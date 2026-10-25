@@ -313,7 +313,7 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /document\.getElementById\('opencodeAddToggle'\)/);
   assert.match(setupBody, /addDetails\?\.classList\.toggle\('hidden'/);
   assert.match(setupBody, /document\.getElementById\('opencodeOpenBrowser'\)\?\.addEventListener\('click'/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/auth'\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/console'\)/);
   // The add form asks before binding: main refuses a name that already holds a
   // different credential, and the form offers the confirmation rather than
   // retrying with merge on its own.

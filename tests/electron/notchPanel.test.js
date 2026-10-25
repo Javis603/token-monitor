@@ -390,6 +390,14 @@ test('active sessions remain reachable and retain independent scroll and focus a
   assert.equal(page.querySelector('.notch-recent-list').scrollTop, 75);
   assert.equal(f.document.activeElement.dataset.focusKey, 'active:list');
   assert.equal(page.querySelectorAll('.notch-active-title').at(-1).textContent, 'Active 6');
+  f.panel.selectPage('home');
+  for (let reopen = 0; reopen < 2; reopen++) {
+    f.panel.suspend();
+    f.panel.render(data, { opening: true });
+  }
+  f.panel.selectPage('sessions');
+  assert.equal(page.querySelector('.notch-active-list').scrollTop, 150, 'reopening retains the hidden active list position');
+  assert.equal(page.querySelector('.notch-recent-list').scrollTop, 75, 'reopening retains the hidden recent list position');
   data.cells[1].sessions = quiet; f.panel.render(data);
   assert.equal(page.querySelector('.notch-active-list'), null);
   assert.ok(page.querySelector('.notch-sessions-empty'));
@@ -647,6 +655,231 @@ test('limit columns past one page scroll a page per wheel gesture and keep their
   t.mock.timers.tick(200);
   f.find('notch-limits').fire('wheel', { deltaX: 0, deltaY: -30, preventDefault() {} });
   assert.equal(f.find('notch-limits').scrollLeft, 0);
+});
+
+
+test('the first limits wheel gesture works after a quick close and reopen', t => {
+  const f = panelFixture(t);
+  const providers = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: String(index),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }] }));
+  const data = { ...payload(), cells: buildEdgeDockCells({ limits: { providers } }, { items: [{ type: 'limit', provider: 'codex' }] }) };
+  f.panel.render(data); f.panel.selectPage('limits');
+  const wheel = deltaY => f.find('notch-limits').fire('wheel', { deltaX: 0, deltaY, preventDefault() {} });
+  wheel(30);
+  assert.equal(f.panel.view.limitPage, 1);
+  f.panel.suspend();
+  t.mock.timers.tick(250);
+  f.panel.render(data, { opening: true });
+  wheel(-30);
+  assert.equal(f.panel.view.limitPage, 0);
+});
+
+function swipe(f, id, phase, amount, complete = false, hit = 'page') {
+  if (phase === 'began') f.document.elementFromPoint = () => f.find(hit === 'strip' ? 'notch-limits' : 'notch-band');
+  f.scroll({ id, phase, amount, complete, x: 0, y: 0 });
+}
+
+function assertPageMotionCleared(f) {
+  for (const page of f.all('notch-page')) {
+    assert.deepEqual([page.style.opacity, page.style.transform, page.style.filter], ['', '', '']);
+  }
+}
+
+test('native pages slide with a fixed gap and settle without momentum', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  const pill = f.find('notch-tab-pill');
+  let layoutReads = 0;
+  Object.defineProperty(pill, 'offsetWidth', { get() { layoutReads++; return 36; } });
+  f.panel.render(payload(150));
+  assert.equal(layoutReads, 0, 'ordinary pushes do not force the tab highlight layout');
+  swipe(f, 1, 'began', 0);
+  swipe(f, 1, 'changed', 0.4);
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 1);
+  assert.equal(Number(f.find('notch-page-limits').style.opacity), 1);
+  const pageX = page => Number(f.find(`notch-page-${page}`).style.transform.match(/translateX\(([-\d.]+)px\)/)[1]);
+  assert.equal(pageX('home'), -256);
+  assert.equal(pageX('limits') - pageX('home') - 600, 40, 'neighboring pages retain their content gap');
+  assert.equal(f.find('notch-page-home').style.filter, 'none');
+  swipe(f, 1, 'changed', 0);
+  assert.equal(pageX('home'), 0);
+  assert.equal(pageX('limits'), 640, 'returning to zero keeps the neighbor outside the viewport');
+  swipe(f, 1, 'changed', 0.4);
+  f.panel.render(payload(200));
+  assert.equal(pageX('limits'), 384, 'a live data push preserves swipe progress');
+  swipe(f, 1, 'ended', 0.4);
+  swipe(f, 1, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'limits');
+  assert.equal(pill.style.transition, '', 'completion restores the normal tab transition');
+  assertPageMotionCleared(f);
+});
+
+test('swipes prepare only the target and refresh hidden data when selected', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', 0.2);
+  assert.ok(f.find('notch-page-limits').children.length > 0);
+  assert.equal(f.find('notch-page-sessions').children.length, 0);
+  assert.equal(f.find('notch-page-breakdown').children.length, 0);
+  swipe(f, 1, 'ended', 0.2);
+  swipe(f, 1, 'none', 1, true);
+  const homeText = f.find('notch-page-home').textContent;
+  f.panel.render(payload(300));
+  assert.equal(f.find('notch-page-home').textContent, homeText);
+  f.panel.selectPage('home');
+  assert.equal(f.find('notch-big').textContent, '300');
+  f.panel.selectPage('sessions');
+  assert.equal(f.find('notch-page-breakdown').children.length, 0);
+});
+
+test('a native cancellation returns to the origin and clears the preview', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', 0.1);
+  swipe(f, 1, 'cancelled', 0.2);
+  swipe(f, 1, 'none', 0, true);
+  assert.equal(f.panel.view.page, 'home');
+  assert.equal(f.find('notch-pages').classList.contains('is-handoff'), false);
+  assertPageMotionCleared(f);
+});
+
+test('reduced motion settles pages and accounts when fingers lift', t => {
+  const f = panelFixture(t, { reduceMotion: true });
+  const providers = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: String(index),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }] }));
+  f.panel.render({ ...payload(), cells: buildEdgeDockCells({ limits: { providers } }, { items: [{ type: 'limit', provider: 'codex' }] }) });
+  swipe(f, 1, 'began', 0.3);
+  swipe(f, 1, 'ended', 0.3);
+  assert.equal(f.panel.view.page, 'limits');
+  assertPageMotionCleared(f);
+  swipe(f, 1, 'none', 0.7);
+  assertPageMotionCleared(f);
+  swipe(f, 1, 'none', 1, true);
+  swipe(f, 2, 'began', 0.4, false, 'strip');
+  swipe(f, 2, 'ended', 0.4, false, 'strip');
+  assert.equal(f.panel.view.limitPage, 1);
+  assert.equal(f.find('notch-limits').scrollLeft, 120);
+  swipe(f, 2, 'none', 0.7);
+  assert.equal(f.find('notch-limits').scrollLeft, 120);
+  swipe(f, 2, 'none', 1, true);
+  swipe(f, 3, 'began', -0.4, false, 'strip');
+  swipe(f, 3, 'cancelled', -0.4, false, 'strip');
+  assert.equal(f.panel.view.limitPage, 1);
+  assert.equal(f.find('notch-pages').classList.contains('is-handoff'), false);
+  assertPageMotionCleared(f);
+});
+
+test('a new finger gesture interrupts the old animation at its decided page', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', 0.1);
+  swipe(f, 1, 'ended', 0.3);
+  swipe(f, 2, 'began', 0.1);
+  assert.equal(f.panel.view.page, 'limits');
+  swipe(f, 2, 'ended', 0.3);
+  swipe(f, 2, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'sessions');
+});
+
+test('main-page endpoints stay visible and a reverse swipe remains available', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', -0.5);
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 1);
+  assert.equal(Number(f.find('notch-page-breakdown').style.opacity), 0);
+  assert.equal(f.find('notch-page-limits').children.length, 0);
+  swipe(f, 1, 'ended', -0.5);
+  swipe(f, 1, 'none', -1, true);
+  assert.equal(f.panel.view.page, 'home');
+  swipe(f, 2, 'began', 0.5);
+  swipe(f, 2, 'ended', 0.5);
+  swipe(f, 2, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'limits');
+  f.panel.selectPage('breakdown');
+  swipe(f, 3, 'began', 0.5);
+  assert.equal(Number(f.find('notch-page-breakdown').style.opacity), 1);
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 0);
+  swipe(f, 3, 'ended', 0.5);
+  swipe(f, 3, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'breakdown');
+  swipe(f, 4, 'began', -0.5);
+  swipe(f, 4, 'ended', -0.5);
+  swipe(f, 4, 'none', -1, true);
+  assert.equal(f.panel.view.page, 'sessions');
+});
+
+test('account paging has priority, then the next gesture leaves its edge', t => {
+  const f = panelFixture(t);
+  const providers = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: String(index),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }] }));
+  f.panel.render({ ...payload(), cells: buildEdgeDockCells({ limits: { providers } }, { items: [{ type: 'limit', provider: 'codex' }] }) });
+  f.panel.selectPage('limits');
+  const strip = f.find('notch-limits');
+  swipe(f, 1, 'began', 0.4, false, 'strip');
+  assert.equal(strip.scrollLeft, 48);
+  swipe(f, 1, 'ended', 0.4, false, 'strip');
+  swipe(f, 2, 'began', 0.2, false, 'strip');
+  assert.equal(strip.scrollLeft, 120);
+  assert.equal(f.panel.view.page, 'limits');
+  swipe(f, 2, 'ended', 0.2, false, 'strip');
+  swipe(f, 2, 'none', 1, true, 'strip');
+  assert.equal(f.panel.view.page, 'sessions');
+});
+
+test('one gesture can reverse between account and main pages without retaining either preview', t => {
+  const f = panelFixture(t);
+  const providers = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: String(index),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }] }));
+  f.panel.render({ ...payload(), cells: buildEdgeDockCells({ limits: { providers } }, { items: [{ type: 'limit', provider: 'codex' }] }) });
+  f.panel.selectPage('limits');
+  const strip = f.find('notch-limits');
+  const tabPosition = f.find('notch-tab-pill').style.transform;
+  f.document.elementFromPoint = () => strip.children[0];
+  f.scroll({ id: 1, phase: 'began', amount: -0.4, x: 0, y: 0 });
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 1);
+  swipe(f, 1, 'changed', 0.2);
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 0);
+  assert.equal(Number(f.find('notch-page-limits').style.opacity), 1);
+  assert.equal(f.find('notch-tab-pill').style.transform, tabPosition);
+  assert.equal(strip.scrollLeft, 24);
+  swipe(f, 1, 'changed', -0.3);
+  assert.equal(strip.scrollLeft, 0, 'returning to main pages restores the account origin');
+  swipe(f, 1, 'cancelled', -0.3);
+  swipe(f, 1, 'none', 0, true);
+  assert.equal(f.panel.view.page, 'limits');
+  assert.equal(f.panel.view.limitPage, 0);
+  strip.scrollTo({ left: 120 });
+  swipe(f, 2, 'began', 0.4, false, 'strip');
+  swipe(f, 2, 'changed', -0.2);
+  assert.equal(Number(f.find('notch-page-sessions').style.opacity), 0);
+  assert.equal(strip.scrollLeft, 96);
+  swipe(f, 2, 'changed', 0.3);
+  assert.equal(strip.scrollLeft, 120);
+  swipe(f, 2, 'ended', 0.3);
+  swipe(f, 2, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'sessions');
+  assert.equal(f.panel.view.limitPage, 1);
+});
+
+test('tab changes and collapse ignore remaining native animation frames', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', 0.5);
+  f.panel.selectPage('breakdown');
+  assertPageMotionCleared(f);
+  swipe(f, 1, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'breakdown');
+  swipe(f, 2, 'began', -0.5);
+  f.panel.suspend();
+  swipe(f, 2, 'ended', -0.5);
+  swipe(f, 2, 'none', -1, true);
+  f.panel.render(payload());
+  assert.equal(f.panel.view.page, 'breakdown');
+  assertPageMotionCleared(f);
+  swipe(f, 3, 'began', -0.5);
+  f.pageHide();
+  assert.equal(f.scrollSubscribed, false);
+  assertPageMotionCleared(f);
 });
 
 test('limit boundaries use the Limits view wording, so an expiring grant never reads as a reset', t => {

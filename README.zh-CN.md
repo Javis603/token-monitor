@@ -34,82 +34,58 @@
 
 ## 支持的工具
 
-Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
+从你已在用的 AI 编程工具和提供方读取 Token 用量、AI 工具额度和 session 明细：
 
-| Logo | 工具 | 数据路径 | Token 用量 | AI 工具额度 | session 明细 |
-|:---:|------|-----------|:---:|:---:|:---:|
-| <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`、`~/.claude/transcripts/` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/`（`sessions/`、`archived_sessions/`） | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/`（`opencode*.db`、`storage/message/`） | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/`（账号层级用量导出） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/`（`antigravity/`、`antigravity-ide/`、`antigravity-backup/`、`antigravity-cli/conversations/`） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`）、`~/.cline/data/sessions/` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/droid.png" width="28" alt="Factory Droid" /> | Factory Droid | `~/.factory/sessions/` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code / Kimi Work | `~/.kimi/sessions/`、`~/.kimi-code/sessions/`、`<platform-app-data>/kimi-desktop/` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/`（`sessions/`、`logs/unified.jsonl`） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
-| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
-| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `~/.local/share/goose/sessions/sessions.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`；VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 与 `kiro-cli` 数据库 | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志 | ✅ | — | ✅ |
-| <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（仅限中国版） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
-| <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/unsloth.png" width="28" alt="Unsloth" /> | Unsloth Studio | `~/.unsloth/studio/studio.db` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/minimax.png" width="28" alt="MiniMax" /> | MiniMax / MiniMax Code | `~/.minimax/v2/sessions/` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie（账单余额及根据 token 用量估算花费） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 密钥（查询用量／密钥上限；获授权访问 credits 时显示余额，官方文档指定 Management 密钥） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 或火山引擎 AK/SK（通过火山引擎 API 查询火山方舟 Coding Plan / Agent Plan 额度） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud API key 或 session cookie（通过 ollama.com 查询 session／每周用量） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token（通过 trae.cn 查询 Trae CN／SOLO credits） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | 阿里云控制台 cookie（百炼／Model Studio Token Plan 额度，团队版与个人版） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan 额度） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI 滚动／每月额度，仅限 Business/Enterprise；手动 token_v2 Cookie + 明确的工作区 ID | — | ✅ | — |
-| <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="第三方 API" /> | 第三方 API | New API / Sub2API 兼容账号预设方案（包括兼容的 One API 分支）、New API 密钥预设方案与自定义余额端点 | — | ✅ | — |
+<p align="center">
+    <img src=".github/assets/tools-icon/claude.png" width="40" alt="Claude Code" title="Claude Code" />
+    <img src=".github/assets/tools-icon/codex.png" width="40" alt="Codex" title="Codex" />
+    <img src=".github/assets/tools-icon/opencode.png" width="40" alt="OpenCode" title="OpenCode" />
+    <img src=".github/assets/tools-icon/hermes-agent.png" width="40" alt="Hermes Agent" title="Hermes Agent" />
+    <img src=".github/assets/tools-icon/openclaw.png" width="40" alt="OpenClaw" title="OpenClaw" />
+    <img src=".github/assets/tools-icon/cursor.png" width="40" alt="Cursor" title="Cursor" />
+    <img src=".github/assets/tools-icon/antigravity.png" width="40" alt="Antigravity" title="Antigravity" />
+    <img src=".github/assets/tools-icon/cline.png" width="40" alt="Cline" title="Cline" />
+    <img src=".github/assets/tools-icon/amp.png" width="40" alt="Amp" title="Amp" />
+    <img src=".github/assets/tools-icon/droid.png" width="40" alt="Factory Droid" title="Factory Droid" />
+    <img src=".github/assets/tools-icon/kimi.png" width="40" alt="Kimi" title="Kimi" />
+    <img src=".github/assets/tools-icon/qwen.png" width="40" alt="Qwen" title="Qwen" />
+    <img src=".github/assets/tools-icon/xai.png" width="40" alt="Grok Build" title="Grok Build" />
+    <img src=".github/assets/tools-icon/copilot.png" width="40" alt="GitHub Copilot" title="GitHub Copilot" />
+    <img src=".github/assets/tools-icon/pi.png" width="40" alt="Pi" title="Pi" />
+    <img src=".github/assets/tools-icon/omp.png" width="40" alt="Oh My Pi" title="Oh My Pi" />
+    <img src=".github/assets/tools-icon/goose.png" width="40" alt="Goose" title="Goose" />
+    <img src=".github/assets/tools-icon/zed.png" width="40" alt="Zed" title="Zed" />
+    <img src=".github/assets/tools-icon/kilo.png" width="40" alt="Kilo" title="Kilo" />
+    <img src=".github/assets/tools-icon/commandcode.png" width="40" alt="Command Code" title="Command Code" />
+    <img src=".github/assets/tools-icon/mimo.png" width="40" alt="MiMo" title="MiMo" />
+    <img src=".github/assets/tools-icon/muse.png" width="40" alt="Muse Code" title="Muse Code" />
+    <img src=".github/assets/tools-icon/zcode.png" width="40" alt="ZCode" title="ZCode" />
+    <img src=".github/assets/tools-icon/kiro.png" width="40" alt="Kiro" title="Kiro" />
+    <img src=".github/assets/tools-icon/codebuddy.png" width="40" alt="CodeBuddy" title="CodeBuddy" />
+    <img src=".github/assets/tools-icon/workbuddy.png" width="40" alt="WorkBuddy" title="WorkBuddy" />
+    <img src=".github/assets/tools-icon/proma.png" width="40" alt="Proma" title="Proma" />
+    <img src=".github/assets/tools-icon/catpaw.png" width="40" alt="CatPaw" title="CatPaw" />
+    <img src=".github/assets/tools-icon/qoder.png" width="40" alt="Qoder" title="Qoder" />
+    <img src=".github/assets/tools-icon/reasonix.png" width="40" alt="Reasonix" title="Reasonix" />
+    <img src=".github/assets/tools-icon/deepseek.png" width="40" alt="DeepSeek" title="DeepSeek" />
+    <img src=".github/assets/tools-icon/cherrystudio.png" width="40" alt="Cherry Studio" title="Cherry Studio" />
+    <img src=".github/assets/tools-icon/lmstudio.png" width="40" alt="LM Studio" title="LM Studio" />
+    <img src=".github/assets/tools-icon/unsloth.png" width="40" alt="Unsloth" title="Unsloth" />
+    <img src=".github/assets/tools-icon/devin.png" width="40" alt="Devin" title="Devin" />
+    <img src=".github/assets/tools-icon/fx.png" width="40" alt="fx" title="fx" />
+    <img src=".github/assets/tools-icon/minimax.png" width="40" alt="MiniMax" title="MiniMax" />
+    <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
+    <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
+    <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
+    <img src=".github/assets/tools-icon/ollama.png" width="40" alt="Ollama" title="Ollama" />
+    <img src=".github/assets/tools-icon/trae.png" width="40" alt="Trae CN" title="Trae CN" />
+    <img src=".github/assets/tools-icon/alibaba.png" width="40" alt="Alibaba Cloud" title="Alibaba Cloud" />
+    <img src=".github/assets/tools-icon/stepfun.png" width="40" alt="StepFun" title="StepFun" />
+    <img src=".github/assets/tools-icon/notion.png" width="40" alt="Notion AI" title="Notion AI" />
+    <img src=".github/assets/tools-icon/thirdparty.gif" width="40" alt="第三方 API" title="第三方 API" />
+</p>
 
-<details>
-<summary><strong>注意事项、Custom 余额端点，以及用环境变量覆盖的数据路径</strong></summary>
-
-<br>
-
-- 上表为默认路径。Token Monitor 与 Tokscale 遵循相同的环境变量覆盖：`~/.local/share/` 下的路径跟随 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
-- Goose 的跨日用量仍计入会话创建日；暂不支持远程 goosed 与自定义扫描路径。详见 [Goose 数据来源说明](docs/providers/goose.md)。
-- CatPaw 默认关闭，可在 Settings → tools 中启用；读取 macOS 和 Windows 上国内版与外区版助手的数据库。路径与验证边界见 [CatPaw 数据来源说明](docs/providers/catpaw.md)。
-- LM Studio 追踪目前仅涵盖服务器日志中记录的 OpenAI 兼容 `/v1/chat/completions` 和 `/v1/responses` 请求。通过 LM Studio 内置 Chat 界面发起的对话，以及原生 `/api/v1/chat` 请求均不包括在内。
-- Unsloth Studio 从 `studio.db` 追踪 Studio 对话与本地 API 的推理用量。本地推理的 API 费用为零；可识别的按量计费供应商使用 Tokscale 的价格估算。不包括训练 Token。详见 [Unsloth 数据来源说明](docs/providers/unsloth.md)。
-- Devin 从本地 `sessions.db` 追踪 Devin CLI 会话，并从 `acp-events` ACP 日志追踪 Devin Desktop 代理会话；同一 session 两边都有数据时以 CLI 数据库为准。Desktop 的覆盖范围取决于连接的 ACP 代理：只有会在本地写入 `usage_update` 事件的代理才会计入，而 Devin Desktop 默认的 `devin-cloud` 代理在服务端计量，因此默认的 Desktop 配置不会报告 Desktop token。session 标题与项目归属取自 CLI 数据库。详见 [Devin 数据来源说明](docs/providers/devin.md)。
-- Notion AI 使用内部 API，需要手动粘贴 `token_v2` Cookie 和明确的 Business/Enterprise 工作区 ID。目前仅以测试数据验证，尚无真实响应样本，实际登录验证待批准。不会自动获取 Cookie，也不保证公开 API 兼容性。详见 [Notion 数据来源说明](docs/providers/notion.md)。
-- MiniMax Code 读取 CLI 写入的本地会话记录，位于 `~/.minimax` 或 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`（也包括 `~/.mavis` 与 `~/.minimax-<profile>` / `~/.mavis-<profile>`），并加上通过 `tokscale headless mcode` 捕获的运行；两边都有的同一轮只计一次。
-
-- Command Code transcript 不包含实际 Token 数或每条消息的模型信息。Token 用量根据 transcript 文本估算；模型归属与推算成本可能反映当前配置的模型，而不是每次请求当时实际使用的模型。
-- Cursor 缓存来自 Cursor 的账号层级用量导出，因此涵盖 Cursor IDE、Cursor CLI 与 Grok Bot 的用量。Token Monitor 会自动检测 Cursor 桌面版已登录的账号，也可在设置中手动新增。缓存过期时会自动重新同步，但刚完成的 session 可能需要几分钟才会出现在 Cursor 控制台，因此最新用量仍可能延迟显示。
-
-- Custom 会从一个 GET 余额端点映射数值 JSON 字段；仅兼容 OpenAI 或 Anthropic API 并不足够。
-
-#### Qoder CN（本地适配器）
-
-Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settings → tools 中启用（可选，默认关闭）。当前版本使用 Qoder 配置目录下的 `projects` JSONL 记录（通常为 `~/.qoder-cn/projects`），旧版本使用 SQLite；Token Monitor 内置的 tokscale 会同时读取两者。JSONL 路径优先使用 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`，其次为 `QODERCN_CONFIG_DIR/projects`，最后使用默认路径；旧数据库可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖。详见 [Qoder 数据来源说明](docs/providers/qodercn.md)。
-
-这是高级本地集成，但两种格式都无需额外运行时。无法读取的来源会保留上一次完整读取的数据。旧数据库的会话只记录项目名称而非路径，因此不会显示所属项目。只统计记录了真实 Token 字段的 JSONL 行；当前第一方套餐模型可能只有 credits 和上下文占用比例，缺少可靠的会话级 context window，因此不会猜测 Token。Credits 仍会显示在 AI Tool Limits，带真实 Token 的 BYOK／自定义模型会正常统计。
-</details>
+<p align="center"><a href="#支持工具详情">查看每个工具的支持项和数据路径 →</a></p>
 
 ## 界面展示
 
@@ -206,6 +182,85 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 - **工具列表自定义**：可隐藏、置顶和拖曳排序主列表中的工具，不影响实际追踪
 - **可录制全局快捷键**：可从任何地方快速显示或隐藏窗口
 - **Discord Rich Presence**：将今日 Token、花费与主要工具广播到你的 Discord 个人资料（需手动开启）
+
+## 支持工具详情
+
+Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
+
+| Logo | 工具 | 数据路径 | Token 用量 | AI 工具额度 | session 明细 |
+|:---:|------|-----------|:---:|:---:|:---:|
+| <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`、`~/.claude/transcripts/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/`（`sessions/`、`archived_sessions/`） | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/`（`opencode*.db`、`storage/message/`） | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/`（账号层级用量导出） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/`（`antigravity/`、`antigravity-ide/`、`antigravity-backup/`、`antigravity-cli/conversations/`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`）、`~/.cline/data/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/droid.png" width="28" alt="Factory Droid" /> | Factory Droid | `~/.factory/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code / Kimi Work | `~/.kimi/sessions/`、`~/.kimi-code/sessions/`、`<platform-app-data>/kimi-desktop/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/`（`sessions/`、`logs/unified.jsonl`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `~/.local/share/goose/sessions/sessions.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`；VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`） | ✅ | — | — |
+| <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 与 `kiro-cli` 数据库 | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志 | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（仅限中国版） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
+| <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
+| <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/unsloth.png" width="28" alt="Unsloth" /> | Unsloth Studio | `~/.unsloth/studio/studio.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/minimax.png" width="28" alt="MiniMax" /> | MiniMax / MiniMax Code | `~/.minimax/v2/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie（账单余额及根据 token 用量估算花费） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 密钥（查询用量／密钥上限；获授权访问 credits 时显示余额，官方文档指定 Management 密钥） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 或火山引擎 AK/SK（通过火山引擎 API 查询火山方舟 Coding Plan / Agent Plan 额度） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud API key 或 session cookie（通过 ollama.com 查询 session／每周用量） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token（通过 trae.cn 查询 Trae CN／SOLO credits） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | 阿里云控制台 cookie（百炼／Model Studio Token Plan 额度，团队版与个人版） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan 额度） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI 滚动／每月额度，仅限 Business/Enterprise；手动 token_v2 Cookie + 明确的工作区 ID | — | ✅ | — |
+| <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="第三方 API" /> | 第三方 API | New API / Sub2API 兼容账号预设方案（包括兼容的 One API 分支）、New API 密钥预设方案与自定义余额端点 | — | ✅ | — |
+
+<details>
+<summary><strong>注意事项、Custom 余额端点，以及用环境变量覆盖的数据路径</strong></summary>
+
+<br>
+
+- 上表为默认路径。Token Monitor 与 Tokscale 遵循相同的环境变量覆盖：`~/.local/share/` 下的路径跟随 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
+- Goose 的跨日用量仍计入会话创建日；暂不支持远程 goosed 与自定义扫描路径。详见 [Goose 数据来源说明](docs/providers/goose.md)。
+- CatPaw 默认关闭，可在 Settings → tools 中启用；读取 macOS 和 Windows 上国内版与外区版助手的数据库。路径与验证边界见 [CatPaw 数据来源说明](docs/providers/catpaw.md)。
+- LM Studio 追踪目前仅涵盖服务器日志中记录的 OpenAI 兼容 `/v1/chat/completions` 和 `/v1/responses` 请求。通过 LM Studio 内置 Chat 界面发起的对话，以及原生 `/api/v1/chat` 请求均不包括在内。
+- Unsloth Studio 从 `studio.db` 追踪 Studio 对话与本地 API 的推理用量。本地推理的 API 费用为零；可识别的按量计费供应商使用 Tokscale 的价格估算。不包括训练 Token。详见 [Unsloth 数据来源说明](docs/providers/unsloth.md)。
+- Devin 从本地 `sessions.db` 追踪 Devin CLI 会话，并从 `acp-events` ACP 日志追踪 Devin Desktop 代理会话；同一 session 两边都有数据时以 CLI 数据库为准。Desktop 的覆盖范围取决于连接的 ACP 代理：只有会在本地写入 `usage_update` 事件的代理才会计入，而 Devin Desktop 默认的 `devin-cloud` 代理在服务端计量，因此默认的 Desktop 配置不会报告 Desktop token。session 标题与项目归属取自 CLI 数据库。详见 [Devin 数据来源说明](docs/providers/devin.md)。
+- Notion AI 使用内部 API，需要手动粘贴 `token_v2` Cookie 和明确的 Business/Enterprise 工作区 ID。目前仅以测试数据验证，尚无真实响应样本，实际登录验证待批准。不会自动获取 Cookie，也不保证公开 API 兼容性。详见 [Notion 数据来源说明](docs/providers/notion.md)。
+- MiniMax Code 读取 CLI 写入的本地会话记录，位于 `~/.minimax` 或 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`（也包括 `~/.mavis` 与 `~/.minimax-<profile>` / `~/.mavis-<profile>`），并加上通过 `tokscale headless mcode` 捕获的运行；两边都有的同一轮只计一次。
+
+- Command Code transcript 不包含实际 Token 数或每条消息的模型信息。Token 用量根据 transcript 文本估算；模型归属与推算成本可能反映当前配置的模型，而不是每次请求当时实际使用的模型。
+- Cursor 缓存来自 Cursor 的账号层级用量导出，因此涵盖 Cursor IDE、Cursor CLI 与 Grok Bot 的用量。Token Monitor 会自动检测 Cursor 桌面版已登录的账号，也可在设置中手动新增。缓存过期时会自动重新同步，但刚完成的 session 可能需要几分钟才会出现在 Cursor 控制台，因此最新用量仍可能延迟显示。
+
+- Custom 会从一个 GET 余额端点映射数值 JSON 字段；仅兼容 OpenAI 或 Anthropic API 并不足够。
+
+#### Qoder CN（本地适配器）
+
+Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settings → tools 中启用（可选，默认关闭）。当前版本使用 Qoder 配置目录下的 `projects` JSONL 记录（通常为 `~/.qoder-cn/projects`），旧版本使用 SQLite；Token Monitor 内置的 tokscale 会同时读取两者。JSONL 路径优先使用 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`，其次为 `QODERCN_CONFIG_DIR/projects`，最后使用默认路径；旧数据库可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖。详见 [Qoder 数据来源说明](docs/providers/qodercn.md)。
+
+这是高级本地集成，但两种格式都无需额外运行时。无法读取的来源会保留上一次完整读取的数据。旧数据库的会话只记录项目名称而非路径，因此不会显示所属项目。只统计记录了真实 Token 字段的 JSONL 行；当前第一方套餐模型可能只有 credits 和上下文占用比例，缺少可靠的会话级 context window，因此不会猜测 Token。Credits 仍会显示在 AI Tool Limits，带真实 Token 的 BYOK／自定义模型会正常统计。
+</details>
 
 ## 安装
 
