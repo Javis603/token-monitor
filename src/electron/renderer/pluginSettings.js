@@ -24,7 +24,15 @@
     return t(`settings.plugins.permission.${permission}`, { hosts: hosts.join(', ') });
   }
 
-  function createPluginSettingsPanel({ document, container, t, api, setDetailTooltip = null, onError = () => {}, onApplySkin = () => {}, onPlaced = () => {}, onSetEnabled = null, getEnabled = null, getLocale = () => document.documentElement?.lang || 'en', onOpenExternal = () => {} }) {
+  function actionErrorMessage(error, t) {
+    const message = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+    const known = /installed-package-invalid/.test(String(error?.code || '') + ' ' + message)
+      ? 'plugins.package.repairRequired'
+      : { 'page-full': 'settings.plugins.pageFull', 'tray-full': 'settings.plugins.trayFull', 'edgeDock-full': 'settings.plugins.edgeDockFull' }[message];
+    return known ? t(known) : t('settings.plugins.actionFailed', { error: message });
+  }
+
+  function createPluginSettingsPanel({ document, container, t, api, setDetailTooltip = null, onApplySkin = () => {}, onPlaced = () => {}, onSetEnabled = null, getEnabled = null, getLocale = () => document.documentElement?.lang || 'en', onOpenExternal = () => {} }) {
     let list = null;
     let consentFor = '';
     let busy = false;
@@ -34,6 +42,7 @@
     let catalogData = null, activeTab = 'installed', query = '', sourcesOpen = false;
     let selectedPluginId = '', diagnostics = false, installedPosition = null;
     let catalogReview = null, menuId = 0, aboutOpen = false;
+    let actionError = null;
     const sourceDraft = { url: '', publicKey: '' };
     const chosenVersions = new Map();
     const detailState = new Map();
@@ -110,19 +119,34 @@
       if (busy) { event.preventDefault(); event.stopImmediatePropagation(); }
     }, true);
 
-    async function run(action) {
+    function errorScope() {
+      return JSON.stringify([activeTab, selectedPluginId, diagnostics, sourcesOpen, catalogReview?.origin?.id, catalogReview?.id, aboutOpen, packagePreview?.token, operation?.id, operation?.kind]);
+    }
+
+    function errorNotice() {
+      if (!actionError || actionError.scope !== errorScope()) return null;
+      const notice = el(document, 'p', 'plugin-action-error', actionErrorMessage(actionError.error, t));
+      notice.id = `${container.id || 'plugin-settings'}-action-error`;
+      notice.setAttribute('role', 'alert'); notice.setAttribute('aria-atomic', 'true');
+      return notice;
+    }
+
+    async function run(action, target = '') {
       if (busy) return;
+      actionError = null;
+      container.querySelector('.plugin-action-error')?.remove();
       busy = true;
       setBusy();
       try {
         const next = await action();
         if (next) { list = next; if (catalogData) catalogData = await api.catalog(); }
       } catch (error) {
-        onError(error);
+        actionError = { error, target: target || (selectedPluginId ? `plugin:${selectedPluginId}` : ''), scope: errorScope() };
       } finally {
         busy = false;
         if (revealConsent && consentFor) { selectedPluginId = consentFor; diagnostics = false; }
         render();
+        if (actionError) container.querySelector('.plugin-action-error')?.scrollIntoView({ block: 'nearest' });
         if (revealConsent) {
           container.querySelector(`[data-plugin-id="${consentFor}"] .plugin-consent`)?.scrollIntoView({ block: 'nearest' });
           revealConsent = false;
@@ -269,6 +293,7 @@
     function packagePanel() {
       const p = packagePreview;
       const panel = el(document, 'section', 'plugin-consent plugin-package-preview');
+      panel.dataset.errorTarget = 'package';
       panel.setAttribute('aria-label', t('plugins.package.review'));
       panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, p.origin.kind));
       panel.append(el(document, 'span', 'plugin-version', `${p.installedVersion ? `${p.installedVersion} → ` : ''}${p.version}`));
@@ -291,12 +316,13 @@
           activeTab = 'installed';
           if (p.operation === 'install' || next.plugins.find(plugin => plugin.id === p.id)?.status === 'needsApproval') { consentFor = p.id; revealConsent = true; }
           return next;
-        }), 'plugin-allow'));
+        }, 'package'), 'plugin-allow'));
       panel.append(actions); return panel;
     }
 
     function operationPanel(plugin) {
       const panel = el(document, 'div', 'plugin-consent');
+      panel.dataset.errorTarget = 'operation';
       const isRemove = operation.kind === 'uninstall';
       panel.append(el(document, 'strong', 'plugin-consent-title', t(isRemove ? 'plugins.package.removeTitle' : 'plugins.package.rollbackTitle', { name: plugin.name, version: plugin.installation.previousVersion })));
       if (isRemove) {
@@ -313,7 +339,7 @@
         button(t(isRemove ? 'plugins.package.uninstall' : 'plugins.package.rollback'), () => void run(async () => {
           const next = isRemove ? await api.uninstall(plugin.id, operation) : await api.rollback(plugin.id);
           operation = null; return next;
-        })));
+        }, 'operation')));
       panel.append(actions); return panel;
     }
 
@@ -364,16 +390,18 @@
         details.append(el(document, 'p', 'settings-note', t('plugins.catalog.sourceNote')));
         for (const source of catalogData.sources.filter(s => s.kind === 'community')) {
           const row = el(document, 'section', 'plugin-source-row'); row.append(el(document, 'strong', 'plugin-consent-title', source.label), el(document, 'code', 'plugin-log', source.url));
+          row.dataset.errorTarget = `source:${source.id}`;
           row.append(el(document, 'p', 'settings-note', source.lastFetched ? t('plugins.catalog.cached', { time: new Date(source.lastFetched).toLocaleString() }) : t('plugins.catalog.notFetched')));
           if (source.signed) row.append(el(document, 'p', 'settings-note', t('plugins.catalog.signed')));
           if (source.fingerprint) row.append(el(document, 'code', 'plugin-log', source.fingerprint));
           if (source.error) row.append(el(document, 'p', 'plugin-risk', source.error));
           const actions = el(document, 'div', 'settings-actions');
-          actions.append(button(t('plugins.catalog.refresh'), () => void run(async () => { catalogData = await api.refreshSource(source.id); return null; })),
-            button(t('plugins.catalog.removeSource'), () => void run(async () => { catalogData = await api.removeSource(source.id); return null; })));
+          actions.append(button(t('plugins.catalog.refresh'), () => void run(async () => { catalogData = await api.refreshSource(source.id); return null; }, `source:${source.id}`)),
+            button(t('plugins.catalog.removeSource'), () => void run(async () => { catalogData = await api.removeSource(source.id); return null; }, `source:${source.id}`)));
           row.append(actions); details.append(row);
         }
         const form = el(document, 'form', 'plugin-source-form');
+        form.dataset.errorTarget = 'source-form';
         const urlLabel = el(document, 'label', '', t('plugins.catalog.url'));
         const url = el(document, 'input'); url.type = 'url'; url.required = true; url.placeholder = 'https://'; url.value = sourceDraft.url;
         url.addEventListener('input', () => { sourceDraft.url = url.value; }); urlLabel.append(url);
@@ -385,7 +413,7 @@
         form.append(urlLabel, advanced, actions);
         form.addEventListener('submit', event => { event.preventDefault(); void run(async () => {
           catalogData = await api.addSource({ ...sourceDraft }); sourceDraft.url = ''; sourceDraft.publicKey = ''; return null;
-        }); });
+        }, 'source-form'); });
         details.append(form);
       return details;
     }
@@ -422,7 +450,7 @@
       allow.type = 'button';
       allow.addEventListener('click', () => {
         consentFor = '';
-        void run(() => api.setEnabled(plugin.id, true));
+        void run(() => api.setEnabled(plugin.id, true), `plugin:${plugin.id}`);
       });
       actions.append(cancel, allow);
       panel.append(actions);
@@ -434,6 +462,7 @@
       wrap.append(el(document, 'div', 'plugin-subhead', t('settings.plugins.views')));
       for (const view of plugin.views.filter(view => view.surfaces.some(surface => SURFACE_ORDER.includes(surface)))) {
         const row = el(document, 'div', 'plugin-view-row');
+        row.dataset.errorTarget = `view:${view.ref}`;
         row.append(el(document, 'span', 'plugin-view-title', view.title));
         const chips = el(document, 'div', 'plugin-surface-chips');
         for (const surface of SURFACE_ORDER.filter((name) => view.surfaces.includes(name))) {
@@ -447,7 +476,7 @@
             const next = await api.place(view.ref, surface, !placed);
             onPlaced(surface, view.ref, !placed);
             return next;
-          }));
+          }, `view:${view.ref}`));
           chips.append(chip);
         }
         row.append(chips);
@@ -501,7 +530,7 @@
         toggle.setAttribute('aria-label', t('settings.plugins.enable', { name: plugin.name }));
         toggle.addEventListener('change', () => {
           if (toggle.checked) { consentFor = plugin.id; openPlugin(plugin.id); }
-          else void run(() => api.setEnabled(plugin.id, false));
+          else void run(() => api.setEnabled(plugin.id, false), `plugin:${plugin.id}`);
         });
         const label = el(document, 'label', 'checkbox-label plugin-toggle'); label.append(toggle); head.append(label);
       }
@@ -761,8 +790,10 @@
         }
         if (plugin.skins?.length) {
           const skins = el(document, 'div', 'plugin-skins');
+          skins.dataset.errorTarget = `skins:${plugin.id}`;
           for (const skin of plugin.skins) {
-            const chip = button('', () => onApplySkin(skin), 'theme-preset-chip plugin-skin-chip');
+            const chip = button('', () => void run(async () => { await onApplySkin(skin); }, `skins:${plugin.id}`), 'theme-preset-chip plugin-skin-chip');
+            chip.dataset.controlKey = `skin/${skin.ref}`;
             const dot = el(document, 'span', 'theme-preset-dot'); dot.style.background = skin.colors.accent || skin.colors.chart || 'currentColor';
             chip.append(dot, el(document, 'span', '', skin.name)); chip.setAttribute('aria-label', t('settings.plugins.applySkin', { name: skin.name })); skins.append(chip);
           }
@@ -801,6 +832,20 @@
       const previousHeight = content.getBoundingClientRect().height;
       content.style.minHeight = `${Math.ceil(previousHeight)}px`;
       content.replaceChildren(...nodes);
+      const notice = errorNotice();
+      if (notice) {
+        const target = [...content.querySelectorAll('[data-error-target], [data-plugin-id]')].find(node =>
+          node.dataset.errorTarget === actionError.target || `plugin:${node.dataset.pluginId}` === actionError.target);
+        const anchor = target || content.querySelector('.plugin-catalog-review, .plugin-sources');
+        if (anchor) {
+          const actions = anchor.querySelector('.plugin-consent-actions, .plugin-detail-utilities');
+          if (actions?.parentElement === anchor) actions.before(notice);
+          else anchor.append(notice);
+          for (const control of anchor.querySelectorAll('button, input, select, textarea')) {
+            control.setAttribute('aria-describedby', [control.getAttribute('aria-describedby'), notice.id].filter(Boolean).join(' '));
+          }
+        } else content.prepend(notice);
+      }
       const spareScroll = saved.scroll.length ? Math.min(...saved.scroll.map(([node, top]) => Math.max(0, node.scrollHeight - node.clientHeight - top))) : previousHeight;
       content.style.minHeight = `${Math.max(0, Math.ceil(previousHeight - spareScroll + (saved.scroll.length ? 1 : 0)))}px`;
       renderedTab = activeTab;
@@ -827,12 +872,16 @@
 
     function render() {
       if (!container) return;
+      if (actionError && actionError.scope !== errorScope()) actionError = null;
       const saved = rememberPosition();
       reconcileSettings();
       presentation?.suspend();
       const nodes = [];
       if (!list) {
-        container.replaceChildren(el(document, 'p', 'settings-note', t('plugins.view.loading')));
+        const notice = errorNotice();
+        container.replaceChildren(...(notice
+          ? [notice, button(t('settings.plugins.reload'), () => void run(() => api.list()))]
+          : [el(document, 'p', 'settings-note', t('plugins.view.loading'))]));
         return;
       }
       if (!tabs) {
@@ -851,7 +900,7 @@
           link.rel = 'noopener noreferrer';
           link.addEventListener('click', event => {
             event.preventDefault();
-            void Promise.resolve().then(() => onOpenExternal(link.href)).catch(onError);
+            void run(async () => { await onOpenExternal(link.href); return null; });
           });
           overviewLabels.set(key, link); guideLinks.set(page, link); guides.append(link);
         }
@@ -955,8 +1004,9 @@
       async refresh() {
         try {
           list = await api.list();
+          if (actionError?.load) actionError = null;
         } catch (error) {
-          onError(error);
+          actionError = { error, target: '', scope: errorScope(), load: true };
         }
         render();
       },
@@ -974,5 +1024,5 @@
     };
   }
 
-  return { SURFACE_ORDER, createPluginSettingsPanel };
+  return { SURFACE_ORDER, actionErrorMessage, createPluginSettingsPanel };
 });

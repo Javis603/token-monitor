@@ -8115,7 +8115,7 @@ function renderThemePresetChips() {
       const label = document.createElement('span');
       label.textContent = skin.name;
       chip.append(dot, label);
-      chip.addEventListener('click', () => void applyPluginSkin(skin));
+      chip.addEventListener('click', () => void applyAppearancePluginSkin(skin, chip));
       els.themePresetChips.appendChild(chip);
     }
   }
@@ -12835,7 +12835,7 @@ function renderNotchPageChoices() {
       dragSort: verticalDragSortApi, getScrollPanel: () => els.settingsPanel,
       preserveScroll: preserveSettingsPanelScroll, ...config
     }),
-    onError: error => setStatus(error.message, true)
+    formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
   });
 }
 
@@ -12863,7 +12863,8 @@ if (pluginViewHost) for (const surface of ['home', 'page']) {
 }
 pluginMainPages = pluginViewHost ? window.TokenMonitorPluginMainPages.create({
   document, container: document.getElementById('pluginMainPanel'), host: pluginViewHost, t,
-  openWindow: ref => pluginBridge.openPage(ref).catch(error => setStatus(error.message, true))
+  openWindow: ref => pluginBridge.openPage(ref),
+  formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
 }) : null;
 if (pluginViewHost) new MutationObserver(() => pluginViewHost.refreshDemand()).observe(els.shell, { attributes: true, attributeFilter: ['class'] });
 pluginPageDesigns = pluginBridge?.webSync ? window.TokenMonitorPluginPageDesigns.create({ document, window, api: pluginBridge, t, breakdown: els.breakdown, update: () => render(), isActive: () => !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed }) : null;
@@ -12937,14 +12938,7 @@ pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
     getLocale: currentLocale,
     onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
     setDetailTooltip: limitWindowsView.setDetailTooltip,
-    onError: (error) => {
-      const message = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
-      const known = /installed-package-invalid/.test(String(error?.code || '') + ' ' + message)
-        ? 'plugins.package.repairRequired'
-        : { 'page-full': 'settings.plugins.pageFull', 'tray-full': 'settings.plugins.trayFull', 'edgeDock-full': 'settings.plugins.edgeDockFull' }[message];
-      setStatus(known ? t(known) : t('settings.plugins.actionFailed', { error: message }), true);
-    },
-    onApplySkin: (skin) => void applyPluginSkin(skin),
+    onApplySkin: (skin) => applyPluginSkin(skin),
     onPlaced: () => renderSettingsSummaries(),
     getEnabled: () => state.settings.pluginsEnabled !== false,
     onSetEnabled: async (enabled) => {
@@ -12982,16 +12976,29 @@ function pluginTrayViews() {
 }
 
 async function applyPluginSkin(skin) {
-  try {
-    // Main resolves the active author manifest and commits palette + tokens
-    // together. Never send the renderer's copy of the skin as trusted settings.
-    await saveSettings({ pluginSkinRef: skin.ref });
-    buildAppearanceColorControls();
-    renderSettingsSummaries();
-  } catch (error) {
-    const message = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
-    setStatus(t('settings.plugins.actionFailed', { error: message }), true);
-  }
+  // Main resolves the active author manifest and commits palette + tokens
+  // together. Never send the renderer's copy of the skin as trusted settings.
+  await saveSettings({ pluginSkinRef: skin.ref });
+  buildAppearanceColorControls();
+  renderSettingsSummaries();
+}
+
+async function applyAppearancePluginSkin(skin, chip) {
+  const container = els.themePresetChips;
+  if (container.getAttribute('aria-busy') === 'true') return;
+  container.querySelector('.plugin-action-error')?.remove();
+  for (const control of container.querySelectorAll('button')) control.removeAttribute('aria-describedby');
+  container.setAttribute('aria-busy', 'true');
+  try { await applyPluginSkin(skin); }
+  catch (error) {
+    // A rebuilt preset list belongs to newer state, not this failed action.
+    if (!container.contains(chip)) return;
+    const notice = document.createElement('p'); notice.className = 'plugin-action-error';
+    notice.id = 'theme-plugin-skin-error';
+    notice.setAttribute('role', 'alert'); notice.setAttribute('aria-atomic', 'true');
+    notice.textContent = window.TokenMonitorPluginSettings.actionErrorMessage(error, t);
+    chip.setAttribute('aria-describedby', notice.id); container.append(notice);
+  } finally { container.setAttribute('aria-busy', 'false'); }
 }
 
 if (pluginBridge) {

@@ -137,17 +137,12 @@ test('Rich withdraws ready zero content on loading or unavailable native ranges'
 
 
 test('plugin action errors localize full Dock and corrupt package recovery', () => {
- const start=source.indexOf('    onError: (error) => {',source.indexOf('pluginSettingsPanel ='));
- const end=source.indexOf('    onApplySkin:',start);
- assert.ok(start>=0&&end>start);
- const messages=[];
- const handler=vm.runInNewContext('({' + source.slice(start,end) + '})',{
-  t:key=>key,setStatus:(text,error)=>messages.push({text,error})
- }).onError;
+ const {actionErrorMessage}=req('src/electron/renderer/pluginSettings.js');
+ const handler=error=>actionErrorMessage(error,key=>key);
  for(const error of [new Error('edgeDock-full'),new Error("Error invoking remote method 'plugin:place': Error: edgeDock-full")]){
-  handler(error);assert.deepEqual(messages.pop(),{text:'settings.plugins.edgeDockFull',error:true});
+  assert.equal(handler(error),'settings.plugins.edgeDockFull');
  }
  for(const error of [Object.assign(new Error('raw manifest parse failure'),{code:'installed-package-invalid'}),new Error("Error invoking remote method 'plugin:install': Error: installed-package-invalid")]){
-  handler(error);assert.deepEqual(messages.pop(),{text:'plugins.package.repairRequired',error:true});
+  assert.equal(handler(error),'plugins.package.repairRequired');
  }
 });

@@ -24,7 +24,7 @@ async function main() {
   win.webContents.debugger.attach('1.3');
   await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
   const result = await win.webContents.executeJavaScript(`(async () => {
-    const checks = [], errors = [], calls = [];
+    const checks = [], calls = [];
     const check = (name, ok, evidence) => { checks.push({name, ok: Boolean(ok), evidence}); };
     const box = document.getElementById('settings'), scroll = document.getElementById('scroll');
     const tick = () => new Promise(r => setTimeout(r, 20));
@@ -33,7 +33,7 @@ async function main() {
     let catalogMode = 'deferred', previewMode = 'success', globalMode = 'success', savedMasterEnabled = true;
     const catalog = {entries:[{id:'demo',name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'official',kind:'official'},versions:[{version:'1.0.0',compatible:true,installable:true},{version:'2.0.0',compatible:true,installable:true}],status:'available'}],sources:[]};
     const tooltips = TokenMonitorLimitWindowsView.createLimitWindowsView({document,tooltip:{hasOpened:()=>false,markOpened:()=>{},release:()=>{}}});
-    const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,setDetailTooltip:tooltips.setDetailTooltip,getEnabled:()=>savedMasterEnabled,onSetEnabled:async enabled=>{calls.push(['global',enabled]);if(globalMode==='error')throw Error('settings write failed');savedMasterEnabled=enabled;data.enabled=enabled&&!data.safeMode;return structuredClone(data)},t:(key,args)=>key==='plugins.ui.locationCount'?String(args.count)+' locations':key,onError:e=>errors.push(e.message),api:{
+    const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,setDetailTooltip:tooltips.setDetailTooltip,getEnabled:()=>savedMasterEnabled,onSetEnabled:async enabled=>{calls.push(['global',enabled]);if(globalMode==='error')throw Error('settings write failed');savedMasterEnabled=enabled;data.enabled=enabled&&!data.safeMode;return structuredClone(data)},t:(key,args)=>key==='plugins.ui.locationCount'?String(args.count)+' locations':key==='settings.plugins.actionFailed'?args.error:key,api:{
       list:async()=>structuredClone(data),
       catalog:()=>{catalogCalls++;return catalogMode==='deferred'?new Promise((yes,no)=>{pending=yes;reject=no}):Promise.resolve(catalog)},
       place:async(ref,surface,on)=>{calls.push(['place',ref,surface,on]);data.plugins[0].views[0].placements.home=on;return structuredClone(data)},
@@ -89,7 +89,7 @@ async function main() {
     scroll.scrollTop=70;pending(catalog);await tick();
     check('completion-retains-navigation-and-current-scroll',official===tab('official')&&document.activeElement===official&&scroll.scrollTop===70&&official.getAttribute('aria-selected')==='true',{scroll:scroll.scrollTop});
     const community=tab('community');community.focus({preventScroll:true});community.click();reject(Error('offline'));await tick();
-    check('failed-tab-load-keeps-current-page-and-focus',official.getAttribute('aria-selected')==='true'&&document.activeElement===community&&errors.at(-1)==='offline');
+    check('failed-tab-load-keeps-current-page-and-focus',official.getAttribute('aria-selected')==='true'&&document.activeElement===community&&box.querySelector('.plugin-action-error')?.textContent==='offline');
     community.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
     check('keyboard-navigation-with-labelled-panel',document.activeElement===tab('installed')&&tab('installed').tabIndex===0&&[...box.querySelectorAll('[role="tab"]')].filter(n=>n.tabIndex===0).length===1&&box.querySelector('[role="tabpanel"]').getAttribute('aria-labelledby')===official.id&&box.querySelector('[role="tablist"]')!==null);
     catalogMode='success';tab('installed').click();await tick();
@@ -120,7 +120,7 @@ async function main() {
     let select=box.querySelector('.plugin-version-picker select');select.focus({preventScroll:true});select.value='2.0.0';select.dispatchEvent(new Event('change'));await tick();
     check('version-change-replaces-token-and-retains-review-focus',document.activeElement===box.querySelector('.plugin-version-picker select')&&document.activeElement.value==='2.0.0'&&calls.some(c=>c[0]==='cancel'&&c[1]==='token-1.0.0')&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='2.0.0');
     previewMode='error';select=box.querySelector('.plugin-version-picker select');select.value='1.0.0';select.dispatchEvent(new Event('change'));await tick();
-    check('failed-version-preview-removes-stale-install-consent',!box.querySelector('.plugin-package-preview')&&errors.at(-1)==='preview rejected'&&calls.some(c=>c[0]==='cancel'&&c[1]==='token-2.0.0'));
+    check('failed-version-preview-removes-stale-install-consent',!box.querySelector('.plugin-package-preview')&&box.querySelector('.plugin-catalog-review .plugin-action-error')?.textContent==='preview rejected'&&calls.some(c=>c[0]==='cancel'&&c[1]==='token-2.0.0'));
     click('plugins.ui.backCatalog');await tick();previewMode='success';
     tab('community').click();await tick();click('plugins.catalog.sources');await tick();
     check('sources-open-as-route-without-nested-disclosures',Boolean(box.querySelector('.plugin-sources .plugin-source-form'))&&!box.querySelector('.plugin-sources details')&&document.activeElement===box.querySelector('.plugin-back'));
@@ -160,7 +160,7 @@ async function main() {
     global=await openGlobal();check('paused-switch-remains-reachable',!global.checked&&!global.disabled);global.click();await tick();
     check('resume-restores-saved-plugin-choices',data.enabled&&!box.querySelector('.plugin-paused')&&!box.querySelector('[data-plugin-id="alpha"] input').disabled&&JSON.stringify(data.plugins.map(p=>[p.id,p.enabled]))===choices&&calls.filter(c=>c[0]==='global').length===2);
     globalMode='error';global=await openGlobal();global.click();await tick();global=await openGlobal();
-    check('failed-global-save-restores-authoritative-switch-and-focus',global.checked&&data.enabled&&!box.querySelector('.plugin-paused')&&errors.at(-1)==='settings write failed'&&document.activeElement===global);
+    check('failed-global-save-restores-authoritative-switch-and-focus',global.checked&&data.enabled&&!box.querySelector('.plugin-paused')&&box.querySelector('.plugin-action-error')?.textContent==='settings write failed'&&document.activeElement===global);
     globalMode='success';global.closest('.plugin-menu').hidePopover();data.safeMode=true;data.enabled=false;await panel.refresh();global=await openGlobal();
     check('safe-mode-master-reflects-saved-intent-not-runtime',global.checked&&savedMasterEnabled&&!data.enabled&&Boolean(box.querySelector('.plugin-paused'))&&box.querySelector('[data-plugin-id="alpha"] input').disabled);
     global.click();await tick();global=await openGlobal();
@@ -203,7 +203,7 @@ async function main() {
     pageHost.update(payload('alpha/view',2));check('acknowledged-main-page-draft-resumes-model-updates',draft.value==='saved');
     pages.render(routes.filter(p=>p.ref!=='alpha/view'),'home');
     check('removed-page-releases-retained-dom',!draft.isConnected&&pageBox.classList.contains('hidden'));
-    return {checks,errors};
+    return {checks};
   })()`);
   // Exercise Chromium's actual pointer/keyboard modality, not just synthetic DOM clicks.
   const point = await win.webContents.executeJavaScript(`(async()=>{

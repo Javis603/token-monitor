@@ -30,7 +30,7 @@ app.whenReady().then(async () => {
     const refs=['demo/system','demo/canvas','demo/pulse'],titles=['系統監控','我的專屬繪圖畫布','Token 脈搏'];
     const states=Object.fromEntries(refs.map((ref,i)=>[ref,{title:titles[i],icon:['cpu','draw','chart'][i]}]));
     const catalog={plugins:[{id:'demo',name:'Demo',status:'active',views:refs.map((ref,i)=>({ref,title:titles[i],icon:'cpu',surfaces:['notch'],placements:{notch:true}}))}]};
-    let settings=await orderBridge.read(),drag;const errors=[];
+    let settings=await orderBridge.read(),drag;
     const host=TokenMonitorPluginViews.createPluginViewHost({document,window});host.update({surface:'notch',views:Object.fromEntries(refs.map(r=>[r,{...states[r],status:'ok',tree:{type:'text',text:states[r].title}}]))});
     const shared={pluginHost:host,markNode:()=>el('span'),hasMask:()=>false,providerLabel:x=>x,limitProviderColor:()=>'',formatTokens:String,formatCardTokens:String,formatBreakdownTokens:String,usageCostNode:()=>el('span'),formatRate:v=>TokenMonitorCompactTokens.formatCompactTokens(v,'western','en',{style:'tray'}),appearance:()=>({}),prefersReducedMotion:()=>true,limitAccountTitle:()=>'',overflowText:{stop(){},preserveReading(){},refresh(){}},limitWindowsView:{},ensureRefreshButton:()=>el('button')};
     const panel=TokenMonitorNotchPanel.createNotchPanel({document,window,el,t:key=>TokenMonitorI18n.translate('zh-TW',key),state:{locale:'zh-TW'},bridge:{},shared});document.getElementById('panel').append(panel.node);
@@ -39,13 +39,13 @@ app.whenReady().then(async () => {
       TokenMonitorNotchPageSettings.render({document,container,resetButton:document.getElementById('reset'),settings,catalog,t:key=>TokenMonitorI18n.translate('zh-TW',key),
         save:async patch=>{settings=await orderBridge.save(patch);render()},
         place:async(ref,value)=>{catalog.plugins[0].views.find(v=>v.ref===ref).placements.notch=value;render()},
-        pluginIcon:name=>TokenMonitorPluginViews.iconNode(document,name,null,14),onError:e=>errors.push(e.message),
+        pluginIcon:name=>TokenMonitorPluginViews.iconNode(document,name,null,14),
         createRowDrag:config=>{drag=TokenMonitorRowDragController.createRowDragController({dragSort:TokenMonitorVerticalDragSort,getScrollPanel:()=>scroll,...config});return drag}
       });
       panel.render({cells:[{id:'stat:liveRate',kind:'stat',metric:'liveRate',rate:31,rateMode:'speed',idle:false}],panel:{builtinPages:settings.notchBuiltinPages,pluginPages:refs.filter(r=>catalog.plugins[0].views.find(v=>v.ref===r).placements.notch),pageOrder:settings.notchPageOrder,pluginCatalog:states}});panel.place({notched:true,gapWidth:180,height:32},1);
     };
     render();
-    window.orderFixture={render,availability:(status,master=true)=>{catalog.plugins[0].status=status;settings.pluginsEnabled=master;render()},inspect:()=>({ids:chips().map(n=>n.dataset.page),chosen:chips().map(n=>[n.dataset.page,n.getAttribute('aria-pressed')]),order:settings.notchPageOrder,focus:document.activeElement?.dataset.page,busy:container.dataset.saving==='true',dragging:drag.isDragging(),errors:[...errors],top:[...panel.node.querySelectorAll('.notch-tab')].filter(n=>!n.hidden).map(n=>n.dataset.page),scroll:scroll.scrollTop}),point:id=>{const n=chips().find(n=>n.dataset.page===id);n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}},focus:id=>chips().find(n=>n.dataset.page===id).focus({preventScroll:true})};
+    window.orderFixture={render,availability:(status,master=true)=>{catalog.plugins[0].status=status;settings.pluginsEnabled=master;render()},inspect:()=>({ids:chips().map(n=>n.dataset.page),chosen:chips().map(n=>[n.dataset.page,n.getAttribute('aria-pressed')]),order:settings.notchPageOrder,focus:document.activeElement?.dataset.page,busy:container.dataset.saving==='true',dragging:drag.isDragging(),errors:[...container.querySelectorAll('.plugin-action-error')].map(n=>n.textContent),top:[...panel.node.querySelectorAll('.notch-tab')].filter(n=>!n.hidden).map(n=>n.dataset.page),scroll:scroll.scrollTop}),point:id=>{const n=chips().find(n=>n.dataset.page===id);n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}},focus:id=>chips().find(n=>n.dataset.page===id).focus({preventScroll:true})};
   })();`);
   const win = new BrowserWindow({ show: false, width: 700, height: 680, webPreferences: { preload: path.join(scratch, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   await win.loadFile(path.join(scratch, 'index.html')); await win.webContents.executeJavaScript('window.ready');

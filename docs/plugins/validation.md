@@ -6,6 +6,8 @@ Run `npm run verify` for lint and the Node test suite. Renderer and lifecycle ch
 
 ```sh
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-settings-ui.cjs
+env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-settings-errors.cjs
+env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-action-errors.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-motion-ui.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-corrections-ui.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-notch-page-order-ui.cjs
@@ -18,6 +20,8 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-smo
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-system-monitor-rich-ui.cjs
 env -u ELECTRON_RUN_AS_NODE npm run verify:plugins -- --out /tmp/plugin-report.json
 ```
+
+Plugin settings errors stay in the panel that owns the action: package/operation confirmation, placement row or source form. The error fixture checks localization, accessible alerts, input/focus retention, retry and navigation cleanup using production renderer/CSS with synthetic API failures. Skin application errors also belong to their calling surface (plugin details or Appearance); Notch page changes and standalone-window failures stay beside their own controls. The action-error fixture exercises the production App callback wiring, retry and late-result cleanup. Initial list-load failure must offer a local retry instead of an endless loading row. It captures normal and narrow widths; this does not replace native screen-reader or packaged-app acceptance.
 
 The sandbox verifier deliberately creates flooding, busy and memory-consuming Workers; run it separately from `npm test`. Test reports, screenshots and frozen review manifests belong in local/CI artifacts and PR evidence, not the permanent author documentation.
 

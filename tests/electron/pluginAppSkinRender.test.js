@@ -75,21 +75,33 @@ test('skin sends only canonical identity, never renderer-supplied palette or tok
   await h.context.applyPluginSkin({ ref: 'author/mono', colors: { accent: '#abcdef' }, vendorColors: { custom: '#778899' }, appearance: { font: 'mono', density: 'compact' } });
   assert.deepEqual(h.saved, [{ pluginSkinRef: 'author/mono' }]);
 });
-test('both real fire-and-forget skin entrypoints surface persistence errors without unhandled rejection', () => {
-  // A subprocess makes Node strict unhandled-rejection behavior observable without
-  // suppressing it through the test runner or a process rejection listener.
-  const entrypoints = [source.match(/chip\.addEventListener\('click', ([^\n]*applyPluginSkin[^\n]*)\);/)[1],
-    source.match(/onApplySkin: ([^\n]*applyPluginSkin[^\n]*),/)[1]];
-  for (const entrypoint of entrypoints) {
-    const script = `const vm = require('node:vm'); const errors = []; const ctx = {
-      themePresetsApi: require(${JSON.stringify(path.join(root, 'src/electron/renderer/themePresets'))}),
-      state: { settings: {} }, pluginBridge: {}, skin: { colors: { accent: '#123456' } },
-      applyThemeColors() {}, applyVendorColorOverrides() {}, buildAppearanceColorControls() {}, renderSettingsSummaries() {},
-      saveSettings: async () => { throw new Error('disk full'); },
-      t: (_key, values) => values?.error || _key, setStatus: (message, error) => errors.push([message, error])
-    }; vm.createContext(ctx); vm.runInContext(${JSON.stringify(extract('currentThemeOverrides') + '\n' + extract('applyPluginSkin') + '\n(')} + ${JSON.stringify(entrypoint)} + ')(skin)', ctx);
-    setImmediate(() => { require('node:assert/strict').deepEqual(errors, [['disk full', true]]); });`;
-    const result = spawnSync(process.execPath, ['--unhandled-rejections=strict', '-e', script], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr);
-  }
+test('plugin-details skin callback returns persistence failure to its owning panel', async () => {
+  const h = skinHarness(true);
+  const callback = source.match(/onApplySkin: ([^\n]*applyPluginSkin[^\n]*),/)[1];
+  const result = vm.runInContext(`(${callback})({ref:'author/mono'})`, h.context);
+  await assert.rejects(result, /disk full/);
+  assert.deepEqual(h.errors, [], 'the panel owns feedback, not the global status');
+});
+test('real Appearance skin click handles rejection locally without an unhandled promise', () => {
+  const entrypoint = source.match(/chip\.addEventListener\('click', ([^\n]*applyAppearancePluginSkin[^\n]*)\);/)[1];
+  const script = `const vm = require('node:vm'), assert = require('node:assert/strict');
+    const {Element} = require(${JSON.stringify(path.join(root, 'tests/helpers/notchPanel'))});
+    const document = {createElement: tag => new Element(tag, document)};
+    const container = document.createElement('div'), chip = document.createElement('button'); container.append(chip);
+    const errors = [], ctx = {document, chip, els:{themePresetChips:container}, skin:{ref:'author/mono'},
+      window:{TokenMonitorPluginSettings:require(${JSON.stringify(path.join(root, 'src/electron/renderer/pluginSettings'))})},
+      buildAppearanceColorControls() {}, renderSettingsSummaries() {},
+      saveSettings: async () => { throw Error('disk full'); },
+      t: (_key, values) => values?.error || _key, setStatus: (...args) => errors.push(args)
+    };
+    vm.createContext(ctx); vm.runInContext(${JSON.stringify(extract('applyPluginSkin') + '\n' + extract('applyAppearancePluginSkin') + '\n(')} + ${JSON.stringify(entrypoint)} + ')()', ctx);
+    setImmediate(() => {
+      assert.deepEqual(errors, []);
+      const notice = container.querySelector('.plugin-action-error');
+      assert.equal(notice.textContent, 'disk full'); assert.equal(notice.getAttribute('role'), 'alert');
+      assert.equal(chip.getAttribute('aria-describedby'), notice.id);
+      assert.equal(container.getAttribute('aria-busy'), 'false');
+    });`;
+  const result = spawnSync(process.execPath, ['--unhandled-rejections=strict', '-e', script], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
 });

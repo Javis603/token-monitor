@@ -46,3 +46,34 @@ test('main and detached windows union page demand without destroying each other'
   demand.set('other', 'page', [{ toString: 0 }, 'bad', 'demo/one', 'demo/one']);
   assert.deepEqual(events.at(-1), ['page', ['demo/one']]);
 });
+
+
+test('standalone-window errors stay with their page, retry once and discard stale navigation results', async () => {
+  const { create } = require('../../src/electron/renderer/pluginMainPages');
+  const { Element } = require('../helpers/notchPanel');
+  const document = { createElement: tag => new Element(tag, document) };
+  const container = document.createElement('main');
+  let pending, calls = 0;
+  const pages = ['one', 'two'].map(id => ({ id: `plugin:demo/${id}`, ref: `demo/${id}`, title: id }));
+  const ui = create({ document, container, host: { mount() {}, refreshDemand() {} }, t: key => key,
+    formatError: error => `Localized: ${error.message}`,
+    openWindow: () => { calls++; return new Promise((resolve, reject) => { pending = { resolve, reject }; }); } });
+  ui.render(pages, pages[0].id);
+  const button = container.querySelector('button');
+  button.fire('click'); button.fire('click'); assert.equal(calls, 1);
+  assert.equal(button.getAttribute('aria-busy'), 'true');
+  pending.reject(Error('open failed')); await new Promise(setImmediate);
+  const notice = container.querySelector('.plugin-action-error');
+  assert.equal(notice?.textContent, 'Localized: open failed');
+  assert.equal(notice.getAttribute('role'), 'alert');
+  assert.equal(button.getAttribute('aria-describedby'), notice.id);
+  assert.equal(button.disabled, false);
+  ui.render(pages, pages[0].id); assert.equal(container.querySelectorAll('.plugin-action-error').length, 1);
+  button.fire('click'); pending.resolve(); await new Promise(setImmediate);
+  assert.equal(container.querySelector('.plugin-action-error'), null);
+  button.fire('click'); ui.render(pages, pages[1].id); ui.render(pages, pages[0].id);
+  pending.reject(Error('stale')); await new Promise(setImmediate);
+  assert.equal(container.querySelector('.plugin-action-error'), null, 'navigation invalidates late failures even after returning');
+  button.fire('click'); ui.render([], 'home'); pending.reject(Error('removed')); await new Promise(setImmediate);
+  assert.equal(container.querySelector('.plugin-action-error'), null);
+});

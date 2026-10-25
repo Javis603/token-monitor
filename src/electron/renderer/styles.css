@@ -8417,6 +8417,14 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-errors { display: flex; flex-direction: column; gap: 3px; }
 .plugin-error, .plugin-log { display: block; font-size: 0.625rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; color: var(--muted); }
 .plugin-error { color: var(--red); }
+.plugin-action-error { margin: 0; padding: 6px 0; color: var(--red); font-size: .75rem; line-height: 1.6; overflow-wrap: anywhere; }
+.plugin-view-row:has(> .plugin-action-error) { flex-wrap: wrap; }
+.plugin-view-row > .plugin-action-error,
+.plugin-skins > .plugin-action-error,
+.theme-preset-chips > .plugin-action-error,
+.notch-page-chips > .plugin-action-error,
+.plugin-main-heading > .plugin-action-error { flex-basis: 100%; min-width: 0; }
+.plugin-main-heading:has(> .plugin-action-error) { flex-wrap: wrap; }
 .plugin-log-warn { color: var(--yellow); }
 .plugin-log-error { color: var(--red); }
 .plugin-logs summary { font-size: 0.625rem; color: var(--muted); cursor: pointer; }

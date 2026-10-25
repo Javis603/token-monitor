@@ -25,7 +25,13 @@
     const byId = new Map(list.map(entry => [entry.id, entry]));
     return placements.orderNotchPages(list.map(entry => entry.id), preferred).map(id => byId.get(id));
   }
+  const errors = new WeakMap();
   const contexts = new WeakMap(), controllers = new WeakMap(), resetButtons = new WeakSet();
+  function clearError(container) {
+    errors.delete(container);
+    container.querySelector('.plugin-action-error')?.remove();
+    for (const chip of container.querySelectorAll('button')) chip.removeAttribute('aria-describedby');
+  }
   function applyOrder(container, order, document) {
     const focus = document.activeElement;
     const byId = new Map([...container.querySelectorAll('button')].map(node => [node.dataset.page, node]));
@@ -34,12 +40,13 @@
   }
   async function persistOrder(container, order, id, reset = false) {
     const options = contexts.get(container), { document } = options;
+    clearError(container);
     container.dataset.saving = 'true'; container.setAttribute('aria-busy', 'true');
     const restoreFocus = container.contains(document.activeElement) || document.activeElement === options.resetButton || document.activeElement === document.body;
     for (const control of container.querySelectorAll('button')) control.disabled = true;
     if (options.resetButton) options.resetButton.disabled = true;
     try { await options.save({ notchPageOrder: reset ? [] : placements.mergeNotchPageOrder(options.settings.notchPageOrder, order) }); }
-    catch (error) { options.onError(error); }
+    catch (error) { errors.set(container, { error, id }); }
     finally {
       delete container.dataset.saving; container.setAttribute('aria-busy', 'false');
       const canRestore = restoreFocus && (document.activeElement === document.body || container.contains(document.activeElement));
@@ -48,7 +55,7 @@
     }
   }
   function render(options) {
-    const { document, container, settings, catalog, t, save, place, onError, pluginIcon } = options;
+    const { document, container, settings, catalog, t, save, place, pluginIcon } = options;
     if (!container) return;
     contexts.set(container, options);
     if (options.resetButton) {
@@ -112,6 +119,7 @@
       chip.append(...(icon ? [icon] : []), label);
       chip.addEventListener('click', async () => {
         if (container.dataset.saving === 'true') return;
+        clearError(container);
         const restoreFocus = document.activeElement === chip;
         const next = !entry.checked;
         chip.setAttribute('aria-pressed', String(next));
@@ -124,7 +132,7 @@
             const chosen = entries(settings, catalog, t).filter(e => !e.ref && (e.id === entry.id ? next : e.checked)).map(e => e.id);
             await save({ notchBuiltinPages: chosen });
           }
-        } catch (error) { chip.setAttribute('aria-pressed', String(entry.checked)); onError(error); }
+        } catch (error) { chip.setAttribute('aria-pressed', String(entry.checked)); errors.set(container, { error, id: entry.id }); }
         finally {
           delete container.dataset.saving; container.setAttribute('aria-busy', 'false');
           const canRestore = restoreFocus && (document.activeElement === document.body || container.contains(document.activeElement));
@@ -134,7 +142,17 @@
       });
       return chip;
     });
-    container.replaceChildren(...chips);
+    const failure = errors.get(container);
+    const affected = failure && chips.find(chip => chip.dataset.page === failure.id);
+    const notice = affected ? document.createElement('p') : null;
+    if (notice) {
+      notice.className = 'plugin-action-error'; notice.id = `${container.id || 'notch-pages'}-action-error`;
+      notice.setAttribute('role', 'alert'); notice.setAttribute('aria-atomic', 'true');
+      notice.textContent = options.formatError ? options.formatError(failure.error)
+        : t('settings.plugins.actionFailed', { error: failure.error.message || String(failure.error) });
+      affected.setAttribute('aria-describedby', notice.id);
+    } else errors.delete(container);
+    container.replaceChildren(...chips, ...(notice ? [notice] : []));
     if (focused) [...container.querySelectorAll('button')].find(chip => chip.dataset.page === focused)?.focus({ preventScroll: true });
   }
   return { entries, render };

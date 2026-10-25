@@ -69,7 +69,7 @@ test('chips toggle through click, restore state on failure and keep focus', asyn
   const document = documentStub();
   const container = new Element('div', document);
   document.body.append(container);
-  let errors = 0, fail = false;
+  let fail = false;
   const options = {
     document, container, settings: {}, catalog, t,
     save: async patch => { if (fail) throw new Error('disk'); Object.assign(options.settings, patch); },
@@ -80,7 +80,7 @@ test('chips toggle through click, restore state on failure and keep focus', asyn
       }
     },
     pluginIcon: name => pluginViews.iconNode(document, name, null, 14),
-    onError: () => { errors += 1; }
+
   };
   render(options);
   const chip = id => container.querySelectorAll('button').find(node => node.dataset.page === id);
@@ -109,9 +109,15 @@ test('chips toggle through click, restore state on failure and keep focus', asyn
   chip('sessions').focus();
   chip('sessions').fire('click', {});
   await flush(); await flush();
-  assert.equal(errors, 1);
+  assert.match(container.querySelector('.plugin-action-error')?.textContent, /disk/);
   assert.equal(chip('sessions').attributes['aria-pressed'], 'true', 'a failed save rolls the chip back');
   assert.equal(document.activeElement?.dataset.page, 'sessions', 'focus lands back on the toggled chip');
+  const notice = container.querySelector('.plugin-action-error');
+  assert.equal(notice.getAttribute('role'), 'alert');
+  assert.equal(chip('sessions').getAttribute('aria-describedby'), notice.id);
+  render(options); assert.ok(container.querySelector('.plugin-action-error'), 'refresh retains failure');
+  fail = false; chip('sessions').fire('click'); await flush();
+  assert.equal(container.querySelector('.plugin-action-error'), null, 'successful retry clears failure');
 });
 
 test('a focused chip survives re-renders while the container is saving', async () => {
@@ -136,10 +142,10 @@ test('a focused chip survives re-renders while the container is saving', async (
 
 test('mixed page order retains hidden entries and keyboard sorting preserves visibility', async () => {
   const document = documentStub(), container = new Element('div', document); document.body.append(container);
-  let fail = false, errors = 0;
+  let fail = false;
   const settings = { notchPageOrder: ['plugin:pulse/main', 'home', 'limits'], notchBuiltinPages: ['home'] };
   const options = { document, container, settings, catalog: structuredClone(catalog), t,
-    save: async patch => { if (fail) throw Error('disk'); Object.assign(settings, patch); }, place: async () => {}, onError: () => errors++ };
+    save: async patch => { if (fail) throw Error('disk'); Object.assign(settings, patch); }, place: async () => {} };
   const ids = () => container.querySelectorAll('button').map(node => node.dataset.page);
   const chip = id => container.querySelectorAll('button').find(node => node.dataset.page === id);
   render(options);
@@ -153,7 +159,7 @@ test('mixed page order retains hidden entries and keyboard sorting preserves vis
   const previous = [...settings.notchPageOrder]; fail = true;
   chip('home').focus(); chip('home').fire('keydown', { altKey: true, key: 'ArrowRight', preventDefault() {} });
   await flush(); await flush();
-  assert.deepEqual(settings.notchPageOrder, previous); assert.deepEqual(ids(), previous); assert.equal(errors, 1);
+  assert.deepEqual(settings.notchPageOrder, previous); assert.deepEqual(ids(), previous); assert.match(container.querySelector('.plugin-action-error')?.textContent, /disk/);
   assert.equal(document.activeElement?.dataset.page, 'home');
 });
 
@@ -162,10 +168,10 @@ test('reset order preserves visibility and recovers from failed saves without du
   document.body.append(resetButton, container);
   const settings = { notchPageOrder: ['plugin:pulse/main', 'limits', 'home'], notchBuiltinPages: ['home'] };
   const fixtureCatalog = structuredClone(catalog), beforePlacements = JSON.stringify(fixtureCatalog);
-  let pending, errors = 0; const patches = [];
+  let pending; const patches = [];
   const options = { document, container, resetButton, settings, catalog: fixtureCatalog, t,
     save: patch => { patches.push(patch); return new Promise((resolve, reject) => { pending = { resolve: () => { Object.assign(settings, patch); resolve(); }, reject }; }); },
-    place: () => assert.fail('reset must not change plugin placements'), onError: () => errors++ };
+    place: () => assert.fail('reset must not change plugin placements') };
   render(options); render(options);
   assert.equal(resetButton.disabled, false);
   assert.equal(resetButton.hidden, false, 'custom order exposes the text reset action');
@@ -173,9 +179,10 @@ test('reset order preserves visibility and recovers from failed saves without du
   assert.equal(patches.length, 1, 'one reset stays in flight across repeated clicks and renders');
   assert.equal(resetButton.disabled, true);
   pending.reject(Error('disk')); await flush(); await flush();
-  assert.equal(errors, 1); assert.equal(resetButton.disabled, false);
+  assert.match(container.querySelector('.plugin-action-error')?.textContent, /disk/); assert.equal(resetButton.disabled, false);
   assert.equal(container.querySelectorAll('button')[0].dataset.page, 'plugin:pulse/main');
   resetButton.fire('click'); pending.resolve(); await flush(); await flush();
+  assert.equal(container.querySelector('.plugin-action-error'), null);
   assert.deepEqual(patches.at(-1), { notchPageOrder: [] });
   assert.deepEqual(container.querySelectorAll('button').slice(0, 4).map(n => n.dataset.page), ['home', 'limits', 'sessions', 'breakdown']);
   assert.deepEqual(settings.notchBuiltinPages, ['home']);
