@@ -6685,8 +6685,6 @@ function renderHomeToolStats({ parts, durationMs, tokensPerSecond }) {
       homeToolStatCell('modelTime', formatHomeToolDuration(durationMs)),
       homeToolStatCell('speed', tokensPerSecond ? t('home.toolStats.tps', { value: formatNumber(tokensPerSecond) }) : '--')
     );
-    // The rate is an estimate over timed generation, not pure decoding; say so.
-    cells[cells.length - 1].title = t('home.toolStats.speedHint');
   }
   if (!cells.length) return null;
   const wrap = document.createElement('div');
@@ -10388,6 +10386,14 @@ function renderHomeToolSettings() {
   });
   detailsLabel.append(detailsInput, detailsText);
   frag.append(detailsLabel);
+
+  // The rate is an estimate over timed generation, not pure decoding. A native
+  // tooltip is off-limits on Electron surfaces, so the basis is stated once here
+  // rather than repeated inside every card.
+  const speedNote = document.createElement('p');
+  speedNote.className = 'settings-note home-tool-speed-note';
+  speedNote.textContent = t('home.toolStats.speedHint');
+  frag.append(speedNote);
 
   // Offer the tools that have usage in any period, plus any already picked.
   const selected = homeToolClientSet();
