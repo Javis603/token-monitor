@@ -7875,7 +7875,7 @@ app.whenReady().then(() => {
   ipcMain.handle('syncContent:retryCleanup', () => getSyncContentRuntime().retryCleanup());
   const credentialCommands = createCredentialCommands({
     getSettings: () => settings,
-    applySettingsPatch,
+    applySettingsPatch: applyCredentialSettingsPatch,
     probeDeps: credentialProbeDeps
   });
   // Resolves only once a worker-hosted transform runs with the saved settings:
@@ -7896,9 +7896,23 @@ app.whenReady().then(() => {
     // Return the latest saved selection rather than restoring an older one.
     return settingsForRenderer();
   });
+  async function applyCredentialSettingsPatch(patch, { provider }) {
+    const refreshes = [];
+    applySettingsPatch(patch, undefined, {
+      ensureLimitProvider: provider,
+      onLimitsRefresh: (_scope, refresh) => refreshes.push(refresh)
+    });
+    // The write is already durable; a refresh failure must not report it as an
+    // unsuccessful save or launch a second check from the renderer.
+    await Promise.all(refreshes).catch((error) => {
+      console.log(`[limits-runtime] credential refresh failed: ${error.message}`);
+    });
+    return settingsForRenderer();
+  }
+
   // The settings:update body, named so a credential save persists through the
   // exact same normalization, runtime reconfigure and limit invalidation.
-  function applySettingsPatch(patch, onDotsVisibilityRefresh = () => {}) {
+  function applySettingsPatch(patch, onDotsVisibilityRefresh = () => {}, limitContext = {}) {
     const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
     const previousSettingsState = settings;
@@ -8194,15 +8208,17 @@ app.whenReady().then(() => {
     if (widgetHistorySourceChanged && !runtimeChange.modeStructural) {
       refreshMacWidgetHistorySource();
     }
-    const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
+    const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange, limitContext.ensureLimitProvider);
     if (runtimeChange.modeStructural || (receiverPermissionChanged && settings.hubMode === 'host')) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
+        limitContext.onLimitsRefresh?.(scope, Promise.resolve({ queued: true }));
       }
       startMode();
     } else if (runtimeChange.sinkStructural) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
+        limitContext.onLimitsRefresh?.(scope, Promise.resolve({ queued: true }));
       }
       restartDeviceRuntimeForMode();
     } else {
@@ -8221,7 +8237,9 @@ app.whenReady().then(() => {
         deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
       }
       for (const { scope, reason, options } of limitInvalidations) {
-        void queueLimitInvalidation(scope, reason, options).catch((error) => {
+        const refresh = queueLimitInvalidation(scope, reason, options);
+        limitContext.onLimitsRefresh?.(scope, refresh);
+        void refresh.catch((error) => {
           console.log(`[limits-runtime] settings refresh failed: ${error.message}`);
         });
       }
@@ -8620,9 +8638,8 @@ app.whenReady().then(() => {
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
-  // The account panels ask for a provider-scoped re-read after a save, a clear
-  // or their refresh button, so the record can confirm the change immediately
-  // instead of waiting for the next scheduled limits poll.
+  // Explicit panel refreshes collect only their provider. Save and clear reuse
+  // the refresh scheduled by the credential settings write above.
   ipcMain.handle('limits:refresh', async (_event, providerId) => {
     const provider = String(providerId || '').trim();
     const parsed = parseLimitProviders(provider);

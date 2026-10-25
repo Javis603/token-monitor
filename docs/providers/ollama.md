@@ -10,9 +10,11 @@ read_when:
 
 ## Credentials
 
-The API-key lane calls `https://ollama.com/api/balance` with `Authorization: Bearer <key>` and reports source `api`; the session-cookie lane scrapes `https://ollama.com/settings` and reports source `web`. The API key is preferred when both are configured, and the cookie lane is the fallback. Saving a credential in the GUI replaces the other lane. `rememberProbe` applies only to the cookie lane; API mode is stateless.
+The API-key lane calls `https://ollama.com/api/balance` with `Authorization: Bearer <key>` and reports source `api`; the session-cookie lane scrapes `https://ollama.com/settings` and reports source `web`. The API key is preferred when both are configured; Cookie is used only when no API key is configured, never after an API failure. Saving a credential in the GUI replaces the other lane. The credential-type selector defaults to API key for an unconfigured account and initializes from the effective configured lane for an existing account. It only changes the draft: switching clears the hidden input, submits only the selected credential and does not alter stored settings until Save. API mode opens the keys page with a short usage hint and `ollama-...` as a format-hint placeholder (not a prefix validation rule); Cookie mode keeps its extraction steps. The selector names the credential type; the inputs retain accessible names without repeating visible labels. `rememberProbe` applies only to the cookie lane; API mode is stateless.
 
 ## Data sources
+
+Both HTTP 401 and 403 from the JSON API are authentication failures. A save probe rejects that draft without changing either saved credential; it never retries with Cookie. Main explicitly clears the other settings credential for a form's mutually exclusive `credentialChoice`, while environment credentials retain their existing precedence.
 
 `/api/balance` returns an `included` object whose shape depends on the plan.
 
@@ -26,7 +28,7 @@ The API-key lane calls `https://ollama.com/api/balance` with `Authorization: Bea
 
 ## Account identity
 
-`/api/balance` carries no identity, so API mode calls `POST https://ollama.com/api/me` (undocumented) for the account email and plan. Its fields are read case-insensitively (`Email`/`email`, `Plan`/`plan`). The email is hashed like the cookie lane's identity, so an account keeps the same `accountKey` across lanes and devices; a successful lookup is cached for six hours. If `/api/me` is unavailable, a key-derived identity keeps the reading usable and the failure is not retried for five minutes. The provider tracks the identity it last emitted for a key, resolved or key-derived, and emits a `{ provider: "ollama", accountKey: <previous>, removed: true }` control row whenever that identity changes, so an expired lookup and a later failure cannot leave two rows for one account. A save probe checks only `/api/balance`; identity resolution belongs to the poll that follows, and the probe leaves no cache behind.
+`/api/balance` carries no identity, so API mode calls `POST https://ollama.com/api/me` (undocumented) for the account email and plan. Its fields are read case-insensitively (`Email`/`email`, `Plan`/`plan`). The email is hashed like the cookie lane's identity, so an account keeps the same `accountKey` across lanes and devices; a successful lookup is cached for six hours. If `/api/me` is unavailable, a key-derived identity keeps the reading usable and the failure is not retried for five minutes. Identity removals compare against the runtime's accepted `previousLimits` rows, not a fetcher-side record of emitted identities. A changed identity emits a `{ provider: "ollama", accountKey: <previous>, removed: true }` control row until the runtime accepts the replacement, so a superseded lookup cannot consume the removal and leave both rows behind. A save probe checks only `/api/balance`; identity resolution belongs to the poll that follows, and the probe leaves no cache behind.
 
 ## Rate limit
 

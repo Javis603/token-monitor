@@ -21,7 +21,6 @@ const WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 let validationCache = null;
 const accountCache = new Map();
 const accountFailures = new Map();
-const emittedIdentities = new Map();
 const OLLAMA_SESSION_COOKIE_NAMES = new Set([
   'session',
   '__Secure-session',
@@ -327,7 +326,7 @@ async function requestOllamaJson(url, init, deps = {}) {
     if (!response || !response.ok) {
       const status = !response
         ? 'unavailable'
-        : response.status === 401
+        : response.status === 401 || response.status === 403
           ? 'unauthorized'
           : response.status === 429
             ? 'sourceRateLimited'
@@ -455,7 +454,7 @@ async function resolveApiIdentity(apiKey, deps, nowMs, allowCache = true) {
   return identity;
 }
 
-async function fetchOllamaApiLimits(apiKey, deps, nowMs, updatedAt) {
+async function fetchOllamaApiLimits(apiKey, options, deps, nowMs, updatedAt) {
   let payload;
   try {
     payload = await requestOllamaJson(OLLAMA_BALANCE_URL, {
@@ -481,27 +480,15 @@ async function fetchOllamaApiLimits(apiKey, deps, nowMs, updatedAt) {
     });
   }
   const allowCache = deps.probe !== true;
-  const keyHash = apiKeyCacheKey(apiKey);
   // A save-time check only proves the key, so it stays one request: identity
   // resolution belongs to the poll that follows it.
   const identity = allowCache ? await resolveApiIdentity(apiKey, deps, nowMs, true) : null;
   const accountKey = identity ? identity.accountKey : fallbackAccountKey(apiKey);
-  const removals = [];
-  if (allowCache) {
-    // Track the identity this key last emitted, resolved or fallback. The
-    // runtime keeps a row per identity, so a change in either direction must
-    // retire the previous row — otherwise an expired identity cache plus a
-    // failed lookup leaves the old account and the fallback side by side.
-    const previous = emittedIdentities.get(keyHash);
-    if (previous && previous !== accountKey) {
-      removals.push({ provider: 'ollama', accountKey: previous, removed: true });
-    }
-    emittedIdentities.delete(keyHash);
-    emittedIdentities.set(keyHash, accountKey);
-    while (emittedIdentities.size > MAX_CACHE_ENTRIES) {
-      emittedIdentities.delete(emittedIdentities.keys().next().value);
-    }
-  }
+  // Compare with rows the runtime accepted. A superseded probe can populate
+  // the identity cache, but must not consume a removal before its result lands.
+  const removals = allowCache ? (options.previousLimits?.providers || [])
+    .filter((previous) => previous.provider === 'ollama' && previous.accountKey && previous.accountKey !== accountKey)
+    .map((previous) => ({ provider: 'ollama', accountKey: previous.accountKey, removed: true })) : [];
   const row = normalizeLimitProvider({
     provider: 'ollama',
     accountKey,
@@ -520,7 +507,7 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
   const apiKey = ollamaApiKey(env, options);
-  if (apiKey) return fetchOllamaApiLimits(apiKey, deps, now, updatedAt);
+  if (apiKey) return fetchOllamaApiLimits(apiKey, options, deps, now, updatedAt);
 
   const cookieHeader = ollamaSessionCookie(env, options);
   if (!cookieHeader) {

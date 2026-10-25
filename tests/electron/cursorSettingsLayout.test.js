@@ -987,10 +987,10 @@ test('Z.ai, Qoder, Trae and Ollama panels are generated from their declared form
   assert.doesNotMatch(JSON.stringify(forms.trae), /settings\.trae\.note/);
   assert.match(readRendererFile('i18n.js'), /'settings\.trae\.deviceIdNote': '[^']*ide_user_ent_usage[^']*X-Device-Id/);
 
-  // Ollama: the API-key lane is preferred and comes first, then the cookie lane;
-  // either one is optional because a draft only needs one secret filled in.
-  assert.deepEqual(forms.ollama.manual[0], { note: 'settings.ollama.modeNote' });
-  assert.equal(forms.ollama.manual[1].steps.length, 3);
+  // Ollama chooses one draft lane; API key is the fresh-install default.
+  assert.deepEqual(forms.ollama.credentialChoice.fields, ['ollamaApiKey', 'ollamaCookie']);
+  assert.deepEqual(forms.ollama.manual[0], { note: 'settings.ollama.apiKeyNote', whenCredential: 'ollamaApiKey' });
+  assert.equal(forms.ollama.manual.find((block) => block.steps).whenCredential, 'ollamaCookie');
   assert.deepEqual(forms.ollama.fields.map(({ key, input }) => [key, input]), [['ollamaApiKey', 'password'], ['ollamaCookie', 'textarea']]);
   assert.equal(forms.ollama.fields[0].required, false);
   assert.equal(forms.ollama.fields[1].required, false);
@@ -1116,6 +1116,8 @@ test('Kimi account panel makes the Code API primary and keeps Web access as a fa
   }
   for (const host of ['ollama.com', 'www.ollama.com']) {
     assert.equal(limitProviderUrlAllowed(host, '/settings'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/settings/keys'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/settings/keys/untrusted'), false);
     assert.equal(limitProviderUrlAllowed(host, '/'), false);
   }
 });
@@ -1242,7 +1244,7 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   assert.match(app, /minimaxPendingCheckSince: 0/);
 
   const saveBody = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
-  assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
+  assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\);/);
   const clearBody = functionBody(app, 'clearAccountCredential', 'commitAccountCredential');
   assert.match(clearBody, /clearCredential\(id\)\);[\s\S]*clearExternalProviderCheckPending\(id\);[\s\S]*clearExternalProviderPendingStatus\(id\);[\s\S]*renderExternalProviderStatus\(id\);/);
   assert.match(functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup'), /onClear: \(\{ id \}\) => clearAccountCredential\(id\)/);
@@ -1250,7 +1252,7 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   const configLookup = /const config = externalLimitAccountConfig\[providerName\] \|\| limitAccountForm\(providerName\)\?\.status;/;
   const pendingBody = functionBody(app, 'markExternalProviderCheckPending', 'clearExternalProviderCheckPending');
   assert.match(pendingBody, configLookup);
-  assert.match(pendingBody, /state\[config\.pendingKey\] = Date\.now\(\);/);
+  assert.match(pendingBody, /state\[config\.pendingKey\] = checkedSince;/);
   assert.match(pendingBody, /clearExternalProviderPendingStatus\(providerName\);/);
 
   const providerBody = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
@@ -1736,7 +1738,11 @@ test('account credentials persist through the settings:update body, not a second
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), patchStart);
   assert.match(updateHandler, /applySettingsPatch\(patch, \(refresh\) => \{ dotsVisibilityApplied = refresh; \}\)/);
   assert.match(updateHandler, /await dotsVisibilityApplied;/);
-  assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch: applyCredentialSettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  const credentialPatch = functionBody(main, 'applyCredentialSettingsPatch', 'applySettingsPatch');
+  assert.match(credentialPatch, /applySettingsPatch\(patch, undefined, \{/);
+  assert.match(credentialPatch, /ensureLimitProvider: provider/);
+  assert.match(credentialPatch, /await Promise\.all\(refreshes\)/);
   const body = main.slice(patchStart, main.indexOf("ipcMain.handle('appearance:preview'"));
   assert.match(body, /credentialCommands\.noteSettingsPatch\(patch\);/);
   assert.match(body, /normalizeAccountPatch\(patch, normalizedPatch\)/);

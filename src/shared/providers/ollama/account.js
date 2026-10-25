@@ -52,24 +52,34 @@ module.exports = {
       {
         key: 'ollamaApiKey',
         input: 'password',
-        labelKey: 'settings.ollama.apiKey',
+        configuredKey: 'ollamaApiKeyConfigured',
+        ariaLabelKey: 'settings.ollama.apiKey',
         placeholderKey: 'settings.ollama.apiKeyPlaceholder'
       },
       {
         key: 'ollamaCookie',
         input: 'textarea',
-        labelKey: 'settings.ollama.cookie',
+        configuredKey: 'ollamaCookieConfigured',
+        ariaLabelKey: 'settings.ollama.cookie',
         placeholderKey: 'settings.ollama.cookiePlaceholder'
       }
     ],
+    credentialChoice: {
+      key: 'ollamaCredentialKind',
+      labelKey: 'settings.common.credentialKind',
+      fields: ['ollamaApiKey', 'ollamaCookie']
+    },
     manual: [
-      { note: 'settings.ollama.modeNote' },
-      { steps: ['settings.ollama.apiKeyStep1', 'settings.ollama.apiKeyStep2', 'settings.ollama.apiKeyStep3'] },
-      { field: 'ollamaApiKey' },
-      { steps: ['settings.ollama.step1', 'settings.ollama.step2', 'settings.ollama.step3', 'settings.ollama.step4'] },
-      { field: 'ollamaCookie' }
+      { note: 'settings.ollama.apiKeyNote', whenCredential: 'ollamaApiKey' },
+      { field: 'ollamaApiKey', whenCredential: 'ollamaApiKey' },
+      { steps: ['settings.ollama.step1', 'settings.ollama.step2', 'settings.ollama.step3', 'settings.ollama.step4'], whenCredential: 'ollamaCookie' },
+      { field: 'ollamaCookie', whenCredential: 'ollamaCookie' }
     ],
-    openUrl: { url: 'https://ollama.com/settings' },
+    openUrl: {
+      byField: 'ollamaCredentialKind',
+      urls: { ollamaApiKey: 'https://ollama.com/settings/keys', ollamaCookie: 'https://ollama.com/settings' },
+      default: 'https://ollama.com/settings/keys'
+    },
     messages: {
       rejected: 'settings.ollama.validationInvalid',
       required: 'settings.ollama.required'
@@ -79,6 +89,6 @@ module.exports = {
     rememberProbe: { fn: 'rememberOllamaValidation', field: 'ollamaCookie' }
   },
   urlPolicy: [
-    { hosts: ['ollama.com', 'www.ollama.com'], exactPaths: ['/settings', '/signin'] }
+    { hosts: ['ollama.com', 'www.ollama.com'], exactPaths: ['/settings', '/settings/keys', '/signin'] }
   ]
 };

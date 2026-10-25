@@ -40,7 +40,9 @@ function invalid(status, errorCode = '') {
 
 // The draft as it would be stored. Only fields the caller sent are part of it,
 // so one of Kimi's two credential lanes can be saved without blanking the
-// other. Independently saved settings are excluded so a rendered default
+// other. A credentialChoice explicitly makes its lanes mutually exclusive;
+// main clears its siblings even when the renderer only submits one field.
+// Independently saved settings are excluded so a rendered default
 // cannot become a stored override just because a credential is submitted.
 function draftFor(entry, values) {
   const candidate = {};
@@ -59,6 +61,11 @@ function draftFor(entry, values) {
   if (fields.some((field) => field.required && !candidate[field.key])
     || !fields.some((field) => field.secret && candidate[field.key])) {
     return { rejected: invalid('required') };
+  }
+  const choices = accountForm(entry).credentialChoice?.fields;
+  if (choices) {
+    const selected = choices.find((key) => candidate[key]);
+    for (const key of choices) if (key !== selected) candidate[key] = '';
   }
   return { candidate };
 }
@@ -102,6 +109,8 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
   async function saveCredential(providerId, values) {
     const entry = formEntry(providerId);
     if (!entry || !values || typeof values !== 'object') return invalid('notConfigured');
+    // Cookie providers may reuse the validation row for the first runtime poll.
+    const checkedSince = Date.now();
     const revision = nextRevision(entry.id);
     const { candidate, rejected } = draftFor(entry, values);
     if (rejected) return rejected;
@@ -193,22 +202,23 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     }
     const remember = accountForm(entry).rememberProbe;
     if (remember && verdict === 'valid') entry.limits[remember.fn](candidate[remember.field], provider);
-    const settings = applySettingsPatch({
+    const applied = applySettingsPatch({
       ...candidate,
       limitProviders: providerSelectionIncluding(getSettings().limitProviders, entry.id),
       limitsEnabled: true
-    });
+    }, { provider: entry.id });
     pendingRenewals.delete(entry.id);
-    return { saved: true, verdict, status, errorCode, settings, ...(discoveredChoices ? { choices: discoveredChoices } : {}) };
+    const settings = await applied;
+    return { saved: true, verdict, status, errorCode, settings, checkedSince, ...(discoveredChoices ? { choices: discoveredChoices } : {}) };
   }
 
-  function clearCredential(providerId) {
+  async function clearCredential(providerId) {
     const entry = formEntry(providerId);
     if (!entry) return { cleared: false };
     pendingRenewals.delete(entry.id);
-    const settings = applySettingsPatch(Object.fromEntries(
+    const settings = await applySettingsPatch(Object.fromEntries(
       formFields(entry).filter((field) => field.secret || entry.fields.find((item) => item.key === field.key)?.clearWithCredential).map(({ key }) => [key, ''])
-    ));
+    ), { provider: entry.id });
     return { cleared: true, settings };
   }
 
@@ -222,7 +232,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     try {
       const choices = await entry.limits[form.discover.fn](cookie, { ...probeDeps(renewed), env: {} });
       if (renewed[form.discover.credential] && getSettings()[form.discover.credential] === cookie) {
-        applySettingsPatch({ [form.discover.credential]: renewed[form.discover.credential] });
+        await applySettingsPatch({ [form.discover.credential]: renewed[form.discover.credential] }, { provider: entry.id });
       }
       return { status: 'ok', choices };
     } catch (error) {

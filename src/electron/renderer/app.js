@@ -11892,8 +11892,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   clearInput();
   // Marked only once the credential is stored: marking drops the provider's
   // current record, and a rejected key must leave the linked status on screen.
-  markExternalProviderCheckPending(id);
-  await refreshLimitProviderQuota(id);
+  markExternalProviderCheckPending(id, result.checkedSince);
   if (result.verdict === 'indeterminate') {
     const throttled = result.status === 'rateLimited' || result.status === 'sourceRateLimited';
     setAccountPanelMessage(id, {
@@ -11904,7 +11903,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     });
   }
   renderExternalProviderStatus(id);
-  await refreshStats({ force: true });
+  await refreshStats();
   setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
   renderExternalProviderStatus(id);
   return result;
@@ -11943,9 +11942,8 @@ async function clearAccountCredential(id) {
   }
   clearExternalProviderCheckPending(id);
   clearExternalProviderPendingStatus(id);
-  await refreshLimitProviderQuota(id);
   renderExternalProviderStatus(id);
-  await refreshStats({ force: true });
+  await refreshStats();
 }
 
 async function commitAccountCredential(request) {
@@ -12038,7 +12036,7 @@ function setupLimitAccountPanels() {
       onRefresh: async () => {
         if (form.id === 'claude') await loadClaudeOrganizationChoices();
         await refreshLimitProviderQuota(form.id);
-        await refreshStats({ force: true });
+        await refreshStats();
       },
       onClear: ({ id }) => clearAccountCredential(id),
       onSave: ({ id, messages, failedKey }, values, clearInput) => saveAccountCredential(id, values, { messages, failedKey, clearInput }),
@@ -16258,10 +16256,10 @@ function scheduleExternalProviderCheckSettle(providerName) {
   externalProviderCheckSettleTimers.set(providerName, timer);
 }
 
-function markExternalProviderCheckPending(providerName) {
+function markExternalProviderCheckPending(providerName, checkedSince = Date.now()) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (!config) return;
-  state[config.pendingKey] = Date.now();
+  state[config.pendingKey] = checkedSince;
   externalProviderCheckSettled.delete(providerName);
   clearExternalProviderPendingStatus(providerName);
   scheduleExternalProviderCheckSettle(providerName);

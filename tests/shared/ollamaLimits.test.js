@@ -347,6 +347,7 @@ test('the API lane wins when both credentials are configured', async () => {
 test('maps API failures to provider statuses without falling back to the cookie lane', async () => {
   const cases = [
     [jsonResponse(401, { error: 'invalid credentials' }), 'unauthorized'],
+    [jsonResponse(403, { error: 'forbidden' }), 'unauthorized'],
     [jsonResponse(429, { error: 'too many requests' }), 'sourceRateLimited'],
     [jsonResponse(404, { error: 'not found' }), 'unavailable'],
     [jsonResponse(500, { error: 'boom' }), 'unavailable']
@@ -405,10 +406,14 @@ test('falls back to a key identity and removes it once the identity resolves', a
   assert.equal(first.accountKey, fallbackKey);
   assert.equal(first.accountEmail, '');
   meBroken = false;
-  const second = await fetchOllamaLimits({ ollamaApiKey: key }, { env: {}, now: () => 10_000 + 5 * 60 * 1000 + 1, fetch: fetchFn });
+  const second = await fetchOllamaLimits({ ollamaApiKey: key, previousLimits: { providers: [first] } }, { env: {}, now: () => 10_000 + 5 * 60 * 1000 + 1, fetch: fetchFn });
   assert.ok(Array.isArray(second));
   assert.equal(second[0].accountKey, hashKey('ollama', 'late@example.com'));
   assert.deepEqual(second[1], { provider: 'ollama', accountKey: fallbackKey, removed: true });
+  const retried = await fetchOllamaLimits({ ollamaApiKey: key, previousLimits: { providers: [first] } }, { env: {}, now: () => 10_000 + 5 * 60 * 1000 + 1, fetch: fetchFn });
+  assert.deepEqual(retried, second, 'a discarded replacement must not consume the accepted identity removal');
+  const accepted = await fetchOllamaLimits({ ollamaApiKey: key, previousLimits: { providers: [second[0]] } }, { env: {}, now: () => 10_000 + 5 * 60 * 1000 + 1, fetch: fetchFn });
+  assert.equal(Array.isArray(accepted), false, 'an accepted replacement needs no further removal');
 });
 
 test('reads lowercase identity fields from the identity endpoint', async () => {
@@ -473,7 +478,7 @@ test('a save probe checks only the key and leaves identity to the next poll', as
   const resolvingFetch = async (url) => String(url).endsWith('/api/balance')
     ? jsonResponse(200, LEGACY_BALANCE)
     : jsonResponse(200, { Email: 'probe@example.com', Plan: 'pro' });
-  const resolved = await fetchOllamaLimits({ ollamaApiKey: key }, {
+  const resolved = await fetchOllamaLimits({ ollamaApiKey: key, previousLimits: { providers: [fallback] } }, {
     env: {},
     now: () => 10_000 + 5 * 60 * 1000 + 1,
     fetch: resolvingFetch
@@ -496,7 +501,7 @@ test('retires the resolved identity when a later lookup falls back to the key', 
   assert.equal(first.accountKey, hashKey('ollama', 'flip@example.com'));
 
   lookupWorks = false;
-  const second = await fetchOllamaLimits({ ollamaApiKey: key }, {
+  const second = await fetchOllamaLimits({ ollamaApiKey: key, previousLimits: { providers: [first] } }, {
     env: {},
     now: () => 1_000 + 6 * 60 * 60 * 1000 + 1,
     fetch: fetchFn

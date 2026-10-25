@@ -1948,7 +1948,7 @@ test('a saved credential folds its panel only once a fresh record confirms the a
   // The refresh after a save can return before the collector publishes the
   // checked account, so the panel stays open and folds when that record lands.
   assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
-  assert.match(save, /markExternalProviderCheckPending\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
+  assert.match(save, /markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*await refreshStats\(\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
   // Ollama answers its first poll from the save-time check instead of fetching
   // the settings page twice in a row.
   const { limitProviderEntry } = require('../../src/shared/limits/registry');
