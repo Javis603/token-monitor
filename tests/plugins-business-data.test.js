@@ -3,9 +3,50 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createBusinessDataService } = require('../src/electron/plugins/businessData');
 const { RESOURCES } = require('../src/shared/plugins/businessData');
+const { normalizePeriod, aggregateDevices } = require('../src/shared/usage');
 const permissions = [...new Set(Object.values(RESOURCES))].map(p => `tm.data.${p}`).concat('tm.data.identities');
 const auth = () => ({ pluginId: 'example', active: true, permissions, revision: 1 });
 const q = (resource, options = {}) => ({ version: 1, resource, ...options });
+
+test('model and tool completeness uses normalized parent zero without fabricating unknown child costs', async t => {
+  const raw = { totalTokens: 100, costUsd: 1, unpricedTokens: 0, models: { m: 100 }, modelCosts: { m: 1 }, clients: { codex: 100 }, clientCosts: { codex: 1 } };
+  const normalized = normalizePeriod(raw);
+  assert.equal(Object.hasOwn(normalized, 'unpricedTokens'), false);
+  const aggregated = aggregateDevices([{ deviceId: 'fixture', updatedAt: '2020-01-01T00:00:00Z', today: raw, month: raw, allTime: raw }], 0, Date.parse('2020-01-01T00:00:00Z'));
+  const cases = [
+    ['explicit-zero', { periods: { today: raw } }, 'complete', 0],
+    ['normalized', { periods: { today: normalized } }, 'complete', 0],
+    ['aggregated', aggregated, 'complete', 0],
+    ['unattributed-positive', { periods: { today: { ...normalized, unpricedTokens: 10 } } }, 'unknown', null],
+    ['missing-child-cost', { periods: { today: { ...normalized, modelCosts: {}, clientCosts: {} } } }, 'unknown', null],
+    ['missing-parent-cost', { periods: { today: { ...raw, costUsd: undefined, unpricedTokens: undefined } } }, 'unknown', null],
+    ['explicit-positive-child', { periods: { today: { ...normalized, modelUnpricedTokens: { m: 5 }, clientUnpricedTokens: { codex: 5 } } } }, 'partial', 5]
+  ];
+  for (const [label, stats, completeness, unpricedTokens] of cases) await t.test(label, async () => {
+    const service = createBusinessDataService();
+    try {
+      service.publish(stats);
+      for (const resource of ['models', 'tools']) {
+        const result = await service.query(q(resource), auth);
+        assert.equal(result.availability, 'available');
+        assert.equal(result.rows[0].cost.completeness, completeness);
+        assert.equal(result.rows[0].cost.unpricedTokens, unpricedTokens);
+        assert.equal(result.rows[0].cost.knownUsd, label === 'missing-child-cost' ? null : 1);
+      }
+    } finally { service.dispose(); }
+  });
+});
+
+for (const resource of ['models', 'tools']) test(`${resource} completeness invalidates when parent cost becomes known`, async t => {
+  const service = createBusinessDataService(); t.after(() => service.dispose());
+  const period = { models: { m: 10 }, modelCosts: { m: 1 }, clients: { codex: 10 }, clientCosts: { codex: 1 } };
+  service.publish({ periods: { today: period } });
+  assert.equal((await service.query(q(resource), auth)).rows[0].cost.completeness, 'unknown');
+  service.publish({ periods: { today: { ...period, costUsd: 1 } } });
+  const fresh = await service.query(q(resource), auth);
+  assert.equal(fresh.snapshotRevision, 2);
+  assert.equal(fresh.rows[0].cost.completeness, 'complete');
+});
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function fixture(count = 3) {
   const sessions = Object.fromEntries(Array.from({ length: count }, (_, n) => [`raw-path-${n}`, { sessionId: `private-session-${n}`, client: 'codex', title: `Session ${n}`, projectId: '/private/work/project', projectLabel: 'Project', totalTokens: n + 1, costUsd: 0, unpricedTokens: n === 0 ? 1 : 0, contextTokens: 100, contextWindow: 200, promptCache: { observedAt: '2026-10-23T00:00:00Z', ttlSeconds: 1800 }, liveActivity: { state: 'running', observedAt: '2026-10-23T00:00:00Z' }, models: { unknown: n + 1 }, secret: 'NEVER_EXPOSE', token: 'NEVER_EXPOSE' }]));

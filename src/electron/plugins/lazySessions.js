@@ -1,7 +1,7 @@
 'use strict';
 const { performance } = require('node:perf_hooks');
 const { setImmediate: immediate } = require('node:timers/promises');
-const { sessionEntries, sessionFields, sessionModelMatches, matchesRow, compareRows } = require('../../shared/plugins/businessData');
+const { sessionEntries, sessionFields, projectSessionActivity, sessionModelMatches, matchesRow, compareRows } = require('../../shared/plugins/businessData');
 
 // Conservative admission accounting, not a V8 heap measurement. The shared
 // ledger charges source maps and raw rows; each index charges its own keys,
@@ -109,7 +109,7 @@ function createSessionBacking({ admit = () => {} } = {}) {
     }
   }
   function pin(plan, pluginId, callbacks) {
-    const maps = [...new Set(plan.contexts.map(c => c.sessions).filter(Boolean))];
+    const maps = [...new Set(plan.contexts.flatMap(c => [c.sessions, c.sessionActivity]).filter(Boolean))];
     if (maps.length > 5000) throw new Error('budgetExceeded');
     const key = maps.map(map => { if (!ids.has(map)) ids.set(map, ++nextId); return ids.get(map); }).sort((a, b) => a - b).join(',');
     let generation = generations.get(key);
@@ -181,14 +181,18 @@ async function buildSessionIndex(plan, query, opaque, { check, charge, lease, re
         // Locators retain scalar context only. The separate lease owns the
         // complete selected maps; neither retains unrelated host stats.
         const context = { scopeKey: locator.context.scopeKey, base: locator.context.base };
+        // Resolve once for this immutable index. The lease also charges and
+        // pins the captured overlay map, including unprojected observations.
+        const liveActivity = locator.context.sessionActivity ? projectSessionActivity(locator) : undefined;
         const value = query.sort.field === 'knownUsd' ? fields.cost.knownUsd : fields[query.sort.field];
         const key = { id: fields.id, [query.sort.field]: value };
         if (query.sort.field === 'knownUsd') key.cost = { knownUsd: value };
-        const indexBytes = 256 + fields.id.length * 2 + (typeof value === 'string' ? value.length * 2 : 16);
+        const activityBytes = liveActivity ? 160 + (liveActivity.state?.length || 0) * 2 + (liveActivity.observedAt?.length || 0) * 2 : 0;
+        const indexBytes = 256 + activityBytes + fields.id.length * 2 + (typeof value === 'string' ? value.length * 2 : 16);
         bytes += indexBytes;
         if (bytes > RESERVATION_BYTES) throw new Error('budgetExceeded');
         reserve(bytes);
-        rows.push({ locator: { session: locator.session, key: locator.key, context }, key, ordinal: rowCount });
+        rows.push({ locator: { session: locator.session, key: locator.key, context, liveActivity }, key, ordinal: rowCount });
       }
       if (due()) await checkpoint();
     }

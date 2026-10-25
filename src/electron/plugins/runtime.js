@@ -274,6 +274,14 @@ function createPluginRuntime({
     const list = manager.list();
     list.management = managed.status?.() || { available: true, error: null };
     const settings = getSettings() || {};
+    const discovered = new Set(list.plugins.map(plugin => plugin.id));
+    // Registry-only entries belong to management, never runtime discovery.
+    for (const record of managed.list?.() || []) {
+      if (discovered.has(record.id)) continue;
+      list.plugins.push({ id: record.id, name: record.id, version: record.installation.version, source: 'user',
+        status: record.missing ? 'missing' : 'invalid', managementOnly: true, enabled: false,
+        views: [], permissions: [], hosts: [], skins: [], errors: [] });
+    }
     for (const plugin of list.plugins) {
       plugin.installation = managed.describe(plugin.id);
       if (plugin.installation) plugin.settingsIdentity = `${plugin.installation.sha256}:${plugin.installation.installedAt}`;

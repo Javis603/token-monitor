@@ -177,6 +177,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
   }
 
   return {
+    MAX_ITEMS,
     DEFAULT_LIMIT_COUNT,
     DERIVED_PERIODS,
     SESSIONS_METRIC,

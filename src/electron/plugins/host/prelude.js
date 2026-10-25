@@ -17,6 +17,7 @@
   let dataSeq = 0;
   let callSeq = 0;
   let mode = 'idle';
+  let receivedMode = false;
   let lifecycle = 0;
   // 'action' wakes the Worker for a requested handler without live data.
   const live = value => value === 'visible' || value === 'background';
@@ -55,6 +56,18 @@
     });
   }
 
+  function submitSubscription(id, entry) {
+    const epoch = lifecycle;
+    entry.activation = epoch;
+    void call('data.subscribe', { id, query: entry.query }).catch(error => {
+      // An old suspended reply cannot undo a newer activation or unsubscribe.
+      if (epoch !== lifecycle || dataSubscriptions.get(id) !== entry) return;
+      if (error?.code === 'capability-suspended') { entry.activation = -1; return; }
+      dataSubscriptions.delete(id);
+      report(error);
+    });
+  }
+
   self.addEventListener('message', async (event) => {
     const message = event.data || {};
     if (message.type === 'ping') {
@@ -86,16 +99,22 @@
     } else if (message.type === 'mode') {
       const previous = mode;
       mode = message.mode;
-      if (mode === 'idle' || mode === 'action' && live(previous)) {
+      receivedMode = true;
+      if (!live(mode)) {
         lifecycle++;
         for (const [id, entry] of pending) {
           if (!/^(data|settings)\./.test(entry.op)) continue;
+          // An initial action wake permits one-shot queries/settings. Only
+          // live subscriptions are suspended until a display needs them.
+          if (mode === 'action' && !live(previous) && entry.op !== 'data.subscribe') continue;
           pending.delete(id);
           entry.reject(Object.assign(new Error('capability suspended'), { code: 'capability-suspended' }));
         }
       }
       if (!live(previous) && live(mode)) {
-        for (const [id, entry] of dataSubscriptions) void call('data.subscribe', { id, query: entry.query }).catch(report);
+        for (const [id, entry] of dataSubscriptions) {
+          if (entry.activation !== lifecycle) submitSubscription(id, entry);
+        }
       }
       if (previous === 'idle' && mode !== 'idle') {
         if (settingsListeners.size) void call('settings.get', {}).then(value => {
@@ -154,14 +173,11 @@
         if (typeof callback !== 'function') throw new TypeError('callback required');
         if (dataSubscriptions.size >= 16) throw new Error('subscription limit');
         const id = `q${++dataSeq}`;
-        dataSubscriptions.set(id, { query, callback });
-        const epoch = lifecycle;
-        // A suspended subscription stays registered and replays once live.
-        void call('data.subscribe', { id, query }).catch(error => {
-          if (error?.code === 'capability-suspended') return;
-          if (epoch === lifecycle) dataSubscriptions.delete(id);
-          report(error);
-        });
+        const entry = { query, callback, activation: -1 };
+        dataSubscriptions.set(id, entry);
+        // Top-level calls already enter the starting host's lane. Only a real
+        // suspension needs replay; an action-only boot waits for live demand.
+        if (!receivedMode || live(mode)) submitSubscription(id, entry);
         return () => { dataSubscriptions.delete(id); void call('data.unsubscribe', { id }).catch(report); };
       }
     }),

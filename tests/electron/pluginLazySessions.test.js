@@ -31,10 +31,94 @@ compiled._compile(fs.readFileSync(process.env.BUSINESS_SERVICE_PATH || servicePa
 const { createBusinessDataService } = compiled.exports;
 const shared = require('../../src/shared/plugins/businessData');
 const { buildSessionIndex } = require('../../src/electron/plugins/lazySessions');
+const { applyActivityPatch } = require('../../src/shared/sessionActivityProjection');
+const { sessionWithActivity } = require('../../src/shared/sessionLive');
 const secret = 'lazy-test';
 const authority = { pluginId: 'reader', active: true, revision: 1, permissions: ['tm.data.sessions', 'tm.data.identities'] };
 const q = (rest = {}) => ({ version: 1, resource: 'sessions', page: { limit: 500 }, ...rest });
 const id = (kind, value) => `${kind}_${createHmac('sha256', secret).update(JSON.stringify(['reader', 'default', '1', kind, String(value)])).digest('base64url')}`;
+
+for (const count of [2, 5001]) test(`${count} sessions capture activity-only publications and preserve old cursor observations`, async t => {
+  const sessions = Object.fromEntries(Array.from({ length: count }, (_, i) => [`codex:s${i}`, {
+    client: 'codex', sessionId: `s${i}`, totalTokens: count - i, costUsd: 1,
+    liveActivity: { state: 'running', observedAt: '2020-01-01T00:00:00.000Z' }
+  }]));
+  const stats = { periods: { today: { sessions } } }, service = setup(t, stats);
+  const query = q({ sort: { field: 'totalTokens', direction: 'desc' }, page: { limit: 1 } });
+  const first = await admitted(service, query, authority, { owner: 'running' });
+  assert.equal(first.rows[0].liveActivity.state, 'running');
+  assert.equal((await service.query(next(query, first), authority, { owner: 'running' })).rows[0].liveActivity.state, 'running');
+  const patch = (input, state, observedAt) => applyActivityPatch(input, { observations: [0, 1].map(i => ({ client: 'codex', sessionId: `s${i}`, liveActivity: { state, observedAt } })) });
+  const waiting = patch(stats, 'waiting', '2020-01-01T00:00:01.000Z');
+  assert.equal(waiting.periods.today.sessions, sessions);
+  service.publish(waiting);
+  const fresh = await admitted(service, query, authority, { owner: 'waiting' });
+  assert.equal(fresh.snapshotRevision, first.snapshotRevision + 1);
+  assert.equal(fresh.aggregateCoverage.totalRows, count);
+  assert.deepEqual(fresh.rows[0].liveActivity, sessionWithActivity(waiting.periods.today, 'codex:s0').liveActivity);
+  assert.equal((await service.query(next(query, fresh), authority, { owner: 'waiting' })).rows[0].liveActivity.state, 'waiting');
+  service.publish(patch(waiting, 'idle', '2020-01-01T00:00:02.000Z'));
+  assert.equal((await service.query(next(query, first), authority, { owner: 'running' })).rows[0].liveActivity.state, 'running');
+  assert.equal((await service.query(next(query, fresh), authority, { owner: 'waiting' })).rows[0].liveActivity.state, 'waiting');
+  assert.equal((await admitted(service, query)).rows[0].liveActivity.state, 'idle');
+});
+
+for (const count of [6, 5001]) test(`${count} session activity follows host archive, client and observation ordering rules`, async t => {
+  const stats = fixture(count), sessions = stats.periods.today.sessions;
+  const period = stats.periods.today;
+  period.sessionActivity = {};
+  const controls = [
+    { client: 'codex' }, { client: 'codex', archived: true }, { client: 'opencode' },
+    { client: 'codex', liveActivity: { state: 'running', observedAt: '2020-01-01T00:00:03Z' } },
+    { client: 'codex' }, { client: 'codex', sourceDeleted: true }
+  ];
+  for (let i = 0; i < controls.length; i++) {
+    Object.assign(sessions[`key-${i}`], { totalTokens: count - i, liveActivity: { state: 'running', observedAt: '2020-01-01T00:00:00Z' } }, controls[i]);
+    period.sessionActivity[`key-${i}`] = { state: 'waiting', observedAt: i === 4 ? '2999-01-01T00:00:00Z' : '2020-01-01T00:00:01Z' };
+  }
+  const service = setup(t, stats), result = await admitted(service, q({ sort: { field: 'totalTokens', direction: 'desc' }, page: { limit: 6 } }));
+  assert.equal(result.availability, 'available');
+  for (let i = 0; i < controls.length; i++) assert.deepEqual(result.rows[i].liveActivity, sessionWithActivity(period, `key-${i}`).liveActivity);
+  assert.equal(result.rows[0].liveActivity.state, 'waiting');
+  assert.ok(result.rows.slice(1).every(row => row.liveActivity.state === 'running'));
+});
+
+test('activity overlays share backing accounting, count as captured generations and release with their last reader', async t => {
+  let time = 1000;
+  const stats = fixture(5001), sessions = stats.periods.today.sessions;
+  const service = setup(t, stats, { now: () => time }), ledger = ledgers.get(service);
+  const query = q({ page: { limit: 1 } });
+  let previousBytes = 0;
+  for (let i = 0; i < 4; i++) {
+    const sessionActivity = { 'key-1': { state: 'waiting', observedAt: `2020-01-01T00:00:0${i}Z`, hidden: 'x'.repeat(2048) } };
+    service.publish({ periods: { today: { sessions, sessionActivity } } }); time += 10000;
+    const first = await admitted(service, query, authority, { owner: `overlay-${i}` });
+    assert.equal(first.availability, 'available');
+    await service.query(next(query, first), authority, { owner: `overlay-${i}` });
+    assert.equal(ledger.usage().sources, i + 2);
+    assert.equal(ledger.usage().generations, i + 1);
+    assert.equal(ledger.usage().measuredRows, 5002 + i);
+    assert.ok(ledger.bytes() > previousBytes + 4096, 'unprojected overlay bytes stay charged');
+    previousBytes = ledger.bytes();
+  }
+  service.publish({ periods: { today: { sessions, sessionActivity: {} } } }); time += 10000;
+  assert.equal((await service.query(query, authority)).availability, 'budgetExceeded');
+  service.releaseOwner('overlay-0');
+  assert.equal(ledger.usage().generations, 3);
+  assert.ok(ledger.bytes() < previousBytes);
+  assert.equal((await admitted(service, query, authority, { owner: 'replacement' })).availability, 'available');
+  for (const owner of ['overlay-1', 'overlay-2', 'overlay-3', 'replacement']) service.releaseOwner(owner);
+  assert.equal(ledger.bytes(), 0);
+});
+
+test('filtered-out oversized activity observations cannot bypass lazy backing admission', async t => {
+  const stats = fixture(5001);
+  stats.periods.today.sessionActivity = { unrelated: { state: 'waiting', observedAt: '2020-01-01T00:00:00Z', hidden: 'x'.repeat(256 * 1024) } };
+  const service = setup(t, stats);
+  const result = await admitted(service, q({ filter: { search: 'no-match' } }));
+  assert.equal(result.availability, 'budgetExceeded');
+  assert.equal(ledgers.get(service).bytes(), 0);
+});
 function fixture(count = 10037) {
   const sessions = {};
   for (let i = 0; i < count; i++) sessions[`key-${i}`] = { sessionId: `s${i}`, client: i % 2 ? 'codex' : 'claude', title: `Session ${i % 11}`, projectLabel: 'Project', projectId: '/private/path', totalTokens: i % 17, costUsd: i % 19 ? i % 7 : null, unpricedTokens: i % 3, lastUsedAt: '2026-10-23T00:00:00Z', models: { [i % 2 ? 'a' : 'b']: 3 }, modelCosts: { a: 0 }, providers: {}, promptCache: { ttlSeconds: 1800 }, liveActivity: { state: 'idle' }, secret: 'NEVER_EXPOSE' };

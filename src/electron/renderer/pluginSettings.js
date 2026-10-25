@@ -495,7 +495,7 @@
     function pluginIdentity(plugin) {
       const head = el(document, 'div', 'plugin-card-head');
       head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon, plugin.installation?.origin.kind || plugin.source));
-      if (plugin.status !== 'invalid') {
+      if (!plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) {
         const toggle = el(document, 'input', 'plugin-enable');
         toggle.type = 'checkbox'; toggle.checked = plugin.enabled; toggle.disabled = !list?.enabled;
         toggle.setAttribute('aria-label', t('settings.plugins.enable', { name: plugin.name }));
@@ -717,10 +717,14 @@
       if (!['active', 'disabled'].includes(plugin.status)) wrap.append(statusChip(plugin));
       if (plugin.description) wrap.append(el(document, 'p', 'plugin-description', plugin.description));
       if (plugin.author) wrap.append(el(document, 'p', 'settings-note', plugin.author));
-      if (consentFor === plugin.id) wrap.append(consentPanel(plugin));
+      if (consentFor === plugin.id && !plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) wrap.append(consentPanel(plugin));
       else if (plugin.status === 'needsApproval') {
         const actions = el(document, 'div', 'settings-actions');
         actions.append(button(t('settings.plugins.reapprove'), () => { consentFor = plugin.id; diagnostics = false; render(); })); wrap.append(actions);
+      }
+      if (plugin.installation && ['invalid', 'missing'].includes(plugin.status)) {
+        const note = el(document, 'p', 'plugin-risk', t(plugin.status === 'missing' ? 'plugins.package.missingNote' : 'plugins.package.repairRequired'));
+        note.setAttribute('role', 'status'); wrap.append(note);
       }
       if (plugin.errors?.length) wrap.append(pluginProblems(plugin));
       if (diagnostics) {

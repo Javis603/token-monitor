@@ -6,7 +6,7 @@
 
 const placements = require('../../shared/plugins/placements');
 const trayLayout = require('../../shared/trayLayout');
-const { defaultEdgeDockItems, normalizeEdgeDockItems } = require('../renderer/edgeDock/items');
+const { defaultEdgeDockItems, normalizeEdgeDockItems, MAX_ITEMS: MAX_EDGE_DOCK_ITEMS } = require('../renderer/edgeDock/items');
 
 const PLACEMENT_SURFACES = Object.freeze(['home', 'edgeDock', 'tray', 'notch', 'page']);
 
@@ -56,7 +56,10 @@ function placementPatch(settings, { ref, surface, placed }, context = {}) {
     const current = normalizeEdgeDockItems(settings.edgeDockItems);
     const base = current || defaultEdgeDockItems(context.defaultEdgeDockProviders || []);
     const items = base.filter((item) => !(item.type === 'plugin' && item.ref === ref));
-    if (placed) items.push({ type: 'plugin', ref });
+    if (placed) {
+      if (items.length >= MAX_EDGE_DOCK_ITEMS) throw new Error('edgeDock-full');
+      items.push({ type: 'plugin', ref });
+    }
     return { edgeDockItems: items };
   }
   if (surface === 'tray') {

@@ -159,7 +159,7 @@ app.whenReady().then(async () => {
     const container=document.getElementById('notchPageChoices');let errors=0;
     const render=()=>TokenMonitorNotchPageSettings.render({document,container,settings,catalog,t:key=>TokenMonitorI18n.translate('en',key),save:async patch=>{if(fail)throw Error('disk');settings={...settings,...patch};render();},place:async(ref,value)=>{catalog.plugins.forEach(p=>{const v=p.views.find(v=>v.ref===ref);if(v)v.placements.notch=value;});render();},pluginIcon:name=>TokenMonitorPluginViews.iconNode(document,name,null,14),onError:()=>errors++});
     render();const toggle=async id=>{const chip=container.querySelector('[data-page="'+id+'"]');chip.focus();chip.click();await wait(10);};
-    check('settings-chips-render',container.querySelectorAll('.notch-page-chip').length===7&&container.querySelector('[data-page="plugin:idle/main"]').disabled);
+    check('settings-chips-render',JSON.stringify([...container.querySelectorAll('.notch-page-chip')].map(chip=>chip.dataset.page))===JSON.stringify(['home','limits','sessions','breakdown','plugin:demo/page0','plugin:demo/pulse'])&&!container.querySelector('[data-page="plugin:idle/main"]'));
     await toggle('home');await toggle('limits');check('unified-settings-persist-successive-choices',JSON.stringify(settings.notchBuiltinPages)==='["sessions","breakdown"]');
     await toggle('plugin:demo/page0');check('plugin-toggle-uses-placement-contract',catalog.plugins[0].views[0].placements.notch===false);
     fail=true;await toggle('sessions');check('failed-save-restores-choice',errors===1&&container.querySelector('[data-page="sessions"]').getAttribute('aria-pressed')==='true');

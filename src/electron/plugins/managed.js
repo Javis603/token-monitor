@@ -113,7 +113,33 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     hasTarget(path.join(userDir, id));
     return registry[id];
   }
-  function describe(id) { const item = registry[id]; return item ? { ...item, previousVersion: item.previousVersion || null } : null; }
+  function describe(id) {
+    const item = registry[id];
+    if (!item) return null;
+    // Registry metadata is a management DTO, never a manifest or capability.
+    const origin = { id: item.origin.id, kind: ['local', 'official', 'community'].includes(item.origin.kind) ? item.origin.kind : 'local' };
+    for (const key of ['label', 'url', 'packageUrl']) if (typeof item.origin[key] === 'string') origin[key] = item.origin[key].slice(0, 2048);
+    return { version: item.version, sha256: item.sha256, installedAt: item.installedAt, origin,
+      previousVersion: semver.valid(item.previousVersion) || null,
+      previousSha256: typeof item.previousSha256 === 'string' && /^[a-f0-9]{64}$/.test(item.previousSha256) ? item.previousSha256 : null };
+  }
+  function list() {
+    if (!available) return [];
+    return Object.keys(registry).map(id => {
+      let missing = false;
+      try { missing = !hasTarget(path.join(userDir, id)); } catch { /* Replaced/unreadable is invalid, never missing. */ }
+      return { id, missing, installation: describe(id) };
+    });
+  }
+  function currentPackage(id) {
+    try {
+      const pkg = packageDirectory(path.join(userDir, id), { checkCompatibility: false });
+      if (pkg.manifest.id !== id || pkg.manifest.version !== registry[id].version) throw new Error('installed package was changed outside the manager');
+      return pkg;
+    } catch (cause) {
+      throw Object.assign(new Error('installed-package-invalid: installed package needs rollback or uninstall and reinstall', { cause }), { code: 'installed-package-invalid' });
+    }
+  }
   function assertInstallable(pkg, origin) {
     assertAvailable();
     const id = pkg.manifest.id, installed = manager.list().plugins.find(p => p.id === id);
@@ -128,6 +154,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
   }
   function preview(pkg, origin = { id: 'local', kind: 'local', label: 'Local package' }) {
     assertInstallable(pkg, origin);
+    if (registry[pkg.manifest.id] && hasTarget(path.join(userDir, pkg.manifest.id))) currentPackage(pkg.manifest.id);
     const token = crypto.randomUUID();
     for (const [key, item] of previews) if (item.expires < now()) previews.delete(key);
     if (previews.size >= 8) previews.delete(previews.keys().next().value);
@@ -153,8 +180,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       // existing package still follow the normal update/rollback policy.
       if (hadTarget && (operation === 'update' || operation === 'rollback')) {
         try {
-          current = packageDirectory(target, { checkCompatibility: false });
-          if (current.manifest.id !== id || current.manifest.version !== registry[id].version) throw new Error('installed package was changed outside the manager');
+          current = currentPackage(id);
         } catch (error) {
           if (operation !== 'rollback') throw error;
           // Rescue may discard an unreadable current version. The saved target
@@ -207,7 +233,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     }
   }
   return {
-    recover, describe, assertAvailable,
+    recover, describe, list, assertAvailable,
     status: () => ({ available, error: available ? null : { code: 'management-unavailable', message: unavailableMessage } }),
     preview,
     previewFile(file) { assertAvailable(); return preview(parsePackage(readBounded(file, MAX_PACKAGE_BYTES))); },

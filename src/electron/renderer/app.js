@@ -7364,12 +7364,23 @@ function setRendererSettings(next) {
   if (titlesChanged) refreshSessionDetailHeading();
 }
 
+function periodContentAvailability() {
+  const derived = fixedPeriodRangesApi.isDerived(state.period);
+  return {
+    fixedUnavailable: derived && state.fixedPeriodSnapshot?.status !== 'ready',
+    detailUnavailable: derived && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
+      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+    })
+  };
+}
+
 function render() {
   renderAppContent();
   if (pluginPageDesigns) {
     const supported = ['model', 'tool', 'device'].includes(state.breakdown);
     const period = state.stats?.periods?.[state.period] || {};
-    const visible = supported && visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed && !state.openSession;
+    const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
+    const visible = supported && Boolean(state.stats) && !fixedUnavailable && !detailUnavailable && visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed && !state.openSession;
     const hasDesign = (state.pluginCatalog?.plugins || []).some(plugin => plugin.status === 'active'
       && (plugin.webDocuments || []).some(doc => doc.target === state.breakdown));
     const rows = visible && hasDesign ? rowsForPeriod(period) : [];
@@ -7425,11 +7436,7 @@ function renderAppContent() {
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
-  const fixedUnavailable = derivedPeriod && state.fixedPeriodSnapshot?.status !== 'ready';
-  const detailUnavailable = derivedPeriod
-    && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
-      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
-    });
+  const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
@@ -9911,7 +9918,16 @@ function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, get
     applyOrder: (order) => applyPreferenceOrder(kind, order),
     preserveScroll: preserveSettingsPanelScroll,
     mirrorOrder: (order) => {
-      const value = order.join(',');
+      // Inactive plugin placements are absent from the rendered Home rows.
+      // Refill only visible slots so a drag cannot silently remove a placement.
+      let merged = order;
+      if (kind === 'homeModule') {
+        const visible = new Set(order);
+        let index = 0;
+        merged = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS)
+          .map((id) => visible.has(id) ? order[index++] : id);
+      }
+      const value = merged.join(',');
       state.settings = { ...state.settings, [settingKey]: value };
       return value;
     },
@@ -12923,7 +12939,9 @@ pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
     setDetailTooltip: limitWindowsView.setDetailTooltip,
     onError: (error) => {
       const message = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
-      const known = { 'page-full': 'settings.plugins.pageFull', 'tray-full': 'settings.plugins.trayFull' }[message];
+      const known = /installed-package-invalid/.test(String(error?.code || '') + ' ' + message)
+        ? 'plugins.package.repairRequired'
+        : { 'page-full': 'settings.plugins.pageFull', 'tray-full': 'settings.plugins.trayFull', 'edgeDock-full': 'settings.plugins.edgeDockFull' }[message];
       setStatus(known ? t(known) : t('settings.plugins.actionFailed', { error: message }), true);
     },
     onApplySkin: (skin) => void applyPluginSkin(skin),
@@ -13834,6 +13852,8 @@ function createDockItemsComposer(root, itemsKey) {
       presentationApi: window.TokenMonitorEdgeDockPresentation,
       getSettings: () => state.settings,
       getStats: () => state.stats,
+      pluginLabel: (ref) => (state.pluginCatalog?.plugins || [])
+        .flatMap((plugin) => plugin.views || []).find((view) => view.ref === ref)?.title || ref,
       save: (patch) => saveSettings(patch),
       providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
       providerColor: (id) => limitProviderColor(id),

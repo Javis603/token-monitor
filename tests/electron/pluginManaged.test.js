@@ -196,7 +196,7 @@ for (const corruption of ['manifest', 'missing-manifest', 'version', 'id']) {
     const registry = fs.readFileSync(path.join(f.args.root, 'installed.json'));
     const backup = fs.readFileSync(path.join(f.args.root, 'previous/test-plugin.tmplugin'));
     const settings = structuredClone(f.settings), stopped = f.stopped;
-    assert.throws(() => f.install('3.0.0'), corruption === 'manifest' ? SyntaxError : corruption === 'missing-manifest' ? { code: 'ENOENT' } : /changed outside/);
+    assert.throws(() => f.install('3.0.0'), { code: 'installed-package-invalid' });
     assert.deepEqual(fs.readFileSync(path.join(f.args.root, 'installed.json')), registry);
     assert.deepEqual(fs.readFileSync(path.join(f.args.root, 'previous/test-plugin.tmplugin')), backup);
     assert.deepEqual(f.settings, settings); assert.equal(f.stopped, stopped);

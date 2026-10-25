@@ -64,7 +64,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       if (q.resource === 'usage') return [...meta, fields(p, usageFields), ref(source?.periodWindows)];
       if (q.resource === 'models' || q.resource === 'tools') {
         const prefix = q.resource === 'models' ? 'model' : 'client';
-        return [...meta, p?.unpricedTokens, ref(p?.[prefix === 'model' ? 'models' : 'clients']), fields(p, `${prefix}Costs ${prefix}UnpricedTokens ${prefix}CacheReads ${prefix}CacheWrites ${prefix}Outputs ${prefix}UnclassifiedTokens modelThroughput clientModels clientModelCosts`)];
+        return [...meta, p?.unpricedTokens, fields(p, 'costUsd cost totalCost'), ref(p?.[prefix === 'model' ? 'models' : 'clients']), fields(p, `${prefix}Costs ${prefix}UnpricedTokens ${prefix}CacheReads ${prefix}CacheWrites ${prefix}Outputs ${prefix}UnclassifiedTokens modelThroughput clientModels clientModelCosts`)];
       }
       if (q.resource === 'sessions') return [...meta, ref(p?.sessions), ref(p?.sessionActivity), ref(source?.sessionDetailsOmitted)];
       return [...meta, ref(p?.projects), fields(source, 'projectsIncomplete periodProjectsOmitted projectsEnabled allTimeProjectsOmitted allTimeProjectsIncomplete')];
@@ -121,7 +121,10 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
     if (devices.length > MAX_COLLECTION_ROWS) throw new Error('budgetExceeded');
     let sources = restricted ? devices.filter(allowed) : [stats];
     if (q.resource === 'sessions') {
-      for (const context of sessionSources(stats, extras, q, a, opaque).contexts) inspect(context.sessions, true);
+      for (const context of sessionSources(stats, extras, q, a, opaque).contexts) {
+        inspect(context.sessions, true);
+        inspect(context.sessionActivity);
+      }
       return;
     }
     if (periodResources.includes(q.resource)) {

@@ -2,6 +2,7 @@
 
 // Pure DTO boundary. Never spread host records into plugin-visible objects.
 const { canonicalProjectKey } = require('../projectKey');
+const { sessionWithActivity } = require('../sessionLive');
 const subscriptionDisplay = require('../subscriptionDisplay');
 const balanceDisplay = require('../limits/balanceDisplay');
 const { CURRENCY_CODES } = require('../currency');
@@ -191,7 +192,7 @@ function sessionSources(stats, extras, query, auth, opaque) {
     if (detail) detailed++;
     if (detail) incomplete ||= !!source.sessionDetailsOmitted?.[query.period];
     const sourceDeviceId = lifetime && !restricted ? null : source.deviceId;
-    return { sessions: detail ? period.sessions : undefined, scopeKey: sourceDeviceId || 'aggregate',
+    return { sessions: detail ? period.sessions : undefined, sessionActivity: detail ? period.sessionActivity : undefined, scopeKey: sourceDeviceId || 'aggregate',
       base: { period: query.period, deviceId: sourceDeviceId ? id('device', sourceDeviceId) : null,
         collectedAt: text(source.updatedAt), stale: typeof source.stale === 'boolean' ? source.stale : null } };
   });
@@ -214,12 +215,15 @@ function sessionFields({ session, key, context }, plan, id) {
     totalTokens: number(session.totalTokens ?? session.tokens),
     cost: { knownUsd: number(session.costUsd ?? session.cost ?? session.totalCost) } };
 }
+function projectSessionActivity({ session, key, context }) {
+  return pick(sessionWithActivity(context, key, session)?.liveActivity, 'state observedAt');
+}
 function projectSessionRow(locator, plan, id, visit = entries) {
   const { session, key, context } = locator;
   return { ...sessionFields(locator, plan, id), ...context.base, ...usage(session),
     ...pick(session, 'startedAt sessionKind', '', 'turnEnded'), ...sessionParent(session, key, context.scopeKey, id),
     projectPath: plan.identities ? text(session.projectId) : null,
-    promptCache: pick(session.promptCache, 'observedAt', 'ttlSeconds'), liveActivity: pick(session.liveActivity, 'state observedAt'),
+    promptCache: pick(session.promptCache, 'observedAt', 'ttlSeconds'), liveActivity: locator.liveActivity ?? projectSessionActivity(locator),
     waitingForInput: typeof session.waitingForInput === 'boolean' ? session.waitingForInput : null,
     models: visit(session.models).map(([model, tokens]) => ({ model: text(model), totalTokens: number(tokens), knownUsd: number(session.modelCosts?.[model]) })),
     providers: visit(session.providers).map(([provider, tokens]) => ({ provider: text(provider), totalTokens: number(tokens) })) };
@@ -294,10 +298,11 @@ function projectResource(stats, extras, query, auth, opaque) {
       if (query.resource === 'usage') add({ id: id('usage', `${scopeKey}:${query.period}`), ...base, ...usage(period), window: { ...pick(source.periodWindows?.[query.period], 'key endsAt'), timeZone: text(source.periodWindows?.timeZone), calendar: 'gregory' } });
       if (query.resource === 'models' || query.resource === 'tools') {
         const model = query.resource === 'models', prefix = model ? 'model' : 'client';
+        const parentUnpriced = usage(period).cost.unpricedTokens;
         for (const [key, tokens] of visit(model ? period.models : period.clients)) {
           const dto = usage({ totalTokens: tokens, costUsd: period[`${prefix}Costs`]?.[key], unpricedTokens: period[`${prefix}UnpricedTokens`]?.[key], cacheReadTokens: period[`${prefix}CacheReads`]?.[key], cacheWriteTokens: period[`${prefix}CacheWrites`]?.[key], outputTokens: period[`${prefix}Outputs`]?.[key], unclassifiedTokens: period[`${prefix}UnclassifiedTokens`]?.[key] }, false);
           // Sparse normalized unknown maps mean zero only if the parent has no unknown cost.
-          if (dto.cost.unpricedTokens === null && number(period.unpricedTokens) === 0) dto.cost = { ...dto.cost, unpricedTokens: 0, completeness: dto.cost.knownUsd === null ? 'unknown' : 'complete' };
+          if (dto.cost.unpricedTokens === null && parentUnpriced === 0 && dto.cost.knownUsd !== null) dto.cost = { ...dto.cost, unpricedTokens: 0, completeness: 'complete' };
           add({ id: id(prefix, `${scopeKey}:${key}`), ...base, [model ? 'model' : 'client']: text(key), label: text(key), ...dto, throughput: pick(period.modelThroughput?.[key], '', 'timedOutputTokens timedDurationMs timedTokens'), ...(model ? {} : { models: visit(period.clientModels?.[key]).map(([name, totalTokens]) => ({ model: text(name), totalTokens: number(totalTokens), knownUsd: number(period.clientModelCosts?.[key]?.[name]) })) }) });
         }
       }
@@ -345,4 +350,4 @@ function projectResource(stats, extras, query, auth, opaque) {
   }
   return { rows, availability: available ? 'available' : 'notCollected', redacted: !identities, incomplete };
 }
-module.exports = { VERSION, RESOURCES, MAX_ROWS, normalizeQuery, projectResource, sessionSources, sessionEntries, sessionFields, projectSessionRow, sessionModelMatches, matchesRow, compareRows };
+module.exports = { VERSION, RESOURCES, MAX_ROWS, normalizeQuery, projectResource, sessionSources, sessionEntries, sessionFields, projectSessionRow, projectSessionActivity, sessionModelMatches, matchesRow, compareRows };

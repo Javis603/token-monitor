@@ -44,10 +44,11 @@ test('a transient refresh failure retains a successfully loaded catalog', async 
 test('ordinary App rendering projects rows only for an active matching page design', () => {
   let reads = 0, received;
   const h = { state: { breakdown: 'model', period: 'today', stats: { periods: { today: {} } }, floatingBubble: {} },
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
     renderAppContent() {}, pluginPageDesigns: { render: input => { received = input; } },
     visibleStatsSurface: () => 'main', isSettingsPanelOpen: () => false, isRendererWindowHidden: () => false,
     prefersReducedMotion: () => false, rowsForPeriod: () => { reads++; return [{ name: 'A', value: 42, cost: 1 }]; } };
-  vm.createContext(h); vm.runInContext(body('render'), h);
+  vm.createContext(h); vm.runInContext(body('periodContentAvailability') + body('render'), h);
   for (const catalog of [null, { plugins: [] }, { plugins: [{ status: 'disabled', webDocuments: [{ target: 'model' }] }] },
     { plugins: [{ status: 'active', webDocuments: [{ target: 'tool' }] }] }]) {
     h.state.pluginCatalog = catalog; h.render(); assert.equal(reads, 0); assert.equal(received.snapshot.rows.length, 0);
