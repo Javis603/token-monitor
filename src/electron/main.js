@@ -8621,7 +8621,7 @@ app.whenReady().then(() => {
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
-    const cookie = opencodeWeb.sanitizeCookieHeader(raw);
+    const cookie = opencodeWeb.sanitizeCookieHeader(raw, '__Host-console_session');
     if (!cookie) {
       settings.opencodeProfiles = {};
       settings.opencodeCookie = '';
@@ -8635,10 +8635,7 @@ app.whenReady().then(() => {
       return { ok: true, cleared: true };
     }
     try {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
-        opencodeWeb.fetchZen(cookie, electronProviderDeps())
-      ]);
+      const [go, zen] = await opencodeWeb.fetchWeb(cookie, electronProviderDeps());
       if (opencodeWeb.summarizeLink(go, zen).expired) {
         return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
       }
@@ -8783,9 +8780,8 @@ app.whenReady().then(() => {
             error: probe.status
           }];
         }
-        const [go, zen, apiProbe] = await Promise.all([
-          opencodeWeb.fetchGoWeb(profile.cookie, electronProviderDeps()),
-          opencodeWeb.fetchZen(profile.cookie, electronProviderDeps()),
+        const [[go, zen], apiProbe] = await Promise.all([
+          opencodeWeb.fetchWeb(profile.cookie, electronProviderDeps()),
           apiKey ? probeOpenCodeApiKey(apiKey) : null
         ]);
         const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
@@ -8809,10 +8805,7 @@ app.whenReady().then(() => {
     // dedupes away (otherwise it shows 2/2 while only one account is tracked).
     const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
     if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(envCookie, electronProviderDeps()),
-        opencodeWeb.fetchZen(envCookie, electronProviderDeps())
-      ]);
+      const [go, zen] = await opencodeWeb.fetchWeb(envCookie, electronProviderDeps());
       let envKey = 'env';
       for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
         envKey = `env:${i}`;
@@ -8937,12 +8930,9 @@ app.whenReady().then(() => {
         }
         credential = { apiKey };
       } else {
-        const cookie = opencodeWeb.sanitizeCookieHeader(raw);
+        const cookie = opencodeWeb.sanitizeCookieHeader(raw, '__Host-console_session');
         if (!cookie) return { ok: false, error: 'Empty cookie' };
-        const [go, zen] = await Promise.all([
-          opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
-          opencodeWeb.fetchZen(cookie, electronProviderDeps())
-        ]);
+        const [go, zen] = await opencodeWeb.fetchWeb(cookie, electronProviderDeps());
         if (opencodeWeb.summarizeLink(go, zen).expired) {
           return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
         }

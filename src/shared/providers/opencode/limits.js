@@ -184,6 +184,7 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
     // workspace identity wins below, so the result would publish one account's
     // quota — and merge it across devices — under the other's identity.
     const primaryApiKey = primary.apiKey || '';
+    const webDeps = opencodeWeb.createProbeDeps({ now: () => nowMs, fetch: deps.fetch, signal: deps.signal, env: deps.env });
     const [goApi, goWeb, zen] = await Promise.all([
       collectGoApi({
         env: deps.env || process.env,
@@ -192,8 +193,8 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
         signal: deps.signal,
         apiKey: primaryApiKey
       }),
-      cookie ? fetchGoWeb(cookie, { now: () => nowMs, fetch: deps.fetch }) : null,
-      cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '', fetch: deps.fetch }) : null
+      cookie ? fetchGoWeb(cookie, webDeps) : null,
+      cookie ? fetchZen(cookie, webDeps) : null
     ]);
     const webIdentity = openCodeWebIdentity(goWeb, zen, cookie);
     const webAccountKey = webIdentity.accountKey;
@@ -225,15 +226,13 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       windows.push(...goWeb.windows.map((window) => ({ ...window, source: 'web' })));
       status = 'ok'; source = 'web'; accountLabel = 'Go';
       accountKey = hashKey('opencode', `go:${goWeb.workspaceId || ''}`);
-    } else if (goLocal.status === 'ok' && goApi.entitled !== false) {
-      // `entitled === false` is the server saying this account has no Go plan,
-      // which the local estimate cannot know: it would keep deriving quota from
-      // rows a cancelled subscription left behind. Only an absent or failed API
-      // answer leaves room for the estimate.
+    } else if (goLocal.status === 'ok' && goApi.entitled !== false && goWeb?.entitled !== false) {
+      // An explicit API or Console no-subscription answer outranks old local
+      // rows: the estimate cannot know whether their Go plan has since ended.
       windows.push(...goLocal.windows.map((window) => ({ ...window, source: 'local' })));
       status = 'ok'; accountLabel = 'Go';
       accountKey = hashKey('opencode', goLocal.identity || 'go');
-    } else if (goLocal.status === 'unavailable' && goApi.entitled !== false) {
+    } else if (goLocal.status === 'unavailable' && goApi.entitled !== false && goWeb?.entitled !== false) {
       status = 'unavailable';
     }
 
@@ -337,9 +336,10 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
   try {
     const result = await Promise.race([
       (async () => {
+        const webDeps = opencodeWeb.createProbeDeps({ now: () => nowMs, fetch: api.deps?.fetch, signal: api.deps?.signal, env: api.deps?.env });
         const [goWeb, zen, goApi] = await Promise.all([
-          cookie ? fetchGoWeb(cookie, { now: () => nowMs, fetch: api.deps?.fetch }) : null,
-          cookie ? fetchZen(cookie, { now: () => nowMs, workspaceId: '', fetch: api.deps?.fetch }) : null,
+          cookie ? fetchGoWeb(cookie, webDeps) : null,
+          cookie ? fetchZen(cookie, webDeps) : null,
           api.apiKey
             ? api.collectGoApi({
               env: api.deps?.env || process.env,

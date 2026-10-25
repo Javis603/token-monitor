@@ -17971,7 +17971,7 @@ function setupCursorAccountUI() {
     addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
 
     document.getElementById('opencodeOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://opencode.ai/auth');
+      window.tokenMonitor.openExternal('https://opencode.ai/console');
     });
 
     // API key is the default: it needs no browser round trip. The cookie stays
