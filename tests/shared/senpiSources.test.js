@@ -8,6 +8,7 @@ const test = require('node:test');
 const { clientSourceRoots, clientSourceChecks, watchPathsForClients,
   clientsForWatchPath, watchIgnoreMatcher, watchAttributionRootsForClients, startCollector } = require('../../src/shared/collector');
 const { resolveSessionDetailForPlatform } = require('../../src/shared/sessionDetailResolver');
+const { senpiSourceRoots } = require('../../src/shared/providers/senpi/paths');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
 
@@ -15,7 +16,9 @@ installSourceEnvGuard(test);
 installInProcessWatchHost(test);
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-senpi-sources-'));
+  // Windows runners expose an 8.3 TEMP path, while watcher events use its
+  // canonical long spelling. Synthesize events in that same path space.
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'tm-senpi-sources-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
   const project = path.join(root, 'project');
@@ -33,6 +36,112 @@ function header(home, project, name = 'parent', tree = '.omo/agent/sessions') {
 }
 
 function children(project) { return path.join(project, '.omo', 'senpi-task', 'children'); }
+
+test('Senpi reuses unchanged headers but discovers appended and rewritten headers', t => {
+  const { home, project, root, options } = fixture(t);
+  const file = header(home, project);
+  const foreign = header(home, 'relative', 'foreign');
+  const open = fs.openSync;
+  const reads = [];
+  t.mock.method(fs, 'openSync', (name, ...args) => {
+    if (name === file || name === foreign) reads.push(name);
+    return open(name, ...args);
+  });
+  const scan = () => senpiSourceRoots(home, {}, options).map(([, dir]) => dir);
+  assert.ok(scan().includes(children(project)));
+  scan();
+  assert.deepEqual(reads.toSorted(), [foreign, file].toSorted(), 'successful headers, including ignored cwd values, are reused');
+  fs.appendFileSync(file, '{"type":"message"}\n');
+  assert.ok(scan().includes(children(project)));
+  assert.equal(reads.length, 3, 'file size invalidates only the appended transcript');
+  const other = path.join(root, 'another'); // same length as "project"
+  const previous = fs.statSync(file);
+  const dirTime = fs.statSync(path.dirname(file));
+  const text = fs.readFileSync(file, 'utf8').replace(project, other);
+  fs.writeFileSync(file, text);
+  fs.utimesSync(file, previous.atime, new Date(previous.mtimeMs + 2000));
+  fs.utimesSync(path.dirname(file), dirTime.atime, dirTime.mtime);
+  assert.equal(fs.statSync(file).size, previous.size);
+  const dirs = scan();
+  assert.ok(dirs.includes(children(other)), 'in-place rewrites do not rely on directory mtime');
+  assert.ok(!dirs.includes(children(project)));
+  assert.equal(reads.length, 4);
+});
+
+for (const failure of ['open', 'read', 'parse']) {
+  test(`Senpi retries a failed header ${failure} with unchanged file metadata`, t => {
+    const { home, project, options } = fixture(t);
+    const file = header(home, project);
+    const previous = fs.statSync(file);
+    const open = fs.openSync;
+    const read = fs.readSync;
+    let fail = true;
+    let headerFd;
+    let opens = 0;
+    t.mock.method(fs, 'openSync', (name, ...args) => {
+      if (name === file) {
+        opens++;
+        if (fail && failure === 'open') { fail = false; throw new Error('temporary open failure'); }
+      }
+      const fd = open(name, ...args);
+      if (name === file) headerFd = fd;
+      return fd;
+    });
+    t.mock.method(fs, 'readSync', (fd, buffer, ...args) => {
+      if (fd === headerFd && fail) {
+        fail = false;
+        if (failure === 'read') throw new Error('temporary read failure');
+        if (failure === 'parse') { buffer.write('{\n'); return 2; }
+      }
+      return read(fd, buffer, ...args);
+    });
+    const scan = () => senpiSourceRoots(home, {}, options).map(([, dir]) => dir);
+    assert.ok(!scan().includes(children(project)));
+    assert.equal(fs.statSync(file).mtimeMs, previous.mtimeMs);
+    assert.equal(fs.statSync(file).size, previous.size);
+    assert.ok(scan().includes(children(project)), 'the next scan retries the failed header');
+    scan();
+    assert.equal(opens, 2, 'only a successful retry enters the cache');
+  });
+}
+
+test('Senpi evicts removed headers before their paths are reused', t => {
+  const { home, project, root, options } = fixture(t);
+  const file = header(home, project);
+  const stat = fs.statSync;
+  const previous = stat(file);
+  // Reproduce path reuse with an identical cache signature on any filesystem.
+  t.mock.method(fs, 'statSync', (name, ...args) => {
+    const current = stat(name, ...args);
+    return name === file ? previous : current;
+  });
+  const scan = () => senpiSourceRoots(home, {}, options).map(([, dir]) => dir);
+  assert.ok(scan().includes(children(project)));
+  fs.unlinkSync(file);
+  assert.ok(!scan().includes(children(project)));
+  const other = path.join(root, 'another');
+  fs.writeFileSync(file, JSON.stringify({ type: 'session', id: 'parent', cwd: other }) + '\n');
+  const dirs = scan();
+  assert.ok(dirs.includes(children(other)));
+  assert.ok(!dirs.includes(children(project)));
+});
+
+test('Senpi bounds its header cache across large session trees', t => {
+  const { home, project, options } = fixture(t);
+  for (let i = 0; i < 4097; i++) header(home, project, `parent-${String(i).padStart(4, '0')}`);
+  const open = fs.openSync;
+  let reads = 0;
+  t.mock.method(fs, 'openSync', (name, ...args) => {
+    reads++;
+    return open(name, ...args);
+  });
+  const scan = () => senpiSourceRoots(home, {}, options);
+  scan();
+  scan(); // fill any slots freed when the first scan prunes a previous source tree
+  reads = 0;
+  scan();
+  assert.equal(reads, 1, 'only the overflow header is reread, without flushing the admitted entries');
+});
 
 test('Senpi discovers every project header and attributes task-child writes', t => {
   const { home, project, root, options } = fixture(t);

@@ -17,7 +17,7 @@ read_when:
 
 ## Where the data lives
 
-Tokscale always scans both of these home-relative trees, plus task children:
+Tokscale always scans `~/.omo/agent/sessions`. It also scans `~/.senpi/agent/sessions` when `SENPI_CODING_AGENT_DIR` is unset or blank, plus task children:
 
 ```
 ~/.omo/agent/sessions/<encoded-cwd>/<timestamp>_<sessionId>.jsonl
@@ -27,7 +27,7 @@ Tokscale always scans both of these home-relative trees, plus task children:
 
 `SENPI_CODING_AGENT_DIR` replaces only the `~/.senpi/agent` root. `SENPI_CODING_AGENT_SESSION_DIR` adds one extra sessions directory. OmO itself has no environment variable for a relocated tree; tokscale reads that from `scanner.extraScanPaths.senpi` in its settings.json. On Windows, the scanner, source checks and native Session Detail use an absolute native `HOME` before the profile directory; scoped WSL lookups ignore host environment overrides.
 
-Task children also live under each project's `.omo/senpi-task/children`. The collector discovers projects from the first session-header line in both global trees, the environment-selected sessions directory and configured custom scan roots. It reads every header in each per-project directory because the encoded directory name is lossy and can represent multiple projects. Header reads stop at 8 KiB; malformed or relative `cwd` values are ignored.
+Task children also live under each project's `.omo/senpi-task/children`. The collector discovers projects from the first session-header line in the selected sessions trees and configured custom scan roots. It checks every header in each per-project directory because the encoded directory name is lossy and can represent multiple projects. Header reads stop at 8 KiB; malformed or relative `cwd` values are ignored. A process-local cache retains up to 4096 successfully parsed headers, keyed by file path, modification time, size and file identity. Unchanged headers avoid repeated reads; failed reads or parses are retried, and entries no longer encountered during discovery are evicted. Directory timestamps are not used for invalidation.
 
 An absolute `task.state_dir` in `.omo/omo.jsonc` (falling back to `.omo/omo.json`) relocates children to `<state_dir>/children`. Project configuration overrides the home configuration; a project declaring an empty or relative `task` block restores that project's default layout instead of inheriting the home block. Configuration reads are bounded to 256 KiB, so an oversized file waits for interval collection through tokscale.
 

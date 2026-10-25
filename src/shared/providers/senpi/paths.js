@@ -5,6 +5,9 @@ const path = require('node:path');
 const { tokscaleHomeDir } = require('../../tokscaleConfig');
 const { normalizeCustomScanPaths } = require('../../customScanPaths');
 
+const HEADER_CACHE_LIMIT = 4096;
+const headerCache = new Map();
+
 function nonBlank(value) {
   return typeof value === 'string' && value.trim() ? value : '';
 }
@@ -35,7 +38,7 @@ function readTaskState(project) {
   return undefined;
 }
 
-function projectCwds(sessions) {
+function projectCwds(sessions, seenHeaders) {
   const projects = new Set();
   let entries;
   try { entries = fs.readdirSync(sessions, { withFileTypes: true }); } catch (_) { return projects; }
@@ -46,17 +49,35 @@ function projectCwds(sessions) {
     try { files = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { continue; }
     for (const file of files) {
       if (!file.name.endsWith('.jsonl') || (!file.isFile() && !file.isSymbolicLink())) continue;
+      const filePath = path.join(dir, file.name);
       let fd;
       try {
-        const filePath = path.join(dir, file.name);
-        if (file.isSymbolicLink() && !fs.statSync(filePath).isFile()) continue;
+        const stat = fs.statSync(filePath);
+        if (!stat.isFile()) continue;
+        seenHeaders.add(filePath);
+        // File metadata catches in-place writes; identity also catches link
+        // retargets and replaced files with an otherwise identical timestamp/size.
+        const key = `${stat.mtimeMs}:${stat.size}:${stat.ctimeMs}:${stat.dev}:${stat.ino}`;
+        const cached = headerCache.get(filePath);
+        if (cached?.key === key) {
+          if (cached.cwd) projects.add(cached.cwd);
+          continue;
+        }
         fd = fs.openSync(filePath, 'r');
         const bytes = Buffer.alloc(8192); // scanner's session-header limit
         const count = fs.readSync(fd, bytes, 0, bytes.length, 0);
         const end = bytes.indexOf(10, 0);
         const header = JSON.parse(bytes.subarray(0, end >= 0 && end < count ? end : count).toString('utf8'));
-        if (header.type === 'session' && typeof header.cwd === 'string' && path.isAbsolute(header.cwd)) projects.add(header.cwd);
-      } catch (_) { /* Missing, oversized or foreign headers do not invent a project. */ }
+        const cwd = header?.type === 'session' && typeof header.cwd === 'string' && path.isAbsolute(header.cwd) ? header.cwd : null;
+        headerCache.delete(filePath);
+        // Keep admitted entries stable: sequential walks over an oversized tree
+        // would otherwise evict each next hit and reread every header each time.
+        if (headerCache.size < HEADER_CACHE_LIMIT) headerCache.set(filePath, { key, cwd });
+        if (cwd) projects.add(cwd);
+      } catch (_) {
+        // Read/parse failures may recover without a metadata change. Retry them.
+        headerCache.delete(filePath);
+      }
       finally { if (fd !== undefined) fs.closeSync(fd); }
     }
   }
@@ -77,9 +98,11 @@ function senpiTopology(home, env, options) {
   if (options.useEnvRoots !== false) {
     projects.add(options.cwdDir || process.cwd());
     const custom = normalizeCustomScanPaths(options.customScanPaths, options).senpi || [];
-    for (const dir of [sessions, roots[1][1], ...(extra ? [extra] : []), ...custom.flatMap(dir => [dir, path.join(dir, 'sessions')])]) {
-      for (const project of projectCwds(dir)) projects.add(project);
+    const seenHeaders = new Set();
+    for (const dir of new Set([sessions, roots[1][1], ...(extra ? [extra] : []), ...custom.flatMap(dir => [dir, path.join(dir, 'sessions')])])) {
+      for (const project of projectCwds(dir, seenHeaders)) projects.add(project);
     }
+    for (const file of headerCache.keys()) if (!seenHeaders.has(file)) headerCache.delete(file);
   }
   const userState = readTaskState(home);
   const taskDirs = new Set();
