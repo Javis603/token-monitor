@@ -20,15 +20,17 @@ const broker = require('./broker');
 const { packageDirectory } = require('./package');
 const { publicSettings } = require('./settings');
 const { capabilityError, createCapabilityLane, isCapabilityRequest } = require('./capabilities');
-const { validMessage } = require('./host/message');
-const { findAction, validateInteraction } = require('../../shared/plugins/interactions');
+const { validJson, validMessage } = require('./host/message');
+const { ACTION_RE, findAction, validateInteraction } = require('../../shared/plugins/interactions');
 
 const MAX_PLUGINS = 64;
 const { MAX_MANIFEST_BYTES, assertHostCompatibility } = require('./contracts');
 const ALERT_INTERVAL_MS = 15_000;
 const IDLE_GRACE_MS = 30_000;
 const BOOT_TIMEOUT_MS = 10_000;
-const TICK_TIMEOUT_MS = 30_000;
+// Ticks and action handlers may await one full network request, so their
+// deadlines outlast the broker's request timeout.
+const HANDLER_TIMEOUT_MS = broker.LIMITS.requestTimeoutMs + 15_000;
 const METRICS_INTERVAL_MS = 5_000;
 const PUSH_THROTTLE_MS = 250;
 const LOG_LIMIT = 100;
@@ -182,7 +184,7 @@ function createPluginManager({
 
   function freshRuntime() {
     return {
-      webRevision: ++interactionRevision, state: 'stopped', mode: null, seq: 0, revision: ++interactionRevision, interactionSeq: 0, pendingInteractions: new Map(), interactionLimit: createRateLimiter({ capacity: 40, perSecond: 30, now }), inTick: false, tickDeadline: null, tickTimer: null, idleTimer: null,
+      webRevision: ++interactionRevision, state: 'stopped', mode: null, seq: 0, revision: ++interactionRevision, interactionSeq: 0, pendingInteractions: new Map(), interactionWaiters: new Map(), interactionLimit: createRateLimiter({ capacity: 40, perSecond: 30, now }), inTick: false, tickDeadline: null, tickTimer: null, idleTimer: null,
       bootTimer: null, restartTimer: null, subscriptions: new Set(), metrics: null,
       limiter: createRateLimiter({ ...MESSAGE_RATE, now }), notifyLimiter: createRateLimiter({ capacity: 3, perSecond: 1 / 60, now }),
       capabilityLane: null, netLimiter: createRateLimiter({ capacity: 10, perSecond: 0.5, now }), requests: new Set(), generation: 0, dropped: 0, lastError: ''
@@ -285,7 +287,14 @@ function createPluginManager({
       const producesAlerts = plugin.manifest.alerts.some(alert => alert.sources.some(source => source.startsWith('@')));
       if (plugin.manifest.main && (plugin.manifest.background || producesAlerts) && !modes.has(plugin.id)) modes.set(plugin.id, 'background');
     }
+    // A pending Rich send (a settings "test connection", say) wakes an
+    // otherwise idle Worker only to run that handler: no ticks, sampling or
+    // data subscriptions, and the usual idle grace once it finishes.
+    for (const plugin of plugins.values()) {
+      if (plugin.manifest?.main && isActive(plugin) && plugin.runtime.interactionWaiters.size && !modes.has(plugin.id)) modes.set(plugin.id, 'action');
+    }
     for (const [pluginId, mode] of modes) {
+      if (mode === 'action') continue;
       const plugin = plugins.get(pluginId);
       const intervalMs = mode === 'visible' ? plugin.manifest.visible.intervalMs : (plugin.manifest.background?.intervalMs || ALERT_INTERVAL_MS);
       for (const source of plugin.runtime.subscriptions) {
@@ -324,7 +333,7 @@ function createPluginManager({
     const runtime = plugin.runtime;
     if (runtime.tickTimer) clearTimer(runtime.tickTimer);
     runtime.tickTimer = null;
-    if (runtime.state !== 'running' || !runtime.mode) return;
+    if (runtime.state !== 'running' || !runtime.mode || runtime.mode === 'action') return;
     const intervalMs = runtime.mode === 'visible' ? plugin.manifest.visible.intervalMs : (plugin.manifest.background?.intervalMs || ALERT_INTERVAL_MS);
     runtime.tickTimer = setTimer(() => {
       runtime.tickTimer = null;
@@ -337,7 +346,7 @@ function createPluginManager({
   function sendTick(plugin) {
     const runtime = plugin.runtime;
     // A tick still in flight is not stacked: slow plugins tick less often.
-    if (runtime.inTick || runtime.state !== 'running') return;
+    if (runtime.inTick || runtime.state !== 'running' || runtime.mode === 'action') return;
     runtime.seq += 1;
     runtime.inTick = true;
     if (!sandbox?.send(plugin.id, { type: 'tick', seq: runtime.seq, mode: runtime.mode, now: now() })) {
@@ -349,8 +358,33 @@ function createPluginManager({
       if (runtime.generation !== generation || runtime.seq !== seq || !runtime.inTick) return;
       runtime.tickDeadline = null;
       sandbox.kill(plugin.id, 'tick-timeout');
-    }, TICK_TIMEOUT_MS);
+    }, HANDLER_TIMEOUT_MS);
     runtime.tickDeadline?.unref?.();
+  }
+
+  // Rich documents await their own actions; a stopped Worker settles them.
+  // A fresh Worker keeps sends still queued for it.
+  function clearInteractions(runtime, { keepQueued = false } = {}) {
+    runtime.pendingInteractions.clear();
+    for (const [seq, waiter] of runtime.interactionWaiters) {
+      if (keepQueued && !waiter.dispatched) continue;
+      runtime.interactionWaiters.delete(seq);
+      waiter.reject(new Error('plugin stopped before the action finished'));
+    }
+  }
+
+  function dispatchInteractions(plugin) {
+    const runtime = plugin.runtime;
+    if (runtime.state !== 'running' || !runtime.mode) return;
+    for (const [seq, waiter] of runtime.interactionWaiters) {
+      if (waiter.dispatched) continue;
+      waiter.dispatched = true;
+      runtime.pendingInteractions.set(seq, now());
+      if (sandbox.send(plugin.id, { type: 'interaction', seq, view: waiter.view, surface: 'web', event: waiter.event })) continue;
+      runtime.pendingInteractions.delete(seq); runtime.interactionWaiters.delete(seq);
+      waiter.reject(new Error('plugin is unavailable'));
+    }
+    if (runtime.mode === 'action' && !runtime.interactionWaiters.size) reconcile();
   }
 
   function startWorker(plugin) {
@@ -359,11 +393,14 @@ function createPluginManager({
     try {
       runtime.generation += 1;
       runtime.revision = ++interactionRevision;
-      runtime.pendingInteractions.clear();
+      clearInteractions(runtime, { keepQueued: true });
       sandbox.start(plugin.id, { codeFile: plugin.codeFile });
     } catch (error) {
       runtime.state = 'error';
       runtime.lastError = error.message;
+      clearInteractions(runtime);
+      releaseWorkerData(plugin);
+      runtime.mode = null;
       addLog(plugin, 'error', `start failed: ${error.message}`);
       return;
     }
@@ -404,7 +441,7 @@ function createPluginManager({
     releaseWorkerData(plugin);
     const runtime = plugin.runtime;
     runtime.generation += 1;
-    runtime.pendingInteractions.clear();
+    clearInteractions(runtime);
     cancelRequests(runtime);
     clearRuntimeTimers(runtime);
     if (runtime.restartTimer) clearTimer(runtime.restartTimer);
@@ -466,6 +503,15 @@ function createPluginManager({
     }
     if (changed && runtime.state === 'running') {
       sandbox.send(plugin.id, { type: 'mode', mode });
+      if (mode === 'action') {
+        if (runtime.tickTimer) clearTimer(runtime.tickTimer);
+        runtime.tickTimer = null;
+        // Drop live data delivery; one-shot queries keep a fresh lane.
+        releaseWorkerData(plugin);
+        runtime.capabilityLane = createCapabilityLane({ now, setTimer, clearTimer });
+        dispatchInteractions(plugin);
+        return;
+      }
       for (const source of runtime.subscriptions) {
         const current = bus.read(source);
         if (current) sandbox.send(plugin.id, { type: 'data', source, value: current.value });
@@ -482,7 +528,7 @@ function createPluginManager({
     const wantedMode = runtime.mode;
     releaseWorkerData(plugin);
     runtime.generation += 1;
-    runtime.pendingInteractions.clear();
+    clearInteractions(runtime);
     cancelRequests(runtime);
     clearRuntimeTimers(runtime);
     runtime.inTick = false;
@@ -527,7 +573,7 @@ function createPluginManager({
       for (const pluginId of running) {
         const plugin = plugins.get(pluginId);
         if (!plugin) continue;
-        if ([...plugin.runtime.pendingInteractions.values()].some(at => now() - at > 30_000)) { changed = true; sandbox.kill(pluginId, 'interaction-timeout'); continue; }
+        if ([...plugin.runtime.pendingInteractions.values()].some(at => now() - at > HANDLER_TIMEOUT_MS)) { changed = true; sandbox.kill(pluginId, 'interaction-timeout'); continue; }
         const previous = plugin.runtime.metrics;
         const next = metrics[pluginId] || null;
         if (!Object.is(previous?.cpuPercent ?? null, next?.cpuPercent ?? null)
@@ -570,6 +616,9 @@ function createPluginManager({
       if (!runtime.mode || !['starting', 'running'].includes(runtime.state) || !sandbox?.isRunning(plugin.id)) throw new Error('plugin is idle');
       if (message.op.startsWith('data.') || message.op.startsWith('settings.')) {
         if (!isCapabilityRequest(message.op, args)) throw new Error('invalid capability request');
+        // The prelude keeps a suspended subscription and replays it once the
+        // Worker is live; an action-only wake does not start data delivery.
+        if (runtime.mode === 'action' && message.op === 'data.subscribe') throw Object.assign(new Error('capability suspended'), { code: 'capability-suspended' });
         if (!capabilities) throw new Error('capability unavailable');
         let owner = dataOwners.get(plugin.id);
         if (!owner) { owner = { pluginId: plugin.id, generation }; dataOwners.set(plugin.id, owner); }
@@ -664,13 +713,23 @@ function createPluginManager({
           sandbox.send(pluginId, { type: 'mode', mode: runtime.mode });
           sendTick(plugin);
           scheduleTick(plugin);
+          dispatchInteractions(plugin);
         }
         pushAll();
         emitChanged();
         return;
-      case 'interaction-done':
+      case 'interaction-done': {
         runtime.pendingInteractions.delete(message.seq);
+        const waiter = runtime.interactionWaiters.get(message.seq);
+        if (!waiter) return;
+        runtime.interactionWaiters.delete(message.seq);
+        if (message.result === 'failed') waiter.reject(new Error('the action handler failed; see the plugin log'));
+        else if (message.result === 'unhandled') waiter.reject(new Error(`no tm.onAction handler for "${waiter.action}"`));
+        else if (message.result === 'unreturnable') waiter.reject(new Error('the action handler returned a value that is not plain JSON within 60 KiB'));
+        else waiter.resolve(message.value);
+        if (runtime.mode === 'action' && !runtime.interactionWaiters.size) reconcile();
         return;
+      }
       case 'tick-done':
         if (!runtime.inTick || message.seq !== runtime.seq) return;
         if (runtime.tickDeadline) clearTimer(runtime.tickDeadline);
@@ -702,7 +761,7 @@ function createPluginManager({
         if (runtime.subscriptions.has(source) || runtime.subscriptions.size >= 16) return;
         runtime.subscriptions.add(source);
         const current = bus.read(source);
-        if (current) sandbox.send(pluginId, { type: 'data', source, value: current.value });
+        if (current && runtime.mode !== 'action') sandbox.send(pluginId, { type: 'data', source, value: current.value });
         reconcile();
         return;
       }
@@ -729,7 +788,7 @@ function createPluginManager({
   function onBusChange(changed) {
     // Worker subscriptions: forward only the sources each worker asked for.
     for (const plugin of plugins.values()) {
-      if (plugin.runtime.state !== 'running' || !plugin.runtime.mode || !isActive(plugin)) continue;
+      if (plugin.runtime.state !== 'running' || !plugin.runtime.mode || plugin.runtime.mode === 'action' || !isActive(plugin)) continue;
       for (const source of plugin.runtime.subscriptions) {
         if (!changed.has(source)) continue;
         const reading = bus.read(source);
@@ -968,6 +1027,28 @@ function createPluginManager({
     webSource(ref, source) {
       if (!this.webReadAllowed(ref, source)) throw new Error('source permission denied');
       return busId(this.webDocument(ref).pluginId, source);
+    },
+    // A Rich document runs a tm.onAction handler in its own Worker through the
+    // declared-control bounds and resolves with the handler's return value.
+    // An idle Worker of an enabled plugin wakes in action mode for it.
+    webSend(ref, input) {
+      const { pluginId, document } = this.webDocument(ref);
+      const plugin = plugins.get(pluginId), runtime = plugin.runtime;
+      if (!plugin.manifest.main || !plugin.codeFile || !sandbox) throw new Error('this document has no plugin code to send to');
+      const action = input?.action;
+      if (typeof action !== 'string' || !ACTION_RE.test(action)) throw new Error('action must be a short camelCase name');
+      const event = input.value === undefined ? { action, type: 'send' } : { action, type: 'send', value: input.value };
+      if (!validJson(event)) throw new Error('send value must be plain JSON within 64 KiB');
+      if (runtime.restartTimer || ['crashed', 'error', 'backoff'].includes(runtime.state)) throw new Error('plugin is restarting; try again');
+      const queued = [...runtime.interactionWaiters.values()].filter(waiter => !waiter.dispatched).length;
+      if (!runtime.interactionLimit.take() || runtime.pendingInteractions.size + queued >= 8) throw new Error('plugin is busy; try again');
+      const seq = ++runtime.interactionSeq;
+      const settled = new Promise((resolve, reject) => {
+        runtime.interactionWaiters.set(seq, { action, event, view: document.id, dispatched: false, resolve, reject });
+      });
+      if (!runtime.mode) reconcile();
+      dispatchInteractions(plugin);
+      return settled;
     },
     webStorage(ref, op, key, value) {
       const { pluginId } = this.webDocument(ref);

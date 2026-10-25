@@ -12,12 +12,15 @@ env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-notch-page
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-web-ui.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-surface-web.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-web-cache.cjs
+env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-send.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-plugin-smooth-charts.cjs
 env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/test-system-monitor-rich-ui.cjs
 env -u ELECTRON_RUN_AS_NODE npm run verify:plugins -- --out /tmp/plugin-report.json
 ```
 
 The sandbox verifier deliberately creates flooding, busy and memory-consuming Workers; run it separately from `npm test`. Test reports, screenshots and frozen review manifests belong in local/CI artifacts and PR evidence, not the permanent author documentation.
+
+The send fixture uses the production runtime, Worker and isolated Rich bridge. It checks settings-only action wakeup without ticks, idle process reclamation while settings remain open, handler results/errors and wire-limit rejection, metric updates, presentation during a pending send, and disable during an action. Captures show synthetic settings/search content, not packaged-app or external-network acceptance.
 
 ## Business/settings integration checks
 

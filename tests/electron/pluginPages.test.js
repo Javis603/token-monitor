@@ -212,6 +212,14 @@ function pagingRich(t, { count = 2000, settingsGet = () => ({ values: { count: 1
   item.view.webContents.emit('did-finish-load'); call('present');
   return { ...f, webUi, item, win, call, business, stats, queries: () => queries };
 }
+test('Rich send replies with a capability envelope instead of an IPC exception', async t => {
+  const f = pagingRich(t, { count: 1 });
+  const reply = await f.call('send', { action: 'refresh' });
+  assert.equal(reply.__tmCapability, 1);
+  assert.equal(reply.ok, false);
+  assert.match(reply.error.message, /no plugin code/);
+  assert.equal(f.item.dead, false);
+});
 for (const limit of [1, 100]) test(`Rich production controller traverses 2000 rows at limit ${limit} mixed with settings`, async t => {
   const f = pagingRich(t), start = Date.now(), rows = [];
   let cursor, pages = 0;

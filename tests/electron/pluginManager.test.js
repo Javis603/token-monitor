@@ -567,7 +567,8 @@ test('a healthy heartbeat cannot hide a stuck tick and stale completions cannot 
   env.manager.setBackground('pulse', true);
     env.manager.handleMessage('pulse', { type: 'ready' });
     env.manager.setSurfaceDemand('notch', ['pulse/pulse']);
-    for (let i = 0; i < 30; i++) {
+    // The tick deadline outlasts one 60-second network request.
+    for (let i = 0; i < 75; i++) {
       env.manager.handleMessage('pulse', { type: 'heartbeat' });
       env.manager.handleMessage('pulse', { type: 'tick-done', seq: 999 });
       await env.clock.advance(1000);
@@ -634,6 +635,113 @@ test('authored page demand starts its Worker without revoking the document and r
   assert.notEqual(env.manager.webDocument('pulse/models').revision, revision);
 });
 
+
+test('a Rich document awaits its own Worker action within the declared-control bounds', async t => {
+  const web = { ...CODE, permissions: [...CODE.permissions, 'ui.web', 'tm.pages'], webUi: { version: 1, assets: ['index.html'], documents: [{ id: 'models', entry: 'index.html', target: 'model', slot: 'replace' }] } };
+  const env = setup({ plugins: [web] }); t.after(() => { env.manager.dispose(); env.bus.dispose(); fs.rmSync(env.root, { recursive: true, force: true }); });
+  env.manager.setEnabled('pulse', true);
+  env.manager.setWebVisible('page', 'pulse/models');
+  const interactions = () => env.sent.filter(([, message]) => message.type === 'interaction').map(([, message]) => message);
+  const early = env.manager.webSend('pulse/models', { action: 'search', value: { q: 'opus', limit: 20 } });
+  assert.equal(interactions().length, 0, 'a send while the Worker boots waits instead of failing');
+  env.manager.handleMessage('pulse', { type: 'ready' });
+  const sent = interactions().at(-1);
+  assert.deepEqual({ view: sent.view, surface: sent.surface, event: sent.event }, { view: 'models', surface: 'web', event: { action: 'search', type: 'send', value: { q: 'opus', limit: 20 } } });
+  let settled = false; early.then(() => { settled = true; });
+  await Promise.resolve();
+  assert.equal(settled, false, 'the promise waits for the handler');
+  env.manager.handleMessage('pulse', { type: 'interaction-done', seq: sent.seq, result: 'done', value: { items: 3 } });
+  assert.deepEqual(await early, { items: 3 }, 'it resolves with the handler return value');
+  const failed = env.manager.webSend('pulse/models', { action: 'boom' });
+  env.manager.handleMessage('pulse', { type: 'interaction-done', seq: interactions().at(-1).seq, result: 'failed' });
+  await assert.rejects(failed, /handler failed/);
+  const unhandled = env.manager.webSend('pulse/models', { action: 'missing' });
+  env.manager.handleMessage('pulse', { type: 'interaction-done', seq: interactions().at(-1).seq, result: 'unhandled' });
+  await assert.rejects(unhandled, /no tm.onAction handler for "missing"/);
+  const unreturnable = env.manager.webSend('pulse/models', { action: 'odd' });
+  env.manager.handleMessage('pulse', { type: 'interaction-done', seq: interactions().at(-1).seq, result: 'unreturnable' });
+  await assert.rejects(unreturnable, /not plain JSON/);
+  assert.throws(() => env.manager.webSend('pulse/models', { action: 'Bad-Name' }), /camelCase/);
+  assert.throws(() => env.manager.webSend('pulse/models', { action: 'big', value: 'x'.repeat(70 * 1024) }), /64 KiB/);
+  assert.throws(() => env.manager.webSend('pulse/models', { action: 'odd', value: { at: new Date() } }), /plain JSON/);
+  const slow = Array.from({ length: 8 }, () => env.manager.webSend('pulse/models', { action: 'slow' }));
+  assert.throws(() => env.manager.webSend('pulse/models', { action: 'slow' }), /busy/);
+  env.manager.setEnabled('pulse', false);
+  for (const pending of slow) await assert.rejects(pending, /stopped before the action finished/);
+  assert.throws(() => env.manager.webSend('pulse/models', { action: 'search' }), /unavailable/, 'a disabled plugin runs no code');
+});
+
+test('a settings test-connection wakes an idle Worker only for that action', async t => {
+  const web = { ...CODE, permissions: [...CODE.permissions, 'ui.web'], webUi: { version: 1, assets: ['index.html'], documents: [{ id: 'prefs', entry: 'index.html', target: 'settings', slot: 'replace' }] } };
+  const env = setup({ plugins: [web] }); t.after(() => { env.manager.dispose(); env.bus.dispose(); fs.rmSync(env.root, { recursive: true, force: true }); });
+  env.manager.setEnabled('pulse', true);
+  assert.equal(env.running.size, 0, 'opening settings alone starts nothing');
+  const test = env.manager.webSend('pulse/prefs', { action: 'testConnection' });
+  assert.equal(env.running.has('pulse'), true, 'the send wakes the Worker');
+  env.manager.handleMessage('pulse', { type: 'ready' });
+  const kinds = env.sent.filter(([id]) => id === 'pulse').map(([, message]) => message.type === 'mode' ? `mode:${message.mode}` : message.type);
+  assert.deepEqual(kinds.filter(kind => kind !== 'author-settings'), ['mode:action', 'interaction'], 'no tick runs in action mode');
+  env.manager.handleMessage('pulse', { type: 'call', id: 1, op: 'data.subscribe', args: { id: 'q1', query: { version: 1, resource: 'usage' } } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(env.sent.find(([, message]) => message.type === 'result' && message.id === 1)[1].code, 'capability-suspended');
+  const seq = env.sent.find(([, message]) => message.type === 'interaction')[1].seq;
+  env.manager.handleMessage('pulse', { type: 'interaction-done', seq, result: 'done', value: { ok: true, latencyMs: 120 } });
+  assert.deepEqual(await test, { ok: true, latencyMs: 120 });
+  assert.equal(env.sent.filter(([, message]) => message.type === 'tick').length, 0);
+  await env.clock.advance(31_000);
+  assert.equal(env.running.size, 0, 'the Worker stops after the idle grace');
+});
+
+test('an action-only wake rejects a failed Worker start and releases its demand', async t => {
+  const web = { ...CODE, permissions: [...CODE.permissions, 'ui.web'], webUi: { version: 1, assets: ['index.html'], documents: [{ id: 'prefs', entry: 'index.html', target: 'settings', slot: 'replace' }] } };
+  const env = setup({ plugins: [web] }); t.after(() => { env.manager.dispose(); env.bus.dispose(); fs.rmSync(env.root, { recursive: true, force: true }); });
+  env.manager.setEnabled('pulse', true);
+  env.sandbox.start = () => { throw new Error('code file disappeared'); };
+  const result = await Promise.race([
+    env.manager.webSend('pulse/prefs', { action: 'testConnection' }).then(() => 'resolved', error => error.message),
+    new Promise(resolve => setImmediate(() => resolve('still pending')))
+  ]);
+  assert.match(result, /stopped before the action finished/);
+  assert.equal(env.manager.diagnostics().plugins.find(p => p.id === 'pulse').mode, null);
+  assert.equal(env.running.size, 0);
+});
+
+test('action mode retains source intent without delivery or sampling, then resumes it when visible', async t => {
+  const web = { ...CODE, permissions: [...CODE.permissions, 'ui.web', 'sys.cpu'], webUi: { version: 1, assets: ['index.html'], documents: [{ id: 'prefs', entry: 'index.html', target: 'settings', slot: 'replace' }] } };
+  const env = setup({ plugins: [web] }); t.after(() => { env.manager.dispose(); env.bus.dispose(); fs.rmSync(env.root, { recursive: true, force: true }); });
+  env.manager.setEnabled('pulse', true);
+  env.bus.publish('sys.cpu', 10);
+  const pending = env.manager.webSend('pulse/prefs', { action: 'testConnection' });
+  void pending.catch(() => {});
+  env.manager.handleMessage('pulse', { type: 'ready' });
+  env.manager.handleMessage('pulse', { type: 'subscribe', source: 'sys.cpu' });
+  env.bus.publish('sys.cpu', 20);
+  assert.equal(env.sent.filter(([, m]) => m.type === 'data').length, 0, 'neither initial nor live readings enter action mode');
+  assert.equal(env.samples(), 0);
+  env.manager.setSurfaceDemand('home', ['pulse/pulse']);
+  assert.ok(env.sent.some(([, m]) => m.type === 'data' && m.source === 'sys.cpu'), 'visible mode replays the kept source');
+  env.manager.setSurfaceDemand('home', []);
+  const count = env.sent.filter(([, m]) => m.type === 'data').length;
+  env.bus.publish('sys.cpu', 30);
+  assert.equal(env.sent.filter(([, m]) => m.type === 'data').length, count, 'visible to action suspends delivery again');
+  const seq = env.sent.find(([, m]) => m.type === 'interaction')[1].seq;
+  env.manager.handleMessage('pulse', { type: 'interaction-done', seq, result: 'done' });
+  await pending;
+});
+
+test('a failed interaction delivery rejects and releases an action-only wake', async t => {
+  const web = { ...CODE, permissions: [...CODE.permissions, 'ui.web'], webUi: { version: 1, assets: ['index.html'], documents: [{ id: 'prefs', entry: 'index.html', target: 'settings', slot: 'replace' }] } };
+  const env = setup({ plugins: [web] }); t.after(() => { env.manager.dispose(); env.bus.dispose(); fs.rmSync(env.root, { recursive: true, force: true }); });
+  env.manager.setEnabled('pulse', true);
+  const pending = env.manager.webSend('pulse/prefs', { action: 'testConnection' });
+  const send = env.sandbox.send;
+  env.sandbox.send = (id, message) => message.type === 'interaction' ? false : send(id, message);
+  env.manager.handleMessage('pulse', { type: 'ready' });
+  await assert.rejects(pending, /unavailable/);
+  assert.equal(env.manager.diagnostics().plugins.find(p => p.id === 'pulse').mode, null);
+  await env.clock.advance(31_000);
+  assert.equal(env.running.size, 0);
+});
 
 test('committed settings survive failing observers and author DTOs omit schema', t => {
   const { createPluginSettingsStore } = require('../../src/electron/plugins/settings');

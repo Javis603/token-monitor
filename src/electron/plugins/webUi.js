@@ -239,6 +239,10 @@ function createWebUi({ electron, manager, bus, isMainSender, surfaceContext = ()
       const next = { ...selections }; delete next[item.target]; save(next); item.host.send('plugins:web:restore'); stop(); return true;
     }
     if (['get', 'set', 'delete'].includes(op)) return manager.webStorage(item.ref, op, args?.key, args?.value);
+    if (op === 'send') {
+      return Promise.resolve().then(() => manager.webSend(item.ref, args))
+        .then(value => ({ __tmCapability: 1, ok: true, value }), error => ({ __tmCapability: 1, ok: false, error: capabilityError(error) }));
+    }
     throw new Error('unsupported capability');
   });
   const offSettings = manager.onAuthorSettings?.((pluginId, value) => {

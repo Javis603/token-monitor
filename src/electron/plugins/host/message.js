@@ -6,7 +6,7 @@
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorPluginMessage = api;
-})(typeof window !== 'undefined' ? window : null, () => {
+})(typeof self !== 'undefined' ? self : typeof window !== 'undefined' ? window : null, () => {
   const MAX_BYTES = 64 * 1024;
   const encoder = new TextEncoder();
   function validJson(value) {

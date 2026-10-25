@@ -18,6 +18,20 @@
   let callSeq = 0;
   let mode = 'idle';
   let lifecycle = 0;
+  // 'action' wakes the Worker for a requested handler without live data.
+  const live = value => value === 'visible' || value === 'background';
+  // An action's return value travels in the 64 KiB completion message.
+  const RETURN_BYTES = 60 * 1024;
+  function returned(value, seq) {
+    if (value === undefined) return { result: 'done' };
+    // Use the actual relay contract, including envelope depth/node budgets;
+    // otherwise an apparently small return can be silently dropped in transit.
+    if (!self.TokenMonitorPluginMessage.validMessage({ type: 'interaction-done', seq, result: 'done', value })) return { result: 'unreturnable' };
+    let json;
+    try { json = JSON.stringify(value); } catch { return { result: 'unreturnable' }; }
+    if (json === undefined || new TextEncoder().encode(json).length > RETURN_BYTES) return { result: 'unreturnable' };
+    return { result: 'done', value: JSON.parse(json) };
+  }
 
   function describe(value) {
     if (typeof value === 'string') return value;
@@ -30,7 +44,7 @@
   }
 
   function report(error) {
-    post({ type: 'error', message: describe(error).slice(0, 500) });
+    post({ type: 'error', message: String(describe(error)).slice(0, 500) });
   }
 
   function call(op, args) {
@@ -55,8 +69,10 @@
     } else if (message.type === 'interaction') {
       actions = actions.then(async () => {
         const handler = actionHandlers.get(message.event?.action);
-        if (typeof handler === 'function') await handler({ ...message.event, view: message.view, surface: message.surface });
-      }).catch(report).finally(() => post({ type: 'interaction-done', seq: message.seq }));
+        if (typeof handler !== 'function') return { result: 'unhandled' };
+        return returned(await handler({ ...message.event, view: message.view, surface: message.surface }), message.seq);
+      }).catch((error) => { report(error); return { result: 'failed' }; })
+        .then((outcome) => post({ type: 'interaction-done', seq: message.seq, ...outcome }));
     } else if (message.type === 'data') {
       latest.set(message.source, message.value);
       for (const handler of subscriptions.get(message.source) || []) {
@@ -70,7 +86,7 @@
     } else if (message.type === 'mode') {
       const previous = mode;
       mode = message.mode;
-      if (mode === 'idle') {
+      if (mode === 'idle' || mode === 'action' && live(previous)) {
         lifecycle++;
         for (const [id, entry] of pending) {
           if (!/^(data|settings)\./.test(entry.op)) continue;
@@ -78,8 +94,10 @@
           entry.reject(Object.assign(new Error('capability suspended'), { code: 'capability-suspended' }));
         }
       }
-      if (previous === 'idle' && mode !== 'idle') {
+      if (!live(previous) && live(mode)) {
         for (const [id, entry] of dataSubscriptions) void call('data.subscribe', { id, query: entry.query }).catch(report);
+      }
+      if (previous === 'idle' && mode !== 'idle') {
         if (settingsListeners.size) void call('settings.get', {}).then(value => {
           for (const listener of settingsListeners) { try { listener(value); } catch (error) { report(error); } }
         }).catch(report);
@@ -138,7 +156,12 @@
         const id = `q${++dataSeq}`;
         dataSubscriptions.set(id, { query, callback });
         const epoch = lifecycle;
-        void call('data.subscribe', { id, query }).catch(error => { if (epoch === lifecycle) dataSubscriptions.delete(id); report(error); });
+        // A suspended subscription stays registered and replays once live.
+        void call('data.subscribe', { id, query }).catch(error => {
+          if (error?.code === 'capability-suspended') return;
+          if (epoch === lifecycle) dataSubscriptions.delete(id);
+          report(error);
+        });
         return () => { dataSubscriptions.delete(id); void call('data.unsubscribe', { id }).catch(report); };
       }
     }),

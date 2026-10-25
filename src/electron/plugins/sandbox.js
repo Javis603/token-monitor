@@ -68,10 +68,11 @@ function readPluginCode(file) {
 }
 
 function workerSource(code) {
+  const message = fs.readFileSync(path.join(HOST_DIR, 'message.js'), 'utf8');
   const prelude = fs.readFileSync(path.join(HOST_DIR, 'prelude.js'), 'utf8');
   // The plugin body gets its own function scope so its declarations cannot
   // collide with the prelude; `self` and `tm` remain its globals.
-  return `${prelude}\n;(function pluginMain() {\n${code}\n}).call(self);\nself.postMessage({ type: 'ready' });\n`;
+  return `${message}\n${prelude}\n;(function pluginMain() {\n${code}\n}).call(self);\nself.postMessage({ type: 'ready' });\n`;
 }
 
 function createPluginSandbox({ electron, onMessage, onExit, log = () => {} }) {

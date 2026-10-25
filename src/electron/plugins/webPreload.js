@@ -19,14 +19,17 @@ function offerPresentation() {
     void ipcRenderer.invoke('plugins:web:call', 'present').catch(() => {});
   }, 32);
 }
-function call(op, args) {
-  pending++; clearTimeout(presentationTimer);
+function invoke(op, args) {
   return ipcRenderer.invoke('plugins:web:call', op, args).then(result => {
     if (result?.__tmCapability !== 1) return result;
     if (result.ok) return result.value;
     // Error custom fields are lost across contextBridge; keep a plain record.
     return Promise.reject({ message: result.error.message, code: result.error.code, fields: result.error.fields });
-  }).finally(() => { pending--; offerPresentation(); });
+  });
+}
+function call(op, args) {
+  pending++; clearTimeout(presentationTimer);
+  return invoke(op, args).finally(() => { pending--; offerPresentation(); });
 }
 window.addEventListener('DOMContentLoaded', () => { loaded = true; offerPresentation(); }, { once: true });
 window.addEventListener('pagehide', () => { presented = true; clearTimeout(presentationTimer); }, { once: true });
@@ -78,6 +81,9 @@ contextBridge.exposeInMainWorld('tm', Object.freeze({
   subscribe: sources => call('subscribe', sources),
   onData: callback => listen('plugins:web:data', callback),
   restoreOriginal: () => call('restore'),
+  // An action can wait on a network request in the Worker, so it does not
+  // hold back the document's first presentation.
+  send: (action, value) => invoke('send', { action, value }),
   settings: Object.freeze({
     get: () => call('settings.get', {}),
     update: input => call('settings.update', input),

@@ -36,8 +36,32 @@ The isolated preload exposes `window.tm` version 1, never an IPC channel argumen
 - For original pages, `context()` and `onContext(callback)` provide `{snapshot, theme}`. Snapshot is version 1: target, selected period, total tokens/cost and up to 500 display rows (`key`, `label`, `tokens`, `costUsd`). Keys are transient row indices, not internal identity. Theme provides validated colours, the resolved App interface font family, light/dark and reduced-motion preference. Authors apply these inside their own document.
 - `subscribe(sourceIds)` replaces this document's requested sources and returns current readings. `onData(callback)` delivers changes. Only manifest-granted sources and the plugin's own declared `@metric` sources are accepted, using the manifest's `visible.intervalSeconds` cadence (default two seconds), bounded by each source's minimum interval. A visible web document keeps its optional Worker producer active; hiding it releases that visible demand. This is not an animation clock: CSS, Web Animations and Canvas run within the browser between readings.
 - `storage.get(key)`, `storage.set(key,value)`, `storage.delete(key)` use the existing bounded per-plugin store. Store important author UI state explicitly: a ready hidden page can be briefly reused, but expiry or resource pressure may destroy it, so unsaved DOM drafts are not durable.
+- `send(action, value?)` runs this plugin's own `tm.onAction(action, handler)` in its Worker, which receives `{ action, type: 'send', value, view, surface: 'web' }`, and resolves with the handler's return value (plain JSON within 60 KiB and the shared message depth/node/byte budgets; `undefined` when it returns nothing). It rejects when the handler throws or returns something else, no handler is registered, the plugin is disabled or restarting, the Worker stops first, or the declared-control bounds (eight outstanding, bounded rate) are reached. `value` is plain JSON within 64 KiB. A pending send does not delay the document's first presentation. Settings documents can send, so a "test connection" or "load options" button works there. If no view needs the Worker, a send wakes it in `action` mode: top-level code and that handler run, with network, storage, settings and one-shot `data.query` available, but no ticks, source sampling or source/business subscription delivery (subscriptions wait until the Worker is visible or background). The Worker returns to idle after the last pending send and stops after the usual idle grace. A disabled plugin runs no code, so its documents cannot send. Use a returned value for request/response results and a declared metric for live data. Documents are sandboxed without forms: a `<form>` never fires `submit`, so trigger sends from button clicks or key handlers.
 - `restoreOriginal()` applies to original-page selections only. Home/page/settings contexts have no original-page snapshot; guard snapshot access.
 - `data.query/subscribe` and `settings.get/update/onChange` use the same finite contracts as Worker code; see [business data and author preferences](README.md#business-data-and-author-preferences). These are distinct from legacy `subscribe/onData`. Settings are plugin-owned declared preferences, never arbitrary App settings or credentials. No arbitrary commands, navigation URLs or host DOM actions are exposed.
+
+A search box, for example, keeps network access in the Worker (`network` permission and `network.hosts` as usual) and returns rows through an `object` metric named `results`:
+
+```js
+// page.js — the Rich document: the count comes back directly, the rows through @results
+tm.onData(readings => render(readings['@results']?.value));
+tm.subscribe(['@results']).then(readings => render(readings['@results']?.value));
+// Documents are sandboxed without forms: use a button, not a <form> submit.
+button.addEventListener('click', async () => {
+  button.disabled = true;
+  try { const { count } = await tm.send('search', { q: input.value }); showCount(count); }
+  catch (error) { showError(error.message); }
+  finally { button.disabled = false; }
+});
+
+// main.js — the Worker
+tm.onAction('search', async ({ value }) => {
+  const response = await tm.net.fetch(`https://api.example.com/search?q=${encodeURIComponent(value.q)}`);
+  const items = JSON.parse(response.text).items.slice(0, 100);
+  tm.publish('results', { query: value.q, items });
+  return { count: items.length };
+});
+```
 
 Listeners return an unsubscribe function. Respect `theme.reducedMotion` for author motion. This preference is supplied by the host; arbitrary author JS cannot be guaranteed to voluntarily stop every custom animation. The existing declarative Roll/Count path continues to enforce reduced motion itself.
 

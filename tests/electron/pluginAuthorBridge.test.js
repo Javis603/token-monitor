@@ -46,6 +46,31 @@ function richPreload(reply) {
   return { tm: () => tm, calls, emit };
 }
 const ok = value => Promise.resolve({ __tmCapability: 1, ok: true, value });
+
+test('Rich tm.send unwraps errors and does not hold back the first presentation', async () => {
+  const windowListeners = new Map(), calls = []; let tm;
+  const ipcRenderer = {
+    on() {}, removeListener() {},
+    invoke(_channel, op, args) {
+      calls.push([op, args]);
+      if (op === 'send' && args.action === 'slow') return new Promise(() => {});
+      if (op === 'send' && args.action === 'busy') return Promise.resolve({ __tmCapability: 1, ok: false, error: { message: 'plugin is busy; try again', code: 'unavailable', fields: {} } });
+      return Promise.resolve({ __tmCapability: 1, ok: true, value: true });
+    }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/electron/plugins/webPreload.js'), 'utf8'), {
+    require: () => ({ ipcRenderer, contextBridge: { exposeInMainWorld(_name, value) { tm = value; } } }),
+    window: { addEventListener(name, fn) { windowListeners.set(name, fn); } }, clearTimeout, setTimeout
+  });
+  assert.equal(await tm.send('search', { q: 'opus' }), true);
+  assert.equal(JSON.stringify(calls.at(-1)), JSON.stringify(['send', { action: 'search', value: { q: 'opus' } }]));
+  await assert.rejects(tm.send('busy'), error => /busy/.test(error.message));
+  void tm.send('slow');
+  windowListeners.get('DOMContentLoaded')();
+  // Poll rather than sleep: a loaded test runner can delay the 32 ms offer.
+  for (const deadline = Date.now() + 2000; !calls.some(([op]) => op === 'present') && Date.now() < deadline;) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(calls.some(([op]) => op === 'present'), 'an unfinished action does not delay presentation');
+});
 const failed = (code, message = code) => Promise.resolve({ __tmCapability: 1, ok: false, error: { message, code, fields: {} } });
 
 test('Rich preload unwraps errors and reveals a resumed document only after replayed subscriptions deliver', async () => {
