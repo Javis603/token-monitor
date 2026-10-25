@@ -210,6 +210,60 @@ test('a probe that itself fails surfaces the original tokscale error, not a sile
   }
 });
 
+test('a probe that cannot answer still scans, by dropping the client clap named', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const scans = [];
+  let helpProbes = 0;
+
+  // Two ids the vendored binary does not know: one from a fork build
+  // (`liveagent`) and one a later tokscale release dropped (`qodercn`). The
+  // probe answers with something that is not a --help payload, which is what a
+  // changed layout, a binary from another generation, or a probe that timed out
+  // under load all look like from here. The scans then reject one id at a time,
+  // exactly as clap does.
+  const rejected = ['liveagent', 'qodercn'];
+  childProcess.spawn = (_bin, args) => {
+    if (args.includes('--help')) {
+      helpProbes += 1;
+      return jsonChild({ not: 'a help payload' });
+    }
+    const csv = String(args[args.indexOf('--client') + 1] || '');
+    if (!isForkOnlyProbe(args)) scans.push(csv);
+    const offender = rejected.find((id) => csv.split(',').includes(id));
+    if (offender) return exitChild(2, `error: invalid value '${offender}' for '--client <CLIENTS>'`);
+    return jsonChild({ entries: [] });
+  };
+
+  try {
+    const { collectUsageOnce } = freshCollector();
+    // The whole point: this resolves. Before the fallback, one unusable id plus
+    // an unanswerable probe rejected every tick and the dashboard froze at the
+    // last good value while the app looked healthy.
+    await collectUsageOnce({
+      clients: 'claude,liveagent,qodercn,codex',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false
+    });
+    assert.equal(helpProbes, 1, 'the unanswerable probe is attempted once, then cached');
+    assert.equal(scans[0], 'claude,liveagent,qodercn,codex', 'the first scan asks for everything requested');
+    assert.deepEqual(
+      rejected.filter((id) => scans.at(-1).split(',').includes(id)),
+      [],
+      'the scan that succeeded asked only for clients the binary accepts'
+    );
+    // Each round drops exactly one id, so the tail of the sequence is the
+    // requested list with the rejected ids removed and nothing else touched.
+    assert.equal(scans.at(-1), 'claude,codex');
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
 test('a timed-out capability probe waits through forced termination until close', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
