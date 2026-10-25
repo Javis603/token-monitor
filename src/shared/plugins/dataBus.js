@@ -18,8 +18,6 @@ function createDataBus({
   historyLimit = DEFAULT_HISTORY,
   historyBytesLimit = 4 * 1024 * 1024,
   currentBytesLimit = 8 * 1024 * 1024,
-  pluginHistoryBytesLimit = 1024 * 1024,
-  pluginCurrentBytesLimit = 2 * 1024 * 1024,
   onError = () => {}
 } = {}) {
   const sources = new Map();
@@ -30,24 +28,15 @@ function createDataBus({
   let disposed = false;
   let currentBytes = 0;
   let retainedBytes = 0;
-  // Host sources and each plugin.<id>. namespace keep separate ledgers, and
-  // all plugins together share a pool apart from the host. A plugin over its
-  // quota fails only its own publishes and evicts only its own history.
-  const ledgers = new Map();
-  const newLedger = () => ({ currentBytes: 0, historyBytes: 0, samples: new Set() });
-  let plugins = newLedger();
-  const ownerOf = id => /^plugin\.[^.]+\./.exec(id)?.[0] || '';
-  function ledgerFor(owner) {
-    let ledger = ledgers.get(owner);
-    if (!ledger) { ledger = newLedger(); ledgers.set(owner, ledger); }
-    return ledger;
-  }
+  // The byte budgets cover host sources only. A plugin is already bounded by
+  // its declared metrics and the per-value and per-history caps in record(),
+  // so plugin publishes never compete with the host or with each other.
+  const host = { currentBytes: 0, historyBytes: 0, samples: new Set() };
 
   function entryFor(id) {
     let entry = sources.get(id);
     if (!entry) {
-      const owner = ownerOf(id);
-      entry = { id, owner, ledger: ledgerFor(owner), sample: null, minIntervalMs: 0, timer: null, intervalMs: 0, value: undefined, at: 0, sampledAt: null, history: [], historyBytes: 0, valueBytes: 0, sampling: false, generation: 0, reset: null, samples: 0, errors: 0 };
+      entry = { id, plugin: id.startsWith('plugin.'), sample: null, minIntervalMs: 0, timer: null, intervalMs: 0, value: undefined, at: 0, sampledAt: null, history: [], historyBytes: 0, valueBytes: 0, sampling: false, generation: 0, reset: null, samples: 0, errors: 0 };
       sources.set(id, entry);
     }
     return entry;
@@ -74,21 +63,18 @@ function createDataBus({
 
   function forget(sample) {
     const { entry } = sample;
-    if (!entry.ledger.samples.delete(sample)) return;
-    entry.ledger.historyBytes -= sample.bytes;
-    if (entry.owner) { plugins.samples.delete(sample); plugins.historyBytes -= sample.bytes; }
+    const index = entry.history.indexOf(sample);
+    if (index < 0) return;
+    entry.history.splice(index, 1);
+    entry.historyBytes -= sample.bytes;
     retainedBytes -= sample.bytes;
-    sample.entry.historyBytes -= sample.bytes;
-    const index = sample.entry.history.indexOf(sample);
-    if (index >= 0) sample.entry.history.splice(index, 1);
+    if (!entry.plugin) { host.samples.delete(sample); host.historyBytes -= sample.bytes; }
   }
 
   function record(entry, value, at) {
     const bytes = (JSON.stringify(value)?.length || 0) * 3, delta = bytes - entry.valueBytes;
-    const { ledger, owner } = entry;
-    if (bytes > 256 * 1024 || ledger.currentBytes + delta > (owner ? pluginCurrentBytesLimit : currentBytesLimit) || owner && plugins.currentBytes + delta > currentBytesLimit) throw new Error('plugin source storage budget exceeded');
-    ledger.currentBytes += delta;
-    if (owner) plugins.currentBytes += delta;
+    if (bytes > 256 * 1024 || !entry.plugin && host.currentBytes + delta > currentBytesLimit) throw new Error('plugin source storage budget exceeded');
+    if (!entry.plugin) host.currentBytes += delta;
     currentBytes += delta;
     entry.valueBytes = bytes;
     entry.value = value;
@@ -104,12 +90,10 @@ function createDataBus({
     const sample = { value: historical, at, entry, bytes: JSON.stringify(historical).length * 3 + 24 };
     entry.history.push(sample);
     entry.historyBytes += sample.bytes;
-    ledger.samples.add(sample); ledger.historyBytes += sample.bytes;
-    if (owner) { plugins.samples.add(sample); plugins.historyBytes += sample.bytes; }
     retainedBytes += sample.bytes;
+    if (!entry.plugin) { host.samples.add(sample); host.historyBytes += sample.bytes; }
     while (entry.history.length && (entry.history.length > historyLimit || entry.historyBytes > 32 * 1024)) forget(entry.history[0]);
-    while (ledger.historyBytes > (owner ? pluginHistoryBytesLimit : historyBytesLimit) && ledger.samples.size) forget(ledger.samples.values().next().value);
-    while (owner && plugins.historyBytes > historyBytesLimit && plugins.samples.size) forget(plugins.samples.values().next().value);
+    while (host.historyBytes > historyBytesLimit && host.samples.size) forget(host.samples.values().next().value);
     notify(entry.id);
   }
 
@@ -135,9 +119,14 @@ function createDataBus({
       const value = await entry.sample();
       if (value !== undefined && !disposed && generation === entry.generation && effectiveInterval(entry.id)) {
         record(entry, value, now());
+        // One failing alias must not leave the remaining aliases stale.
         for (const [id, alias] of aliases) if (alias.source === entry.id && effectiveInterval(id)) {
-          const projected = alias.project(value);
-          if (projected !== undefined) record(entryFor(id), projected, now());
+          try {
+            const projected = alias.project(value);
+            if (projected !== undefined) record(entryFor(id), projected, now());
+          } catch (error) {
+            onError(error);
+          }
         }
       }
     } catch (error) {
@@ -195,12 +184,10 @@ function createDataBus({
         entry.generation++; entry.reset?.();
         if (entry.timer) clearTimer(entry.timer);
         for (const sample of [...entry.history]) forget(sample);
-        currentBytes -= entry.valueBytes; entry.ledger.currentBytes -= entry.valueBytes;
-        if (entry.owner) plugins.currentBytes -= entry.valueBytes;
+        currentBytes -= entry.valueBytes;
+        if (!entry.plugin) host.currentBytes -= entry.valueBytes;
         sources.delete(id);
       }
-      const live = new Set([...sources.values()].map(entry => entry.owner));
-      for (const owner of ledgers.keys()) if (!live.has(owner)) ledgers.delete(owner);
     },
     memoryUsage: () => ({ currentBytes, historyBytes: retainedBytes }),
     read(id) {
@@ -276,7 +263,7 @@ function createDataBus({
       disposed = true;
       for (const entry of sources.values()) if (entry.timer) clearTimer(entry.timer);
       sources.clear();
-      ledgers.clear(); plugins = newLedger();
+      host.samples.clear(); host.currentBytes = 0; host.historyBytes = 0;
       currentBytes = 0;
       retainedBytes = 0;
       demands.clear();

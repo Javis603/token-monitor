@@ -128,6 +128,21 @@ test('a failing sampler is counted and retried, not fatal', async () => {
   assert.equal(bus.read('sys.cpu').value, 5);
 });
 
+test('a failing alias does not leave later aliases of the same sample stale', async () => {
+  const clock = fakeClock();
+  const errors = [];
+  const bus = createDataBus({ now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer, defer: (fn) => fn(), onError: (error) => errors.push(error.message) });
+  bus.defineSource('sys.memory', { sample: () => ({ percent: 40 }) });
+  bus.defineAlias('sys.memoryBroken', 'sys.memory', () => { throw new Error('alias boom'); });
+  bus.defineAlias('sys.memoryPercent', 'sys.memory', (value) => value.percent);
+  bus.setDemand('v', { sources: ['sys.memoryBroken', 'sys.memoryPercent'], intervalMs: 1000 });
+  await clock.advance(10);
+  assert.deepEqual(errors, ['alias boom']);
+  assert.equal(bus.read('sys.memory').value.percent, 40);
+  assert.equal(bus.read('sys.memoryPercent')?.value, 40);
+  assert.equal(bus.stats()['sys.memory'].errors, 0, 'the source sample itself succeeded');
+});
+
 test('alerts hold for their duration, fire once, and re-arm after recovery and cooldown', () => {
   const rule = { op: '>=', value: 90, forMs: 60_000, cooldownMs: 30 * 60_000 };
   let state = {};
@@ -179,31 +194,30 @@ test('changing demand during an asynchronous sample cannot create overlapping re
 });
 
 
-test('one plugin filling its quota cannot block host sources or evict their history', () => {
-  const bus = createDataBus({ historyBytesLimit: 4000, currentBytesLimit: 6000, pluginHistoryBytesLimit: 1000, pluginCurrentBytesLimit: 3000 });
+test('plugin publishes never block host sources, evict their history, or affect each other', () => {
+  const bus = createDataBus({ historyBytesLimit: 4000, currentBytesLimit: 6000 });
   for (let i = 0; i < 5; i++) bus.publish('sys.cpu', { percent: i });
   const hostHistory = bus.history('sys.cpu', 120, 'percent');
-  // A hostile plugin exhausts its own current-value quota...
-  bus.publish('plugin.flood.a', 'x'.repeat(900));
-  assert.throws(() => bus.publish('plugin.flood.b', 'x'.repeat(200)), /storage budget/);
-  // ...and floods history; only its own samples are evicted.
-  for (let i = 0; i < 200; i++) bus.publish(`plugin.flood.m${i % 8}`, { n: i });
+  for (let i = 0; i < 5; i++) bus.publish('plugin.calm.n', i);
+  // A heavy plugin may exceed the host budget several times over...
+  for (let i = 0; i < 8; i++) bus.publish(`plugin.heavy.m${i}`, 'x'.repeat(5000));
+  for (let i = 0; i < 200; i++) bus.publish(`plugin.heavy.h${i % 8}`, { n: i });
+  assert.equal(bus.read('plugin.heavy.m7').value.length, 5000);
+  // ...without touching host readings or another plugin's history.
   assert.deepEqual(bus.history('sys.cpu', 120, 'percent'), hostHistory, 'host history survives plugin pressure');
-  bus.publish('sys.cpu', { percent: 9 });
+  assert.deepEqual(bus.history('plugin.calm.n'), [0, 1, 2, 3, 4], 'another plugin keeps its history');
   bus.publish('tm.today', 'y'.repeat(1500));
   assert.equal(bus.read('tm.today').value.length, 1500, 'host publishes keep their own budget');
-  bus.publish('plugin.calm.a', 'z'.repeat(500));
-  assert.equal(bus.read('plugin.calm.a').value.length, 500, 'another plugin keeps its quota');
-  // All plugins together still share one ceiling apart from the host.
-  bus.publish('plugin.third.a', 'w'.repeat(300));
-  assert.throws(() => bus.publish('plugin.fourth.a', 'v'.repeat(300)), /storage budget/);
+  // Each value stays individually bounded, and the host budget still applies to host sources.
+  assert.throws(() => bus.publish('plugin.heavy.big', 'x'.repeat(90_000)), /storage budget/);
+  assert.throws(() => bus.publish('tm.month', 'z'.repeat(600)), /storage budget/);
   bus.clearSourcesWithPrefix('plugin.');
-  bus.publish('plugin.flood.a', 'x'.repeat(900));
-  assert.equal(bus.read('plugin.flood.a').value.length, 900, 'clearing a namespace returns its quota');
+  assert.equal(bus.read('tm.today').value.length, 1500);
+  assert.deepEqual(bus.history('sys.cpu', 120, 'percent'), [...hostHistory]);
   bus.dispose();
 });
 
-test('retained histories and current readings obey aggregate byte budgets', () => {
+test('host histories and current readings obey their byte budgets', () => {
   const bus = createDataBus({ historyBytesLimit: 200, currentBytesLimit: 2000 });
   for (let i = 0; i < 100; i++) bus.publish('one', { percent: i, drawing: Array(50).fill('x') });
   assert.ok(bus.memoryUsage().historyBytes <= 200);

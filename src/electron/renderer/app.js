@@ -12918,7 +12918,7 @@ pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
     container: document.getElementById('pluginSettingsList'),
     t,
     api: pluginApi,
-    getLocale: () => state.locale,
+    getLocale: currentLocale,
     onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
     setDetailTooltip: limitWindowsView.setDetailTooltip,
     onError: (error) => {
