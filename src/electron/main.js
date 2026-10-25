@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
+const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, screen, session, shell, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
@@ -496,18 +497,6 @@ function appWindowIcon() {
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
-const CSP_HEADER = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "frame-ancestors 'none'"
-].join('; ');
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
@@ -7759,7 +7748,7 @@ app.whenReady().then(() => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [CSP_HEADER]
+        'Content-Security-Policy': [contentSecurityPolicyForRequest(details)]
       }
     });
   });
@@ -8293,6 +8282,10 @@ app.whenReady().then(() => {
     }
     return true;
   });
+  ipcMain.handle('settings:displayPreview', (event, surface, phase, slots) => {
+    if (event.sender !== mainWindow?.webContents) return null;
+    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots);
+  });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
   });
@@ -8621,7 +8614,7 @@ app.whenReady().then(() => {
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
-    const cookie = opencodeWeb.sanitizeCookieHeader(raw);
+    const cookie = opencodeWeb.sanitizeCookieHeader(raw, '__Host-console_session');
     if (!cookie) {
       settings.opencodeProfiles = {};
       settings.opencodeCookie = '';
@@ -8635,10 +8628,7 @@ app.whenReady().then(() => {
       return { ok: true, cleared: true };
     }
     try {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
-        opencodeWeb.fetchZen(cookie, electronProviderDeps())
-      ]);
+      const [go, zen] = await opencodeWeb.fetchWeb(cookie, electronProviderDeps());
       if (opencodeWeb.summarizeLink(go, zen).expired) {
         return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
       }
@@ -8783,9 +8773,8 @@ app.whenReady().then(() => {
             error: probe.status
           }];
         }
-        const [go, zen, apiProbe] = await Promise.all([
-          opencodeWeb.fetchGoWeb(profile.cookie, electronProviderDeps()),
-          opencodeWeb.fetchZen(profile.cookie, electronProviderDeps()),
+        const [[go, zen], apiProbe] = await Promise.all([
+          opencodeWeb.fetchWeb(profile.cookie, electronProviderDeps(), { isolateErrors: true }),
           apiKey ? probeOpenCodeApiKey(apiKey) : null
         ]);
         const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
@@ -8809,10 +8798,7 @@ app.whenReady().then(() => {
     // dedupes away (otherwise it shows 2/2 while only one account is tracked).
     const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
     if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(envCookie, electronProviderDeps()),
-        opencodeWeb.fetchZen(envCookie, electronProviderDeps())
-      ]);
+      const [go, zen] = await opencodeWeb.fetchWeb(envCookie, electronProviderDeps(), { isolateErrors: true });
       let envKey = 'env';
       for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
         envKey = `env:${i}`;
@@ -8937,12 +8923,9 @@ app.whenReady().then(() => {
         }
         credential = { apiKey };
       } else {
-        const cookie = opencodeWeb.sanitizeCookieHeader(raw);
+        const cookie = opencodeWeb.sanitizeCookieHeader(raw, '__Host-console_session');
         if (!cookie) return { ok: false, error: 'Empty cookie' };
-        const [go, zen] = await Promise.all([
-          opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
-          opencodeWeb.fetchZen(cookie, electronProviderDeps())
-        ]);
+        const [go, zen] = await opencodeWeb.fetchWeb(cookie, electronProviderDeps());
         if (opencodeWeb.summarizeLink(go, zen).expired) {
           return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
         }

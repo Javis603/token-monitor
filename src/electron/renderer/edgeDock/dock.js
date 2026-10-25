@@ -1964,6 +1964,7 @@ let selfRepaintTimer = null;
 function scheduleSelfRepaint() {
   if (selfRepaintTimer) clearTimeout(selfRepaintTimer);
   selfRepaintTimer = null;
+  if (bridge.isSettingsPreview) return;
   const delay = selfRepaintDelayMs();
   // 0 means this surface has nothing to wake for: a rail with no sessions expiry, or
   // the peek handle. Leaving the timer unarmed is what keeps the rail push-driven.

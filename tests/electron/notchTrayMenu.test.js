@@ -106,6 +106,7 @@ test('Notch Settings command reaches the renderer through the registered preload
   const context = {
     window: rendererWindow,
     els: { settingsPanel: element(), shell: element(), notchFeature: { scrollIntoView: () => events.push('scroll') }, notchInput: { focus: () => events.push('focus') } },
+    displaySettings: { open: id => events.push(['display', id]) },
     state: {}, syncSettingsForm: () => events.push('sync'), ensureServiceStatusTicker() {},
     setSettingsSectionExpanded: (...args) => events.push(args),
     setSettingsAccordionExpanded: (...args) => events.push(args.at(-1)),
@@ -128,7 +129,7 @@ test('Notch Settings command reaches the renderer through the registered preload
   vm.runInNewContext(functionSource(read('main.js'), 'openSettingsFromTray', 'openViewFromTray'), mainContext);
   notchMenu({}, { onOpenSettings: mainContext.openSettingsFromTray }).submenu.at(-1).click();
   assert.deepEqual(sent, ['focus', ['settings:open', 'notch']]);
-  assert.deepEqual(events, ['sync', ['general', true], true, true, 'scroll', 'focus']);
+  assert.deepEqual(events, ['sync', ['window', true], ['display', 'notch']]);
 
   events.length = 0;
   mainContext.openSettingsFromTray();

@@ -362,8 +362,8 @@ time.sleep(10)
 });
 
 test('PTY trust selection waits for a complete menu and selected Yes before confirming', { skip: !hasPython }, async t => {
-  for (const mode of ['default-no', 'default-yes', 'fragmented', 'slow-start', 'no-color-env', 'trusted']) {
-    for (const command of ['slow-start', 'no-color-env'].includes(mode) ? ['status'] : ['usage', 'status']) await t.test(`${mode}: /${command}`, async t => {
+  for (const mode of ['default-no', 'default-yes', 'fragmented', 'paused-after-menu', 'slow-start', 'no-color-env', 'trusted']) {
+    for (const command of ['slow-start', 'no-color-env', 'paused-after-menu'].includes(mode) ? ['status'] : ['usage', 'status']) await t.test(`${mode}: /${command}`, async t => {
       const f = fixture(t);
       const fake = path.join(f.root, 'trust-menu.py');
       const receipt = path.join(f.root, 'trust.json');
@@ -379,9 +379,13 @@ def read_key():
     key = os.read(0, 128)
     keys.append(key.decode())
     return key
-def quiet(delay):
-    if select.select([0], [], [], delay)[0]:
+def quiet_until(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining > 0 and select.select([0], [], [], remaining)[0]:
+        sys.stderr.write('probe sent input before the trust fixture was ready\\n')
         sys.exit(9)
+def quiet(delay):
+    quiet_until(time.monotonic() + delay)
 def menu(yes):
     if yes and mode == 'no-color-env' and ('NO_COLOR' in os.environ or os.environ.get('FORCE_COLOR') != '1'):
         # An unstyled Ink selection changes only the marker, not its label.
@@ -394,15 +398,20 @@ def menu(yes):
 if mode != 'trusted':
     if mode == 'slow-start':
         quiet(5.2)
-    if mode == 'fragmented':
+    if mode in ('fragmented', 'paused-after-menu'):
         print('Ready to code here?\\r', flush=True)
         quiet(0.2)
         print('❯ No, exit\\r', flush=True)
         quiet(0.2)
         print('  Yes, I trust this folder\\r', flush=True)
         quiet(0.2)
+    # Anchor the mount guard before publishing the menu. If this fixture is
+    # descheduled after flush, a key queued after the guard is legitimate.
+    confirm_after = time.monotonic() + 0.15
     menu(mode == 'default-yes')
-    quiet(0.15)
+    if mode == 'paused-after-menu':
+        time.sleep(0.5)
+    quiet_until(confirm_after)
     if mode != 'default-yes':
         if read_key() != b'\\x1b[B':
             sys.exit(1)

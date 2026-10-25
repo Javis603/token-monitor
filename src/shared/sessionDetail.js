@@ -14,7 +14,7 @@ const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
-const PI_FORMAT_CLIENTS = new Set(['pi', 'omp']);
+const PI_FORMAT_CLIENTS = new Set(['pi', 'omp', 'senpi']);
 
 function* readTranscriptLines(filePath, transcriptFs = fs) {
   const decoded = isCompressedCodexTranscript(filePath) ? readCompressedCodexTranscript(filePath, { fs: transcriptFs }) : null;

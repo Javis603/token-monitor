@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   discardOrphanedSubscriptions: () => ipcRenderer.invoke('subscriptions:discardOrphans'),
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
+  getDisplayPreview: (surface, phase, slots) => ipcRenderer.invoke('settings:displayPreview', surface, phase, slots),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
   getBackgroundImage: () => ipcRenderer.invoke('appearance:getBackgroundImage'),
   chooseBackgroundImage: () => ipcRenderer.invoke('appearance:chooseBackgroundImage'),

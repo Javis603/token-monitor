@@ -73,6 +73,9 @@
     // .omp/agent/sessions root as its own `omp` client, so the row is a real
     // client, not a sub-source of Pi.
     { id: 'omp', label: 'Oh My Pi' },
+    // Tokscale already emits this id for OmO Native. It was never folded into
+    // Pi or Oh My Pi, so a saved client list does not gain it automatically.
+    { id: 'senpi', label: 'OmO Native' },
     { id: 'goose', label: 'Goose' },
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },

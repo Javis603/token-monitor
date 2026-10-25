@@ -401,7 +401,6 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
-  experimentalFeaturesGroup: document.getElementById('experimentalFeaturesGroup'),
   notchFeature: document.getElementById('notchFeature'),
   notchInput: document.getElementById('notchInput'),
   notchOptions: document.getElementById('notchOptions'),
@@ -759,6 +758,8 @@ function applySettingsTranslations() {
   setSubscriptionFormMode();
   diagnosticsPanel?.render();
 }
+
+let displaySettings = null;
 
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
@@ -5784,13 +5785,8 @@ function openSettingsPanel(section) {
   syncSettingsForm();
   ensureServiceStatusTicker();
   if (section === 'notch') {
-    setSettingsSectionExpanded('general', true);
-    setSettingsAccordionExpanded(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails, true);
-    setSettingsAccordionExpanded(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails, true);
-    requestAnimationFrame(() => {
-      els.notchFeature?.scrollIntoView({ block: 'start' });
-      els.notchInput?.focus({ preventScroll: true });
-    });
+    setSettingsSectionExpanded('window', true);
+    displaySettings?.open('notch');
   }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
@@ -7719,6 +7715,32 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value)));
 }
 
+function initFooterActionDisclosure() {
+  const actions = els.utilityActions?.closest('.footer-update-actions');
+  if (!actions) return;
+  // The footer group's width changes on every frame of the update's margin
+  // transition. Observe it so an open card follows both motion and instant
+  // reduced-motion changes without a permanent animation-frame loop.
+  const anchorObserver = new ResizeObserver(() => {
+    if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();
+  });
+  anchorObserver.observe(actions);
+  window.addEventListener('unload', () => anchorObserver.disconnect(), { once: true });
+  const reveal = () => actions.classList.add('is-disclosed');
+  const hide = () => actions.classList.remove('is-disclosed');
+  els.utilityActions.addEventListener('pointerenter', reveal);
+  actions.addEventListener('pointerleave', () => {
+    if (!actions.querySelector(':focus-visible')) hide();
+  });
+  actions.addEventListener('focusin', (event) => {
+    if (event.target.matches(':focus-visible') && els.utilityActions.contains(event.target)) reveal();
+  });
+  actions.addEventListener('focusout', (event) => {
+    if (!actions.contains(event.relatedTarget) && !actions.matches(':hover')) hide();
+  });
+  window.addEventListener('blur', () => hide());
+}
+
 function applyControlLayout(swapSettingsAndRefresh) {
   const footerSlot = document.getElementById('footerActionSlot');
   if (!footerSlot || !els.utilityActions) return;
@@ -9521,9 +9543,9 @@ function syncSettingsForm() {
   els.trayModeInput.checked = showTrayIcon && Boolean(state.settings.trayMode);
   syncHideAppIconControl(showTrayIcon, els.trayModeInput.checked);
   els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
-  els.trayContentInput.disabled = !showTrayIcon;
+  els.trayContentInput.disabled = false;
   els.showTrayProviderBadgeInput.checked = state.settings.showTrayProviderBadge === true;
-  els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
+  els.showTrayProviderBadgeInput.disabled = false;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !state.settings.trayMode);
   refreshTrayComposers();
@@ -9574,6 +9596,7 @@ function syncSettingsForm() {
   }
   modelAliasForm?.syncSettings();
   renderCursorStatus();
+  displaySettings?.sync();
 }
 
 function enabledClientSet() {
@@ -12897,7 +12920,7 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp' && client !== 'senpi') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
@@ -12925,6 +12948,7 @@ els.pinButton.addEventListener('click', (event) => {
   if (event.detail > 0) els.pinButton.blur();
   saveSettings({ windowBehavior: nextWindowBehavior(currentWindowBehavior()) });
 });
+initFooterActionDisclosure();
 els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
@@ -13493,7 +13517,6 @@ function syncDockControls() {
   }
   const notchAvailable = state.appInfo?.platform === 'darwin';
   const notchEnabled = notchAvailable && state.settings?.notchEnabled === true;
-  els.experimentalFeaturesGroup?.classList.toggle('hidden', !notchAvailable);
   els.notchFeature?.classList.toggle('hidden', !notchAvailable);
   if (els.notchInput) els.notchInput.checked = notchEnabled;
   els.notchOptions?.classList.toggle('hidden', !notchEnabled);
@@ -13510,8 +13533,8 @@ function syncDockControls() {
   syncNotchHoverControls();
   if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
-  if (enabled) edgeDockComposer?.render();
-  if (notchEnabled) notchItemsComposer?.render();
+  if (available) edgeDockComposer?.render();
+  if (notchAvailable) notchItemsComposer?.render();
 }
 
 function syncNotchSummaryMode() {
@@ -13695,8 +13718,8 @@ els.showTrayIconInput?.addEventListener('change', () => {
   state.settings.showTrayIcon = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
   if (!showTrayIcon) els.trayModeInput.checked = false;
-  els.trayContentInput.disabled = !showTrayIcon;
-  els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
+  els.trayContentInput.disabled = false;
+  els.showTrayProviderBadgeInput.disabled = false;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !els.trayModeInput.checked);
   if (!showTrayIcon) state.settings.hideAppIcon = false;
@@ -15196,9 +15219,9 @@ function syncCustomTrayClockTimer() {
 
 function refreshTrayComposers() {
   const surfaces = [
-    { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
-    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true },
-    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom' }
+    { id: 'tray', root: els.trayComposer, visible: true },
+    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: true },
+    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchSummaryMode === 'custom' }
   ];
   window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
     surfaces,
@@ -15206,6 +15229,7 @@ function refreshTrayComposers() {
     createTrayComposer
   );
   Object.values(trayComposers).forEach((composer) => composer?.refresh());
+  displaySettings?.refreshLivePreview();
   syncCustomTrayClockTimer();
 }
 
@@ -17971,7 +17995,7 @@ function setupCursorAccountUI() {
     addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
 
     document.getElementById('opencodeOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://opencode.ai/auth');
+      window.tokenMonitor.openExternal('https://opencode.ai/console');
     });
 
     // API key is the default: it needs no browser round trip. The cookie stays
@@ -18628,6 +18652,15 @@ setupSettingsAccordion(
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
 );
 setupSettingsSections();
+const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create({
+  window, document, bridge: window.tokenMonitor, settings: () => state.settings,
+  bitmap: trayComposerPreview, stats: () => state.stats, t
+});
+displaySettings = window.TokenMonitorDisplaySettings.create({
+  document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
+  scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
+  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction
+});
 setupCursorAccountUI();
 setupCustomPricingUI();
 setupModelAliasesUI();
