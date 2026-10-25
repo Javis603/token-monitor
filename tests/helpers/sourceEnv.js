@@ -31,7 +31,9 @@ const SOURCE_ENV_KEYS = Object.freeze([
   'ANTIGRAVITY_HOME',
   'ANTIGRAVITY_DATA_DIR',
   'HERMES_HOME',
-  'UNSLOTH_STUDIO_HOME'
+  'UNSLOTH_STUDIO_HOME',
+  'SENPI_CODING_AGENT_DIR',
+  'SENPI_CODING_AGENT_SESSION_DIR'
 ]);
 
 // Applied to a whole file rather than case by case, so a test added later is

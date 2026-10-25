@@ -57,9 +57,9 @@ test('OmO Native detail reads ~/.omo/agent/sessions and does not add reasoning t
 
 test('SENPI_CODING_AGENT_DIR replaces only the legacy senpi root', () => {
   const home = path.join(path.sep, 'tmp', 'senpi-home');
-  const roots = senpiSourceRoots(home, { SENPI_CODING_AGENT_DIR: '/custom/senpi-agent' });
+  const roots = senpiSourceRoots(home, { SENPI_CODING_AGENT_DIR: '/custom/senpi-agent' }, { cwdDir: home });
   assert.deepEqual(roots.map(([id]) => id), ['senpi-sessions', 'senpi-omo-sessions', 'senpi-task-children']);
   assert.equal(roots[0][1], path.join('/custom/senpi-agent', 'sessions'));
   assert.equal(roots[1][1], path.join(home, '.omo', 'agent', 'sessions'));
-  assert.equal(roots[2][1], path.join(home, '.omo', 'senpi-task'));
+  assert.equal(roots[2][1], path.join(home, '.omo', 'senpi-task', 'children'));
 });

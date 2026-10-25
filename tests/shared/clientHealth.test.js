@@ -344,11 +344,11 @@ test('every source-root id the collector emits is in the allowlist', () => {
 
 test('senpi watches the OmO tree and the legacy senpi root, and the agent dir replaces only the latter', () => {
   const homeDir = path.join(path.sep, 'tmp', 'source-home');
-  const options = { homeDir, platform: 'linux', env: {} };
+  const options = { homeDir, platform: 'linux', env: {}, cwdDir: homeDir };
   assert.deepEqual(clientSourceRoots('senpi', options).senpi, [
     { id: 'senpi-sessions', dir: path.join(homeDir, '.senpi', 'agent', 'sessions') },
     { id: 'senpi-omo-sessions', dir: path.join(homeDir, '.omo', 'agent', 'sessions') },
-    { id: 'senpi-task-children', dir: path.join(homeDir, '.omo', 'senpi-task') }
+    { id: 'senpi-task-children', dir: path.join(homeDir, '.omo', 'senpi-task', 'children') }
   ]);
   const relocated = clientSourceRoots('senpi', {
     ...options,
@@ -624,7 +624,12 @@ test('labelling roots keeps diagnostics separate from watcher roots', () => {
         && root.id !== 'kiro-ide-globalstorage'
       ))
       .map((root) => root.dir);
-    assert.deepEqual(dirs, expected);
+    if (client === 'senpi') {
+      // Discovery ancestors are watch targets, while diagnostics continue to
+      // describe only the transcript sources. Their pruning is covered by
+      // senpiSources.test.js.
+      for (const dir of expected) assert.ok(dirs.includes(dir));
+    } else assert.deepEqual(dirs, expected);
   }
 });
 

@@ -20,7 +20,7 @@ const {
   devinCliDbDirs,
   devinDesktopAcpDirs
 } = require('./providers/devin/paths');
-const { senpiSourceRoots } = require('./providers/senpi/paths');
+const { senpiWatchSources } = require('./providers/senpi/paths');
 
 // Windows only: libuv asserts that the filename ReadDirectoryChangesW hands
 // back starts with the directory string it was given, and calls abort() when it
@@ -314,7 +314,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // rather than inventing an env override the scan does not honor.
   add('pi', ...simpleHostSourceRoots('pi', home));
   add('omp', ...simpleHostSourceRoots('omp', home));
-  add('senpi', ...senpiSourceRoots(home, env));
+  if (enabled.has('senpi')) add('senpi', ...(options.senpiSources || senpiWatchSources({ ...options, homeDir: home, env, platform })).roots);
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
   // cfg(macos)/cfg(windows) blocks) — watch all three so native mac/win users get
