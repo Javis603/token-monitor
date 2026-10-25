@@ -75,7 +75,7 @@ class FakeElement {
     this.parent.children = this.parent.children.filter((child) => child !== this);
     this.parent = null;
   }
-  addEventListener() {}
+  addEventListener(name, handler) { (this.listeners ||= {})[name] = handler; }
   setAttribute(name, value) { this.attributes[name] = value; }
   getAttribute(name) { return this.attributes[name] ?? null; }
   removeAttribute(name) { delete this.attributes[name]; }
@@ -730,6 +730,77 @@ test('an Ollama API card keeps purchased balance separate from included monthly 
   assert.equal(card.textOf('limit-meter').length, 1);
   for (const amount of ['$52.50', '$18.25', '$7.50']) assert.ok(card.text.includes(amount), card.text);
   assert.equal(card.text.includes('$70.75'), false, 'wallet and allowance must not be added');
+  assert.deepEqual([...card.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['Credit balance', 'Included credits']);
+  assert.match(card.find('limit-spend-summary').textContent, /\$18\.25/);
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.equal(tooltip.text, 'Monthly credits used $7.50');
+  const trigger = card.find('limit-detail-tooltip-trigger');
+  assert.equal(trigger.tabIndex, 0);
+  assert.match(trigger.getAttribute('aria-label'), /Monthly credits used: \$7\.50/);
+  const wrap = card.find('limit-spend-info-wrap');
+  wrap.isConnected = true;
+  wrap.getBoundingClientRect = () => ({ top: 200 });
+  tooltip.childElementCount = tooltip.children.length;
+  tooltip.offsetHeight = 40;
+  tooltip.showPopover = () => { tooltip.opened = true; };
+  tooltip.hidePopover = () => { tooltip.opened = false; };
+  wrap.listeners.focusin();
+  assert.equal(tooltip.opened, true);
+  wrap.listeners.keydown({ key: 'Escape' });
+  assert.equal(tooltip.opened, false);
+  wrap.listeners.pointerenter();
+  assert.equal(tooltip.opened, true);
+  wrap.listeners.pointerleave();
+  assert.equal(tooltip.opened, false);
+});
+
+test('Ollama hides spending details when that usage item is disabled and keeps spend-only readings', () => {
+  const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
+  const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 0 } });
+  const row = normalizeLimitProvider({ provider: 'ollama', status: 'ok', windows: parsed.windows });
+  const hidden = dockView({ limitProviderHiddenItems: { ollama: ['spend'] } }).renderProviderWindows(row, '#888888');
+  assert.match(hidden.text, /Credit balance \$0\.00/);
+  assert.equal(hidden.find('limit-detail-tooltip'), null);
+  assert.ok(dockView().limitProviderUsageItems([row]).some((item) => item.id === 'spend'));
+  const hiddenBalance = dockView({ limitProviderHiddenItems: { ollama: ['credits'] } }).renderProviderWindows(row, '#888888');
+  assert.doesNotMatch(hiddenBalance.text, /Credit balance/);
+  assert.match(hiddenBalance.text, /Monthly credits used \$7\.50/);
+  const spendOnly = dockView().renderProviderWindows({ provider: 'ollama', windows: parsed.windows.filter((w) => w.metric === 'spend') }, '#888888');
+  assert.match(spendOnly.text, /Monthly credits used \$7\.50/);
+  assert.doesNotMatch(spendOnly.text, /Credit balance/);
+});
+
+test('Home renders Ollama balance and included quota on separate full-width rows with the shared tooltip', () => {
+  const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
+  const { homeLimitAccounts } = require('../../src/electron/renderer/homeOverview');
+  const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 } });
+  const rows = homeLimitAccounts([{ providerId: 'ollama', name: 'Ollama', windows: parsed.windows }]);
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const functions = ['homeModuleShell', 'homeLimitWindowLabel', 'formatHomeLimitWindowValue', 'renderHomeLimitModule'].map((name) => {
+    const start = source.indexOf(`function ${name}(`);
+    return source.slice(start, source.indexOf('\n}\n', start) + 2);
+  }).join('\n');
+  const context = {
+    document: { createElement: (tag) => new FakeElement(tag) }, homeLimitRows: () => rows,
+    state: { settings: { homeLimitDisplayMode: 'bars' } }, VIEW_ICON_CLASSES: {}, renderBreakdownChange() {},
+    t: (key) => i18n.translate('en', key), applyHomeListMark() {}, iconKindFor: () => '',
+    limitWindowsView: dockView(), limitProviderPresentationApi: limitPresentationApi,
+    isCreditsWindow: balanceDisplay.isCreditsWindow, formatCompactMoney: balanceDisplay.formatCompactMoney,
+    currentLocale: () => 'en', formatPercent: (n) => `${n}%`,
+    limitModeSuffix: limitDisplayMode.limitModeSuffix, limitFillPercent: limitDisplayMode.limitFillPercent,
+    formatLimitBoundary: () => '', optionalFiniteNumber: (n) => n == null ? null : Number(n)
+  };
+  vm.runInNewContext(`${functions}\nthis.result = renderHomeLimitModule();`, context);
+  const readings = [...context.result.walk()].filter((node) => node.classNames.has('home-limit-window'));
+  assert.equal(readings.length, 2);
+  assert.ok(readings.every((node) => node.classNames.has('home-limit-window-wide')));
+  assert.equal(readings[0].find('home-limit-window-label').textContent, 'Credit balance');
+  assert.equal(readings[0].find('home-list-value').textContent, '$18.25');
+  assert.equal(readings[0].find('limit-meter'), null);
+  assert.equal(readings[0].find('limit-detail-tooltip').text, 'Monthly credits used $7.50');
+  assert.equal(readings[0].find('limit-detail-tooltip-trigger').tabIndex, 0);
+  assert.equal(readings[1].find('home-list-value').textContent, '$52.50');
+  assert.ok(readings[1].find('limit-meter'));
 });
 
 test('a TypeSafe card omits expiry when the billing response has no valid grants', () => {

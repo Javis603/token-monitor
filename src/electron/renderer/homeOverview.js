@@ -92,12 +92,17 @@
   }
 
   function compactAccountWindows(providerId, windows) {
-    const selected = windows.slice(0, 2);
-    const spend = providerId === 'ollama'
-      ? windows.find((window) => window.metric === 'spend' && window.showMeter === false)
-      : null;
-    if (spend && !selected.includes(spend)) selected.push(spend);
-    return selected;
+    if (providerId !== 'ollama') return windows.slice(0, 2);
+    const wallet = windows.find((window) => window.metric === 'credits' && window.showMeter === false);
+    const spend = windows.find((window) => window.metric === 'spend' && window.showMeter === false);
+    if (!wallet) return windows.slice(0, 2).map((window) => ({ ...window, fullWidth: true }));
+    return [
+      { ...wallet, resetDescription: '', detailEntries: [
+        ...(spend?.value ? [[spend.label, spend.value]] : []),
+        ...(wallet.resetDescription ? [{ full: wallet.resetDescription }] : [])
+      ] },
+      ...windows.filter((window) => window !== wallet && window !== spend).slice(0, 2)
+    ].map((window) => ({ ...window, fullWidth: true }));
   }
 
   // `isWindowHidden(providerId, window)` drops the rows the user unchecked on

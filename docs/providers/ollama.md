@@ -34,6 +34,8 @@ The Cookie path retains Session/Hourly/Weekly meters and also accepts **Monthly 
 
 The **Usage credits** wallet layout supplies **Credit balance**, **Monthly credits used**, and refill text. These remain independent measurements: monthly spending never substitutes for a missing balance, and a refill target is neither a quota denominator nor an exact reset date. Wallet amounts use meterless `credits`/`spend` windows and may coexist with genuine quota meters. Parse complete elements within the wallet section so adjacent sections cannot provide missing values.
 
+Credit balance leads the card and Home display. Monthly credits used appears in its existing-style info tooltip, alongside refill text on the card; included usage keeps its own separate quota row. Home uses full-width Ollama readings so a wallet amount never shares a grid row with a quota bar. If no wallet balance is reported, monthly spending remains a standalone reading. The wire retains the independent `credits`/`spend` measurements; this grouping is presentation only.
+
 Cookie markup follows the sanitized shapes in CodexBar's [parser tests](https://github.com/steipete/CodexBar/blob/d34fbb47afe73f81dd591bae28a60f72c39a9fe4/Tests/CodexBarTests/OllamaUsageParserTests.swift) and [wallet tests](https://github.com/steipete/CodexBar/blob/d34fbb47afe73f81dd591bae28a60f72c39a9fe4/Tests/CodexBarTests/OllamaCreditWalletTests.swift). Local fixtures are bounded parser/transport/display evidence, not live-account acceptance.
 
 ## Account identity

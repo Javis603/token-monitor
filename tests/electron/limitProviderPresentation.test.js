@@ -438,6 +438,7 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
     formatHomeLimitWindowValue: () => '',
     formatLimitBoundary: (window) => boundaryLabels[window.resetsAt] || '',
     limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' },
+    limitWindowsView: createLimitWindowsView({}),
     state: { settings: {} },
     t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
   };

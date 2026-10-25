@@ -6456,6 +6456,7 @@ function renderHomeLimitModule() {
     for (const window of row.windows) {
       const metric = document.createElement('div');
       metric.className = 'home-limit-window';
+      if (window.fullWidth) metric.classList.add('home-limit-window-wide');
       const line = document.createElement('div');
       line.className = 'home-limit-window-line';
       const label = document.createElement('span');
@@ -6474,7 +6475,15 @@ function renderHomeLimitModule() {
           value.style.setProperty('--home-limit-accent', row.color);
         }
       }
-      line.append(label, value);
+      const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
+      if (info) {
+        const right = document.createElement('span');
+        right.className = 'home-limit-window-value';
+        right.append(value, info);
+        line.append(label, right);
+      } else {
+        line.append(label, value);
+      }
       metric.append(line);
       // Money and fixed labels retain a remaining meter; only percentage
       // labels follow the global used/remaining display preference.
