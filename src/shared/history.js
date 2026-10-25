@@ -311,6 +311,10 @@ function localDayKey(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+function utcOffsetMinutes(date = new Date()) {
+  return -date.getTimezoneOffset();
+}
+
 // A day is "active" when tokens > 0. currentStreak = consecutive active days ending at
 // todayKey (0 if today is inactive). longestStreak = longest run anywhere.
 function computeStreaks(days, todayKey) {
@@ -626,6 +630,7 @@ module.exports = {
   hasDisjointReasoning, num, normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
   normalizeTokscaleModelComponentSummary, sumOutputTokens, sumTokens,
   parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
+  utcOffsetMinutes,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision, deviceHistoryRevision
 };
