@@ -3092,7 +3092,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web/API']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'API/Web']);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
