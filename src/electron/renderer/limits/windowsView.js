@@ -1578,6 +1578,22 @@
         windows.append(node);
       }
       if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
+      // New Ollama plans have no 5-hour or weekly limits: their balance is a
+      // monthly included allowance, so it renders as a money row.
+      for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
+        const amount = creditsAmount(provider, creditsWindow);
+        if (amount === null) continue;
+        const node = limitWindowNode(
+          providerWindowLabel(provider, creditsWindow, 'Balance'),
+          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) },
+          color,
+          0.95,
+          formatMoney(amount, creditsCurrency(provider, creditsWindow))
+        );
+        node.classList.add('limit-window-wide');
+        if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) node.classList.add('limit-window-no-reset');
+        windows.append(node);
+      }
     } else if (provider.provider === 'claude') {
       // Claude usually shows session + one all-models weekly, but can carry a second
       // model-scoped weekly (the temporary "Fable only" promo cap). Render every

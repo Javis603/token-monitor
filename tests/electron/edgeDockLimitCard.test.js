@@ -672,6 +672,32 @@ test('a TypeSafe card does not repeat the full balance beside its expiry', () =>
   assert.equal(card.text.match(/\$5\.00/g)?.length, 1);
 });
 
+test('an Ollama new-plan card draws the monthly included credits', () => {
+  const row = normalizeLimitProvider({
+    provider: 'ollama',
+    accountKey: 'sha256:ollama-credits-row',
+    status: 'ok',
+    source: 'api',
+    updatedAt: '2026-10-23T12:00:00Z',
+    windows: [{
+      kind: 'billing',
+      metric: 'credits',
+      label: 'Included credits',
+      used: 15,
+      limit: 60,
+      remaining: 45,
+      currency: 'USD',
+      usedPercent: 25,
+      remainingPercent: 75,
+      resetsAt: '2026-11-08T08:00:00Z',
+      showMeter: true
+    }]
+  });
+  const node = dockView().renderLimitProviderSolo('ollama', 'Ollama', row, '#888888');
+  assert.match(node.text, /\$45\.00/);
+  assert.match(node.text, /Included credits/);
+});
+
 test('a TypeSafe card omits expiry when the billing response has no valid grants', () => {
   const card = dockView().renderProviderWindows({
     provider: 'typesafe',

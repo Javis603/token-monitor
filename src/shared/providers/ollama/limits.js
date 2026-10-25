@@ -3,14 +3,24 @@
 const { normalizeLimitProvider } = require('../../limits/core');
 const {
   cleanSecret,
-  errorWithStatus
+  errorWithStatus,
+  providerStatusFromError
 } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
 const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
+const OLLAMA_BALANCE_URL = 'https://ollama.com/api/balance';
+const OLLAMA_ME_URL = 'https://ollama.com/api/me';
 const VALIDATION_CACHE_MS = 30 * 1000;
+const ACCOUNT_CACHE_MS = 6 * 60 * 60 * 1000;
+const ACCOUNT_FAILURE_TTL_MS = 5 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 4;
+const SESSION_WINDOW_MINUTES = 5 * 60;
+const WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 let validationCache = null;
+const accountCache = new Map();
+const accountFailures = new Map();
 const OLLAMA_SESSION_COOKIE_NAMES = new Set([
   'session',
   '__Secure-session',
@@ -62,6 +72,16 @@ function ollamaSessionCookie(env = process.env, options = {}) {
   return '';
 }
 
+function ollamaApiKey(env = process.env, options = {}) {
+  const explicit = cleanSecret(options.ollamaApiKey);
+  if (explicit) return explicit;
+  for (const name of ['TOKEN_MONITOR_OLLAMA_API_KEY', 'OLLAMA_API_KEY']) {
+    const key = cleanSecret(env[name]);
+    if (key) return key;
+  }
+  return '';
+}
+
 function toIso(value) {
   if (!value) return null;
   const parsed = new Date(String(value));
@@ -82,11 +102,16 @@ function validationCacheKey(cookieHeader) {
   return hashKey('ollama-validation', cookieHeader);
 }
 
+// Only a web-lane success can prove a cookie; an API-lane probe must never seed
+// this cache or a later cookie poll could answer with another account's row.
 function rememberOllamaValidation(cookieHeader, provider, nowMs = Date.now()) {
   if (!cookieHeader) return;
+  if (provider?.status !== 'ok' || provider?.source !== 'web') {
+    if (validationCache?.key === validationCacheKey(cookieHeader)) validationCache = null;
+    return;
+  }
   const key = validationCacheKey(cookieHeader);
   if (validationCache?.key === key) validationCache = null;
-  if (provider?.status !== 'ok') return;
   validationCache = {
     key,
     expiresAt: nowMs + VALIDATION_CACHE_MS,
@@ -214,10 +239,276 @@ async function requestSettings(fetchFn, cookieHeader, controller) {
   throw errorWithStatus('unavailable', 'Ollama returned too many redirects');
 }
 
+function finiteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function usagePercentFromRemaining(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.round(Math.max(0, Math.min(100, 100 - number)) * 1000) / 1000;
+}
+
+/**
+ * GET /api/balance contract (https://docs.ollama.com/api/balance).
+ * Legacy plans carry included.session|weekly { remaining_percent, resets_at };
+ * the new pricing returns included { balance_usd, allowance_usd, period } and
+ * no 5-hour/weekly windows. `remaining_percent` is what is left, so the meter
+ * value is its complement.
+ */
+function parseOllamaBalance(json) {
+  const included = json && typeof json === 'object' && json.included && typeof json.included === 'object'
+    ? json.included
+    : null;
+  if (!included) return null;
+  const session = included.session && typeof included.session === 'object' ? included.session : null;
+  const weekly = included.weekly && typeof included.weekly === 'object' ? included.weekly : null;
+  if (session || weekly) {
+    const windows = [];
+    const sessionUsed = session ? usagePercentFromRemaining(session.remaining_percent) : null;
+    if (sessionUsed !== null) {
+      windows.push({
+        kind: 'session',
+        usedPercent: sessionUsed,
+        resetsAt: toIso(session.resets_at),
+        windowMinutes: SESSION_WINDOW_MINUTES,
+        showMeter: true
+      });
+    }
+    const weeklyUsed = weekly ? usagePercentFromRemaining(weekly.remaining_percent) : null;
+    if (weeklyUsed !== null) {
+      windows.push({
+        kind: 'weekly',
+        usedPercent: weeklyUsed,
+        resetsAt: toIso(weekly.resets_at),
+        windowMinutes: WEEKLY_WINDOW_MINUTES,
+        showMeter: true
+      });
+    }
+    if (windows.length) return { windows };
+    return null;
+  }
+  const allowance = finiteNumber(included.allowance_usd);
+  const balance = finiteNumber(included.balance_usd);
+  if (allowance === null || allowance <= 0 || balance === null) return null;
+  const remaining = Math.max(0, balance);
+  const used = Math.max(0, Math.min(allowance, allowance - remaining));
+  const period = included.period && typeof included.period === 'object' ? included.period : null;
+  return {
+    windows: [{
+      kind: 'billing',
+      metric: 'credits',
+      label: 'Included credits',
+      used,
+      limit: allowance,
+      remaining,
+      currency: 'USD',
+      resetsAt: toIso(period && period.until),
+      showMeter: true
+    }]
+  };
+}
+
+async function requestOllamaJson(url, init, deps = {}) {
+  const fetchFn = deps.fetch || fetch;
+  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetchFn(url, {
+      ...init,
+      redirect: 'manual',
+      ...(controller ? { signal: controller.signal } : {})
+    });
+    if (!response || !response.ok) {
+      const status = !response
+        ? 'unavailable'
+        : response.status === 401 || response.status === 403
+          ? 'unauthorized'
+          : response.status === 429
+            ? 'sourceRateLimited'
+            : 'unavailable';
+      const error = errorWithStatus(status, `${url} returned ${response ? response.status : 'no response'}`);
+      if (response) error.httpStatus = response.status;
+      throw error;
+    }
+    try {
+      return await response.json();
+    } catch (_) {
+      throw errorWithStatus('unavailable', `${url} returned invalid JSON`);
+    }
+  } catch (error) {
+    if (error?.name === 'AbortError') throw errorWithStatus('unavailable', `${url} timed out`);
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function apiKeyCacheKey(apiKey) {
+  return hashKey('ollama-api-key', apiKey);
+}
+
+function fallbackAccountKey(apiKey) {
+  return hashKey('ollama', `api-key:${apiKey}`);
+}
+
+function rememberAccount(keyHash, identity, nowMs) {
+  accountCache.delete(keyHash);
+  accountCache.set(keyHash, { ...identity, expiresAt: nowMs + ACCOUNT_CACHE_MS });
+  while (accountCache.size > MAX_CACHE_ENTRIES) {
+    accountCache.delete(accountCache.keys().next().value);
+  }
+}
+
+function cachedAccount(keyHash, nowMs) {
+  const cached = accountCache.get(keyHash);
+  if (!cached) return null;
+  if (cached.expiresAt <= nowMs) {
+    accountCache.delete(keyHash);
+    return null;
+  }
+  return cached;
+}
+
+// A failed lookup says nothing about the credential, so it must not be retried
+// on every poll: a short negative cache keeps the extra request to once per
+// failure window while the quota reading stays on the key-derived identity.
+function rememberAccountFailure(keyHash, nowMs) {
+  accountFailures.delete(keyHash);
+  accountFailures.set(keyHash, nowMs + ACCOUNT_FAILURE_TTL_MS);
+  while (accountFailures.size > MAX_CACHE_ENTRIES) {
+    accountFailures.delete(accountFailures.keys().next().value);
+  }
+}
+
+function accountFailureFresh(keyHash, nowMs) {
+  const until = accountFailures.get(keyHash);
+  if (!until) return false;
+  if (until <= nowMs) {
+    accountFailures.delete(keyHash);
+    return false;
+  }
+  return true;
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+/**
+ * The balance payload carries no identity, so a first-seen key asks the web
+ * app's own session endpoint for the account email and plan. That endpoint is
+ * undocumented: its fields are read case-insensitively, the answer is cached
+ * for six hours, and a failure is not retried for five minutes. The email hash
+ * matches the cookie lane's identity, so switching credential lanes or devices
+ * does not split one account into two rows. A save probe passes `allowCache`
+ * false so it can neither read nor seed this bookkeeping.
+ */
+async function resolveApiIdentity(apiKey, deps, nowMs, allowCache = true) {
+  const keyHash = apiKeyCacheKey(apiKey);
+  if (allowCache) {
+    const cached = cachedAccount(keyHash, nowMs);
+    if (cached) return cached;
+    if (accountFailureFresh(keyHash, nowMs)) return null;
+  }
+  let data;
+  try {
+    data = await requestOllamaJson(OLLAMA_ME_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: '{}'
+    }, deps);
+  } catch (error) {
+    if (allowCache) {
+      if (error?.status === 'unauthorized') accountCache.delete(keyHash);
+      rememberAccountFailure(keyHash, nowMs);
+    }
+    return null;
+  }
+  const email = firstText(data?.Email, data?.email).toLowerCase();
+  if (!email || !email.includes('@')) {
+    if (allowCache) rememberAccountFailure(keyHash, nowMs);
+    return null;
+  }
+  const plan = firstText(data?.Plan, data?.plan);
+  const identity = {
+    accountKey: hashKey('ollama', email),
+    accountEmail: email,
+    accountLabel: plan
+  };
+  if (allowCache) {
+    accountFailures.delete(keyHash);
+    rememberAccount(keyHash, identity, nowMs);
+  }
+  return identity;
+}
+
+async function fetchOllamaApiLimits(apiKey, options, deps, nowMs, updatedAt) {
+  let payload;
+  try {
+    payload = await requestOllamaJson(OLLAMA_BALANCE_URL, {
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' }
+    }, deps);
+  } catch (error) {
+    return normalizeLimitProvider({
+      provider: 'ollama',
+      source: 'api',
+      status: providerStatusFromError(error),
+      updatedAt,
+      windows: []
+    });
+  }
+  const parsed = parseOllamaBalance(payload);
+  if (!parsed) {
+    return normalizeLimitProvider({
+      provider: 'ollama',
+      source: 'api',
+      status: 'unavailable',
+      updatedAt,
+      windows: []
+    });
+  }
+  const allowCache = deps.probe !== true;
+  // A save-time check only proves the key, so it stays one request: identity
+  // resolution belongs to the poll that follows it.
+  const identity = allowCache ? await resolveApiIdentity(apiKey, deps, nowMs, true) : null;
+  const accountKey = identity ? identity.accountKey : fallbackAccountKey(apiKey);
+  // Compare with rows the runtime accepted. A superseded probe can populate
+  // the identity cache, but must not consume a removal before its result lands.
+  const removals = allowCache ? (options.previousLimits?.providers || [])
+    .filter((previous) => previous.provider === 'ollama' && previous.accountKey && previous.accountKey !== accountKey)
+    .map((previous) => ({ provider: 'ollama', accountKey: previous.accountKey, removed: true })) : [];
+  const row = normalizeLimitProvider({
+    provider: 'ollama',
+    accountKey,
+    ...(identity?.accountEmail ? { accountEmail: identity.accountEmail } : {}),
+    ...(identity?.accountLabel ? { accountLabel: identity.accountLabel } : {}),
+    source: 'api',
+    status: 'ok',
+    updatedAt,
+    windows: parsed.windows
+  });
+  return removals.length ? [row, ...removals] : row;
+}
+
 async function fetchOllamaLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
+  const apiKey = ollamaApiKey(env, options);
+  if (apiKey) return fetchOllamaApiLimits(apiKey, options, deps, now, updatedAt);
+
   const cookieHeader = ollamaSessionCookie(env, options);
   if (!cookieHeader) {
     return normalizeLimitProvider({ provider: 'ollama', source: 'web', status: 'notConfigured', updatedAt, windows: [] });
@@ -272,10 +563,14 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
 
 module.exports = {
   OLLAMA_SETTINGS_URL,
+  OLLAMA_BALANCE_URL,
+  OLLAMA_ME_URL,
   OLLAMA_SESSION_COOKIE_NAMES,
   normalizeOllamaCookieHeader,
   ollamaSessionCookie,
+  ollamaApiKey,
   rememberOllamaValidation,
   parseOllamaUsageHtml,
+  parseOllamaBalance,
   fetchOllamaLimits
 };
