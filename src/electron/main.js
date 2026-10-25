@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
+const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
 const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, screen, session, shell, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
@@ -496,18 +497,6 @@ function appWindowIcon() {
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
-const CSP_HEADER = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "frame-ancestors 'none'"
-].join('; ');
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
@@ -7759,7 +7748,7 @@ app.whenReady().then(() => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [CSP_HEADER]
+        'Content-Security-Policy': [contentSecurityPolicyForRequest(details)]
       }
     });
   });
@@ -8292,6 +8281,10 @@ app.whenReady().then(() => {
       notchController.previewScale(patch.notchCustomScale);
     }
     return true;
+  });
+  ipcMain.handle('settings:displayPreview', (event, surface, phase, slots) => {
+    if (event.sender !== mainWindow?.webContents) return null;
+    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots);
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);

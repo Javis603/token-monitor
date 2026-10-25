@@ -759,6 +759,8 @@ function applySettingsTranslations() {
   diagnosticsPanel?.render();
 }
 
+let displaySettings = null;
+
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
@@ -5784,11 +5786,7 @@ function openSettingsPanel(section) {
   ensureServiceStatusTicker();
   if (section === 'notch') {
     setSettingsSectionExpanded('window', true);
-    setSettingsAccordionExpanded(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails, true);
-    requestAnimationFrame(() => {
-      els.notchFeature?.scrollIntoView({ block: 'start' });
-      els.notchInput?.focus({ preventScroll: true });
-    });
+    displaySettings?.open('notch');
   }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
@@ -9545,9 +9543,9 @@ function syncSettingsForm() {
   els.trayModeInput.checked = showTrayIcon && Boolean(state.settings.trayMode);
   syncHideAppIconControl(showTrayIcon, els.trayModeInput.checked);
   els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
-  els.trayContentInput.disabled = !showTrayIcon;
+  els.trayContentInput.disabled = false;
   els.showTrayProviderBadgeInput.checked = state.settings.showTrayProviderBadge === true;
-  els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
+  els.showTrayProviderBadgeInput.disabled = false;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !state.settings.trayMode);
   refreshTrayComposers();
@@ -9598,6 +9596,7 @@ function syncSettingsForm() {
   }
   modelAliasForm?.syncSettings();
   renderCursorStatus();
+  displaySettings?.sync();
 }
 
 function enabledClientSet() {
@@ -13534,8 +13533,8 @@ function syncDockControls() {
   syncNotchHoverControls();
   if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
-  if (enabled) edgeDockComposer?.render();
-  if (notchEnabled) notchItemsComposer?.render();
+  if (available) edgeDockComposer?.render();
+  if (notchAvailable) notchItemsComposer?.render();
 }
 
 function syncNotchSummaryMode() {
@@ -13719,8 +13718,8 @@ els.showTrayIconInput?.addEventListener('change', () => {
   state.settings.showTrayIcon = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
   if (!showTrayIcon) els.trayModeInput.checked = false;
-  els.trayContentInput.disabled = !showTrayIcon;
-  els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
+  els.trayContentInput.disabled = false;
+  els.showTrayProviderBadgeInput.disabled = false;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !els.trayModeInput.checked);
   if (!showTrayIcon) state.settings.hideAppIcon = false;
@@ -15220,9 +15219,9 @@ function syncCustomTrayClockTimer() {
 
 function refreshTrayComposers() {
   const surfaces = [
-    { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
-    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true },
-    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom' }
+    { id: 'tray', root: els.trayComposer, visible: true },
+    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: true },
+    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchSummaryMode === 'custom' }
   ];
   window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
     surfaces,
@@ -18652,6 +18651,15 @@ setupSettingsAccordion(
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
 );
 setupSettingsSections();
+const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create({
+  window, document, bridge: window.tokenMonitor, settings: () => state.settings,
+  bitmap: trayComposerPreview, stats: () => state.stats, t
+});
+displaySettings = window.TokenMonitorDisplaySettings.create({
+  document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
+  scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
+  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction
+});
 setupCursorAccountUI();
 setupCustomPricingUI();
 setupModelAliasesUI();
