@@ -6,7 +6,8 @@ const semver = require('semver');
 const { normalizeManifest } = require('../../shared/plugins/manifest');
 const { localize } = require('../../shared/plugins/localized');
 const { missingGrant, riskSummary } = require('../../shared/plugins/permissions');
-const MAX_PACKAGE_BYTES = 2 * 1024 * 1024;
+// Room for the full Worker code allowance plus the encoded Rich assets.
+const MAX_PACKAGE_BYTES = 4 * 1024 * 1024;
 const { MAX_CODE_BYTES, MAX_MANIFEST_BYTES, assertHostCompatibility } = require('./contracts');
 const { assetPath } = require('../../shared/plugins/webUi');
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
@@ -29,7 +30,7 @@ function entryName(name) {
 }
 function parsePackage(bytes, { checkCompatibility = true } = {}) {
   if (!Buffer.isBuffer(bytes)) bytes = Buffer.from(bytes);
-  if (bytes.length > MAX_PACKAGE_BYTES) throw new Error('plugin package exceeds 2 MB');
+  if (bytes.length > MAX_PACKAGE_BYTES) throw new Error(`plugin package exceeds ${MAX_PACKAGE_BYTES / 1024 / 1024} MB`);
   let data;
   try { data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); } catch { throw new Error('plugin package must contain valid UTF-8 JSON'); }
   if (!data || data.format !== 1 || !data.manifest || Array.isArray(data.manifest)) throw new Error('unsupported plugin package format');
@@ -42,7 +43,7 @@ function parsePackage(bytes, { checkCompatibility = true } = {}) {
   if (!semver.valid(result.manifest.version)) throw new Error('invalid plugin version');
   if (result.manifest.main) {
     if (!entryName(result.manifest.main)) throw new Error('entry must be a portable, contained .js path');
-    if (typeof data.code !== 'string' || Buffer.byteLength(data.code) > MAX_CODE_BYTES) throw new Error('entry code must be text under 512 KB');
+    if (typeof data.code !== 'string' || Buffer.byteLength(data.code) > MAX_CODE_BYTES) throw new Error(`entry code must be text under ${MAX_CODE_BYTES / 1024 / 1024} MB`);
   } else if (data.code !== undefined && data.code !== null) throw new Error('package has code but manifest has no main');
   const assets = validateAssets(data.assets, result.manifest);
   return { assets, bytes: Buffer.from(bytes), hash: digest(bytes), manifest: result.manifest, rawManifest: data.manifest, code: data.code ?? null };

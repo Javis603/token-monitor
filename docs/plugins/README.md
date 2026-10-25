@@ -25,7 +25,7 @@ Build a package without publishing it:
 node scripts/build-plugin-package.js docs/plugins/examples/token-pulse /tmp/token-pulse.tmplugin
 ```
 
-The version-1 JSON envelope contains `format`, `manifest`, optional bundled `code` and an optional `assets` map for declared Rich UI files. Limits are 2 MB encoded package, 256 KB manifest and 512 KB code, shared with runtime loading. The installed manifest is written compactly within its verified byte limit. `engines.tokenMonitor` is checked during import and runtime discovery; incompatible installed plugins can still be removed or replaced by a compatible update. See [distribution contracts](distribution-design.md) for catalogs, source identity and transaction recovery.
+The version-1 JSON envelope contains `format`, `manifest`, optional bundled `code` and an optional `assets` map for declared Rich UI files. Limits are 4 MB encoded package, 256 KB manifest and 2 MB code, shared with runtime loading. The installed manifest is written compactly within its verified byte limit. `engines.tokenMonitor` is checked during import and runtime discovery; incompatible installed plugins can still be removed or replaced by a compatible update. See [distribution contracts](distribution-design.md) for catalogs, source identity and transaction recovery.
 
 To recover from a faulty plugin, turn off the plugin or the **Enable plugins** switch in the Installed tab’s **More plugin actions** menu. The master switch pauses all plugins without changing their individual selections; the same menu also contains plugin information. `--plugins-safe-mode` or `TOKEN_MONITOR_PLUGINS_SAFE_MODE=1` prevents all plugin activation on startup. A plugin which repeatedly fails can be re-enabled explicitly after its code is repaired.
 
@@ -80,7 +80,7 @@ tm.onAction('note', async ({ value }) => {
 });
 ```
 
-Text inputs accept a declared `maxLength` up to 1024 JavaScript string units. Their bound values stay raw: display formatting does not truncate the draft or treat a literal `—` as missing. A `text` metric is capped at 200 characters; for a longer editable value, publish an `object` metric such as `{ note }` and bind its `note` field. Enter commits through the native change/blur path; ordinary live pushes preserve an unsubmitted draft.
+Text inputs accept a declared `maxLength` up to 1024 JavaScript string units. Their bound values stay raw: display formatting does not truncate the draft or treat a literal `—` as missing. A `text` metric is capped at 4096 characters and flattens control characters to spaces; for multi-line or structured values, publish an `object` metric such as `{ note }` and bind its `note` field. Enter commits through the native change/blur path; ordinary live pushes preserve an unsubmitted draft.
 
 Buttons send `press`; the other controls send `change` with a boolean, number or text value. Sliders require literal finite min/max/step; selects declare up to 32 options. A draw action receives bounded `pointerdown`, `pointermove`, `pointerup`, `pointercancel` coordinates in its own declared box, or a `key` from arrows, Enter, Escape and Space. Pointer movement is sampled at about 20 events/second; terminal events are not throttled by the renderer. The tray stays a bitmap and has no control events. Compact rail cards are read-only; use their full view or a plugin page for controls. Authors must implement a keyboard path for interactive drawings, as Sketch Pad does.
 
@@ -103,7 +103,7 @@ This legacy bus excludes credentials, account keys/emails, session titles, trans
 
 `notify` permits host notifications. `network` permits brokered HTTPS requests only to the declared `network.hosts` (exact hostnames or a leading wildcard). The consent UI highlights read access combined with a network destination. Adding permissions or hosts pauses the updated plugin until approved. Effective access is the intersection of the current manifest and the stored grant.
 
-The host uses an isolated, cookie-free transport with the app's proxy policy. Requests have bounded size, concurrency, timeout and rate; redirects are returned without following them. This is a destination allowlist, not a public-IP guarantee: DNS, proxies and network routing still determine where an approved hostname connects. No credential picker or provider-auth forwarding exists.
+The host uses an isolated, cookie-free transport with the app's proxy policy. Requests have bounded size, concurrency, timeout and rate (responses up to 8 MiB, a 60-second timeout and four in flight per plugin); redirects are returned without following them. This is a destination allowlist, not a public-IP guarantee: DNS, proxies and network routing still determine where an approved hostname connects. No credential picker or provider-auth forwarding exists.
 
 ## Business data and author preferences
 
@@ -155,7 +155,7 @@ The complete public settings DTO is transport-budgeted before commit; oversized 
 
 ## Code API
 
-Add `"main": "main.js"` and declare `metrics` with kinds `number`, `text`, `series`, `draw`, `rows` or `object`. The entry is one local JavaScript file; bundle dependencies into it if needed. There is no Node, DOM, dynamic import or ambient network access.
+Add `"main": "main.js"` and declare `metrics` with kinds `number`, `text`, `series`, `draw`, `rows` or `object`. An `object` value is plain JSON up to 56 KiB, eight levels deep and 1024 entries per object or array, so it can carry structured lists to a Rich page; one Worker message, including a storage write, stays within 64 KiB. Chart history keeps numeric fields from the first 32 keys of the first four levels. The entry is one local JavaScript file; bundle dependencies into it if needed. There is no Node, DOM, dynamic import or ambient network access.
 
 ```js
 tm.subscribe('sys.cpu');
@@ -173,7 +173,7 @@ tm.onTick(({ mode }) => {
 | `tm.onTick(callback)` | Register a callback receiving `{ mode, now }`; returned promises are awaited and overlapping ticks are skipped |
 | `tm.onAction(action, handler)` | Handle a declared control action. Receives `{ action, type, view, surface, ...validatedValue }`; async actions serialize within the Worker |
 | `tm.publish(metric, value)` | Publish a declared metric; the host validates its kind and limits |
-| `tm.storage.get/set/delete` | Promise-based JSON store scoped to this plugin, bounded to 256 KB and coalesced to disk |
+| `tm.storage.get/set/delete` | Promise-based JSON store scoped to this plugin, bounded to 5 MiB and coalesced to disk; each flush rewrites the whole store, so it is not a database |
 | `tm.notify({ title, body })` | Rate-limited host notification, requiring `notify` |
 | `tm.net.fetch(url, init?)` | Returns `{ status, ok, headers, text }`, requiring `network`; this is not a browser `Response` |
 | `tm.log(...)`, `tm.warn(...)` | Bounded diagnostics visible in Settings |

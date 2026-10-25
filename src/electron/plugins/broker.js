@@ -1,7 +1,7 @@
 'use strict';
 
 // Capabilities a sandboxed plugin can ask main for: publishing its declared
-// metrics, a small persistent store, rate-limited notifications and requests
+// metrics, a persistent store, rate-limited notifications and requests
 // to the hosts its manifest lists. Every request is re-validated here; the
 // Worker-side API in host/prelude.js is only a convenience.
 
@@ -10,17 +10,20 @@ const path = require('node:path');
 const { sanitizeDisplayList, normalizeRows } = require('../../shared/plugins/viewSpec');
 const { hostAllowed } = require('../../shared/plugins/permissions');
 
+// Content limits bound one value, not what a plugin may express. Worker
+// messages separately stay within the 64 KiB IPC envelope (host/message.js),
+// which is why an object metric stops short of it.
 const LIMITS = Object.freeze({
-  textChars: 200,
+  textChars: 4096,
   seriesLength: 240,
-  objectBytes: 8 * 1024,
-  objectDepth: 3,
-  objectKeys: 32,
-  storageBytes: 256 * 1024,
+  objectBytes: 56 * 1024,
+  objectDepth: 8,
+  objectKeys: 1024,
+  storageBytes: 5 * 1024 * 1024,
   storageKeyChars: 64,
   requestBodyBytes: 256 * 1024,
-  responseBytes: 1024 * 1024,
-  requestTimeoutMs: 15_000,
+  responseBytes: 8 * 1024 * 1024,
+  requestTimeoutMs: 60_000,
   requestHeaders: 20,
   headerValueChars: 2048,
   notifyTitleChars: 64,
@@ -152,7 +155,7 @@ async function performNetRequest(fetchImpl, request, { timeoutMs = LIMITS.reques
   }
 }
 
-// Small JSON store per plugin under userData/plugin-data/<id>.json, written
+// JSON store per plugin under userData/plugin-data/<id>.json, written
 // atomically and coalesced so a chatty plugin cannot thrash the disk.
 function createPluginStorage({ dir, pluginId, flushDelayMs = 1000, fsImpl = fs, onError = () => {} }) {
   const file = path.join(dir, `${pluginId}.json`);
@@ -160,6 +163,11 @@ function createPluginStorage({ dir, pluginId, flushDelayMs = 1000, fsImpl = fs, 
   let timer = null;
   let dirty = false;
   let retries = 0;
+  let bytes = 0;
+  // An upper bound on one `"key":value,` member. Tracking the store's size as
+  // the sum of its members keeps a set proportional to its own value instead
+  // of re-serialising the whole store on every write.
+  const memberBytes = (id, value) => Buffer.byteLength(JSON.stringify(id)) + Buffer.byteLength(JSON.stringify(value)) + 2;
 
   function load() {
     if (data) return data;
@@ -169,6 +177,8 @@ function createPluginStorage({ dir, pluginId, flushDelayMs = 1000, fsImpl = fs, 
     } catch {
       data = {};
     }
+    bytes = 2;
+    for (const [id, value] of Object.entries(data)) bytes += memberBytes(id, value);
     return data;
   }
 
@@ -210,9 +220,11 @@ function createPluginStorage({ dir, pluginId, flushDelayMs = 1000, fsImpl = fs, 
       const id = key(name);
       if (!plainObject(value)) throw new Error('storage values must be plain JSON');
       const store = load();
-      const next = { ...store, [id]: value };
-      if (Buffer.byteLength(JSON.stringify(next)) > LIMITS.storageBytes) throw new Error('storage quota exceeded');
-      data = next;
+      const next = bytes - (Object.hasOwn(store, id) ? memberBytes(id, store[id]) : 0) + memberBytes(id, value);
+      if (next > LIMITS.storageBytes) throw new Error('storage quota exceeded');
+      // defineProperty keeps keys such as "__proto__" as ordinary entries.
+      Object.defineProperty(store, id, { value, enumerable: true, writable: true, configurable: true });
+      bytes = next;
       dirty = true;
       retries = 0;
       schedule();
@@ -222,8 +234,8 @@ function createPluginStorage({ dir, pluginId, flushDelayMs = 1000, fsImpl = fs, 
       const store = load();
       const id = key(name);
       if (!Object.hasOwn(store, id)) return false;
-      const { [id]: _removed, ...rest } = store;
-      data = rest;
+      bytes -= memberBytes(id, store[id]);
+      delete store[id];
       dirty = true;
       retries = 0;
       schedule();

@@ -29,8 +29,8 @@ test('package preview is data-only and rejects traversal, oversized code and inc
   for (const main of ['../escape.js', '/escape.js', 'CON.js', 'dir/../escape.js', 'dir//escape.js']) assert.throws(() => parsePackage(bytes('1.0.0', { main })));
   assert.throws(() => parsePackage(bytes('1.0.0', { tmApi: '^99' })), /not supported/);
   assert.throws(() => parsePackage(bytes('1.0.0', { engines: { tokenMonitor: '>=999' } })), /incompatible/);
-  const data = JSON.parse(bytes()); data.code = 'x'.repeat(1024 * 1024 + 1);
-  assert.throws(() => parsePackage(JSON.stringify(data)), /under 512 KB/);
+  const data = JSON.parse(bytes()); data.code = 'x'.repeat(MAX_CODE_BYTES + 1);
+  assert.throws(() => parsePackage(JSON.stringify(data)), /under 2 MB/);
   assert.throws(() => parsePackage('{"format":1,"manifest":{"id":{"toString":0}}}'), /invalid plugin manifest/);
 });
 test('install, update, rollback and uninstall preserve grants and explicit retention choices', t => {
@@ -98,8 +98,8 @@ test('accepted manifest and code artifacts stay executable at their runtime boun
   const data = JSON.parse(bytes()); data.code = '/*' + 'a'.repeat(MAX_CODE_BYTES - 4) + '*/';
   f.api.install(f.api.preview(parsePackage(JSON.stringify(data))).token);
   assert.equal(Buffer.byteLength(readPluginCode(path.join(f.args.userDir, 'test-plugin/main.js'))), MAX_CODE_BYTES);
-  data.code = '/*' + 'a'.repeat(600 * 1024) + '*/';
-  assert.throws(() => parsePackage(JSON.stringify(data)), /under 512 KB/);
+  data.code = '/*' + 'a'.repeat(MAX_CODE_BYTES) + '*/';
+  assert.throws(() => parsePackage(JSON.stringify(data)), /under 2 MB/);
 });
 test('corrupt current versions can be rolled back or uninstalled without parsing them', t => {
   const f = fixture(t); f.install('1.0.0'); f.install('2.0.0');
