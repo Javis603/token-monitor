@@ -8447,7 +8447,8 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('session:getDetail', (_event, args) => {
     const { client, sessionId, period, sessionCost } = args || {};
-    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost }, {
+    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost,
+      ...(client === 'senpi' ? { customScanPaths: normalizeCustomScanPaths(settings?.customScanPaths) } : {}) }, {
       lookupModelPricing, getPricingRevision: () => pricingFingerprint({ pricingPath: customPricingPath() })
     });
   });

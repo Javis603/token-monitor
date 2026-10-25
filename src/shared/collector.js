@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { customPricingPath } = require('./tokscaleConfig');
-const { senpiWatchSources } = require('./providers/senpi/paths');
+const { senpiWatchSources, senpiExtraScanDirs } = require('./providers/senpi/paths');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
@@ -212,14 +212,18 @@ function tokscaleEnvWithBlanksDropped(env, platform = process.platform) {
 function tokscaleCommand(options = {}) {
   const resolved = resolvePlatformBinary();
   const useDirect = Boolean(resolved && resolved.source !== 'shim');
+  const sourceEnv = options.env || process.env;
   const customExtraDirs = tokscaleExtraDirsEnv(
     options.customScanPaths,
-    process.env.TOKSCALE_EXTRA_DIRS,
+    sourceEnv.TOKSCALE_EXTRA_DIRS,
     { platform: options.platform || process.platform, home: options.homeDir }
   );
-  const extraDirsEnv = customExtraDirs
-    ? { ...process.env, TOKSCALE_EXTRA_DIRS: customExtraDirs }
-    : process.env;
+  const senpiDirs = options.senpiScanDirs || (normalizeClientsCsv(options.clients).split(',').includes('senpi')
+    ? senpiExtraScanDirs(options) : []);
+  const extraDirs = [customExtraDirs, ...senpiDirs.map(dir => `senpi:${dir}`)].filter(Boolean).join(',');
+  const extraDirsEnv = extraDirs
+    ? { ...sourceEnv, TOKSCALE_EXTRA_DIRS: extraDirs }
+    : sourceEnv;
   const env = tokscaleEnvWithBlanksDropped(extraDirsEnv, options.platform || process.platform);
   const command = useDirect
     ? { bin: resolved.path, prefixArgs: [], env }
@@ -553,10 +557,12 @@ function runTokscale({
   onTerminationUnconfirmed,
   customScanPaths,
   homeDir,
+  env,
+  senpiScanDirs,
   workspaces = true
 }) {
   throwIfAborted(signal);
-  const command = tokscaleCommand({ customScanPaths, homeDir });
+  const command = tokscaleCommand({ clients, customScanPaths, homeDir, env, senpiScanDirs });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ entries: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
@@ -608,9 +614,9 @@ function runTokscale({
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, env, senpiScanDirs }) {
   throwIfAborted(signal);
-  const command = tokscaleCommand({ customScanPaths, homeDir });
+  const command = tokscaleCommand({ clients, customScanPaths, homeDir, env, senpiScanDirs });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
@@ -890,11 +896,20 @@ async function collectUsageOnce(options) {
     }
   };
   const projectsEnabled = options.projectsEnabled !== false;
+  let senpiScanDirs;
+  const nativeCommandOptions = (input) => ({
+    customScanPaths: options.customScanPaths,
+    homeDir: options.homeDir,
+    env: options.env,
+    // Reuse one discovery snapshot across Today/Month/All Time and History.
+    // Targeted scans of another client do not enumerate Senpi sources.
+    senpiScanDirs: normalizeClientsCsv(input.clients).split(',').includes('senpi')
+      ? (senpiScanDirs ??= senpiExtraScanDirs(options)) : []
+  });
   const runTokscaleScan = options.runTokscale || ((input) => runTokscale({
     ...input,
     workspaces: projectsEnabled,
-    customScanPaths: options.customScanPaths,
-    homeDir: options.homeDir,
+    ...nativeCommandOptions(input),
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
@@ -905,8 +920,7 @@ async function collectUsageOnce(options) {
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
-    customScanPaths: options.customScanPaths,
-    homeDir: options.homeDir,
+    ...nativeCommandOptions(input),
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-graph')
   }));
@@ -2255,7 +2269,8 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
   const catpawPart = catpawRevision ? `|catpaw:${catpawRevision}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
+  const senpiPart = normalizeClientsCsv(clientsCsv).split(',').includes('senpi') ? '|senpi-sources:1' : '';
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}${senpiPart}|pricing:${pricingRevision}`;
 }
 
 function qoderCnSourcesForClients(clientsCsv, options = {}) {

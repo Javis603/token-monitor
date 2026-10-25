@@ -217,7 +217,8 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     for (const sessionsDir of resolveSenpiSessionsDirs({
       homeDir: home,
       env: options.env,
-      useEnvRoots: options.useEnvRoots
+      useEnvRoots: options.useEnvRoots,
+      customScanPaths: options.customScanPaths
     })) {
       const found = findTimestampedSessionFiles(sessionsDir, [id]).get(id);
       if (found) return found;

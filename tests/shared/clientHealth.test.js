@@ -5,6 +5,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 
 const {
@@ -345,9 +346,13 @@ test('every source-root id the collector emits is in the allowlist', () => {
 test('senpi watches the OmO tree and the legacy senpi root, and the agent dir replaces only the latter', () => {
   const homeDir = path.join(path.sep, 'tmp', 'source-home');
   const options = { homeDir, platform: 'linux', env: {}, cwdDir: homeDir };
+  let canonical = path.resolve(homeDir);
+  try { canonical = fs.realpathSync.native(homeDir); } catch (_) {}
+  const key = `source-home-${createHash('sha256').update(canonical).digest('hex').slice(0, 12)}`;
   assert.deepEqual(clientSourceRoots('senpi', options).senpi, [
     { id: 'senpi-sessions', dir: path.join(homeDir, '.senpi', 'agent', 'sessions') },
     { id: 'senpi-omo-sessions', dir: path.join(homeDir, '.omo', 'agent', 'sessions') },
+    { id: 'senpi-task-children', dir: path.join(homeDir, '.omo', 'agent', 'projects', key, 'senpi-task', 'children') },
     { id: 'senpi-task-children', dir: path.join(homeDir, '.omo', 'senpi-task', 'children') }
   ]);
   const relocated = clientSourceRoots('senpi', {
@@ -356,7 +361,7 @@ test('senpi watches the OmO tree and the legacy senpi root, and the agent dir re
   }).senpi;
   assert.equal(relocated[0].dir, path.join('/custom/senpi-agent', 'sessions'));
   assert.equal(relocated[1].dir, path.join(homeDir, '.omo', 'agent', 'sessions'));
-  assert.equal(relocated[3].dir, '/custom/sessions');
+  assert.equal(relocated.at(-1).dir, '/custom/sessions');
 });
 
 test('shared home-relative directories retain exact source roots, checks and watch candidates', () => {
