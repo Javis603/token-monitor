@@ -12,6 +12,15 @@ const { MAX_CODE_BYTES, MAX_MANIFEST_BYTES, assertHostCompatibility } = require(
 const { assetPath } = require('../../shared/plugins/webUi');
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
 function digest(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
+function contentDigest({ rawManifest, code, assets }) {
+  // Hash installed content independently of archive whitespace, key ordering,
+  // or base64 representation. Keep raw manifest fields, including extensions.
+  const content = ['tmplugin-content-v1', rawManifest, code,
+    Object.entries(assets).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+      .map(([name, bytes]) => [name, bytes.toString('base64')])];
+  return digest(JSON.stringify(content, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value));
+}
 function readBounded(file, limit) {
   const fd = fs.openSync(file, 'r');
   try {
@@ -113,4 +122,4 @@ function describePackage(pkg, { locale = 'en', grant } = {}) {
     identityIcon: m.identityIcon, icon: m.views[0]?.icon || 'dot',
     permissions: [...m.permissions], hosts: [...m.network.hosts], missing: missingGrant(m, grant), risk: riskSummary(m), hasCode: Boolean(m.main), sha256: pkg.hash };
 }
-module.exports = { MAX_PACKAGE_BYTES, ID_RE, digest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage };
+module.exports = { MAX_PACKAGE_BYTES, ID_RE, digest, contentDigest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage };

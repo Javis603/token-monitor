@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const semver = require('semver');
-const { ID_RE, MAX_PACKAGE_BYTES, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage } = require('./package');
+const { ID_RE, MAX_PACKAGE_BYTES, contentDigest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage } = require('./package');
 const { removePluginPlacements } = require('./placementSettings');
 const SETTING_KEYS = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'notchPluginPages', 'pluginMainPages'];
 const MAX_REGISTRY_BYTES = 1024 * 1024;
@@ -36,6 +36,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
   function validateRegistry(data) {
     if (!isRecord(data) || Object.entries(data).some(([id, item]) => !ID_RE.test(id) || !isRecord(item)
       || !semver.valid(item.version) || typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sha256)
+      || (item.contentSha256 !== undefined && (typeof item.contentSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.contentSha256)))
       || !isRecord(item.origin) || typeof item.origin.id !== 'string' || !item.origin.id
       || !Number.isFinite(item.installedAt))) throw new Error('invalid installed plugin registry');
     return Object.assign(Object.create(null), data);
@@ -134,7 +135,10 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
   function currentPackage(id) {
     try {
       const pkg = packageDirectory(path.join(userDir, id), { checkCompatibility: false });
-      if (pkg.manifest.id !== id || pkg.manifest.version !== registry[id].version) throw new Error('installed package was changed outside the manager');
+      if (pkg.manifest.id !== id || pkg.manifest.version !== registry[id].version
+        || !registry[id].contentSha256 || contentDigest(pkg) !== registry[id].contentSha256) {
+        throw new Error('installed package content is changed or has no trusted fingerprint');
+      }
       return pkg;
     } catch (cause) {
       throw Object.assign(new Error('installed-package-invalid: installed package needs rollback or uninstall and reinstall', { cause }), { code: 'installed-package-invalid' });
@@ -171,10 +175,6 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     try {
       const target = path.join(userDir, id), stage = path.join(txDir, 'stage');
       const hadTarget = hasTarget(target);
-      fs.rmSync(txDir, { recursive: true, force: true }); fs.mkdirSync(txDir, { mode: 0o700 });
-      if (pkg) unpackPackage(pkg, stage);
-      const previous = path.join(historyDir, `${id}.tmplugin`), hadPrevious = fs.existsSync(previous);
-      if (hadPrevious) fs.copyFileSync(previous, path.join(txDir, 'previous.tmplugin'));
       let current = null;
       // A missing directory has no current package to retain. Errors within an
       // existing package still follow the normal update/rollback policy.
@@ -188,9 +188,13 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
           current = null;
         }
       }
+      fs.rmSync(txDir, { recursive: true, force: true }); fs.mkdirSync(txDir, { mode: 0o700 });
+      if (pkg) unpackPackage(pkg, stage);
+      const previous = path.join(historyDir, `${id}.tmplugin`), hadPrevious = fs.existsSync(previous);
+      if (hadPrevious) fs.copyFileSync(previous, path.join(txDir, 'previous.tmplugin'));
       const next = Object.assign(Object.create(null), registry);
       if (operation === 'uninstall') delete next[id];
-      else next[id] = { version: pkg.manifest.version, sha256: pkg.hash, origin, installedAt: now(), previousVersion: current?.manifest.version || null, previousSha256: current?.hash || null };
+      else next[id] = { version: pkg.manifest.version, sha256: pkg.hash, contentSha256: contentDigest(pkg), origin, installedAt: now(), previousVersion: current?.manifest.version || null, previousSha256: current?.hash || null };
       boundedJson(next, MAX_REGISTRY_BYTES);
       manager.beginMutation(); began = true;
       const before = settingsSnapshot();

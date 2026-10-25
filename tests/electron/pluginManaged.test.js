@@ -55,6 +55,95 @@ function operation(api, name, token) {
   return api.uninstall('test-plugin', { keepData: false });
 }
 
+function richPackage(version) {
+  const raw = JSON.parse(bytes(version, { permissions: ['ui.web', 'tm.pages'],
+    webUi: { version: 1, assets: ['ui/index.html', 'ui/page.js'], documents: [{ id: 'models', entry: 'ui/index.html', target: 'model', slot: 'replace' }] } }));
+  raw.assets = { 'ui/page.js': Buffer.from('console.log(1)').toString('base64'), 'ui/index.html': Buffer.from('<p>Original</p>').toString('base64') };
+  return parsePackage(JSON.stringify(raw, null, 2));
+}
+function changeInstalled(f, kind) {
+  const dir = path.join(f.args.userDir, 'test-plugin');
+  if (kind === 'code') fs.writeFileSync(path.join(dir, 'main.js'), 'tm.onTick(() => { /* changed */ });');
+  else if (kind === 'asset') fs.writeFileSync(path.join(dir, 'ui/page.js'), 'console.log(2)');
+  else {
+    const file = path.join(dir, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file));
+    manifest.name = 'Changed'; fs.writeFileSync(file, JSON.stringify(manifest));
+  }
+}
+for (const kind of ['code', 'asset', 'manifest']) for (const timing of ['before preview', 'after preview']) {
+  test(`content integrity rejects changed ${kind} ${timing} without replacing installed state or backup`, t => {
+    const f = fixture(t);
+    for (const version of ['1.0.0', '2.0.0']) f.api.install(f.api.preview(richPackage(version)).token);
+    const token = timing === 'after preview' ? f.api.preview(richPackage('3.0.0')).token : null;
+    changeInstalled(f, kind);
+    const before = snapshot(f), stopped = f.stopped;
+    assert.throws(() => token ? f.api.install(token) : f.api.preview(richPackage('3.0.0')), { code: 'installed-package-invalid' });
+    assert.deepEqual(snapshot(f), before); assert.equal(f.stopped, stopped);
+    const restarted = createManagedPlugins(f.args); restarted.recover();
+    assert.throws(() => restarted.preview(richPackage('3.0.0')), { code: 'installed-package-invalid' });
+  });
+}
+for (const kind of ['code', 'asset', 'manifest']) {
+  test(`content integrity rescue rollback discards changed ${kind} reverse backup`, t => {
+    const f = fixture(t), original = richPackage('1.0.0');
+    f.api.install(f.api.preview(original).token); f.api.install(f.api.preview(richPackage('2.0.0')).token);
+    changeInstalled(f, kind); f.api.rollback('test-plugin');
+    const restored = packageDirectory(path.join(f.args.userDir, 'test-plugin'));
+    assert.deepEqual(restored.rawManifest, original.rawManifest); assert.equal(restored.code, original.code); assert.deepEqual(restored.assets, original.assets);
+    assert.equal(f.api.describe('test-plugin').previousVersion, null);
+    assert.equal(fs.existsSync(path.join(f.args.root, 'previous/test-plugin.tmplugin')), false);
+    f.api.install(f.api.preview(richPackage('3.0.0')).token);
+    assert.equal(f.api.describe('test-plugin').previousVersion, '1.0.0');
+  });
+}
+test('content integrity accepts archive formatting, manifest key ordering and exact content across repeated rollback', t => {
+  const f = fixture(t), original = richPackage('1.0.0');
+  f.api.install(f.api.preview(original).token);
+  const dir = path.join(f.args.userDir, 'test-plugin'), file = path.join(dir, 'manifest.json');
+  assert.notEqual(packageDirectory(dir).hash, original.hash, 'archive hash is not the installed-content fingerprint');
+  const reorder = value => Array.isArray(value) ? value.map(reorder) : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).reverse().map(([key, child]) => [key, reorder(child)])) : value;
+  fs.writeFileSync(file, JSON.stringify(reorder(original.rawManifest), null, 4));
+  const read = () => JSON.parse(fs.readFileSync(path.join(f.args.root, 'installed.json')))['test-plugin'];
+  const fingerprint = read().contentSha256;
+  assert.match(fingerprint, /^[a-f0-9]{64}$/); assert.equal(read().sha256, original.hash);
+  const restarted = createManagedPlugins(f.args); restarted.recover();
+  restarted.install(restarted.preview(richPackage('2.0.0')).token);
+  restarted.rollback('test-plugin'); assert.equal(read().contentSha256, fingerprint);
+  restarted.rollback('test-plugin'); assert.equal(read().version, '2.0.0');
+});
+for (const operationName of ['update', 'rollback', 'uninstall', 'missing update']) {
+  test(`content integrity legacy record without fingerprint supports safe ${operationName}`, t => {
+    const f = historyFixture(t), file = path.join(f.args.root, 'installed.json');
+    const registry = JSON.parse(fs.readFileSync(file)); delete registry['test-plugin'].contentSha256;
+    fs.writeFileSync(file, JSON.stringify(registry));
+    const api = createManagedPlugins(f.args); api.recover(); assert.equal(api.status().available, true);
+    if (operationName === 'update') {
+      const before = snapshot(f);
+      assert.throws(() => api.preview(parsePackage(bytes('3.0.0'))), { code: 'installed-package-invalid' });
+      assert.deepEqual(snapshot(f), before);
+    } else if (operationName === 'uninstall') { api.uninstall('test-plugin'); assert.equal(api.describe('test-plugin'), null); }
+    else {
+      if (operationName === 'missing update') {
+        fs.rmSync(path.join(f.args.userDir, 'test-plugin'), { recursive: true });
+        api.install(api.preview(parsePackage(bytes('3.0.0'))).token);
+      } else api.rollback('test-plugin');
+      assert.equal(api.describe('test-plugin').previousVersion, null);
+      assert.match(JSON.parse(fs.readFileSync(file))['test-plugin'].contentSha256, /^[a-f0-9]{64}$/);
+    }
+  });
+}
+for (const invalid of [null, 123, 'not-a-digest']) {
+  test(`content integrity rejects malformed stored fingerprint ${JSON.stringify(invalid)}`, t => {
+    const f = fixture(t); f.install('1.0.0');
+    const file = path.join(f.args.root, 'installed.json'), registry = JSON.parse(fs.readFileSync(file));
+    registry['test-plugin'].contentSha256 = invalid; fs.writeFileSync(file, JSON.stringify(registry));
+    const before = snapshot(f), api = createManagedPlugins(f.args);
+    assert.throws(() => api.recover(), /invalid installed plugin registry/);
+    assert.equal(api.status().available, false); assert.deepEqual(snapshot(f), before);
+  });
+}
+
 for (const restart of [false, true]) for (const name of ['preview', 'update', 'rollback', 'uninstall']) {
   test(`missing target permits ${name}${restart ? ' after restart' : ''}`, t => {
     const f = historyFixture(t), target = path.join(f.args.userDir, 'test-plugin');
