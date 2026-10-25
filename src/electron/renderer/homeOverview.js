@@ -91,6 +91,15 @@
     return windows;
   }
 
+  function compactAccountWindows(providerId, windows) {
+    const selected = windows.slice(0, 2);
+    const spend = providerId === 'ollama'
+      ? windows.find((window) => window.metric === 'spend' && window.showMeter === false)
+      : null;
+    if (spend && !selected.includes(spend)) selected.push(spend);
+    return selected;
+  }
+
   // `isWindowHidden(providerId, window)` drops the rows the user unchecked on
   // the provider's usage-item list. It runs after the MiMo plan is synthesized,
   // so hiding the plan hides the placeholder built from the balance as well.
@@ -109,7 +118,7 @@
               // Credits windows carry money; their meter percentage is derived
               // here rather than read off the wire.
               remainingPercent: credits
-                ? balanceDisplay.creditsMeterPercent(account, window)
+                ? balanceDisplay.creditsMeterPercent(account, window, { inferBalance: providerId !== 'ollama' || window.showMeter !== false })
                 : remainingPercent(window),
               remaining: credits
                 ? balanceDisplay.creditsAmount(account, window)
@@ -130,10 +139,10 @@
             || window.planStatus === 'expired'
             || window.value
             || (window.metric === 'credits' && (window.remaining != null || window.detail)))
-          .sort((a, b) => compactWindowRank(providerId, a) - compactWindowRank(providerId, b) || a.index - b.index)
-          .slice(0, 2)
+          .sort((a, b) => compactWindowRank(providerId, a) - compactWindowRank(providerId, b) || a.index - b.index);
+        const compactWindows = compactAccountWindows(providerId, windows)
           .map(({ index: _index, ...window }) => window);
-        if (windows.length === 0) return null;
+        if (compactWindows.length === 0) return null;
         return {
           key: account.key || String(index),
           providerId: account.providerId || '',
@@ -141,8 +150,8 @@
           name: account.name || '',
           plan: account.plan || '',
           color: account.color || '',
-          lowestRemaining: Math.min(...windows.map((window) => window.remainingPercent ?? 100)),
-          windows,
+          lowestRemaining: Math.min(...compactWindows.map((window) => window.remainingPercent ?? 100)),
+          windows: compactWindows,
           index
         };
       })

@@ -168,8 +168,8 @@ function creditWalletWindows(text) {
 
 function parseOllamaUsageHtml(html) {
   const text = String(html || '')
-    .replace(/<!--[^]*?-->/g, '')
-    .replace(/<(script|style)\b[^>]*>[^]*?<\/\1\s*>/gi, '')
+    .replace(/<!--[^]*?-->/g, ' ')
+    .replace(/<(script|style)\b[^>]*>[^]*?<\/\1\s*>/gi, ' ')
     .replace(/&nbsp;|&#160;/gi, ' ');
   // Monthly labels must be complete element text: "Free usage credits..."
   // and repeated aria descriptions are not separate usage blocks.

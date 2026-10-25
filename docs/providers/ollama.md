@@ -26,7 +26,7 @@ Both HTTP 401 and 403 from the JSON API are authentication failures. A save prob
 
 `included.balance_usd`, `included.allowance_usd`, and `included.period` describe monthly included credits. They map to one `billing` window with `metric: "credits"` and `currency: "USD"`, using `period.until` as the reset; new plans report no 5-hour or weekly windows. Monthly credits used is the nonnegative difference between allowance and balance, reported separately as a meterless `spend` window.
 
-`purchased.balance_usd` maps to a separate **Credit balance** window, including on legacy plans and purchased-only accounts. Never add it to the included allowance. It has no quota denominator or reset timestamp, so `showMeter: false` prevents the display layer from inferring a percentage. A reported zero remains a real zero; absent or malformed money stays absent. See the [official balance contract](https://docs.ollama.com/api/balance).
+`purchased.balance_usd` maps to a separate **Credit balance** window, including on legacy plans and purchased-only accounts. Never add it to the included allowance. It has no quota denominator or reset timestamp: Ollama renderers keep `showMeter: false` and explicitly disable balance inference for these wallets. A reported zero remains a real zero; absent or malformed money stays absent. See the [official balance contract](https://docs.ollama.com/api/balance).
 
 ### Cookie settings pages
 

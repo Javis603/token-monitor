@@ -50,6 +50,18 @@ test('Home carries Ollama wallet and spending amounts without inferred quota per
   }
 });
 
+test('Home keeps Ollama monthly spend beside included and purchased balances while other providers retain the two-window cap', () => {
+  const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
+  const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 } });
+  const [row] = homeLimitAccounts([{ providerId: 'ollama', windows: parsed.windows }]);
+  assert.deepEqual(row.windows.map((w) => w.label), ['Included credits', 'Credit balance', 'Monthly credits used']);
+  assert.equal(row.windows[2].value, '$7.50');
+  assert.equal(row.windows[1].remainingPercent, null);
+  assert.equal(homeLimitAccounts([{ providerId: 'thirdparty', windows: parsed.windows }])[0].windows.length, 2);
+  const [hiddenSpend] = homeLimitAccounts([{ providerId: 'ollama', windows: parsed.windows }], 3, { isWindowHidden: (_, w) => w.metric === 'spend' });
+  assert.equal(hiddenSpend.windows.length, 2);
+});
+
 test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   assert.deepEqual(homeActivityHeatmapLayout(), { cell: 9, gap: 3, radius: 2 });
 

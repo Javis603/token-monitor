@@ -776,6 +776,19 @@ test('a Sub2API card keeps Month and All time in the summary and its original us
   assert.equal(tooltip.find('is-separated'), null);
 });
 
+test('a real Sub2API adapter result retains its inferred balance meter', () => {
+  const { THIRD_PARTY_ADAPTERS } = require('../../src/shared/providers/thirdparty/limits');
+  const quota = THIRD_PARTY_ADAPTERS.sub2api.quota({ code: 0, data: { id: 7, balance: 4 } }, null, null, null, {
+    month: { code: 0, data: { total_actual_cost: 6 } }
+  });
+  const row = normalizeLimitProvider({ provider: 'thirdparty', adapterId: 'sub2api', status: 'ok', windows: [quota.window], balance: quota.balance });
+  const card = dockView().renderProviderWindows(row, '#888888');
+  assert.equal(card.textOf('limit-meter').length, 1);
+  assert.match(card.text, /\$4\.00/);
+  assert.match(card.text, /Month \$6\.00/);
+  assert.equal(card.find('limit-meter-fill').style['--bar-scale'], '0.4');
+});
+
 test('a third-party card summarizes Today and Month and details every period', () => {
   const card = dockView().renderProviderWindows({
     provider: 'thirdparty',

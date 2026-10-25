@@ -1590,7 +1590,7 @@
         if (amount === null) continue;
         const node = limitWindowNode(
           providerWindowLabel(provider, creditsWindow, 'Balance'),
-          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) },
+          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow, { inferBalance: creditsWindow.showMeter !== false }) },
           color,
           0.95,
           formatMoney(amount, creditsCurrency(provider, creditsWindow))

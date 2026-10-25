@@ -44,7 +44,7 @@ test('wallet amounts remain independent without an inferred allowance or percent
     assert.equal(window.resetsAt, null);
     assert.equal(window.showMeter, false);
   }
-  assert.equal(creditsMeterPercent(row, row.windows[0]), null);
+  assert.equal(creditsMeterPercent(row, row.windows[0], { inferBalance: false }), null);
 });
 
 test('wallet fields cannot borrow missing values from spending, prose or another section', () => {
@@ -87,6 +87,12 @@ test('monthly currency parsing handles separators and rejects malformed amounts 
   const alternate = parseOllamaUsageHtml('<span>Monthly usage</span><span>unavailable</span><span>Free usage</span><span>17% used</span>');
   assert.equal(alternate.windows.length, 1);
   assert.equal(alternate.windows[0].usedPercent, 17);
+});
+
+test('discarding non-content HTML does not join fragments into a valid monthly label', () => {
+  for (const ignored of ['<!-- ignored -->', '<script>ignored</script>', '<style>ignored</style>']) {
+    assert.equal(parseOllamaUsageHtml(`<span>Mont${ignored}hly usage</span><span>17% used</span>`).windows.length, 0);
+  }
 });
 
 test('API purchased balance coexists with monthly included credits and spending without being added to the quota', () => {
