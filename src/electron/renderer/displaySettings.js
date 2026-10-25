@@ -133,7 +133,7 @@
     container.append(overview, detail); root.append(container);
     wireArrows(quick, button => open([...entries].find(([, entry]) => entry.tab === button)[0]));
     function available(id) { return id === 'notch' ? platform() === 'darwin' : id !== 'edgeDock' || ['darwin', 'win32'].includes(platform()); }
-    function updatePreview() { if (scrollPanel.classList.contains('hidden') || root.closest('.settings-section-details')?.classList.contains('hidden')) return; if (active) { const entry = entries.get(active); preview?.(active, entry.stage, entry.phase); } }
+    function updatePreview(force = false) { if (scrollPanel.classList.contains('hidden') || root.closest('.settings-section-details')?.classList.contains('hidden')) return; if (active) { const entry = entries.get(active); preview?.(active, entry.stage, entry.phase, { force }); } }
     function open(id) {
       if (!entries.has(id) || !available(id)) return;
       cancelScroll?.();
@@ -171,7 +171,7 @@
     }
     container.addEventListener('change', () => queueMicrotask(sync));
     sync();
-    return { open, close, sync, get active() { return active; } };
+    return { open, close, sync, refreshLivePreview() { if (active === 'tray' || active === 'floatingBubble') updatePreview(true); }, get active() { return active; } };
   }
   return { create, SURFACES };
 });

@@ -100,3 +100,13 @@ test('notch preview reserves the same expanded height across phase changes', () 
     assert.ok(closed.contentHeight < closed.previewHeight);
   }
 });
+
+test('sample appearance carries effective rates and display preferences without private settings', () => {
+  const settings = { currency: 'TWD', currencyRatesEffective: { TWD: 40 }, showCompactTotalTokens: true,
+    sessionContextMetric: 'remaining', tokenNumberAnimation: 'count', showCodexAdditionalLimits: true, limitProviderHiddenItems: { codex: ['weekly'] }, secret: 'private-value' };
+  for (const surface of ['notch', 'edgeDock']) {
+    const { appearance } = buildDisplayPreview(settings, surface, 'open').payload;
+    for (const key of Object.keys(settings).filter(key => key !== 'secret')) assert.deepEqual(appearance[key], settings[key], key);
+    assert.equal(appearance.secret, undefined);
+  }
+});

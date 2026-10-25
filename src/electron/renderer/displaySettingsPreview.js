@@ -3,7 +3,7 @@
 (function expose(root) {
   function create({ bridge, settings, stats, bitmap, t, window, document }) {
     const stages = new Map(), bitmaps = new WeakMap();
-    const appearanceKeys = ['language', 'theme', 'themePreset', 'themeColors', 'vendorColors', 'interfaceFont', 'displayFont', 'interfaceFontPreset', 'displayFontPreset', 'textSize', 'glassOpacity', 'glassBlur', 'systemGlass', 'currency', 'currencyRate', 'currencyRateOverride', 'compactTokenUnits', 'showLimitUsed', 'limitsEnabled', 'limitProviders', 'limitProviderOrder', 'showCodexAdditionalLimits', 'showTrayProviderBadge', 'maskLimitAccountEmails', 'tokenRateMode', 'contextDisplayMode'];
+    const appearanceKeys = ['language', 'theme', 'themePreset', 'themeColors', 'vendorColors', 'interfaceFont', 'displayFont', 'interfaceFontPreset', 'displayFontPreset', 'textSize', 'glassOpacity', 'glassBlur', 'systemGlass', 'currency', 'currencyRate', 'currencyRateOverride', 'currencyRatesEffective', 'showCompactTotalTokens', 'sessionContextMetric', 'tokenNumberAnimation', 'compactTokenUnits', 'showLimitUsed', 'limitsEnabled', 'limitProviders', 'limitProviderOrder', 'showCodexAdditionalLimits', 'limitProviderHiddenItems', 'showTrayProviderBadge', 'maskLimitAccountEmails', 'tokenRateMode', 'contextDisplayMode'];
     function keyFor(surface, phase) {
       const preferences = settings();
       const keys = Object.keys(preferences).filter(key => key.startsWith(surface) || appearanceKeys.includes(key) || surface === 'notch' && key.startsWith('tray'));
@@ -84,11 +84,11 @@
       fit(entry);
       send(entry);
     }
-    function show(surface, stage, phase) {
+    function show(surface, stage, phase, { force = false } = {}) {
       stage.dataset.surface = surface; stage.dataset.phase = phase;
       if (surface === 'tray' || surface === 'floatingBubble') {
         const previous = bitmaps.get(stage), key = keyFor(surface, phase), currentStats = stats?.();
-        if (previous?.key === key && previous.stats === currentStats) return;
+        if (!force && previous?.key === key && previous.stats === currentStats) return;
         bitmaps.set(stage, { key, stats: currentStats });
         let node = stage.firstElementChild;
         if (!node) { node = document.createElement('div'); node.className = 'display-settings-bitmap'; stage.append(node); }
