@@ -16487,7 +16487,7 @@ function renderClaudeWebAccounts() {
         true, 'settings', limitProviderEnabled('claude'))].filter(Boolean).join(' · '));
   const signature = JSON.stringify([accounts.map((account) => [account.id, account.accountKey, account.accountEmail,
     account.accountName, account.accountLabel, account.organizationId, account.enabled]),
-  claudeWebAccountId, claudeWebFormOpen, currentLocale()]);
+  claudeWebAccountId, claudeWebFormOpen, state.settings?.claudeWebLegacyCookieSource, currentLocale()]);
   if (list.dataset.signature === signature) {
     list.querySelectorAll('.managed-account-info').forEach((info, index) => {
       info.textContent = statusTexts[index];

@@ -9,7 +9,8 @@ const vm = require('node:vm');
 test('Claude Web rows retain controls and removal confirmation across quota and login-status updates', () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const document = { activeElement: null };
-  const element = () => ({ children: [], dataset: {}, handlers: {}, classList: { add() {}, toggle() {} },
+  const element = () => ({ children: [], dataset: {}, handlers: {}, classList: { values: new Set(), add() {},
+    toggle(name, enabled) { if (enabled) this.values.add(name); else this.values.delete(name); } },
     append(...nodes) { this.children.push(...nodes); },
     replaceChildren() { this.children = []; document.activeElement = null; },
     setAttribute() {}, addEventListener(name, handler) { this.handlers[name] = handler; },
@@ -47,6 +48,17 @@ test('Claude Web rows retain controls and removal confirmation across quota and 
   assert.equal(info.textContent, 'settings.claude.statusInvalid');
   assert.equal(document.activeElement, remove);
   assert.equal(remove.textContent, '✓');
+  state.settings = { ...state.settings, claudeManagedAccounts: [], claudeWebLegacyCookieConfigured: true,
+    claudeWebLegacyAccount: { accountKey: 'same' }, claudeWebLegacyCookieSource: 'settings' };
+  context.renderClaudeWebAccounts();
+  const legacyRemove = () => list.children[0].children[2].children[1];
+  assert.equal(legacyRemove().classList.values.has('hidden'), false);
+  state.settings.claudeWebLegacyCookieSource = 'env';
+  context.renderClaudeWebAccounts();
+  assert.equal(legacyRemove().classList.values.has('hidden'), true, 'falling back to the same env cookie hides Remove');
+  state.settings.claudeWebLegacyCookieSource = 'settings';
+  context.renderClaudeWebAccounts();
+  assert.equal(legacyRemove().classList.values.has('hidden'), false);
 });
 
 for (const fromCancel of [true, false]) {

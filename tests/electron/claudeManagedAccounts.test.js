@@ -249,6 +249,32 @@ test('Web login health stays independent of healthy OAuth for the same subscript
   assert.equal(f.api.loginStatuses()[account.id], undefined);
 });
 
+test('login-status projection skips unobserved accounts and isolates credential read or format failures', async (t) => {
+  const f = fixture(t);
+  await f.save('a');
+  await f.save('b');
+  const [a, b] = f.api.accounts();
+  const read = f.store.readClaudeWebCredential.bind(f.store);
+  f.store.readClaudeWebCredential = () => { throw new Error('credential read failed'); };
+  assert.deepEqual(f.api.loginStatuses(), {}, 'unobserved logins need no credential read');
+  f.store.readClaudeWebCredential = read;
+  for (const account of [a, b]) await f.api.resolved({ id: account.id,
+    cookie: read(account.id), organizationId: account.organizationId, provider: { status: 'ok' } });
+  for (const failure of ['read', 'format']) {
+    f.store.readClaudeWebCredential = id => {
+      if (id !== a.id) return read(id);
+      if (failure === 'read') throw new Error('credential read failed');
+      return 'not-a-session-key';
+    };
+    assert.deepEqual(f.api.loginStatuses(), { [b.id]: 'ok' });
+  }
+  f.store.readClaudeWebCredential = read;
+  f.setSettings({ ...f.settings(), claudeWebCookie: 'sessionKey=sk-ant-a', claudeWebOrganizationId: a.organizationId });
+  await f.api.resolved({ id: 'legacy', cookie: read(a.id), organizationId: a.organizationId, provider: { status: 'ok' } });
+  f.setSettings({ ...f.settings(), claudeWebCookie: 'not-a-session-key' });
+  assert.deepEqual(f.api.loginStatuses(), { [a.id]: 'ok', [b.id]: 'ok' });
+});
+
 test('a delayed organization A observation cannot overwrite organization B saved with the same cookie', async (t) => {
   const f = fixture(t);
   let release;

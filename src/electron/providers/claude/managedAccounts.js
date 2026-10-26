@@ -157,9 +157,11 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
     const current = [...accounts(), { id: 'legacy', enabled: true, organizationId: getSettings().claudeWebOrganizationId || '' }];
     return Object.fromEntries(current.flatMap((account) => {
       const observation = loginObservations.get(account.id);
-      const cookie = account.id === 'legacy' ? getLegacyCredential() : credentialStore.readClaudeWebCredential(account.id);
-      return account.enabled && observation?.organizationId === account.organizationId
-        && observation.cookie === normalizeClaudeWebCookieInput(cookie) ? [[account.id, observation.status]] : [];
+      if (!account.enabled || !observation || observation.organizationId !== account.organizationId) return [];
+      try {
+        const cookie = account.id === 'legacy' ? getLegacyCredential() : credentialStore.readClaudeWebCredential(account.id);
+        return observation.cookie === normalizeClaudeWebCookieInput(cookie) ? [[account.id, observation.status]] : [];
+      } catch (_) { return []; }
     }));
   }
 
