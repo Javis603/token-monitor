@@ -218,7 +218,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // choose those items, so only the display bounds the summary.
     const closedMaxWidth = maxWidth;
     const summaryBudget = Math.max(0, Math.floor(compact ? closedMaxWidth - 2 * ((geometry.notched ? NOTCH_METRICS.restingFlare : 0) + 8)
-      : (closedMaxWidth - geometry.gapWidth) / 2 - 16 - NOTCH_METRICS.restingFlare));
+      : (closedMaxWidth - geometry.gapWidth) / 2 - 8 - NOTCH_METRICS.cameraClearance - NOTCH_METRICS.restingFlare));
     const boundedSlots = activeSlots && !compact
       ? { left: Math.min(activeSlots.left, summaryBudget), right: Math.min(activeSlots.right, summaryBudget) } : activeSlots;
     const closed = notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom(), closedMaxWidth);
@@ -363,8 +363,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       const gapLeft = current.geometry.centerX - current.geometry.gapWidth / 2 - canvas.x;
       const gapRight = gapLeft + current.geometry.gapWidth;
       const left = frame.summaryEdges.left + frame.summaryIconInset - current.summaryIconInset;
-      const leftScale = slots.left > 0 ? (gapLeft - 8 - left) / slots.left : Infinity;
-      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - 8) / slots.right : Infinity;
+      const leftScale = slots.left > 0 ? (gapLeft - NOTCH_METRICS.cameraClearance - left) / slots.left : Infinity;
+      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - NOTCH_METRICS.cameraClearance) / slots.right : Infinity;
       frame.summaryScale = Math.max(0, Math.min(frame.summaryScale, leftScale, rightScale));
     }
     // The camera cap must share the native material's compositor transaction.
