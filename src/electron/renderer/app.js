@@ -109,6 +109,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
+  muse: 'settings.limits.connection.muse',
   kiro: 'settings.limits.connection.kiro',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
@@ -239,6 +240,8 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Sign in again': 'settings.limits.status.signInAgain',
   'Run grok login': 'settings.limits.status.runGrokLogin',
   'Run kiro-cli login': 'settings.limits.status.runKiroLogin',
+  'Install Muse Code': 'settings.limits.status.installMuseCode',
+  'Run muse login': 'settings.limits.status.runMuseLogin',
   'Open Cline': 'settings.limits.status.openCline',
   'Re-login': 'settings.limits.status.relogin',
   Limited: 'settings.limits.status.limited',

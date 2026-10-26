@@ -151,7 +151,7 @@
 
 ### 額度、趨勢與匯出
 
-- **AI 工具額度偵測**：涵蓋 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 29+ 家供應商的 session、每日、每週、帳單與 credits 視窗，支援多個 OpenRouter／第三方 profile，以及餘額型帳戶（Claude credits、DeepSeek 預付餘額與消費歷史、第三方餘額）
+- **AI 工具額度偵測**：涵蓋 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 30+ 家供應商的 session、每日、每週、帳單與 credits 視窗，支援多個 OpenRouter／第三方 profile，以及餘額型帳戶（Claude credits、DeepSeek 預付餘額與消費歷史、第三方餘額）
 - **多帳號與 Codex 帳號切換**：同一供應商可追蹤多個帳號、各自顯示額度；已加入追蹤的 Codex 帳號還能一鍵切換為本機使用帳號，免重新登入授權
 - **Codex 重置預測**：可選開啟的第三方重置預測，顯示預計重置時間、重置類型（Regular 或 Banked）與上次重置時間
 - **保留已刪除會話用量**：許多工具會定期清除舊 session（Claude Code 預設清 30 天前的 transcript），一刪就再也算不到。開啟後，Token Monitor 會在本機不設期限地封存已觀測到的每日工具／模型用量，讓熱力圖與趨勢即使在來源檔案被清掉後仍然完整（詳見下方[〈會話資料保留期〉](#會話資料保留期)）
@@ -212,7 +212,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`；VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 與 `kiro-cli` 資料庫 | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 與 IDE / VS Code 擴充套件日誌 | ✅ | — | ✅ |
@@ -244,6 +244,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 <br>
 
 - 上表為預設路徑。Token Monitor 與 Tokscale 遵循相同的環境變數覆寫：`~/.local/share/` 下的路徑跟隨 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$SENPI_CODING_AGENT_DIR`、`$SENPI_CODING_AGENT_SESSION_DIR`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
+- Muse Code 訂閱額度透過 Muse Code 1.4.13+ 的 `muse usage --json` 和既有登入讀取。未提供額度或使用 API 金鑰計費時，無法顯示額度百分比。詳見 [Muse 資料來源說明](docs/providers/muse.md)。
 - Goose 的跨日用量仍計入會話建立日；暫不支援遠端 goosed 與自訂掃描路徑。詳見 [Goose 資料來源說明](docs/providers/goose.md)。
 - CatPaw 預設關閉，可在 Settings → tools 中啟用；讀取 macOS 和 Windows 上國內版與海外版助手的資料庫。路徑與驗證邊界見 [CatPaw 資料來源說明](docs/providers/catpaw.md)。
 - OmO Native 同時統計 OmO Native 與獨立 Senpi 的本機 session 紀錄。全新安裝會追蹤它；已儲存的工具選擇在升級後不會自動加上，請在 Settings → tools 中啟用 OmO Native。見 [OmO Native 資料來源說明](docs/providers/senpi.md)。 部分子任務紀錄只計入用量，暫不支援 Session Detail。

@@ -151,7 +151,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Limits, trends & export
 
-- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 29+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
+- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 30+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
 - **Codex reset forecast** — an optional third-party forecast below Codex limits, showing the expected reset time, the reset type (Regular or Banked), and when the window last reset
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
@@ -212,7 +212,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`; VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage & `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | ✅ |
@@ -244,6 +244,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 <br>
 
 - Paths above are the defaults. Token Monitor follows the same environment overrides Tokscale does — `$XDG_DATA_HOME` for the `~/.local/share/` roots, and per-tool variables such as `$CODEX_HOME`, `$SENPI_CODING_AGENT_DIR`, `$SENPI_CODING_AGENT_SESSION_DIR`, `$GROK_HOME`, `$HERMES_HOME`, `$GOOSE_PATH_ROOT`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME` and the `$CLINE_*` family.
+- Muse Code subscription limits use `muse usage --json` from Muse Code 1.4.13+ and its existing sign-in. Missing allowance and API-key billing do not provide quota percentages. See the [Muse data-source notes](docs/providers/muse.md).
 - Goose counts all session usage on its creation day, including usage on later days. Remote goosed servers and custom scan paths are not supported. See [Goose source notes](docs/providers/goose.md).
 - CatPaw is off by default; enable it in Settings → tools. It reads domestic and overseas assistant databases on macOS and Windows. See [CatPaw source notes](docs/providers/catpaw.md) for paths and verification boundaries.
 - OmO Native tracks local session records from both OmO Native and standalone Senpi. A fresh install tracks it. An existing saved Tools selection does not gain it on upgrade; enable OmO Native in Settings → tools. Some child-task logs count toward usage but do not yet support Session Detail. See [OmO Native source notes](docs/providers/senpi.md).

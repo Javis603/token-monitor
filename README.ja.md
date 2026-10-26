@@ -151,7 +151,7 @@ Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 47+ 種類�
 
 ### 制限・トレンド・エクスポート
 
-- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 29+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
+- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 30+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
 - **複数アカウントと Codex 切り替え** — 1 つのプロバイダーで複数アカウントを追跡し、それぞれの制限を表示。追跡済みの Codex アカウントは、再認証なしでローカルアカウントとしてワンクリック切り替え可能
 - **Codex リセット予測** — 任意で有効にできるサードパーティのリセット予測。予測されるリセット時刻、リセットタイプ（Regular / Banked）、前回のリセット時刻を表示
 - **削除されたセッション使用量を保持** — 多くのツールは古いセッションを削除します（Claude Code はデフォルトで 30 日後にトランスクリプトを削除）。有効にすると、Token Monitor は観測済みの日別ツール/モデル使用量をローカルにアーカイブし、元ファイルが消えてもヒートマップとトレンドを維持します（下記 [セッションデータの保持期間](#セッションデータの保持期間) を参照）
@@ -212,7 +212,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`、VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage および `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 拡張ログ | ✅ | — | ✅ |
@@ -244,6 +244,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 <br>
 
 - 上記はデフォルトのパスです。Token Monitor は Tokscale と同じ環境変数の上書きに従います。`~/.local/share/` 配下は `$XDG_DATA_HOME`、ツール個別では `$CODEX_HOME`、`$SENPI_CODING_AGENT_DIR`、`$SENPI_CODING_AGENT_SESSION_DIR`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME`、`$CLINE_*` などです。
+- Muse Code の利用枠は Muse Code 1.4.13+ の `muse usage --json` と既存のログインから取得します。利用枠が返らない場合や API キー課金では使用率を表示できません。[Muse のデータソース](docs/providers/muse.md)を参照してください。
 - Goose の使用量は、翌日以降の分もセッション作成日に計上されます。リモート goosed とカスタムスキャンパスは対象外です。[Goose のデータソース](docs/providers/goose.md)を参照してください。
 - CatPaw は既定で無効です。Settings → tools で有効にすると、macOS と Windows の中国版・海外版アシスタントのデータベースを読み取ります。パスと検証範囲は [CatPaw のデータソース](docs/providers/catpaw.md)を参照してください。
 - OmO Native は、OmO Native と単体の Senpi のローカルセッション記録を集計します。新規インストールでは追跡されます。保存済みのツール選択はアップグレードでは自動的に追加されないため、Settings → tools で OmO Native を有効にしてください。[OmO Native のデータソース](docs/providers/senpi.md)を参照してください。一部の子タスクのログは使用量にのみ含まれ、セッション詳細にはまだ対応していません。
