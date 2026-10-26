@@ -1373,13 +1373,13 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
     if (scopeId && account.id !== scopeId) continue;
     if (scopeField && account[scopeField] && !matchesScope(account)) continue;
     if (deps.signal?.aborted) throw abortError(deps.signal);
+    let row;
     try {
       const credential = account.id === 'legacy' ? account.cookie : await deps.resolveClaudeWebCredential?.(account);
       if (!credential) throw errorWithStatus('notConfigured', 'Claude Web login is not configured');
       const cookie = renewedCookies.get(credential) || credential;
       account.cookie = cookie;
-      const row = await runWithProbeDeadline(async ({ signal }) => {
-        const row = await fetchClaudeLimits({
+      row = await runWithProbeDeadline(({ signal }) => fetchClaudeLimits({
           ...options, claudeWebCookie: cookie, claudeWebOrganizationId: account.organizationId
         }, {
           ...deps, signal,
@@ -1391,24 +1391,12 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
             renewedCookies.set(renewal.previousCookie, renewal.cookie);
             return deps.onClaudeWebCookieRenewed?.({ ...renewal, ...(account.id !== 'legacy' ? { accountId: account.id } : {}) });
           }
-        });
-        if (!signal.aborted) {
-          try {
-            await deps.onClaudeWebAccountResolved?.({ id: account.id, organizationId: account.organizationId,
-              cookie: renewedCookies.get(cookie) || cookie, provider: row,
-              scopedById: Boolean(scopeId && !scopeField) });
-          } catch (_) {
-            deps.logger?.('[limits] Claude account metadata could not be persisted');
-          }
-        }
-        return row;
-      }, { signal: deps.signal, deadlineMs: deps.claudeAccountTimeoutMs || 45000 });
-      rows.push(row);
+        }), { signal: deps.signal, deadlineMs: deps.claudeAccountTimeoutMs || 45000 });
     } catch (error) {
       if (deps.signal?.aborted) throw abortError(deps.signal);
       const cached = claudeCachedIdentity(claudeWebIdentityFingerprint(renewedCookies.get(account.cookie) || account.cookie), deps, { allowStale: true });
       const identity = cached?.selectedOrganizationId === account.organizationId ? cached.identity : null;
-      const row = normalizeLimitProvider({
+      row = normalizeLimitProvider({
         provider: 'claude', ...claudeWebAccountMetadata(account), source: 'web',
         ...identity,
         status: error?.status || 'unavailable', updatedAt: nowIso((deps.now || Date.now)()), windows: []
@@ -1421,7 +1409,16 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
         const context = { identity: { accountKey: row.accountKey }, organizationId: cached?.organizationId || account.organizationId };
         if (claudeCachedPrepaid(claudePrepaidKey(context), deps, options, true)?.balance) retainedCreditKeys.add(row.accountKey);
       }
-      rows.push(row);
+    }
+    rows.push(row);
+    if (!deps.signal?.aborted) {
+      try {
+        await deps.onClaudeWebAccountResolved?.({ id: account.id, organizationId: account.organizationId,
+          cookie: renewedCookies.get(account.cookie) || account.cookie, provider: row,
+          scopedById: Boolean(scopeId && !scopeField) });
+      } catch (_) {
+        deps.logger?.('[limits] Claude account observation could not be recorded');
+      }
     }
   }
   let local;

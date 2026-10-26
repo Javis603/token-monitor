@@ -905,6 +905,7 @@ function claudeAccountService() {
       projectSettings: settingsForRenderer,
       onChanged: (account, reason, options) => {
         pushSettingsToRenderer();
+        if (reason === 'login-status') return;
         deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
         const scope = claudeAccountChangeScope(account, options);
         return queueLimitInvalidation(scope, reason, options);
@@ -5491,6 +5492,7 @@ function settingsForRenderer() {
     mimoManagedAccounts: mimoAccountsForRenderer(),
     ...accountStatusProjection(settings, process.env),
     claudeWebLegacyAccount: claudeAccountService().legacyAccount(),
+    claudeWebLoginStatuses: claudeAccountService().loginStatuses(),
     limitAccountForms: limitAccountFormsForRenderer(),
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,

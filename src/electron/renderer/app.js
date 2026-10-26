@@ -16481,11 +16481,23 @@ function renderClaudeWebAccounts() {
   if (!list) return;
   const providers = localProviderStatuses('claude');
   const accounts = claudeWebSettingsAccounts(providers);
-  const signature = JSON.stringify([accounts, providers, claudeWebAccountId, claudeWebFormOpen, currentLocale()]);
-  if (list.dataset.signature === signature) return;
+  const statusTexts = accounts.map((account) => [account.id === 'legacy' ? t('settings.claude.legacyLogin') : '', account.accountName, account.accountLabel,
+    account.enabled === false ? t('settings.codex.disabled')
+      : apiKeyAccountStatusText('claude', { status: state.settings?.claudeWebLoginStatuses?.[account.id] || 'notChecked' },
+        true, 'settings', limitProviderEnabled('claude'))].filter(Boolean).join(' · '));
+  const signature = JSON.stringify([accounts.map((account) => [account.id, account.accountKey, account.accountEmail,
+    account.accountName, account.accountLabel, account.organizationId, account.enabled]),
+  claudeWebAccountId, claudeWebFormOpen, currentLocale()]);
+  if (list.dataset.signature === signature) {
+    list.querySelectorAll('.managed-account-info').forEach((info, index) => {
+      info.textContent = statusTexts[index];
+      info.setAttribute('aria-label', info.textContent);
+    });
+    return;
+  }
   list.dataset.signature = signature;
   list.replaceChildren();
-  for (const account of accounts) {
+  for (const [index, account] of accounts.entries()) {
     const row = document.createElement('div');
     row.className = 'managed-account-row claude-web-account-row';
     row.classList.toggle('disabled', account.enabled === false);
@@ -16507,10 +16519,7 @@ function renderClaudeWebAccounts() {
     label.textContent = labelText;
     const info = document.createElement('div');
     info.className = 'managed-account-info';
-    const provider = providers.find((provider) => provider.accountKey === account.accountKey);
-    info.textContent = [account.id === 'legacy' ? t('settings.claude.legacyLogin') : '', account.accountName, account.accountLabel,
-      account.enabled === false ? t('settings.codex.disabled')
-        : apiKeyAccountStatusText('claude', provider, true, 'settings', limitProviderEnabled('claude'))].filter(Boolean).join(' · ');
+    info.textContent = statusTexts[index];
     info.setAttribute('aria-label', info.textContent);
     main.append(label, info);
     const actions = document.createElement('span');

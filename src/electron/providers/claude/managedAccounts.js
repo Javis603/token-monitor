@@ -15,6 +15,7 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
   let mutationLane = Promise.resolve();
   let epoch = 0;
   let legacyObservation = null;
+  const loginObservations = new Map();
   const contexts = new WeakMap();
   const accounts = () => normalizeClaudeManagedAccounts(getSettings().claudeManagedAccounts);
   const serialize = (work) => {
@@ -70,6 +71,7 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
       commit(next, [{ id: account.id, cookie: candidate.claudeWebCookie }, ...removed.map(({ id }) => ({ id, cookie: '' }))], {
         limitProviders: providerSelectionIncluding(getSettings().limitProviders, 'claude'), limitsEnabled: true
       });
+      for (const entry of [account, ...removed]) loginObservations.delete(entry.id);
       // A duplicate credential disappearing does not retire the shared identity.
       for (const old of removed) changed(old, 'account-removed', { refresh: false });
       const old = previous.find((entry) => entry.id === account.id);
@@ -106,6 +108,7 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
         : previous.map((entry) => entry.id === id ? { ...entry, enabled, updatedAt: new Date(now()).toISOString() } : entry);
       try {
         commit(next, removing ? [{ id, cookie: '' }] : []);
+        loginObservations.delete(id);
         if ((removing || !enabled) && !account.accountKey) {
           // Retire only this provisional ID. Reconciliation has no stable key
           // yet, so its provider-wide refresh must never clear sibling rows.
@@ -150,11 +153,31 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
       ? legacyObservation.metadata : null;
   }
 
+  function loginStatuses() {
+    const current = [...accounts(), { id: 'legacy', enabled: true, organizationId: getSettings().claudeWebOrganizationId || '' }];
+    return Object.fromEntries(current.flatMap((account) => {
+      const observation = loginObservations.get(account.id);
+      const cookie = account.id === 'legacy' ? getLegacyCredential() : credentialStore.readClaudeWebCredential(account.id);
+      return account.enabled && observation?.organizationId === account.organizationId
+        && observation.cookie === normalizeClaudeWebCookieInput(cookie) ? [[account.id, observation.status]] : [];
+    }));
+  }
+
   function resolved({ id, cookie, organizationId, provider, scopedById }) {
     return serialize(() => {
+      const account = id === 'legacy'
+        ? { id, enabled: true, organizationId: getSettings().claudeWebOrganizationId || '' }
+        : accounts().find((entry) => entry.id === id);
+      const currentCookie = id === 'legacy' ? getLegacyCredential() : credentialStore.readClaudeWebCredential(id);
+      if (!account?.enabled || account.organizationId !== organizationId
+        || normalizeClaudeWebCookieInput(currentCookie) !== cookie) return;
+      const observation = { cookie, organizationId, status: provider?.status || 'notChecked' };
+      if (JSON.stringify(loginObservations.get(id)) !== JSON.stringify(observation)) {
+        loginObservations.set(id, observation);
+        changed(account, 'login-status', { refresh: false });
+      }
+      if (provider?.status !== 'ok' || !provider.accountKey) return;
       if (id === 'legacy') {
-        if (!provider?.accountKey || normalizeClaudeWebCookieInput(getLegacyCredential()) !== cookie
-          || (getSettings().claudeWebOrganizationId || '') !== organizationId) return;
         const metadata = claudeWebAccountMetadata(provider);
         if (JSON.stringify(legacyAccount()) === JSON.stringify(metadata)) return;
         legacyObservation = { cookie, organizationId, metadata };
@@ -162,9 +185,6 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
         return;
       }
       const current = accounts();
-      const account = current.find((entry) => entry.id === id);
-      if (!account?.enabled || !provider?.accountKey || account.organizationId !== organizationId
-        || credentialStore.readClaudeWebCredential(id) !== cookie) return;
       const identity = ['accountKey', 'accountEmail', 'accountName', 'accountLabel'];
       if (identity.every((key) => account[key] === (provider[key] || ''))) return;
       const next = current.map((entry) => entry.id === id
@@ -180,7 +200,7 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
   return { accounts, saveAccount, removeAccount: (id) => mutateAccount(id),
     setAccountEnabled: (id, enabled) => typeof enabled === 'boolean'
       ? mutateAccount(id, enabled) : Promise.resolve({ ok: false, errorCode: 'invalidEnabled' }),
-    resolveCredential, renew, resolved, legacyAccount };
+    resolveCredential, renew, resolved, legacyAccount, loginStatuses };
 }
 
 module.exports = { createClaudeManagedAccounts, claudeAccountChangeScope };

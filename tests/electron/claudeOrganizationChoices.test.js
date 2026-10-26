@@ -6,6 +6,49 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+test('Claude Web rows retain controls and removal confirmation across quota and login-status updates', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const document = { activeElement: null };
+  const element = () => ({ children: [], dataset: {}, handlers: {}, classList: { add() {}, toggle() {} },
+    append(...nodes) { this.children.push(...nodes); },
+    replaceChildren() { this.children = []; document.activeElement = null; },
+    setAttribute() {}, addEventListener(name, handler) { this.handlers[name] = handler; },
+    querySelectorAll(selector) { return this.children.flatMap(child => [
+      ...(child.className === selector.slice(1) ? [child] : []), ...child.querySelectorAll(selector)
+    ]); }
+  });
+  const list = element();
+  document.createElement = element;
+  document.getElementById = id => id === 'claudeWebAccountList' ? list : null;
+  const state = { settings: { claudeManagedAccounts: [{ id: 'a', accountKey: 'same', enabled: true }],
+    claudeWebLoginStatuses: { a: 'ok' } } };
+  const providers = [{ accountKey: 'same', source: 'oauth', status: 'ok', updatedAt: 'old', windows: [] }];
+  const context = { document, state, localProviderStatuses: () => providers,
+    claudeWebAccountId: 'new', claudeWebFormOpen: false, currentLocale: () => 'en', t: key => key,
+    limitProviderEnabled: () => true,
+    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation') };
+  vm.runInNewContext(app.slice(app.indexOf('function apiKeyAccountStatusText('), app.indexOf('function setExternalAccountExpanded('))
+    + app.slice(app.indexOf('function claudeWebSettingsAccounts('), app.indexOf('function renderExternalProviderStatus(')), context);
+  context.renderClaudeWebAccounts();
+  const row = list.children[0];
+  const info = row.children[1].children[1];
+  const remove = row.children[2].children[1];
+  assert.equal(info.textContent, 'settings.claude.statusSet');
+  remove.handlers.click();
+  document.activeElement = remove;
+  providers[0].updatedAt = 'new';
+  providers[0].windows = [{ usedPercent: 42 }];
+  context.renderClaudeWebAccounts();
+  assert.equal(list.children[0], row);
+  assert.equal(document.activeElement, remove);
+  assert.equal(remove.textContent, '✓');
+  state.settings.claudeWebLoginStatuses.a = 'unauthorized';
+  context.renderClaudeWebAccounts();
+  assert.equal(info.textContent, 'settings.claude.statusInvalid');
+  assert.equal(document.activeElement, remove);
+  assert.equal(remove.textContent, '✓');
+});
+
 for (const fromCancel of [true, false]) {
   test(`closing the Claude Web form ${fromCancel ? 'restores Cancel keyboard focus to Add account' : 'preserves unrelated focus'}`, () => {
     const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');

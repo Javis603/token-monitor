@@ -217,6 +217,38 @@ test('a failed metadata save restores both the credential and the account list',
   assert.equal(f.store.readClaudeWebCredential(a.id), 'sessionKey=sk-ant-a');
 });
 
+test('Web login health stays independent of healthy OAuth for the same subscription', async (t) => {
+  const f = fixture(t);
+  await f.save('a');
+  const [account] = f.api.accounts();
+  let webStatus = 401;
+  f.deps.env = { CLAUDE_CODE_OAUTH_TOKEN: 'oauth-fixture' };
+  f.deps.platform = 'linux';
+  f.beforeFetch((url, init) => {
+    if (init.headers.cookie && webStatus !== 200) return response(webStatus, {});
+    if (url.endsWith('/api/oauth/profile')) return response(200, {
+      account: { uuid: 'account-a', email: 'a@example.com' }, organization: { uuid: 'org-a' }
+    });
+  });
+  const runtime = createLimitsRuntime({ limitProviders: ['claude'], claudeManagedAccounts: f.api.accounts() }, {
+    ...f.deps, onClaudeWebAccountResolved: f.api.resolved, resolveClaudeWebCredential: f.api.resolveCredential
+  });
+  t.after(() => runtime.stop());
+  await runtime.refresh('claude', 'credential-save');
+  assert.equal(runtime.getSnapshot().providers.length, 1);
+  assert.equal(runtime.getSnapshot().providers[0].status, 'ok');
+  assert.equal(f.api.loginStatuses()[account.id], 'unauthorized');
+  webStatus = 200;
+  await runtime.refresh('claude', 'credential-save');
+  assert.equal(f.api.loginStatuses()[account.id], 'ok');
+  assert.equal(fs.readFileSync(path.join(f.dir, 'settings.json'), 'utf8').includes('loginStatus'), false);
+  await f.api.setAccountEnabled(account.id, false);
+  assert.equal(f.api.loginStatuses()[account.id], undefined);
+  await f.api.removeAccount(account.id);
+  await f.api.resolved({ id: account.id, cookie: 'sessionKey=sk-ant-a', organizationId: 'org-a', provider: { status: 'unauthorized' } });
+  assert.equal(f.api.loginStatuses()[account.id], undefined);
+});
+
 test('a delayed organization A observation cannot overwrite organization B saved with the same cookie', async (t) => {
   const f = fixture(t);
   let release;
@@ -249,11 +281,13 @@ test('a delayed organization A observation cannot overwrite organization B saved
   release();
   await readingA;
   assert.deepEqual(f.api.accounts(), savedB, 'late A result cannot change B metadata');
+  assert.equal(f.api.loginStatuses()[a.id], undefined, 'late A result cannot set B login health');
   assert.equal(f.changes.length, changesBefore, 'late result must not trigger another identity refresh');
   const disk = JSON.parse(fs.readFileSync(path.join(f.dir, 'settings.json'), 'utf8'));
   assert.equal(disk.claudeManagedAccounts[0].accountKey, savedB[0].accountKey);
   await runtime.refresh({ provider: 'claude', accountId: a.id, accountKey: savedB[0].accountKey }, 'account-added');
   assert.deepEqual(f.api.accounts(), savedB, 'current B observations still resolve normally');
+  assert.equal(f.api.loginStatuses()[a.id], 'ok');
 });
 
 test('legacy observations expose only identity and are discarded when the credential or organization changes', async (t) => {
@@ -268,10 +302,12 @@ test('legacy observations expose only identity and are discarded when the creden
   t.after(() => runtime.stop());
   await runtime.refresh('claude', 'credential-save');
   assert.equal(f.api.legacyAccount().accountKey, a.accountKey);
+  assert.equal(f.api.loginStatuses().legacy, 'ok');
   assert.equal(JSON.stringify(f.api.legacyAccount()).includes('sk-ant'), false);
   assert.equal(runtime.getSnapshot().providers.filter((row) => row.accountKey === a.accountKey).length, 1);
   f.setSettings({ ...f.settings(), claudeWebOrganizationId: 'another-org' });
   assert.equal(f.api.legacyAccount(), null);
+  assert.equal(f.api.loginStatuses().legacy, undefined);
   f.setSettings({ ...f.settings(), claudeWebOrganizationId: 'org-a', claudeWebCookie: 'sessionKey=sk-ant-b' });
   assert.equal(f.api.legacyAccount(), null);
 });
@@ -342,6 +378,7 @@ test('an identity learned by an id-scoped refresh retires the temporary scope an
   await runtime.refresh({ provider: 'claude', accountId: a.id }, 'account-panel');
   assert.equal(f.api.accounts()[0].accountKey, a.accountKey);
   assert.deepEqual(f.changes.map(({ account, reason, flags }) => ({ key: account.accountKey, reason, flags })), [
+    { key: '', reason: 'login-status', flags: { refresh: false } },
     { key: '', reason: 'identity-switch', flags: { clear: true, refresh: false } },
     { key: a.accountKey, reason: 'identity-resolved', flags: { refresh: true } }
   ]);
