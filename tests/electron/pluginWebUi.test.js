@@ -93,3 +93,12 @@ test('Home/page documents require matching declared views; settings needs no dis
     }
   }
 });
+
+for (const id of [undefined, null, ['models'], {}, 123, true]) {
+  test(`authored document rejects non-string id ${JSON.stringify(id)}`, () => {
+    const m = manifest(); m.webUi.documents[0].id = id;
+    const result = normalizeManifest(m);
+    assert.ok(result.errors.includes('invalid webUi document id, entry, target or slot'));
+    assert.equal(result.manifest?.webUi, undefined);
+  });
+}

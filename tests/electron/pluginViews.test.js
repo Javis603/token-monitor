@@ -79,3 +79,62 @@ test('detached page metadata errors use the same clean message', async () => {
   assert.equal(nodes.get('pageError').textContent, 'Action failed: page unavailable');
   assert.equal(nodes.get('pageError').hidden, false);
 });
+
+test('retained page revisions refresh layout and canvas coordinates without losing drafts', async () => {
+  const { Element } = require('../helpers/notchPanel');
+  const document = { visibilityState: 'visible', addEventListener() {} };
+  document.createElement = tag => {
+    const node = new Element(tag, document);
+    node.style.removeProperty = key => delete node.style[key];
+    Object.defineProperties(node, {
+      firstElementChild: { get: () => node.children[0] || null },
+      childNodes: { get: () => node.children },
+      isConnected: { get: () => document.body?.contains(node) || false }
+    });
+    node.getClientRects = () => [{}];
+    node.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 200 });
+    node.setPointerCapture = () => {};
+    return node;
+  };
+  document.createElementNS = (_ns, tag) => document.createElement(tag);
+  document.body = document.createElement('body');
+  const container = document.createElement('div'); document.body.append(container);
+  const events = [];
+  const host = createPluginViewHost({ document, window: {}, t: key => key, onInteraction: (...args) => events.push(args) });
+  const tree = (layout, width, height) => ({ type: 'stack', ...layout, children: [
+    { type: 'input', action: 'note', label: 'Note', value: 'Saved note' },
+    { type: 'draw', action: 'paint', label: 'Canvas', width, height, list: [] }
+  ] });
+  const update = (revision, layout, width, height) => host.update({ surface: 'page', views: {
+    'demo/view': { status: 'ok', revision, tree: tree(layout, width, height) }
+  } });
+  update(1, { dir: 'col', gap: 4 }, 100, 40);
+  host.mount(container, 'demo/view', 'page', { retainDrafts: true });
+  const stack = container.querySelector('.pv-stack'), field = container.querySelector('.pv-field');
+  const drawing = container.querySelector('.pv-draw-box'), canvas = drawing.firstElementChild;
+  field.value = 'Unsaved draft'; field.fire('input'); field.focus();
+  update(2, { dir: 'row', gap: 16, align: 'center', justify: 'between', wrap: true, flex: 2 }, 200, 100);
+  assert.equal(container.querySelector('.pv-stack'), stack);
+  assert.equal(container.querySelector('.pv-field'), field);
+  assert.equal(field.value, 'Unsaved draft'); assert.equal(document.activeElement, field);
+  assert.equal(stack.classList.contains('pv-dir-row'), true);
+  assert.equal(stack.classList.contains('pv-dir-col'), false);
+  assert.equal(stack.style.gap, 'calc(16px * var(--pv-spacing, 1))');
+  assert.equal(stack.style.alignItems, 'center'); assert.equal(stack.style.justifyContent, 'space-between');
+  assert.equal(stack.style.flexWrap, 'wrap'); assert.equal(stack.style.flex, '2 1 0');
+  assert.equal(drawing.firstElementChild, canvas);
+  assert.equal(canvas.getAttribute('viewBox'), '0 0 200 100');
+  assert.equal(canvas.style.aspectRatio, '200 / 100');
+  drawing.fire('pointerdown', { type: 'pointerdown', button: 0, pointerId: 1, clientX: 200, clientY: 100, preventDefault() {}, stopPropagation() {} });
+  await new Promise(setImmediate);
+  assert.deepEqual(events[0], ['page', 'demo/view', { action: 'paint', type: 'pointerdown', x: 100, y: 50 }, 2]);
+  assert.deepEqual(drawing._pvPosition, { x: 100, y: 50 });
+  assert.deepEqual([drawing._pvModel.width, drawing._pvModel.height], [200, 100]);
+  update(3, {}, 100, 40);
+  assert.equal(stack.classList.contains('pv-dir-col'), true);
+  for (const property of ['gap', 'alignItems', 'justifyContent', 'flexWrap', 'flex', 'minWidth']) assert.equal(stack.style[property], '');
+  assert.equal(canvas.getAttribute('viewBox'), '0 0 100 40');
+  assert.equal(canvas.style.aspectRatio, '100 / 40');
+  assert.equal(field.value, 'Unsaved draft');
+  container.remove(); host.refreshDemand();
+});

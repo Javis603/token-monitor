@@ -16,7 +16,7 @@ function normalizeWebUi(raw, permissions, errors, views = []) {
   if (!permissions.includes('ui.web')) errors.push('webUi requires ui.web permission');
   const documents = [], ids = new Set();
   for (const doc of raw.documents) {
-    if (!doc || !/^[a-z][a-z0-9-]{0,31}$/.test(doc.id) || ids.has(doc.id) || !assets.includes(doc.entry) || !doc.entry.endsWith('.html') || ![...TARGETS, ...SURFACES, 'settings'].includes(doc.target) || !['before', 'after', 'replace'].includes(doc.slot)) { errors.push('invalid webUi document id, entry, target or slot'); continue; }
+    if (!doc || typeof doc.id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(doc.id) || ids.has(doc.id) || !assets.includes(doc.entry) || !doc.entry.endsWith('.html') || ![...TARGETS, ...SURFACES, 'settings'].includes(doc.target) || !['before', 'after', 'replace'].includes(doc.slot)) { errors.push('invalid webUi document id, entry, target or slot'); continue; }
     if (TARGETS.includes(doc.target) && !permissions.includes('tm.pages')) errors.push('original page documents require tm.pages permission');
     const surface = SURFACES.includes(doc.target);
     if (doc.target === 'settings' && (doc.slot !== 'replace' || doc.view !== undefined || doc.variant && doc.variant !== 'full' || documents.some(other => other.target === 'settings'))) errors.push('settings document must be unique, view-independent and use replace/full');

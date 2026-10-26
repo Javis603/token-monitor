@@ -13,7 +13,6 @@
   },
   "permissions": [
     "ui.web",
-    "tm.pages",
     "sys.cpu"
   ],
   "views": [

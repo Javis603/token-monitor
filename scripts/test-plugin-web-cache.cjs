@@ -142,7 +142,7 @@ async function main() {
     timings.push({ coldMs, reopenMs, sameDocument: same });
     await delay(150); fs.writeFileSync(path.join(scratch, 'reopened.png'), (await itemFor(h).view.webContents.capturePage()).toPNG());
     if(process.env.TM_CACHE_REQUIRE_REUSE) check('reopen reuses the exact WebContents and unsaved draft',same&&await itemFor(h).view.webContents.executeJavaScript("note.value==='Keep my draft'"));
-    check('baseline recreates the child and loses unsaved DOM state', !same && await itemFor(h).view.webContents.executeJavaScript("note.value===''") );
+    else check('baseline recreates the child and loses unsaved DOM state', !same && await itemFor(h).view.webContents.executeJavaScript("note.value===''") );
     return;
   }
   await until(() => service.cached().length === 1 && !service.cached()[0].resuming);

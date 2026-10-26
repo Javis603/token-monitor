@@ -340,9 +340,21 @@
     });
     out.addEventListener('click', event => event.stopPropagation());
   }
+  function applyNodeLayout(out, node) {
+    out.dataset.pvMotion = node.motion || 'inherit';
+    out.style.flex = node.flex === undefined ? '' : `${node.flex} 1 0`;
+    out.style.minWidth = node.flex === undefined ? '' : '0';
+    if (node.type !== 'stack') return;
+    out.classList.toggle('pv-dir-row', node.dir === 'row');
+    out.classList.toggle('pv-dir-col', node.dir !== 'row');
+    out.style.gap = node.gap === undefined ? '' : `calc(${node.gap}px * var(--pv-spacing, 1))`;
+    out.style.alignItems = { start: 'flex-start', end: 'flex-end', center: 'center', stretch: 'stretch' }[node.align] || '';
+    out.style.justifyContent = { start: 'flex-start', end: 'flex-end', center: 'center', between: 'space-between' }[node.justify] || '';
+    out.style.flexWrap = node.wrap ? 'wrap' : '';
+  }
   function patchNode(document, old, node, options) {
     if (!old || old._pvType !== node.type || old._pvAction !== node.action) return renderNode(document, node, options);
-    old.dataset.pvMotion = node.motion || 'inherit';
+    applyNodeLayout(old, node);
     if (CONTROL_TYPES.includes(node.type)) { updateControl(document, old, node, options); return old; }
     if (node.type === 'stack') {
       const children = node.children || [];
@@ -357,7 +369,10 @@
       old._pvModel = node; old._pvSend = options.onInteraction;
       old.tabIndex = node.disabled || !options.onInteraction ? -1 : 0; old.setAttribute('aria-label', node.label);
       const drawing = renderDisplayList(document, node.list || [], node.width || 100, node.height || 40);
-      old.firstElementChild.replaceChildren(...drawing.childNodes);
+      const canvas = old.firstElementChild;
+      canvas.setAttribute('viewBox', drawing.getAttribute('viewBox'));
+      canvas.style.aspectRatio = drawing.style.aspectRatio;
+      canvas.replaceChildren(...drawing.childNodes);
       return old;
     }
     return renderNode(document, node, options);
@@ -369,10 +384,6 @@
     else switch (node.type) {
       case 'stack': {
         out = el(document, 'div', `pv-stack pv-dir-${node.dir === 'row' ? 'row' : 'col'}`);
-        if (node.gap !== undefined) out.style.gap = `calc(${node.gap}px * var(--pv-spacing, 1))`;
-        if (node.align) out.style.alignItems = { start: 'flex-start', end: 'flex-end', center: 'center', stretch: 'stretch' }[node.align];
-        if (node.justify) out.style.justifyContent = { start: 'flex-start', end: 'flex-end', center: 'center', between: 'space-between' }[node.justify];
-        if (node.wrap) out.style.flexWrap = 'wrap';
         for (const child of node.children || []) {
           const rendered = renderNode(document, child, options);
           if (rendered) out.append(rendered);
@@ -438,12 +449,8 @@
       default:
         return null;
     }
-    out.dataset.pvMotion = node.motion || 'inherit';
+    applyNodeLayout(out, node);
     out._pvType = node.type; out._pvAction = node.action;
-    if (node.flex !== undefined) {
-      out.style.flex = `${node.flex} 1 0`;
-      out.style.minWidth = '0';
-    }
     return out;
   }
 
