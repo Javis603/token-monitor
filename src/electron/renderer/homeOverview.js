@@ -211,7 +211,41 @@
     }));
   }
 
-  function homeDeviceRows(devices, { localDeviceId = '', period = 'today', limit = 4 } = {}) {
+  // TokenLedger: today's credit spend for the device's WorkBuddy ledger, from
+  // the bounded recentEvents window. Null when the device reports no ledger —
+  // most machines — so callers render nothing instead of a zero.
+  function creditsSpentToday(credits, now = Date.now()) {
+    if (!credits || credits.available !== true || !Array.isArray(credits.recentEvents)) return null;
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const startMs = startOfDay.getTime();
+    let spend = 0;
+    let seen = false;
+    for (const event of credits.recentEvents) {
+      const at = Number(event?.updatedAt);
+      const amount = Number(event?.credits);
+      if (!Number.isFinite(at) || at < startMs || !Number.isFinite(amount) || amount >= 0) continue;
+      spend += -amount;
+      seen = true;
+    }
+    return seen ? spend : null;
+  }
+
+  // Bounded tooltip payload for the credits badge: fitted coefficients first,
+  // then the models still accumulating samples. Pure data — the caller owns
+  // translation and joining.
+  function creditsCalibrationLines(calibration, { profileLimit = 3, pendingLimit = 3 } = {}) {
+    if (!calibration || typeof calibration !== 'object') return { profiles: [], pending: [] };
+    const pick = (list, limit) => (Array.isArray(list) ? list : []).map((entry) => ({
+      model: String(entry?.model || 'unknown'),
+      creditsPerMTok: Number.isFinite(Number(entry?.creditsPerMTok)) ? Number(entry.creditsPerMTok) : null,
+      r2: Number.isFinite(Number(entry?.r2)) ? Number(entry.r2) : null,
+      samples: Math.max(0, Math.trunc(Number(entry?.samples) || 0))
+    })).filter((entry) => entry.samples > 0).slice(0, Math.max(0, limit));
+    return { profiles: pick(calibration.profiles, profileLimit), pending: pick(calibration.pending, pendingLimit) };
+  }
+
+  function homeDeviceRows(devices, { localDeviceId = '', period = 'today', limit = 4, now = Date.now() } = {}) {
     const localKey = String(localDeviceId || '').trim();
     return (devices || [])
       .map((device, index) => {
@@ -224,6 +258,10 @@
           platform: device?.platform || '',
           isLocal: Boolean(localKey && key === localKey),
           isStale: Boolean(device?.stale),
+          creditsToday: creditsSpentToday(device?.credits, now),
+          creditsAvailable: device?.credits?.available === true,
+          creditsTotal: Number(device?.credits?.totals?.credits) || 0,
+          creditsCalibration: device?.credits?.calibration || null,
           index
         };
       })
@@ -508,6 +546,8 @@
 
   return {
     compactWindowRank,
+    creditsCalibrationLines,
+    creditsSpentToday,
     homeLimitAccounts,
     homeLimitAccountsForProviders,
     homeLimitsAwaitingFirstData,

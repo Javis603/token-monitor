@@ -30,6 +30,7 @@ const {
   readSessionUsageArchiveSnapshot
 } = require('../shared/usage/sessionUsageArchiveStore');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
+const { createCreditsAttacher } = require('../shared/credits/attach');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
@@ -145,6 +146,10 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 
+// The credit ledger rides on every full summary via the shared attacher;
+// WorkBuddy absent is a normal state (available:false), not an error.
+const withWorkBuddyCredits = createCreditsAttacher();
+
 const titleSyncNegotiator = createAgentTitleSync({ dataDir: path.dirname(pidFilePath()), fetchFn: fetch });
 
 async function postUsage(summary) {
@@ -211,7 +216,7 @@ async function main() {
     envelope: { deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent' },
     usageOptions,
     limitsOptions,
-    transformUsage: summaryWithSessionUsageArchive,
+    transformUsage: (summary) => summaryWithSessionUsageArchive(withWorkBuddyCredits(summary)),
     deliver,
     dryRun,
     onRuntime: (runtime) => { runtimeHandle = runtime; },

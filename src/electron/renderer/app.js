@@ -957,6 +957,13 @@ function formatCompact(value, unitSystem, locale) {
     locale === undefined ? currentLocale() : locale
   );
 }
+// TokenLedger: credit spend stays a plain decimal — compounding 1.2K credits
+// would hide the small per-request amounts the ledger is about.
+function formatCredits(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  return n >= 100 ? String(Math.round(n)) : String(Math.round(n * 10) / 10);
+}
 function updateTotalCompact(value) {
   if (!els.totalTokensCompact) return;
   const num = Math.round(Number(value || 0));
@@ -6758,6 +6765,27 @@ function renderHomeDeviceModule() {
     body.append(empty);
     return module;
   }
+  // TokenLedger: the credits badge is exact local-ledger data; its tooltip
+  // states the confidence and how far the per-model calibration has come.
+  function creditsTooltip(calibration) {
+    const lines = [t('home.creditsSource')];
+    if (calibration) {
+      const { profiles, pending } = homeOverviewApi.creditsCalibrationLines(calibration);
+      lines.push(t('home.creditsCalibration', { profiles: profiles.length, pending: pending.length }));
+      for (const entry of profiles) {
+        lines.push(t('home.creditsFittedModel', {
+          model: entry.model,
+          value: formatCredits(entry.creditsPerMTok),
+          r2: entry.r2,
+          samples: entry.samples
+        }));
+      }
+      for (const entry of pending) {
+        lines.push(t('home.creditsPendingModel', { model: entry.model, samples: entry.samples }));
+      }
+    }
+    return lines.join('\n');
+  }
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-device-row';
@@ -6783,6 +6811,17 @@ function renderHomeDeviceModule() {
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.value);
     item.append(mark, label, value);
+    if (row.creditsAvailable) {
+      const credits = document.createElement('span');
+      credits.className = 'home-device-credits';
+      // A day with no WorkBuddy spend still proves the ledger is connected;
+      // only the label switches to the running total.
+      credits.textContent = row.creditsToday != null
+        ? t('home.creditsToday', { value: formatCredits(row.creditsToday) })
+        : t('home.creditsTotal', { value: formatCredits(row.creditsTotal) });
+      credits.title = creditsTooltip(row.creditsCalibration);
+      item.append(credits);
+    }
     body.append(item);
   }
   return module;
