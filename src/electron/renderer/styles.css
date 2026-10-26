@@ -1255,6 +1255,28 @@ span.settings-note.settings-item-desc {
   gap: 6px;
 }
 .managed-account-list:empty { display: none; }
+#claudeWebAccountList { container-type: inline-size; }
+.claude-web-account-row .managed-account-info {
+  max-width: none;
+}
+.claude-web-account-row .settings-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.claude-web-account-row .settings-actions button {
+  padding: 4px 6px;
+  font-size: 0.625rem;
+}
+@container (max-width: 360px) {
+  .claude-web-account-row.managed-account-row {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+  .claude-web-account-row .managed-account-right {
+    grid-column: 2;
+    justify-self: end;
+    max-width: 100%;
+  }
+}
 .codex-workspace-selection {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

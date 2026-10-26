@@ -221,9 +221,9 @@ test('open flare stays within the physical notch height at every list size and z
 test('equal ears reserve the wider content and preserve the physical notch center', () => {
   const geometry = notchGeometry(display, native);
   const closed = notchBounds(display, geometry, false, 180, { left: 17, right: 36 });
-  assert.equal(closed.width, 179 + 2 * (36 + 16 + NOTCH_METRICS.restingFlare));
-  assert.equal(closed.x + 36 + 16 + NOTCH_METRICS.restingFlare, 646);
-  assert.equal(closed.x + closed.width - 36 - 16 - NOTCH_METRICS.restingFlare, 825);
+  assert.equal(closed.width, 179 + 2 * (36 + 12 + NOTCH_METRICS.restingFlare));
+  assert.equal(closed.x + 36 + 12 + NOTCH_METRICS.restingFlare, 646);
+  assert.equal(closed.x + closed.width - 36 - 12 - NOTCH_METRICS.restingFlare, 825);
   assert.equal(notchBounds(display, geometry, false, 180, null).width, 179 + 2 * NOTCH_METRICS.restingFlare, 'a quiet shell hugs the camera with its resting flares');
   const open = notchBounds(display, geometry, true, 800, { left: 17, right: 36 }, 1.5);
   assert.ok(Math.abs(open.x + open.width / 2 - geometry.centerX) <= 0.5, 'expanded shell remains centered on the physical notch');
@@ -936,8 +936,8 @@ test('summary minimum follows each screen gap and measured content rather than a
       const longer = notchBounds(display, geometry, false, 180, { left: iconWidth, right: 60 });
       assert.ok(longer.width > minimum.width);
       const leftEar = (minimum.width - gapWidth) / 2;
-      assert.ok(leftEar >= iconWidth + 16 + NOTCH_METRICS.restingFlare, 'the measured icon and existing clearances fit');
-      assert.ok(leftEar < iconWidth + 16 + NOTCH_METRICS.restingFlare + 1, 'no extra fixed content reservation is added');
+      assert.ok(leftEar >= iconWidth + 12 + NOTCH_METRICS.restingFlare, 'the measured icon and existing clearances fit');
+      assert.ok(leftEar < iconWidth + 12 + NOTCH_METRICS.restingFlare + 1, 'no extra fixed content reservation is added');
       assert.ok(Math.abs(minimum.x + minimum.width / 2 - geometry.centerX) <= 0.5);
       assert.ok(Math.abs(longer.x + longer.width / 2 - geometry.centerX) <= 0.5);
       assert.equal(notchBounds(display, geometry, false, 180, null).width, gapWidth + 2 * NOTCH_METRICS.restingFlare);
@@ -1006,6 +1006,55 @@ test('hover grows the entry by default and opens on click; open mode waits for t
   assert.equal(last(open.windows[0]).expanded, true);
 });
 
+test('transparent resting corners neither hover nor capture menu bar input', (t) => {
+  for (const [shape, fullScreen] of [['notch', false], ['pill', false], ['notch', true]]) {
+    const f = fixture(t, { notchShape: shape, notchHoverAction: 'open' }, { isFullScreen: () => fullScreen });
+    const top = f.windows[0], g = last(top).geometry;
+    const left = top.getBounds().x + g.headerX;
+    const animations = () => top.messages.filter(m => m.channel === 'topNotch:animate').length;
+    const before = animations();
+    for (const x of [left + 1, left + g.headerWidth - 1]) {
+      f.screen.point = { x, y: g.y + g.height - 1 };
+      f.controller.poll(1000);
+      assert.equal(animations(), before, `${shape}: transparent lower corner must not hover`);
+      assert.equal(top.ignoreMouse, true, `${shape}: transparent lower corner stays click-through`);
+      press(f);
+      assert.equal(last(top).expanded, false);
+    }
+    f.screen.point = { x: g.centerX, y: g.y + g.height / 2 };
+    f.controller.poll(1100);
+    assert.equal(last(top).expanded, true, `${shape}: the visible center remains reachable`);
+  }
+});
+
+test('hover input follows the painted shell rather than the animation destination', (t) => {
+  const f = fixture(t, { notchHoverAction: 'peek' }, { reducedMotion: false });
+  const top = f.windows[0], g = last(top).geometry;
+  f.screen.point = { x: g.centerX, y: g.y + 10 }; f.controller.poll(1000);
+  assert.equal(top.ignoreMouse, false);
+  // No animation frame has arrived: this is inside the future grown shell only.
+  f.screen.point = { x: g.centerX, y: g.y + g.height + 2 }; f.controller.poll(1010);
+  assert.equal(top.ignoreMouse, true, 'unpainted hover growth cannot take input');
+  press(f);
+  assert.equal(last(top).expanded, false);
+});
+
+test('the open panel leaves its transparent lower corners click-through', (t) => {
+  for (const shape of ['notch', 'pill']) {
+    const f = fixture(t, { notchShape: shape });
+    const top = f.windows[0], g = last(top).geometry;
+    f.screen.point = { x: g.centerX, y: g.y + 10 }; f.controller.poll(1000);
+    assert.equal(last(top).expanded, true);
+    const open = notchBounds(display, notchGeometry(display, native, shape), true);
+    for (const x of [open.x + 1, open.x + open.width - 1]) {
+      f.screen.point = { x, y: open.y + open.height - 1 }; f.controller.poll(1010);
+      assert.equal(top.ignoreMouse, true, `${shape}: the open corner stays click-through`);
+    }
+    f.screen.point = { x: g.centerX, y: open.y + open.height - 2 }; f.controller.poll(1020);
+    assert.equal(top.ignoreMouse, false, `${shape}: the visible bottom edge still takes input`);
+  }
+});
+
 test('hover growth scales both ears with the shell and keeps the camera gap fixed', (t) => {
   for (const shape of ['auto', 'pill']) {
     const f = fixture(t, { notchShape: shape, notchHoverAction: 'peek' }, { reducedMotion: false });
@@ -1038,6 +1087,27 @@ test('hover growth scales both ears with the shell and keeps the camera gap fixe
   }
 });
 
+test('compact attached summaries keep full-size content with eight-point outer margins and four-point camera clearance', (t) => {
+  const f = fixture(t);
+  f.controller.setData({ cells: [], summary: { items: [{ type: 'activity', running: 1 }] } });
+  const win = f.windows[0];
+  for (const [left, right] of [[17, 16], [16, 17], [28, 28]]) {
+    f.ipcMain.emit('topNotch:size', { sender: win.webContents }, { slots: { left, right } });
+    const g = last(win).geometry;
+    const m = win.messages.filter(message => message.channel === 'topNotch:motion').at(-1).payload;
+    assert.equal(m.summaryScale, 1, 'narrowing the shell must not shrink its content');
+    const closedX = win.bounds.x + g.headerX;
+    const leftStart = win.bounds.x + m.summaryEdges.left;
+    const rightEnd = win.bounds.x + m.summaryEdges.right;
+    assert.equal(leftStart - closedX - g.shoulder, 8);
+    assert.equal(closedX + g.headerWidth - g.shoulder - rightEnd, 8);
+    const clearance = left >= right ? g.centerX - g.gapWidth / 2 - leftStart - left
+      : rightEnd - right - g.centerX - g.gapWidth / 2;
+    assert.equal(clearance, 4, 'the wider side retains its camera clearance');
+    assert.equal(g.headerWidth, g.gapWidth + 2 * (Math.max(left, right) + 20));
+  }
+});
+
 test('wide hover summaries stay outside the camera through overshoot, reversal and opening at every zoom', (t) => {
   for (const zoom of [0.8, 1, 1.2]) for (const widths of [[160, 160], [17, 240], [240, 42], [0, 160], [160, 0]]) {
     let down = false;
@@ -1052,8 +1122,8 @@ test('wide hover summaries stay outside the camera through overshoot, reversal a
       const g = last(win).geometry, m = frame();
       const leftEnd = win.bounds.x + m.summaryEdges.left + widths[0] * m.summaryScale;
       const rightStart = win.bounds.x + m.summaryEdges.right - widths[1] * m.summaryScale;
-      assert.ok(leftEnd <= g.centerX - g.gapWidth / 2 - 8 + 1e-8, `left clearance at zoom ${zoom}, widths ${widths}`);
-      assert.ok(rightStart >= g.centerX + g.gapWidth / 2 + 8 - 1e-8, `right clearance at zoom ${zoom}, widths ${widths}`);
+      assert.ok(leftEnd <= g.centerX - g.gapWidth / 2 - 4 + 1e-8, `left clearance at zoom ${zoom}, widths ${widths}`);
+      assert.ok(rightStart >= g.centerX + g.gapWidth / 2 + 4 - 1e-8, `right clearance at zoom ${zoom}, widths ${widths}`);
     };
     const tick = elapsed => { f.ipcMain.emit('topNotch:frame', { sender: win.webContents }, { id: animation().id, elapsed }); check(); };
     tick(animation().duration);
@@ -1086,8 +1156,8 @@ test('live summary width changes preserve camera clearance while the hover shell
       const g = last(win).geometry, m = frame();
       const leftEnd = win.bounds.x + m.summaryEdges.left + m.summaryIconInset - iconInset + left * m.summaryScale;
       const rightStart = win.bounds.x + m.summaryEdges.right - right * m.summaryScale;
-      if (left) assert.ok(leftEnd <= g.centerX - g.gapWidth / 2 - 8 + 1e-8, 'resizing left content clears the camera');
-      if (right) assert.ok(rightStart >= g.centerX + g.gapWidth / 2 + 8 - 1e-8, 'resizing right content clears the camera');
+      if (left) assert.ok(leftEnd <= g.centerX - g.gapWidth / 2 - 4 + 1e-8, 'resizing left content clears the camera');
+      if (right) assert.ok(rightStart >= g.centerX + g.gapWidth / 2 + 4 - 1e-8, 'resizing right content clears the camera');
       assert.ok(Number.isFinite(m.summaryScale), 'empty slots do not produce invalid transforms');
     }
   }
@@ -2296,9 +2366,9 @@ test('wide summaries are bounded only by the screen capacity, menu bar items inc
   const primary = f.windows[0];
   f.ipcMain.emit('topNotch:size', { sender: primary.webContents }, { slots: { left: 1000, right: 2000 } });
   const geometry = last(primary).geometry;
-  assert.equal(geometry.summaryBudget, 629 - NOTCH_METRICS.restingFlare);
+  assert.equal(geometry.summaryBudget, 633 - NOTCH_METRICS.restingFlare);
   assert.equal(geometry.headerWidth, 1469);
-  assert.equal((geometry.headerWidth - geometry.gapWidth) / 2 - 16 - NOTCH_METRICS.restingFlare, geometry.summaryBudget);
+  assert.equal((geometry.headerWidth - geometry.gapWidth) / 2 - 12 - NOTCH_METRICS.restingFlare, geometry.summaryBudget);
 });
 
 test('both physical ears use the same finite budget', () => {

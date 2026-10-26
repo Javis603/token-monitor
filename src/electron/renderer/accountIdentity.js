@@ -142,6 +142,10 @@
     ].map((key) => String(key === null || key === undefined ? '' : key).trim()).filter(Boolean));
   }
 
+  function sourceDeviceKey(record) {
+    return String(record?.sourceDeviceId || '').trim();
+  }
+
   // Whether two records name one account — the question a list is deduped with
   // and a row asks about the account a record resolved to. The rungs are the
   // subscription matcher's, in its order (subscriptionDisplay.js,
@@ -170,7 +174,8 @@
   // matcher the single candidate it declined to choose between, and put the cost
   // on the wrong row.
   function sameAccount(a, b) {
-    if (String(a?.provider || '').trim().toLowerCase() !== String(b?.provider || '').trim().toLowerCase()) {
+    const provider = String(a?.provider || '').trim().toLowerCase();
+    if (provider !== String(b?.provider || '').trim().toLowerCase()) {
       return false;
     }
     const keysA = accountKeyFamily(a);
@@ -193,7 +198,13 @@
     // sole-account fallback heal a re-pasted credential.
     const namedA = keysA.size > 0 || Boolean(emailA);
     const namedB = keysB.size > 0 || Boolean(emailB);
-    return !namedA && !namedB;
+    if (namedA || namedB) return false;
+    // Anonymous Muse rows name a device, not an account: the CLI exposes no
+    // stable account id (limits/core.js scopes them by device for the same
+    // reason). Trimmed, case-sensitive device ids decide; a missing id is one
+    // unknown bucket, equal only to another unknown — never to a known device.
+    if (provider === 'muse') return sourceDeviceKey(a) === sourceDeviceKey(b);
+    return true;
   }
 
   // Whether two key families name one account: they are sets, and an account
@@ -288,7 +299,7 @@
     }
     const emailOf = (record) => accountEmailOf(record).toLowerCase();
     const survivors = new Map();
-    for (const indexes of indexesByProvider.values()) {
+    for (const [provider, indexes] of indexesByProvider.entries()) {
       const inProvider = indexes.map((index) => list[index]);
       const groups = keyedAccountGroups(inProvider, emailOf);
       const namedEmails = new Set(groups.flatMap((group) => [...group.emails]));
@@ -298,12 +309,23 @@
         survivors.set(indexes[group.survivor], withGroupKeyFamily(list[indexes[group.survivor]], group));
       }
       const keptKeylessEmails = new Set();
+      const keptMuseDevices = new Set();
       let keptAnonymous = false;
       for (let position = 0; position < inProvider.length; position += 1) {
         const record = inProvider[position];
         if (accountKeyFamily(record).size > 0) continue;
         const email = emailOf(record);
         if (!email) {
+          // Anonymous Muse rows are device observations (see sameAccount):
+          // one survivor per trimmed device id, with every missing id in a
+          // single unknown bucket that never absorbs a known device row.
+          if (provider === 'muse') {
+            const deviceKey = sourceDeviceKey(record);
+            if (keptMuseDevices.has(deviceKey)) continue;
+            keptMuseDevices.add(deviceKey);
+            survivors.set(indexes[position], record);
+            continue;
+          }
           if (keptAnonymous) continue;
           keptAnonymous = true;
           survivors.set(indexes[position], record);
@@ -363,7 +385,20 @@
     const local = localDeviceId
       ? devices.find((device) => device?.deviceId === localDeviceId)
       : (devices.length === 1 ? devices[0] : null);
-    return local?.limits?.providers || [];
+    const providers = local?.limits?.providers;
+    if (!Array.isArray(providers)) return providers || [];
+    // Raw per-device rows carry no sourceDeviceId (aggregateLimits stamps it
+    // from the device record), so a local Muse row would not dedupe against
+    // its own aggregate copy. Stamp the matched device's id on a copy; never
+    // mutate the caller's stats, and leave every other row by reference.
+    const effectiveDeviceId = String(local?.deviceId || '').trim();
+    if (!effectiveDeviceId) return providers;
+    const needsStamp = (record) => String(record?.provider || '').trim().toLowerCase() === 'muse'
+      && !sourceDeviceKey(record);
+    if (!providers.some(needsStamp)) return providers;
+    return providers.map((record) => (needsStamp(record)
+      ? { ...record, sourceDeviceId: effectiveDeviceId }
+      : record));
   }
 
   function localLiveCodexProvider(stats, localDeviceId = '') {

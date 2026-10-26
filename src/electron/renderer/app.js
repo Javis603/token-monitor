@@ -109,6 +109,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
+  muse: 'settings.limits.connection.muse',
   kiro: 'settings.limits.connection.kiro',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
@@ -239,6 +240,8 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Sign in again': 'settings.limits.status.signInAgain',
   'Run grok login': 'settings.limits.status.runGrokLogin',
   'Run kiro-cli login': 'settings.limits.status.runKiroLogin',
+  'Install Muse Code': 'settings.limits.status.installMuseCode',
+  'Run muse login': 'settings.limits.status.runMuseLogin',
   'Open Cline': 'settings.limits.status.openCline',
   'Re-login': 'settings.limits.status.relogin',
   Limited: 'settings.limits.status.limited',
@@ -12006,6 +12009,11 @@ function moveOpenCodeLocalFallbackSetting() {
 // generated and hand-built panels share this, including which messages they
 // may override (`messages.required` / `rejected` / `invalidFormat`).
 let claudeOrganizationChoicesRevision = 0;
+let claudeWebAccountId = 'new';
+// null opens the initial empty-account form; an explicit cancel stays closed.
+let claudeWebFormOpen = null;
+const claudeAccountActions = accountShellApi.createBusyGuard();
+
 async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
@@ -12014,12 +12022,15 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   renderExternalProviderStatus(id);
   let result;
   try {
-    result = await commitAccountCredential(() => window.tokenMonitor.limits.saveCredential(id, values));
+    result = await commitAccountCredential(() => id === 'claude' && values.claudeWebAccountId
+      ? claudeAccountActions.run('claude', null, () => window.tokenMonitor.claude.saveWebAccount(values))
+      : window.tokenMonitor.limits.saveCredential(id, values));
   } catch (error) {
     setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
     renderExternalProviderStatus(id);
     return result;
   }
+  if (id === 'claude' && values.claudeWebAccountId && result === undefined) return result;
   if (result?.verdict === 'superseded') return result;
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
@@ -12029,6 +12040,11 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     return result;
   }
   if (!result?.saved) {
+    if (id === 'claude' && result?.errorCode === 'credentialStorageUnavailable') {
+      setAccountPanelMessage(id, { key: failedKey, params: { message: t('settings.common.error') } });
+      renderExternalProviderStatus(id);
+      return result;
+    }
     const rejection = {
       required: { key: messages.required || 'settings.common.credentialRequired' },
       invalidFormat: { key: messages.invalidFormat || 'settings.common.credentialInvalidFormat' }
@@ -12151,6 +12167,7 @@ async function loadClaudeOrganizationChoices() {
 // one, so switching drops it instead of leaving a key that can only fail.
 async function saveAccountFormSetting({ id }, field, value) {
   if (id === 'claude' && field.key === 'claudeWebOrganizationId') {
+    if (claudeWebAccountId !== 'legacy') return;
     if (!value || !state.settings?.claudeWebCookieConfigured || document.getElementById('claudeWebCookieInput')?.value) return;
     claudeOrganizationChoicesRevision += 1;
     await saveSettings({ claudeWebOrganizationId: value });
@@ -12182,12 +12199,22 @@ function setupLimitAccountPanels() {
         provider: externalProviderForAccount(form.id)
       })),
       onRefresh: async () => {
-        if (form.id === 'claude') await loadClaudeOrganizationChoices();
+        if (form.id === 'claude' && claudeWebAccountId === 'legacy') await loadClaudeOrganizationChoices();
         await refreshLimitProviderQuota(form.id);
         await refreshStats();
       },
       onClear: ({ id }) => clearAccountCredential(id),
-      onSave: ({ id, messages, failedKey }, values, clearInput) => saveAccountCredential(id, values, { messages, failedKey, clearInput }),
+      onSave: async ({ id, messages, failedKey }, values, clearInput) => {
+        if (id === 'claude' && claudeWebAccountId !== 'legacy') values.claudeWebAccountId = claudeWebAccountId;
+        const result = await saveAccountCredential(id, values, { messages, failedKey, clearInput });
+        if (id === 'claude' && result?.saved) {
+          claudeWebFormOpen = false;
+          claudeWebAccountId = 'new';
+          renderClaudeOrganizationChoices([]);
+          renderExternalProviderStatus(id);
+        }
+        return result;
+      },
       onFieldChange: (form, field, value) => saveAccountFormSetting(form, field, value),
       onFieldError: ({ id, failedKey }, error) => {
         setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
@@ -12202,7 +12229,6 @@ function setupLimitAccountPanels() {
     added = true;
     setExternalAccountExpanded(form.id, false);
     limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
-    if (form.id === 'claude' && state.settings?.claudeWebCookieConfigured) void loadClaudeOrganizationChoices();
     renderExternalProviderStatus(form.id);
   }
   if (added) initSettingsAnimationWrappers();
@@ -16767,6 +16793,191 @@ function kimiPlatformUrl() {
   return 'https://www.kimi.com/code/console';
 }
 
+function editClaudeWebAccount(account = null) {
+  claudeOrganizationChoicesRevision += 1;
+  claudeWebAccountId = account?.id || 'new';
+  claudeWebFormOpen = true;
+  const input = document.getElementById('claudeWebCookieInput');
+  if (input) input.value = '';
+  renderClaudeOrganizationChoices(account?.organizationId
+    ? [{ id: account.organizationId, name: account.accountName || account.organizationId }]
+    : [], account?.organizationId || '');
+  setAccountPanelMessage('claude', null);
+  renderExternalProviderStatus('claude');
+  input?.focus();
+  if (account?.id === 'legacy') void loadClaudeOrganizationChoices();
+}
+
+function cancelClaudeWebAccountEdit(restoreFocus = document.activeElement?.id === 'claudeCancelWebAccountButton') {
+  claudeOrganizationChoicesRevision += 1;
+  claudeWebAccountId = 'new';
+  claudeWebFormOpen = false;
+  const input = document.getElementById('claudeWebCookieInput');
+  if (input) input.value = '';
+  renderClaudeOrganizationChoices([]);
+  setAccountPanelMessage('claude', null);
+  renderExternalProviderStatus('claude');
+  if (restoreFocus) document.getElementById('claudeAddWebAccountButton')?.focus({ preventScroll: true });
+}
+
+async function runClaudeAccountAction(button, operation) {
+  return claudeAccountActions.run('claude', button, async () => {
+    setAccountPanelMessage('claude', null);
+    try {
+      const result = await commitAccountCredential(operation);
+      if (!result?.ok) throw new Error(t('settings.common.error'));
+      await refreshStats();
+      renderExternalProviderStatus('claude');
+      return result;
+    } catch (error) {
+      setAccountPanelMessage('claude', { key: 'settings.claude.saveFailed', params: { message: error.message } });
+      renderExternalProviderStatus('claude');
+      return null;
+    }
+  });
+}
+
+function claudeWebSettingsAccounts(providers) {
+  const accounts = [...(state.settings?.claudeManagedAccounts || [])];
+  if (state.settings?.claudeWebLegacyCookieConfigured) {
+    const legacy = state.settings.claudeWebLegacyAccount || providers.find((provider) => provider.source === 'web'
+      && !accounts.some((account) => account.accountKey === provider.accountKey));
+    accounts.unshift({ ...legacy, id: 'legacy', enabled: true, organizationId: state.settings.claudeWebOrganizationId || '' });
+  }
+  return accounts;
+}
+
+function claudeAccountStatusText(fallback, enabled) {
+  const providers = localProviderStatuses('claude');
+  const accounts = claudeWebSettingsAccounts(providers);
+  // Count configured Web logins even before their first result, and include
+  // discovered local identities without double-counting the same subscription.
+  const identities = new Map();
+  for (const account of accounts) {
+    const key = account.accountKey || `managed:${account.id}`;
+    const linked = enabled && account.enabled !== false
+      && providers.some((provider) => provider.accountKey && provider.accountKey === account.accountKey && provider.status === 'ok');
+    identities.set(key, identities.get(key) === true || linked);
+  }
+  for (const provider of providers) {
+    if (!provider.accountKey || provider.source === 'web' || provider.status === 'notConfigured') continue;
+    identities.set(provider.accountKey, identities.get(provider.accountKey) === true || (enabled && provider.status === 'ok'));
+  }
+  return identities.size ? t('settings.opencode.connected', {
+    linked: [...identities.values()].filter(Boolean).length, total: identities.size
+  }) : fallback;
+}
+
+function renderClaudeWebAccounts() {
+  const list = document.getElementById('claudeWebAccountList');
+  if (!list) return;
+  const providers = localProviderStatuses('claude');
+  const accounts = claudeWebSettingsAccounts(providers);
+  const statusTexts = accounts.map((account) => [account.id === 'legacy' ? t('settings.claude.legacyLogin') : '', account.accountName, account.accountLabel,
+    account.enabled === false ? t('settings.codex.disabled')
+      : apiKeyAccountStatusText('claude', { status: state.settings?.claudeWebLoginStatuses?.[account.id] || 'notChecked' },
+        true, 'settings', limitProviderEnabled('claude'))].filter(Boolean).join(' · '));
+  const signature = JSON.stringify([accounts.map((account) => [account.id, account.accountKey, account.accountEmail,
+    account.accountName, account.accountLabel, account.organizationId, account.enabled]),
+  claudeWebAccountId, claudeWebFormOpen, state.settings?.claudeWebLegacyCookieSource, currentLocale()]);
+  if (list.dataset.signature === signature) {
+    list.querySelectorAll('.managed-account-info').forEach((info, index) => {
+      info.textContent = statusTexts[index];
+      info.setAttribute('aria-label', info.textContent);
+    });
+    return;
+  }
+  list.dataset.signature = signature;
+  list.replaceChildren();
+  for (const [index, account] of accounts.entries()) {
+    const row = document.createElement('div');
+    row.className = 'managed-account-row claude-web-account-row';
+    row.classList.toggle('disabled', account.enabled === false);
+    const labelText = account.accountEmail || account.accountName || t('settings.codex.unnamedAccount');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'managed-account-checkbox';
+    input.checked = account.enabled !== false;
+    input.disabled = account.id === 'legacy';
+    input.setAttribute('aria-label', t('settings.codex.toggleAccount', { account: labelText }));
+    input.addEventListener('change', async () => {
+      await runClaudeAccountAction(input, () => window.tokenMonitor.claude.setAccountEnabled(account.id, input.checked));
+      input.checked = (state.settings?.claudeManagedAccounts || []).find((entry) => entry.id === account.id)?.enabled !== false;
+    });
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const label = document.createElement('div');
+    label.className = 'managed-account-email';
+    label.textContent = labelText;
+    const info = document.createElement('div');
+    info.className = 'managed-account-info';
+    info.textContent = statusTexts[index];
+    info.setAttribute('aria-label', info.textContent);
+    main.append(label, info);
+    const actions = document.createElement('span');
+    actions.className = 'managed-account-right';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.textContent = t('settings.claude.updateAccount');
+    edit.addEventListener('click', () => claudeAccountActions.run('claude', edit, () => editClaudeWebAccount(account)));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.setAttribute('aria-label', t('settings.codex.remove'));
+    let confirmingRemove = false;
+    remove.addEventListener('click', () => {
+      if (!confirmingRemove) {
+        confirmingRemove = true;
+        remove.classList.add('confirming');
+        remove.textContent = '✓';
+        remove.setAttribute('aria-label', t('settings.codex.removeConfirm', { account: labelText }));
+        return;
+      }
+      return runClaudeAccountAction(remove, async () => {
+        const result = account.id === 'legacy'
+          ? { ...(await window.tokenMonitor.limits.clearCredential('claude')), ok: true }
+          : await window.tokenMonitor.claude.removeWebAccount(account.id);
+        if (result?.ok && claudeWebAccountId === account.id) {
+          claudeWebAccountId = 'new';
+          claudeWebFormOpen = false;
+          renderClaudeOrganizationChoices([]);
+        }
+        return result;
+      });
+    });
+    remove.classList.toggle('hidden', account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env');
+    const controls = document.createElement('span');
+    controls.className = 'settings-actions';
+    controls.append(edit);
+    actions.append(controls, remove);
+    row.append(input, main, actions);
+    list.append(row);
+  }
+  const add = document.createElement('button');
+  add.id = 'claudeAddWebAccountButton';
+  add.type = 'button';
+  add.textContent = t('settings.codex.addAccount');
+  add.setAttribute('aria-expanded', String(claudeWebFormOpen ?? accounts.length === 0));
+  add.addEventListener('click', () => claudeAccountActions.run('claude', add, () => editClaudeWebAccount()));
+  const actions = document.createElement('div');
+  actions.className = 'settings-actions';
+  actions.append(add);
+  if (claudeWebFormOpen ?? accounts.length === 0) {
+    const cancel = document.createElement('button');
+    cancel.id = 'claudeCancelWebAccountButton';
+    cancel.type = 'button';
+    cancel.textContent = t('settings.common.cancel');
+    cancel.addEventListener('click', () => {
+      // Capture before the busy guard disables Cancel and blurs it.
+      const restoreFocus = document.activeElement === cancel;
+      return claudeAccountActions.run('claude', cancel, () => cancelClaudeWebAccountEdit(restoreFocus));
+    });
+    actions.append(cancel);
+  }
+  list.append(actions);
+}
+
 function renderExternalProviderStatus(providerName) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
@@ -16802,14 +17013,15 @@ function renderExternalProviderStatus(providerName) {
   const form = limitAccountForm(providerName);
   if (form) limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
   if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
+  if (providerName === 'claude') renderClaudeWebAccounts();
   // Once the settle window lapses without a fresh record, show "not checked"
   // instead of a permanent spinner; the cutoff above still blocks the old
   // record from being read as a confirmed link.
   const statusProvider = provider || (settled && configured && enabled ? { status: 'noSyncedData' } : null);
-  setCursorStatusText(
-    statusEl,
-    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled)
-  );
+  const statusText = pending ? t('settings.common.checking')
+    : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
+  setCursorStatusText(statusEl, providerName === 'claude' && !pending
+    ? claudeAccountStatusText(statusText, enabled) : statusText);
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
   // auto-discovered plans still exist, so the pill shows auto-detect instead
   // of the final "disabled" state the generic seven-state map lands on.
@@ -16818,6 +17030,12 @@ function renderExternalProviderStatus(providerName) {
   }
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
+  if (providerName === 'claude') {
+    const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
+    manualPanel.classList.toggle('hidden', !showForm);
+    document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || !document.getElementById('claudeWebOrganizationIdInput')?.options.length);
+    openBtn.classList.remove('hidden');
+  }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin');
   if (discoveredLogin) {
@@ -16829,6 +17047,7 @@ function renderExternalProviderStatus(providerName) {
   }
   const canClearConfiguredCredential = source === 'settings' && configured;
   logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
+  if (providerName === 'claude') logoutBtn.classList.add('hidden');
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
