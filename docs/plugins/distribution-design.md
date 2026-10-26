@@ -1,65 +1,33 @@
-# Plugin pages and distribution contracts
-
-Token Monitor supports main-App plugin pages, optional detached windows and managed package/catalog installation. Authors share packages directly or through HTTPS catalogs; publishing a package does not install or approve it for another user.
-
-## Installation and page placement
-
-1. The host validates the manifest, declared permissions and supported display locations.
-2. A plugin may declare `surfaces: ["page"]` and optional `layouts.page`. Only explicitly enabled page placements appear in the main app’s view menu. A detached window is an optional action within that page. Main and detached page visibility share demand; neither grants arbitrary DOM or Node access.
-3. Installation previews the exact package and requires confirmation. Installed code is disabled until approved; updates are confirmed even if their permissions do not change. A previous version is retained for rollback. Uninstall provides explicit data/placement retention choices. Directory import is available for authors.
-4. Installed and Discover are the two primary tabs. Discover combines official and configured community entries with search and distinct source attribution. Install from file remains directly available; Advanced options (⋯) opens Custom catalog sources for source management, refresh/update checks and offline cache status. Refresh is explicit; there is no default scheduled updater.
+# Packages, trust and recovery
 
 ## Package format
 
-A `.tmplugin` file is a version-1 JSON envelope with a required manifest, optional bundled Worker JavaScript `code`, and optional `assets` for the manifest's declared Rich UI files. A declarative plugin needs no code or web assets. The package is data: parsing and validation do not execute it. Directory import and `scripts/build-plugin-package.js` produce the same representation.
+A `.tmplugin` is JSON `{format:2, manifest, files}`. `files` maps each manifest-declared relative filename to base64 bytes. Maximum encoded envelope is 64 MiB; maximum manifest is 256 KiB. All files are explicit, including prebuilt dependencies. Path traversal, symlinks, case-insensitive collisions and file/directory-prefix collisions are rejected. Exact code/asset bytes, including UTF-8 BOM, survive packing and unpacking. Installing never executes dependency installation or package scripts.
 
-Packages are limited to 4 MiB encoded, including a 256 KiB manifest, at most 2 MiB Worker code, and at most 1 MiB of decoded assets. Rich assets use canonical base64 values, with at most 64 files and 512 KiB per file. Asset paths must match the manifest and remain package-local; symlink escapes, conflicting names and undeclared files are rejected. See [the Rich UI asset contract](author-ui-options.md#original-pages) for formats and path rules. Worker imports and arbitrary host-file access are not supported. `semver` handles compatibility/version comparison; SHA-256 binds downloaded bytes to the catalog entry.
+The package SHA-256 verifies downloaded bytes. A separate canonical manifest-plus-exact-files digest identifies installed content, because serializing a directory does not reproduce arbitrary original envelope formatting. Neither hash proves code safety or identity. An installed package changed outside management is not accepted as a trusted rollback backup. Missing directories remain recoverable; symlink replacements remain rejected.
 
-Managed installs record source id, exact version and SHA-256 beside local transaction metadata. Downloaded bytes must match the selected catalog digest before parsing. Updates stage and validate completely, stop/flush the current owner, preserve a recoverable previous version, atomically switch directories and reload. Failed switching restores the old directory and state; a prepared/committed journal recovers process-interrupted operations at startup. Rollback preserves data but warns that application-specific data migrations cannot be automatically reversed by the host. Uninstall never silently deletes user data.
+## Trust and activation
 
-## Source trust
+Install records the package but leaves it disabled. Enablement trusts the discovered content revision. An update or Reload with changed bytes requires a new explicit trust decision; version and id alone are insufficient. Optional `engines.tokenMonitor` and required `tmApi:2` identify compatibility. API 1 is rejected, not adapted.
 
-The user flow is browse → inspect source and permissions → install. A public key is optional; source labels and permission approval remain separate.
+There is no granular capability consent. UI can change the shared renderer; a Node backend can access local files, credentials, network and subprocesses available to the OS user. Display location and background toggles control lifecycle, not containment. The App continues protecting its ordinary external interfaces and renderer secret projections, but these are not a security barrier against trusted local code.
 
-- App-shipped catalog entries alone get the Official source label. Community sources do not make their authors official or guarantee safety.
-- An advanced source manager accepts HTTPS catalog URLs, clearly labelled Community / Unreviewed. Optional pinned signatures can strengthen source identity without becoming a mandatory installation step. Community sources are added explicitly by the user.
-- Every manual install/update confirms the exact source and version. Existing permission grants survive updates; additional permissions or destinations require renewed consent before execution. No automatic update policy is enabled implicitly.
-- Local packages are unverified. SHA-256 detects content mismatch; it does not establish publisher identity or prove safe code. Labels come from host-owned source records, never package claims.
-- The app ships an offline browsable official catalog containing real bundled examples. Discover includes configured community entries alongside the bundled catalog; adding a source is optional.
-- Authors choose where to host packages and catalogs. The App does not provide a submission backend, ratings or moderation service.
+Executable updates, Reload, disable and removal warn about affected renderer reloads and possible unsaved state. A disabled backend loses demand and is stopped before package files move. The host requests cooperative cleanup, then terminates if needed. Arbitrary external side effects or child processes created by an unrestricted plugin are the author's responsibility; package rollback is not an OS transaction.
 
-## Persistence and recovery bounds
+## Atomic management
 
-Registry reads and writes share a 1 MB limit; the journal uses 2 MB. Next registry and journal payloads are bounded before replacement. Capacity failure leaves the prior installation intact. The journal file is fsynced, but directory/staged-file power-loss durability is not guaranteed; only process termination recovery has been exercised.
+The registry and prepared/committed journal remain authoritative. A prepared transaction recovers the previous package, registry, management settings and owned data copies. A committed transaction completes cleanup. Before replacement, the current managed directory and content digest are rechecked. Invalid registry/journal bytes block mutations and remain intact for diagnosis.
 
-Backups may read a formerly compatible installed version after the host upgrades. A rollback target must itself satisfy current compatibility. Uninstall skips current package parsing; rescue rollback tolerates a corrupt current package and drops the unusable reverse backup. A wholly missing package remains listed in Installed for verified rollback or removal, without execution controls; a newer same-source update can also restore it. Update discovery uses the managed installed version when runtime discovery is invalid, but an existing damaged or modified package cannot be updated because it cannot supply a trustworthy reverse backup. Preview rejects it with recovery guidance, and confirmation rechecks the current package. Use a saved rollback when available, or uninstall and reinstall with the data and placement retention options selected.
+One verified previous compatible package is retained for rollback. Rollback swaps code; it does not reverse backend data migrations. Missing managed directories retain management-only entries, with rollback/uninstall available and execution forbidden. A corrupt existing package is rejected early with repair guidance; uninstall/reinstall with retention is the recovery route.
 
-Managed installs store a versioned content fingerprint separately from the original archive SHA-256. It covers the raw manifest (ignoring JSON formatting and object-key order), entry code (preserving any leading UTF-8 BOM) and declared asset bytes; preview and confirmation compare it before retaining a reverse backup. It is computed only during package management, not on every runtime discovery. Legacy records without a fingerprint remain manageable but cannot supply a trusted reverse backup: an existing directory requires verified rollback or uninstall/reinstall, while a missing-directory update remains supported. A successful install or rollback establishes the fingerprint from the accepted package, never from unchecked live files. Saved rollback archives retain their existing byte-hash verification; this cannot retroactively prove that a backup created by an older manager was originally unmodified. These checks detect drift relative to local metadata, not an attacker able to rewrite both the package and its registry. Unmanaged authoring folders remain editable.
+Uninstall can retain plugin data/preferences and display locations independently. Without retention, it removes the owned backend data directory, author settings and selected content replacements alongside ordinary placements. Files an unrestricted backend created elsewhere are not automatically discovered or deleted. Skin presets already applied are host snapshots; switching/resetting the App theme clears them.
 
-Source and package URLs are bounded after URL normalization, before persistence. Ordinary sources are HTTPS, credential-free, fragment-free and limited to 2048 normalized characters. Downloads omit cookies, reject redirects, and enforce streamed byte/time limits. Good cache survives a refresh failure; source removal aborts downloads and invalidates pending previews.
+## Catalogs
 
-## Catalog v1
+No built-in official catalog or production example plugin ships. Discover shows user-configured HTTPS catalogs. Install from file and folder remain available for private unpublished plugins. Catalog refresh and update preview do not execute code; installation is always explicit.
 
-```json
-{
-  "format": 1,
-  "title": "Example community catalog",
-  "plugins": [{
-    "id": "example-plugin",
-    "name": "Example plugin",
-    "author": "Example author",
-    "versions": [{
-      "version": "1.0.0",
-      "types": ["page"],
-      "url": "https://example.com/example.tmplugin",
-      "sha256": "replace-with-the-64-character-sha256-of-the-exact-package",
-      "engines": { "tokenMonitor": ">=0.76.0" },
-      "changelog": "Release description"
-    }]
-  }]
-}
-```
+The existing catalog index schema, bounded downloads, source pins, package hashes and optional Ed25519 signatures remain. A source is a configured catalog URL, not a GitHub repository crawler. Source changes cannot silently replace another installation's origin. Community labels and author descriptions are publisher claims, never an audit badge. Experimental API compatibility is checked against the downloaded package before installation.
 
-Each version may advertise optional `types`: `widget`, `page`, `appearance`. Unknown values are ignored; omitted metadata has no label. These are unreviewed display hints, not capabilities or trust markers. Package previews and installed entries derive labels from the validated manifest: Home/tray/Edge Dock/Notch views are Widgets; page views and model/tool/device page extensions are Pages; skins are Appearance. Settings documents and background code alone imply none of these labels. Multiple labels are allowed.
+## Recovery outside the renderer
 
-This is schema documentation, not an enrolled source. The digest placeholder must be replaced by the builder's digest. Limits are 16 sources, 128 plugin entries per index, 32 versions per plugin, 1 MB downloaded index and 4 MiB package. For an optional pinned source, serve `{ "payload": "base64 of exact catalog JSON bytes", "signature": "base64 Ed25519 signature over those bytes" }`; the user-provided PEM key verifies identity, not safety or review status.
+Use the native tray menu **Restart without plugins**, `--plugins-safe-mode`, or `TOKEN_MONITOR_PLUGINS_SAFE_MODE=1`. Safe mode enumerates and manages packages without loading their UI or backend. This is necessary because trusted same-page code can block its entire renderer. A package cannot be individually killed out of that shared JavaScript realm while preserving the rest of it. Safe mode does not undo arbitrary local changes previously made by code.

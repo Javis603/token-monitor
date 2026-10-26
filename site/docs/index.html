@@ -78,7 +78,7 @@
             <h2 data-i18n="docs.group.reference">API references</h2>
             <ul>
               <li><a href="plugin-reference.html" data-i18n="docs.page.reference">Plugin API reference</a></li>
-              <li><a href="plugin-rich-reference.html" data-i18n="docs.page.richReference">Rich UI reference</a></li>
+              <li><a href="plugin-ui-reference.html" data-i18n="docs.page.uiReference">UI integration reference</a></li>
               <li><a href="plugin-distribution-reference.html" data-i18n="docs.page.distributionReference">Distribution reference</a></li>
             </ul>
           </div>
@@ -86,95 +86,47 @@
       </aside>
       <main class="docs-main" id="main">
         <article class="doc-lang docs-article" lang="en">
-<h1>Token Monitor guides</h1>
-<p class="docs-lede">Start with your own usage. Build a plugin when you want a view of your own.</p><p class="prompt-jump"><a href="#create-prompt">Jump to the plugin prompt ↓</a></p>
-
-
-<h2 id="choose" data-anchor="choose">Choose your path</h2>
-<div class="docs-tracks"><section class="docs-track"><h2>Use the App</h2><p>Install, understand your numbers and connect another device.</p><ul><li><a href="app.html"><strong>Your first dashboard</strong><span>Download, views, settings and sync</span></a></li><li><a href="plugins.html"><strong>Use plugins</strong><span>Install, approve and choose placements</span></a></li></ul></section><section class="docs-track"><h2>Build a plugin</h2><p>Begin with one working manifest. Add code only when you need it.</p><ul><li><a href="plugin-quickstart.html"><strong>A CPU readout</strong><span>Your first plugin, without JavaScript</span></a></li><li><a href="plugin-quickstart.html#interface"><strong>Make the interface yours</strong><span>Declarative layouts and packaged Rich UI</span></a></li><li><a href="plugin-quickstart.html#data-settings"><strong>Reuse App data</strong><span>Permissions, paging and saved preferences</span></a></li><li><a href="plugin-quickstart.html#test-distribute"><strong>Test and share</strong><span>Local packages and HTTPS catalogs</span></a></li></ul></section></div>
-<h2 id="reference" data-anchor="reference">Plugin API reference</h2>
-<p>When developing a plugin, see the <a href="plugin-reference.html">plugin API reference</a> for available capabilities, fields, and usage.</p>
-        <h2 id="create-prompt" data-anchor="create-prompt">Create with an AI coding agent</h2><p>Copy this into a coding agent and add your idea at the end.</p><figure class="code prompt-card"><figcaption class="code-head"><span>Prompt</span></figcaption><pre tabindex="0"><code>Help me build a Token Monitor Desktop plugin. Read the official guide: https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md (and the reference it links to).
+<h1>Trusted Desktop plugins</h1><p class="docs-lede">Build a same-page interface with an optional local Node backend. API 2 is experimental; API 1 is incompatible.</p><h2 id="choose" data-anchor="choose">Trust before enabling</h2><p>Plugins can read local files and credentials, use the network, change data or freeze the interface. Enable only code you trust. A hash is not a security audit.</p><p><a href="app.html">Token Monitor</a> · <a href="plugins.html">Trusted Desktop plugins</a> · <a href="plugin-quickstart.html">First manifest</a></p><p><a href="plugin-reference.html">API 2</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a></p><h2 id="create-prompt" data-anchor="create-prompt">AI</h2><p>Build a same-page interface with an optional local Node backend. API 2 is experimental; API 1 is incompatible.</p><figure class="code prompt-card"><figcaption class="code-head"><span>Prompt</span></figcaption><pre tabindex="0"><code>Help me build a Token Monitor Desktop plugin. Read the official guide: https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md (and the reference it links to).
 
 If any requirements are unclear, please ask me first. When finished, test the plugin and provide a folder or .tmplugin file I can import, along with installation and activation steps.
 
 My idea:</code></pre></figure>
-        </article>
+</article>
         <article class="doc-lang docs-article" lang="zh-TW">
-<h1>Token Monitor 使用指南</h1>
-<p class="docs-lede">先了解自己的使用量，再打造適合自己的外掛介面。</p><p class="prompt-jump"><a href="#create-prompt">跳到外掛提示詞 ↓</a></p>
-
-
-<h2 data-anchor="choose">選擇閱讀路徑</h2>
-<div class="docs-tracks"><section class="docs-track"><h2>使用 App</h2><p>安裝、閱讀數據，並連接其他裝置。</p><ul><li><a href="app.html"><strong>第一個儀表板</strong><span>下載、檢視、設定與同步</span></a></li><li><a href="plugins.html"><strong>使用外掛</strong><span>安裝、授權與顯示位置</span></a></li></ul></section><section class="docs-track"><h2>開發外掛</h2><p>從一份可運作的宣告檔開始，需要時再加入程式碼。</p><ul><li><a href="plugin-quickstart.html"><strong>CPU 負載讀數</strong><span>不需要 JavaScript 的第一個外掛</span></a></li><li><a href="plugin-quickstart.html#interface"><strong>打造自己的介面</strong><span>宣告式配置與 Rich UI</span></a></li><li><a href="plugin-quickstart.html#data-settings"><strong>重用 App 資料</strong><span>權限、分頁與偏好設定</span></a></li><li><a href="plugin-quickstart.html#test-distribute"><strong>測試與分享</strong><span>本地套件與 HTTPS 目錄</span></a></li></ul></section></div>
-<h2 data-anchor="reference">外掛 API 參考</h2>
-<p>開發外掛時，可查閱<a href="plugin-reference.html">外掛 API 參考</a>，了解可用功能、欄位與使用方式。</p>
-        <h2 data-anchor="create-prompt">請 AI 程式助手建立外掛</h2><p>複製以下內容貼到程式助手，在最後補上你的想法。</p><figure class="code prompt-card"><figcaption class="code-head"><span>提示詞</span></figcaption><pre tabindex="0"><code>幫我製作一個 Token Monitor Desktop 外掛。請閱讀官方指南：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（以及其中連結的參考文件）。
+<h1>可信 Desktop 外掛</h1><p class="docs-lede">以同頁介面配合選用的本機 Node 後端。API 2 屬實驗性；不相容 API 1。</p><h2 data-anchor="choose">信任後才啟用</h2><p>外掛可能讀取本機檔案與憑證、連線、更改資料或令介面停止回應。只啟用你信任的程式碼；雜湊不代表安全審核。</p><p><a href="app.html">Token Monitor</a> · <a href="plugins.html">可信 Desktop 外掛</a> · <a href="plugin-quickstart.html">第一份宣告檔</a></p><p><a href="plugin-reference.html">API 2</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a></p><h2 data-anchor="create-prompt">AI</h2><p>以同頁介面配合選用的本機 Node 後端。API 2 屬實驗性；不相容 API 1。</p><figure class="code prompt-card"><figcaption class="code-head"><span>提示詞</span></figcaption><pre tabindex="0"><code>幫我製作一個 Token Monitor Desktop 外掛。請閱讀官方指南：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（以及其中連結的參考文件）。
 
 如果需求有不清楚的地方，請先向我確認。完成後，請測試外掛，並提供可匯入的資料夾或 .tmplugin 檔案，以及安裝與啟用步驟。
 
 我的想法：</code></pre></figure>
-        </article>
+</article>
         <article class="doc-lang docs-article" lang="zh-CN">
-<h1>Token Monitor 使用指南</h1>
-<p class="docs-lede">先了解自己的使用量，再打造适合自己的插件界面。</p><p class="prompt-jump"><a href="#create-prompt">跳到插件提示词 ↓</a></p>
-
-
-<h2 data-anchor="choose">选择阅读路径</h2>
-<div class="docs-tracks"><section class="docs-track"><h2>使用 App</h2><p>安装、阅读数据，并连接其他设备。</p><ul><li><a href="app.html"><strong>第一个仪表板</strong><span>下载、视图、设置与同步</span></a></li><li><a href="plugins.html"><strong>使用插件</strong><span>安装、授权与显示位置</span></a></li></ul></section><section class="docs-track"><h2>开发插件</h2><p>从一份可运作的声明文件开始，需要时再加入代码。</p><ul><li><a href="plugin-quickstart.html"><strong>CPU 负载读数</strong><span>不需要 JavaScript 的第一个插件</span></a></li><li><a href="plugin-quickstart.html#interface"><strong>打造自己的界面</strong><span>声明式配置与 Rich UI</span></a></li><li><a href="plugin-quickstart.html#data-settings"><strong>重用 App 数据</strong><span>权限、分页与偏好设置</span></a></li><li><a href="plugin-quickstart.html#test-distribute"><strong>测试与分享</strong><span>本地包与 HTTPS 目录</span></a></li></ul></section></div>
-<h2 data-anchor="reference">插件 API 参考</h2>
-<p>开发插件时，可查阅<a href="plugin-reference.html">插件 API 参考</a>，了解可用功能、字段与使用方式。</p>
-        <h2 data-anchor="create-prompt">请 AI 编程助手创建插件</h2><p>复制以下内容粘贴到编程助手，在最后补上你的想法。</p><figure class="code prompt-card"><figcaption class="code-head"><span>提示词</span></figcaption><pre tabindex="0"><code>帮我制作一个 Token Monitor Desktop 插件。请阅读官方指南：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（以及其中链接的参考文档）。
+<h1>可信 Desktop 插件</h1><p class="docs-lede">同页界面配合可选本机 Node 后端。API 2 为实验性，不兼容 API 1。</p><h2 data-anchor="choose">信任后再启用</h2><p>插件可能读取本机文件和凭证、联网、修改数据或使界面停止响应。仅启用信任的代码；哈希不代表安全审核。</p><p><a href="app.html">Token Monitor</a> · <a href="plugins.html">可信 Desktop 插件</a> · <a href="plugin-quickstart.html">首个声明文件</a></p><p><a href="plugin-reference.html">API 2</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a></p><h2 data-anchor="create-prompt">AI</h2><p>同页界面配合可选本机 Node 后端。API 2 为实验性，不兼容 API 1。</p><figure class="code prompt-card"><figcaption class="code-head"><span>提示词</span></figcaption><pre tabindex="0"><code>帮我制作一个 Token Monitor Desktop 插件。请阅读官方指南：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（以及其中链接的参考文档）。
 
 如果需求有不清楚的地方，请先向我确认。完成后，请测试插件，并提供可导入的文件夹或 .tmplugin 文件，以及安装与启用步骤。
 
 我的想法：</code></pre></figure>
-        </article>
+</article>
         <article class="doc-lang docs-article" lang="ko">
-<h1>Token Monitor 가이드</h1>
-<p class="docs-lede">먼저 자신의 사용량을 확인하고, 필요한 화면은 플러그인으로 만드세요.</p><p class="prompt-jump"><a href="#create-prompt">플러그인 프롬프트로 이동 ↓</a></p>
-
-
-<h2 data-anchor="choose">목적에 맞는 경로 선택</h2>
-<div class="docs-tracks"><section class="docs-track"><h2>앱 사용하기</h2><p>설치, 수치 해석과 다른 기기 연결.</p><ul><li><a href="app.html"><strong>첫 대시보드</strong><span>다운로드, 보기, 설정과 동기화</span></a></li><li><a href="plugins.html"><strong>플러그인 사용</strong><span>설치, 승인과 배치</span></a></li></ul></section><section class="docs-track"><h2>플러그인 만들기</h2><p>작동하는 매니페스트로 시작하고 필요할 때 코드를 추가합니다.</p><ul><li><a href="plugin-quickstart.html"><strong>CPU 사용률 표시</strong><span>JavaScript 없는 첫 플러그인</span></a></li><li><a href="plugin-quickstart.html#interface"><strong>나만의 화면</strong><span>선언형 레이아웃과 Rich UI</span></a></li><li><a href="plugin-quickstart.html#data-settings"><strong>앱 데이터 재사용</strong><span>권한, 페이지와 설정</span></a></li><li><a href="plugin-quickstart.html#test-distribute"><strong>테스트와 공유</strong><span>로컬 패키지와 HTTPS 카탈로그</span></a></li></ul></section></div>
-<h2 data-anchor="reference">플러그인 API 레퍼런스</h2>
-<p>플러그인을 개발할 때 <a href="plugin-reference.html">플러그인 API 레퍼런스</a>에서 사용 가능한 기능, 필드와 사용 방법을 확인하세요.</p>
-        <h2 data-anchor="create-prompt">AI 코딩 에이전트로 플러그인 만들기</h2><p>아래 내용을 코딩 에이전트에 붙여 넣고 마지막에 원하는 기능을 적으세요.</p><figure class="code prompt-card"><figcaption class="code-head"><span>프롬프트</span></figcaption><pre tabindex="0"><code>Token Monitor Desktop 플러그인 만들기를 도와주세요. 공식 가이드를 읽어 주세요: https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md (및 거기서 링크된 레퍼런스).
+<h1>신뢰 기반 Desktop 플러그인</h1><p class="docs-lede">같은 페이지의 UI와 선택적 로컬 Node 백엔드. 실험적 API 2는 API 1과 호환되지 않습니다.</p><h2 data-anchor="choose">신뢰 후 활성화</h2><p>플러그인은 파일과 자격 증명, 네트워크에 접근하고 데이터를 변경하거나 UI를 멈출 수 있습니다. 신뢰하는 코드만 활성화하세요. 해시는 보안 검토가 아닙니다.</p><p><a href="app.html">Token Monitor</a> · <a href="plugins.html">신뢰 기반 Desktop 플러그인</a> · <a href="plugin-quickstart.html">첫 매니페스트</a></p><p><a href="plugin-reference.html">API 2</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a></p><h2 data-anchor="create-prompt">AI</h2><p>같은 페이지의 UI와 선택적 로컬 Node 백엔드. 실험적 API 2는 API 1과 호환되지 않습니다.</p><figure class="code prompt-card"><figcaption class="code-head"><span>프롬프트</span></figcaption><pre tabindex="0"><code>Token Monitor Desktop 플러그인 만들기를 도와주세요. 공식 가이드를 읽어 주세요: https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md (및 거기서 링크된 레퍼런스).
 
 요구사항이 불분명하면 먼저 저에게 확인해 주세요. 완성되면 플러그인을 테스트하고, 가져올 수 있는 폴더나 .tmplugin 파일과 설치 및 활성화 방법을 제공해 주세요.
 
 원하는 기능:</code></pre></figure>
-        </article>
+</article>
         <article class="doc-lang docs-article" lang="ja">
-<h1>Token Monitor ガイド</h1>
-<p class="docs-lede">まず自分の使用量を確認し、必要になったら独自のプラグインを作りましょう。</p><p class="prompt-jump"><a href="#create-prompt">プラグイン依頼文へ移動 ↓</a></p>
-
-
-<h2 data-anchor="choose">目的に合わせて読む</h2>
-<div class="docs-tracks"><section class="docs-track"><h2>アプリを使う</h2><p>インストール、数値の読み方、端末の接続。</p><ul><li><a href="app.html"><strong>最初のダッシュボード</strong><span>ダウンロード、表示、設定と同期</span></a></li><li><a href="plugins.html"><strong>プラグインを使う</strong><span>インストール、許可と配置</span></a></li></ul></section><section class="docs-track"><h2>プラグインを作る</h2><p>動くマニフェストから始め、必要に応じてコードを追加します。</p><ul><li><a href="plugin-quickstart.html"><strong>CPU の使用率を表示</strong><span>JavaScript なしで最初のプラグイン</span></a></li><li><a href="plugin-quickstart.html#interface"><strong>独自の画面を作る</strong><span>宣言的レイアウトと Rich UI</span></a></li><li><a href="plugin-quickstart.html#data-settings"><strong>アプリのデータを使う</strong><span>権限、ページングと設定</span></a></li><li><a href="plugin-quickstart.html#test-distribute"><strong>テストと共有</strong><span>ローカルパッケージと HTTPS カタログ</span></a></li></ul></section></div>
-<h2 data-anchor="reference">プラグイン API リファレンス</h2>
-<p>プラグイン開発時は、<a href="plugin-reference.html">プラグイン API リファレンス</a>で利用できる機能、フィールド、使い方を確認できます。</p>
-        <h2 data-anchor="create-prompt">AI コーディングエージェントで作る</h2><p>次の文をコーディングエージェントに貼り付け、最後に作りたいものを書き足してください。</p><figure class="code prompt-card"><figcaption class="code-head"><span>プロンプト</span></figcaption><pre tabindex="0"><code>Token Monitor Desktop のプラグイン作成を手伝ってください。公式ガイドを読んでください：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（およびそこからリンクされたリファレンス）。
+<h1>信頼する Desktop プラグイン</h1><p class="docs-lede">同一ページの UI と任意のローカル Node バックエンド。実験的 API 2 は API 1 と互換性がありません。</p><h2 data-anchor="choose">信頼してから有効化</h2><p>プラグインはファイルや認証情報、ネットワークにアクセスし、データを変更したり UI を停止させる可能性があります。信頼するコードだけを有効にしてください。ハッシュは安全性の審査ではありません。</p><p><a href="app.html">Token Monitor</a> · <a href="plugins.html">信頼する Desktop プラグイン</a> · <a href="plugin-quickstart.html">最初のマニフェスト</a></p><p><a href="plugin-reference.html">API 2</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a></p><h2 data-anchor="create-prompt">AI</h2><p>同一ページの UI と任意のローカル Node バックエンド。実験的 API 2 は API 1 と互換性がありません。</p><figure class="code prompt-card"><figcaption class="code-head"><span>プロンプト</span></figcaption><pre tabindex="0"><code>Token Monitor Desktop のプラグイン作成を手伝ってください。公式ガイドを読んでください：https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md（およびそこからリンクされたリファレンス）。
 
 要件に不明な点があれば、まず私に確認してください。完成したらプラグインをテストし、インポートできるフォルダーまたは .tmplugin ファイルと、インストール・有効化の手順を提供してください。
 
 作りたいもの：</code></pre></figure>
-        </article>
+</article>
         <article class="doc-lang docs-article" lang="pt-BR">
-<h1>Guias do Token Monitor</h1>
-<p class="docs-lede">Comece pelo seu uso. Crie um plugin quando precisar de uma visualização própria.</p><p class="prompt-jump"><a href="#create-prompt">Ir ao prompt do plugin ↓</a></p>
-
-
-<h2 data-anchor="choose">Escolha seu caminho</h2>
-<div class="docs-tracks"><section class="docs-track"><h2>Usar o app</h2><p>Instale, entenda os números e conecte outro dispositivo.</p><ul><li><a href="app.html"><strong>Seu primeiro painel</strong><span>Download, visualizações, configurações e sincronização</span></a></li><li><a href="plugins.html"><strong>Usar plugins</strong><span>Instalação, autorização e posicionamento</span></a></li></ul></section><section class="docs-track"><h2>Criar um plugin</h2><p>Comece com um manifesto funcional. Adicione código quando precisar.</p><ul><li><a href="plugin-quickstart.html"><strong>Um indicador de CPU</strong><span>Seu primeiro plugin sem JavaScript</span></a></li><li><a href="plugin-quickstart.html#interface"><strong>Crie sua interface</strong><span>Layouts declarativos e Rich UI</span></a></li><li><a href="plugin-quickstart.html#data-settings"><strong>Reutilize dados do app</strong><span>Permissões, paginação e preferências</span></a></li><li><a href="plugin-quickstart.html#test-distribute"><strong>Teste e compartilhe</strong><span>Pacotes locais e catálogos HTTPS</span></a></li></ul></section></div>
-<h2 data-anchor="reference">Referência da API de plugins</h2>
-<p>Ao desenvolver um plugin, consulte a <a href="plugin-reference.html">referência da API de plugins</a> para conhecer os recursos disponíveis, os campos e como usá-los.</p>
-        <h2 data-anchor="create-prompt">Crie com um agente de programação de IA</h2><p>Cole isto em um agente de programação e acrescente sua ideia no final.</p><figure class="code prompt-card"><figcaption class="code-head"><span>Prompt</span></figcaption><pre tabindex="0"><code>Me ajude a criar um plugin para o Token Monitor Desktop. Leia o guia oficial: https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md (e a referência que ele indica).
+<h1>Plugins Desktop confiáveis</h1><p class="docs-lede">UI na mesma página com backend Node local opcional. A API 2 experimental não é compatível com a API 1.</p><h2 data-anchor="choose">Confie antes de ativar</h2><p>Plugins podem acessar arquivos, credenciais e rede, modificar dados ou travar a interface. Ative apenas código confiável. Um hash não é uma auditoria de segurança.</p><p><a href="app.html">Token Monitor</a> · <a href="plugins.html">Plugins Desktop confiáveis</a> · <a href="plugin-quickstart.html">Primeiro manifesto</a></p><p><a href="plugin-reference.html">API 2</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a></p><h2 data-anchor="create-prompt">AI</h2><p>UI na mesma página com backend Node local opcional. A API 2 experimental não é compatível com a API 1.</p><figure class="code prompt-card"><figcaption class="code-head"><span>Prompt</span></figcaption><pre tabindex="0"><code>Me ajude a criar um plugin para o Token Monitor Desktop. Leia o guia oficial: https://github.com/Javis603/token-monitor/blob/main/docs/plugins/author-quickstart.md (e a referência que ele indica).
 
 Se algum requisito não estiver claro, confirme comigo primeiro. Ao terminar, teste o plugin e forneça uma pasta ou um arquivo .tmplugin que eu possa importar, junto com as instruções de instalação e ativação.
 
 Minha ideia:</code></pre></figure>
-        </article>
+</article>
 
       </main>
     </div>

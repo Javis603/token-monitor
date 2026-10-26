@@ -5,7 +5,7 @@ import { Marked, Renderer } from "marked";
 // Canonical Markdown stays in docs/plugins; only this build imports Marked.
 export const references = [
   { source: "docs/plugins/README.md", page: "plugin-reference", title: "Plugin API reference" },
-  { source: "docs/plugins/author-ui-options.md", page: "plugin-rich-reference", title: "Rich UI reference" },
+  { source: "docs/plugins/author-ui-options.md", page: "plugin-ui-reference", title: "UI integration reference" },
   { source: "docs/plugins/distribution-design.md", page: "plugin-distribution-reference", title: "Package and catalog reference" }
 ];
 const repository = "https://github.com/Javis603/token-monitor/blob/main/";

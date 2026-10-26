@@ -14,7 +14,7 @@ test("reference rendering keeps code literal, escapes raw HTML and rejects execu
 
 test("canonical document links stay local while implementation links keep repository context", () => {
   assert.equal(referenceHref('README.md#code-api', references[1].source), 'plugin-reference.html#code-api');
-  assert.equal(referenceHref('author-ui-options.md#fixed-bridge', references[0].source), 'plugin-rich-reference.html#fixed-bridge');
+  assert.equal(referenceHref('author-ui-options.md#fixed-bridge', references[0].source), 'plugin-ui-reference.html#fixed-bridge');
   assert.equal(referenceHref('../../src/shared/plugins/manifest.js', references[0].source), 'https://github.com/Javis603/token-monitor/blob/main/src/shared/plugins/manifest.js');
   assert.equal(referenceHref('//external.test', references[0].source), null);
   assert.equal(referenceHref('data:text/html,example', references[0].source), null);
