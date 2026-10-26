@@ -10,7 +10,7 @@ read_when:
 
 ## Identity and ids
 
-`muse` is both the tracked Muse Code client and its limits provider. `meta` is the model vendor mark; it does not represent a separate account or collection source. Muse Spark, Wonder, Glimmer, Image and Voice names resolve to Meta in both the Electron charts and native macOS widget.
+`muse` is both the tracked Muse Code client and its limits provider; the display name is Muse Code. This integration does not collect the separate muse.ai personal agent allowance. `meta` is the model vendor mark; it does not represent a separate account or collection source. Muse Spark, Wonder, Glimmer, Image and Voice names resolve to Meta in both the Electron charts and native macOS widget.
 
 ## Data sources
 
@@ -22,7 +22,7 @@ Subscription allowance comes separately from Muse Code 1.4.13+ via `muse usage -
 
 Muse owns authentication. Token Monitor invokes the native launcher from PATH, falling back to `~/.local/bin` and standard Unix install locations. It never copies Muse credentials into settings or the renderer. Sign in using `muse login`; API-key billing is separate from subscription allowance.
 
-The probe uses `execFile` without a shell, closes stdin, bounds output to 256 KiB, times out after 15 seconds and honors collector cancellation. It runs outside the project directory and sets `MUSE_NO_AUTO_UPDATE=1`, preventing routine quota polling from updating the launcher or binary. Quota refresh follows the shared limits scheduler; token-file changes do not trigger it.
+The probe uses `execFile` without a shell, closes stdin, bounds output to 256 KiB, times out after 15 seconds and honors collector cancellation. Timeout, output overflow and cancellation terminate the read-only process with `SIGKILL`, so a CLI that handles `SIGTERM` cannot keep polling alive. It runs outside the project directory and sets `MUSE_NO_AUTO_UPDATE=1`, preventing routine quota polling from updating the launcher or binary. Quota refresh follows the shared limits scheduler; token-file changes do not trigger it.
 
 ## Invariants and known gaps
 

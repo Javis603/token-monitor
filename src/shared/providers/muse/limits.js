@@ -5,6 +5,7 @@ const os = require('node:os');
 const nodePath = require('node:path');
 const { execFile } = require('node:child_process');
 const { normalizeLimitProvider } = require('../../limits/core');
+const { abortError } = require('../../probeDeadline');
 const {
   errorWithStatus,
   pathDelimiterForPlatform,
@@ -32,24 +33,34 @@ function existingMuseCli(env = process.env, platform = process.platform, deps = 
 }
 
 function runMuseUsageCli(command, deps = {}) {
+  if (deps.signal?.aborted) return Promise.reject(abortError(deps.signal));
   const run = deps.execFile || execFile;
   return new Promise((resolve, reject) => {
+    // execFile does not forward killSignal to its native AbortSignal handler.
+    // Own cancellation so it also hard-stops the child and waits for close.
+    const onAbort = () => child.kill('SIGKILL');
     const child = run(command, ['usage', '--json'], {
       // Quota polling must neither update Muse nor load a project's configuration.
       cwd: os.tmpdir(),
       env: { ...(deps.env || process.env), MUSE_NO_AUTO_UPDATE: '1' },
       encoding: 'utf8',
       timeout: deps.museCliTimeoutMs || 15000,
+      // This read-only probe needs no graceful shutdown. Enforce timeout,
+      // output overflow and cancellation even if the CLI handles SIGTERM.
+      killSignal: 'SIGKILL',
       maxBuffer: 256 * 1024,
-      windowsHide: true,
-      signal: deps.signal
+      windowsHide: true
     }, (error, stdout, stderr) => {
+      deps.signal?.removeEventListener('abort', onAbort);
+      if (deps.signal?.aborted) return reject(abortError(deps.signal));
       if (!error) return resolve(stdout);
       if (/not logged in: run [`']?muse login/i.test(String(stderr))) {
         return reject(errorWithStatus('unauthorized', 'Sign in with muse login'));
       }
       reject(error);
     });
+    deps.signal?.addEventListener('abort', onAbort, { once: true });
+    if (deps.signal?.aborted) onAbort();
     child.stdin?.end();
   });
 }

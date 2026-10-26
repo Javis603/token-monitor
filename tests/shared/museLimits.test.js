@@ -134,6 +134,7 @@ test('Muse polls only usage JSON with closed stdin, bounded output and auto-upda
       assert.deepEqual(args, ['usage', '--json']);
       assert.equal(options.env.MUSE_NO_AUTO_UPDATE, '1');
       assert.equal(options.timeout, 15000);
+      assert.equal(options.killSignal, 'SIGKILL');
       assert.equal(options.maxBuffer, 256 * 1024);
       assert.notEqual(options.shell, true);
       process.nextTick(() => callback(null, usage, ''));
@@ -157,4 +158,57 @@ test('Muse propagates collector cancellation instead of returning a stale provid
   const pending = fetchMuseLimits({}, { ...deps, signal: controller.signal, execFile: realChild('setInterval(() => {}, 1000)') });
   controller.abort();
   await assert.rejects(pending, { name: 'AbortError' });
+});
+
+test('Muse does not launch an already-cancelled probe and preserves its reason', async () => {
+  const controller = new AbortController();
+  const reason = new Error('collector replaced');
+  controller.abort(reason);
+  let launched = false;
+  await assert.rejects(runMuseUsageCli('fixture', {
+    signal: controller.signal,
+    execFile() { launched = true; }
+  }), (error) => error === reason);
+  assert.equal(launched, false);
+});
+
+test('Muse terminates a SIGTERM-ignoring probe on timeout, overflow and cancellation', async (t) => {
+  for (const reason of ['timeout', 'overflow', 'cancellation']) {
+    await t.test(reason, { timeout: 10000 }, async (t) => {
+      const controller = new AbortController();
+      let child;
+      let ready;
+      let closed;
+      const pending = runMuseUsageCli('fixture', {
+        // Readiness below proves the handler was installed before cancellation
+        // or output overflow. The timeout case must also reach that handshake.
+        museCliTimeoutMs: 2000,
+        signal: controller.signal,
+        execFile(_command, _args, options, callback) {
+          child = execFile(process.execPath, ['-e', `
+            process.on('SIGTERM', () => {});
+            process.stdout.write('ready\\n');
+            ${reason === 'overflow' ? "setImmediate(() => process.stdout.write('x'.repeat(300000)));" : ''}
+            setInterval(() => {}, 1000);
+          `], options, callback);
+          ready = new Promise((resolve) => child.stdout.once('data', resolve));
+          closed = new Promise((resolve) => child.once('close', resolve));
+          return child;
+        }
+      });
+      // Attach the rejection handler before awaiting readiness: output overflow
+      // can close the child before this continuation runs on a busy runner.
+      const rejected = assert.rejects(pending, reason === 'cancellation'
+        ? { name: 'AbortError' }
+        : reason === 'overflow' ? { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' } : { killed: true });
+      t.after(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      });
+      assert.match(String(await ready), /^ready\n/);
+      if (reason === 'cancellation') controller.abort();
+      await rejected;
+      await closed;
+      if (process.platform !== 'win32') assert.equal(child.signalCode, 'SIGKILL');
+    });
+  }
 });
