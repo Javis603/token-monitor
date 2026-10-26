@@ -40,6 +40,15 @@ test('Muse discovers PATH before the launcher fallback without resolving shell c
   assert.equal(existingMuseCli({ PATH: 'relative' }, 'win32', { existsSync: () => true }), null);
 });
 
+test('Muse resolves CLI paths deterministically for the requested platform regardless of host', () => {
+  // POSIX requested platform: '/' joins and ':' PATH splitting on any host.
+  assert.equal(existingMuseCli({ PATH: '/first:/second', HOME: '/home/user' }, 'linux', { existsSync: (p) => p === '/second/muse' }), '/second/muse');
+  assert.equal(existingMuseCli({ HOME: '/home/user' }, 'linux', { existsSync: (p) => p === '/home/user/.local/bin/muse' }), '/home/user/.local/bin/muse');
+  // win32 requested platform: '\\' joins, ';' PATH splitting (drive ':' kept), .exe name on any host.
+  assert.equal(existingMuseCli({ Path: 'C:\\first;C:\\second' }, 'win32', { existsSync: (p) => p === 'C:\\second\\muse.exe' }), 'C:\\second\\muse.exe');
+  assert.equal(existingMuseCli({ USERPROFILE: 'C:\\Users\\me' }, 'win32', { existsSync: (p) => p === 'C:\\Users\\me\\.local\\bin\\muse.exe' }), 'C:\\Users\\me\\.local\\bin\\muse.exe');
+});
+
 test('Muse maps session and weekly percentages and millisecond reset times', async () => {
   const row = await fetchMuseLimits({}, deps);
   assert.equal(row.provider, 'muse');

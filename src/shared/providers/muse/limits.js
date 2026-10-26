@@ -2,17 +2,25 @@
 
 const fs = require('node:fs');
 const os = require('node:os');
+const nodePath = require('node:path');
 const { execFile } = require('node:child_process');
 const { normalizeLimitProvider } = require('../../limits/core');
 const {
   errorWithStatus,
-  pathApiForPlatform,
   pathDelimiterForPlatform,
   providerStatusFromError
 } = require('../../limits/providerHelpers');
 
+// pathApiForPlatform returns the host-default `path` for non-win32, which is
+// path.win32 on a Windows host; an explicit POSIX simulation there would then
+// join with '\'. Pick posix/win32 explicitly from the requested platform so
+// resolution is deterministic regardless of host.
+function pathApiForRequestedPlatform(platform) {
+  return platform === 'win32' ? nodePath.win32 : nodePath.posix;
+}
+
 function existingMuseCli(env = process.env, platform = process.platform, deps = {}) {
-  const path = pathApiForPlatform(platform);
+  const path = pathApiForRequestedPlatform(platform);
   const exists = deps.existsSync || fs.existsSync;
   // Native launchers only: never run a shell or interpret a user-controlled command.
   const name = platform === 'win32' ? 'muse.exe' : 'muse';
