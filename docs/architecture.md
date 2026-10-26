@@ -20,6 +20,12 @@ Device collection, transforms and archives live in `src/shared/usage/`. The neig
 
 Cloudflare deployment isolates `worker/` into its own repository. Its portable closure, `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`, must not import Node built-ins or anything above `worker/`. Edit the originals in `src/shared/`, then run `npm run sync:worker`; the mirrored `worker/src/shared/` files are generated and CI rejects drift.
 
+## Native macOS widget recovery
+
+The desktop widget extension can survive replacement of its containing app. LaunchServices registration alone does not retire that process: WidgetKit can reject its timelines because the archived bundle version no longer matches the installation. On macOS 14+, packaged startup holds snapshot publication while the existing installation-identity recovery registers the host and retires its resident widget extension. The helper targets only the current user's process whose current or launch-time executable path exactly matches the containing app's extension, and rechecks its start time before sending SIGTERM; it never restarts system widget services or extensions from another installation.
+
+Successful recovery is recorded per installation (including migration from registration-only markers). Ordinary restarts skip it, and periodic same-installation revalidation only registers the host. Recovery failure leaves the marker retryable and still releases snapshot publication. A successful recovery also requests a timeline reload even when the retained snapshot is unchanged or the retired extension's demand heartbeat is stale; neither snapshot deduplication nor demand gating should suppress that wake-up.
+
 ## Generated and registered state
 
 Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Never edit generated Worker metadata directly.

@@ -7765,7 +7765,19 @@ app.whenReady().then(() => {
   regenerateTokscalePricing();
   if (widgetRuntimeSupported) ensureMacWidgetDemand();
   startMode();
-  void widgetRecovery.finally(() => {
+  void widgetRecovery.then((result) => {
+    if (result.status !== 'completed' || widgetRecoveryAbort?.signal.aborted) return;
+    const config = macWidgetConfiguration();
+    if (!config) return;
+    // The retained snapshot may be unchanged after an update, so publication
+    // deduplication alone cannot wake the newly registered extension. Do not
+    // require a recent demand heartbeat from the extension we just retired.
+    requestMacWidgetReload({
+      widgetKind: config.widgetKind,
+      isCurrent: () => !widgetRecoveryAbort?.signal.aborted,
+      logger: (message) => console.warn(message)
+    });
+  }).finally(() => {
     if (widgetRecoveryAbort) app.removeListener('before-quit', abortWidgetRecovery);
     if (!widgetRecoveryAbort?.signal.aborted) {
       macWidgetPublicationReady = true;
