@@ -372,7 +372,23 @@
       },
       {
         "revision": 93,
+<<<<<<< HEAD
         "buildId": "sha256:ba3a65a1863838be65e01cc763397d299dee659be8b78e7b0de33910036b6b0f"
+=======
+        "buildId": "sha256:492423ce78aa0763a9607a4fc620174c0610c3c07e8b3230677d77dd208a21f3"
+      },
+      {
+        "revision": 94,
+        "buildId": "sha256:2dbc8fe40e25e006424545097788f806d90dad47d5b1c3207fb489075961c1d1"
+      },
+      {
+        "revision": 95,
+        "buildId": "sha256:a81ba9c3e55239e7071f297dc629bab71f2d4654aafda341c35249174a464807"
+      },
+      {
+        "revision": 96,
+        "buildId": "sha256:afb925cd193a7fc64c086c4d53c8c4ad12f62c6e01a6b0cc77884f0e9ce64d74"
+>>>>>>> 95edae3c (fix(credits): address the coderabbit review round)
       }
     ],
     "node-hub": [

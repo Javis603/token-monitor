@@ -14,6 +14,9 @@ const MAX_CALIBRATION_ENTRIES = 20;
 const MAX_REASON_LENGTH = 200;
 
 function clampNumber(value) {
+  // Number(null)/Number('') are 0 and Number(true) is 1 — reject these up front
+  // so they cannot masquerade as zero/one credit values.
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   return Math.round(n * 1e6) / 1e6;

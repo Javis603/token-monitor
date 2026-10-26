@@ -57,9 +57,16 @@ function explodeCreditJson(raw, warnings) {
 
 function collectCredits({ home, deps } = {}) {
   const sqliteMod = resolveSqlite(deps || {});
-  const dbPath = candidateDbPaths(home || '').find((p) => {
-    try { require('node:fs').accessSync(p); return true; } catch (_) { return false; }
-  });
+  // When both WorkBuddy homes exist (5.5 migration), the first-candidate rule
+  // could pin a stale database; the freshest file wins instead.
+  const fs = require('node:fs');
+  const candidates = candidateDbPaths(home || '')
+    .map((p) => {
+      try { return { p, mtime: fs.statSync(p).mtimeMs }; } catch (_) { return null; }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.mtime - a.mtime);
+  const dbPath = candidates[0]?.p;
   if (!dbPath) return { available: false, reason: 'workbuddy.db not found' };
   if (!sqliteMod) return { available: false, reason: 'node:sqlite unavailable', dbPath };
 

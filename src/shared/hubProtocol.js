@@ -54,6 +54,13 @@ function hubStatsContentKey(stats) {
         ageMs: _ageMs,
         ...stableDevice
       } = device || {};
+      // TokenLedger: the credit ledger's updatedAt regenerates on every scan
+      // even when the ledger itself is unchanged, so it must not churn the
+      // stable content key (the other credits fields stay).
+      if (stableDevice.credits && typeof stableDevice.credits === 'object') {
+        const { updatedAt: _creditsUpdatedAt, ...stableCredits } = stableDevice.credits;
+        stableDevice.credits = stableCredits;
+      }
       return stableDevice;
     })
   });

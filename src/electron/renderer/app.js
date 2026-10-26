@@ -962,6 +962,7 @@ function formatCompact(value, unitSystem, locale) {
 function formatCredits(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n < 0.1) return '<0.1';
   return n >= 100 ? String(Math.round(n)) : String(Math.round(n * 10) / 10);
 }
 function updateTotalCompact(value) {
@@ -6819,7 +6820,11 @@ function renderHomeDeviceModule() {
       credits.textContent = row.creditsToday != null
         ? t('home.creditsToday', { value: formatCredits(row.creditsToday) })
         : t('home.creditsTotal', { value: formatCredits(row.creditsTotal) });
-      credits.title = creditsTooltip(row.creditsCalibration);
+      const tooltip = creditsTooltip(row.creditsCalibration);
+      credits.title = tooltip;
+      // Keyboard/screen-reader parity with the hover tooltip.
+      credits.setAttribute('role', 'note');
+      credits.setAttribute('aria-label', tooltip);
       item.append(credits);
     }
     body.append(item);

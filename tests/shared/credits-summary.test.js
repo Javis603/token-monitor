@@ -72,3 +72,22 @@ test('normalizeCreditsSummary rejects junk and shapes unavailability', () => {
     { available: false, reason: 'invalid totals' }
   );
 });
+
+test('clampNumber-style rejection: null, empty strings and booleans are not credits', () => {
+  const normalized = normalizeCreditsSummary({
+    available: true,
+    totals: { credits: 10, requests: 2 },
+    recentEvents: [
+      { credits: null },
+      { credits: '' },
+      { credits: true },
+      { credits: false },
+      { credits: undefined },
+      { credits: 3 }
+    ]
+  });
+  // Only the real numeric event survives the strict rejection.
+  assert.equal(normalized.recentEvents.length, 1);
+  assert.equal(normalized.recentEvents[0].credits, 3);
+  assert.equal(normalized.totals.credits, 10);
+});
