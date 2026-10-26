@@ -1,7 +1,7 @@
 # Notch session-only summary
 
 Before: `7f14812656344cd915a57bdeb25ea746ae439e99`.
-After: `653497219ffa9c18a8c2c969ec35a6e8e413e01d`.
+After: `dd16445e949509620a984153e596217a049001c8`.
 
 Matching screenshots from the production summary builder, typography, icons, fitting logic and CSS rendered in Electron 43.7.9 on macOS, with synthetic session data and reduced motion enabled. Both images use the same window size, summary zoom and camera gap. The fixture provides the shell and sample labels; these are not full native desktop captures or native glass acceptance evidence.
 
