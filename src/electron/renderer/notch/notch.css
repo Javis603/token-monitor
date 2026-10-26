@@ -78,7 +78,7 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 /* Session-only marks are one measured group, with a surface-coloured separator. */
 .notch-session-icons { display: inline-flex; align-items: center; isolation: isolate; }
 .notch-session-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 21px; width: 21px; height: 21px; border-radius: 50%; background: rgb(var(--glass-rgb)); }
-.notch-session-icon + .notch-session-icon { margin-left: -7px; }
+.notch-session-icon + .notch-session-icon { margin-left: -10px; }
 .is-notch-attached .notch-session-icon, html.notch-black .notch-session-icon { background: #000; }
 .notch-session-activity { --notch-waiting-color: #e7b764; gap: 6px; }
 .notch-session-activity .notch-activity-count { color: var(--notch-accent, var(--text)); font-size: 1.3em; font-weight: 600; line-height: 1; }
