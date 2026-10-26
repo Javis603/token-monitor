@@ -35,6 +35,12 @@ app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_event, callback) => callback({ cancel: true }));
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [require('../src/electron/contentSecurityPolicy').contentSecurityPolicyForRequest(details)] } }));
   await runtime.start(); await main.loadURL('about:blank');
+  const demandEvents = [];
+  let notchDemand = [];
+  ipcMain.on('topNotch:pluginDemand', (_event, { refs }) => {
+    notchDemand = refs;
+    demandEvents.push({ refs, visible: windows.get('notch')?.isVisible(), backendCount: runtime.manager.backendCount() });
+  });
   const js = text => main.webContents.executeJavaScript(text);
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
@@ -96,7 +102,13 @@ app.whenReady().then(async () => {
   windows.get('notch').show(); runtime.refreshSurfaces();
   await wait(windows.get('notch'), "document.visibilityState === 'visible'", 'Notch restore');
   await windows.get('notch').webContents.executeJavaScript("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','restored')");
+  console.log('RESTORE before demand settles', JSON.stringify({ notchDemand, backendCount: runtime.manager.backendCount() }));
+  // DOM visibility and a one-shot backend call do not establish continuing
+  // foreground demand. Wait for the real renderer demand IPC/start transition.
+  for (let i = 0; i < 150 && (!notchDemand.includes('trusted-fixture/content') || runtime.manager.backendCount() !== 1); i++) await pause(40);
+  assert.ok(notchDemand.includes('trusted-fixture/content'), 'visible Notch publishes foreground demand again');
   assert.equal(runtime.manager.backendCount(), 1);
+  console.log('RESTORE demand settled', JSON.stringify(demandEvents));
   await js("tokenMonitorTrustedPlugins.selectContent('notch.home.content',null)");
   await wait(windows.get('notch'), "!document.querySelector('[data-plugin-target=\"notch.home.content\"]')", 'Notch native fallback');
   const collapsed = payloads.get('notch'); collapsed.expanded = false;

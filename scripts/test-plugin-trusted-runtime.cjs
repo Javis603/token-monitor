@@ -5,28 +5,37 @@ const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
 const { createPluginRuntime, registerPluginScheme } = require('../src/electron/plugins/runtime');
+const { atomicJson } = require('../src/electron/plugins/managed');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trusted-runtime-'));
 app.setPath('userData', path.join(scratch, 'profile'));
 registerPluginScheme(protocol);
 let runtime;
 const fixture = path.join(scratch, 'source');
 fs.cpSync(path.resolve('tests/fixtures/trusted-plugin'), fixture, { recursive: true });
+const initialManifest = JSON.parse(fs.readFileSync(path.join(fixture, 'manifest.json')));
+initialManifest.background = true;
+fs.writeFileSync(path.join(fixture, 'manifest.json'), JSON.stringify(initialManifest));
+const archive = path.join(scratch, 'fixture.tmplugin');
+require('./build-plugin-package').main([fixture, archive]);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const deadline = setTimeout(() => { console.error('Runtime fixture deadline'); app.exit(1); }, 60000);
 app.whenReady().then(async () => {
   let settings = { pluginsEnabled: true, pluginStates: {}, homeModuleOrder: 'plugin:trusted-fixture/panel', pluginMainPages: ['trusted-fixture/panel'] };
+  const settingsFile = path.join(scratch, 'fixture-settings.json');
+  const persist = patch => { settings = { ...settings, ...patch }; atomicJson(settingsFile, settings); };
   const win = new BrowserWindow({ show: true, width: 420, height: 600, webPreferences: { preload: path.resolve('src/electron/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
-  runtime = createPluginRuntime({ electron: { app, BrowserWindow, ipcMain, session, utilityProcess, dialog: { showMessageBox: async () => ({ response: 1 }), showOpenDialog: async () => ({ canceled: false, filePaths: [fixture] }) } },
+  const createRuntime = () => createPluginRuntime({ electron: { app, BrowserWindow, ipcMain, session, utilityProcess, dialog: { showMessageBox: async () => ({ response: 1 }), showOpenDialog: async (_win, options) => ({ canceled: false, filePaths: [options.properties.includes('openDirectory') ? fixture : archive] }) } },
     userDataDir: scratch, getSettings: () => settings, getContext: () => ({ source: 'fixture' }), getLocale: () => 'en',
     isMainSender: event => event.sender === win.webContents,
-    persistPluginStates: value => { settings.pluginStates = value; },
-    persistManagementSettings: patch => { settings = { ...settings, ...patch }; },
-    applySettingsPatch: patch => { settings = { ...settings, ...patch }; }, env: {}, log: console.log });
+    persistPluginStates: value => persist({ pluginStates: value }),
+    persistManagementSettings: persist,
+    applySettingsPatch: persist, env: {}, log: console.log });
+  runtime = createRuntime();
   await runtime.start();
   await win.loadURL('about:blank');
   const js = source => win.webContents.executeJavaScript(source);
   assert.equal(runtime.manager.backendCount(), 0);
-  const preview = await js("tokenMonitor.plugins.importPackage('directory')");
+  const preview = await js("tokenMonitor.plugins.importPackage('file')");
   assert.equal(preview.trustedCode, true);
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
   // install resolves only after the transaction and manager reload have completed.
@@ -41,6 +50,19 @@ app.whenReady().then(async () => {
     await runtime.dispose(); runtime = null; clearTimeout(deadline); console.log('PASS external safe-mode flag permits management but no author execution'); app.exit(0); return;
   }
   console.log('PASS install never executes; enabled without demand remains idle');
+  const trust = settings.pluginStates['trusted-fixture'].trustedRevision;
+  await js("tokenMonitor.plugins.setBackground('trusted-fixture',true)");
+  assert.equal((await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','background')")).value, 'background');
+  assert.equal(runtime.manager.backendCount(), 1);
+  await runtime.dispose();
+  settings = JSON.parse(fs.readFileSync(settingsFile)); runtime = createRuntime(); await runtime.start();
+  assert.equal(runtime.manager.active('trusted-fixture'), true);
+  assert.equal(settings.pluginStates['trusted-fixture'].trustedRevision, trust);
+  assert.equal((await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','restored')")).value, 'restored');
+  assert.equal(runtime.manager.backendCount(), 1);
+  await js("tokenMonitor.plugins.setBackground('trusted-fixture',false)");
+  assert.equal(runtime.manager.backendCount(), 0);
+  console.log('PASS package CLI, file import, persisted trust and explicit background across runtime restart');
   await js("tokenMonitor.plugins.setDemand('home',['trusted-fixture/panel'])");
   const result = await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','native')");
   assert.equal(result.value, 'native'); assert.equal(runtime.manager.backendCount(), 1);

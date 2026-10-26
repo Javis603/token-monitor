@@ -11,6 +11,8 @@
     const modules = new Map(), mounts = new Map();
     let disposed = false;
     function report(error, record) {
+      if (record && (disposed || mounts.get(record.container) !== record || record.failed)) return;
+      if (record) { record.failed = true; record.observer?.disconnect(); }
       onError(error, record?.descriptor);
       record?.context.onMountStatus?.(false);
       if (record && mounts.get(record.container) === record) {
@@ -85,6 +87,11 @@
       return { ...record.context, viewId: record.descriptor.id, ref: record.descriptor.ref,
         data: record.descriptor.data, container: record.container };
     }
+    async function update(record) {
+      if (record.failed || disposed || mounts.get(record.container) !== record) return;
+      try { await record.instance?.update?.(context(record)); }
+      catch (error) { report(error, record); }
+    }
     function unmount(container) {
       const record = mounts.get(container);
       if (!record) return;
@@ -97,8 +104,9 @@
       const previous = mounts.get(container);
       if (previous && previous.descriptor.ref === descriptor.ref && previous.descriptor.revision === descriptor.revision) {
         previous.descriptor = descriptor; previous.context = { ...previous.context, ...value };
-        try { await previous.instance?.update?.(context(previous)); } catch (error) { report(error, previous); return; }
-        if (mounts.get(container) === previous && previous.instance) previous.context.onMountStatus?.(true);
+        if (previous.failed) { previous.context.onMountStatus?.(false); return; }
+        await update(previous);
+        if (mounts.get(container) === previous && previous.instance && !previous.failed) previous.context.onMountStatus?.(true);
         return;
       }
       unmount(container);
@@ -118,7 +126,7 @@
             const bounds = entries[0]?.contentRect;
             if (!bounds) return;
             record.context = { ...record.context, width: bounds.width, height: bounds.height };
-            Promise.resolve(record.instance?.update?.(context(record))).catch(error => report(error, record));
+            void update(record);
           });
           record.observer.observe(container);
         }
@@ -129,7 +137,7 @@
         const record = mounts.get(container);
         if (!record || record.context.visible === visible) return;
         record.context = { ...record.context, visible };
-        Promise.resolve(record.instance?.update?.(context(record))).catch(error => report(error, record));
+        void update(record);
       },
       load,
       renderTray(descriptor, canvas, context) {

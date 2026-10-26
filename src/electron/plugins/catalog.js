@@ -1,10 +1,28 @@
 'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
 const semver = require('semver');
-const { parsePackage, MAX_PACKAGE_BYTES, digest } = require('./package');
+const { parsePackage, readBounded, MAX_PACKAGE_BYTES, describePackage, digest } = require('./package');
+const { assertHostCompatibility } = require('./contracts');
 const { localize } = require('../../shared/plugins/localized');
 const { createCatalogSources } = require('./catalogSources');
-function createPluginCatalog({ manager, managed, getLocale = () => 'en', root, fetchImpl }) {
+const OFFICIAL = Object.freeze({ id: 'bundled', kind: 'official', label: 'Token Monitor' });
+function createPluginCatalog({ manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog') }) {
   const sources = createCatalogSources({ root, fetchImpl, getLocale, cancelPreviews: id => managed.cancelSource(id) });
+  const packages = new Map(), errors = [];
+  // Only App-distributed files receive official attribution. Discovery never
+  // executes them, and a broken entry must not disable package management.
+  try {
+    for (const name of fs.readdirSync(catalogDirectory).filter(name => name.endsWith('.tmplugin')).sort()) {
+      try {
+        const pkg = parsePackage(readBounded(path.join(catalogDirectory, name), MAX_PACKAGE_BYTES), { checkCompatibility: false });
+        if (packages.has(pkg.manifest.id)) throw new Error('duplicate bundled catalog identity');
+        let compatible = true;
+        try { assertHostCompatibility(pkg.rawManifest); } catch { compatible = false; }
+        packages.set(pkg.manifest.id, { pkg, compatible });
+      } catch (error) { errors.push(`${name}: ${error.message}`); }
+    }
+  } catch (error) { errors.push(`Official catalog unavailable: ${error.message}`); }
   function list() {
     const plugins = manager.list().plugins;
     function installation(id) {
@@ -16,6 +34,13 @@ function createPluginCatalog({ manager, managed, getLocale = () => 'en', root, f
         version: semver.valid(record?.version) || semver.valid(discovered?.version) || null };
     }
     const entries = [];
+    for (const { pkg, compatible } of packages.values()) {
+      const installed = installation(pkg.manifest.id);
+      entries.push({ ...describePackage(pkg, { locale: getLocale() }), origin: OFFICIAL,
+        status: !compatible ? 'incompatible' : !installed.exists ? 'available'
+          : installed.version && installed.record?.origin.id === OFFICIAL.id && semver.gt(pkg.manifest.version, installed.version) ? 'update' : 'installed',
+        installedVersion: installed.version });
+    }
     for (const entry of sources.entries()) {
       const installed = installation(entry.id);
       const compatible = entry.versions.filter(v => v.compatible);
@@ -26,7 +51,7 @@ function createPluginCatalog({ manager, managed, getLocale = () => 'en', root, f
         versions: entry.versions.map(v => ({ ...v, installable: v.compatible && (!installed.exists || Boolean(installed.version && installed.record?.origin.id === entry.origin.id && semver.gt(v.version, installed.version))), changelog: localize(v.changelog, getLocale()) })) });
     }
     const state = sources.list();
-    return { sources: state.sources, entries, error: state.error, communityConfigured: state.sources.length > 0 };
+    return { sources: [OFFICIAL, ...state.sources], entries, error: [...errors, state.error].filter(Boolean).join('\n'), communityConfigured: state.sources.length > 0 };
   }
   return {
     list,
@@ -35,7 +60,11 @@ function createPluginCatalog({ manager, managed, getLocale = () => 'en', root, f
     removeSource(id) { sources.remove(id); return list(); },
     dispose: () => sources.dispose(),
     async preview(sourceId, id, version) {
-
+      if (sourceId === OFFICIAL.id) {
+        const entry = packages.get(id);
+        if (!entry?.compatible || entry.pkg.manifest.version !== version) throw new Error('catalog version is missing or incompatible');
+        return managed.preview(entry.pkg, OFFICIAL);
+      }
         const entry = sources.entries().find(p => p.id === id && p.origin.id === sourceId);
         const selected = entry?.versions.find(v => v.version === version);
         if (!selected?.compatible) throw new Error('catalog version is missing or incompatible');

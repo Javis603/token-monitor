@@ -43,7 +43,10 @@ export function activate(ctx) {
       container.style.cssText = 'padding:16px;border:1px solid var(--accent);border-radius:12px;display:grid;gap:16px';
       const row = ctx.native.usageRow({ key:'audit', name:'原生用量元件', value:125000, cost:4.25, max:150000 });
       row.dataset.auditNative = 'true'; container.append(title,note,row,input);
-      return { update(next) { container.dataset.period = next.period || ''; }, hasUnsavedChanges:()=>Boolean(input.value), dispose(){container.replaceChildren();} };
+      return { update(next) {
+        if (globalThis.fixtureUpdateFailure) { globalThis.fixtureUpdateFailure = false; throw Error('Intentional fixture update failure'); }
+        container.dataset.period = next.period || '';
+      }, hasUnsavedChanges:()=>Boolean(input.value), dispose(){container.replaceChildren();} };
     }
     return basic.mount(container,context);
   } };
@@ -184,6 +187,9 @@ app.whenReady().then(async () => {
   assert.equal(inlineCount, 2);
   await js("state.rowSignature='';render()");
   await waitFor(`document.querySelectorAll('[data-audit=inline]').length === ${inlineCount}`, 'rebuilt native rows');
+  await js("state.rowSignature='';renderRows(rowsForPeriod(state.stats.periods[state.period]))");
+  await waitFor(`document.querySelectorAll('[data-audit=inline]').length === ${inlineCount}`, 'partial native row renderer preserves inline extensions');
+  console.log('PASS direct native renderRows reconciles section and inline anchors without App render wrapper');
   await js("tokenMonitorTrustedPlugins.orderContent('main.navigation.content',['trusted-fixture/navigation-second','trusted-fixture/navigation']).then(applyPluginCatalog)");
   await js('renderViewSwitcher()');
   await waitFor("document.querySelectorAll('[data-plugin-target=\"main.navigation.content\"][data-audit]').length === 2", 'navigation-only rerender');
@@ -205,6 +211,14 @@ app.whenReady().then(async () => {
   await js("tokenMonitorTrustedPlugins.selectContent('main.model.content','trusted-fixture/content').then(applyPluginCatalog)");
   await waitFor("document.querySelector('[data-plugin-target=\"main.model.content\"] [data-audit-native]')", 'comparison author');
   fs.writeFileSync(path.join(evidence, 'comparison-author.png'), (await capture()).toPNG());
+  await js("globalThis.fixtureUpdateFailure=true; document.querySelector('[data-plugin-target=\"main.model.content\"] [data-audit-native]').parentElement.style.width='95%'");
+  await waitFor("document.querySelector('[data-plugin-target=\"main.model.content\"] .plugin-inline-error') && !els.breakdown.hidden", 'resize error restores native content');
+  await js('render(); render()');
+  await pause(50);
+  assert.equal(await js('els.breakdown.hidden'), false);
+  assert.match(await js("document.querySelector('[data-plugin-target=\"main.model.content\"] .plugin-inline-error').textContent"), /Intentional fixture update failure/);
+  fs.writeFileSync(path.join(evidence, 'comparison-failed-update.png'), (await capture()).toPNG());
+  console.log('PASS real ResizeObserver failure stays contained and native content survives later pushes');
   const reloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
   await js("pluginApi.setEnabled('trusted-fixture',false)");
   await reloaded;
@@ -218,7 +232,8 @@ app.whenReady().then(async () => {
   fs.writeFileSync(path.join(evidence, 'coverage-results.json'), JSON.stringify({ coveredPages, sessionDetail:true, sectionRows:inlineCount, navigationOrder:true, trayCallback:true, authorSettings:true, disabledReloadRestored:true },null,2));
   console.log('PASS all native page roots, session detail, section/inline, navigation order, native factory, settings, Tray callback, disable/reload/restoration');
   console.log('PASS Home mount/draft, local backend, explicit original-page replacement and native restoration');
-  assert.deepEqual(errors.filter(text => !text.includes('Electron Security Warning') && !text.includes('Autofill.')), []);
+  assert.equal(errors.filter(text => text.includes('Intentional fixture update failure')).length, 1);
+  assert.deepEqual(errors.filter(text => !text.includes('Electron Security Warning') && !text.includes('Autofill.') && !text.includes('Intentional fixture update failure')), []);
   fs.writeFileSync(path.join(evidence, 'app-results.json'), JSON.stringify({ electron: process.versions.electron, chrome: process.versions.chrome, errors, pid, scope: 'production index.html/app.js/preload + real plugin runtime; synthetic non-plugin IPC, not full main collector' }, null, 2));
   clearTimeout(deadline);
   if (process.argv.includes('--demo')) {

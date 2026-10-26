@@ -20,6 +20,54 @@ function index(bytes = packageBytes()) {
     sha256: digest(bytes), url: 'https://catalog.example/demo.tmplugin' }] }] };
 }
 function temp(t) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-catalog-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir; }
+test('the shipped official catalog remains available and empty without showcase plugins', t => {
+  const catalog = createPluginCatalog({ root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
+    fetchImpl: () => assert.fail('local discovery must not fetch') });
+  t.after(() => catalog.dispose());
+  assert.deepEqual(catalog.list().sources.map(source => [source.id, source.kind]), [['bundled', 'official']]);
+  assert.deepEqual(catalog.list().entries, []); assert.equal(catalog.list().error, '');
+});
+test('local official packages install offline, survive restart, update with renewed trust and roll back', async t => {
+  const root = temp(t), userDir = path.join(root, 'plugins'), catalogDirectory = path.join(root, 'official');
+  fs.mkdirSync(catalogDirectory);
+  let settings = { pluginStates: {} }, manager, managed, catalog;
+  const boot = async () => {
+    manager = createPluginManager({ userDir, dataDir: path.join(root, 'data'), getSettings: () => settings, saveStates: value => { settings.pluginStates = value; } });
+    managed = createManagedPlugins({ root: path.join(root, 'managed'), userDir, dataDir: path.join(root, 'data'), manager, getSettings: () => settings,
+      saveSettings: patch => { settings = { ...settings, ...patch }; } });
+    managed.recover(); await manager.reload();
+    catalog = createPluginCatalog({ catalogDirectory, root: path.join(root, 'catalog'), manager, managed, fetchImpl: () => assert.fail('official catalog is offline') });
+  };
+  t.after(async () => { catalog?.dispose(); managed?.dispose(); await manager?.dispose(); });
+  fs.writeFileSync(path.join(catalogDirectory, 'fixture.tmplugin'), packageBytes()); await boot();
+  const entry = catalog.list().entries[0]; assert.equal(entry?.origin.kind, 'official'); assert.equal(entry.status, 'available');
+  await assert.rejects(catalog.preview('bundled', entry.id, '9.0.0'), /version/);
+  await managed.install((await catalog.preview('bundled', entry.id, entry.version)).token);
+  assert.equal(manager.list().plugins[0].status, 'disabled'); manager.setEnabled(entry.id, true);
+  const trustedRevision = settings.pluginStates[entry.id].trustedRevision;
+  catalog.dispose(); managed.dispose(); await manager.dispose(); await boot();
+  assert.equal(manager.list().plugins[0].status, 'active'); assert.equal(manager.backendCount(), 0);
+  assert.equal(managed.describe(entry.id).origin.id, 'bundled');
+  catalog.dispose(); managed.dispose(); await manager.dispose();
+  fs.writeFileSync(path.join(catalogDirectory, 'fixture.tmplugin'), packageBytes('2.0.0')); await boot();
+  assert.equal(catalog.list().entries[0].status, 'update');
+  await managed.install((await catalog.preview('bundled', entry.id, '2.0.0')).token);
+  assert.equal(manager.list().plugins[0].status, 'needsApproval');
+  await managed.rollback(entry.id); assert.equal(manager.list().plugins[0].status, 'active');
+  assert.equal(settings.pluginStates[entry.id].trustedRevision, trustedRevision);
+  await managed.uninstall(entry.id); assert.equal(manager.list().plugins.length, 0);
+});
+test('invalid or incompatible local catalog entries never execute or block management', async t => {
+  const root = temp(t), catalogDirectory = path.join(root, 'official'); fs.mkdirSync(catalogDirectory);
+  fs.writeFileSync(path.join(catalogDirectory, 'broken.tmplugin'), '{broken');
+  const pkg = JSON.parse(packageBytes()); pkg.manifest.engines = { tokenMonitor: '>=999' };
+  fs.writeFileSync(path.join(catalogDirectory, 'future.tmplugin'), JSON.stringify(pkg));
+  const catalog = createPluginCatalog({ root: path.join(root, 'sources'), catalogDirectory,
+    manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {}, preview() { assert.fail('incompatible preview'); } } });
+  t.after(() => catalog.dispose());
+  assert.match(catalog.list().error, /broken.tmplugin/); assert.equal(catalog.list().entries[0].status, 'incompatible');
+  await assert.rejects(catalog.preview('bundled', 'community-demo', '1.0.0'), /incompatible/);
+});
 test('catalog validation rejects insecure URLs, duplicate identities, missing digests and incompatible versions', () => {
   assert.equal(parseIndex(Buffer.from(JSON.stringify(index()))).plugins.length, 1);
   for (const url of ['http://catalog.example/a', 'https://user:password@catalog.example/a', 'file:///tmp/a', 'https://catalog.example/a#part']) {

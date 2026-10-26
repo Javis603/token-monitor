@@ -63,6 +63,34 @@ test('failed update restores native replacement and never reports a successful m
   await host.mount(node, descriptor, options); await host.mount(node, descriptor, options);
   assert.deepEqual(states, [true, false]); assert.match(node.textContent, /update failed/); await host.dispose();
 });
+test('a failed update stays failed across data pushes until the view is remounted', async () => {
+  const document = dom(), node = document.createElement('div'); document.body.append(node);
+  const states = []; let updates = 0, disposed = 0;
+  const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(container) {
+    container.append(document.createElement('input'));
+    return { update() { if (++updates === 1) throw Error('one failed update'); }, dispose() { disposed++; } };
+  } }) });
+  const options = { onMountStatus: value => states.push(value) };
+  await host.mount(node, descriptor, options); await host.mount(node, descriptor, options);
+  await host.mount(node, descriptor, options);
+  assert.equal(states.at(-1), false); assert.equal(updates, 1);
+  assert.match(node.textContent, /one failed update/);
+  host.unmount(node); await host.mount(node, descriptor, options);
+  assert.equal(states.at(-1), true); assert.equal(node.children[0].tagName, 'INPUT');
+  await host.dispose(); assert.equal(disposed, 2);
+});
+for (const trigger of ['visibility', 'resize']) test(`synchronous ${trigger} update failure is contained and restores native content`, async () => {
+  const document = dom(), node = document.createElement('div'); document.body.append(node);
+  let resize, error; const states = [];
+  class ResizeObserver { constructor(callback) { resize = callback; } observe() {} disconnect() {} }
+  const host = createHost({ document, window: { ResizeObserver }, bridge: {}, onError: cause => { error = cause; },
+    importModule: async () => ({ mount() { return { update() { throw Error('author update failed'); } }; } }) });
+  await host.mount(node, descriptor, { onMountStatus: value => states.push(value) });
+  assert.doesNotThrow(() => trigger === 'visibility' ? host.setVisibility(node, false) : resize([{ contentRect: { width: 100, height: 80 } }]));
+  await new Promise(setImmediate);
+  assert.equal(error.message, 'author update failed'); assert.equal(states.at(-1), false);
+  assert.match(node.textContent, /author update failed/); await host.dispose();
+});
 test('context changed while async mount is pending reaches the mounted instance', async () => {
   const document = dom(), node = document.createElement('div'); document.body.append(node); let finish, latest;
   const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount: () => new Promise(resolve => { finish = () => resolve({ update(value) { latest = value; } }); }) }) });
@@ -135,4 +163,54 @@ test('overlapping selectors keep the selected additive order at the same native 
   views[0].contentOrder['main.home.content']=2;
   content.render('main.home.content',native);
   assert.deepEqual(native.children.slice(1).map(node=>node.textContent),['fixture/v1','fixture/v0']);
+});
+
+
+test('native partial redraw reconciles selectors without an App render and ignores author-only mutations', () => {
+  const document = dom(), native = document.createElement('div'); document.body.append(native);
+  const observers = [];
+  document.defaultView = { MutationObserver: class {
+    constructor(callback) { this.callback = callback; this.active = false; observers.push(this); }
+    observe(node) { this.node = node; this.active = true; }
+    disconnect() { this.active = false; }
+  } };
+  const row = () => { const node = document.createElement('span'); node.className = 'metric'; return node; };
+  const first = row(); native.append(first);
+  let mounts = 0;
+  const host = { mount(node, view, context) { mounts++; context.onMountStatus(true); }, unmount() {} };
+  const content = create({ document, host, getViews: () => [{ ...descriptor, selector: '.metric' }], selection: () => descriptor.ref });
+  content.render('main.home.content', native);
+  assert.equal(observers.length, 1);
+  const container = native.children[1]; container.value = 'draft';
+  observers[0].callback(); assert.equal(mounts, 1, 'own mount mutations do not cause an update loop');
+  const second = row(); native.replaceChildren(second);
+  observers[0].callback();
+  assert.equal(native.children[1], container); assert.equal(container.value, 'draft');
+  assert.equal(second.hidden, true); assert.equal(first.hidden, undefined);
+  assert.equal(mounts, 2);
+  container.remove(); observers[0].callback();
+  assert.equal(native.children[1], container, 'a partial renderer may retain the anchor but remove its extension sibling');
+  observers[0].callback(); assert.equal(mounts, 3);
+  content.retain([]); assert.equal(observers[0].active, false);
+  assert.equal(second.hidden, undefined); assert.equal(native.children.length, 1);
+});
+
+test('selector observation exists only for active targets and can discover initially absent anchors', () => {
+  const document = dom(), native = document.createElement('div'); document.body.append(native);
+  const observers = [];
+  document.defaultView = { MutationObserver: class {
+    constructor(callback) { this.callback = callback; observers.push(this); }
+    observe() { this.active = true; } disconnect() { this.active = false; }
+  } };
+  let views = [], mounts = 0;
+  const content = create({ document, host: { mount() { mounts++; }, unmount() {} }, getViews: () => views });
+  content.render('main.home.content', native); assert.equal(observers.length, 0);
+  views = [{ ...descriptor, mode: 'append' }]; content.render('main.home.content', native);
+  assert.equal(observers.length, 0, 'whole-root content needs no subtree observer');
+  views = [{ ...descriptor, mode: 'append', selector: '.metric' }]; content.render('main.home.content', native);
+  const row = document.createElement('span'); row.className = 'metric'; native.append(row);
+  observers[0].callback(); assert.equal(mounts, 2);
+  views = []; content.render('main.home.content', native); assert.equal(observers[0].active, false);
+  views = [{ ...descriptor, mode: 'append', selector: '.metric' }]; content.render('main.home.content', native);
+  content.dispose(); assert.equal(observers[1].active, false);
 });
