@@ -344,6 +344,8 @@
     out.dataset.pvMotion = node.motion || 'inherit';
     out.style.flex = node.flex === undefined ? '' : `${node.flex} 1 0`;
     out.style.minWidth = node.flex === undefined ? '' : '0';
+    // The flex shorthand clears flex-basis; restore a fixed spacer only when flex is not explicit.
+    if (node.type === 'spacer' && node.flex === undefined && node.size !== undefined) out.style.flexBasis = `${node.size}px`;
     if (node.type !== 'stack') return;
     out.classList.toggle('pv-dir-row', node.dir === 'row');
     out.classList.toggle('pv-dir-col', node.dir !== 'row');
@@ -441,7 +443,6 @@
         break;
       case 'spacer':
         out = el(document, 'div', 'pv-spacer');
-        if (node.size !== undefined) out.style.flexBasis = `${node.size}px`;
         break;
       case 'divider':
         out = el(document, 'div', 'pv-divider');
