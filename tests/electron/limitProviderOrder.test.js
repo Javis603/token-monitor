@@ -42,6 +42,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'zed',
     'commandcode',
     'mimo',
+    'muse',
     'zai',
     'zaiteam',
     'kiro',
