@@ -217,13 +217,127 @@ test('an account owning no personal plan reports unconfigured without probing qu
     ['plans', 'get', '--format', 'json', '--profile', 'personal']
   ]);
 });
-test('CLI builds without a subscription command still probe both personal plans', async () => {
-  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
-    if (args[0] === 'plans') throw new Error('unknown command');
+test('failed or malformed subscription discovery never probes unverified products', async () => {
+  for (const failure of [new Error('unknown command'), new Error('timeout'), new SyntaxError('invalid JSON'),
+    Object.assign(new Error('executable disappeared after auth'), { status: 'notConfigured' }),
+    null, {}, { plans: null }, { plans: [null] }, { plans: [{}] }]) {
+    const calls = [];
+    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+      calls.push(args);
+      if (args[0] === 'auth') return auth;
+      if (args[0] === 'plans') {
+        if (failure instanceof Error) throw failure;
+        return failure;
+      }
+      assert.fail('ownership failure must not query usage');
+    } });
+    assert.equal(rows[0].status, 'unavailable');
+    assert.equal(rows[0].windows.length, 0);
+    assert.equal(calls.length, 2);
+  }
+});
+test('errored subscription entries are unknown rather than owned or absent', async () => {
+  for (const healthySibling of [true, false]) {
+    const calls = [];
+    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+      calls.push(args);
+      if (args[0] === 'auth') return auth;
+      if (args[0] === 'plans') return { plans: [
+        { key: 'agent-plan', scope: 'personal', error: 'private error' },
+        ...(healthySibling ? subscriptions('coding-plan').plans : [])
+      ] };
+      assert.equal(args[3], 'coding-plan');
+      return codingResponse();
+    } });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, healthySibling ? 'ok' : 'unavailable');
+    if (healthySibling) assert.equal(rows[0].accountLabel, 'Coding Plan');
+    assert.equal(calls.filter(args => args[0] === 'usage').length, healthySibling ? 1 : 0);
+    assert.ok(!JSON.stringify(rows).includes('private'));
+  }
+});
+test('subscription discovery cancellation propagates without probing quota', async () => {
+  const controller = new AbortController();
+  await assert.rejects(fetchVolcengineLimits({}, { env: {}, signal: controller.signal, runArkcli: async args => {
     if (args[0] === 'auth') return auth;
-    return args[3] === 'coding-plan' ? codingResponse() : response();
-  } });
-  assert.deepEqual(rows.map(row => row.accountLabel), ['Agent Plan', 'Coding Plan']);
+    if (args[0] === 'plans') { controller.abort(); throw controller.signal.reason; }
+    assert.fail('cancelled discovery must not query usage');
+  } }), { name: 'AbortError' });
+});
+
+test('CLI plan lifecycle removes only confirmed products of the same viewer', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  for (const scenario of ['unsubscribed', 'absent', 'agent-unsubscribed', 'agent-absent', 'all-absent',
+    'discovery-error', 'plan-error', 'all-plan-errors', 'usage-error', 'malformed-usage',
+    'other-account', 'other-user', 'other-region', 'other-unsubscribed', 'other-all-absent', 'identity-error']) {
+    await t.test(scenario, async () => {
+      let stage = 0;
+      let time = Date.parse(now);
+      const queries = [];
+      const runtime = createLimitsRuntime({ limitProviders: ['volcengine'] }, {
+        autoStart: false, now: () => time,
+        probeProvider: (_provider, options) => fetchVolcengineLimits(options, {
+          env: {}, now: () => time, runArkcli: async args => {
+            if (args[0] === 'auth') return auth;
+            if (args[0] === 'plans') {
+              if (stage && scenario === 'discovery-error') throw new Error('timeout');
+              if (stage && ['all-absent', 'other-all-absent', 'identity-error'].includes(scenario)) return subscriptions();
+              if (stage && scenario === 'agent-absent') return subscriptions('coding-plan');
+              if (stage && ['absent', 'other-account', 'other-user', 'other-region'].includes(scenario)) return subscriptions('agent-plan');
+              if (stage && scenario === 'all-plan-errors') return { plans: ['agent-plan', 'coding-plan'].map(key => ({
+                key, scope: 'personal', error: 'private error'
+              })) };
+              if (stage && scenario === 'plan-error') return { plans: [
+                ...subscriptions('agent-plan').plans,
+                { key: 'coding-plan', scope: 'personal', error: 'private error' }
+              ] };
+              return subscriptions('agent-plan', 'coding-plan');
+            }
+            queries.push(args[3]);
+            if (stage && (scenario === 'identity-error' || (scenario === 'usage-error' && args[3] === 'coding-plan'))) throw new Error('timeout');
+            const body = args[3] === 'coding-plan' ? codingResponse() : response();
+            if (stage && scenario.startsWith('other-')) {
+              const field = { 'other-user': 'user_id', 'other-region': 'region' }[scenario] || 'account_id';
+              body.viewer[field] = 'different';
+            }
+            if (stage && scenario === 'agent-unsubscribed' && args[3] === 'agent-plan') body.items[0].subscribed = false;
+            if (stage && args[3] === 'coding-plan') {
+              if (['unsubscribed', 'other-unsubscribed'].includes(scenario)) body.items[0].subscribed = false;
+              if (scenario === 'malformed-usage') body.items[0].periods = null;
+            }
+            return body;
+          }
+        })
+      });
+      try {
+        await runtime.refresh({}, 'manual');
+        const first = runtime.getSnapshot().providers;
+        const coding = first.find(row => row.accountLabel === 'Coding Plan');
+        const agent = first.find(row => row.accountLabel === 'Agent Plan');
+        assert.equal(first.length, 2);
+        for (stage = 1; stage <= 2; stage++) {
+          time += 300_000;
+          await runtime.refresh({}, 'manual');
+          const rows = runtime.getSnapshot().providers;
+          const retained = rows.find(row => row.accountKey === coding.accountKey);
+          if (['agent-unsubscribed', 'agent-absent'].includes(scenario)) {
+            assert.equal(rows.find(row => row.accountKey === agent.accountKey), undefined);
+            assert.equal(retained.status, 'ok');
+          } else if (['unsubscribed', 'absent', 'all-absent'].includes(scenario)) {
+            assert.equal(retained, undefined);
+            if (scenario === 'all-absent') assert.ok(rows.every(row => row.status === 'notConfigured' && !row.accountKey && !row.windows.length));
+            else assert.equal(rows.find(row => row.accountKey === agent.accountKey).status, 'ok');
+          } else {
+            assert.equal(retained.status, 'unavailable');
+            assert.equal(retained.updatedAt, coding.updatedAt);
+            assert.deepEqual(retained.windows, coding.windows);
+          }
+          assert.ok(rows.every(row => !Object.hasOwn(row, 'removed')));
+        }
+        if (['discovery-error', 'all-plan-errors'].includes(scenario)) assert.equal(queries.length, 2);
+      } finally { runtime.stop(); }
+    });
+  }
 });
 test('a failed sibling query does not hide a healthy personal plan', async () => {
   for (const product of ['agent-plan', 'coding-plan']) {

@@ -529,7 +529,7 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
       || Object.entries(env).some(([key, value]) =>
         /^(VOLCENGINE|VOLC|DOUBAO|ARK)_.*(KEY|SECRET)/.test(key) && cleanSecret(value));
     if (explicit || env.TOKEN_MONITOR_VOLCENGINE_ARKCLI === '0') return [statusRow('notConfigured')];
-    return fetchArkcliLimits(deps, updatedAt);
+    return fetchArkcliLimits(deps, updatedAt, options.previousLimits);
   }
 
   const tryArkFallback = async () => {

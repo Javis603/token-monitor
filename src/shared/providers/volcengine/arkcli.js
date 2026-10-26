@@ -139,6 +139,10 @@ function runArkcli(args, deps = {}) {
   });
 }
 
+function arkcliAccountKey(viewer, product) {
+  return hashKey('volcengine', 'arkcli', viewer.account_id, viewer.user_id || '', viewer.region || '', product);
+}
+
 function parseArkcliPlan(body, updatedAt, product) {
   const viewer = body?.viewer;
   if (!viewer?.account_id || !Array.isArray(body?.items) || !Object.hasOwn(PERSONAL_PLANS, product)) throw probeError();
@@ -174,7 +178,7 @@ function parseArkcliPlan(body, updatedAt, product) {
   if (!windows.length) throw probeError();
   return normalizeLimitProvider({
     provider: 'volcengine', source: 'cli', status: 'ok', updatedAt,
-    accountKey: hashKey('volcengine', 'arkcli', viewer.account_id, viewer.user_id || '', viewer.region || '', product),
+    accountKey: arkcliAccountKey(viewer, product),
     accountLabel: PERSONAL_PLANS[product], planLabel: typeof item.tier === 'string' ? item.tier : '',
     region: viewer.region, windows
   });
@@ -182,54 +186,79 @@ function parseArkcliPlan(body, updatedAt, product) {
 
 // `usage plan --product` reports subscribed:true with all-zero periods for a
 // plan the account never bought, so the subscription list is the only authority
-// on which products exist. Older CLI builds predate `plans get`.
+// on which products exist. Failed discovery must never fall back to blind probes.
 async function fetchPersonalPlanKeys(run, profile) {
   const args = ['plans', 'get', '--format', 'json'];
   if (profile) args.push('--profile', profile);
   const body = await run(args);
   if (!Array.isArray(body?.plans)) throw probeError();
-  return new Set(body.plans
-    .filter((plan) => plan && Object.hasOwn(PERSONAL_PLANS, plan.key) && plan.scope !== 'team')
-    .map((plan) => plan.key));
+  const subscribed = new Set();
+  const unknown = new Set();
+  for (const plan of body.plans) {
+    if (!plan || typeof plan.key !== 'string' || !['personal', 'team'].includes(plan.scope)) throw probeError();
+    if (!Object.hasOwn(PERSONAL_PLANS, plan.key)) continue;
+    if (plan.scope !== 'personal' || Object.hasOwn(plan, 'error') || typeof plan.status !== 'string' || !plan.status) unknown.add(plan.key);
+    else subscribed.add(plan.key);
+  }
+  for (const product of unknown) subscribed.delete(product);
+  return { subscribed, unknown };
 }
 
-async function fetchArkcliLimits(deps, updatedAt) {
+async function fetchArkcliLimits(deps, updatedAt, previousLimits) {
   const run = deps.runArkcli || ((args) => runArkcli(args, deps));
   const status = (value) => normalizeLimitProvider({ provider: 'volcengine', source: 'cli',
     status: value, updatedAt, windows: [] });
+  const previous = (previousLimits?.providers || []).filter(row => row.provider === 'volcengine');
+  const previousCliKeys = new Set(previous.filter(row => row.source === 'cli' && row.accountKey).map(row => row.accountKey));
+  let authenticated = false;
   try {
     const auth = await run(['auth', 'status', '--format', 'json']);
     if (typeof auth?.logged_in !== 'boolean') throw probeError();
     if (!auth.logged_in || !['sso', 'sts', 'aksk'].includes(auth.auth_method)) return [status('notConfigured')];
+    authenticated = true;
     const profile = auth.active_profile?.name;
-    let products = Object.keys(PERSONAL_PLANS);
-    let subscribed = null;
-    try {
-      subscribed = await fetchPersonalPlanKeys(run, profile);
-    } catch {
-      if (deps.signal?.aborted) throw abortError(deps.signal);
-    }
-    if (subscribed) {
-      products = products.filter((product) => subscribed.has(product));
-      if (!products.length) return [status('notConfigured')];
-    }
-    const results = await Promise.allSettled(products.map(async (product) => {
+    const { subscribed, unknown } = await fetchPersonalPlanKeys(run, profile);
+    const products = Object.keys(PERSONAL_PLANS).filter(product => subscribed.has(product));
+    const absent = Object.keys(PERSONAL_PLANS).filter(product => !subscribed.has(product) && !unknown.has(product));
+    const query = (product) => {
       const args = ['usage', 'plan', '--product', product, '--format', 'json'];
       if (profile) args.push('--profile', profile);
-      return parseArkcliPlan(await run(args), updatedAt, product);
+      return run(args);
+    };
+    const results = await Promise.allSettled(products.map(async (product) => {
+      const body = await query(product);
+      return { product, viewer: body?.viewer, row: parseArkcliPlan(body, updatedAt, product) };
     }));
     if (deps.signal?.aborted) throw abortError(deps.signal);
-    const rows = results.filter((result) => result.status === 'fulfilled' && result.value)
-      .map((result) => result.value);
+    const fulfilled = results.filter(result => result.status === 'fulfilled').map(result => result.value);
+    const rows = fulfilled.filter(result => result.row).map(result => result.row);
+    const removals = new Map();
+    const remove = (viewer, product) => {
+      const accountKey = arkcliAccountKey(viewer, product);
+      if (previousCliKeys.has(accountKey)) removals.set(accountKey, { provider: 'volcengine', accountKey, removed: true });
+    };
+    for (const result of fulfilled) {
+      if (!result.row) remove(result.viewer, result.product);
+      for (const product of absent) remove(result.viewer, product);
+    }
+    // plans get has no viewer. If all owned queries failed or no plan remains,
+    // one bounded probe can establish the current viewer for scoped removals.
+    // Its quota is deliberately ignored: this product is confirmed absent.
+    if (!fulfilled.length && absent.length && previousCliKeys.size) {
+      const body = await query(absent[0]);
+      if (!body?.viewer?.account_id || !Array.isArray(body.items)) throw probeError();
+      for (const product of absent) remove(body.viewer, product);
+    }
+    if (deps.signal?.aborted) throw abortError(deps.signal);
     // A failed sibling is omitted so the runtime retains its last-good identity
     // as unavailable, without marking a successfully queried plan as failed.
-    if (rows.length) return rows;
+    if (rows.length || removals.size) return [...rows, ...removals.values()];
     const failed = results.find((result) => result.status === 'rejected');
     if (failed) throw failed.reason;
-    return [status('notConfigured')];
+    return [status(unknown.size || previous.some(row => row.accountKey) ? 'unavailable' : 'notConfigured')];
   } catch (error) {
     if (deps.signal?.aborted) throw abortError(deps.signal);
-    return [status(error.status === 'notConfigured' ? 'notConfigured' : 'unavailable')];
+    return [status(!authenticated && error.status === 'notConfigured' ? 'notConfigured' : 'unavailable')];
   }
 }
 
