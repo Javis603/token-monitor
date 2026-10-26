@@ -30,6 +30,8 @@ The probe uses `execFile` without a shell, closes stdin, bounds output to 256 Ki
 
 The quota response exposes no stable account identifier. The provider leaves `accountKey` empty rather than inventing one from a plan or credential, and aggregation keeps Muse rows scoped to their source device, so different Muse accounts on synced devices stay separate rows instead of silently coalescing. The same account observed from two devices likewise appears once per device; this is not a multi-account integration.
 
+The renderer's account dedupe follows the same device scoping for anonymous Muse rows: `dedupeAccounts`/`sameAccount` in `src/electron/renderer/accountIdentity.js` keep one row per trimmed, case-sensitive `sourceDeviceId`, and local rows are stamped with their device's id on copies so a device's local and aggregate rows collapse into one. Rows with no device id form a single unknown-device observation and never merge with a known device row. Because subscription bindings persist only `profileName`/`accountKey`/`accountEmail` — all empty for Muse — a subscription cannot be durably bound to one particular anonymous Muse device: with two devices present the binding stays unresolved (a rebind prompt) rather than silently matching either row, while a single device still matches unambiguously. No identity is derived from the tier, plan name or credential to work around this.
+
 ## Verification
 
 Run `node --test tests/shared/museLimits.test.js tests/shared/usage.test.js tests/shared/history.test.js tests/electron/dashboardCharts.test.js tests/electron/widgetVendorParity.test.js` and `npm run verify`.

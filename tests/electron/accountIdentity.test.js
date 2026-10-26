@@ -13,6 +13,7 @@ const {
   codexManagedAccountPlanLabel,
   dedupeAccounts,
   isCodexLiveAccount,
+  localDeviceLimitsProviders,
   localLiveCodexProvider,
   maskEmailAddress,
   sameAccount
@@ -334,6 +335,96 @@ test('a list of accounts is deduped by the same rule, over the whole list', () =
     ]).map((record) => `${record.provider}:${record.accountKey}`),
     ['codex:k', 'claude:c']
   );
+});
+
+test('anonymous Muse accounts are scoped to their source device', () => {
+  const muse = (overrides = {}) => ({ provider: 'muse', accountKey: '', status: 'ok', ...overrides });
+  const devicesOf = (records) => records.map((record) => record.sourceDeviceId || '(unknown)');
+
+  // The hub keeps synced Muse devices apart (aggregateLimits); deduping the
+  // renderer's copy of that list must not coalesce them again.
+  const cases = [
+    ['different devices stay separate', [muse({ sourceDeviceId: 'a' }), muse({ sourceDeviceId: 'b' })], ['a', 'b']],
+    ['input order is preserved', [muse({ sourceDeviceId: 'b' }), muse({ sourceDeviceId: 'a' })], ['b', 'a']],
+    ['device ids are trimmed', [muse({ sourceDeviceId: ' a ' }), muse({ sourceDeviceId: 'a' })], [' a ']],
+    ['device ids stay case-sensitive', [muse({ sourceDeviceId: 'Mac' }), muse({ sourceDeviceId: 'mac' })], ['Mac', 'mac']],
+    ['missing and whitespace ids are one unknown bucket', [muse({}), muse({ sourceDeviceId: '   ' }), muse({ sourceDeviceId: '' })], ['(unknown)']],
+    ['unknown never absorbs a known device', [muse({}), muse({ sourceDeviceId: 'a' })], ['(unknown)', 'a']],
+    ['status does not split one device', [muse({ sourceDeviceId: 'a' }), muse({ sourceDeviceId: 'a', status: 'unavailable' })], ['a']],
+    ['healthy and failed rows on different devices both stay', [muse({ sourceDeviceId: 'a' }), muse({ sourceDeviceId: 'b', status: 'error' })], ['a', 'b']]
+  ];
+  for (const [label, records, expected] of cases) {
+    assert.deepEqual(devicesOf(dedupeAccounts(records)), expected, label);
+  }
+
+  // Same-device repeats keep the first record, whichever status arrived later.
+  const first = muse({ sourceDeviceId: 'a' });
+  assert.equal(dedupeAccounts([first, muse({ sourceDeviceId: 'a', status: 'error' })])[0], first);
+
+  // Explicit identities keep the generic rules: keys and emails decide, the
+  // device does not split a keyed account, and other providers are unchanged.
+  assert.equal(dedupeAccounts([muse({ accountKey: 'k1', sourceDeviceId: 'a' }), muse({ accountKey: 'k2', sourceDeviceId: 'a' })]).length, 2);
+  assert.equal(dedupeAccounts([muse({ accountKey: 'k1', sourceDeviceId: 'a' }), muse({ accountKey: 'k1', sourceDeviceId: 'b' })]).length, 1);
+  assert.equal(dedupeAccounts([muse({ accountEmail: 'a@example.com' }), muse({ accountEmail: 'b@example.com' })]).length, 2);
+  assert.equal(dedupeAccounts([
+    { provider: 'codex', status: 'ok', sourceDeviceId: 'a' },
+    { provider: 'codex', status: 'ok', sourceDeviceId: 'b' }
+  ]).length, 1, 'non-Muse anonymous dedupe is unchanged');
+  assert.equal(dedupeAccounts([muse({ sourceDeviceId: 'a' }), { provider: 'codex', status: 'ok', sourceDeviceId: 'a' }]).length, 2);
+
+  // The pair rule answers the same way the list rule does.
+  const pairCases = [
+    [muse({ sourceDeviceId: 'a' }), muse({ sourceDeviceId: 'a' }), true],
+    [muse({ sourceDeviceId: 'a' }), muse({ sourceDeviceId: 'b' }), false],
+    [muse({ sourceDeviceId: ' a ' }), muse({ sourceDeviceId: 'a' }), true],
+    [muse({ sourceDeviceId: 'Mac' }), muse({ sourceDeviceId: 'mac' }), false],
+    [muse({}), muse({ sourceDeviceId: '  ' }), true],
+    [muse({}), muse({ sourceDeviceId: 'a' }), false],
+    [muse({ sourceDeviceId: 'a' }), muse({}), false],
+    [muse({ accountKey: 'k', sourceDeviceId: 'a' }), muse({ accountKey: 'k', sourceDeviceId: 'b' }), true],
+    [muse({ sourceDeviceId: 'a' }), muse({ accountKey: 'k', sourceDeviceId: 'a' }), false]
+  ];
+  for (const [left, right, expected] of pairCases) {
+    assert.equal(sameAccount(left, right), expected);
+    assert.equal(sameAccount(right, left), expected, 'sameAccount is symmetric');
+  }
+
+  // Records are never amended in place.
+  const frozen = Object.freeze([Object.freeze(muse({ sourceDeviceId: 'a' })), Object.freeze(muse({ sourceDeviceId: 'b' }))]);
+  assert.deepEqual(devicesOf(dedupeAccounts(frozen)), ['a', 'b']);
+});
+
+test('local Muse rows are stamped with their device id on copies only', () => {
+  const localMuse = { provider: 'muse', accountKey: '', status: 'ok' };
+  const localCodex = { provider: 'codex', accountKey: 'k', status: 'ok' };
+  const stats = {
+    devices: [
+      { deviceId: 'device-a', limits: { providers: [localMuse, localCodex] } },
+      { deviceId: 'device-b', limits: { providers: [{ provider: 'muse', accountKey: '', status: 'ok' }] } }
+    ]
+  };
+  const providers = localDeviceLimitsProviders(stats, 'device-a');
+  assert.equal(providers[0].sourceDeviceId, 'device-a');
+  assert.notEqual(providers[0], localMuse, 'the stamped row is a copy');
+  assert.equal(localMuse.sourceDeviceId, undefined, 'caller state is not mutated');
+  assert.equal(providers[1], localCodex, 'non-Muse rows are not cloned');
+
+  // The single-device fallback stamps from that device's own id.
+  const single = { devices: [{ deviceId: 'only', limits: { providers: [{ provider: 'muse', status: 'ok' }] } }] };
+  assert.equal(localDeviceLimitsProviders(single)[0].sourceDeviceId, 'only');
+  assert.equal(single.devices[0].limits.providers[0].sourceDeviceId, undefined);
+
+  // An existing id is retained, and no id is invented when the device has none.
+  const stamped = { provider: 'muse', status: 'ok', sourceDeviceId: 'elsewhere' };
+  const retained = { devices: [{ deviceId: 'device-a', limits: { providers: [stamped] } }] };
+  assert.equal(localDeviceLimitsProviders(retained, 'device-a')[0], stamped);
+  const anonymous = { devices: [{ deviceId: ' ', limits: { providers: [{ provider: 'muse', status: 'ok' }] } }] };
+  assert.equal(localDeviceLimitsProviders(anonymous)[0].sourceDeviceId, undefined);
+
+  // Legacy shapes keep their meaning.
+  assert.equal(localDeviceLimitsProviders({}, 'device-a'), null);
+  assert.deepEqual(localDeviceLimitsProviders(stats, 'missing'), []);
+  assert.deepEqual(localDeviceLimitsProviders({ devices: [{ deviceId: 'x', limits: {} }] }, 'x'), []);
 });
 
 test('renderer loads the shared Codex identity API before app.js', () => {
