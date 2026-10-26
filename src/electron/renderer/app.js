@@ -16416,7 +16416,7 @@ function editClaudeWebAccount(account = null) {
   if (account?.id === 'legacy') void loadClaudeOrganizationChoices();
 }
 
-function cancelClaudeWebAccountEdit() {
+function cancelClaudeWebAccountEdit(restoreFocus = document.activeElement?.id === 'claudeCancelWebAccountButton') {
   claudeOrganizationChoicesRevision += 1;
   claudeWebAccountId = 'new';
   claudeWebFormOpen = false;
@@ -16425,6 +16425,7 @@ function cancelClaudeWebAccountEdit() {
   renderClaudeOrganizationChoices([]);
   setAccountPanelMessage('claude', null);
   renderExternalProviderStatus('claude');
+  if (restoreFocus) document.getElementById('claudeAddWebAccountButton')?.focus({ preventScroll: true });
 }
 
 async function runClaudeAccountAction(button, operation) {
@@ -16553,6 +16554,7 @@ function renderClaudeWebAccounts() {
     list.append(row);
   }
   const add = document.createElement('button');
+  add.id = 'claudeAddWebAccountButton';
   add.type = 'button';
   add.textContent = t('settings.codex.addAccount');
   add.setAttribute('aria-expanded', String(claudeWebFormOpen ?? accounts.length === 0));
@@ -16562,9 +16564,14 @@ function renderClaudeWebAccounts() {
   actions.append(add);
   if (claudeWebFormOpen ?? accounts.length === 0) {
     const cancel = document.createElement('button');
+    cancel.id = 'claudeCancelWebAccountButton';
     cancel.type = 'button';
     cancel.textContent = t('settings.common.cancel');
-    cancel.addEventListener('click', () => claudeAccountActions.run('claude', cancel, cancelClaudeWebAccountEdit));
+    cancel.addEventListener('click', () => {
+      // Capture before the busy guard disables Cancel and blurs it.
+      const restoreFocus = document.activeElement === cancel;
+      return claudeAccountActions.run('claude', cancel, () => cancelClaudeWebAccountEdit(restoreFocus));
+    });
     actions.append(cancel);
   }
   list.append(actions);

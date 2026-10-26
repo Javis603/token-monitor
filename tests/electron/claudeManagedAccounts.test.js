@@ -217,6 +217,45 @@ test('a failed metadata save restores both the credential and the account list',
   assert.equal(f.store.readClaudeWebCredential(a.id), 'sessionKey=sk-ant-a');
 });
 
+test('a delayed organization A observation cannot overwrite organization B saved with the same cookie', async (t) => {
+  const f = fixture(t);
+  let release;
+  let reached;
+  let pause = false;
+  const pending = new Promise((resolve) => { reached = resolve; });
+  f.beforeFetch((url) => {
+    if (url.endsWith('/api/organizations')) return response(200, [{ uuid: 'org-a', name: 'A' }, { uuid: 'org-b', name: 'B' }]);
+    if (pause && url.includes('/organizations/org-a/usage')) {
+      pause = false;
+      reached();
+      return new Promise((resolve) => { release = () => resolve(response(200, { five_hour: { utilization: 20 } })); });
+    }
+  });
+  assert.equal((await f.save('a', 'new', { claudeWebOrganizationId: 'org-a' })).saved, true);
+  const [a] = f.api.accounts();
+  const runtime = createLimitsRuntime({ limitProviders: ['claude'] }, {
+    ...f.deps, resolveConfigSnapshot: () => f.settings(), resolveClaudeWebCredential: f.api.resolveCredential,
+    onClaudeWebAccountResolved: f.api.resolved
+  });
+  t.after(() => { release?.(); runtime.stop(); });
+  pause = true;
+  const readingA = runtime.refresh({ provider: 'claude', accountId: a.id, accountKey: a.accountKey }, 'account-added');
+  await pending;
+  assert.equal((await f.save('a', a.id, { claudeWebOrganizationId: 'org-b' })).saved, true);
+  const savedB = f.api.accounts();
+  assert.equal(savedB[0].organizationId, 'org-b');
+  assert.notEqual(savedB[0].accountKey, a.accountKey);
+  const changesBefore = f.changes.length;
+  release();
+  await readingA;
+  assert.deepEqual(f.api.accounts(), savedB, 'late A result cannot change B metadata');
+  assert.equal(f.changes.length, changesBefore, 'late result must not trigger another identity refresh');
+  const disk = JSON.parse(fs.readFileSync(path.join(f.dir, 'settings.json'), 'utf8'));
+  assert.equal(disk.claudeManagedAccounts[0].accountKey, savedB[0].accountKey);
+  await runtime.refresh({ provider: 'claude', accountId: a.id, accountKey: savedB[0].accountKey }, 'account-added');
+  assert.deepEqual(f.api.accounts(), savedB, 'current B observations still resolve normally');
+});
+
 test('legacy observations expose only identity and are discarded when the credential or organization changes', async (t) => {
   const f = fixture(t);
   await f.save('a');

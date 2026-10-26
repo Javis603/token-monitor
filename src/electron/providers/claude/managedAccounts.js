@@ -163,7 +163,8 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
       }
       const current = accounts();
       const account = current.find((entry) => entry.id === id);
-      if (!account?.enabled || !provider?.accountKey || credentialStore.readClaudeWebCredential(id) !== cookie) return;
+      if (!account?.enabled || !provider?.accountKey || account.organizationId !== organizationId
+        || credentialStore.readClaudeWebCredential(id) !== cookie) return;
       const identity = ['accountKey', 'accountEmail', 'accountName', 'accountLabel'];
       if (identity.every((key) => account[key] === (provider[key] || ''))) return;
       const next = current.map((entry) => entry.id === id

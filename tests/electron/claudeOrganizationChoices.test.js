@@ -6,6 +6,31 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+for (const fromCancel of [true, false]) {
+  test(`closing the Claude Web form ${fromCancel ? 'restores Cancel keyboard focus to Add account' : 'preserves unrelated focus'}`, () => {
+    const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+    const start = app.indexOf('function cancelClaudeWebAccountEdit(');
+    const end = app.indexOf('async function runClaudeAccountAction(', start);
+    const cancel = { id: 'claudeCancelWebAccountButton' };
+    const unrelated = { id: 'elsewhere' };
+    const draft = { value: 'discard-this' };
+    const document = { activeElement: fromCancel ? cancel : unrelated,
+      getElementById: (id) => id === 'claudeWebCookieInput' ? draft : id === 'claudeAddWebAccountButton' ? add : null };
+    const add = { focus() { document.activeElement = add; } };
+    let choices;
+    const context = { document, claudeOrganizationChoicesRevision: 1, claudeWebAccountId: 'work', claudeWebFormOpen: true,
+      renderClaudeOrganizationChoices: (value) => { choices = value; }, setAccountPanelMessage() {},
+      renderExternalProviderStatus() { if (document.activeElement === cancel) document.activeElement = { id: 'body' }; } };
+    vm.runInNewContext(app.slice(start, end), context);
+    context.cancelClaudeWebAccountEdit();
+    assert.equal(document.activeElement, fromCancel ? add : unrelated);
+    assert.equal(draft.value, '');
+    assert.equal(choices.length, 0);
+    assert.equal(context.claudeWebAccountId, 'new');
+    assert.equal(context.claudeWebFormOpen, false);
+  });
+}
+
 test('Claude card counts healthy identities instead of letting one linked account hide failures', () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const start = app.indexOf('function claudeWebSettingsAccounts(');
