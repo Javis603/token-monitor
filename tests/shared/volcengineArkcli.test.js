@@ -6,20 +6,31 @@ const { PassThrough } = require('node:stream');
 const { fetchVolcengineLimits } = require('../../src/shared/providers/volcengine/limits');
 const { parseArkcliPlan, runArkcli } = require('../../src/shared/providers/volcengine/arkcli');
 const now = '2026-09-10T06:00:00Z';
-function response() {
+function response(product = 'agent-plan') {
   return { viewer: { account_id: 'account', user_id: 'user', region: 'cn-beijing' }, items: [
-    { product: 'agent-plan', subscribed: true, tier: 'medium', periods: [
-      { label: '5h', used: 25, total: 100, reset_at: '2026-09-10T16:00:00+08:00' },
-      { label: 'weekly', used: 0, total: 500 },
-      { label: 'monthly', used: 600, total: 500 }
-    ] }
+    product === 'coding-plan'
+      ? { product, subscribed: false }
+      : { product, subscribed: true, tier: 'medium', periods: [
+        { label: '5h', used: 25, total: 100, reset_at: '2026-09-10T16:00:00+08:00' },
+        { label: 'weekly', used: 0, total: 500 },
+        { label: 'monthly', used: 600, total: 500 }
+      ] }
   ] };
+}
+function codingResponse() {
+  const body = response();
+  body.items = [{ product: 'coding-plan', edition: 'personal', subscribed: true, periods: [
+    { label: 'session', percent: 0, reset_at: '2026-09-10T16:00:00+08:00' },
+    { label: 'weekly', percent: 12.5 },
+    { label: 'monthly', percent: 24.6787843, reset_at: '2026-10-09T23:59:59+08:00' }
+  ] }];
+  return body;
 }
 const auth = { logged_in: true, auth_method: 'sso', active_profile: { name: 'personal' } };
 test('logged-in CLI reports normalized quotas and pins the authenticated profile', async () => {
   const calls = [];
   const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
-    calls.push(args); return calls.length === 1 ? auth : response();
+    calls.push(args); return args[0] === 'auth' ? auth : response(args[3]);
   } });
   assert.equal(rows[0].source, 'cli');
   assert.equal(rows[0].status, 'ok');
@@ -34,9 +45,11 @@ test('logged-in CLI reports normalized quotas and pins the authenticated profile
 test('STS-only login is accepted; absent login never queries quota', async () => {
   for (const logged_in of [true, false]) {
     let count = 0;
-    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async () =>
-      ++count === 1 ? { ...auth, logged_in, auth_method: 'sts' } : response() });
-    assert.equal(count, logged_in ? 2 : 1);
+    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+      count += 1;
+      return args[0] === 'auth' ? { ...auth, logged_in, auth_method: 'sts' } : response(args[3]);
+    } });
+    if (!logged_in) assert.equal(count, 1);
     assert.equal(rows[0].status, logged_in ? 'ok' : 'notConfigured');
   }
 });
@@ -64,8 +77,8 @@ test('no subscription is hidden, while errors and malformed quota are unavailabl
     if (variant === 'empty') body.items[0].periods = [];
     if (variant === 'unknown') body.items[0].periods = [{ label: 'unsupported', used: 1, total: 10 }];
     if (variant === 'zero') body.items[0].periods = [{ label: '5h', used: 0, total: 0 }];
-    let count = 0;
-    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async () => ++count === 1 ? auth : body });
+    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args =>
+      args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? response('coding-plan') : body });
     assert.equal(rows[0].status, variant === 'none' ? 'notConfigured' : 'unavailable');
     assert.ok(!JSON.stringify(rows).includes('sensitive'));
   }
@@ -80,7 +93,7 @@ test('omitted zero usage is accepted for every recognized window', () => {
   for (const label of ['5h', 'daily', 'weekly', 'monthly']) {
     const body = resetResponse();
     body.items[0].periods = [{ label, total: 100, percent: 0 }];
-    const row = parseArkcliPlan(body, now);
+    const row = parseArkcliPlan(body, now, 'agent-plan');
     assert.equal(row.status, 'ok');
     assert.equal(row.updatedAt, new Date(now).toISOString());
     assert.equal(row.windows[0].used, 0);
@@ -94,12 +107,12 @@ test('zero percent does not turn unknown or invalid amounts into zero usage', ()
     { total: 100 },
     ...[null, '0', 1, -1].map(percent => ({ total: 100, percent })),
     ...[null, '0', -1, NaN, Infinity].map(used => ({ total: 100, percent: 0, used })),
-    ...[undefined, null, '100', -1, NaN, Infinity, 0].map(total => ({ total, percent: 0 }))
+    ...[null, '100', -1, NaN, Infinity, 0].map(total => ({ total, percent: 0 }))
   ];
   for (const period of invalidPeriods) {
     const body = resetResponse();
     body.items[0].periods = [{ label: '5h', ...period }];
-    assert.throws(() => parseArkcliPlan(body, now), /arkcli quota probe failed/);
+    assert.throws(() => parseArkcliPlan(body, now, 'agent-plan'), /arkcli quota probe failed/);
   }
 });
 test('a CLI zero-usage refresh replaces retained stale quota after a failure', async (t) => {
@@ -111,7 +124,7 @@ test('a CLI zero-usage refresh replaces retained stale quota after a failure', a
     now: () => time,
     probeProvider: () => fetchVolcengineLimits({}, {
       env: {}, now: () => time,
-      runArkcli: async args => args[0] === 'auth' ? auth : body
+      runArkcli: async args => args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? response('coding-plan') : body
     })
   });
   t.after(() => runtime.stop());
@@ -139,11 +152,112 @@ test('a CLI zero-usage refresh replaces retained stale quota after a failure', a
   assert.deepEqual(recovered.windows.slice(1), first.windows.slice(1));
 });
 test('CLI identities remain distinct between users and stable across plan upgrades', () => {
-  const first = parseArkcliPlan(response(), now);
+  const first = parseArkcliPlan(response(), now, 'agent-plan');
   const other = response(); other.viewer.user_id = 'different';
-  assert.notEqual(parseArkcliPlan(other, now).accountKey, first.accountKey);
+  assert.notEqual(parseArkcliPlan(other, now, 'agent-plan').accountKey, first.accountKey);
   const upgraded = response(); upgraded.items[0].tier = 'max';
-  assert.equal(parseArkcliPlan(upgraded, now).accountKey, first.accountKey);
+  assert.equal(parseArkcliPlan(upgraded, now, 'agent-plan').accountKey, first.accountKey);
+});
+test('personal Coding Plan reports authoritative percentages without invented absolute quota', async () => {
+  const unsubscribed = response(); unsubscribed.items[0].subscribed = false;
+  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args =>
+    args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? codingResponse() : unsubscribed });
+  assert.equal(rows.length, 1);
+  const [row] = rows;
+  assert.equal(row.status, 'ok');
+  assert.equal(row.accountLabel, 'Coding Plan');
+  assert.deepEqual(row.windows.map(window => window.kind), ['session', 'weekly', 'billing']);
+  assert.deepEqual(row.windows.map(window => window.usedPercent), [0, 12.5, 24.6787843]);
+  assert.equal(row.windows[0].resetsAt, '2026-09-10T08:00:00.000Z');
+  assert.equal(row.windows[1].resetsAt, null);
+  for (const window of row.windows) {
+    assert.equal(window.used, null);
+    assert.equal(window.limit, null);
+    assert.equal(window.remaining, null);
+    assert.ok(Math.abs(window.remainingPercent - (100 - window.usedPercent)) < 0.001);
+  }
+});
+test('Coding and Agent Plans coexist with distinct stable identities', async () => {
+  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args =>
+    args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? codingResponse() : response() });
+  assert.deepEqual(rows.map(row => row.accountLabel), ['Agent Plan', 'Coding Plan']);
+  assert.equal(rows[0].accountKey, parseArkcliPlan(response(), now, 'agent-plan').accountKey);
+  assert.notEqual(rows[0].accountKey, rows[1].accountKey);
+  const upgraded = codingResponse(); upgraded.items[0].tier = 'max';
+  assert.equal(parseArkcliPlan(upgraded, now, 'coding-plan').accountKey, rows[1].accountKey);
+});
+test('a failed sibling query does not hide a healthy personal plan', async () => {
+  for (const product of ['agent-plan', 'coding-plan']) {
+    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+      if (args[0] === 'auth') return auth;
+      if (args[3] !== product) throw new Error('private upstream error');
+      return product === 'coding-plan' ? codingResponse() : response();
+    } });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, 'ok');
+    assert.equal(rows[0].accountLabel, product === 'coding-plan' ? 'Coding Plan' : 'Agent Plan');
+    assert.ok(!JSON.stringify(rows).includes('private'));
+  }
+});
+test('percentage-only CLI periods reject missing or invalid quota rather than showing zero', () => {
+  for (const percent of [undefined, null, '0', -1, NaN, Infinity]) {
+    const body = codingResponse();
+    body.items[0].periods[0].percent = percent;
+    assert.throws(() => parseArkcliPlan(body, now, 'coding-plan'), /arkcli quota probe failed/);
+  }
+  const body = codingResponse();
+  body.items[0].periods[0].percent = 110;
+  assert.equal(parseArkcliPlan(body, now, 'coding-plan').windows[0].usedPercent, 100);
+});
+test('current Agent Plan percentage-only periods retain unknown amounts and reset times', () => {
+  const body = response();
+  body.items[0].periods = [{ label: '5h', percent: 0 }, { label: 'weekly', percent: 25 }];
+  const row = parseArkcliPlan(body, now, 'agent-plan');
+  assert.equal(row.windows[0].usedPercent, 0);
+  assert.equal(row.windows[0].resetsAt, null);
+  assert.equal(row.windows[0].limit, null);
+  assert.equal(row.windows[1].remainingPercent, 75);
+});
+test('a failed Coding Plan retains stale quota without staling a healthy Agent Plan', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  let time = Date.parse(now);
+  let failCoding = false;
+  let coding = codingResponse();
+  const runtime = createLimitsRuntime({ limitProviders: ['volcengine'] }, {
+    autoStart: false,
+    now: () => time,
+    probeProvider: () => fetchVolcengineLimits({}, {
+      env: {}, now: () => time, runArkcli: async args => {
+        if (args[0] === 'auth') return auth;
+        if (args[3] === 'agent-plan') return response();
+        if (failCoding) throw new Error('private upstream error');
+        return coding;
+      }
+    })
+  });
+  t.after(() => runtime.stop());
+  await runtime.refresh({}, 'manual');
+  const first = runtime.getSnapshot().providers.find(row => row.accountLabel === 'Coding Plan');
+  assert.equal(first.status, 'ok');
+  time += 300_000;
+  failCoding = true;
+  await runtime.refresh({}, 'manual');
+  const partial = runtime.getSnapshot().providers;
+  const stale = partial.find(row => row.accountLabel === 'Coding Plan');
+  assert.equal(stale.status, 'unavailable');
+  assert.equal(stale.updatedAt, first.updatedAt);
+  assert.deepEqual(stale.windows, first.windows);
+  assert.equal(partial.find(row => row.accountLabel === 'Agent Plan').status, 'ok');
+  time += 300_000;
+  failCoding = false;
+  coding = codingResponse();
+  coding.items[0].periods[2].percent = 30;
+  await runtime.refresh({}, 'manual');
+  const recovered = runtime.getSnapshot().providers.find(row => row.accountLabel === 'Coding Plan');
+  assert.equal(recovered.status, 'ok');
+  assert.equal(recovered.accountKey, first.accountKey);
+  assert.equal(recovered.updatedAt, new Date(time).toISOString());
+  assert.equal(recovered.windows[2].usedPercent, 30);
 });
 function mockChild() {
   const child = new EventEmitter(); child.stdout = new PassThrough();

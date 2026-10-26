@@ -21,6 +21,11 @@ const WINDOWS = {
   monthly: ['billing', 'Monthly', 43200]
 };
 
+const PERSONAL_PLANS = {
+  'agent-plan': 'Agent Plan',
+  'coding-plan': 'Coding Plan'
+};
+
 function probeError(status = 'unavailable') {
   return Object.assign(new Error('arkcli quota probe failed'), { status });
 }
@@ -134,33 +139,43 @@ function runArkcli(args, deps = {}) {
   });
 }
 
-function parseArkcliPlan(body, updatedAt) {
+function parseArkcliPlan(body, updatedAt, product) {
   const viewer = body?.viewer;
-  if (!viewer?.account_id || !Array.isArray(body?.items)) throw probeError();
-  const item = body.items.find((entry) => entry?.product === 'agent-plan');
+  if (!viewer?.account_id || !Array.isArray(body?.items) || !Object.hasOwn(PERSONAL_PLANS, product)) throw probeError();
+  const item = body.items.find((entry) => entry?.product === product);
   if (!item || item.error || typeof item.subscribed !== 'boolean') throw probeError();
   if (!item.subscribed) return null;
   if (!Array.isArray(item.periods)) throw probeError();
   const windows = [];
   for (const [label, [kind, title, windowMinutes]] of Object.entries(WINDOWS)) {
-    const period = item.periods.find((entry) => entry?.label === label);
+    const period = item.periods.find((entry) => entry?.label === label
+      || (label === '5h' && entry?.label === 'session'));
     if (!period) continue;
+    const reset = typeof period.reset_at === 'string' ? Date.parse(period.reset_at) : NaN;
+    const window = { kind, label: title, windowMinutes,
+      resetsAt: Number.isFinite(reset) ? new Date(reset).toISOString() : null, showMeter: true };
     const { total } = period;
+    // Coding Plan and newer Agent Plan responses can contain only percentages.
+    // Those describe subscription usage, not a known number of tokens/requests.
+    if (total === undefined && period.used === undefined) {
+      if (typeof period.percent !== 'number' || !Number.isFinite(period.percent) || period.percent < 0) throw probeError();
+      const usedPercent = Math.min(100, period.percent);
+      windows.push({ ...window, usedPercent, remainingPercent: 100 - usedPercent });
+      continue;
+    }
     // arkcli omits used after a window resets; only explicit 0% proves zero.
     const used = period.used === undefined && period.percent === 0 ? 0 : period.used;
     if (typeof total !== 'number' || !Number.isFinite(total) || total < 0) throw probeError();
     if (total === 0) continue;
     if (typeof used !== 'number' || !Number.isFinite(used) || used < 0) throw probeError();
-    const reset = typeof period.reset_at === 'string' ? Date.parse(period.reset_at) : NaN;
-    windows.push({ kind, label: title, windowMinutes, used, limit: total,
-      remaining: Math.max(0, total - used), usedPercent: Math.min(100, used / total * 100),
-      resetsAt: Number.isFinite(reset) ? new Date(reset).toISOString() : null, showMeter: true });
+    windows.push({ ...window, used, limit: total,
+      remaining: Math.max(0, total - used), usedPercent: Math.min(100, used / total * 100) });
   }
   if (!windows.length) throw probeError();
   return normalizeLimitProvider({
     provider: 'volcengine', source: 'cli', status: 'ok', updatedAt,
-    accountKey: hashKey('volcengine', 'arkcli', viewer.account_id, viewer.user_id || '', viewer.region || '', 'agent-plan'),
-    accountLabel: 'Agent Plan', planLabel: typeof item.tier === 'string' ? item.tier : '',
+    accountKey: hashKey('volcengine', 'arkcli', viewer.account_id, viewer.user_id || '', viewer.region || '', product),
+    accountLabel: PERSONAL_PLANS[product], planLabel: typeof item.tier === 'string' ? item.tier : '',
     region: viewer.region, windows
   });
 }
@@ -174,11 +189,20 @@ async function fetchArkcliLimits(deps, updatedAt) {
     if (typeof auth?.logged_in !== 'boolean') throw probeError();
     if (!auth.logged_in || !['sso', 'sts', 'aksk'].includes(auth.auth_method)) return [status('notConfigured')];
     const profile = auth.active_profile?.name;
-    const args = ['usage', 'plan', '--product', 'agent-plan', '--format', 'json'];
-    if (profile) args.push('--profile', profile);
-    const body = await run(args);
-    const row = parseArkcliPlan(body, updatedAt);
-    return [row || status('notConfigured')];
+    const results = await Promise.allSettled(Object.keys(PERSONAL_PLANS).map(async (product) => {
+      const args = ['usage', 'plan', '--product', product, '--format', 'json'];
+      if (profile) args.push('--profile', profile);
+      return parseArkcliPlan(await run(args), updatedAt, product);
+    }));
+    if (deps.signal?.aborted) throw abortError(deps.signal);
+    const rows = results.filter((result) => result.status === 'fulfilled' && result.value)
+      .map((result) => result.value);
+    // A failed sibling is omitted so the runtime retains its last-good identity
+    // as unavailable, without marking a successfully queried plan as failed.
+    if (rows.length) return rows;
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    return [status('notConfigured')];
   } catch (error) {
     if (deps.signal?.aborted) throw abortError(deps.signal);
     return [status(error.status === 'notConfigured' ? 'notConfigured' : 'unavailable')];

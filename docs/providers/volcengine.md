@@ -1,5 +1,5 @@
 ---
-summary: "Volcengine explicit credentials and local arkcli Agent Plan discovery."
+summary: "Volcengine explicit credentials and local arkcli personal-plan discovery."
 ids: [volcengine]
 read_when:
   - Changing Volcengine credentials, CLI detection or quota mapping
@@ -7,13 +7,13 @@ read_when:
 
 # Volcengine
 
-Explicit AK/SK or Ark API key configuration keeps its existing query path. When no credentials are configured, the enabled Volcengine provider can use `arkcli auth status --format json` followed by `arkcli usage plan --product agent-plan --format json`.
+Explicit AK/SK or Ark API key configuration keeps its existing query path. When no credentials are configured, the enabled Volcengine provider can use `arkcli auth status --format json` followed by `arkcli usage plan --product agent-plan --format json` and `arkcli usage plan --product coding-plan --format json`.
 
 The authenticated profile is pinned for the quota query. No login command is run, and credentials are never exported or copied into Token Monitor. arkcli owns SSO/STS refresh. A missing executable or logged-out CLI remains unconfigured; a failed or malformed query is unavailable rather than zero quota. The existing limits runtime retains last-good quota on transient failures.
 
-The fallback currently queries the **personal Agent Plan** only, not team seats or Coding Plan. It maps recognized 5h/daily/weekly/monthly periods returned by the CLI; it cannot display a daily period omitted by arkcli. Positive quota is required to display a window. arkcli can omit `used` and `reset_at` after a window resets. A missing `used` is zero only when `percent` is the number `0`; an absent reset time stays unknown. Other unknown or malformed amounts, including explicit `null` usage, are not treated as zero.
+The fallback queries the **personal Agent Plan and Coding Plan**, not team seats. Each plan has its own account identity and is queried independently, so a failed sibling cannot hide a successful reading; the limits runtime retains an absent previously observed identity as unavailable. It maps recognized 5h/session, daily, weekly and monthly periods returned by the CLI; it cannot display a period omitted by arkcli. Percentage-only periods (including Coding Plan) use the reported `percent` without inventing absolute used/total amounts. Absolute-quota periods require a positive total; arkcli can omit `used` after a window resets, but a missing `used` is zero only when `percent` is the number `0`. An absent reset time stays unknown. Other unknown or malformed amounts, including explicit `null` usage, are not treated as zero.
 
-Account identity hashes the CLI viewer's account/user/region, not profile name or tier. The CLI and explicit credential paths are exclusive so two accounts are never silently combined; even incomplete explicit credentials block fallback.
+Account identity hashes the CLI viewer's account/user/region and product, not profile name or tier. Existing Agent Plan identities stay unchanged. The CLI and explicit credential paths are exclusive so two accounts are never silently combined; even incomplete explicit credentials block fallback. To use CLI discovery, clear any saved Volcengine keys and corresponding credential environment variables, then run `arkcli auth login` as the same local user. An Ark inference API key alone is not equivalent to a logged-in CLI subscription query and does not guarantee the console's session/weekly/monthly quota windows.
 
 Discovery is on by default when the Volcengine provider is enabled; no extra arkcli opt-in is required. Token Monitor checks the inherited PATH first, then common npm, Homebrew, Bun, and local-bin locations. Set `TOKEN_MONITOR_VOLCENGINE_ARKCLI=0` to disable discovery, or `TOKEN_MONITOR_ARKCLI_COMMAND` to an explicit executable path for another installation.
 
