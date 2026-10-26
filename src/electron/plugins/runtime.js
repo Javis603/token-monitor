@@ -216,6 +216,13 @@ function createPluginRuntime({
   // which surface; a surface's demand is the union across its windows.
   const subscribers = new Map();
   const nativeDemandVisible = (webContents, surface) => { const scope = surfaceContext({ sender: webContents }, surface); return scope?.visible === true || scope?.preparing === true; };
+  function demandVisible(webContents, surface) {
+    if (['home', 'page'].includes(surface)) {
+      const win = BrowserWindow.fromWebContents(webContents);
+      return Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized());
+    }
+    return !['notch', 'edgeDock'].includes(surface) || nativeDemandVisible(webContents, surface);
+  }
   function setDemand(webContents, surface, refs) {
     let subscriber = subscribers.get(webContents.id);
     if (!subscriber) {
@@ -235,8 +242,8 @@ function createPluginRuntime({
     const selected = Array.isArray(refs) ? refs.filter(ref => typeof ref === 'string' && allowed.has(ref)).slice(0, 32) : [];
     subscriber.demands.set(surface, selected);
     webUi?.refreshPresentations?.();
-    const native = ['notch', 'edgeDock'].includes(surface);
-    demand.set(webContents.id, surface, !native || nativeDemandVisible(webContents, surface) ? selected : []);
+    // Retain the request across native hide/show, but never grant foreground work while hidden.
+    demand.set(webContents.id, surface, demandVisible(webContents, surface) ? selected : []);
     // Opening a view is not a streaming update: resolve existing readings now.
     // This neither samples nor bypasses active placement / native visibility.
     if (!webContents.isDestroyed()) webContents.send('plugins:views', manager.payload(surface));
@@ -388,7 +395,7 @@ function createPluginRuntime({
     });
     handle('plugins:interact', (event, { surface, ref, input, revision } = {}) => {
       const allowed = ['home', 'page'].includes(surface) ? mainSender(event) : ['edgeDock', 'notch'].includes(surface) && isSurfaceSender(event, surface);
-      if (!allowed || !subscribers.get(event.sender.id)?.demands.get(surface)?.includes(ref)) throw new Error('interaction is not from an active plugin view');
+      if (!allowed || !demandVisible(event.sender, surface) || !subscribers.get(event.sender.id)?.demands.get(surface)?.includes(ref)) throw new Error('interaction is not from an active plugin view');
       if (surface === 'page' && !placementsFor(getSettings(), ref).page) throw new Error('plugin page placement was removed');
       return manager.interact(surface, ref, input, revision);
     });
@@ -428,6 +435,10 @@ function createPluginRuntime({
     refreshBusinessData,
     refreshWindowVisibility(win) {
       if (disposed) return;
+      const subscriber = subscribers.get(win?.webContents?.id);
+      if (subscriber) for (const surface of ['home', 'page']) {
+        if (subscriber.demands.has(surface)) setDemand(subscriber.webContents, surface, subscriber.demands.get(surface));
+      }
       webUi?.refreshWindowVisibility(win);
       pages.refreshVisibility();
     },

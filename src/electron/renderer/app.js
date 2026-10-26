@@ -12913,7 +12913,7 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
   onDemand: (surface, refs) => pluginBridge.setDemand(surface, refs),
   motionAllowed: () => !prefersReducedMotion(),
   motionMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
-  isSurfaceActive: surface => surface !== 'page' || (!isRendererWindowHidden() && !isSettingsPanelOpen() && !state.floatingBubble.collapsed)
+  isSurfaceActive: surface => !['home', 'page'].includes(surface) || (!isRendererWindowHidden() && !isSettingsPanelOpen() && !state.floatingBubble.collapsed)
 }) : null;
 if (pluginViewHost) for (const surface of ['home', 'page']) {
   const presentation = window.TokenMonitorPluginPresentationWeb?.create({ document, window, bridge: pluginBridge, surface,

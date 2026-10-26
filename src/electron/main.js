@@ -444,7 +444,7 @@ const pluginPlacements = require('../shared/plugins/placements');
 // Created after 'ready' by startPluginRuntime(); null in safe paths and tests.
 let pluginRuntime = null;
 const { createWindowVisibilityActions } = require('./plugins/windowVisibility');
-const pluginWindowActions = createWindowVisibilityActions(win => pluginRuntime?.refreshWindowVisibility(win));
+const pluginWindowActions = createWindowVisibilityActions(syncPluginWindowVisibility);
 const { DERIVED_PERIODS: EDGE_DOCK_DERIVED_PERIODS, normalizeEdgeDockItems } = require('./renderer/edgeDock/items');
 const fixedPeriodRangesApi = require('./renderer/fixedPeriodRanges');
 const { normalizeBackgroundImageOpacity } = require('./renderer/glassRendering');
@@ -2240,6 +2240,11 @@ function updateRendererViewState(patch) {
 function sendFloatingBubbleState() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try { mainWindow.webContents.send('floatingBubble:state', floatingBubblePayload()); } catch (_) {}
+}
+
+function syncPluginWindowVisibility(win) {
+  pluginRuntime?.refreshWindowVisibility(win);
+  sendMainWindowVisibility(win);
 }
 
 function sendMainWindowVisibility(win = mainWindow) {
@@ -7576,10 +7581,10 @@ function createWindow(boundsOverride, options = {}) {
     if (quitRequested || process.platform === 'darwin') return;
     if (BrowserWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other) || pluginRuntime?.owns(other)))) app.quit();
   });
-  win.on('show', () => sendMainWindowVisibility(win));
-  win.on('hide', () => sendMainWindowVisibility(win));
-  win.on('minimize', () => sendMainWindowVisibility(win));
-  win.on('restore', () => sendMainWindowVisibility(win));
+  win.on('show', () => syncPluginWindowVisibility(win));
+  win.on('hide', () => syncPluginWindowVisibility(win));
+  win.on('minimize', () => syncPluginWindowVisibility(win));
+  win.on('restore', () => syncPluginWindowVisibility(win));
   win.webContents.on('did-finish-load', () => {
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its

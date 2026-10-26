@@ -9,9 +9,9 @@ const { EventEmitter } = require('node:events');
 
 function fixture({ rich = false, businessAdapters = {} } = {}) {
   const publications = [];
-  let webOptions;
+  let webOptions, detachedDemand;
   const released = [], visibilityRefreshes = [];
-  const win = { isDestroyed: () => false, isVisible: () => native.visible, isMinimized: () => false };
+  const win = { isDestroyed: () => false, isVisible: () => native.visible, isMinimized: () => native.minimized === true };
   const file = path.resolve(__dirname, '../../src/electron/plugins/runtime.js');
   const nativeRequire = createRequire(file), handlers = new Map(), events = new Map(), calls = [], messages = [], demands = new Map();
   const sender = new EventEmitter(); sender.id = 1; sender.mainFrame = {}; sender.isDestroyed = () => false; sender.send = (channel, payload) => messages.push({ channel, payload });
@@ -26,7 +26,7 @@ function fixture({ rich = false, businessAdapters = {} } = {}) {
     '../../shared/plugins/dataBus': { createDataBus: () => ({ defineSource() {}, defineAlias() {}, dispose() {} }) },
     './businessData': { createBusinessDataService: options => { const api = nativeRequire('./businessData').createBusinessDataService(options); return { ...api, publish: (stats, extras) => { publications.push({stats,extras}); api.publish(stats,extras); } }; } },
     './webUi': { createWebUi: options => { webOptions = options; return { refreshWindowVisibility(win) { visibilityRefreshes.push(win); }, refreshPresentations() { visibilityRefreshes.push('presentations'); }, refreshSurfaces() { visibilityRefreshes.push('surfaces'); }, dispose() {}, releasePresentationHost: sender => released.push(sender.id) }; } },
-    './pages': { createPluginPages: () => ({presentationContext: () => null, refreshVisibility() { visibilityRefreshes.push('pages'); }, refresh() {}, dispose() {}}) },
+    './pages': { createPluginPages: options => { detachedDemand = options.onDemand; return ({presentationContext: () => null, refreshVisibility() { visibilityRefreshes.push('pages'); }, refresh() {}, dispose() {}}); } },
     './appSources': { createAppSources: () => ({ publish() {} }) },
     './manager': { createPluginManager: () => manager },
     './appearance': { createPluginAppearance: () => ({ get: () => ({}) }) },
@@ -37,12 +37,13 @@ function fixture({ rich = false, businessAdapters = {} } = {}) {
   };
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), { module, require: id => mocks[id] || nativeRequire(id), __dirname: path.dirname(file), process, console, setTimeout, clearTimeout });
-  const runtime = module.exports.createPluginRuntime({ electron: { app: {}, ...(rich ? {WebContentsView: function () {}, BrowserWindow: {fromWebContents: () => win}} : {}), ipcMain: {
+  const runtime = module.exports.createPluginRuntime({ electron: { app: {}, BrowserWindow: {fromWebContents: () => win}, ...(rich ? {WebContentsView: function () {}} : {}), ipcMain: {
     handle: (name, fn) => { if (handlers.has(name)) throw Error('duplicate handler'); handlers.set(name, fn); }, on: (name, fn) => events.set(name, fn), removeHandler: name => handlers.delete(name), removeListener: (name, fn) => { if (events.get(name) === fn) events.delete(name); }
   } }, userDataDir: '/unused-plugin-runtime-fixture', getSettings: () => settings, getLocale: () => 'en',
   businessAdapters, isSurfaceSender: event => event.sender === sender, surfaceContext: () => native, isMainSender: event => event.sender === sender, env: { TOKEN_MONITOR_PLUGINS_SAFE_MODE: '1' } });
   runtime.start();
-  return { visibilityRefreshes, publications, webOptions, released, manager, native, runtime, handlers, events, sender, settings, calls, demands, messages, event: { sender, senderFrame: sender.mainFrame } };
+  win.webContents = sender;
+  return { setDetachedDemand: refs => detachedDemand(refs), win, visibilityRefreshes, publications, webOptions, released, manager, native, runtime, handlers, events, sender, settings, calls, demands, messages, event: { sender, senderFrame: sender.mainFrame } };
 }
 test('main page IPC requires its main frame, declared surface, opted-in placement and active demand', () => {
   const f = fixture();
@@ -206,4 +207,77 @@ test('explicit host actions use runtime refresh for Rich and detached demand', (
   f.runtime.dispose(); f.visibilityRefreshes.length = 0;
   actions.hide(win);
   assert.deepEqual(f.visibilityRefreshes, [], 'disposed runtime ignores late host callbacks');
+});
+
+for (const surface of ['home', 'page']) test(`${surface}: native hide/minimize caps requests and restores only valid demand`, () => {
+  const f = fixture(), ref = `demo/${surface}`, send = () => f.events.get('plugins:demand')(f.event, { surface, refs: [ref] });
+  send(); assert.deepEqual(Array.from(f.demands.get(surface)), [ref]);
+  // No DOM notification or native event: the explicit completed-state callback is sufficient.
+  f.native.visible = false; f.runtime.refreshWindowVisibility(f.win);
+  assert.deepEqual(Array.from(f.demands.get(surface)), []);
+  send(); assert.deepEqual(Array.from(f.demands.get(surface)), [], 'late IPC cannot restart hidden work');
+  assert.throws(() => f.handlers.get('plugins:interact')(f.event, { surface, ref }), /active plugin view/);
+  f.native.visible = true; f.runtime.refreshWindowVisibility(f.win);
+  assert.deepEqual(Array.from(f.demands.get(surface)), [ref], 'show needs no new renderer request');
+  f.native.minimized = true; f.runtime.refreshWindowVisibility(f.win);
+  assert.deepEqual(Array.from(f.demands.get(surface)), []);
+  send(); assert.deepEqual(Array.from(f.demands.get(surface)), []);
+  f.native.minimized = false; f.runtime.refreshWindowVisibility(f.win);
+  assert.deepEqual(Array.from(f.demands.get(surface)), [ref]);
+  f.native.visible = false; f.runtime.refreshWindowVisibility(f.win);
+  if (surface === 'home') f.settings.homeModuleOrder = ''; else f.settings.pluginMainPages = [];
+  f.native.visible = true; f.runtime.refreshWindowVisibility(f.win);
+  assert.deepEqual(Array.from(f.demands.get(surface)), [], 'show revalidates removed placement');
+  f.runtime.dispose();
+});
+
+test('hidden startup retains requests; revoked authority cannot be restored on show', () => {
+  const f = fixture(); f.native.visible = false;
+  f.events.get('plugins:demand')(f.event, { surface: 'home', refs: ['demo/home'] });
+  assert.deepEqual(Array.from(f.demands.get('home')), []);
+  assert.equal(f.messages.at(-1).channel, 'plugins:views', 'hidden startup can still paint before native reveal');
+  f.native.visible = true; f.runtime.refreshWindowVisibility(f.win);
+  assert.deepEqual(Array.from(f.demands.get('home')), ['demo/home']);
+  f.native.visible = false; f.runtime.refreshWindowVisibility(f.win);
+  f.manager.list = () => ({ plugins: [] });
+  f.native.visible = true; f.runtime.refreshWindowVisibility(f.win);
+  assert.deepEqual(Array.from(f.demands.get('home')), []);
+  f.runtime.dispose();
+});
+
+test('hidden main owner does not clear detached page, tray or visible Notch demand', () => {
+  const f = fixture(), send = f.events.get('plugins:demand');
+  send(f.event, {surface:'page',refs:['demo/page']});
+  send(f.event, {surface:'tray',refs:['demo/tray']});
+  f.events.get('topNotch:pluginDemand')(f.event, {refs:['demo/native']});
+  f.setDetachedDemand(['demo/page']);
+  f.native.minimized = true; f.runtime.refreshWindowVisibility(f.win);
+  assert.deepEqual(Array.from(f.demands.get('page')), ['demo/page']);
+  assert.deepEqual(Array.from(f.demands.get('tray')), ['demo/tray']);
+  assert.deepEqual(Array.from(f.demands.get('notch')), ['demo/native']);
+  assert.throws(() => f.handlers.get('plugins:interact')(f.event, {surface:'page',ref:'demo/page'}), /active plugin view/);
+  f.setDetachedDemand([]); assert.deepEqual(Array.from(f.demands.get('page')), []);
+  f.native.minimized = false; f.runtime.refreshWindowVisibility(f.win);
+  assert.deepEqual(Array.from(f.demands.get('page')), ['demo/page']);
+  f.runtime.dispose();
+});
+
+test('main visibility pushes and explicit actions reconcile native demand; Home respects hidden state', () => {
+  const main = fs.readFileSync(path.resolve(__dirname, '../../src/electron/main.js'), 'utf8');
+  const callback = main.match(/^function syncPluginWindowVisibility\(win\) \{[^]*?^\}/m)?.[0];
+  assert.ok(callback);
+  const calls = [], win = {};
+  vm.runInNewContext(`${callback};syncPluginWindowVisibility(win)`, {
+    pluginRuntime: {refreshWindowVisibility: w => calls.push(['runtime',w])},
+    sendMainWindowVisibility: w => calls.push(['renderer',w]), win
+  });
+  assert.deepEqual(calls, [['runtime',win],['renderer',win]]);
+  assert.match(main, /createWindowVisibilityActions\(syncPluginWindowVisibility\)/);
+  for (const event of ['show','hide','minimize','restore']) assert.ok(main.includes(`win.on('${event}', () => syncPluginWindowVisibility(win))`));
+  const renderer = fs.readFileSync(path.resolve(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const predicate = renderer.match(/isSurfaceActive: (surface => [^\n]+)/)[1];
+  for (const hidden of [false,true]) {
+    const active = vm.runInNewContext(`(${predicate})`, {isRendererWindowHidden:()=>hidden,isSettingsPanelOpen:()=>false,state:{floatingBubble:{collapsed:false}}});
+    assert.equal(active('home'),!hidden); assert.equal(active('page'),!hidden); assert.equal(active('tray'),true);
+  }
 });
