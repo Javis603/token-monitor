@@ -136,6 +136,8 @@ Attached Liquid Glass updates the native camera scrim and outline together; a fa
 
 The seven-day chart takes its newest bar from live Today accounting and past days from History (`notch/history.js`). A missing day stays unknown, and reads as zero only when the transport is available and every joined device answered for its History. The answer is dropped when the backend generation, local date or History enablement changes; a new revision keeps the previous answer until the reload lands, and remote reloads are throttled to one a minute.
 
+The session-only collapsed summary treats overlapping client marks as one measured group, rather than independently fitted icons. One running session keeps its waveform; multiple sessions use a running count, with a static gradient for mixed clients. Waiting sessions have a separate reply badge and count, including when nothing is running. Counts retain the shared activity projection's semantics; no activity still removes the summary. Auto and configured tray/custom summaries keep their existing presentation.
+
 ## Widget mode switching
 
 `settings.hubMode` selects the source: `local` uses the local IPC collector; `client` uses Hub SSE plus this device's sync collector; `host` adds an embedded Hub; `icloud` uses local collection and iCloud file reconciliation instead of SSE. A live agent PID suppresses widget Hub uploads and owns the local daily-history archive. The agent has no iCloud sink, so the widget must still publish its iCloud record while yielding archive writes.
