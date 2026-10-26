@@ -88,6 +88,83 @@ test('usageTransform applies attachCredits after projection', () => {
   assert.equal(out.today.totalTokens, 2);
 });
 
+<<<<<<< HEAD
+=======
+test('manual usage bases fold a fixed historical offset into allTime', () => {
+  const transform = createUsageTransform({
+    getSettings: () => ({
+      sessionUsageArchiveEnabled: false,
+      projectsEnabled: false,
+      manualUsageBases: [{ tool: 'zcode', tokens: 600000000 }]
+    })
+  });
+  const raw = { deviceId: 'd', allTime: { totalTokens: 100, clients: { codex: 100 } } };
+  const out = transform.transform(raw, 'test', {});
+  assert.equal(out.allTime.totalTokens, 100 + 600000000);
+  // The per-client map is `clients` — the field the Tools view reads.
+  assert.equal(out.allTime.clients.zcode, 600000000);
+  assert.equal(out.allTime.clients.codex, 100);
+  assert.equal(out.allTime.clientTokens, undefined);
+  // Idempotent per call: the base is a constant on the raw summary, never compounding.
+  const again = transform.transform({ deviceId: 'd', allTime: { totalTokens: 100, clients: {} } }, 'test', {});
+  assert.equal(again.allTime.totalTokens, 100 + 600000000);
+});
+
+test('manual usage bases tolerate junk entries and missing periods', () => {
+  const transform = createUsageTransform({
+    getSettings: () => ({
+      sessionUsageArchiveEnabled: false,
+      projectsEnabled: false,
+      manualUsageBases: [{ tool: '', tokens: 5 }, { tool: 'x', tokens: -3 }, 'junk', { tool: 'zcode', tokens: 7 }]
+    })
+  });
+  const out = transform.transform({ deviceId: 'd' }, 'test', {});
+  assert.equal(out.allTime, undefined);
+  const out2 = transform.transform({ deviceId: 'd', allTime: { totalTokens: 0 } }, 'test', {});
+  assert.equal(out2.allTime.totalTokens, 7);
+  assert.equal(out2.allTime.clients.zcode, 7);
+});
+
+test('per-model bases attribute tokens to models and clientModels', () => {
+  const transform = createUsageTransform({
+    getSettings: () => ({
+      sessionUsageArchiveEnabled: false,
+      projectsEnabled: false,
+      manualUsageBases: [{
+        tool: 'claude',
+        models: [
+          { model: 'claude-opus-4-8', tokens: 11117300000 },
+          { model: 'claude-fable-5', tokens: 4134200000 }
+        ]
+      }]
+    })
+  });
+  const out = transform.transform({
+    deviceId: 'd',
+    allTime: { totalTokens: 2052159, clients: { claude: 2052159 }, models: { 'claude-sonnet-5': 1000 }, clientModels: { claude: { 'claude-sonnet-5': 1000 } } }
+  }, 'test', {});
+  assert.equal(out.allTime.totalTokens, 2052159 + 11117300000 + 4134200000);
+  assert.equal(out.allTime.clients.claude, 11117300000 + 4134200000 + 2052159);
+  assert.equal(out.allTime.models['claude-opus-4-8'], 11117300000);
+  assert.equal(out.allTime.models['claude-fable-5'], 4134200000);
+  assert.equal(out.allTime.models['claude-sonnet-5'], 1000);
+  assert.equal(out.allTime.clientModels.claude['claude-opus-4-8'], 11117300000);
+  assert.equal(out.allTime.clientModels.claude['claude-sonnet-5'], 1000);
+});
+
+test('a per-model base with only junk model rows contributes nothing', () => {
+  const transform = createUsageTransform({
+    getSettings: () => ({
+      sessionUsageArchiveEnabled: false,
+      projectsEnabled: false,
+      manualUsageBases: [{ tool: 'claude', models: [{ model: '', tokens: 5 }, { model: 'm', tokens: -1 }] }]
+    })
+  });
+  const out = transform.transform({ deviceId: 'd', allTime: { totalTokens: 10 } }, 'test', {});
+  assert.equal(out.allTime.totalTokens, 10);
+});
+
+>>>>>>> 0e3c0232 (fix(transform): write manual bases into the clients map, not a dead key)
 test('aggregateDevices passes the ledger through per device only', () => {
   const credits = { available: true, tool: 'workbuddy', updatedAt: 'x', totals: { credits: 9, requests: 2 } };
   const stats = aggregateDevices([

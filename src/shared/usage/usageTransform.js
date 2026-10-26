@@ -18,6 +18,61 @@ const USAGE_TRANSFORM_SETTING_KEYS = Object.freeze([
   'sessionUsageArchiveEnabled'
 ]);
 
+<<<<<<< HEAD
+=======
+// TokenLedger: a fixed, user-declared offset for tools whose historical usage
+// predates local tracking (rolling logs, desktop clients without token
+// detail, other machines). Applied to allTime only, after every other
+// projection step, so the anchored delta math stays exact — a constant offset
+// cancels in deltas and never compounds, because project() starts from the
+// raw collector summary.
+//
+// A base is either flat ({tool, tokens}) or per-model ({tool, models:
+// [{model, tokens}]}) so declared history can carry real model attribution
+// instead of degrading into Unclassified. Per-model sums feed totalTokens,
+// clientTokens, models and clientModels alike.
+function applyManualUsageBases(summary, bases) {
+  if (!Array.isArray(bases) || bases.length === 0) return summary;
+  // Collector summaries carry periods at the top level (allTime/today/month);
+  // normalized device records nest them under .periods. Handle both shapes.
+  const allTime = summary?.allTime || summary?.periods?.allTime;
+  if (!allTime || typeof allTime !== 'object') return summary;
+  for (const base of bases) {
+    const tool = String(base?.tool || '').trim();
+    if (!tool) continue;
+    let flatTokens = Math.max(0, Math.trunc(Number(base?.tokens) || 0));
+    const modelEntries = [];
+    if (Array.isArray(base?.models)) {
+      for (const entry of base.models) {
+        const model = String(entry?.model || '').trim();
+        const tokens = Math.max(0, Math.trunc(Number(entry?.tokens) || 0));
+        if (model && tokens > 0) modelEntries.push({ model, tokens });
+      }
+      if (modelEntries.length > 0) flatTokens = 0;
+    }
+    const total = modelEntries.length > 0
+      ? modelEntries.reduce((sum, e) => sum + e.tokens, 0)
+      : flatTokens;
+    if (total === 0) continue;
+    allTime.totalTokens = (allTime.totalTokens || 0) + total;
+    // The per-client token map is `clients` (normalizePeriod's shape) — not
+    // clientTokens. Writing the wrong key here is what previously made the
+    // bases show up as Unclassified rows in the Tools view.
+    const clients = allTime.clients || (allTime.clients = {});
+    clients[tool] = (clients[tool] || 0) + total;
+    if (modelEntries.length === 0) continue;
+    const models = allTime.models || (allTime.models = {});
+    const clientModels = allTime.clientModels || (allTime.clientModels = {});
+    const perClient = clientModels[tool] || (clientModels[tool] = {});
+    for (const { model, tokens } of modelEntries) {
+      models[model] = (models[model] || 0) + tokens;
+      perClient[model] = (perClient[model] || 0) + tokens;
+    }
+  }
+  return summary;
+}
+
+>>>>>>> 0e3c0232 (fix(transform): write manual bases into the clients map, not a dead key)
 function usageTransformSettings(settings = {}) {
   const picked = {};
   for (const key of USAGE_TRANSFORM_SETTING_KEYS) {

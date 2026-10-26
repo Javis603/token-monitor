@@ -4930,6 +4930,20 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+<<<<<<< HEAD
+=======
+    // TokenLedger dev diagnostics: the single sink every stats push crosses.
+    if (!app.isPackaged) {
+      try {
+        const s = latestStats;
+        const prov = (s?.limits?.providers || []).map((p) => `${p.provider}:${p.status}`).join(' ');
+        const cred = (s?.devices || []).map((d) => `${d.deviceId}:credits=${d.credits ? d.credits.available : 'absent'}`).join(' ');
+        const at = s?.periods?.allTime || s?.allTime || {};
+        const cl = at.clients || {};
+        console.log(`[diag] sendPush reason=${payload?.data?.reason} limits=[${prov}] ${cred} allTime=${Math.round((at.totalTokens || 0) / 1e8 * 100) / 100}亿 clients: claude=${Math.round((cl.claude || 0) / 1e8 * 100) / 100}亿 codex=${Math.round((cl.codex || 0) / 1e8 * 100) / 100}亿 zcode=${Math.round((cl.zcode || 0) / 1e8 * 100) / 100}亿 5.6sol=${Math.round((at.models?.['gpt-5.6-sol'] || 0) / 1e8 * 100) / 100}亿 opus48=${Math.round((at.models?.['claude-opus-4-8'] || 0) / 1e8 * 100) / 100}亿`);
+      } catch (_) { /* diagnostics must never break the push */ }
+    }
+>>>>>>> 0e3c0232 (fix(transform): write manual bases into the clients map, not a dead key)
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
     if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) {
