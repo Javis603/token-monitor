@@ -6,6 +6,14 @@ module.exports = {
   fetch: 'fetchOllamaLimits',
   fields: [
     {
+      key: 'ollamaApiKey',
+      kind: 'credential',
+      storePath: ['providers', 'ollama', 'apiKey'],
+      resolve: 'ollamaApiKey',
+      envFallback: ['TOKEN_MONITOR_OLLAMA_API_KEY', 'OLLAMA_API_KEY'],
+      project: 'set'
+    },
+    {
       key: 'ollamaCookie',
       kind: 'credential',
       storePath: ['providers', 'ollama', 'cookie'],
@@ -13,11 +21,25 @@ module.exports = {
       project: 'set'
     }
   ],
+  // Either lane configures the account; the API key is used when present.
   status: {
-    credential: 'ollamaCookie',
-    configuredKey: 'ollamaCookieConfigured',
-    sourceKey: 'ollamaCookieSource',
+    configuredKey: 'ollamaCredentialsConfigured',
+    sourceKey: 'ollamaCredentialsSource',
     pendingKey: 'ollamaPendingCheckSince'
+  },
+  accountStatus: ({ settings, env, limits }) => {
+    const apiKey = limits.ollamaApiKey(env, settings || {});
+    const cookie = limits.ollamaSessionCookie(env, settings || {});
+    const apiKeySource = settings?.ollamaApiKey ? 'settings' : limits.ollamaApiKey(env) ? 'env' : '';
+    const cookieSource = settings?.ollamaCookie ? 'settings' : limits.ollamaSessionCookie(env) ? 'env' : '';
+    return {
+      ollamaApiKeyConfigured: Boolean(apiKey),
+      ollamaApiKeySource: apiKeySource,
+      ollamaCookieConfigured: Boolean(cookie),
+      ollamaCookieSource: cookieSource,
+      ollamaCredentialsConfigured: Boolean(apiKey || cookie),
+      ollamaCredentialsSource: apiKeySource || cookieSource
+    };
   },
   form: {
     titleKey: 'settings.ollama.title',
@@ -27,19 +49,46 @@ module.exports = {
     emptyKey: 'settings.ollama.statusNotSet',
     failedKey: 'settings.ollama.saveFailed',
     fields: [
-      { key: 'ollamaCookie', input: 'textarea', placeholderKey: 'settings.ollama.cookiePlaceholder', required: true }
+      {
+        key: 'ollamaApiKey',
+        input: 'password',
+        configuredKey: 'ollamaApiKeyConfigured',
+        ariaLabelKey: 'settings.ollama.apiKey',
+        placeholderKey: 'settings.ollama.apiKeyPlaceholder'
+      },
+      {
+        key: 'ollamaCookie',
+        input: 'textarea',
+        configuredKey: 'ollamaCookieConfigured',
+        ariaLabelKey: 'settings.ollama.cookie',
+        placeholderKey: 'settings.ollama.cookiePlaceholder'
+      }
     ],
+    credentialChoice: {
+      key: 'ollamaCredentialKind',
+      labelKey: 'settings.common.credentialKind',
+      fields: ['ollamaApiKey', 'ollamaCookie']
+    },
     manual: [
-      { steps: ['settings.ollama.step1', 'settings.ollama.step2', 'settings.ollama.step3', 'settings.ollama.step4'] },
-      { field: 'ollamaCookie' }
+      { note: 'settings.ollama.apiKeyNote', whenCredential: 'ollamaApiKey' },
+      { field: 'ollamaApiKey', whenCredential: 'ollamaApiKey' },
+      { steps: ['settings.ollama.step1', 'settings.ollama.step2', 'settings.ollama.step3', 'settings.ollama.step4'], whenCredential: 'ollamaCookie' },
+      { field: 'ollamaCookie', whenCredential: 'ollamaCookie' }
     ],
-    openUrl: { url: 'https://ollama.com/settings' },
-    messages: { rejected: 'settings.ollama.validationInvalid' },
-    // The first poll after a save answers from this check instead of fetching
-    // the settings page a second time.
+    openUrl: {
+      byField: 'ollamaCredentialKind',
+      urls: { ollamaApiKey: 'https://ollama.com/settings/keys', ollamaCookie: 'https://ollama.com/settings' },
+      default: 'https://ollama.com/settings/keys'
+    },
+    messages: {
+      rejected: 'settings.ollama.validationInvalid',
+      required: 'settings.ollama.required'
+    },
+    // The cookie lane answers its next poll from a confirmed probe instead of
+    // fetching the rate-limited settings page twice.
     rememberProbe: { fn: 'rememberOllamaValidation', field: 'ollamaCookie' }
   },
   urlPolicy: [
-    { hosts: ['ollama.com', 'www.ollama.com'], exactPaths: ['/settings', '/signin'] }
+    { hosts: ['ollama.com', 'www.ollama.com'], exactPaths: ['/settings', '/settings/keys', '/signin'] }
   ]
 };

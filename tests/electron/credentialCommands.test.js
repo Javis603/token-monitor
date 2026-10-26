@@ -53,7 +53,9 @@ test('the verdict only rejects what the provider itself calls a bad credential',
 test('a confirmed credential is stored and selects its provider in the same write', async () => {
   const { api, patches, writes } = commands({ settings: { limitProviders: 'claude,codex' } });
   const result = await api.saveCredential('deepseek', { deepseekApiKey: '  sk-live  ' });
-  assert.deepEqual(result, { saved: true, verdict: 'valid', status: 'ok', errorCode: '', settings: { projected: true } });
+  const { checkedSince, ...reply } = result;
+  assert.ok(Number.isFinite(checkedSince));
+  assert.deepEqual(reply, { saved: true, verdict: 'valid', status: 'ok', errorCode: '', settings: { projected: true } });
   assert.deepEqual(patches, [{ deepseekApiKey: 'sk-live', limitProviders: 'claude,codex,deepseek', limitsEnabled: true }]);
   assert.deepEqual(writes, [], 'a probe must not add to the DeepSeek balance history');
 });
@@ -144,11 +146,11 @@ test('a stale probe that was rejected still reports superseded, not invalid', as
   assert.deepEqual(patches, []);
 });
 
-test('clearing removes the form credential through the same settings write', () => {
+test('clearing removes the form credential through the same settings write', async () => {
   const { api, patches } = commands();
-  assert.deepEqual(api.clearCredential('minimax'), { cleared: true, settings: { projected: true } });
+  assert.deepEqual(await api.clearCredential('minimax'), { cleared: true, settings: { projected: true } });
   assert.deepEqual(patches, [{ minimaxApiKey: '' }]);
-  assert.deepEqual(api.clearCredential('codex'), { cleared: false });
+  assert.deepEqual(await api.clearCredential('codex'), { cleared: false });
 });
 
 test('saving selects the provider without reordering or widening the selection', () => {
@@ -219,7 +221,7 @@ test('Claude save asks for an organization before storing a multi-organization s
   assert.equal(saved.saved, true);
   assert.equal(patches[0].claudeWebOrganizationId, 'team');
   assert.deepEqual((await api.listOrganizationChoices('claude')).choices.map(({ id }) => id), ['free', 'team']);
-  api.clearCredential('claude');
+  await api.clearCredential('claude');
   assert.equal(patches.at(-1).claudeWebOrganizationId, '');
 });
 
@@ -268,6 +270,59 @@ test('Claude multi-organization save carries a rotated session through the choic
   assert.equal(patches[0].claudeWebCookie, newCookie);
   assert.equal(patches[0].claudeWebOrganizationId, 'team');
   assert.ok(sentCookies.slice(1).every((cookie) => cookie === newCookie));
+});
+
+test('Claude organization discovery awaits rotated-cookie persistence through the main adapter', async (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = main.indexOf('  async function applyCredentialSettingsPatch(');
+  const source = main.slice(start, main.indexOf('\n  // The settings:update body', start));
+  for (const failedWrite of [false, true]) {
+    await t.test(failedWrite ? 'failed write' : 'persist and wait', async () => {
+      let settings = { claudeWebCookie: 'sessionKey=sk-ant-discovery-old' };
+      const writes = [];
+      let releaseRefresh;
+      const host = {
+        console: { log() {} }, settingsForRenderer: () => ({ claudeWebCookieConfigured: true }),
+        applySettingsPatch: (patch, _onDots, context) => {
+          assert.equal(context.ensureLimitProvider, 'claude');
+          if (failedWrite) throw new Error('fixture write failed');
+          writes.push(patch);
+          settings = { ...settings, ...patch };
+          context.onLimitsRefresh({ provider: 'claude' }, new Promise((resolve) => { releaseRefresh = resolve; }));
+        }
+      };
+      vm.runInNewContext(source, host);
+      const api = createCredentialCommands({
+        getSettings: () => settings, applySettingsPatch: host.applyCredentialSettingsPatch, env: {},
+        probeDeps: (renewed) => ({
+          onClaudeWebCookieRenewed: ({ cookie }) => { renewed.claudeWebCookie = cookie; return true; },
+          fetch: async (url) => {
+            assert.ok(url.endsWith('/api/organizations'));
+            return { ok: true, headers: { getSetCookie: () => ['sessionKey=sk-ant-discovery-new; Path=/; HttpOnly'] },
+              json: async () => [{ uuid: 'fixture-org', name: 'Fixture' }] };
+          }
+        })
+      });
+      let settled = false;
+      const discovery = api.listOrganizationChoices('claude').then((result) => { settled = true; return result; });
+      await new Promise((resolve) => setImmediate(resolve));
+      if (failedWrite) {
+        assert.deepEqual(await discovery, { status: 'unavailable', choices: [] });
+        assert.equal(writes.length, 0);
+      } else {
+        assert.equal(writes.length, 1);
+        assert.equal(settings.claudeWebCookie, 'sessionKey=sk-ant-discovery-new');
+        assert.equal(settled, false, 'organization discovery cannot finish before the credential refresh');
+        releaseRefresh();
+        const result = await discovery;
+        assert.equal(result.status, 'ok');
+        assert.equal(result.choices[0].id, 'fixture-org');
+      }
+    });
+  }
 });
 
 test('a lane saved on its own is probed without the stored sibling vouching for it', async () => {
@@ -380,6 +435,47 @@ test('a confirmed Ollama cookie answers the next poll from the probe', async () 
   });
   assert.equal(polled.status, 'unavailable');
   assert.equal(requests, 1);
+});
+
+test('an Ollama API key probes the balance endpoint and replaces the cookie lane', async () => {
+  const balance = {
+    included: {
+      session: { remaining_percent: 75, resets_at: '2026-10-23T14:00:00Z' },
+      weekly: { remaining_percent: 40, resets_at: '2026-10-26T00:00:00Z' }
+    },
+    purchased: { balance_usd: 0 }
+  };
+  const requested = [];
+  const saved = commands({
+    settings: { ollamaCookie: 'wos-session=stored' },
+    answer: (url) => {
+      requested.push(String(url));
+      return String(url).endsWith('/api/balance')
+        ? response(200, balance)
+        : response(200, { Email: 'user@example.com', Plan: 'pro' });
+    }
+  });
+  const result = await saved.api.saveCredential('ollama', { ollamaApiKey: 'ollama-key-live', ollamaCookie: '' });
+  assert.equal(result.verdict, 'valid');
+  assert.equal(saved.patches[0].ollamaApiKey, 'ollama-key-live');
+  assert.equal(saved.patches[0].ollamaCookie, '');
+  assert.equal(requested.some((url) => url.includes('/settings')), false, 'the cookie lane must not be probed');
+
+  for (const status of [401, 403]) {
+    const rejected = commands({
+      settings: { ollamaCookie: 'wos-session=fixture-existing' },
+      answer: (url) => (String(url).endsWith('/api/balance') ? response(status) : response(200, {}))
+    });
+    const bad = await rejected.api.saveCredential('ollama', { ollamaApiKey: 'ollama-key-bad' });
+    assert.equal(bad.verdict, 'invalid', String(status));
+    assert.equal(bad.status, 'unauthorized', String(status));
+    assert.deepEqual(rejected.patches, [], 'a rejected key cannot replace or clear the saved credential');
+  }
+
+  const unconfirmed = commands({ answer: () => response(500) });
+  const maybe = await unconfirmed.api.saveCredential('ollama', { ollamaApiKey: 'ollama-key-maybe', ollamaCookie: '' });
+  assert.equal(maybe.verdict, 'indeterminate');
+  assert.equal(unconfirmed.patches.length, 1);
 });
 
 test('MiniMax credential save keeps an implicit region and probes the effective env region', async () => {
