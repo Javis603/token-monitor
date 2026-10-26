@@ -60,6 +60,11 @@
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
   }
 
+  function actionErrorMessage(error, t) {
+    const message = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+    return t ? t('settings.plugins.actionFailed', { error: message }) : message;
+  }
+
   function clampPercent(value) {
     const number = finite(value);
     return number === null ? null : Math.max(0, Math.min(100, number));
@@ -578,7 +583,7 @@
             if (!container.isConnected || mount.revision !== state.revision) return;
             let message = container.querySelector('.pv-action-error');
             if (!message) { message = el(document, 'p', 'pv-action-error'); message.setAttribute('role', 'alert'); container.append(message); }
-            message.textContent = t ? t('settings.plugins.actionFailed', { error: error.message }) : error.message;
+            message.textContent = actionErrorMessage(error, t);
           });
         } : null };
         const root = container.firstElementChild;
@@ -726,6 +731,7 @@
   return {
     ICON_PATHS,
     TONES,
+    actionErrorMessage,
     applyAppearance,
     createPluginViewHost,
     drawDisplayList,

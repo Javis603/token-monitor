@@ -8584,6 +8584,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-toolbar { display: flex; align-items: center; gap: 8px; min-height: 30px; }
 .plugin-toolbar-count { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .625rem; color: var(--muted); }
 .plugin-inline-action, .plugin-more, .settings-actions button.plugin-installed-link { box-shadow: none; border: 0; border-radius: 5px; background: transparent; color: var(--muted); padding: 5px 4px; font: inherit; font-size: .6875rem; cursor: pointer; }
+.settings-actions button.plugin-installed-link { -webkit-backdrop-filter: none; backdrop-filter: none; }
 .plugin-inline-action:hover, .plugin-more:hover, .settings-actions button.plugin-installed-link:hover { color: var(--text); background: rgba(var(--overlay-rgb), .06); }
 .plugin-more { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; font-size: 1rem; line-height: 1; }
 /* Popover lifecycle is native; plate and item treatment are shared with App menus. */

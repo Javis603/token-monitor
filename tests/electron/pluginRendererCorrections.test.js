@@ -1,10 +1,10 @@
 'use strict';
-const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict'), acorn = require('acorn');
+const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm'), assert = require('node:assert/strict'), espree = require('espree');
 const test = require('node:test');
 const root = process.env.TM_PLUGIN_CORRECTIONS_ROOT || path.resolve(__dirname, '../..');
 const req = p => require(path.join(root,p));
 const appPath='src/electron/renderer/app.js', source=fs.readFileSync(path.join(root,appPath),'utf8');
-const ast=acorn.parse(source,{ecmaVersion:'latest',locations:true}), extracted={};
+const ast=espree.parse(source,{ecmaVersion:'latest',loc:true,range:true}), extracted={};
 function extract(name) {
  const n=ast.body.find(n=>n.type==='FunctionDeclaration'&&n.id.name===name);
  assert.ok(n,name); extracted[name]={file:appPath,start:n.loc.start.line,end:n.loc.end.line};

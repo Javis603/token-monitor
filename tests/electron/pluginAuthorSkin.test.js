@@ -174,3 +174,22 @@ test('every finite appearance option reaches actual plugin-content DOM projectio
     assert.equal(container.dataset[`pv${key[0].toUpperCase()}${key.slice(1)}`], choice);
   }
 });
+
+test('explicit clear restores underlying plugin appearance without changing the App palette', t => {
+  const f = fixture(t, { themeColors: { accent: '#123456' }, vendorColors: { test: '#abcdef' }, pluginAuthorSkin: { ref: 'removed/skin', appearance: tokens } });
+  const h = helpers({ mainWindow: null });
+  const cleared = h.preparePluginSkinSettings({ pluginSkinRef: null }, f.settings, null);
+  assert.equal(cleared.authorSkin, null);
+  assert.deepEqual(plain(cleared.patch), {});
+  Object.assign(f.settings, cleared.patch, { pluginAuthorSkin: cleared.authorSkin });
+  f.runtime.settingsChanged();
+  assert.deepEqual(f.settings.themeColors, { accent: '#123456' });
+  assert.deepEqual(f.settings.vendorColors, { test: '#abcdef' });
+  assert.equal(f.runtime.payload('home').appearance.font, 'system');
+  assert.equal(f.runtime.payload('home').appearance.corners, 'square');
+  assert.equal(fs.readFileSync(f.legacyFile, 'utf8'), f.legacy);
+  const restarted = fixture(t, plain(f.settings));
+  assert.equal(restarted.runtime.payload('home').appearance.corners, 'square');
+  assert.throws(() => h.preparePluginSkinSettings({ pluginSkinRef: null, themeColors: {} }, f.settings, null), /standalone/);
+  assert.throws(() => h.assertPluginSkinRequest({ sender: {}, senderFrame: {} }, { pluginSkinRef: null }), /main window/);
+});

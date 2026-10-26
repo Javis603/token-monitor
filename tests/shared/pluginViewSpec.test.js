@@ -288,3 +288,21 @@ test('Surface Studio resolves the production numeric CPU reading in full and com
   const missing = createResolver({ pluginId: manifest.id, read: () => null, history: () => [] });
   assert.equal(missing.resolveNode(view.layout).value, '—');
 });
+
+test('invalid sliders are removed from a loaded manifest, not just reported as warnings', () => {
+  const { normalizeManifest } = require('../../src/shared/plugins/manifest');
+  const { findAction, validateInteraction } = require('../../src/shared/plugins/interactions');
+  for (const bounds of [{ step: 0 }, { step: -1 }, { min: 20, max: 1 }, { step: { $: '@tpm' } }]) {
+    const result = normalizeManifest({ id: 'slider-test', name: 'Slider', version: '1.0.0', tmApi: '^1', main: 'main.js', permissions: [], metrics: [{ id: 'tpm', kind: 'number' }],
+      views: [{ id: 'edit', title: 'Edit', surfaces: ['home'], layout: { type: 'stack', children: [
+        { type: 'slider', action: 'bad', label: 'Invalid', min: 1, max: 20, step: 1, ...bounds },
+        { type: 'slider', action: 'good', label: 'Valid', min: 1, max: 20, step: 0.5 }
+      ] } }] });
+    assert.equal(result.ok, true, 'a bad child must not discard unrelated controls');
+    assert.ok(result.errors.some(error => /slider/.test(error)));
+    const tree = result.manifest.views[0].layout;
+    assert.equal(findAction(tree, 'bad'), null);
+    const good = findAction(tree, 'good');
+    assert.equal(validateInteraction(good, { action: 'good', type: 'change', value: 4.2 }).value, 4);
+  }
+});

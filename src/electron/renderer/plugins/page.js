@@ -17,7 +17,7 @@
     const state = host.state('page', current);
     content.firstElementChild?.classList.toggle('page-rich-viewport', state?.status === 'ok' && state.webDocuments?.some(doc => !doc.variant || doc.variant === 'full') === true);
   }
-  function fail(reason) { error.hidden = false; error.textContent = t('settings.plugins.actionFailed', { error: reason.message || String(reason) }); }
+  function fail(reason) { error.hidden = false; error.textContent = window.TokenMonitorPluginViews.actionErrorMessage(reason, t); }
   function applyMotion() {
     document.documentElement.dataset.reduceMotion = reduceMotion() ? 'on' : 'off';
     host.refreshMotion();

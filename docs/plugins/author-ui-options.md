@@ -19,7 +19,7 @@ The plugin requests `ui.web` (execute an authored interface) and `tm.pages` (rea
 }
 ```
 
-Existing declarative manifests/packages remain valid. The optional package `assets` map contains canonical base64 values for exactly the manifest's declared paths. Assets share the existing package hash, preview, staging, rollback and removal. Limits: 64 assets, 512 KiB per asset, 1 MiB aggregate assets, existing 2 MiB package total. Portable contained paths only; symlink escapes, duplicate case-insensitive names and code collisions are rejected. Formats: HTML, CSS, JS, PNG, JPEG, WebP, SVG and WOFF2. SVG is page-local content, not a trusted host identity mark.
+Existing declarative manifests/packages remain valid. The optional package `assets` map contains canonical base64 values for exactly the manifest's declared paths. Assets share the existing package hash, preview, staging, rollback and removal. Limits: 64 assets, 512 KiB per asset, 1 MiB aggregate assets, 4 MiB package total. Portable contained paths only; symlink escapes, duplicate case-insensitive names and code collisions are rejected. Formats: HTML, CSS, JS, PNG, JPEG, WebP, SVG and WOFF2. SVG is page-local content, not a trusted host identity mark.
 
 ## Home, plugin pages and settings editors
 
@@ -105,6 +105,8 @@ One host sampler serves all subscribed projections at the fastest permitted inte
 ## Appearance and distribution
 
 Plugin content follows App appearance by default. Existing `plugin-appearance.json` is read-only compatibility data and remains untouched; existing skin/theme preset capabilities remain. Authors own their document design and plugin-specific controls. Whole-App themes continue through the host theme contract, not arbitrary App CSS.
+
+In Appearance, **Clear plugin style** removes the copied author font, density, corner, panel and content-color overrides without changing the App palette. It returns plugin content to its default appearance (or the existing read-only local appearance settings). This action remains available after the author plugin is disabled or removed; choosing an App color preset alone does not clear the copied style.
 
 Official app-shipped listings plus user-added HTTPS indexes are the supported catalog model. Catalog inclusion does not imply a safety review. Users explicitly add community sources; plugins cannot enroll or publish a source themselves.
 

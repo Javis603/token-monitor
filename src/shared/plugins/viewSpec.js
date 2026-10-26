@@ -311,9 +311,15 @@ function normalizeNode(raw, ctx, path, depth, errors) {
     if (!node.label) errors.push(`${path}: interactive controls need a label`);
     if (node.type === 'select' && !node.options) errors.push(`${path}: select needs unique options`);
     if (node.type === 'slider') {
-      for (const name of ['min', 'max', 'step']) if (node[name] !== undefined && typeof node[name] !== 'number') errors.push(`${path}: slider bounds must be literal numbers`);
+      if (['min', 'max', 'step'].some(name => node[name] !== undefined && typeof node[name] !== 'number')) {
+        errors.push(`${path}: slider bounds must be literal numbers`);
+        return null;
+      }
       const min = node.min ?? 0, max = node.max ?? 100, step = node.step ?? 1;
-      if (min >= max || min < -1e6 || max > 1e6 || step <= 0 || step > max - min) errors.push(`${path}: invalid slider range`);
+      if (min >= max || min < -1e6 || max > 1e6 || step <= 0 || step > max - min) {
+        errors.push(`${path}: invalid slider range`);
+        return null;
+      }
     }
   }
   if (spec.children) {

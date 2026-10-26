@@ -155,3 +155,23 @@ for (const scenario of ['rollback rebuild', 'removed skin', 'changed skin', 'new
     assert.equal(container.getAttribute('aria-busy'), 'false');
   });
 }
+
+test('clear style remains reachable after author removal and sends the explicit reset command', async () => {
+  const { Element } = require('../helpers/notchPanel');
+  const document = { createElement: tag => new Element(tag, document) };
+  const container = document.createElement('div'); container.appendChild = node => container.append(node);
+  Object.defineProperty(container, 'innerHTML', { set() { container.replaceChildren(); } });
+  const h = skinHarness();
+  Object.assign(h.context, { document, els: { themePresetChips: container }, selectThemePreset() {} });
+  h.context.state.settings.pluginAuthorSkin = { ref: 'removed/skin', appearance: { font: 'mono' } };
+  h.context.state.pluginCatalog = { plugins: [] };
+  let pending;
+  h.context.applyAppearancePluginSkin = skin => { pending = h.context.applyPluginSkin(skin); };
+  vm.runInContext(extract('matchingThemePresetId') + '\n' + extract('renderThemePresetChips'), h.context);
+  h.context.renderThemePresetChips();
+  const clear = container.querySelectorAll('button').find(node => node.dataset.pluginSkin === '{"ref":null}');
+  assert.ok(clear); clear.fire('click'); await pending;
+  assert.deepEqual(h.saved, [{ pluginSkinRef: null }]);
+  h.context.state.settings.pluginAuthorSkin = null; h.context.renderThemePresetChips();
+  assert.equal(container.querySelectorAll('button').some(node => node.dataset.pluginSkin), false);
+});

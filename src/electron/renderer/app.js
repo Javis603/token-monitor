@@ -8137,6 +8137,15 @@ function renderThemePresetChips() {
     chip.addEventListener('click', () => selectThemePreset(preset.id));
     els.themePresetChips.appendChild(chip);
   }
+  if (state.settings?.pluginAuthorSkin) {
+    const clear = document.createElement('button');
+    clear.type = 'button'; clear.className = 'theme-preset-chip';
+    const skin = { ref: null };
+    clear.dataset.pluginSkin = JSON.stringify(skin);
+    clear.textContent = t('settings.plugins.clearSkin');
+    clear.addEventListener('click', () => void applyAppearancePluginSkin(skin, clear));
+    els.themePresetChips.appendChild(clear);
+  }
   // Skins from active plugins sit beside the built-in presets; applying one
   // writes ordinary theme colours, so it survives the plugin being removed.
   const resolved = themePresetsApi.mergeThemeColors(state.settings?.themeColors);
