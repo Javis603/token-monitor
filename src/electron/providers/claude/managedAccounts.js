@@ -1,13 +1,20 @@
 'use strict';
 
 const { createCredentialCommands, providerSelectionIncluding } = require('../../limits/credentialCommands');
-const { normalizeClaudeManagedAccounts, normalizeClaudeWebAccounts, upsertClaudeManagedAccount } = require('../../../shared/providers/claude/webAccounts');
+const { claudeWebAccountMetadata, normalizeClaudeManagedAccounts, normalizeClaudeWebAccounts, upsertClaudeManagedAccount } = require('../../../shared/providers/claude/webAccounts');
 const { normalizeClaudeWebCookieInput } = require('../../../shared/providers/claude/limits');
 
+function claudeAccountChangeScope(account, options = {}) {
+  return { provider: 'claude', ...(!options.reconcileSources ? { accountId: account.id } : {}),
+    ...(options.reconcileSources ? { reconcileSources: true } : {}),
+    ...(account.accountKey ? { accountKey: account.accountKey } : {}) };
+}
+
 function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, credentialStore,
-  probeDeps, projectSettings, onChanged, now = Date.now }) {
+  probeDeps, projectSettings, onChanged, getLegacyCredential = () => getSettings().claudeWebCookie, now = Date.now }) {
   let mutationLane = Promise.resolve();
   let epoch = 0;
+  let legacyObservation = null;
   const contexts = new WeakMap();
   const accounts = () => normalizeClaudeManagedAccounts(getSettings().claudeManagedAccounts);
   const serialize = (work) => {
@@ -63,9 +70,10 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
       commit(next, [{ id: account.id, cookie: candidate.claudeWebCookie }, ...removed.map(({ id }) => ({ id, cookie: '' }))], {
         limitProviders: providerSelectionIncluding(getSettings().limitProviders, 'claude'), limitsEnabled: true
       });
-      for (const old of removed) changed(old, 'account-removed', { clear: true, refresh: false });
+      // A duplicate credential disappearing does not retire the shared identity.
+      for (const old of removed) changed(old, 'account-removed', { refresh: false });
       const old = previous.find((entry) => entry.id === account.id);
-      if (old?.accountKey && old.accountKey !== account.accountKey) changed(old, 'identity-switch', { clear: true, refresh: false });
+      if (old?.accountKey && old.accountKey !== account.accountKey) changed(old, 'identity-switch', { refresh: true, reconcileSources: true });
       changed(account, 'account-added', { refresh: true });
       return projectSettings();
     })
@@ -98,8 +106,11 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
         : previous.map((entry) => entry.id === id ? { ...entry, enabled, updatedAt: new Date(now()).toISOString() } : entry);
       try {
         commit(next, removing ? [{ id, cookie: '' }] : []);
-        changed(removing ? account : next.find((entry) => entry.id === id), removing ? 'account-removed' : 'account-state', {
-          clear: removing || !enabled, refresh: !removing && enabled
+        // Stable identity refreshes replace or explicitly retire the merged row.
+        // Do not blank a still-valid OAuth/legacy reading while that runs.
+        changed(removing ? account : next.find((entry) => entry.id === id), 'account-state', {
+          clear: (removing || !enabled) && !account.accountKey, refresh: true,
+          ...(removing || !enabled ? { reconcileSources: true } : {})
         });
         return { ok: true, accounts: accounts(), settings: projectSettings() };
       } catch (_) { return { ok: false, errorCode: 'credentialStorageUnavailable' }; }
@@ -126,8 +137,25 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
     });
   }
 
-  function resolved({ id, cookie, provider, scopedById }) {
+  function legacyAccount() {
+    let cookie;
+    try { cookie = normalizeClaudeWebCookieInput(getLegacyCredential()); } catch (_) { return null; }
+    return legacyObservation?.cookie === cookie
+      && legacyObservation.organizationId === (getSettings().claudeWebOrganizationId || '')
+      ? legacyObservation.metadata : null;
+  }
+
+  function resolved({ id, cookie, organizationId, provider, scopedById }) {
     return serialize(() => {
+      if (id === 'legacy') {
+        if (!provider?.accountKey || normalizeClaudeWebCookieInput(getLegacyCredential()) !== cookie
+          || (getSettings().claudeWebOrganizationId || '') !== organizationId) return;
+        const metadata = claudeWebAccountMetadata(provider);
+        if (JSON.stringify(legacyAccount()) === JSON.stringify(metadata)) return;
+        legacyObservation = { cookie, organizationId, metadata };
+        changed({ ...metadata, id: 'legacy' }, 'identity-resolved', { refresh: false });
+        return;
+      }
       const current = accounts();
       const account = current.find((entry) => entry.id === id);
       if (!account?.enabled || !provider?.accountKey || credentialStore.readClaudeWebCredential(id) !== cookie) return;
@@ -156,7 +184,7 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
   return { accounts, saveAccount, removeAccount: (id) => mutateAccount(id),
     setAccountEnabled: (id, enabled) => typeof enabled === 'boolean'
       ? mutateAccount(id, enabled) : Promise.resolve({ ok: false, errorCode: 'invalidEnabled' }),
-    resolveCredential, renew, resolved, migrateLegacyAccounts };
+    resolveCredential, renew, resolved, legacyAccount, migrateLegacyAccounts };
 }
 
-module.exports = { createClaudeManagedAccounts };
+module.exports = { createClaudeManagedAccounts, claudeAccountChangeScope };

@@ -142,6 +142,7 @@ const { normalizeLimitProviderHiddenItems } = require('../shared/limits/usageIte
 const {
   accountFieldProjection,
   accountStatusProjection,
+  currentAccountField,
   finalAccountSettings,
   initialAccountSettings,
   limitAccountFormsForRenderer,
@@ -152,7 +153,7 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
-const { createClaudeManagedAccounts } = require('./providers/claude/managedAccounts');
+const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
   codexAuthIdentity,
@@ -899,13 +900,13 @@ function claudeAccountService() {
       setSettings: (next) => { settings = next; },
       saveSettings: () => saveSettings({ throwOnError: true }),
       credentialStore: ensureCredentialStore(),
+      getLegacyCredential: () => currentAccountField('claudeWebCookie', settings, process.env),
       probeDeps: credentialProbeDeps,
       projectSettings: settingsForRenderer,
       onChanged: (account, reason, options) => {
         pushSettingsToRenderer();
         deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
-        const scope = { provider: 'claude', accountId: account.id,
-          ...(account.accountKey ? { accountKey: account.accountKey } : {}) };
+        const scope = claudeAccountChangeScope(account, options);
         return queueLimitInvalidation(scope, reason, options);
       }
     });
@@ -5491,6 +5492,7 @@ function settingsForRenderer() {
     workbuddyManagedAccounts: workbuddyAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     ...accountStatusProjection(settings, process.env),
+    claudeWebLegacyAccount: claudeAccountService().legacyAccount(),
     limitAccountForms: limitAccountFormsForRenderer(),
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,

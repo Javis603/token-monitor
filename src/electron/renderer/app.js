@@ -11865,7 +11865,8 @@ function moveOpenCodeLocalFallbackSetting() {
 // may override (`messages.required` / `rejected` / `invalidFormat`).
 let claudeOrganizationChoicesRevision = 0;
 let claudeWebAccountId = 'new';
-let claudeWebFormOpen = false;
+// null opens the initial empty-account form; an explicit cancel stays closed.
+let claudeWebFormOpen = null;
 const claudeAccountActions = accountShellApi.createBusyGuard();
 
 async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
@@ -11884,6 +11885,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     renderExternalProviderStatus(id);
     return result;
   }
+  if (id === 'claude' && values.claudeWebAccountId && result === undefined) return result;
   if (result?.verdict === 'superseded') return result;
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
@@ -16414,6 +16416,17 @@ function editClaudeWebAccount(account = null) {
   if (account?.id === 'legacy') void loadClaudeOrganizationChoices();
 }
 
+function cancelClaudeWebAccountEdit() {
+  claudeOrganizationChoicesRevision += 1;
+  claudeWebAccountId = 'new';
+  claudeWebFormOpen = false;
+  const input = document.getElementById('claudeWebCookieInput');
+  if (input) input.value = '';
+  renderClaudeOrganizationChoices([]);
+  setAccountPanelMessage('claude', null);
+  renderExternalProviderStatus('claude');
+}
+
 async function runClaudeAccountAction(button, operation) {
   return claudeAccountActions.run('claude', button, async () => {
     setAccountPanelMessage('claude', null);
@@ -16434,7 +16447,7 @@ async function runClaudeAccountAction(button, operation) {
 function claudeWebSettingsAccounts(providers) {
   const accounts = [...(state.settings?.claudeManagedAccounts || [])];
   if (state.settings?.claudeWebLegacyCookieConfigured) {
-    const legacy = providers.find((provider) => provider.source === 'web'
+    const legacy = state.settings.claudeWebLegacyAccount || providers.find((provider) => provider.source === 'web'
       && !accounts.some((account) => account.accountKey === provider.accountKey));
     accounts.unshift({ ...legacy, id: 'legacy', enabled: true, organizationId: state.settings.claudeWebOrganizationId || '' });
   }
@@ -16494,7 +16507,7 @@ function renderClaudeWebAccounts() {
     const info = document.createElement('div');
     info.className = 'managed-account-info';
     const provider = providers.find((provider) => provider.accountKey === account.accountKey);
-    info.textContent = [account.accountName, account.accountLabel,
+    info.textContent = [account.id === 'legacy' ? t('settings.claude.legacyLogin') : '', account.accountName, account.accountLabel,
       account.enabled === false ? t('settings.codex.disabled')
         : apiKeyAccountStatusText('claude', provider, true, 'settings', limitProviderEnabled('claude'))].filter(Boolean).join(' · ');
     info.setAttribute('aria-label', info.textContent);
@@ -16542,11 +16555,18 @@ function renderClaudeWebAccounts() {
   const add = document.createElement('button');
   add.type = 'button';
   add.textContent = t('settings.codex.addAccount');
-  add.setAttribute('aria-expanded', String(claudeWebFormOpen || accounts.length === 0));
+  add.setAttribute('aria-expanded', String(claudeWebFormOpen ?? accounts.length === 0));
   add.addEventListener('click', () => claudeAccountActions.run('claude', add, () => editClaudeWebAccount()));
   const actions = document.createElement('div');
   actions.className = 'settings-actions';
   actions.append(add);
+  if (claudeWebFormOpen ?? accounts.length === 0) {
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = t('settings.common.cancel');
+    cancel.addEventListener('click', () => claudeAccountActions.run('claude', cancel, cancelClaudeWebAccountEdit));
+    actions.append(cancel);
+  }
   list.append(actions);
 }
 
@@ -16603,7 +16623,7 @@ function renderExternalProviderStatus(providerName) {
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
   if (providerName === 'claude') {
-    const showForm = claudeWebFormOpen || (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
+    const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
     manualPanel.classList.toggle('hidden', !showForm);
     document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || !document.getElementById('claudeWebOrganizationIdInput')?.options.length);
     openBtn.classList.remove('hidden');

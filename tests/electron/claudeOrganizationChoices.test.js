@@ -32,9 +32,37 @@ test('Claude card counts healthy identities instead of letting one linked accoun
   state.settings = { claudeManagedAccounts: [], claudeWebLegacyCookieConfigured: true };
   providers = [{ accountKey: 'legacy', source: 'web', status: 'ok' }];
   assert.equal(context.claudeAccountStatusText('fallback', true), '1/1');
+  state.settings = { claudeManagedAccounts: [{ id: 'managed', accountKey: 'same', enabled: true }],
+    claudeWebLegacyCookieConfigured: true, claudeWebLegacyAccount: { accountKey: 'same' } };
+  providers = [{ accountKey: 'same', source: 'web', status: 'ok' }];
+  assert.equal(context.claudeAccountStatusText('fallback', true), '1/1');
+  assert.equal(context.claudeWebSettingsAccounts(providers).length, 2, 'both credential management entries remain reachable');
   state.settings = {};
   providers = [];
   assert.equal(context.claudeAccountStatusText('fallback', true), 'fallback');
+});
+
+test('a busy Claude save never reports a credential rejection or clears the draft', async () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf('async function saveAccountCredential(');
+  const end = app.indexOf('// The busy guard generated panels', start);
+  const guard = require('../../src/electron/renderer/limits/accountShell').createBusyGuard();
+  let release;
+  const busy = guard.run('claude', null, () => new Promise((resolve) => { release = resolve; }));
+  const messages = [];
+  let saved = false;
+  let cleared = false;
+  const context = { claudeOrganizationChoicesRevision: 0, claudeAccountActions: guard,
+    LIMIT_PROVIDERS: [], setAccountPanelMessage: (_id, message) => messages.push(message),
+    renderExternalProviderStatus() {}, commitAccountCredential: (operation) => operation(),
+    window: { tokenMonitor: { claude: { saveWebAccount: () => { saved = true; } } } } };
+  vm.runInNewContext(app.slice(start, end), context);
+  await context.saveAccountCredential('claude', { claudeWebAccountId: 'new', claudeWebCookie: 'draft' }, { clearInput: () => { cleared = true; } });
+  release();
+  await busy;
+  assert.equal(saved, false);
+  assert.equal(cleared, false);
+  assert.equal(messages.some((message) => message?.key?.includes('Rejected')), false);
 });
 
 test('an old Claude organization discovery cannot replace a newly saved cookie’s choices', async () => {

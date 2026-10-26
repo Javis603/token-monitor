@@ -5,7 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { createClaudeManagedAccounts } = require('../../src/electron/providers/claude/managedAccounts');
+const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('../../src/electron/providers/claude/managedAccounts');
+const { runLimitInvalidation } = require('../../src/electron/deviceRuntimeCoordinator');
 const { CredentialStore, persistSettingsAndCredentials } = require('../../src/shared/credentialStore');
 const { accountFieldProjection, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
@@ -22,6 +23,7 @@ function fixture(t) {
   const changes = [];
   const requests = [];
   let beforeFetch;
+  let onChanged;
   let failSettings = false;
   const fetch = async (url, init) => {
     const id = (init.headers.cookie || '').replace('sessionKey=sk-ant-', '').replace('-renewed', '');
@@ -46,11 +48,12 @@ function fixture(t) {
     projectSettings: () => accountFieldProjection(settings, {}),
     probeDeps: (renewed) => ({ ...deps, providerRuntimeState: new Map(),
       onClaudeWebCookieRenewed: ({ cookie }) => { renewed.claudeWebCookie = cookie; return true; } }),
-    onChanged: (account, reason, flags) => changes.push({ account, reason, flags })
+    onChanged: (account, reason, flags) => { changes.push({ account, reason, flags }); return onChanged?.(account, reason, flags); }
   });
   return { api, store, dir, changes, requests, deps,
     settings: () => settings, setSettings: (value) => { settings = value; },
     beforeFetch: (fn) => { beforeFetch = fn; }, failSettings: () => { failSettings = true; },
+    onChanged: (fn) => { onChanged = fn; },
     save: (id, accountId = 'new', extra = {}) => api.saveAccount({ claudeWebCookie: `sk-ant-${id}`, claudeWebAccountId: accountId, ...extra }) };
 }
 
@@ -73,12 +76,63 @@ test('managed accounts store metadata separately, reject generic writes and use 
   assert.equal((await f.api.setAccountEnabled(a.id, false)).ok, true);
   assert.equal(f.api.accounts()[0].enabled, false);
   assert.equal(f.store.readClaudeWebCredential(a.id), 'sessionKey=sk-ant-a');
-  assert.deepEqual(f.changes.at(-1).flags, { clear: true, refresh: false });
+  assert.deepEqual(f.changes.at(-1).flags, { clear: false, refresh: true, reconcileSources: true });
   assert.equal((await f.api.removeAccount(a.id)).ok, true);
   assert.equal(f.store.readClaudeWebCredential(a.id), '');
   assert.deepEqual(f.api.accounts().map((account) => account.id), [b.id]);
-  assert.deepEqual(f.changes.at(-1).flags, { clear: true, refresh: false });
+  assert.deepEqual(f.changes.at(-1).flags, { clear: false, refresh: true, reconcileSources: true });
 });
+
+for (const action of ['disable', 'remove']) {
+  for (const remaining of ['oauth', 'legacy', 'none']) {
+    test(`${action} reconciles the same identity through ${remaining} without polling sibling managed accounts`, async (t) => {
+      const f = fixture(t);
+      await f.save('a');
+      await f.save('b');
+      const [a, b] = f.api.accounts();
+      if (remaining === 'legacy') f.setSettings({ ...f.settings(), claudeWebCookie: 'sessionKey=sk-ant-a' });
+      if (remaining === 'oauth') {
+        f.deps.env = { CLAUDE_CODE_OAUTH_TOKEN: 'oauth-fixture' };
+        f.deps.platform = 'linux';
+      }
+      f.beforeFetch((url, init) => {
+        if (url.endsWith('/prepaid/credits')) return response(200, { amount: 2500, currency: 'USD' });
+        if (remaining !== 'oauth' || init.headers.cookie) return;
+        return url.endsWith('/api/oauth/profile')
+          ? response(200, { account: { uuid: 'account-a', email: 'a@example.com' }, organization: { uuid: 'org-a' } })
+          : response(200, { five_hour: { utilization: 35 } });
+      });
+      const runtime = createLimitsRuntime({ limitProviders: ['claude'] }, {
+        ...f.deps, resolveConfigSnapshot: () => f.settings(), resolveClaudeWebCredential: f.api.resolveCredential
+      });
+      t.after(() => runtime.stop());
+      await runtime.refresh('claude', 'credential-save');
+      assert.equal(runtime.getSnapshot().providers.filter((row) => row.accountKey === a.accountKey).length, 1);
+      assert.equal(runtime.getSnapshot().providers.find((row) => row.accountKey === a.accountKey).balance.amount, 25);
+      let invalidation;
+      let visibleDuringReconcile;
+      f.onChanged((account, reason, flags) => {
+        runtime.reconfigure(f.settings());
+        invalidation = runLimitInvalidation({ clearLimits: runtime.clear, refreshLimits: runtime.refresh },
+          claudeAccountChangeScope(account, flags), reason, flags);
+        visibleDuringReconcile = runtime.getSnapshot().providers.some((row) => row.accountKey === a.accountKey);
+        return invalidation;
+      });
+      f.requests.length = 0;
+      const result = action === 'remove' ? await f.api.removeAccount(a.id) : await f.api.setAccountEnabled(a.id, false);
+      assert.equal(result.ok, true);
+      assert.equal(visibleDuringReconcile, true, 'keep the merged reading visible while its remaining sources are checked');
+      await invalidation;
+      const rows = runtime.getSnapshot().providers;
+      assert.equal(rows.some((row) => row.accountKey === a.accountKey && row.status === 'ok'), remaining !== 'none');
+      assert.equal(rows.some((row) => row.accountKey === b.accountKey && row.status === 'ok'), true);
+      assert.equal(f.requests.some((request) => request.id === 'b'), false);
+      if (remaining === 'none') assert.equal(rows.some((row) => row.accountKey === a.accountKey), false);
+      if (remaining === 'oauth') assert.equal(rows.find((row) => row.accountKey === a.accountKey).balance, null);
+      if (remaining === 'legacy') assert.equal(rows.find((row) => row.accountKey === a.accountKey).balance.amount, 25);
+    });
+  }
+}
 
 test('a failed metadata save restores both the credential and the account list', async (t) => {
   const f = fixture(t);
@@ -93,6 +147,26 @@ test('a failed metadata save restores both the credential and the account list',
   assert.equal((await f.api.removeAccount(a.id)).ok, false);
   assert.deepEqual(f.api.accounts(), before);
   assert.equal(f.store.readClaudeWebCredential(a.id), 'sessionKey=sk-ant-a');
+});
+
+test('legacy observations expose only identity and are discarded when the credential or organization changes', async (t) => {
+  const f = fixture(t);
+  await f.save('a');
+  const [a] = f.api.accounts();
+  f.setSettings({ ...f.settings(), claudeWebCookie: 'sessionKey=sk-ant-a', claudeWebOrganizationId: 'org-a' });
+  const runtime = createLimitsRuntime({ limitProviders: ['claude'] }, {
+    ...f.deps, resolveConfigSnapshot: () => f.settings(), resolveClaudeWebCredential: f.api.resolveCredential,
+    onClaudeWebAccountResolved: f.api.resolved
+  });
+  t.after(() => runtime.stop());
+  await runtime.refresh('claude', 'credential-save');
+  assert.equal(f.api.legacyAccount().accountKey, a.accountKey);
+  assert.equal(JSON.stringify(f.api.legacyAccount()).includes('sk-ant'), false);
+  assert.equal(runtime.getSnapshot().providers.filter((row) => row.accountKey === a.accountKey).length, 1);
+  f.setSettings({ ...f.settings(), claudeWebOrganizationId: 'another-org' });
+  assert.equal(f.api.legacyAccount(), null);
+  f.setSettings({ ...f.settings(), claudeWebOrganizationId: 'org-a', claudeWebCookie: 'sessionKey=sk-ant-b' });
+  assert.equal(f.api.legacyAccount(), null);
 });
 
 test('an in-flight save cannot restore an account removed through its dedicated operation', async (t) => {
