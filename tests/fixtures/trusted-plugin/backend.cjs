@@ -6,6 +6,7 @@ exports.activate = async context => {
   let counter = 0;
   return {
     async call(method, value) {
+      if (method === 'tray') return { action: value.id, pid: process.pid };
       if (method === 'echo') return { value, pid: process.pid };
       if (method === 'file') {
         const file = path.join(context.dataDirectory, 'fixture.txt');

@@ -8,7 +8,7 @@ function dom() {
   const document = { createElement: tag => {
     const node = new Element(tag, document);
     Object.defineProperties(node, { isConnected: { get: () => document.body?.contains(node) || document.head?.contains(node) || false }, parentNode: { get: () => node.parent }, nextSibling: { get: () => node.parent?.children[node.parent.children.indexOf(node) + 1] } });
-    node.insertBefore = (child, next) => { child.remove(); const index = next ? node.children.indexOf(next) : node.children.length; child.parent = node; node.children.splice(index, 0, child); };
+    node.insertBefore = (child, next) => { if (child === next) return; child.remove(); const index = next ? node.children.indexOf(next) : node.children.length; child.parent = node; node.children.splice(index, 0, child); };
     return node;
   } };
   document.body = document.createElement('body'); document.head = document.createElement('head'); return document;
@@ -89,4 +89,50 @@ test('a throwing Tray drawing falls back without throwing through App compositio
   assert.equal(host.renderTray(descriptor, {}, {}), false);
   assert.equal(host.renderTray(descriptor, {}, {}), false);
   assert.equal(errors, 1); await host.dispose();
+});
+test('section/inline selectors follow rebuilt native anchors, preserve drafts and restore replacements', () => {
+  const document = dom(), native = document.createElement('div'); document.body.append(native);
+  const row = () => { const node = document.createElement('span'); node.className = 'metric'; node.hidden = false; return node; };
+  const first = row(), second = row(); native.append(first, second);
+  let views = [{ ...descriptor, selector: '.metric' }];
+  const mounted = [], removed = [];
+  const host = { mount(node, view, context) { mounted.push({ node, view, context }); if (!node.children.length) { const own = row(); node.append(own); } context.onMountStatus(true); }, unmount(node) { removed.push(node); } };
+  const content = create({ document, host, getViews: () => views, selection: () => descriptor.ref });
+  content.render('main.home.content', native);
+  assert.equal(mounted.length, 2); assert.equal(first.hidden, true); assert.equal(native.hidden, undefined);
+  const container = mounted[0].node; container.children[0].value = 'draft';
+  content.render('main.home.content', native);
+  assert.equal(mounted.length, 4, 'own author descendants are not selector anchors');
+  assert.equal(mounted[2].node, container);
+  const rebuilt = row(); native.replaceChildren(rebuilt);
+  content.render('main.home.content', native);
+  assert.equal(mounted.at(-1).node, container); assert.equal(container.children[0].value, 'draft');
+  assert.equal(mounted.at(-1).context.native, rebuilt); assert.equal(mounted.at(-1).context.root, native);
+  assert.equal(first.hidden, false); assert.equal(second.hidden, false); assert.equal(removed.length, 1);
+  views = []; content.render('main.home.content', native);
+  assert.equal(rebuilt.hidden, false); assert.equal(native.children.length, 1);
+});
+test('user order applies to additive views and invalid selectors cannot hide native content', t => {
+  const document = dom(), native = document.createElement('div'); document.body.append(native); native.hidden = false;
+  const calls = [];
+  const views = ['a', 'b'].map((id, index) => ({ ...descriptor, ref: `fixture/${id}`, mode: 'append', contentOrder: { 'main.home.content': 1 - index } }));
+  const content = create({ document, host: { mount(node, view) { calls.push(view.ref); }, unmount() {} }, getViews: () => views });
+  content.render('main.home.content', native); assert.deepEqual(calls, ['fixture/b', 'fixture/a']);
+  views.splice(0, 2, { ...descriptor, selector: '[' });
+  native.querySelectorAll = () => { throw Error('bad selector'); };
+  t.mock.method(console, 'error', () => {});
+  const bad = create({ document, host: { mount() { assert.fail('invalid selector must not mount'); }, unmount() {} }, getViews: () => views, selection: () => descriptor.ref });
+  bad.render('main.home.content', native); assert.equal(native.hidden, false);
+});
+
+test('overlapping selectors keep the selected additive order at the same native anchor', () => {
+  const document = dom(), native = document.createElement('div'), value = document.createElement('span');
+  value.className = 'metric'; native.append(value); document.body.append(native);
+  const views = ['.metric','span'].map((selector,index) => ({ ...descriptor, ref:`fixture/v${index}`, selector, mode:'append', contentOrder:{ 'main.home.content':index } }));
+  const content = create({ document, host:{mount(node,view){node.textContent=view.ref;},unmount(){}}, getViews:()=>views });
+  content.render('main.home.content',native);
+  assert.deepEqual(native.children.slice(1).map(node=>node.textContent),['fixture/v0','fixture/v1']);
+  views[0].contentOrder['main.home.content']=2;
+  content.render('main.home.content',native);
+  assert.deepEqual(native.children.slice(1).map(node=>node.textContent),['fixture/v1','fixture/v0']);
 });

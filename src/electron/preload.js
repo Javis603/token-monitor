@@ -300,6 +300,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
 // Trusted plugin UI shares this renderer. This is routing, not plugin isolation.
 contextBridge.exposeInMainWorld('tokenMonitorTrustedPlugins', {
   contentSelections: () => ipcRenderer.invoke('plugins:contentSelections'),
+  orderContent: (target, refs) => ipcRenderer.invoke('plugins:orderContent', target, refs),
   selectContent: (target, ref) => ipcRenderer.invoke('plugins:selectContent', target, ref),
   call: (id, method, args) => ipcRenderer.invoke('plugins:call', id, method, args),
   host: (id, method, args) => ipcRenderer.invoke('plugins:host', id, method, args),

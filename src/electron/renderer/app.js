@@ -6205,6 +6205,9 @@ function updateViewSwitcherOpenState({ focusMenu = false, focusDisclosure = fals
   if (state.viewSwitcherOpen) requestAnimationFrame(() => menu.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' }));
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
   if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
+  if (visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed) {
+    pluginContent?.render('main.navigation.content', els.viewSwitcher, { surface: 'page', navigate: openViewFromTray });
+  }
   return true;
 }
 
@@ -6332,6 +6335,9 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   if (state.viewSwitcherOpen) requestAnimationFrame(() => menu.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' }));
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
   if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
+  if (visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed) {
+    pluginContent?.render('main.navigation.content', els.viewSwitcher, { surface: 'page', navigate: openViewFromTray });
+  }
 }
 
 function homeModuleShell(kind, title, viewId, meta = '') {
@@ -7396,12 +7402,12 @@ function render() {
   if (pluginContent) {
     const target = `main.${state.breakdown}.content`;
     const roots = { home: els.homePanel, limits: els.limitsPanel, trends: els.trendsPanel, status: els.serviceStatusPanel };
-    const native = roots[state.breakdown] || els.breakdown;
+    const native = state.breakdown === 'session' && state.openSession ? els.sessionDetail : roots[state.breakdown] || els.breakdown;
     const visible = visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed;
-    pluginContent.retain(visible ? [target] : []);
+    pluginContent.retain(visible ? [target, 'main.navigation.content'] : []);
     if (visible && !state.breakdown.startsWith('plugin:')) pluginContent.render(target, native, {
       surface: 'page', period: state.period, source: state.settings?.hubMode, stats: state.stats,
-      navigate: openViewFromTray
+      navigate: openViewFromTray, session: state.openSession
     });
   }
 
@@ -12930,6 +12936,8 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
     app: window.tokenMonitor,
     native: {
       quota: limitWindowsView,
+      usageRow: data => { const node = rowTemplate(data); updateRow(node, { ...data, barValue: data.barValue ?? data.value, max: data.max ?? data.value, color: data.color || 'var(--accent)' }); return node; },
+      updateUsageRow: updateRow,
       quotaProvider: (id, label, record, color) => renderLimitProviderSolo(id, label, record, color),
       quotaGroup: (id, label, records, color) => renderLimitProviderGroup(id, label, records, color)
     },
@@ -12960,7 +12968,7 @@ function applyPluginCatalog(list) {
   state.pluginCatalog = list;
   // Home and the theme chips depend only on which plugins and views are
   // active; process metrics refresh every few seconds and must not re-render.
-  const key = JSON.stringify([list.contentSelections, (list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.revision,
+  const key = JSON.stringify([list.contentSelections, list.contentOrder, (list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.revision,
     (plugin.views || []).map((view) => [view.ref, view.title, view.surfaces, view.placements?.page, view.placements?.notch]), plugin.skins, plugin.revision])]);
   if (key !== pluginCatalogKey) {
     pluginCatalogKey = key;
@@ -12985,6 +12993,7 @@ async function loadPluginCatalog() {
 
 pluginApi = pluginBridge ? {
   list: loadPluginCatalog,
+  orderContent: async (target, refs) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.orderContent(target, refs)),
   selectContent: async (target, ref) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.selectContent(target, ref)),
   setEnabled: async (id, enabled) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled)),
   setBackground: async (id, enabled) => applyPluginCatalog(await pluginBridge.setBackground(id, enabled)),

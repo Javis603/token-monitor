@@ -91,6 +91,7 @@ function removePluginPlacements(settings, id) {
     hiddenHomeModules: splitList(settings.hiddenHomeModules).filter(token => !token.startsWith(tokenPrefix)).join(','),
     edgeDockItems: settings.edgeDockItems == null ? null : (normalizeEdgeDockItems(settings.edgeDockItems) || []).filter(item => !(item.type === 'plugin' && owns(item.ref))),
     trayCustomLayout: { ...trayLayout.normalizeTrayLayout(settings.trayCustomLayout), items: trayLayout.normalizeTrayLayout(settings.trayCustomLayout).items.filter(item => !(item.type === 'plugin' && owns(item.ref))) },
+    ...(Object.hasOwn(settings, 'pluginContentOrder') ? { pluginContentOrder: Object.fromEntries(Object.entries(placements.normalizeContentOrder(settings.pluginContentOrder)).map(([target, refs]) => [target, refs.filter(ref => !owns(ref))])) } : {}),
     pluginContentSelections: Object.fromEntries(Object.entries(placements.normalizeContentSelections(settings.pluginContentSelections)).filter(([, ref]) => !owns(ref))),
     pluginMainPages: placements.normalizeRefList(settings.pluginMainPages, 32).filter(ref => !owns(ref)),
     notchPluginPages: placements.normalizeNotchPluginPages(settings.notchPluginPages).filter(ref => !owns(ref))

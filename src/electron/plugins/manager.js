@@ -98,6 +98,7 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
   function descriptor(plugin, view) {
     const base = `tm-plugin://${plugin.id}/${plugin.revision}/`;
     return { ...view, title: localize(view.title, getLocale()), pluginId: plugin.id, ref: `${plugin.id}/${view.id}`,
+      contentOrder: Object.fromEntries((view.targets || []).map(target => { const index = (getSettings().pluginContentOrder?.[target] || []).indexOf(`${plugin.id}/${view.id}`); return [target, index < 0 ? Number.MAX_SAFE_INTEGER : index]; })),
       revision: plugin.revision, entry: plugin.manifest.ui ? base + plugin.manifest.ui : null,
       css: plugin.manifest.css.map(name => base + name), data: plugin.data, status: status(plugin) };
   }
@@ -141,6 +142,8 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
   return {
     reload, list: () => ({ enabled: master(), safeMode, plugins: [...plugins.values()].map(describe) }), payload,
     surfaceCatalog: surface => Object.values(payload(surface).views),
+    trayMenu: () => [...plugins.values()].filter(active).flatMap(plugin => plugin.manifest.trayMenu.map(item => ({ pluginId: plugin.id, id: item.id,
+      pluginName: localize(plugin.manifest.name, getLocale()), label: localize(item.label, getLocale()) }))),
     hasActive: () => [...plugins.values()].some(active),
     onChanged(fn) { changes.add(fn); return () => changes.delete(fn); },
     onViews(fn) { views.add(fn); return () => views.delete(fn); },

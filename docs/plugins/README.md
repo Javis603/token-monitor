@@ -27,7 +27,7 @@ Module-private variables and another process's memory are not automatically avai
 }
 ```
 
-`ui`, `backend`, `css`, `views`, `settings`, `skins` and `background` are optional; at least UI, backend or skins is required. UI views require `ui`. List every distributed file explicitly. Paths are package-relative, portable and cannot traverse parents or symlinks. Dependencies must be bundled beforehand; installation never runs npm or lifecycle scripts. Native addons require compatible OS/architecture/Electron ABI, and utility-process loading must be tested in a packaged build; arbitrary addons are not universally supported.
+`ui`, `backend`, `css`, `views`, `trayMenu`, `settings`, `skins` and `background` are optional; at least UI, backend or skins is required. UI views require `ui`. List every distributed file explicitly. Paths are package-relative, portable and cannot traverse parents or symlinks. Dependencies must be bundled beforehand; installation never runs npm or lifecycle scripts. Native addons require compatible OS/architecture/Electron ABI, and utility-process loading must be tested in a packaged build; arbitrary addons are not universally supported.
 
 `name`, `description` and view titles support localized strings. Optional `author`, HTTPS `homepage` and validated `identityIcon` provide attribution, not trust. `engines.tokenMonitor` can constrain the App version. API 1 manifests fail with `incompatible-plugin-api`; there is no prerelease compatibility layer. This experimental API can break; authors must follow release changes.
 

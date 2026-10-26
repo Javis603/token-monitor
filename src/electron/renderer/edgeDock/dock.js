@@ -126,7 +126,7 @@ function updatePluginViews(payload) {
   if (payload?.surface !== pluginSurface) return;
   pluginHost?.update(payload);
   if (surface === 'rail') refreshPluginCellLabels(railNode);
-  const key = JSON.stringify(Object.values(payload.views || {}).map(view => [view.ref, view.revision, view.targets, view.mode]));
+  const key = JSON.stringify(Object.values(payload.views || {}).map(view => [view.ref, view.revision, view.targets, view.mode, view.selector, view.contentOrder]));
   void window.tokenMonitorTrustedPlugins.contentSelections().then(value => {
     const next = key + JSON.stringify(value);
     if (pluginContentsKey === next) return;

@@ -1419,3 +1419,10 @@ test('every tray helper main.js destructures is actually exported', () => {
   const missing = names.filter((name) => typeof trayModule[name] === 'undefined');
   assert.deepEqual(missing, []);
 });
+test('plugin menu callbacks keep native Settings, recovery and Quit entries available', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({ state: { pluginMenu: [{ pluginId: 'fixture', id: 'ping', pluginName: 'Fixture', label: 'Ping' }] }, onPluginMenu: (...args) => calls.push(args) });
+  template.find(item => item.label === 'Fixture: Ping').click();
+  assert.deepEqual(calls, [['fixture', 'ping']]);
+  for (const label of ['Settings…', 'Restart without plugins', 'Quit Token Monitor']) assert.ok(template.some(item => item.label === label));
+});

@@ -236,6 +236,7 @@ function createPluginRuntime({
   function listWithPlacements() {
     const list = manager.list();
     list.contentSelections = { ...contentSelections() };
+    list.contentOrder = { ...(getSettings().pluginContentOrder || {}) };
     list.management = managed.status?.() || { available: true, error: null };
     const settings = getSettings() || {};
     const discovered = new Set(list.plugins.map(plugin => plugin.id));
@@ -308,6 +309,15 @@ function createPluginRuntime({
   }
 
   function registerIpc() {
+    handle('plugins:orderContent', (event, target, refs) => {
+      requireMain(event);
+      const allowed = new Set(manager.list().plugins.flatMap(plugin => (plugin.views || []).filter(view => view.targets?.includes(target) && view.mode !== 'replace').map(view => view.ref)));
+      if (typeof target !== 'string' || !/^[a-zA-Z][a-zA-Z0-9.-]{0,119}$/.test(target) || !Array.isArray(refs) || refs.length > 256 || new Set(refs).size !== refs.length || refs.some(ref => !allowed.has(ref))) throw new Error('Invalid content order');
+      const next = { ...(getSettings().pluginContentOrder || {}), [target]: refs };
+      if (Object.keys(next).length > 128) throw new Error('Too many content orders');
+      persistManagementSettings({ pluginContentOrder: next });
+      manager.settingsChanged(); return listWithPlacements();
+    });
     handle('plugins:selectContent', (event, target, ref) => {
       requireMain(event);
       if (typeof target !== 'string' || !/^[a-zA-Z][a-zA-Z0-9.-]{0,119}$/.test(target)) throw new Error('Invalid content target');
@@ -441,6 +451,11 @@ function createPluginRuntime({
       return structuredClone(skin);
     },
     manager,
+    trayMenu: () => manager.trayMenu(),
+    trayAction(id, action) {
+      if (!manager.trayMenu().some(item => item.pluginId === id && item.id === action)) return Promise.reject(new Error('Plugin Tray action is unavailable'));
+      return manager.call(id, 'tray', { id: action });
+    },
     async beforeSettingsChange(event, patch) {
       const reload = patch.pluginsEnabled === false && manager.hasActive();
       if (reload) await confirmCodeChange(event);

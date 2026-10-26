@@ -818,6 +818,28 @@
           wrap.append(row);
         }
       }
+      for (const target of new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode !== 'replace').flatMap(view => view.targets || []))) {
+        const views = (list.plugins || []).flatMap(item => (item.views || []).filter(view => view.mode !== 'replace' && view.targets?.includes(target)))
+          .sort((a, b) => (a.contentOrder?.[target] ?? Number.MAX_SAFE_INTEGER) - (b.contentOrder?.[target] ?? Number.MAX_SAFE_INTEGER));
+        if (views.length < 2) continue;
+        const rows = el(document, 'div', 'plugin-content-order');
+        for (const [index, view] of views.entries()) {
+          const row = el(document, 'div', 'settings-actions');
+          row.append(el(document, 'span', 'settings-note', view.title));
+          for (const direction of [-1, 1]) {
+            const move = button(direction < 0 ? '↑' : '↓', () => void run(() => {
+              const refs = views.map(item => item.ref);
+              [refs[index], refs[index + direction]] = [refs[index + direction], refs[index]];
+              return api.orderContent(target, refs);
+            }));
+            move.disabled = busy || index + direction < 0 || index + direction >= views.length;
+            move.setAttribute('aria-label', t(direction < 0 ? 'settings.limits.moveUp' : 'settings.limits.moveDown', { name: view.title }));
+            row.append(move);
+          }
+          rows.append(row);
+        }
+        wrap.append(detailSection(target, rows));
+      }
       const utility = el(document, 'div', 'settings-actions plugin-detail-utilities');
       if (plugin.runtime || plugin.logs?.length) utility.append(button(t('plugins.ui.diagnostics'), () => { diagnostics = true; render(); content.querySelector('.plugin-back')?.focus({ preventScroll: true }); }, 'plugin-diagnostics'));
       if (plugin.installation) {

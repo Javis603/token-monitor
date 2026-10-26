@@ -8489,7 +8489,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-permission.is-new { color: var(--orange); }
 .plugin-permission-network { color: var(--orange); }
 .plugin-risk { margin: 0; font-size: 0.6875rem; color: var(--orange); }
-.plugin-sandbox-note { margin: 0; }
 .plugin-consent-actions { justify-content: flex-end; }
 .settings-actions button.plugin-allow { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
 .plugin-views { display: flex; flex-direction: column; gap: 6px; }

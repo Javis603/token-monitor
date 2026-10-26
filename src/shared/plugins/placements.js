@@ -98,7 +98,14 @@
       .filter(([target, ref]) => /^[a-zA-Z][a-zA-Z0-9.-]{0,119}$/.test(target) && isRef(ref)).slice(0, 128));
   }
 
+  function normalizeContentOrder(value) {
+    return Object.fromEntries(Object.entries(value && typeof value === 'object' && !Array.isArray(value) ? value : {})
+      .filter(([target]) => /^[a-zA-Z][a-zA-Z0-9.-]{0,119}$/.test(target)).slice(0, 128)
+      .map(([target, refs]) => [target, normalizeRefList(refs, 256)]));
+  }
+
   return {
+    normalizeContentOrder,
     normalizeContentSelections,
     HOME_PREFIX,
     MAX_NOTCH_PAGES,

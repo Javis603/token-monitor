@@ -80,3 +80,35 @@ test('returning demand during cancelled activation starts the replacement backen
   assert.equal(f.children.length, 2); assert.equal(f.runtime.manager.backendCount(), 1);
   assert.equal(await f.invoke('plugins:call', 'trusted-fixture', 'echo', 'ready'), 'ready');
 });
+test('Tray menu enumeration is idle; callbacks are declared, demand-driven and revoked when disabled', async t => {
+  const f = await runtimeFixture(t); await f.install();
+  assert.deepEqual(f.runtime.trayMenu(), []);
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  assert.equal(f.runtime.trayMenu()[0].id, 'ping'); assert.equal(f.children.length, 0);
+  assert.deepEqual(await f.runtime.trayAction('trusted-fixture', 'ping'), { id: 'ping' });
+  await tick(); assert.equal(f.runtime.manager.backendCount(), 0);
+  await assert.rejects(async () => f.runtime.trayAction('trusted-fixture', 'unknown'));
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+  assert.deepEqual(f.runtime.trayMenu(), []);
+  await assert.rejects(async () => f.runtime.trayAction('trusted-fixture', 'ping'));
+});
+test('content ordering validates declared additive refs, persists and reaches descriptors without starting code', async t => {
+  const f = await runtimeFixture(t); await f.install();
+  const manifestPath = path.join(f.dir, 'plugins/trusted-fixture/manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath));
+  manifest.views.push(...['a','b'].map(id => ({ id, targets: ['main.model.content'] })));
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest)); await f.runtime.manager.reload();
+  const refs = ['trusted-fixture/b', 'trusted-fixture/a'];
+  const list = f.invoke('plugins:orderContent', 'main.model.content', refs);
+  assert.deepEqual(list.contentOrder['main.model.content'], refs);
+  assert.equal(list.plugins[0].views.find(view => view.id === 'b').contentOrder['main.model.content'], 0);
+  assert.equal(f.children.length, 0);
+  assert.throws(() => f.invoke('plugins:orderContent', 'main.model.content', ['other/a']));
+  assert.throws(() => f.invoke('plugins:orderContent', 'main.model.content', [refs[0],refs[0]]));
+  assert.throws(() => f.invoke('plugins:orderContent', 'main.limits.content', ['trusted-fixture/content']));
+});
+
+test('removing placements does not create an absent content-order setting', () => {
+  const { removePluginPlacements } = require('../../src/electron/plugins/placementSettings');
+  assert.equal(Object.hasOwn(removePluginPlacements({}, 'fixture'), 'pluginContentOrder'), false);
+});

@@ -46,7 +46,7 @@ app.whenReady().then(async () => {
   payloads.set('rail', { surface: 'rail', side: 'right', platform: process.platform, appearance, shape, cells: [stat], always: true, reveal: 1 });
   payloads.set('bubble', { surface: 'bubble', side: 'right', platform: process.platform, appearance, shape, cell: stat, maxCardHeight: 400 });
   payloads.set('notch', { surface: 'notch', platform: process.platform, appearance, shape, expanded: true,
-    geometry: { notched: false, gapWidth: 0, height: 32, headerX: 0, headerWidth: 680, shoulder: 0, summaryZoom: 1 }, cells: [stat], panel: { builtinPages: ['home'], pluginPages: [] }, summary: { items: [] }, motion: { shape, progress: 1, bodyHeight: 260, headerHeight: 0, summaryHeight: 32, bodyBox: { x: 0, width: 680 } } });
+    geometry: { notched: false, gapWidth: 0, height: 32, headerX: 0, headerWidth: 680, shoulder: 0, summaryZoom: 1 }, cells: [stat], panel: { builtinPages: ['home','limits','sessions','breakdown'], pluginPages: [] }, summary: { items: [] }, motion: { shape, progress: 1, bodyHeight: 260, headerHeight: 0, summaryHeight: 32, bodyBox: { x: 0, width: 680 } } });
   const push = kind => windows.get(kind)?.webContents.send(kind === 'notch' ? 'topNotch:render' : 'edgeDock:render', payloads.get(kind));
   ipcMain.on('edgeDock:ready', event => push(surfaceOf(event.sender)));
   ipcMain.on('topNotch:ready', () => push('notch'));
@@ -74,6 +74,16 @@ app.whenReady().then(async () => {
     assert.equal(await win.webContents.executeJavaScript(`document.querySelector('[data-plugin-target="${target}"]').previousElementSibling.hidden`), true);
     fs.writeFileSync(path.join(evidence, `${kind}-author.png`), (await win.webContents.capturePage()).toPNG());
   }
+  for (const page of ['limits','sessions','breakdown']) {
+    const target = `notch.${page}.content`, win = windows.get('notch');
+    await win.webContents.executeJavaScript(`document.querySelector('.notch-tab[data-page="${page}"]').click()`);
+    await js(`tokenMonitorTrustedPlugins.selectContent(${JSON.stringify(target)},'trusted-fixture/content')`);
+    await wait(win, `document.querySelector('[data-plugin-target="${target}"] input')`, target);
+    assert.equal(await win.webContents.executeJavaScript(`document.querySelector('[data-plugin-target="${target}"]').previousElementSibling.hidden`), true);
+    await js(`tokenMonitorTrustedPlugins.selectContent(${JSON.stringify(target)},null)`);
+    await wait(win, `!document.querySelector('[data-plugin-target="${target}"]')`, `${target} restoration`);
+  }
+  await windows.get('notch').webContents.executeJavaScript("document.querySelector('.notch-tab[data-page=home]').click()");
   const pids = [];
   for (const win of windows.values()) pids.push((await win.webContents.executeJavaScript("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','surface')")).pid);
   assert.equal(new Set(pids).size, 1); assert.equal(runtime.manager.backendCount(), 1);
@@ -97,7 +107,7 @@ app.whenReady().then(async () => {
   await js("tokenMonitorTrustedPlugins.selectContent('notch.summary.content',null)");
   await wait(windows.get('notch'), "!document.querySelector('[data-plugin-target=\"notch.summary.content\"]')", 'compact summary restoration');
   assert.deepEqual(errors, []);
-  fs.writeFileSync(path.join(evidence, 'surface-results.json'), JSON.stringify({ pids, sizeReports, errors, electron: process.versions.electron, scope: 'production secondary renderer/preloads/runtime, synthetic controller payloads; not OS hit-testing acceptance' }, null, 2));
+  fs.writeFileSync(path.join(evidence, 'surface-results.json'), JSON.stringify({ pids, notchPages: ['home','limits','sessions','breakdown'], sizeReports, errors, electron: process.versions.electron, scope: 'production secondary renderer/preloads/runtime, synthetic controller payloads; not OS hit-testing acceptance' }, null, 2));
   console.log('PASS rail/bubble/Notch native content replacement, shared process, visibility union and restoration');
   await runtime.dispose(); runtime = null;
   for (const win of windows.values()) win.destroy(); main.destroy(); clearTimeout(deadline); app.exit(0);

@@ -671,6 +671,7 @@ function defaultSettings() {
     notchBuiltinPages: [...pluginPlacements.NOTCH_BUILTIN_PAGES],
     pluginMainPages: [],
     pluginContentSelections: {},
+    pluginContentOrder: {},
     lastViewState: { period: 'today', breakdown: 'home' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
@@ -2817,6 +2818,7 @@ function readSettings() {
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
+    merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
     merged.pluginContentSelections = pluginPlacements.normalizeContentSelections(merged.pluginContentSelections);
     merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
     delete merged.pluginSkinRef;
@@ -6494,6 +6496,7 @@ function ensureTray() {
   if (!shouldCreateTray(settings)) return false;
   if (tray && !tray.isDestroyed()) return;
   tray = createTray({
+    onPluginMenu: (id, action) => { void pluginRuntime?.trayAction(id, action).catch(error => console.warn(`[plugins] Tray action: ${error.message}`)); },
     onRestartPluginsSafe: () => {
       app.relaunch({ args: [...process.argv.slice(1).filter(arg => arg !== '--plugins-safe-mode'), '--plugins-safe-mode'] });
       disposePluginRuntime();
@@ -6503,6 +6506,7 @@ function ensureTray() {
       const codex = trayCodexMenuState();
       return {
         appVersion: appVersion(),
+        pluginMenu: pluginRuntime?.trayMenu() || [],
         locale: trayMenuLocale(),
         refreshing: trayRefreshInFlight,
         trayContent: settings?.trayContent || 'tokens',
@@ -8068,6 +8072,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.syncContentBase;
     delete normalizedPatch.pluginStates;
     delete normalizedPatch.pluginContentSelections;
+    delete normalizedPatch.pluginContentOrder;
     // Account fields declared persist:'never' (managed account lists, profile
     // maps, workbuddy session fields) are stripped by the registry walk below.
     normalizeAccountPatch(patch, normalizedPatch);
@@ -9715,7 +9720,7 @@ app.whenReady().then(() => {
         },
         persistManagementSettings: (patch) => {
           // Main-owned transaction state only; never exposed as generic renderer settings.
-          const allowed = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections'];
+          const allowed = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
           settings = { ...settings, ...Object.fromEntries(allowed.filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]])) };
           settings.pluginStates = normalizePluginStates(settings.pluginStates);
           saveSettings({ throwOnError: true });
@@ -9769,7 +9774,7 @@ app.whenReady().then(() => {
         },
       });
       void pluginRuntime.start().catch(error => console.warn(`[plugins] startup: ${error.message}`));
-      pluginRuntime.manager.onChanged(repaintDockSurfaces);
+      pluginRuntime.manager.onChanged(() => { repaintDockSurfaces(); refreshTrayContextMenu(); });
       if (latestStats) pluginRuntime.publishStats(electronPresentationStats(latestStats), latestStats);
     } catch (error) {
       pluginRuntime = null;

@@ -84,8 +84,18 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
     if (!surfaces.length && !targets.length) fail(`view needs surfaces or content targets: ${view.id}`);
     const mode = view.mode ?? 'append';
     if (!['append', 'replace', 'decorate'].includes(mode)) fail(`invalid view mode: ${view.id}`);
-    views.push({ id: view.id, title: normalizeLocalized(view.title, 80) || name, surfaces, targets, mode,
+    const selector = view.selector ?? null;
+    if (selector !== null && (typeof selector !== 'string' || !selector.trim() || selector.length > 500 || !targets.length)) fail(`invalid content selector: ${view.id}`);
+    if (mode === 'replace' && targets.includes('main.navigation.content')) fail('core navigation cannot be replaced');
+    views.push({ id: view.id, title: normalizeLocalized(view.title, 80) || name, surfaces, targets, mode, selector,
       icon: typeof view.icon === 'string' ? view.icon.slice(0, 32) : 'dot' });
+  }
+  const trayMenu = [], menuIds = new Set();
+  if (raw.trayMenu !== undefined && (!Array.isArray(raw.trayMenu) || raw.trayMenu.length > 32)) fail('trayMenu must contain at most 32 items');
+  for (const item of Array.isArray(raw.trayMenu) ? raw.trayMenu : []) {
+    const label = normalizeLocalized(item?.label, 80);
+    if (!backend || !isObject(item) || typeof item.id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(item.id) || menuIds.has(item.id) || !label) { fail('invalid Tray menu item or missing backend'); continue; }
+    menuIds.add(item.id); trayMenu.push({ id: item.id, label });
   }
   let settings, identityIcon;
   try { settings = normalizeSettings(raw.settings); identityIcon = normalizeIdentityIcon(raw.identityIcon); } catch (error) { fail(error.message); }
@@ -97,6 +107,6 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
     name, description: normalizeLocalized(raw.description, 240), author: cleanText(raw.author, 80),
     homepage: typeof raw.homepage === 'string' && /^https:\/\//.test(raw.homepage) ? raw.homepage.slice(0, 300) : '',
     ui, backend, files: Object.freeze([...files]), css: Object.freeze([...css]), views: Object.freeze(views),
-    skins: Object.freeze(skins), settings, identityIcon, background: raw.background === true }) };
+    skins: Object.freeze(skins), trayMenu: Object.freeze(trayMenu), settings, identityIcon, background: raw.background === true }) };
 }
 module.exports = { API_MAJOR, ID_RE, SURFACES, SKIN_COLOR_KEYS, apiMajor, filePath, normalizeManifest };

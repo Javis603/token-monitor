@@ -6,13 +6,15 @@ Run `npm run verify` for lint and Node tests. `npm run verify:plugins` exercises
 env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron scripts/test-plugin-trusted.cjs
 env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron scripts/test-plugin-trusted-runtime.cjs
 env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron scripts/test-plugin-trusted-app.cjs
+# Keep the synthetic App open after assertions for a manual look (never the real profile):
+env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron scripts/test-plugin-trusted-app.cjs --demo
 env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron scripts/test-plugin-trusted-surfaces.cjs
 env -u ELECTRON_RUN_AS_NODE node_modules/.bin/electron scripts/test-plugin-trusted-runtime.cjs --plugins-safe-mode
 # macOS: local unsigned ASAR/native-addon smoke
 node scripts/test-plugin-trusted-packaged.cjs
 ```
 
-Fixtures use self-authored minimal modules and scratch data. The engine fixture covers shared process identity, local file IO, loopback network, host calls and teardown. The runtime fixture uses real management and preload IPC. The App fixture loads production index.html, app.js, styles and preload with real plugin runtime; non-plugin collector/account IPC is synthetic. It is not full-main, packaged or physical Notch acceptance. Keep these distinctions in reports.
+Fixtures use self-authored minimal modules and scratch data. The engine fixture covers shared process identity, local file IO, loopback network, host calls and teardown. The runtime fixture uses real management and preload IPC. The App fixture loads production index.html, app.js, styles and preload with real plugin runtime; non-plugin collector/account IPC is synthetic. It enumerates all current native main-page targets, session detail, section/inline selectors, navigation ordering, native row reuse, custom author settings, Tray callback and actual disable/reload restoration. The secondary fixture covers all four native Notch pages, compact summary and Dock rail/card. It is not full-main, packaged or physical Notch acceptance. Keep these distinctions in reports.
 
 Acceptance must cover installation without execution, explicit revision trust, one backend across surfaces, no-demand shutdown, source/period updates, retained drafts, original-content selection, native fallback, update/rollback, removal retention and external safe mode. No active plugin must add no continuous plugin sampling/process/projection work. This does not promise identical RAM bytes, and arbitrary trusted author timers remain the author's responsibility.
 
