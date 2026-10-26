@@ -179,6 +179,12 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),
     status: (options = {}) => ipcRenderer.invoke('cursor:status', options)
   },
+  claude: {
+    accounts: () => ipcRenderer.invoke('claude:accounts'),
+    saveWebAccount: (values) => ipcRenderer.invoke('claude:saveWebAccount', values),
+    removeWebAccount: (id) => ipcRenderer.invoke('claude:removeWebAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('claude:setAccountEnabled', id, enabled)
+  },
   limits: {
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
     listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),

@@ -152,6 +152,7 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createClaudeManagedAccounts } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
   codexAuthIdentity,
@@ -889,16 +890,38 @@ function defaultLimitProviderOrder() {
   return parseLimitProviders().join(',');
 }
 
-function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
+let claudeManagedAccountService = null;
+
+function claudeAccountService() {
+  if (!claudeManagedAccountService) {
+    claudeManagedAccountService = createClaudeManagedAccounts({
+      getSettings: () => settings,
+      setSettings: (next) => { settings = next; },
+      saveSettings: () => saveSettings({ throwOnError: true }),
+      credentialStore: ensureCredentialStore(),
+      probeDeps: credentialProbeDeps,
+      projectSettings: settingsForRenderer,
+      onChanged: (account, reason, options) => {
+        pushSettingsToRenderer();
+        deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+        const scope = { provider: 'claude', accountId: account.id,
+          ...(account.accountKey ? { accountKey: account.accountKey } : {}) };
+        return queueLimitInvalidation(scope, reason, options);
+      }
+    });
+  }
+  return claudeManagedAccountService;
+}
+
+function persistClaudeWebCookieRenewal({ accountId, previousCookie, cookie } = {}) {
+  if (accountId) return claudeAccountService().renew({ accountId, previousCookie, cookie });
   if (!settings?.claudeWebCookie) return false;
   let expected;
   let renewed;
   try {
     expected = normalizeAccountField('claudeWebCookie', previousCookie);
     renewed = normalizeAccountField('claudeWebCookie', cookie);
-  } catch (_) {
-    return false;
-  }
+  } catch (_) { return false; }
   if (!renewed || normalizeAccountField('claudeWebCookie', settings.claudeWebCookie) !== expected) return false;
   if (settings.claudeWebCookie === renewed) return true;
   settings.claudeWebCookie = renewed;
@@ -964,6 +987,8 @@ function electronLimitsDeps() {
     },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onClaudeWebAccountResolved: (observation) => claudeAccountService().resolved(observation),
+    resolveClaudeWebCredential: (account) => claudeAccountService().resolveCredential(account),
     onStepfunTokenRenewed: persistStepfunTokenRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
     resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
@@ -2187,6 +2212,8 @@ function ensureSettingsLoaded() {
   const persistedCodexAccounts = settings.codexManagedAccounts;
   const hydratedCodexAccounts = hydrateCodexManagedAccounts(persistedCodexAccounts);
   persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+  try { claudeAccountService().migrateLegacyAccounts(); }
+  catch (error) { reportCredentialStorageError('could not migrate Claude Web accounts', error); }
   if (JSON.stringify(hydratedCodexAccounts) !== JSON.stringify(persistedCodexAccounts)) {
     settings.codexManagedAccounts = hydratedCodexAccounts;
     if (!saveSettings()) {
@@ -8628,6 +8655,10 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
+  ipcMain.handle('claude:accounts', () => claudeAccountService().accounts());
+  ipcMain.handle('claude:saveWebAccount', (_event, values) => claudeAccountService().saveAccount(values));
+  ipcMain.handle('claude:removeWebAccount', (_event, id) => claudeAccountService().removeAccount(String(id || '')));
+  ipcMain.handle('claude:setAccountEnabled', (_event, id, enabled) => claudeAccountService().setAccountEnabled(String(id || ''), enabled));
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));

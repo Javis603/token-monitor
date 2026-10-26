@@ -89,6 +89,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
   assert.deepEqual(CREDENTIAL_SETTING_PATHS, {
     hubHostSecret: ['hub', 'hostSecret'],
     secret: ['hub', 'clientSecret'],
+    claudeWebAccounts: ['providers', 'claude', 'webAccounts'],
     claudeWebCookie: ['providers', 'claude', 'webCookie'],
     opencodeCookie: ['providers', 'opencode', 'cookie'],
     opencodeProfiles: ['providers', 'opencode', 'profiles'],
@@ -288,9 +289,9 @@ test('settings:update normalizes provider fields and strips separately managed a
     const patch = { [key]: value };
     const normalized = { ...patch };
     normalizeAccountPatch(patch, normalized);
-    assert.equal(normalized[key], normalizeAccountField(key, value), key);
+    assert.deepEqual(normalized[key], normalizeAccountField(key, value), key);
     if (fields.find((field) => field.key === key).persist !== 'spread') {
-      assert.equal(finalAccountSettings(patch, {})[key], normalized[key], key);
+      assert.deepEqual(finalAccountSettings(patch, {})[key], normalized[key], key);
     }
   }
   assert.equal(finalAccountSettings({}, {}).zaiApiRegion, 'global');
@@ -303,7 +304,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   assert.equal(Object.hasOwn(finalAccountSettings({ kimiApiKey: 'x' }, {}), 'kimiApiKey'), false);
 
   const managedKeys = [
-    'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
+    'claudeManagedAccounts', 'claudeWebAccounts', 'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
     'workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId',
     'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo',
     'openrouterProfiles', 'thirdPartyProfiles'
@@ -502,7 +503,8 @@ test('the renderer account config names the settings keys main must project', ()
 test('static account statuses refresh in both paths while descriptor panels use the form loop', () => {
   const config = evalTopLevel(appSource, 'const externalLimitAccountConfig = {', '\nfunction clearDisabledLimitProviderPendingChecks(');
   const expected = Object.keys(config).sort();
-  const calls = [...appSource.matchAll(/renderExternalProviderStatus\('([a-z]+)'\)/g)].map((match) => match[1]);
+  const calls = [...appSource.matchAll(/renderExternalProviderStatus\('([a-z]+)'\)/g)].map((match) => match[1])
+    .filter((provider) => expected.includes(provider));
   assert.deepEqual(calls.slice(0, expected.length).sort(), expected);
   assert.deepEqual(calls.slice(expected.length, expected.length * 2).sort(), expected);
   for (const provider of expected) {

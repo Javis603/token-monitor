@@ -6,6 +6,37 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+test('Claude card counts healthy identities instead of letting one linked account hide failures', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf('function claudeWebSettingsAccounts(');
+  const end = app.indexOf('function renderClaudeWebAccounts(', start);
+  const state = { settings: { claudeManagedAccounts: [
+    { id: 'a', accountKey: 'a', enabled: true },
+    { id: 'b', accountKey: 'b', enabled: true },
+    { id: 'c', accountKey: 'c', enabled: false },
+    { id: 'unchecked', enabled: true }
+  ] } };
+  let providers = [
+    { accountKey: 'a', source: 'web', status: 'ok' },
+    { accountKey: 'b', source: 'web', status: 'unauthorized' },
+    { accountKey: 'c', source: 'web', status: 'ok' },
+    { accountKey: 'a', source: 'oauth', status: 'ok' }
+  ];
+  const context = { state, localProviderStatuses: () => providers,
+    t: (_key, { linked, total }) => `${linked}/${total}` };
+  vm.runInNewContext(app.slice(start, end), context);
+  assert.equal(context.claudeAccountStatusText('fallback', true), '1/4');
+  assert.equal(context.claudeAccountStatusText('fallback', false), '0/4');
+  providers.push({ accountKey: 'local', source: 'oauth', status: 'ok' });
+  assert.equal(context.claudeAccountStatusText('fallback', true), '2/5');
+  state.settings = { claudeManagedAccounts: [], claudeWebLegacyCookieConfigured: true };
+  providers = [{ accountKey: 'legacy', source: 'web', status: 'ok' }];
+  assert.equal(context.claudeAccountStatusText('fallback', true), '1/1');
+  state.settings = {};
+  providers = [];
+  assert.equal(context.claudeAccountStatusText('fallback', true), 'fallback');
+});
+
 test('an old Claude organization discovery cannot replace a newly saved cookieâ€™s choices', async () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const start = app.indexOf('let claudeOrganizationChoicesRevision = 0;');
@@ -26,6 +57,7 @@ test('an old Claude organization discovery cannot replace a newly saved cookieâ€
   };
   const context = {
     state,
+    accountShellApi: require('../../src/electron/renderer/limits/accountShell'),
     LIMIT_PROVIDERS: [{ id: 'claude', label: 'Claude' }],
     document: {
       getElementById: (id) => ({

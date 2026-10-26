@@ -4,8 +4,27 @@
 // src/shared/limits/accounts.js for the field schema.
 module.exports = {
   id: 'claude',
-  fetch: 'fetchClaudeLimits',
+  fetch: 'fetchClaudeAccountsLimits',
   fields: [
+    {
+      key: 'claudeManagedAccounts',
+      kind: 'managed',
+      contextOverride: true,
+      persist: 'never',
+      watch: false,
+      initial: [],
+      project: (value, limits) => limits.normalizeClaudeManagedAccounts(value)
+    },
+    {
+      key: 'claudeWebAccounts',
+      kind: 'managed',
+      storePath: ['providers', 'claude', 'webAccounts'],
+      persist: 'never',
+      watch: false,
+      rendererOmit: true,
+      config: false,
+      initial: []
+    },
     {
       key: 'claudeWebCookie',
       kind: 'credential',
@@ -29,7 +48,19 @@ module.exports = {
     sourceKey: 'claudeWebCookieSource',
     pendingKey: 'claudePendingCheckSince'
   },
+  accountStatus({ settings, env, limits }) {
+    const stored = Boolean(settings?.claudeWebCookie);
+    const external = Boolean(limits.claudeWebCookie(env));
+    const managed = limits.normalizeClaudeManagedAccounts(settings?.claudeManagedAccounts).length > 0;
+    return {
+      claudeWebCookieConfigured: stored || external || managed,
+      claudeWebCookieSource: stored || managed ? 'settings' : external ? 'env' : '',
+      claudeWebLegacyCookieConfigured: stored || external,
+      claudeWebLegacyCookieSource: stored ? 'settings' : external ? 'env' : ''
+    };
+  },
   form: {
+    multipleAccounts: true,
     discover: { fn: 'listClaudeWebOrganizations', credential: 'claudeWebCookie', selection: 'claudeWebOrganizationId' },
     titleKey: 'settings.claude.title',
     openKey: 'settings.claude.openBrowser',
