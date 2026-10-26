@@ -27,11 +27,19 @@ function codingResponse() {
   return body;
 }
 const auth = { logged_in: true, auth_method: 'sso', active_profile: { name: 'personal' } };
+// `usage plan` reports subscribed:true for products the account never bought,
+// so the subscription list drives which products a test allows through.
+function subscriptions(...keys) {
+  return { plans: keys.map(key => ({ key, scope: 'personal', status: 'Running' })) };
+}
+function cliMock(handler, keys = ['agent-plan', 'coding-plan']) {
+  return async args => args[0] === 'plans' ? subscriptions(...keys) : handler(args);
+}
 test('logged-in CLI reports normalized quotas and pins the authenticated profile', async () => {
   const calls = [];
-  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: cliMock(async args => {
     calls.push(args); return args[0] === 'auth' ? auth : response(args[3]);
-  } });
+  }) });
   assert.equal(rows[0].source, 'cli');
   assert.equal(rows[0].status, 'ok');
   assert.equal(rows[0].accountLabel, 'Agent Plan');
@@ -45,10 +53,10 @@ test('logged-in CLI reports normalized quotas and pins the authenticated profile
 test('STS-only login is accepted; absent login never queries quota', async () => {
   for (const logged_in of [true, false]) {
     let count = 0;
-    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: cliMock(async args => {
       count += 1;
       return args[0] === 'auth' ? { ...auth, logged_in, auth_method: 'sts' } : response(args[3]);
-    } });
+    }) });
     if (!logged_in) assert.equal(count, 1);
     assert.equal(rows[0].status, logged_in ? 'ok' : 'notConfigured');
   }
@@ -77,8 +85,8 @@ test('no subscription is hidden, while errors and malformed quota are unavailabl
     if (variant === 'empty') body.items[0].periods = [];
     if (variant === 'unknown') body.items[0].periods = [{ label: 'unsupported', used: 1, total: 10 }];
     if (variant === 'zero') body.items[0].periods = [{ label: '5h', used: 0, total: 0 }];
-    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args =>
-      args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? response('coding-plan') : body });
+    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: cliMock(async args =>
+      args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? response('coding-plan') : body) });
     assert.equal(rows[0].status, variant === 'none' ? 'notConfigured' : 'unavailable');
     assert.ok(!JSON.stringify(rows).includes('sensitive'));
   }
@@ -124,7 +132,7 @@ test('a CLI zero-usage refresh replaces retained stale quota after a failure', a
     now: () => time,
     probeProvider: () => fetchVolcengineLimits({}, {
       env: {}, now: () => time,
-      runArkcli: async args => args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? response('coding-plan') : body
+      runArkcli: cliMock(async args => args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? response('coding-plan') : body)
     })
   });
   t.after(() => runtime.stop());
@@ -160,8 +168,8 @@ test('CLI identities remain distinct between users and stable across plan upgrad
 });
 test('personal Coding Plan reports authoritative percentages without invented absolute quota', async () => {
   const unsubscribed = response(); unsubscribed.items[0].subscribed = false;
-  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args =>
-    args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? codingResponse() : unsubscribed });
+  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: cliMock(async args =>
+    args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? codingResponse() : unsubscribed) });
   assert.equal(rows.length, 1);
   const [row] = rows;
   assert.equal(row.status, 'ok');
@@ -178,21 +186,52 @@ test('personal Coding Plan reports authoritative percentages without invented ab
   }
 });
 test('Coding and Agent Plans coexist with distinct stable identities', async () => {
-  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args =>
-    args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? codingResponse() : response() });
+  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: cliMock(async args =>
+    args[0] === 'auth' ? auth : args[3] === 'coding-plan' ? codingResponse() : response()) });
   assert.deepEqual(rows.map(row => row.accountLabel), ['Agent Plan', 'Coding Plan']);
   assert.equal(rows[0].accountKey, parseArkcliPlan(response(), now, 'agent-plan').accountKey);
   assert.notEqual(rows[0].accountKey, rows[1].accountKey);
   const upgraded = codingResponse(); upgraded.items[0].tier = 'max';
   assert.equal(parseArkcliPlan(upgraded, now, 'coding-plan').accountKey, rows[1].accountKey);
 });
+test('a plan missing from the subscription list is never shown as a phantom quota', async () => {
+  // `usage plan --product agent-plan` claims subscribed:true with all-zero
+  // periods on an account that only bought Coding Plan.
+  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: cliMock(async args => {
+    if (args[0] === 'auth') return auth;
+    return args[3] === 'coding-plan' ? codingResponse() : response();
+  }, ['coding-plan']) });
+  assert.deepEqual(rows.map(row => row.accountLabel), ['Coding Plan']);
+  assert.deepEqual(rows[0].windows.map(window => window.kind), ['session', 'weekly', 'billing']);
+});
+test('an account owning no personal plan reports unconfigured without probing quotas', async () => {
+  const calls = [];
+  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+    calls.push(args);
+    return args[0] === 'plans' ? subscriptions() : auth;
+  } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'notConfigured');
+  assert.deepEqual(calls, [
+    ['auth', 'status', '--format', 'json'],
+    ['plans', 'get', '--format', 'json', '--profile', 'personal']
+  ]);
+});
+test('CLI builds without a subscription command still probe both personal plans', async () => {
+  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+    if (args[0] === 'plans') throw new Error('unknown command');
+    if (args[0] === 'auth') return auth;
+    return args[3] === 'coding-plan' ? codingResponse() : response();
+  } });
+  assert.deepEqual(rows.map(row => row.accountLabel), ['Agent Plan', 'Coding Plan']);
+});
 test('a failed sibling query does not hide a healthy personal plan', async () => {
   for (const product of ['agent-plan', 'coding-plan']) {
-    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: cliMock(async args => {
       if (args[0] === 'auth') return auth;
       if (args[3] !== product) throw new Error('private upstream error');
       return product === 'coding-plan' ? codingResponse() : response();
-    } });
+    }) });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].status, 'ok');
     assert.equal(rows[0].accountLabel, product === 'coding-plan' ? 'Coding Plan' : 'Agent Plan');
@@ -227,12 +266,12 @@ test('a failed Coding Plan retains stale quota without staling a healthy Agent P
     autoStart: false,
     now: () => time,
     probeProvider: () => fetchVolcengineLimits({}, {
-      env: {}, now: () => time, runArkcli: async args => {
+      env: {}, now: () => time, runArkcli: cliMock(async args => {
         if (args[0] === 'auth') return auth;
         if (args[3] === 'agent-plan') return response();
         if (failCoding) throw new Error('private upstream error');
         return coding;
-      }
+      })
     })
   });
   t.after(() => runtime.stop());

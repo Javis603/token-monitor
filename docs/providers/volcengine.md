@@ -7,7 +7,9 @@ read_when:
 
 # Volcengine
 
-Explicit AK/SK or Ark API key configuration keeps its existing query path. When no credentials are configured, the enabled Volcengine provider can use `arkcli auth status --format json` followed by `arkcli usage plan --product agent-plan --format json` and `arkcli usage plan --product coding-plan --format json`.
+Explicit AK/SK or Ark API key configuration keeps its existing query path. When no credentials are configured, the enabled Volcengine provider can use `arkcli auth status --format json`, then `arkcli plans get --format json` to learn which personal plans the account owns, then `arkcli usage plan --product <plan> --format json` for each owned plan.
+
+The subscription list is authoritative. `usage plan --product` answers `subscribed: true` with all-zero periods for a plan the account never bought, so querying both products unconditionally would display a phantom plan with a full bar. An account with no owned personal plan reports unconfigured without a quota query. A CLI build that predates `plans get` falls back to probing both personal products.
 
 The authenticated profile is pinned for the quota query. No login command is run, and credentials are never exported or copied into Token Monitor. arkcli owns SSO/STS refresh. A missing executable or logged-out CLI remains unconfigured; a failed or malformed query is unavailable rather than zero quota. The existing limits runtime retains last-good quota on transient failures.
 

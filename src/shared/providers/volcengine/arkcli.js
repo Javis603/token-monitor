@@ -180,6 +180,19 @@ function parseArkcliPlan(body, updatedAt, product) {
   });
 }
 
+// `usage plan --product` reports subscribed:true with all-zero periods for a
+// plan the account never bought, so the subscription list is the only authority
+// on which products exist. Older CLI builds predate `plans get`.
+async function fetchPersonalPlanKeys(run, profile) {
+  const args = ['plans', 'get', '--format', 'json'];
+  if (profile) args.push('--profile', profile);
+  const body = await run(args);
+  if (!Array.isArray(body?.plans)) throw probeError();
+  return new Set(body.plans
+    .filter((plan) => plan && Object.hasOwn(PERSONAL_PLANS, plan.key) && plan.scope !== 'team')
+    .map((plan) => plan.key));
+}
+
 async function fetchArkcliLimits(deps, updatedAt) {
   const run = deps.runArkcli || ((args) => runArkcli(args, deps));
   const status = (value) => normalizeLimitProvider({ provider: 'volcengine', source: 'cli',
@@ -189,7 +202,18 @@ async function fetchArkcliLimits(deps, updatedAt) {
     if (typeof auth?.logged_in !== 'boolean') throw probeError();
     if (!auth.logged_in || !['sso', 'sts', 'aksk'].includes(auth.auth_method)) return [status('notConfigured')];
     const profile = auth.active_profile?.name;
-    const results = await Promise.allSettled(Object.keys(PERSONAL_PLANS).map(async (product) => {
+    let products = Object.keys(PERSONAL_PLANS);
+    let subscribed = null;
+    try {
+      subscribed = await fetchPersonalPlanKeys(run, profile);
+    } catch {
+      if (deps.signal?.aborted) throw abortError(deps.signal);
+    }
+    if (subscribed) {
+      products = products.filter((product) => subscribed.has(product));
+      if (!products.length) return [status('notConfigured')];
+    }
+    const results = await Promise.allSettled(products.map(async (product) => {
       const args = ['usage', 'plan', '--product', product, '--format', 'json'];
       if (profile) args.push('--profile', profile);
       return parseArkcliPlan(await run(args), updatedAt, product);
