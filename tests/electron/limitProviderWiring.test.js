@@ -89,7 +89,6 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
   assert.deepEqual(CREDENTIAL_SETTING_PATHS, {
     hubHostSecret: ['hub', 'hostSecret'],
     secret: ['hub', 'clientSecret'],
-    claudeWebAccounts: ['providers', 'claude', 'webAccounts'],
     claudeWebCookie: ['providers', 'claude', 'webCookie'],
     opencodeCookie: ['providers', 'opencode', 'cookie'],
     opencodeProfiles: ['providers', 'opencode', 'profiles'],
@@ -304,7 +303,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   assert.equal(Object.hasOwn(finalAccountSettings({ kimiApiKey: 'x' }, {}), 'kimiApiKey'), false);
 
   const managedKeys = [
-    'claudeManagedAccounts', 'claudeWebAccounts', 'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
+    'claudeManagedAccounts', 'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
     'workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId',
     'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo',
     'openrouterProfiles', 'thirdPartyProfiles'

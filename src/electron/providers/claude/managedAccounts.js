@@ -1,7 +1,7 @@
 'use strict';
 
 const { createCredentialCommands, providerSelectionIncluding } = require('../../limits/credentialCommands');
-const { claudeWebAccountMetadata, normalizeClaudeManagedAccounts, normalizeClaudeWebAccounts, upsertClaudeManagedAccount } = require('../../../shared/providers/claude/webAccounts');
+const { claudeWebAccountMetadata, normalizeClaudeManagedAccounts, upsertClaudeManagedAccount } = require('../../../shared/providers/claude/webAccounts');
 const { normalizeClaudeWebCookieInput } = require('../../../shared/providers/claude/limits');
 
 function claudeAccountChangeScope(account, options = {}) {
@@ -177,20 +177,10 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
     });
   }
 
-  function migrateLegacyAccounts() {
-    const legacy = normalizeClaudeWebAccounts(getSettings().claudeWebAccounts);
-    if (!legacy.length) return;
-    const current = accounts();
-    const missing = legacy.filter((account) => !current.some((entry) => entry.id === account.id));
-    // Read-back verification happens in writeClaudeWebCredential before the
-    // source is stripped by the ordinary settings/credentials transaction.
-    commit(normalizeClaudeManagedAccounts([...current, ...missing]), missing.map(({ id, cookie }) => ({ id, cookie })), { claudeWebAccounts: [] });
-  }
-
   return { accounts, saveAccount, removeAccount: (id) => mutateAccount(id),
     setAccountEnabled: (id, enabled) => typeof enabled === 'boolean'
       ? mutateAccount(id, enabled) : Promise.resolve({ ok: false, errorCode: 'invalidEnabled' }),
-    resolveCredential, renew, resolved, legacyAccount, migrateLegacyAccounts };
+    resolveCredential, renew, resolved, legacyAccount };
 }
 
 module.exports = { createClaudeManagedAccounts, claudeAccountChangeScope };

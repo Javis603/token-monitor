@@ -66,7 +66,7 @@ test('managed accounts store metadata separately, reject generic writes and use 
   assert.equal(fs.readFileSync(path.join(f.dir, 'settings.json'), 'utf8').includes('sk-ant-'), false);
   assert.equal(f.store.readClaudeWebCredential(a.id), 'sessionKey=sk-ant-a');
   assert.equal(f.store.readClaudeWebCredential(b.id), 'sessionKey=sk-ant-b');
-  const patch = { claudeManagedAccounts: [{ id: 'forged', accountKey: 'forged', cookie: 'secret' }], claudeWebAccounts: [{ cookie: 'forged' }] };
+  const patch = { claudeManagedAccounts: [{ id: 'forged', accountKey: 'forged', cookie: 'secret' }] };
   const normalized = { ...patch };
   normalizeAccountPatch(patch, normalized);
   assert.deepEqual(normalized, {});
@@ -302,23 +302,6 @@ test('session rotation compares the current credential and cannot resurrect a re
   await f.api.removeAccount(a.id);
   assert.equal(await f.api.renew({ accountId: a.id, previousCookie: 'sk-ant-a-renewed', cookie: 'sk-ant-late' }), false);
   assert.equal(f.store.readClaudeWebCredential(a.id), '');
-});
-
-test('migration verifies the new credential and strips the previous format only on success', async (t) => {
-  const f = fixture(t);
-  const original = { claudeManagedAccounts: [], claudeWebAccounts: [{ id: 'legacy-a', cookie: 'sessionKey=sk-ant-a', organizationId: 'org-a', accountKey: 'key-a' }] };
-  f.setSettings(original);
-  f.failSettings();
-  assert.throws(() => f.api.migrateLegacyAccounts(), /credentialStorageUnavailable/);
-  assert.equal(f.settings().claudeWebAccounts[0].cookie, 'sessionKey=sk-ant-a');
-  assert.equal(f.store.readClaudeWebCredential('legacy-a'), '');
-  f.api.migrateLegacyAccounts();
-  assert.equal(f.store.readClaudeWebCredential('legacy-a'), 'sessionKey=sk-ant-a');
-  assert.equal(f.settings().claudeWebAccounts.length, 0);
-  assert.equal(f.api.accounts()[0].accountKey, 'key-a');
-  assert.equal(fs.readFileSync(path.join(f.dir, 'settings.json'), 'utf8').includes('sk-ant-'), false);
-  f.api.migrateLegacyAccounts();
-  assert.equal(f.api.accounts().length, 1);
 });
 
 test('collection resolves only the selected managed credential and publishes no secret', async (t) => {

@@ -2213,8 +2213,6 @@ function ensureSettingsLoaded() {
   const persistedCodexAccounts = settings.codexManagedAccounts;
   const hydratedCodexAccounts = hydrateCodexManagedAccounts(persistedCodexAccounts);
   persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
-  try { claudeAccountService().migrateLegacyAccounts(); }
-  catch (error) { reportCredentialStorageError('could not migrate Claude Web accounts', error); }
   if (JSON.stringify(hydratedCodexAccounts) !== JSON.stringify(persistedCodexAccounts)) {
     settings.codexManagedAccounts = hydratedCodexAccounts;
     if (!saveSettings()) {

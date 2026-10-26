@@ -21,14 +21,6 @@ function normalizeClaudeManagedAccounts(value) {
   });
 }
 
-// Read-only input for migration from the first multi-Web-account format.
-function normalizeClaudeWebAccounts(value) {
-  return normalizeClaudeManagedAccounts(value).flatMap((account) => {
-    const cookie = String(value.find((entry) => entry?.id === account.id)?.cookie || '').trim();
-    return cookie ? [{ ...account, cookie }] : [];
-  });
-}
-
 function upsertClaudeManagedAccount(value, candidate, provider, accountId, now = Date.now()) {
   const accounts = normalizeClaudeManagedAccounts(value);
   const previous = accounts.find((account) => account.id === accountId)
@@ -48,4 +40,4 @@ function upsertClaudeManagedAccount(value, candidate, provider, accountId, now =
 }
 
 module.exports = { claudeWebAccountMetadata, normalizeClaudeManagedAccounts,
-  normalizeClaudeWebAccounts, upsertClaudeManagedAccount };
+  upsertClaudeManagedAccount };

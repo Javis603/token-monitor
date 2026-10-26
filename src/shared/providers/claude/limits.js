@@ -12,7 +12,7 @@ const path = require('node:path');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { aggregateLimits, normalizeLimitProvider } = require('../../limits/core');
 const { abortError, runWithProbeDeadline } = require('../../probeDeadline');
-const { claudeWebAccountMetadata, normalizeClaudeManagedAccounts, normalizeClaudeWebAccounts: normalizeWebAccounts } = require('./webAccounts');
+const { claudeWebAccountMetadata, normalizeClaudeManagedAccounts } = require('./webAccounts');
 const { hashKey } = require('../../hashKey');
 const { CLAUDE_PROBE_ARGS, prepareClaudeProbeDir } = require('./probe');
 const {
@@ -1350,14 +1350,6 @@ async function refreshClaudeCredentials(currentCredentials, deps = {}) {
 
 // The single-credential probe remains the save-time validator. Runtime fans out
 // the saved Web sessions alongside the automatic OAuth/CLI lane.
-function normalizeClaudeWebAccounts(value) {
-  return normalizeWebAccounts(value).map((account) => ({
-    ...account,
-    cookie: normalizeClaudeWebCookieInput(account.cookie),
-    organizationId: normalizeClaudeWebOrganizationId(account.organizationId)
-  }));
-}
-
 async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
   if (deps.probe === true) return fetchClaudeLimits(options, deps);
   const accounts = normalizeClaudeManagedAccounts(options.claudeManagedAccounts).filter((account) => account.enabled);
@@ -2283,7 +2275,6 @@ async function touchClaudeAuthPath(deps = {}) {
 
 module.exports = {
   claudeWebAccountMetadata,
-  normalizeClaudeWebAccounts,
   normalizeClaudeManagedAccounts,
   fetchClaudeAccountsLimits,
   claudeCommandCandidates,

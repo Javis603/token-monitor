@@ -16,16 +16,6 @@ module.exports = {
       project: (value, limits) => limits.normalizeClaudeManagedAccounts(value)
     },
     {
-      key: 'claudeWebAccounts',
-      kind: 'managed',
-      storePath: ['providers', 'claude', 'webAccounts'],
-      persist: 'never',
-      watch: false,
-      rendererOmit: true,
-      config: false,
-      initial: []
-    },
-    {
       key: 'claudeWebCookie',
       kind: 'credential',
       storePath: ['providers', 'claude', 'webCookie'],
