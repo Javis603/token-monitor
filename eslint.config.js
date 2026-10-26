@@ -25,6 +25,11 @@ module.exports = [
   },
 
   {
+    files: ['tests/fixtures/trusted-plugin/**/*.mjs'],
+    languageOptions: { sourceType: 'module', globals: globals.browser },
+  },
+
+  {
     // Renderer runs in the browser; UMD modules also touch module/window
     files: ['src/electron/renderer/**/*.js'],
     languageOptions: {
