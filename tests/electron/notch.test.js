@@ -1006,6 +1006,55 @@ test('hover grows the entry by default and opens on click; open mode waits for t
   assert.equal(last(open.windows[0]).expanded, true);
 });
 
+test('transparent resting corners neither hover nor capture menu bar input', (t) => {
+  for (const [shape, fullScreen] of [['notch', false], ['pill', false], ['notch', true]]) {
+    const f = fixture(t, { notchShape: shape, notchHoverAction: 'open' }, { isFullScreen: () => fullScreen });
+    const top = f.windows[0], g = last(top).geometry;
+    const left = top.getBounds().x + g.headerX;
+    const animations = () => top.messages.filter(m => m.channel === 'topNotch:animate').length;
+    const before = animations();
+    for (const x of [left + 1, left + g.headerWidth - 1]) {
+      f.screen.point = { x, y: g.y + g.height - 1 };
+      f.controller.poll(1000);
+      assert.equal(animations(), before, `${shape}: transparent lower corner must not hover`);
+      assert.equal(top.ignoreMouse, true, `${shape}: transparent lower corner stays click-through`);
+      press(f);
+      assert.equal(last(top).expanded, false);
+    }
+    f.screen.point = { x: g.centerX, y: g.y + g.height / 2 };
+    f.controller.poll(1100);
+    assert.equal(last(top).expanded, true, `${shape}: the visible center remains reachable`);
+  }
+});
+
+test('hover input follows the painted shell rather than the animation destination', (t) => {
+  const f = fixture(t, { notchHoverAction: 'peek' }, { reducedMotion: false });
+  const top = f.windows[0], g = last(top).geometry;
+  f.screen.point = { x: g.centerX, y: g.y + 10 }; f.controller.poll(1000);
+  assert.equal(top.ignoreMouse, false);
+  // No animation frame has arrived: this is inside the future grown shell only.
+  f.screen.point = { x: g.centerX, y: g.y + g.height + 2 }; f.controller.poll(1010);
+  assert.equal(top.ignoreMouse, true, 'unpainted hover growth cannot take input');
+  press(f);
+  assert.equal(last(top).expanded, false);
+});
+
+test('the open panel leaves its transparent lower corners click-through', (t) => {
+  for (const shape of ['notch', 'pill']) {
+    const f = fixture(t, { notchShape: shape });
+    const top = f.windows[0], g = last(top).geometry;
+    f.screen.point = { x: g.centerX, y: g.y + 10 }; f.controller.poll(1000);
+    assert.equal(last(top).expanded, true);
+    const open = notchBounds(display, notchGeometry(display, native, shape), true);
+    for (const x of [open.x + 1, open.x + open.width - 1]) {
+      f.screen.point = { x, y: open.y + open.height - 1 }; f.controller.poll(1010);
+      assert.equal(top.ignoreMouse, true, `${shape}: the open corner stays click-through`);
+    }
+    f.screen.point = { x: g.centerX, y: open.y + open.height - 2 }; f.controller.poll(1020);
+    assert.equal(top.ignoreMouse, false, `${shape}: the visible bottom edge still takes input`);
+  }
+});
+
 test('hover growth scales both ears with the shell and keeps the camera gap fixed', (t) => {
   for (const shape of ['auto', 'pill']) {
     const f = fixture(t, { notchShape: shape, notchHoverAction: 'peek' }, { reducedMotion: false });
