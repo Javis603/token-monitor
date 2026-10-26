@@ -75,11 +75,11 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-activity-count { font-weight: 600; }
 .notch-activity-waiting { color: var(--yellow); }
 .notch-waiting-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
-/* Transparent lenses blur rear marks while keeping each foreground mark sharp. */
+/* Session-only marks are one measured group, with a surface-coloured separator. */
 .notch-session-icons { display: inline-flex; align-items: center; isolation: isolate; }
-.notch-session-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 21px; width: 21px; height: 21px; }
+.notch-session-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 21px; width: 21px; height: 21px; border-radius: 50%; background: rgb(var(--glass-rgb)); }
 .notch-session-icon + .notch-session-icon { margin-left: -9px; }
-.notch-session-icon:not(:last-child)::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: 50%; backdrop-filter: blur(1.5px); pointer-events: none; }
+.is-notch-attached .notch-session-icon, html.notch-black .notch-session-icon { background: #000; }
 .notch-session-activity { --notch-waiting-color: #e7b764; gap: 6px; }
 .notch-session-activity .notch-activity-count { color: var(--notch-accent, var(--text)); font-size: 1.3em; font-weight: 600; line-height: 1; }
 .notch-session-activity .notch-activity-count.is-mixed { background: linear-gradient(115deg, #81d9e0 8%, #adbfdf 48%, #efb08e 95%); background-clip: text; -webkit-background-clip: text; color: transparent; }
