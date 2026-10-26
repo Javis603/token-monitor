@@ -106,10 +106,15 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
         : previous.map((entry) => entry.id === id ? { ...entry, enabled, updatedAt: new Date(now()).toISOString() } : entry);
       try {
         commit(next, removing ? [{ id, cookie: '' }] : []);
+        if ((removing || !enabled) && !account.accountKey) {
+          // Retire only this provisional ID. Reconciliation has no stable key
+          // yet, so its provider-wide refresh must never clear sibling rows.
+          changed(account, 'account-state', { clear: true, refresh: false });
+        }
         // Stable identity refreshes replace or explicitly retire the merged row.
         // Do not blank a still-valid OAuth/legacy reading while that runs.
         changed(removing ? account : next.find((entry) => entry.id === id), 'account-state', {
-          clear: (removing || !enabled) && !account.accountKey, refresh: true,
+          clear: false, refresh: true,
           ...(removing || !enabled ? { reconcileSources: true } : {})
         });
         return { ok: true, accounts: accounts(), settings: projectSettings() };

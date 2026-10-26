@@ -84,6 +84,74 @@ test('managed accounts store metadata separately, reject generic writes and use 
 });
 
 for (const action of ['disable', 'remove']) {
+  for (const healthySource of ['web', 'oauth']) {
+    test(`${action} of an unidentified account preserves healthy ${healthySource} through reconciliation and removes its temporary row`, async (t) => {
+      const f = fixture(t);
+      f.beforeFetch((url, init) => init.headers.cookie === 'sessionKey=sk-ant-a' && url.endsWith('/api/account')
+        ? response(503, {}) : undefined);
+      assert.equal((await f.save('a')).saved, true);
+      const [a] = f.api.accounts();
+      assert.equal(a.accountKey, '');
+      let b;
+      if (healthySource === 'web') {
+        await f.save('b');
+        b = f.api.accounts()[1];
+      } else {
+        f.deps.env = { CLAUDE_CODE_OAUTH_TOKEN: 'oauth-fixture' };
+        f.deps.platform = 'linux';
+      }
+      let release;
+      let reached;
+      const paused = new Promise((resolve) => { reached = resolve; });
+      let hold = false;
+      f.beforeFetch(async (url, init) => {
+        if (init.headers.cookie === 'sessionKey=sk-ant-a' && url.endsWith('/api/account')) return response(503, {});
+        if (hold && url.includes('/usage')) {
+          reached();
+          await new Promise((resolve) => { release = resolve; });
+        }
+        if (!init.headers.cookie && healthySource === 'oauth') return url.endsWith('/api/oauth/profile')
+          ? response(200, { account: { uuid: 'account-b', email: 'b@example.com' }, organization: { uuid: 'org-b' } })
+          : response(200, { five_hour: { utilization: 35 } });
+      });
+      const runtime = createLimitsRuntime({ limitProviders: ['claude'] }, {
+        ...f.deps, resolveConfigSnapshot: () => f.settings(), resolveClaudeWebCredential: f.api.resolveCredential
+      });
+      t.after(() => { release?.(); runtime.stop(); });
+      await runtime.refresh({ provider: 'claude', accountId: a.id }, 'account-added');
+      await runtime.refresh('claude', 'credential-save');
+      const healthy = runtime.getSnapshot().providers.find((row) => row.accountEmail === 'b@example.com');
+      assert.equal(healthy.status, 'ok');
+      if (b) assert.equal(healthy.accountKey, b.accountKey);
+      assert.equal(runtime.getSnapshot().providers.some((row) => !row.accountKey), true, 'seeded temporary account row exists');
+      const snapshots = [];
+      const unsubscribe = runtime.subscribe((snapshot) => snapshots.push(snapshot));
+      t.after(unsubscribe);
+      let invalidation;
+      f.onChanged((account, reason, flags) => {
+        runtime.reconfigure(f.settings());
+        invalidation = runLimitInvalidation({ clearLimits: runtime.clear, refreshLimits: runtime.refresh },
+          claudeAccountChangeScope(account, flags), reason, flags);
+        return invalidation;
+      });
+      hold = true;
+      const result = action === 'remove' ? await f.api.removeAccount(a.id) : await f.api.setAccountEnabled(a.id, false);
+      assert.equal(result.ok, true);
+      await paused;
+      const during = runtime.getSnapshot().providers;
+      const visibleDuring = during.some((row) => row.accountKey === healthy.accountKey && row.status === 'ok');
+      const temporaryRemoved = during.every((row) => row.accountKey);
+      hold = false;
+      release();
+      await invalidation;
+      assert.equal(visibleDuring, true, 'healthy identity must remain visible while collection is paused');
+      assert.equal(temporaryRemoved, true, 'only the unidentified account temporary row is cleared');
+      assert.equal(snapshots.every((snapshot) => snapshot.providers.some((row) => row.accountKey === healthy.accountKey && row.status === 'ok')), true);
+      assert.equal(runtime.getSnapshot().providers.length, 1);
+      assert.equal(runtime.getSnapshot().providers[0].accountKey, healthy.accountKey);
+      assert.equal(f.store.readClaudeWebCredential(a.id), action === 'remove' ? '' : 'sessionKey=sk-ant-a');
+    });
+  }
   for (const remaining of ['oauth', 'legacy', 'none']) {
     test(`${action} reconciles the same identity through ${remaining} without polling sibling managed accounts`, async (t) => {
       const f = fixture(t);

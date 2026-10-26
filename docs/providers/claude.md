@@ -60,7 +60,7 @@ The [shared activity pipeline](../architecture.md) owns refresh, patches and thi
 
 ## Limits source order
 
-`fetchClaudeAccountsLimits()` collects each saved Web account alongside the automatically detected OAuth/CLI account. Accounts are probed independently; a failed Web session cannot suppress another account. Each Web account has its own organization selection and cached display identity. Account-scoped refreshes publish only the requested identity. Removing or disabling a Web credential reconciles the stable identity through its remaining Web, legacy and OAuth/CLI sources; only a confirmed missing identity is retired. Transient failures retain last-good data through the limits runtime.
+`fetchClaudeAccountsLimits()` collects each saved Web account alongside the automatically detected OAuth/CLI account. Accounts are probed independently; a failed Web session cannot suppress another account. Each Web account has its own organization selection and cached display identity. Account-scoped refreshes publish only the requested identity. Removing or disabling a Web credential reconciles the stable identity through its remaining Web, legacy and OAuth/CLI sources; only a confirmed missing identity is retired. Before identity resolution, clear only that managed ID's provisional row, then reconcile the provider without clearing its other identities. Transient failures retain last-good data through the limits runtime.
 
 The single-credential `fetchClaudeLimits()` remains the form validator and uses these mutually exclusive paths:
 
