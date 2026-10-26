@@ -673,6 +673,8 @@ function defaultSettings() {
     showHomeLimitBars: false,
     homeLimitDisplayMode: 'text',
     showHomeLimitProviderNames: false,
+    homeToolDetails: true,
+    homeToolClients: '',
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     projectBreakdownMode: 'tool',
     historyEnabled: true,
@@ -2642,6 +2644,8 @@ function readSettings() {
     merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
     merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.homeToolDetails = parseBoolean(merged.homeToolDetails, true);
+    merged.homeToolClients = migrateClientSelection(merged.homeToolClients, normalizePinnedClients);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
     merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
@@ -8075,6 +8079,8 @@ app.whenReady().then(() => {
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
       homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
+      homeToolDetails: parseBoolean(patch.homeToolDetails ?? settings.homeToolDetails, true),
+      homeToolClients: migrateClientSelection(patch.homeToolClients ?? settings.homeToolClients, normalizePinnedClients),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
       limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),

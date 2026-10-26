@@ -24,6 +24,7 @@ class Element {
     this.events = {};
     this.attributes = {};
     this.dataset = {};
+    this.style = {};
     this.classList = { add() {}, toggle() {} };
   }
   append(...children) { this.children.push(...children); }
@@ -67,7 +68,10 @@ test('Tools, Models and Devices render more than their old hardcoded caps with u
     homeOverviewApi: overview, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }),
     t: key => key, modelRowsForPeriod: () => rows, homeToolSourceRows: () => rows,
     fixedPeriodDevices: () => devices, applyHomeListMark() {}, iconKindFor() {},
-    formatCompact: String, formatPercent: String, deviceAccent: '#fff', deviceStaleColor: '#888'
+    formatCompact: String, formatPercent: String, formatNumber: String, deviceAccent: '#fff', deviceStaleColor: '#888',
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    toolDetailsApi: require('../../src/electron/renderer/toolDetails'),
+    attributionComponent: () => 0
   };
   for (const [name, next, count] of [
     ['renderHomeToolModule', 'homeSessionAgo', 9],
@@ -76,7 +80,9 @@ test('Tools, Models and Devices render more than their old hardcoded caps with u
   ]) {
     vm.runInNewContext(`${source(name, next)}; ${name}(period);`, { ...context, period, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }) });
     assert.equal(context.body.children.length, count);
-    if (count !== 7) assert.equal(context.body.children[0].children[3].textContent, '5', 'share uses the full period total');
+    // Tool rows sit inside a card that also carries the per-tool stats.
+    const firstRow = name === 'renderHomeToolModule' ? context.body.children[0].children[0] : context.body.children[0];
+    if (count !== 7) assert.equal(firstRow.children[3].textContent, '5', 'share uses the full period total');
   }
 });
 

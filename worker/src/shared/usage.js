@@ -265,6 +265,8 @@ function emptyPeriod() {
     timedOutputTokens: 0,
     timedDurationMs: 0,
     modelThroughput: Object.create(null),
+    // Same raw counters keyed by tool, so Home can show each tool's model time and tok/s.
+    clientThroughput: Object.create(null),
     clients: {},
     clientCosts: {},
     clientCacheReads: {},
@@ -958,6 +960,7 @@ function normalizePeriod(input, options = {}) {
     // is different: its zero counters are synthetic and must never seed a live delta.
     period.capabilities.throughput = false;
     delete period.modelThroughput;
+    delete period.clientThroughput;
     return period;
   }
   const projectsEnabled = options.projectsEnabled !== false;
@@ -1073,6 +1076,8 @@ function normalizePeriod(input, options = {}) {
   }
   period.modelThroughput = normalizeModelThroughput(input.modelThroughput, period);
   if (!period.modelThroughput) delete period.modelThroughput;
+  period.clientThroughput = normalizeClientThroughput(input.clientThroughput, period);
+  if (!period.clientThroughput) delete period.clientThroughput;
   if (input.modelCosts && typeof input.modelCosts === 'object') {
     for (const [model, value] of Object.entries(input.modelCosts)) {
       const key = normalizeModelName(model);
@@ -1159,6 +1164,30 @@ function normalizeModelThroughput(value, period) {
   return result;
 }
 
+function normalizeClientThroughput(value, period) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const result = Object.create(null);
+  for (const [client, counters] of Object.entries(value)) {
+    const key = normalizeClientName(client);
+    if (!key || !counters || typeof counters !== 'object' || Array.isArray(counters)
+      || !['timedTokens', 'timedOutputTokens', 'timedDurationMs'].every((field) => hasOwn(counters, field))) continue;
+    const durationMs = Math.max(0, Math.round(asNumber(counters.timedDurationMs)));
+    const target = result[key] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+    target.timedTokens += Math.max(0, Math.round(asNumber(counters.timedTokens)));
+    target.timedDurationMs += durationMs;
+    target.timedOutputTokens += normalizeTimedOutputTokens(counters.timedOutputTokens, period.timedOutputTokens, durationMs);
+  }
+  for (const [client, counters] of Object.entries(result)) {
+    counters.timedTokens = Math.min(counters.timedTokens, period.timedTokens);
+    counters.timedDurationMs = Math.min(counters.timedDurationMs, period.timedDurationMs);
+    const outputBound = Math.min(period.timedOutputTokens,
+      hasOwn(period.clientOutputs, client) ? period.clientOutputs[client] : period.outputTokens);
+    counters.timedOutputTokens = normalizeTimedOutputTokens(counters.timedOutputTokens, outputBound, counters.timedDurationMs);
+  }
+  if (Object.keys(value).length && !Object.keys(result).length) return undefined;
+  return result;
+}
+
 
 // Exact per-message subtotals are authoritative, including zero. Older binaries
 // lack these fields, so retain their legacy whole-row behavior until upgraded.
@@ -1206,6 +1235,12 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   period.timedDurationMs += timedDurationMs;
   if (model && timedDurationMs > 0) {
     const counters = period.modelThroughput[model] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+    counters.timedTokens += timedTokens;
+    counters.timedOutputTokens += timedOutputTokens;
+    counters.timedDurationMs += timedDurationMs;
+  }
+  if (client && timedDurationMs > 0) {
+    const counters = period.clientThroughput[client] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
     counters.timedTokens += timedTokens;
     counters.timedOutputTokens += timedOutputTokens;
     counters.timedDurationMs += timedDurationMs;
@@ -1493,6 +1528,22 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
       if (output > 0) target.clientOutputs[client] = output;
       if (unclassified > 0) target.clientUnclassifiedTokens[client] = unclassified;
       if (unclassified > 0) target.capabilities.tokenComponents = false;
+      // Restore the retained client's timing with the period totals it counts
+      // toward. A source without the map cannot vouch for it: fail closed.
+      if (!source.clientThroughput) {
+        delete target.clientThroughput;
+      } else if (target.clientThroughput && source.clientThroughput[client]?.timedDurationMs > 0) {
+        const timing = source.clientThroughput[client];
+        const restored = {
+          timedTokens: Math.min(tokens, asNumber(timing.timedTokens)),
+          timedOutputTokens: Math.min(output, asNumber(timing.timedOutputTokens)),
+          timedDurationMs: asNumber(timing.timedDurationMs)
+        };
+        target.clientThroughput[client] = restored;
+        target.timedTokens += restored.timedTokens;
+        target.timedOutputTokens += restored.timedOutputTokens;
+        target.timedDurationMs += restored.timedDurationMs;
+      }
       addClientModelUsage(target, source, client);
       addClientSessionUsage(target, client, source.sessions, restoredSessions, projectsEnabled);
     }
@@ -1771,6 +1822,13 @@ function addPeriodInto(target, source) {
       for (const field of ['timedTokens', 'timedOutputTokens', 'timedDurationMs']) merged[field] += counters[field];
     }
   }
+  if (!source.clientThroughput) delete target.clientThroughput;
+  if (target.clientThroughput) {
+    for (const [client, counters] of Object.entries(source.clientThroughput)) {
+      const merged = target.clientThroughput[client] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+      for (const field of ['timedTokens', 'timedOutputTokens', 'timedDurationMs']) merged[field] += counters[field];
+    }
+  }
   for (const [client, tokens] of Object.entries(source.clients)) {
     target.clients[client] = (target.clients[client] || 0) + tokens;
     if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];
@@ -1941,6 +1999,9 @@ function applyPeriodDelta(base, freshToday, anchorToday) {
   const result = deltaValue(base, freshToday, anchorToday, '');
   if (result && (!base?.modelThroughput || !freshToday?.modelThroughput || !anchorToday?.modelThroughput)) {
     delete result.modelThroughput;
+  }
+  if (result && (!base?.clientThroughput || !freshToday?.clientThroughput || !anchorToday?.clientThroughput)) {
+    delete result.clientThroughput;
   }
   // Older anchors may still contain the pre-native Reasonix stats-path rows.
   // They are not authoritative session detail and must not survive a warm tick
