@@ -33,7 +33,7 @@ test('production Dock projection removes disabled, missing and master-off views 
   assert.equal(JSON.stringify(settings), before);
 });
 test('production Tray bitmap omits inactive plugin placeholders and restores enabled content', () => {
-  const view = { status: 'ok', tray: { text: '42%' } }, rendered = [];
+  const view = { status: 'active', tray: { text: '42%' } }, rendered = [];
   const layout = { version: trayLayout.VERSION, items: [{ id: 'plugin-cell', type: 'plugin', ref }] };
   const context = { state: { settings: {} }, localLiveCodexProvider: () => null, trayLayoutApi: trayLayout,
     currentCurrency: () => 'USD', compactTokenDisplayOptions: () => ({}), trayProviderImages: {},
@@ -47,7 +47,7 @@ test('production Tray bitmap omits inactive plugin placeholders and restores ena
     view.status = status; rendered.length = 0;
     assert.equal(context.renderCustomTrayLayout({}, layout), null); assert.equal(rendered.length, 0);
   }
-  view.status = 'ok'; assert.equal(context.renderCustomTrayLayout({}, layout), 'bitmap');
+  view.status = 'active'; assert.equal(context.renderCustomTrayLayout({}, layout), 'bitmap');
   assert.equal(rendered.length, 1); assert.equal(layout.items[0].ref, ref);
 });
 

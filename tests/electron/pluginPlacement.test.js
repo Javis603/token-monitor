@@ -1,8 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
 
 const { placementPatch, placementsFor } = require('../../src/electron/plugins/placementSettings');
@@ -11,7 +9,6 @@ const { normalizeEdgeDockItems, itemId } = require('../../src/electron/renderer/
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 const trayLayout = require('../../src/shared/trayLayout');
 const { buildNotchData } = require('../../src/electron/notch/data');
-const sandbox = require('../../src/electron/plugins/sandbox');
 
 const BUILTINS = ['limits', 'tool', 'model', 'session', 'device', 'trends'].map((id) => ({ id }));
 const REF = 'system-monitor/cpu';
@@ -47,7 +44,7 @@ test('placing on the tray turns the current preset into a custom layout plus the
   assert.equal(patch.trayContent, 'custom');
   assert.deepEqual(patch.trayCustomLayout.items.map((item) => item.type), ['icon', 'plugin']);
   assert.deepEqual(trayLayout.trayLayoutPluginRefs(patch.trayCustomLayout), [REF]);
-  const resolved = trayLayout.resolveTrayLayout(patch.trayCustomLayout, {}, { pluginViews: { [REF]: { status: 'ok', tray: { text: '42%' } } } });
+  const resolved = trayLayout.resolveTrayLayout(patch.trayCustomLayout, {}, { pluginViews: { [REF]: { status: 'active', tray: { text: '42%' } } } });
   assert.equal(resolved.items[1].available, true);
   assert.equal(resolved.items[1].plugin.tray.text, '42%');
   const removed = placementPatch({ trayContent: 'custom', ...patch }, { ref: REF, surface: 'tray', placed: false });
@@ -64,33 +61,6 @@ test('Notch selection is independent of visible tab capacity and preserves built
   assert.deepEqual(data.panel.pluginPages, ['a1/v', 'b1/v', 'c1/v', 'd1/v', 'e1/v', 'f1/v', 'g1/v']);
   assert.deepEqual(buildNotchData({ periods: {} }, [], { ...settings, notchSummaryEnabled: false, pluginsEnabled: false }).panel.pluginPages, []);
 });
-
-test('the plugin host page admits no network, script or frame sources', () => {
-  const csp = sandbox.HOST_CSP;
-  for (const directive of ["default-src 'none'", "connect-src 'none'", "script-src 'self'", 'worker-src blob:', "frame-src 'none'", "img-src 'none'", "form-action 'none'"]) {
-    assert.ok(csp.includes(directive), directive);
-  }
-  assert.ok(!/unsafe-(eval|inline)/.test(csp));
-  assert.equal(sandbox.requestAllowed('tm-plugin://demo/host.html'), true);
-  assert.equal(sandbox.requestAllowed('tm-plugin://demo/../../etc/passwd'), false);
-  assert.equal(sandbox.requestAllowed('tm-plugin://demo/manifest.json'), false);
-  assert.equal(sandbox.requestAllowed('blob:tm-plugin://demo/123'), true);
-  for (const url of ['https://example.com/', 'http://127.0.0.1:17321/api/stats', 'file:///etc/passwd', 'data:text/html,x', 'ws://localhost:1']) {
-    assert.equal(sandbox.requestAllowed(url), false, url);
-  }
-});
-
-test('plugin host windows are Chromium-sandboxed with no Node in page or workers', () => {
-  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/plugins/sandbox.js'), 'utf8');
-  for (const option of ['sandbox: true', 'contextIsolation: true', 'nodeIntegration: false', 'nodeIntegrationInWorker: false', 'webviewTag: false', 'backgroundThrottling: false']) {
-    assert.ok(source.includes(option), option);
-  }
-  assert.match(source, /setPermissionRequestHandler\(\(_webContents, _permission, callback\) => callback\(false\)\)/);
-  assert.match(source, /webContents\.ipc\.on\('plugin-host:message'/, 'messages are bound to the sending webContents');
-  const worker = sandbox.workerSource('tm.log(1);');
-  assert.match(worker, /\(function pluginMain\(\) \{\ntm\.log\(1\);\n\}\)\.call\(self\);/);
-});
-
 
 test('Edge Dock omits inactive plugin cells while retaining their saved placements', () => {
   const items = [{ type: 'stat', metric: 'liveRate' }, { type: 'plugin', ref: REF }];

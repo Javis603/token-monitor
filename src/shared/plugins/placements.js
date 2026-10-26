@@ -93,7 +93,13 @@
     return normalizeRefList(value, MAX_NOTCH_PAGES);
   }
 
+  function normalizeContentSelections(value) {
+    return Object.fromEntries(Object.entries(value && typeof value === 'object' && !Array.isArray(value) ? value : {})
+      .filter(([target, ref]) => /^[a-zA-Z][a-zA-Z0-9.-]{0,119}$/.test(target) && isRef(ref)).slice(0, 128));
+  }
+
   return {
+    normalizeContentSelections,
     HOME_PREFIX,
     MAX_NOTCH_PAGES,
     NOTCH_BUILTIN_PAGES,

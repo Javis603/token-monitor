@@ -6,9 +6,6 @@ const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const espree = require('espree');
-const { createRequire } = require('node:module');
-const { createDataBus } = require('../../src/shared/plugins/dataBus');
-const { createPluginManager } = require('../../src/electron/plugins/manager');
 const { normalizeAppearance, OPTIONS } = require('../../src/shared/plugins/appearance');
 const { persistSettingsAndCredentials, writePrivateJsonAtomic } = require('../../src/shared/credentialStore');
 const root = path.resolve(__dirname, '../..');
@@ -97,57 +94,6 @@ test('actual settings candidate and saveSettings rollback commit palette + snaps
   assert.equal(Object.hasOwn(writes[0], 'pluginSkinRef'), false);
   const restarted = JSON.parse(fs.readFileSync(file)); assert.deepEqual(plain(h.normalizePluginAuthorSkin(restarted.pluginAuthorSkin)), plain(selection.authorSkin));
 });
-function fixture(t, initialSettings = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-author-preset-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const userDir = path.join(dir, 'plugins'); fs.mkdirSync(userDir);
-  for (const id of ['author', 'second']) {
-    fs.mkdirSync(path.join(userDir, id)); fs.writeFileSync(path.join(userDir, id, 'manifest.json'), JSON.stringify({ id, name: id, version: '1.0.0', tmApi: '^1', permissions: [], skins: [{ id: 'mono', name: 'Mono', appearance: tokens }], views: [{ id: 'card', title: 'Card', surfaces: ['home', 'page', 'notch', 'edgeDock'], layout: { type: 'text', text: 'Preset' } }] }));
-  }
-  const settings = { pluginStates: {}, ...initialSettings }; const bus = createDataBus();
-  let getAppearance;
-  const legacyFile = path.join(dir, 'plugin-appearance.json'); const legacy = '{"font":"system","corners":"square"}'; fs.writeFileSync(legacyFile, legacy);
-  // Instantiate real runtime wiring and real manager; isolate Electron/background owners.
-  const filename = path.join(root, 'src/electron/plugins/runtime.js'); const nativeRequire = createRequire(filename);
-  let manager; const timers = [];
-  const mocks = {
-    './systemDetails': { registerSystemSources() {} }, './appSources': { createAppSources: () => ({ publish() {} }) },
-    './sandbox': { createPluginSandbox: () => null }, './pages': { createPluginPages: () => ({ refresh() {}, dispose() {} }) },
-    './managed': { createManagedPlugins: () => ({ recover() {}, dispose() {} }) }, './catalog': { createPluginCatalog: () => ({ dispose() {} }) },
-    './manager': { createPluginManager: options => { getAppearance = options.getAppearance; manager = createPluginManager({ ...options, builtinDir: path.join(dir, 'empty'), safeMode: false, setTimer: fn => { timers.push(fn); return fn; }, clearTimer: fn => { const index = timers.indexOf(fn); if (index >= 0) timers.splice(index, 1); }, saveStates: value => { settings.pluginStates = value; } }); return manager; } },
-    '../limits/fetch': { createElectronNetFetch: () => () => {} }, '../../shared/outboundFetch': { resolveProxyConfig: () => ({}) }
-  };
-  const module = { exports: {} }; vm.runInNewContext(runtimeSource, { module, require: id => mocks[id] || nativeRequire(id), __dirname: path.dirname(filename), process, console, setTimeout, clearTimeout, structuredClone });
-  const runtime = module.exports.createPluginRuntime({ electron: { app: {}, ipcMain: { handle() {}, on() {}, removeHandler() {}, removeListener() {} } }, userDataDir: dir, getSettings: () => settings, getLocale: () => 'en', isMainSender: () => false, env: {} });
-  runtime.start(); t.after(() => runtime.dispose()); t.after(() => bus.dispose());
-  return { runtime, manager, settings, getAppearance, legacyFile, legacy, userDir, flush: () => { while (timers.length) timers.shift()(); } };
-}
-test('real manager DTOs and runtime resolve active identities; snapshot survives disable/remove and repaints tokens', t => {
-  const f = fixture(t);
-  assert.throws(() => f.runtime.resolveSkin('author/mono'), /unavailable/);
-  for (const id of ['author', 'second']) f.manager.setEnabled(id, true);
-  const skin = f.runtime.resolveSkin('author/mono'); assert.equal(skin.ref, 'author/mono');
-  assert.equal(f.runtime.resolveSkin('second/mono').ref, 'second/mono');
-  assert.equal(f.manager.list().plugins.find(p => p.id === 'author').skins[0].ref, skin.ref);
-  f.settings.pluginAuthorSkin = { ref: skin.ref, appearance: skin.appearance };
-  const payloads = []; f.manager.onViews((surface, value) => payloads.push({ surface, value }));
-  for (const surface of ['home', 'page', 'notch', 'edgeDock']) f.manager.setSurfaceDemand(surface, ['second/card']);
-  f.flush(); payloads.length = 0; f.runtime.settingsChanged(); f.flush();
-  assert.equal(payloads.length, 4); for (const payload of payloads) assert.deepEqual(plain(payload.value.appearance), tokens); assert.deepEqual(plain(f.runtime.payload('home').appearance), tokens);
-  const viewSource = fs.readFileSync(path.join(root, 'src/electron/renderer/pluginViews.js'), 'utf8');
-  const properties = {}; const container = { dataset: {}, style: { setProperty: (key, value) => { properties[key] = value; }, removeProperty: key => delete properties[key] } };
-  const context = { container, value: f.runtime.payload('home').appearance }; vm.createContext(context); vm.runInContext(extract(viewSource, 'applyAppearance') + '\napplyAppearance(container, value)', context);
-  assert.deepEqual(container.dataset, { pvFont: 'mono', pvDensity: 'comfortable', pvCorners: 'soft', pvPanel: 'outline' });
-  assert.equal(properties['--pv-background'], tokens.colors.background); assert.equal(Object.keys(properties).length, 5);
-  f.manager.setEnabled('author', false); assert.throws(() => f.runtime.resolveSkin(skin.ref), /unavailable/);
-  fs.rmSync(path.join(f.userDir, 'author'), { recursive: true }); f.manager.reload();
-  f.settings.pluginAuthorSkin = JSON.parse(JSON.stringify(f.settings.pluginAuthorSkin)); f.runtime.settingsChanged();
-  assert.deepEqual(plain(f.getAppearance()), tokens); assert.equal(fs.readFileSync(f.legacyFile, 'utf8'), f.legacy);
-  const restarted = fixture(t, { pluginAuthorSkin: JSON.parse(JSON.stringify(f.settings.pluginAuthorSkin)) });
-  assert.throws(() => restarted.runtime.resolveSkin(skin.ref), /unavailable/);
-  assert.deepEqual(plain(restarted.runtime.payload('home').appearance), tokens);
-  f.settings.pluginAuthorSkin = null; assert.equal(f.getAppearance().font, 'inherit'); assert.equal(f.getAppearance().corners, 'rounded');
-});
-
 test('actual settings IPC revalidates sender and active selection after async publication', async () => {
   const start = main.indexOf("ipcMain.handle('settings:update',");
   const end = main.indexOf('\n  });', start) + '\n  });'.length;
@@ -159,12 +105,12 @@ test('actual settings IPC revalidates sender and active selection after async pu
     ipcMain: { handle: (_channel, fn) => { handler = fn; } },
     getSyncContentRuntime: () => ({ status: () => ({ identity: 'same' }), publishPatch: () => new Promise(resolve => { release = resolve; }) }),
     applySettingsPatch: patch => { h.preparePluginSkinSettings(patch, {}, { resolveSkin: () => active ? { ref: 'author/mono', appearance: tokens } : null }); commits++; },
-    latestUsageHost: null, settingsForRenderer: () => ({})
+    pluginRuntime: null, latestUsageHost: null, settingsForRenderer: () => ({})
   });
   vm.runInContext(main.slice(start, end), h);
-  let pending = handler(event, { pluginSkinRef: 'author/mono' }); active = false; release();
+  let pending = handler(event, { pluginSkinRef: 'author/mono' }); await Promise.resolve(); active = false; release();
   await assert.rejects(pending, /unavailable/); assert.equal(commits, 0);
-  active = true; pending = handler(event, { pluginSkinRef: 'author/mono' }); h.mainWindow = null; release();
+  active = true; pending = handler(event, { pluginSkinRef: 'author/mono' }); await Promise.resolve(); h.mainWindow = null; release();
   await assert.rejects(pending, /main window/); assert.equal(commits, 0);
   await assert.rejects(handler(event, { pluginAuthorSkin: { ref: 'author/mono', appearance: tokens } }), /host-owned/);
 });
@@ -176,23 +122,4 @@ test('every finite appearance option reaches actual plugin-content DOM projectio
     context.value = normalizeAppearance({ [key]: choice }); vm.runInContext('applyAppearance(container, value)', context);
     assert.equal(container.dataset[`pv${key[0].toUpperCase()}${key.slice(1)}`], choice);
   }
-});
-
-test('reset ignores obsolete appearance files and restores defaults', t => {
-  const f = fixture(t, { themeColors: { accent: '#123456' }, vendorColors: { test: '#abcdef' }, pluginAuthorSkin: { ref: 'removed/skin', appearance: tokens } });
-  const h = helpers({ mainWindow: null });
-  const cleared = h.preparePluginSkinSettings({ pluginSkinRef: null }, f.settings, null);
-  assert.equal(cleared.authorSkin, null);
-  assert.deepEqual(plain(cleared.patch), {});
-  Object.assign(f.settings, cleared.patch, { pluginAuthorSkin: cleared.authorSkin });
-  f.runtime.settingsChanged();
-  assert.deepEqual(f.settings.themeColors, { accent: '#123456' });
-  assert.deepEqual(f.settings.vendorColors, { test: '#abcdef' });
-  assert.equal(f.runtime.payload('home').appearance.font, 'inherit');
-  assert.equal(f.runtime.payload('home').appearance.corners, 'rounded');
-  assert.equal(fs.readFileSync(f.legacyFile, 'utf8'), f.legacy);
-  const restarted = fixture(t, plain(f.settings));
-  assert.equal(restarted.runtime.payload('home').appearance.corners, 'rounded');
-  assert.deepEqual(plain(h.preparePluginSkinSettings({ pluginSkinRef: null, themeColors: {} }, f.settings, null)), { patch: { themeColors: {} }, authorSkin: null });
-  assert.throws(() => h.assertPluginSkinRequest({ sender: {}, senderFrame: {} }, { pluginSkinRef: null }), /main window/);
 });

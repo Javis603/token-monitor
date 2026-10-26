@@ -6,12 +6,29 @@ function subscribe(channel, callback) {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 contextBridge.exposeInMainWorld('tokenMonitorPluginPage', {
-  syncWebPresentation: input => ipcRenderer.invoke('plugins:presentation:sync', input),
-  onWebPresentationReady: callback => subscribe('plugins:presentation:ready', callback),
-  onWebPresentationFailed: callback => subscribe('plugins:presentation:failed', callback),
   metadata: () => ipcRenderer.invoke('pluginPage:metadata'),
-  interact: (ref, input, revision) => ipcRenderer.invoke('pluginPage:interact', ref, input, revision),
   select: ref => ipcRenderer.invoke('pluginPage:select', ref),
   onMeta: callback => subscribe('pluginPage:meta', callback),
   onViews: callback => subscribe('pluginPage:views', callback)
+});
+
+// Trusted plugin UI shares this renderer. This is routing, not plugin isolation.
+contextBridge.exposeInMainWorld('tokenMonitorTrustedPlugins', {
+  contentSelections: () => ipcRenderer.invoke('plugins:contentSelections'),
+  selectContent: (target, ref) => ipcRenderer.invoke('plugins:selectContent', target, ref),
+  call: (id, method, args) => ipcRenderer.invoke('plugins:call', id, method, args),
+  host: (id, method, args) => ipcRenderer.invoke('plugins:host', id, method, args),
+  views: surface => ipcRenderer.invoke('plugins:views', { surface }),
+  subscribe(id, callback) {
+    const listener = (_event, message) => { if (message.id === id) callback(message.value); };
+    ipcRenderer.on('plugins:backend', listener);
+    return () => ipcRenderer.removeListener('plugins:backend', listener);
+  },
+  subscribeData: (id, query) => ipcRenderer.invoke('plugins:subscribe', id, query),
+  unsubscribeData: subscription => ipcRenderer.invoke('plugins:unsubscribe', subscription),
+  onData(callback) {
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on('plugins:data', listener);
+    return () => ipcRenderer.removeListener('plugins:data', listener);
+  }
 });

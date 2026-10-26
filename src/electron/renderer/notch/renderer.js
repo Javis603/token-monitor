@@ -26,7 +26,7 @@
     const {
       el, t, appearance, prefersReducedMotion, providerLabel, limitProviderColor, readableColor, limitAccountTitle,
       markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
-      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit, pluginHost
+      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit, pluginHost, pluginContent
     } = shared;
     const presentation = window.TokenMonitorEdgeDockPresentation;
     const numberAnimation = window.TokenMonitorTokenNumberAnimation;
@@ -41,7 +41,7 @@
     const panelApi = window.TokenMonitorNotchPanel;
     const panel = panelApi.createNotchPanel({ document, window, el, t, state, bridge, shared: {
       markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate,
-      appearance, prefersReducedMotion, ensureRefreshButton, readableColor, limitAccountTitle, overflowText, limitWindowsView, pluginHost
+      appearance, prefersReducedMotion, ensureRefreshButton, readableColor, limitAccountTitle, overflowText, limitWindowsView, pluginHost, pluginContent
     } });
 
     // ---- Top notch ------------------------------------------------------------
@@ -626,6 +626,12 @@
       }
       const summary = contentLayer.querySelector('.notch-summary');
       if (summary) {
+        const target = 'notch.summary.content';
+        if (pluginContent && (pluginContent.hasTarget(target) || summary.querySelector('.plugin-native-content'))) {
+          let native = summary.querySelector('.plugin-native-content');
+          if (!native) { native = el('div', 'plugin-native-content'); native.append(...summary.childNodes); summary.append(native); }
+          pluginContent.render(target, native, { surface: 'notch', surfaceVariant: 'summary', nativeData: payload });
+        }
         summary.style.visibility = payload.summaryMeasurement?.measuring ? 'hidden' : '';
         positionNotchSummary(summary, payload); reportNotchSlots(summary);
         animateNotchNumbers();
@@ -691,7 +697,7 @@
           || state.payload?.expanded);
       },
       repaint() { notchClock++; renderNotch(state.payload); },
-      pluginViewsChanged() { panel.pluginViewsChanged(); }
+      pluginViewsChanged() { panel.pluginViewsChanged(); if (state.payload) renderNotch(state.payload); }
     };
   }
   return { createNotchRenderer, notchGlassGeometry };

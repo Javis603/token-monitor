@@ -3,7 +3,7 @@ const path = require('node:path');
 
 // One process per demanded plugin, shared by all its renderer occurrences.
 function createPluginBackends({ fork, hostCall, onData = () => {}, onError = () => {}, log = () => {}, startupTimeoutMs = 15000, callTimeoutMs = 60000 }) {
-  const records = new Map();
+  const records = new Map(), closing = new Map();
   let sequence = 0;
   function fail(record, error) {
     clearTimeout(record.startTimer);
@@ -11,10 +11,13 @@ function createPluginBackends({ fork, hostCall, onData = () => {}, onError = () 
     for (const pending of record.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     record.pending.clear();
   }
-  function start(id, entry, dataDirectory) {
+  async function start(id, entry, dataDirectory, wanted = () => true) {
+    if (closing.has(id)) await closing.get(id);
+    if (!wanted()) throw new Error('Plugin backend no longer demanded');
     if (records.has(id)) return records.get(id).ready;
     const child = fork(path.join(__dirname, 'backendHost.cjs'), [entry, dataDirectory], { serviceName: `Token Monitor plugin: ${id}`, stdio: 'pipe' });
     const record = { child, pending: new Map(), stopped: false };
+    record.exited = new Promise(resolve => { record.resolveExit = resolve; });
     record.ready = new Promise((resolve, reject) => { record.resolveReady = resolve; record.rejectReady = reject; });
     // Activation errors are also reported through onError when nobody awaits start.
     record.ready.catch(() => {});
@@ -43,6 +46,7 @@ function createPluginBackends({ fork, hostCall, onData = () => {}, onError = () 
       }
     });
     child.once('exit', code => {
+      record.resolveExit();
       clearTimeout(record.stopTimer);
       if (records.get(id) === record) records.delete(id);
       fail(record, new Error(`Plugin backend exited (${code})`));
@@ -52,12 +56,15 @@ function createPluginBackends({ fork, hostCall, onData = () => {}, onError = () 
   }
   function stop(id) {
     const record = records.get(id);
-    if (!record) return;
+    if (!record) return closing.get(id);
+    closing.set(id, record.exited);
+    void record.exited.then(() => { if (closing.get(id) === record.exited) closing.delete(id); });
     records.delete(id); record.stopped = true;
     fail(record, new Error('Plugin backend stopped'));
-    record.child.postMessage({ type: 'stop' });
+    try { record.child.postMessage({ type: 'stop' }); } catch { record.child.kill(); }
     record.stopTimer = setTimeout(() => record.child.kill(), 500);
     record.stopTimer.unref?.();
+    return record.exited;
   }
   async function call(id, method, args) {
     const record = records.get(id);
@@ -75,6 +82,6 @@ function createPluginBackends({ fork, hostCall, onData = () => {}, onError = () 
     update(id, value) { const record = records.get(id); if (record) record.ready.then(() => {
       if (records.get(id) === record) record.child.postMessage({ type: 'context', value });
     }).catch(() => {}); },
-    dispose() { for (const id of [...records.keys()]) stop(id); } };
+    dispose() { return Promise.all([...records.keys()].map(stop).concat([...closing.values()])); } };
 }
 module.exports = { createPluginBackends };

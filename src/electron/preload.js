@@ -257,32 +257,8 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     }
   },
   // Plugin management and the views this window draws (Home, tray bitmap).
-  // Consent and placement run in main; the renderer never sees manifests,
-  // plugin code or file paths beyond the plugins folder location.
+  // Trust and installation run in main; enabled author UI executes in this page.
   plugins: {
-    syncWebPresentation: input => ipcRenderer.invoke('plugins:presentation:sync', input),
-    onWebPresentationReady: callback => {
-      const listener = () => callback(); ipcRenderer.on('plugins:presentation:ready', listener);
-      return () => ipcRenderer.removeListener('plugins:presentation:ready', listener);
-    },
-    onWebPresentationFailed: callback => {
-      const listener = (_event, reason) => callback(reason); ipcRenderer.on('plugins:presentation:failed', listener);
-      return () => ipcRenderer.removeListener('plugins:presentation:failed', listener);
-    },
-    webSync: input => ipcRenderer.invoke('plugins:web:sync', input),
-    webSelect: (target, ref) => ipcRenderer.invoke('plugins:web:select', target, ref),
-    onWebRestore: callback => {
-      const listener = () => callback(); ipcRenderer.on('plugins:web:restore', listener);
-      return () => ipcRenderer.removeListener('plugins:web:restore', listener);
-    },
-    onWebReady: callback => {
-      const listener = () => callback(); ipcRenderer.on('plugins:web:ready', listener);
-      return () => ipcRenderer.removeListener('plugins:web:ready', listener);
-    },
-    onWebFailed: callback => {
-      const listener = (_event, reason) => callback(reason); ipcRenderer.on('plugins:web:failed', listener);
-      return () => ipcRenderer.removeListener('plugins:web:failed', listener);
-    },
     getSettings: id => pluginSettingsResult(ipcRenderer.invoke('plugins:getSettings', id)),
     updateSettings: (id, input) => pluginSettingsResult(ipcRenderer.invoke('plugins:updateSettings', id, input)),
     list: () => ipcRenderer.invoke('plugins:list'),
@@ -303,7 +279,6 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     rollback: id => ipcRenderer.invoke('plugins:rollback', id),
     uninstall: (id, options) => ipcRenderer.invoke('plugins:uninstall', id, options),
     place: (ref, surface, placed) => ipcRenderer.invoke('plugins:place', { ref, surface, placed }),
-    interact: (surface, ref, input, revision) => ipcRenderer.invoke('plugins:interact', { surface, ref, input, revision }),
     skins: () => ipcRenderer.invoke('plugins:skins'),
     views: (surface) => ipcRenderer.invoke('plugins:views', { surface }),
     setDemand: (surface, refs) => ipcRenderer.send('plugins:demand', { surface, refs }),
@@ -320,4 +295,25 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   minimize: () => ipcRenderer.send('window:minimize'),
   close: () => ipcRenderer.send('window:close')
+});
+
+// Trusted plugin UI shares this renderer. This is routing, not plugin isolation.
+contextBridge.exposeInMainWorld('tokenMonitorTrustedPlugins', {
+  contentSelections: () => ipcRenderer.invoke('plugins:contentSelections'),
+  selectContent: (target, ref) => ipcRenderer.invoke('plugins:selectContent', target, ref),
+  call: (id, method, args) => ipcRenderer.invoke('plugins:call', id, method, args),
+  host: (id, method, args) => ipcRenderer.invoke('plugins:host', id, method, args),
+  views: surface => ipcRenderer.invoke('plugins:views', { surface }),
+  subscribe(id, callback) {
+    const listener = (_event, message) => { if (message.id === id) callback(message.value); };
+    ipcRenderer.on('plugins:backend', listener);
+    return () => ipcRenderer.removeListener('plugins:backend', listener);
+  },
+  subscribeData: (id, query) => ipcRenderer.invoke('plugins:subscribe', id, query),
+  unsubscribeData: subscription => ipcRenderer.invoke('plugins:unsubscribe', subscription),
+  onData(callback) {
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on('plugins:data', listener);
+    return () => ipcRenderer.removeListener('plugins:data', listener);
+  }
 });

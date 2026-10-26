@@ -2,8 +2,8 @@
 const path = require('node:path');
 const { parseRef } = require('../../shared/plugins/placements');
 
-// These are visible application windows, never executable plugin documents.
-// The preload grants only metadata, selection and validated view messages.
+// Visible application windows hosting trusted author modules through the same
+// renderer adapter as the main window. Native window ownership stays here.
 function createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLocale,
   onDemand = refs => manager.setSurfaceDemand('page', refs) }) {
   const windows = new Map();
@@ -43,11 +43,6 @@ function createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLo
   });
   const offChanged = manager.onChanged(() => { for (const record of windows.values()) sendMeta(record); syncDemand(); });
   ipcMain.handle('pluginPage:metadata', event => metadata(recordFor(event)));
-  ipcMain.handle('pluginPage:interact', (event, ref, input, revision) => {
-    const record = recordFor(event);
-    if (!visible(record) || record.ref !== ref) throw new Error('interaction is not from the visible plugin page');
-    return manager.interact('page', ref, input, revision);
-  });
   ipcMain.handle('pluginPage:select', (event, ref) => {
     const record = recordFor(event);
     if (!catalog(record.id)?.views.some(view => view.ref === ref && view.surfaces.includes('page'))) throw new Error('page does not belong to this plugin');
@@ -57,16 +52,8 @@ function createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLo
     return metadata(record);
   });
   return {
-    presentationContext(event, surface, ref) {
-      if (surface !== 'page') return null;
-      let record; try { record = recordFor(event); } catch { return null; }
-      if (ref === null) return { visible: visible(record) };
-      const plugin = catalog(record.id);
-      // Explicit open owns this detached page; pluginMainPages only places it
-      // in the main menu. Keep this callback authoritative for mount/reuse and
-      // revocation, returning hidden (not revoked) so retention can park it.
-      return record.ref === ref && plugin?.status === 'active' && plugin.views.some(view => view.ref === ref && view.surfaces.includes('page')) ? { visible: visible(record) } : null;
-    },
+    ownsSender(sender) { return [...windows.values()].some(record => record.win.webContents === sender); },
+    broadcast(channel, value) { for (const record of windows.values()) if (!record.win.isDestroyed()) record.win.webContents.send(channel, value); },
     open(ref) {
       if (disposed) throw new Error('plugin pages are closed');
       const parsed = parseRef(ref);
@@ -90,6 +77,7 @@ function createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLo
       win.on('closed', () => { if (windows.get(record.id) === record) windows.delete(record.id); syncDemand(); });
       win.loadFile(path.join(__dirname, '../renderer/plugins/page.html')).catch(() => { if (!win.isDestroyed()) win.close(); });
     },
+    reloadHosts() { for (const record of windows.values()) if (!record.win.isDestroyed()) record.win.webContents.reload(); },
     refreshVisibility: syncDemand,
     refresh() { for (const record of windows.values()) sendMeta(record); },
     dispose() {
@@ -97,7 +85,7 @@ function createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLo
       disposed = true; offViews(); offChanged();
       for (const record of windows.values()) if (!record.win.isDestroyed()) record.win.destroy();
       windows.clear(); onDemand([]);
-      ipcMain.removeHandler('pluginPage:interact'); ipcMain.removeHandler('pluginPage:metadata'); ipcMain.removeHandler('pluginPage:select');
+      ipcMain.removeHandler('pluginPage:metadata'); ipcMain.removeHandler('pluginPage:select');
     }
   };
 }

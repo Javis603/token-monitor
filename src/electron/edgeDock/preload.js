@@ -6,10 +6,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 // deliberately narrow bridge: it can render what the main process pushes and
 // report pointer gestures, nothing else (no settings writes, no credentials).
 contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
-  syncWebSurface: input => ipcRenderer.invoke('plugins:surface:sync', input),
-  onWebSurfaceReady: callback => { const listener = () => callback(); ipcRenderer.on('plugins:surface:ready', listener); return () => ipcRenderer.removeListener('plugins:surface:ready', listener); },
-  onWebSurfaceFailed: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('plugins:surface:failed', listener); return () => ipcRenderer.removeListener('plugins:surface:failed', listener); },
-  onWebSurfaceEscape: callback => { const listener = () => callback(); ipcRenderer.on('plugins:surface:escape', listener); return () => ipcRenderer.removeListener('plugins:surface:escape', listener); },
   ready: () => ipcRenderer.send('edgeDock:ready'),
   click: (cellIndex) => ipcRenderer.send('edgeDock:click', { cellIndex }),
   pointer: () => ipcRenderer.send('edgeDock:pointer'),
@@ -35,10 +31,30 @@ contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   },
   // Plugin cells: which views this window shows, and their resolved content.
   setPluginDemand: (refs) => ipcRenderer.send('edgeDock:pluginDemand', { refs }),
-  interact: (ref, input, revision) => ipcRenderer.invoke('plugins:interact', { surface: 'edgeDock', ref, input, revision }),
   onPluginViews: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('plugins:views', listener);
     return () => ipcRenderer.removeListener('plugins:views', listener);
+  }
+});
+
+// Trusted plugin UI shares this renderer. This is routing, not plugin isolation.
+contextBridge.exposeInMainWorld('tokenMonitorTrustedPlugins', {
+  contentSelections: () => ipcRenderer.invoke('plugins:contentSelections'),
+  selectContent: (target, ref) => ipcRenderer.invoke('plugins:selectContent', target, ref),
+  call: (id, method, args) => ipcRenderer.invoke('plugins:call', id, method, args),
+  host: (id, method, args) => ipcRenderer.invoke('plugins:host', id, method, args),
+  views: surface => ipcRenderer.invoke('plugins:views', { surface }),
+  subscribe(id, callback) {
+    const listener = (_event, message) => { if (message.id === id) callback(message.value); };
+    ipcRenderer.on('plugins:backend', listener);
+    return () => ipcRenderer.removeListener('plugins:backend', listener);
+  },
+  subscribeData: (id, query) => ipcRenderer.invoke('plugins:subscribe', id, query),
+  unsubscribeData: subscription => ipcRenderer.invoke('plugins:unsubscribe', subscription),
+  onData(callback) {
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on('plugins:data', listener);
+    return () => ipcRenderer.removeListener('plugins:data', listener);
   }
 });

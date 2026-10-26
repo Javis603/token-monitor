@@ -33,14 +33,14 @@ test('identity rejects corrupted checksums, trailing bytes and truncated images'
 });
 test('package preview and installed roundtrip retain identity without any external asset path', () => {
   const icon = uri(png());
-  const manifest = {id:'icon-demo',version:'1.0.0',tmApi:'^1',name:'Icon demo',identityIcon:icon,views:[{id:'main',title:'Main',surfaces:['home'],layout:{type:'text',text:'Demo'}}]};
-  const pkg = parsePackage(Buffer.from(JSON.stringify({format:1,manifest})));
+  const manifest = {id:'icon-demo',version:'1.0.0',tmApi:2,name:'Icon demo',identityIcon:icon,skins:[{id:'plain',name:'Plain',colors:{accent:'#123456'}}]};
+  const pkg = parsePackage(Buffer.from(JSON.stringify({format:2,files:{},manifest})));
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tm-icon-'));
   try {
     unpackPackage(pkg,dir);
     assert.equal(packageDirectory(dir).manifest.identityIcon,icon);
     assert.equal(describePackage(pkg).identityIcon,icon);
-    assert.throws(()=>parsePackage(Buffer.from(JSON.stringify({format:1,manifest:{...manifest,identityIcon:'https://example.test/icon.png'}}))), /identityIcon/);
+    assert.throws(()=>parsePackage(Buffer.from(JSON.stringify({format:2,files:{},manifest:{...manifest,identityIcon:'https://example.test/icon.png'}}))), /identityIcon/);
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
 

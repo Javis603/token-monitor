@@ -1144,7 +1144,7 @@
         if (item.type === 'spacer') return { ...item, available: true };
         if (item.type === 'plugin') {
           const view = options.pluginViews?.[item.ref] || null;
-          return { ...item, available: view?.status === 'ok', plugin: view };
+          return { ...item, available: view?.status === 'active', plugin: view };
         }
         return resolveTextItem(item, stats, options, recentProvider);
       })

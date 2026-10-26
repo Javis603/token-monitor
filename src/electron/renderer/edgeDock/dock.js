@@ -109,37 +109,38 @@ const pluginHost = pluginViewsApi && bridge.onPluginViews ? pluginViewsApi.creat
   document,
   window,
   t,
-  onInteraction: (_surface, ref, input, revision) => bridge.interact(ref, input, revision),
+  services: { app: bridge, native: { get quota() { return limitWindowsView; } } },
+  getContext: () => ({ nativeData: state.payload, surfaceVariant: surface }),
   onDemand: (_surface, refs) => bridge.setPluginDemand(refs),
-  onMount: mount => surfaceWeb?.track(mount),
-  onPaint: mount => surfaceWeb?.prepare(mount),
   motionAllowed: () => !prefersReducedMotion(),
   motionMode: () => tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation)
 }) : null;
-const surfaceWeb = window.TokenMonitorPluginSurfaceWeb?.create({ document, window, bridge, surface: pluginSurface, kind: surface, t, stateFor: ref => pluginHost?.state(pluginSurface, ref), active: () => surface === 'notch' ? state.payload?.expanded === true : true, reducedMotion: prefersReducedMotion, maxHeight: () => state.payload?.maxCardHeight || window.innerHeight, onLayout: () => { if (surface === 'bubble' && state.payload) setTimeout(() => renderBubble(state.payload), 0); } });
-bridge.onWebSurfaceEscape?.(() => { if (surface === 'notch' || surface === 'bubble') bridge.dismiss(); });
-const pluginRailNumbers = window.TokenMonitorPluginRailNumbers.create({
-  railNumbers: railNumberRollApi, animation: tokenNumberAnimationApi,
-  viewFor: ref => pluginHost?.state('edgeDock', ref),
-  enabled: () => !document.hidden && !prefersReducedMotion(),
-  mode: () => tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation),
-  numberFormat: window.TokenMonitorPluginNumberFormat
-});
+let contentSelections = {};
+const pluginContent = pluginHost ? window.TokenMonitorPluginContent.create({ document,
+  host: { mount: (container, view, context) => pluginHost.mount(container, view.ref, pluginSurface, context), unmount: container => pluginHost.unmount(container) },
+  getViews: () => pluginHost.descriptors(pluginSurface), selection: target => contentSelections[target]
+}) : null;
+void window.tokenMonitorTrustedPlugins.contentSelections().then(value => { contentSelections = value; if (state.payload) render(state.payload); });
+let pluginContentsKey = '';
 function updatePluginViews(payload) {
   if (payload?.surface !== pluginSurface) return;
-  const numbers = surface === 'rail' ? pluginRailNumbers.capture(railNode) : null;
   pluginHost?.update(payload);
-  surfaceWeb?.refresh();
-  if (surface === 'rail') { refreshPluginCellLabels(railNode); pluginRailNumbers.update(railNode, numbers); }
-  // Re-measure the retained plugin card without replacing interactive nodes.
-  if (surface === 'bubble' && state.payload?.cell?.kind === 'plugin') renderBubble(state.payload);
-  if (surface === 'notch') notchRenderer?.pluginViewsChanged();
+  if (surface === 'rail') refreshPluginCellLabels(railNode);
+  const key = JSON.stringify(Object.values(payload.views || {}).map(view => [view.ref, view.revision, view.targets, view.mode]));
+  void window.tokenMonitorTrustedPlugins.contentSelections().then(value => {
+    const next = key + JSON.stringify(value);
+    if (pluginContentsKey === next) return;
+    pluginContentsKey = next; contentSelections = value;
+    if (surface === 'notch') notchRenderer?.pluginViewsChanged();
+    else if (state.payload) render(state.payload);
+  });
 }
 bridge.onPluginViews?.(updatePluginViews);
+void window.tokenMonitorTrustedPlugins.views(pluginSurface).then(updatePluginViews);
 
 function pluginCellLabel(ref) {
   const view = pluginHost?.state('edgeDock', ref);
-  return [view?.title, view?.compact?.value].filter(Boolean).join(' ') || ref;
+  return view?.title || ref;
 }
 
 // Plugin values repaint in place between rail renders; keep the spoken label
@@ -1178,7 +1179,6 @@ function settleDockMotions() {
   }
   ringNumberAnimations.clear();
   railNumberRoll.settle();
-  pluginRailNumbers.settle();
   cardResetAnimator.settle(contentLayer);
 }
 
@@ -1254,10 +1254,20 @@ function renderRail(payload) {
   }
   const ringSnapshot = captureRingResetMotion();
   const rollSnapshot = railNumberRoll.capture(railNode);
-  const pluginSnapshot = pluginRailNumbers.capture(railNode);
   railNode.replaceChildren(...nodes);
+  const targets = [];
+  (payload.cells || []).forEach((cell, index) => {
+    if (cell.kind === 'plugin') return;
+    const target = `edgeDock.rail.${cell.kind}.content`;
+    targets.push(target);
+    if (!pluginContent?.hasTarget(target)) return;
+    const node = nodes[index], native = el('div', 'plugin-native-content');
+    native.append(...node.childNodes); node.append(native);
+    pluginContent.render(target, native, { surface: 'edgeDock', surfaceVariant: 'rail', targetInstance: cell.id, cell, nativeData: payload });
+  });
+  pluginContent?.retain(targets);
+  pluginHost?.refreshDemand();
   const refilling = animateRingResets(ringSnapshot);
-  pluginRailNumbers.update(railNode, pluginSnapshot, { revealing });
   // A retracted rail is not repainted, so a reveal shows the latest readings at
   // once rather than rolling from ones left on screen minutes ago. A refill's
   // count-up owns its figure.
@@ -1862,8 +1872,9 @@ function clampBreakdownList(card) {
 // an unreadable strip. Measure its natural height before flex shrink, reserving
 // at most half the card so multiple accounts still leave room for sessions.
 function reserveAccountHeight(card, maxHeight) {
-  const accounts = card.querySelector(':scope > .edge-dock-accounts');
-  if (!accounts || !card.querySelector(':scope > .edge-dock-sessions') || !(maxHeight > 0)) return;
+  const native = card.querySelector(':scope > .plugin-native-content') || card;
+  const accounts = native.querySelector(':scope > .edge-dock-accounts');
+  if (!accounts || !native.querySelector(':scope > .edge-dock-sessions') || !(maxHeight > 0)) return;
   const shrink = accounts.style.flexShrink;
   accounts.style.flexShrink = '0';
   const naturalHeight = Math.ceil(accounts.getBoundingClientRect().height);
@@ -1902,6 +1913,14 @@ function renderBubble(payload) {
   }
   const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
+  pluginContent?.retain(cell.kind === 'plugin' ? [] : [`edgeDock.${cell.kind}.content`]);
+  if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {
+    const native = document.createElement('div'); native.className = 'plugin-native-content';
+    native.append(...card.childNodes); card.append(native);
+    const target = `edgeDock.${cell.kind}.content`;
+    pluginContent.retain([target]);
+    pluginContent.render(target, native, { surface: 'edgeDock', cell, nativeData: payload });
+  }
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
   stagingLayer.replaceChildren(card);
   fitCardTotal(card);
@@ -1916,6 +1935,15 @@ function renderBubble(payload) {
 }
 
 
+if (surface === 'bubble' && window.ResizeObserver) new ResizeObserver(() => {
+  const card = contentLayer.querySelector('.edge-dock-card') || stagingLayer.querySelector('.edge-dock-card');
+  const payload = state.payload;
+  if (card && payload?.cell?.id === card.dataset.cellId) {
+    const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
+    if (height > 0 && payload.placed?.height !== height) bridge.reportBubbleSize(card.dataset.cellId, height);
+  }
+}).observe(root);
+
 const notchRenderer = surface === 'notch'
   ? window.TokenMonitorNotchRenderer.createNotchRenderer({
     document, window, bridge, state, root, shapeLayer, contentLayer,
@@ -1923,7 +1951,7 @@ const notchRenderer = surface === 'notch'
       el, t, appearance, prefersReducedMotion, readableColor, providerLabel, limitProviderColor,
       markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
       limitAccountTitle: (...args) => limitWindowsView.limitAccountTitle(...args),
-      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit, pluginHost
+      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit, pluginHost, pluginContent
     }
   }) : null;
 
@@ -1932,7 +1960,6 @@ const notchRenderer = surface === 'notch'
 function render(payload) {
   if (!payload || payload.surface !== surface) return;
   state.payload = payload;
-  surfaceWeb?.refresh();
   applyAppearance(payload);
   notchRenderer?.applyAppearance(payload);
   if (surface === 'notch') notchRenderer.applyMotion(payload.motion);

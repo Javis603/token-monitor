@@ -1,7 +1,6 @@
 'use strict';
 const semver = require('semver');
 // Import, installed artifacts and runtime discovery share the same bounds.
-const MAX_CODE_BYTES = 2 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 256 * 1024;
 function assertHostCompatibility(manifest) {
   const range = manifest.engines?.tokenMonitor;
@@ -9,4 +8,4 @@ function assertHostCompatibility(manifest) {
     throw new Error('package requires an incompatible Token Monitor version');
   }
 }
-module.exports = { MAX_CODE_BYTES, MAX_MANIFEST_BYTES, assertHostCompatibility };
+module.exports = { MAX_MANIFEST_BYTES, assertHostCompatibility };

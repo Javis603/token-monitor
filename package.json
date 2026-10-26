@@ -2,7 +2,7 @@
   "name": "token-monitor",
   "productName": "Token Monitor",
   "version": "0.79.0",
-  "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
+  "description": "Live token & cost widget for Claude Code, Codex & Hermes \u2014 local-first, optional multi-device sync.",
   "main": "src/electron/main.js",
   "scripts": {
     "start": "npm run ensure:tokscale && electron .",
@@ -34,7 +34,7 @@
     "benchmark:hub-bandwidth": "node scripts/benchmark-hub-bandwidth.js",
     "lint": "eslint .",
     "verify": "npm run lint && npm test",
-    "verify:plugins": "electron scripts/verify-plugin-sandbox.js"
+    "verify:plugins": "electron scripts/test-plugin-trusted.cjs && electron scripts/test-plugin-trusted-runtime.cjs && electron scripts/test-plugin-trusted-app.cjs && electron scripts/test-plugin-trusted-surfaces.cjs"
   },
   "build": {
     "beforePack": "scripts/build-windows-dock.js",
@@ -73,7 +73,10 @@
     },
     "win": {
       "extraResources": [
-        { "from": "build/windows-dock/TokenMonitor.DockBackdrop.exe", "to": "windows-dock/TokenMonitor.DockBackdrop.exe" }
+        {
+          "from": "build/windows-dock/TokenMonitor.DockBackdrop.exe",
+          "to": "windows-dock/TokenMonitor.DockBackdrop.exe"
+        }
       ],
       "target": [
         {

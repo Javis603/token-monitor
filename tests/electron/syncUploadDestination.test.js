@@ -80,7 +80,7 @@ test('the actual settings IPC handler rejects a destination change while publica
   let release;
   const held = new Promise(resolve => { release = resolve; });
   let applied = false;
-  const sandbox = vm.createContext({ syncContentContext: () => context,
+  const sandbox = vm.createContext({ pluginRuntime: null, syncContentContext: () => context,
     ipcMain: { handle: (_channel, callback) => { handler = callback; } },
     getSyncContentRuntime: () => ({ publishPatch: () => held, status: () => ({ identity: context.url }) }),
     applySettingsPatch: () => { applied = true; }, latestUsageHost: null });
@@ -89,6 +89,7 @@ test('the actual settings IPC handler rejects a destination change while publica
   assert.ok(guardStart >= 0 && guardEnd > guardStart);
   vm.runInContext(source.slice(guardStart, guardEnd) + source.slice(start, end), sandbox);
   const edit = handler(null, { customModelPricing: [] });
+  await Promise.resolve();
   context = { ...context, url: 'https://second.example' };
   release();
   await assert.rejects(edit, /hub_changed/);

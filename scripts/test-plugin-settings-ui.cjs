@@ -13,7 +13,8 @@ app.on('window-all-closed', () => {});
 let win;
 async function main() {
   app.dock?.hide();
-  fs.writeFileSync(path.join(scratch, 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="file://${root}/src/electron/renderer/styles.css"><link rel="stylesheet" href="file://${root}/src/electron/renderer/pluginViews.css"><style>body{overflow:auto}#scroll{display:block;height:500px;overflow:auto}#before{height:80px}#after{height:600px}</style></head><body><div id="scroll" class="settings-panel"><div id="before"></div><div id="settings"></div><div id="after"></div></div><button id="outside">Outside</button><script src="file://${root}/src/electron/renderer/pluginViews.js"></script><script src="file://${root}/src/electron/renderer/limits/windowsView.js"></script><script src="file://${root}/src/electron/renderer/selectControl.js"></script><script src="file://${root}/src/electron/renderer/pluginSettings.js"></script><script src="file://${root}/src/electron/renderer/pluginMainPages.js"></script></body></html>`);
+  fs.writeFileSync(path.join(scratch, 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="file://${root}/src/electron/renderer/styles.css"><link rel="stylesheet" href="file://${root}/src/electron/renderer/pluginViews.css"><style>body{overflow:auto}#scroll{display:block;height:500px;overflow:auto}#before{height:80px}#after{height:600px}</style></head><body><div id="scroll" class="settings-panel"><div id="before"></div><div id="settings"></div><div id="after"></div></div><button id="outside">Outside</button><script src="file://${root}/src/electron/renderer/pluginUi.js"></script><script src="file://${root}/src/electron/renderer/pluginViews.js"></script><script src="file://${root}/src/electron/renderer/limits/windowsView.js"></script><script src="file://${root}/src/electron/renderer/selectControl.js"></script><script src="file://${root}/src/electron/renderer/pluginSettings.js"></script><script src="file://${root}/src/electron/renderer/pluginMainPages.js"></script></body></html>`);
+  fs.writeFileSync(path.join(scratch, 'ui.mjs'), "export function mount(container){const input=document.createElement('input');input.value='saved';container.append(input);return {dispose(){input.remove()}}}");
   win = new BrowserWindow({ show: false, width: 361, height: 799, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   const appHtml=fs.readFileSync(path.join(root,'src/electron/renderer/index.html'),'utf8');
   assert.ok(!appHtml.includes('id="pluginsEnabledInput"')&&!appHtml.includes('data-i18n="settings.plugins.intro"'));
@@ -28,17 +29,17 @@ async function main() {
     const check = (name, ok, evidence) => { checks.push({name, ok: Boolean(ok), evidence}); };
     const box = document.getElementById('settings'), scroll = document.getElementById('scroll');
     const tick = () => new Promise(r => setTimeout(r, 20));
-    const data = {enabled:true, plugins:[{id:'alpha',types:['widget','page'],name:'Alpha',description:'Plugin description',version:'1.0.0',source:'builtin',status:'active',enabled:true,permissions:[],hosts:[],views:[{ref:'alpha/view',title:'View',surfaces:['home','page'],placements:{home:false}}],background:{supported:true,enabled:false},logs:[{at:0,level:'info',text:'Fixture ready'}],runtime:{state:'idle',cpuPercent:null,memoryMB:null}},{id:'beta',name:'Beta',source:'builtin',status:'disabled',enabled:false,permissions:[],hosts:[],views:[]}]};
+    const data = {enabled:true, plugins:[{id:'alpha',types:['widget','page'],name:'Alpha',description:'Plugin description',version:'1.0.0',source:'user',status:'active',enabled:true,views:[{ref:'alpha/view',title:'View',surfaces:['home','page'],placements:{home:false}}],background:{supported:true,enabled:false},logs:[{at:0,level:'info',text:'Fixture ready'}],runtime:{state:'idle',cpuPercent:null,memoryMB:null}},{id:'beta',name:'Beta',source:'user',status:'disabled',enabled:false,views:[]}]};
     let pending, reject, previewPending, catalogCalls = 0, importResult = null, copyFailure = false;
     let catalogMode = 'deferred', previewMode = 'success', globalMode = 'success', savedMasterEnabled = true;
-    const catalog = {entries:[{id:'demo',types:['page'],name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'official',kind:'official'},versions:[{version:'1.0.0',compatible:true,installable:true},{version:'2.0.0',compatible:true,installable:true}],status:'available'}],sources:[]};
+    const catalog = {entries:[{id:'demo',types:['page'],name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'custom-fixture',kind:'community'},versions:[{version:'1.0.0',compatible:true,installable:true},{version:'2.0.0',compatible:true,installable:true}],status:'available'}],sources:[]};
     const tooltips = TokenMonitorLimitWindowsView.createLimitWindowsView({document,tooltip:{hasOpened:()=>false,markOpened:()=>{},release:()=>{}}});
     const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,setDetailTooltip:tooltips.setDetailTooltip,getEnabled:()=>savedMasterEnabled,onCopyText:async text=>{if(copyFailure)throw Error('clipboard unavailable');calls.push(['copy',text])},onOpenExternal:async url=>{calls.push(['guide',url])},onSetEnabled:async enabled=>{calls.push(['global',enabled]);if(globalMode==='error')throw Error('settings write failed');savedMasterEnabled=enabled;data.enabled=enabled&&!data.safeMode;return structuredClone(data)},t:(key,args)=>key==='plugins.authoring.prompt'?'Fixture prompt with exact punctuation:':key==='plugins.ui.locationCount'?String(args.count)+' locations':key==='settings.plugins.actionFailed'?args.error:key,api:{
       list:async()=>structuredClone(data),
       catalog:()=>{catalogCalls++;return catalogMode==='deferred'?new Promise((yes,no)=>{pending=yes;reject=no}):Promise.resolve(catalog)},
       place:async(ref,surface,on)=>{calls.push(['place',ref,surface,on]);data.plugins[0].views[0].placements.home=on;return structuredClone(data)},
       setEnabled:async(id,on)=>{const p=data.plugins.find(p=>p.id===id);p.enabled=on;p.status=on?'active':'disabled';return structuredClone(data)},
-      catalogPreview:async(source,id,version)=>{calls.push(['preview',version]);if(previewMode==='error')throw Error('preview rejected');if(previewMode==='deferred')await new Promise(resolve=>{previewPending=resolve});return {token:'token-'+version,id,name:'Demo',description:'Example',version,author:'Author',origin:{id:source,kind:'official'},permissions:[],hosts:[],risk:{},operation:'install',sha256:'abc'}},
+      catalogPreview:async(source,id,version)=>{calls.push(['preview',version]);if(previewMode==='error')throw Error('preview rejected');if(previewMode==='deferred')await new Promise(resolve=>{previewPending=resolve});return {token:'token-'+version,id,name:'Demo',description:'Example',version,author:'Author',origin:{id:source,kind:'community'},operation:'install',sha256:'abc'}},
       cancelInstall:async token=>{calls.push(['cancel',token])},
       install:async token=>{calls.push(['install',token]);return structuredClone(data)},
       importPackage:async kind=>{calls.push(['import',kind]);return importResult},
@@ -49,10 +50,8 @@ async function main() {
     check('legacy-entry-does-not-invent-types',!box.querySelector('[data-plugin-id="beta"] .plugin-type'));
     data.plugins[0].author='Token Monitor · Official';await panel.refresh();
     const sourceIdentity=box.querySelector('.plugin-identity');
-    check('host-source-label-is-separate-from-author-controlled-text',sourceIdentity.querySelector('.plugin-author').textContent==='Token Monitor · Official'&&sourceIdentity.querySelector('.plugin-origin-label').textContent==='settings.plugins.source.builtin'&&!sourceIdentity.querySelector('.plugin-author').contains(sourceIdentity.querySelector('.plugin-origin-label')));
-    check('only-host-official-origin-gets-shield',Boolean(sourceIdentity.querySelector('.plugin-shield')));
-    const officialSource=sourceIdentity.querySelector('.plugin-source');
-    check('official-attribution-is-one-green-line-with-host-owned-source',officialSource.firstElementChild.classList.contains('plugin-shield')&&getComputedStyle(officialSource).flexWrap==='nowrap'&&getComputedStyle(officialSource.querySelector('.plugin-author')).color===getComputedStyle(officialSource.querySelector('.plugin-origin-label')).color&&getComputedStyle(officialSource.querySelector('.plugin-origin-label')).borderTopWidth==='0px');
+    check('host-source-label-is-separate-from-author-controlled-text',sourceIdentity.querySelector('.plugin-author').textContent==='Token Monitor · Official'&&sourceIdentity.querySelector('.plugin-origin-label').textContent==='settings.plugins.source.user'&&!sourceIdentity.querySelector('.plugin-author').contains(sourceIdentity.querySelector('.plugin-origin-label')));
+    check('author-text-never-gets-a-trust-shield',!sourceIdentity.querySelector('.plugin-shield'));
     data.plugins[0].installation={origin:{kind:'community'}};await panel.refresh();
     check('community-author-cannot-spoof-official-shield',!box.querySelector('[data-plugin-id="alpha"] .plugin-shield')&&box.querySelector('[data-plugin-id="alpha"] .plugin-origin-label').textContent==='plugins.origin.community');
     delete data.plugins[0].installation;
@@ -115,7 +114,7 @@ async function main() {
     check('catalog-shares-identity-layout-with-no-inline-version-folds',Boolean(box.querySelector('.plugin-catalog .plugin-identity-art'))&&!box.querySelector('.plugin-catalog details'));
     box.querySelector('.plugin-toolbar > .plugin-inline-action').click();await tick();
     check('cancel-file-import-keeps-discover',tab('discover').getAttribute('aria-selected')==='true'&&!box.querySelector('.plugin-package-preview')&&calls.at(-1)?.[1]==='file');
-    importResult={token:'local-file',id:'local-demo',name:'Local demo',description:'Private package',version:'1.0.0',types:['widget','page'],origin:{id:'local',kind:'local'},permissions:[],hosts:[],risk:{},operation:'install',sha256:'abc'};
+    importResult={token:'local-file',id:'local-demo',name:'Local demo',description:'Private package',version:'1.0.0',types:['widget','page'],origin:{id:'local',kind:'local'},operation:'install',sha256:'abc'};
     box.querySelector('.plugin-toolbar > .plugin-inline-action').click();await tick();
     check('file-import-from-discover-opens-local-preview-in-installed',tab('installed').getAttribute('aria-selected')==='true'&&box.querySelector('.plugin-package-preview .plugin-types')?.textContent==='plugins.type.widgetplugins.type.page'&&box.querySelector('.plugin-package-preview .plugin-description')?.textContent==='Private package');
     click('settings.plugins.cancel');await tick();importResult=null;tab('discover').click();await tick();
@@ -128,7 +127,7 @@ async function main() {
     check('discover-search-spans-all-origins',box.querySelectorAll('[data-catalog-id]').length===1&&box.querySelector('[data-catalog-id="third-party"]'));
     search.value='';search.dispatchEvent(new Event('input'));catalog.entries.pop();await panel.refresh();
     const installedLink=box.querySelector('.plugin-installed-check');
-    check('catalog-installed-check-uses-success-color-and-retains-navigation',Boolean(installedLink)&&installedLink.textContent==='plugins.catalog.installed'&&getComputedStyle(installedLink).color===getComputedStyle(box.querySelector('.plugin-origin-official')).color);
+    check('catalog-installed-check-uses-success-color-and-retains-navigation',Boolean(installedLink)&&installedLink.textContent==='plugins.catalog.installed'&&getComputedStyle(installedLink).color!=='rgba(0, 0, 0, 0)');
     installedLink.click();await tick();check('installed-check-navigates-to-installed-list',Boolean(box.querySelector('.plugin-installed-card')));
     delete catalog.entries[0].installedVersion;catalog.entries[0].status='available';tab('discover').click();await tick();
 
@@ -217,19 +216,18 @@ async function main() {
     box.querySelector('.plugin-allow').click();await tick();previewMode='success';
     check('rapid-version-changes-align-selection-preview-and-installed-token',rapidAligned&&calls.filter(c=>c[0]==='install').at(-1)?.[1]==='token-3.0.0',{lastInstall:calls.filter(c=>c[0]==='install').at(-1)});
     const pageBox=document.createElement('div');document.body.append(pageBox);
-    const demands=[], pageHost=TokenMonitorPluginViews.createPluginViewHost({document,window,t:k=>k,onDemand:(s,r)=>demands.push([s,r]),onInteraction:()=>{}});
+    window.tokenMonitorTrustedPlugins={views:async()=>({views:{}}),subscribe:()=>()=>{}};
+    const demands=[], pageHost=TokenMonitorPluginViews.createPluginViewHost({document,window,t:k=>k,onDemand:(s,r)=>demands.push([s,r])});
     const pages=TokenMonitorPluginMainPages.create({document,container:pageBox,host:pageHost,t:k=>k,openWindow:()=>{}});
     const routes=[{id:'plugin:alpha/view',ref:'alpha/view',title:'Alpha'},{id:'plugin:beta/view',ref:'beta/view',title:'Beta'}];
-    const payload=(ref,revision=1)=>({surface:'page',views:{[ref]:{status:'ok',revision,tree:{type:'input',action:'note',label:'Note',value:'saved'}}}});
-    pages.render(routes,'plugin:alpha/view');pageHost.update(payload('alpha/view'));
-    const draft=pageBox.querySelector('input');draft.value='unsubmitted';draft.dispatchEvent(new Event('input'));
-    pages.render(routes,'plugin:beta/view');pageHost.update(payload('beta/view'));pageHost.update({surface:'page',views:{}});
-    pages.render(routes,'plugin:alpha/view');pageHost.update(payload('alpha/view',2));
-    check('main-page-draft-survives-switch-empty-push-and-worker-restart',draft.isConnected&&draft.value==='unsubmitted'&&draft===pageBox.querySelector('input'));
-    pageHost.update({surface:'page',views:{'alpha/view':{status:'ok',revision:2,tree:{type:'input',action:'note',label:'Note',value:'unsubmitted'}}}});
-    pageHost.update(payload('alpha/view',2));check('acknowledged-main-page-draft-resumes-model-updates',draft.value==='saved');
+    const payload={surface:'page',views:Object.fromEntries(routes.map(route=>[route.ref,{id:'view',ref:route.ref,pluginId:route.ref.split('/')[0],revision:'test',status:'active',entry:'file://${scratch}/ui.mjs',css:[]}]))};
+    pageHost.update(payload);pages.render(routes,'plugin:alpha/view');await tick();
+    const draft=pageBox.querySelector('input');draft.value='unsubmitted';
+    pages.render(routes,'plugin:beta/view');await tick();pages.render(routes,'plugin:alpha/view');pageHost.update(payload);await tick();
+    check('main-page-draft-survives-ordinary-page-switch-and-context-update',draft.isConnected&&draft.value==='unsubmitted'&&draft===pageBox.querySelector('input'));
     pages.render(routes.filter(p=>p.ref!=='alpha/view'),'home');
     check('removed-page-releases-retained-dom',!draft.isConnected&&pageBox.classList.contains('hidden'));
+    await pageHost.dispose();
     return {checks};
   })()`);
   // Exercise Chromium's actual pointer/keyboard modality, not just synthetic DOM clicks.
@@ -272,8 +270,8 @@ async function main() {
     sync.firstElementChild.innerHTML = '<div style="height:700px">Devices</div>';
     sync.classList.remove('hidden'); sync.parentElement.classList.add('expanded');
     const box = document.getElementById('pluginSettingsList');
-    const scrollData = { enabled: true, plugins: [{ id: 'scroll-fixture', name: 'Monitor', version: '1.0.0', description: 'CPU and memory readings. Sample only while visible or while approved background checks need data.', source: 'builtin', status: 'disabled', enabled: false,
-      permissions: ['notify', 'sys.cpu', 'sys.memory', 'tm.pages', 'ui.web'], hosts: [], views: [] }] };
+    const scrollData = { enabled: true, plugins: [{ id: 'scroll-fixture', name: 'Monitor', version: '1.0.0', description: 'CPU and memory readings. Sample only while visible or while approved background checks need data.', source: 'user', status: 'disabled', enabled: false,
+      views: [] }] };
     const host = TokenMonitorPluginSettings.createPluginSettingsPanel({ document, container: box, t: key => key,
       api: { list: async () => scrollData } });
     const wait = () => new Promise(resolve => setTimeout(resolve, 300));

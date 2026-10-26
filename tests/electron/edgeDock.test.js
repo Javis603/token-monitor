@@ -137,6 +137,7 @@ test('a card commits after its reported height is clamped to the work area', () 
       const renderBubble = Function('deps', `
         const { root, stagingLayer, providerCard, statCard, fitCardTotal,
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
+        const surface = 'fixture', pluginContent = null;
         ${source}
         return renderBubble;
       `)({
@@ -1046,7 +1047,7 @@ test('provider detail reserves natural account height without exceeding half the
   const reserve = Function(`${source}; return reserveAccountHeight;`)();
   for (const [natural, cap, expected] of [[75.15, 570, '76px'], [1200, 570, '285px'], [75.15, 228, '76px']]) {
     const accounts = { style: { flexShrink: '' }, getBoundingClientRect: () => ({ height: accounts.style.flexShrink === '0' ? natural : 48 }) };
-    const card = { querySelector: selector => selector.endsWith('accounts') ? accounts : {} };
+    const card = { querySelector: selector => selector.endsWith('accounts') ? accounts : selector.endsWith('sessions') ? {} : null };
     reserve(card, cap);
     assert.equal(accounts.style.minHeight, expected);
     assert.equal(accounts.style.flexShrink, '', 'keep the original shared scrolling/flex rule');

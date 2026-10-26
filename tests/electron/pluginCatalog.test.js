@@ -8,13 +8,12 @@ const crypto = require('node:crypto');
 const { parseIndex, createCatalogSources, download } = require('../../src/electron/plugins/catalogSources');
 const { createPluginCatalog } = require('../../src/electron/plugins/catalog');
 const { createManagedPlugins } = require('../../src/electron/plugins/managed');
-const { digest, parsePackage, packageDirectory } = require('../../src/electron/plugins/package');
-const { createDataBus } = require('../../src/shared/plugins/dataBus');
+const { digest, packageDirectory } = require('../../src/electron/plugins/package');
 const { createPluginManager } = require('../../src/electron/plugins/manager');
 const URL = 'https://catalog.example/index.json';
-function packageBytes(version = '1.0.0', permissions = []) {
-  return Buffer.from(JSON.stringify({ format: 1, manifest: { id: 'community-demo', name: 'Community demo', version, tmApi: '^1', permissions,
-    views: [{ id: 'overview', title: 'Overview', surfaces: ['page'], layout: { type: 'text', value: 'community example' } }] } }));
+function packageBytes(version = '1.0.0') {
+  return Buffer.from(JSON.stringify({ format: 2, manifest: { id: 'community-demo', name: 'Community demo', version, tmApi: 2, ui: 'ui.mjs', files: ['ui.mjs'],
+    views: [{ id: 'overview', title: 'Overview', surfaces: ['page'] }] }, files: { 'ui.mjs': Buffer.from('export function mount() {}').toString('base64') } }));
 }
 function index(bytes = packageBytes()) {
   return { format: 1, title: 'Test fixture catalog', official: true, plugins: [{ id: 'community-demo', name: 'Demo', author: 'Fixture author', versions: [{ version: JSON.parse(bytes).manifest.version,
@@ -66,37 +65,30 @@ test('removing a source aborts its download and prevents a late result restoring
 test('discover → verify → install → approve → update pauses new access → rollback → uninstall', async t => {
   const dir = temp(t), userDir = path.join(dir, 'plugins'), builtinDir = path.join(dir, 'builtin'); fs.mkdirSync(builtinDir);
   let settings = { pluginStates: {}, homeModuleOrder: '', hiddenHomeModules: '', edgeDockItems: null, notchPluginPages: [] };
-  const bus = createDataBus();
-  const manager = createPluginManager({ builtinDir, userDir, dataDir: path.join(dir, 'data'), bus, getSettings: () => settings,
+  const manager = createPluginManager({ builtinDir, userDir, dataDir: path.join(dir, 'data'), getSettings: () => settings,
     saveStates: states => { settings.pluginStates = states; } });
-  t.after(() => { manager.dispose(); bus.dispose(); });
+  t.after(() => { manager.dispose(); });
   const managed = createManagedPlugins({ root: path.join(dir, 'managed'), userDir, dataDir: path.join(dir, 'data'), manager,
-    getSettings: () => settings, saveSettings: patch => { settings = { ...settings, ...patch }; } }); managed.recover(); manager.reload();
+    getSettings: () => settings, saveSettings: patch => { settings = { ...settings, ...patch }; } }); managed.recover(); await manager.reload();
   let pkg = packageBytes(); let mismatch = false;
   const catalog = createPluginCatalog({ root: path.join(dir, 'catalog'), manager, managed,
     fetchImpl: async url => new Response(url.endsWith('.tmplugin') ? (mismatch ? packageBytes('3.0.0') : pkg) : JSON.stringify(index(pkg))) });
   t.after(() => catalog.dispose()); await catalog.addSource({ url: URL });
   let entry = catalog.list().entries.find(p => p.id === 'community-demo'); assert.equal(entry.origin.kind, 'community');
   assert.deepEqual(entry.types, []); // Old catalogs need no new metadata.
-  let preview = await catalog.preview(entry.origin.id, entry.id, entry.version); assert.deepEqual(preview.types, ['page']); managed.install(preview.token);
+  let preview = await catalog.preview(entry.origin.id, entry.id, entry.version); assert.deepEqual(preview.types, ['page']); await managed.install(preview.token);
   assert.deepEqual(manager.list().plugins[0].types, ['page']);
   assert.equal(manager.list().plugins[0].status, 'disabled'); manager.setEnabled(entry.id, true);
   assert.equal(manager.list().plugins[0].status, 'active');
   pkg = packageBytes('2.0.0', ['sys.cpu']); await catalog.refreshSource(entry.origin.id);
   entry = catalog.list().entries.find(p => p.id === entry.id); assert.equal(entry.status, 'update');
   mismatch = true; await assert.rejects(catalog.preview(entry.origin.id, entry.id, entry.version), /SHA-256/); mismatch = false;
-  preview = await catalog.preview(entry.origin.id, entry.id, entry.version); managed.install(preview.token);
-  assert.equal(manager.list().plugins[0].status, 'needsApproval'); assert.deepEqual(settings.pluginStates[entry.id].grant.permissions, []);
-  managed.rollback(entry.id); assert.equal(manager.list().plugins[0].status, 'active');
+  preview = await catalog.preview(entry.origin.id, entry.id, entry.version); await managed.install(preview.token);
+  assert.equal(manager.list().plugins[0].status, 'needsApproval'); assert.ok(settings.pluginStates[entry.id].trustedRevision);
+  await managed.rollback(entry.id); assert.equal(manager.list().plugins[0].status, 'active');
   assert.equal(packageDirectory(path.join(userDir, entry.id)).manifest.version, '1.0.0');
-  managed.uninstall(entry.id); assert.equal(manager.list().plugins.length, 0);
+  await managed.uninstall(entry.id); assert.equal(manager.list().plugins.length, 0);
 });
-test('the shipped official package matches the authoring example', () => {
-  const expected = packageDirectory(path.join(__dirname, '../../docs/plugins/examples/token-pulse'));
-  const shipped = parsePackage(fs.readFileSync(path.join(__dirname, '../../src/electron/plugins/catalog/token-pulse.tmplugin')));
-  assert.equal(shipped.hash, expected.hash);
-});
-
 test('normalized source URLs are bounded before persistence and existing sources remain writable', async t => {
   const root = temp(t), fetchImpl = async () => new Response(JSON.stringify(index()));
   const sources = createCatalogSources({ root, fetchImpl });
@@ -125,7 +117,7 @@ test('catalog recovery updates use the managed version when discovery is invalid
   origins.set('community-demo', { version: '1.0.0', origin: { id: source.id } });
   origins.set('token-pulse', { version: '0.0.1', origin: { id: 'bundled' } });
   const entries = catalog.list().entries;
-  assert.equal(entries.find(e => e.id === 'token-pulse').status, 'update');
+  assert.equal(entries.some(e => e.id === 'token-pulse'), false);
   const entry = entries.find(e => e.id === 'community-demo');
   assert.equal(entry.status, 'update'); assert.equal(entry.installedVersion, '1.0.0');
   assert.equal(entry.versions[0].installable, true);

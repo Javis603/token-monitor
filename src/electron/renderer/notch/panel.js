@@ -39,7 +39,7 @@
 
   function createNotchPanel({ document, window, el, t, state, bridge, shared }) {
     const { markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, usageCostNode: usageCost, formatRate,
-      appearance, prefersReducedMotion, readableColor = color => color, limitAccountTitle, overflowText, limitWindowsView, pluginHost = null } = shared;
+      appearance, prefersReducedMotion, readableColor = color => color, limitAccountTitle, overflowText, limitWindowsView, pluginHost = null, pluginContent = null } = shared;
     const pluginViews = window.TokenMonitorPluginViews;
     const presentation = window.TokenMonitorEdgeDockPresentation;
     const trayText = window.TokenMonitorTrayText;
@@ -1278,6 +1278,12 @@
       else if (page === 'limits') renderLimits(pageNode, nowMs);
       else if (page === 'sessions') renderSessions(pageNode, nowMs, scroll);
       else renderBreakdown(pageNode, nowMs);
+      if (!page.startsWith(PLUGIN_PAGE_PREFIX) && pluginContent?.hasTarget(`notch.${page}.content`)) {
+        const native = el('div', 'plugin-native-content'); native.append(...pageNode.childNodes); pageNode.append(native);
+        pluginContent.render(`notch.${page}.content`, native, { surface: 'notch', page, period: view.breakdownPeriod, nativeData: payload });
+      }
+      pluginContent?.retain(['notch.summary.content', ...[...pageNodes.keys()].filter(key => !key.startsWith(PLUGIN_PAGE_PREFIX)).map(key => `notch.${key}.content`)]);
+      pluginHost?.refreshDemand();
       overflowText.preserveReading(previous, pageNode);
       overflowText.refresh();
       playRolls(pageNode, snapshot);
@@ -1297,6 +1303,7 @@
     // Plugin pushes refresh tab titles and icons that arrived after mount.
     function pluginViewsChanged() {
       paintTabs();
+      if (!view.page.startsWith(PLUGIN_PAGE_PREFIX)) renderPage(view.page, { force: true });
       if (view.page.startsWith(PLUGIN_PAGE_PREFIX)) {
         const kicker = pageNodes.get(view.page)?.querySelector('.notch-kicker');
         const pluginState = pluginHost?.state('notch', view.page.slice(PLUGIN_PAGE_PREFIX.length));

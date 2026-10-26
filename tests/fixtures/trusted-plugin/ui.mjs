@@ -1,5 +1,6 @@
 export function activate(ctx) {
   return {
+    renderTray(canvas, context) { const paint = canvas.getContext('2d'); paint.fillStyle = context.textColor || '#fff'; paint.fillRect(0, 0, canvas.width, canvas.height); },
     mount(container, context) {
       const label = document.createElement('p');
       label.textContent = `Trusted UI: ${context.viewId}`;
@@ -12,7 +13,7 @@ export function activate(ctx) {
       container.append(label, input, button, output);
       const off = ctx.backend.subscribe(value => { output.dataset.update = String(value); });
       return {
-        update(next) { label.textContent = `Trusted UI: ${next.viewId} (${next.width || 0})`; },
+        update(next) { label.textContent = `Trusted UI: ${next.viewId} (${next.width || 0})`; container.dataset.period = next.period || ''; container.dataset.source = next.source || ''; },
         hasUnsavedChanges: () => input.value.length > 0,
         dispose() { off(); container.replaceChildren(); }
       };

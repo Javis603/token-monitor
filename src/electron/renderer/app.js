@@ -278,9 +278,8 @@ const pluginViewsApi = window.TokenMonitorPluginViews;
 const pluginPlacementsApi = window.TokenMonitorPluginPlacements;
 // Assigned in the Plugins block below; read lazily by Home, tray and settings.
 let pluginViewHost = null;
+let pluginContent = null;
 let pluginMainPages = null;
-const pluginPresentations = new Map();
-let pluginPageDesigns = null;
 function pluginPageOptions() { return window.TokenMonitorPluginMainPages?.entries(state.pluginCatalog) || []; }
 let pluginApi = null;
 let pluginSettingsPanel = null;
@@ -7393,16 +7392,19 @@ function periodContentAvailability() {
 
 function render() {
   renderAppContent();
-  if (pluginPageDesigns) {
-    const supported = ['model', 'tool', 'device'].includes(state.breakdown);
-    const period = state.stats?.periods?.[state.period] || {};
-    const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
-    const visible = supported && Boolean(state.stats) && !fixedUnavailable && !detailUnavailable && visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed && !state.openSession;
-    const hasDesign = (state.pluginCatalog?.plugins || []).some(plugin => plugin.status === 'active'
-      && (plugin.webDocuments || []).some(doc => doc.target === state.breakdown));
-    const rows = visible && hasDesign ? rowsForPeriod(period) : [];
-    pluginPageDesigns.render({ visible, catalog: state.pluginCatalog, reducedMotion: prefersReducedMotion(), snapshot: { target: state.breakdown, period: state.period, totalTokens: period.totalTokens, costUsd: period.costUsd, rows: rows.map(row => ({ label: row.name, tokens: row.value, costUsd: row.cost })) } });
+  pluginViewHost?.refreshContext();
+  if (pluginContent) {
+    const target = `main.${state.breakdown}.content`;
+    const roots = { home: els.homePanel, limits: els.limitsPanel, trends: els.trendsPanel, status: els.serviceStatusPanel };
+    const native = roots[state.breakdown] || els.breakdown;
+    const visible = visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed;
+    pluginContent.retain(visible ? [target] : []);
+    if (visible && !state.breakdown.startsWith('plugin:')) pluginContent.render(target, native, {
+      surface: 'page', period: state.period, source: state.settings?.hubMode, stats: state.stats,
+      navigate: openViewFromTray
+    });
   }
+
 }
 function renderAppContent() {
   const surface = visibleStatsSurface();
@@ -12924,26 +12926,33 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
   document,
   window,
   t,
-  onMount: mount => pluginPresentations.get(mount.surface)?.track(mount),
-  onInteraction: (surface, ref, input, revision) => pluginBridge.interact(surface, ref, input, revision),
+  services: {
+    app: window.tokenMonitor,
+    native: {
+      quota: limitWindowsView,
+      quotaProvider: (id, label, record, color) => renderLimitProviderSolo(id, label, record, color),
+      quotaGroup: (id, label, records, color) => renderLimitProviderGroup(id, label, records, color)
+    },
+    navigate: openViewFromTray
+  },
+  getContext: () => ({ period: state.period, source: state.settings?.hubMode, stats: state.stats }),
+  onLoaded: () => { void maybeUpdateBarsIcon(); },
   onDemand: (surface, refs) => pluginBridge.setDemand(surface, refs),
   motionAllowed: () => !prefersReducedMotion(),
   motionMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
-  isSurfaceActive: surface => !['home', 'page'].includes(surface) || (!isRendererWindowHidden() && !isSettingsPanelOpen() && !state.floatingBubble.collapsed)
+  isSurfaceActive: surface => !isRendererWindowHidden() && !state.floatingBubble.collapsed && (surface === 'settings' ? isSettingsPanelOpen() : !isSettingsPanelOpen())
 }) : null;
-if (pluginViewHost) for (const surface of ['home', 'page']) {
-  const presentation = window.TokenMonitorPluginPresentationWeb?.create({ document, window, bridge: pluginBridge, surface,
-    stateFor: ref => pluginViewHost.state(surface, ref), reducedMotion: prefersReducedMotion,
-    active: () => !isRendererWindowHidden() && !isSettingsPanelOpen() && !state.floatingBubble.collapsed });
-  if (presentation) pluginPresentations.set(surface, presentation);
-}
+pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ document,
+  host: { mount: (container, view, context) => pluginViewHost.mount(container, view.ref, 'page', context), unmount: container => pluginViewHost.unmount(container) },
+  getViews: () => (state.pluginCatalog?.plugins || []).filter(plugin => plugin.status === 'active').flatMap(plugin => plugin.views || []),
+  selection: target => state.pluginCatalog?.contentSelections?.[target]
+}) : null;
 pluginMainPages = pluginViewHost ? window.TokenMonitorPluginMainPages.create({
   document, container: document.getElementById('pluginMainPanel'), host: pluginViewHost, t,
   openWindow: ref => pluginBridge.openPage(ref),
   formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
 }) : null;
 if (pluginViewHost) new MutationObserver(() => pluginViewHost.refreshDemand()).observe(els.shell, { attributes: true, attributeFilter: ['class'] });
-pluginPageDesigns = pluginBridge?.webSync ? window.TokenMonitorPluginPageDesigns.create({ document, window, api: pluginBridge, t, breakdown: els.breakdown, update: () => render(), isActive: () => !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed }) : null;
 let pluginCatalogKey = '';
 
 function applyPluginCatalog(list) {
@@ -12951,8 +12960,8 @@ function applyPluginCatalog(list) {
   state.pluginCatalog = list;
   // Home and the theme chips depend only on which plugins and views are
   // active; process metrics refresh every few seconds and must not re-render.
-  const key = JSON.stringify((list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.webRevision,
-    (plugin.views || []).map((view) => [view.ref, view.title, view.surfaces, view.placements?.page, view.placements?.notch]), plugin.skins, plugin.webDocuments]));
+  const key = JSON.stringify([list.contentSelections, (list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.revision,
+    (plugin.views || []).map((view) => [view.ref, view.title, view.surfaces, view.placements?.page, view.placements?.notch]), plugin.skins, plugin.revision])]);
   if (key !== pluginCatalogKey) {
     pluginCatalogKey = key;
     render();
@@ -12976,6 +12985,7 @@ async function loadPluginCatalog() {
 
 pluginApi = pluginBridge ? {
   list: loadPluginCatalog,
+  selectContent: async (target, ref) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.selectContent(target, ref)),
   setEnabled: async (id, enabled) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled)),
   setBackground: async (id, enabled) => applyPluginCatalog(await pluginBridge.setBackground(id, enabled)),
   restart: async (id) => applyPluginCatalog(await pluginBridge.restart(id)),
@@ -12989,9 +12999,6 @@ pluginApi = pluginBridge ? {
   },
   getSettings: id => pluginBridge.getSettings(id),
   updateSettings: (id, input) => pluginBridge.updateSettings(id, input),
-  syncWebPresentation: input => pluginBridge.syncWebPresentation(input),
-  onWebPresentationReady: callback => pluginBridge.onWebPresentationReady(callback),
-  onWebPresentationFailed: callback => pluginBridge.onWebPresentationFailed(callback),
   catalog: () => pluginBridge.catalog(),
   catalogPreview: (source, id, version) => pluginBridge.catalogPreview(source, id, version),
   addSource: input => pluginBridge.addSource(input),
@@ -13007,6 +13014,8 @@ pluginApi = pluginBridge ? {
 
 pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
   ? window.TokenMonitorPluginSettings.createPluginSettingsPanel({
+    mountSettings: (container, view) => pluginViewHost.mount(container, view.ref, 'settings', { descriptor: view }),
+    unmountSettings: container => pluginViewHost.unmount(container),
     document,
     container: document.getElementById('pluginSettingsList'),
     t,
@@ -13088,7 +13097,6 @@ async function applyAppearancePluginSkin(skin, chip) {
 if (pluginBridge) {
   pluginBridge.onViews((payload) => {
     pluginViewHost?.update(payload);
-    pluginPresentations.get(payload?.surface)?.refresh();
     if (payload?.surface === 'tray') void maybeUpdateBarsIcon();
   });
   pluginBridge.onChanged(() => void refreshPluginCatalog());
@@ -15205,42 +15213,15 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
   return canvas;
 }
 
-// A plugin's tray item: optional icon, optional free drawing and a reading,
-// drawn in the tray's single ink so it matches template rendering.
+// Author drawing uses the App's bitmap composition; the OS still owns the menu.
 function renderPluginTrayItemCanvas(item, h, { trackColor, textColor }) {
   const view = item.plugin;
-  const tray = view?.status === 'ok' ? view.tray || {} : {};
-  const text = view?.status === 'ok' ? String(tray.text ?? view.compact?.value ?? '') : '--';
-  const iconName = tray.icon || (!tray.draw && view?.status === 'ok' ? view.icon : '') || '';
-  const fontSize = Math.round(h * 0.62);
-  const font = trayTextCanvasFont({ fontStyle: 'normal' }, fontSize, 500);
-  const measure = document.createElement('canvas').getContext('2d');
-  measure.font = font;
-  const iconSize = Math.round(h * 0.7);
-  const gap = Math.max(1, Math.round(h * 0.12));
-  const drawWidth = Array.isArray(tray.draw) ? Math.round((tray.width || 32) * (h / 22)) : 0;
-  const textWidth = text ? Math.ceil(measure.measureText(text).width) : 0;
-  const parts = [iconName ? iconSize : 0, drawWidth, textWidth].filter(Boolean);
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, parts.reduce((sum, part) => sum + part, 0) + gap * Math.max(0, parts.length - 1) + 2);
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  let x = 1;
-  if (iconName) {
-    pluginViewsApi.drawIcon(ctx, iconName, { x, y: (h - iconSize) / 2, size: iconSize, color: textColor });
-    x += iconSize + gap;
-  }
-  if (drawWidth) {
-    const ink = { default: textColor, accent: textColor, chart: textColor, ok: textColor, info: textColor, warn: textColor, bad: textColor, muted: trackColor };
-    pluginViewsApi.drawDisplayList(ctx, tray.draw, { x, y: 0, width: drawWidth, height: h, boxWidth: tray.width || 32, boxHeight: 22, colors: ink });
-    x += drawWidth + gap;
-  }
-  if (text) {
-    ctx.font = font;
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = view?.status === 'ok' ? textColor : trackColor;
-    ctx.fillText(text, x, h / 2 + 1);
-  }
+  const canvas = document.createElement('canvas'); canvas.width = h; canvas.height = h;
+  if (view?.entry && pluginViewHost?.renderTray(view, canvas, { height: h, textColor, trackColor })) return canvas;
+  const size = Math.round(h * 0.7);
+  pluginViewsApi.drawIcon(canvas.getContext('2d'), view?.icon || 'dot', {
+    x: (h - size) / 2, y: (h - size) / 2, size, color: textColor
+  });
   return canvas;
 }
 

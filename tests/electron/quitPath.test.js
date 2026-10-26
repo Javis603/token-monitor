@@ -80,7 +80,7 @@ test('tray and signal quit flush plugin state before immediate exit', () => {
 test('a failing plugin teardown cannot skip the host shutdown that follows it', () => {
   const stopAll = functionSource('function stopAll()');
   assert.match(stopAll, /^function stopAll\(\) \{\s*disposePluginRuntime\(\);/);
-  assert.doesNotMatch(main, /pluginRuntime\?\.dispose\(\)(?!; \} catch)/, 'every dispose goes through the guard');
+  assert.equal((main.match(/pluginRuntime\?\.dispose\(\)/g) || []).length, 1, 'every dispose goes through the guard');
   const warnings = [];
   const dispose = new Function('pluginRuntime', 'console', `${main.match(/function disposePluginRuntime\(\) \{[\s\S]*?\n\}/)[0]}; return disposePluginRuntime;`)(
     { dispose() { throw new Error('boom'); } }, { warn: message => warnings.push(message) });

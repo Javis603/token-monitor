@@ -1,10 +1,10 @@
 'use strict';
 
 // Settings → Plugins. Lists discovered plugins, asks for consent before the
-// first enable (and again when an update widens access), places each view on
+// each executable revision, places each view on
 // the surfaces it supports, and shows a code plugin's process state. All
 // writes go through the main-process plugin API; nothing here edits settings
-// keys a plugin could abuse.
+// through the trusted host; this is not a same-renderer security boundary.
 (function exposePluginSettings(root, factory) {
   const positionApi = typeof module === 'object' && module.exports ? require('./selectControl') : root?.TokenMonitorSelectControl;
   const api = factory(positionApi);
@@ -20,9 +20,7 @@
     return node;
   }
 
-  function permissionLabel(t, permission, hosts) {
-    return t(`settings.plugins.permission.${permission}`, { hosts: hosts.join(', ') });
-  }
+
 
   function actionErrorMessage(error, t) {
     const message = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
@@ -32,7 +30,7 @@
     return known ? t(known) : t('settings.plugins.actionFailed', { error: message });
   }
 
-  function createPluginSettingsPanel({ document, container, t, api, setDetailTooltip = null, onApplySkin = () => {}, onPlaced = () => {}, onSetEnabled = null, getEnabled = null, getLocale = () => document.documentElement?.lang || 'en', onOpenExternal = () => {}, onCopyText = text => window.navigator.clipboard.writeText(text) }) {
+  function createPluginSettingsPanel({ mountSettings = null, unmountSettings = () => {}, document, container, t, api, setDetailTooltip = null, onApplySkin = () => {}, onPlaced = () => {}, onSetEnabled = null, getEnabled = null, getLocale = () => document.documentElement?.lang || 'en', onOpenExternal = () => {}, onCopyText = text => window.navigator.clipboard.writeText(text) }) {
     let list = null;
     let consentFor = '';
     let busy = false;
@@ -47,24 +45,18 @@
     const chosenVersions = new Map();
     const detailState = new Map();
     const authorSettings = new Map();
-    let editorPluginId = '', editorBody = null;
-    const settingsIdentities = new Map();
-    const presentation = window.TokenMonitorPluginPresentationWeb?.create({
-      document, window, bridge: api, surface: 'settings',
-      active: () => activeTab === 'installed' && !diagnostics && selectedPluginId === editorPluginId,
-      stateFor: id => {
-        const plugin = list?.plugins.find(item => item.id === id);
-        return { status: list?.enabled && plugin?.enabled && plugin.status === 'active' ? 'ok' : 'disabled',
-          revision: plugin?.webRevision, webDocuments: plugin?.webDocuments?.filter(doc => doc.target === 'settings') || [] };
-      },
-      reducedMotion: () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    });
+    const settingsIdentities = new Map(), settingsMounts = new Map();
     function reconcileSettings() {
       const installed = new Map((list?.plugins || []).map(plugin => [plugin.id, JSON.stringify([plugin.settingsIdentity, plugin.version, plugin.source])]));
       for (const [id, identity] of settingsIdentities) {
         if (installed.get(id) !== identity) {
           authorSettings.delete(id);
-          if (editorPluginId === id) editorPluginId = '';
+        }
+      }
+      for (const [ref, held] of settingsMounts) {
+        const plugin = list?.plugins?.find(item => item.id === held.pluginId);
+        if (plugin?.status !== 'active' || !plugin.views?.some(view => view.ref === ref && view.revision === held.revision)) {
+          unmountSettings(held.node); held.node.remove(); settingsMounts.delete(ref);
         }
       }
       settingsIdentities.clear();
@@ -159,26 +151,19 @@
       node.type = 'button'; node.disabled = busy; node.addEventListener('click', action); return node;
     }
 
-    function identity(name, author, origin, iconName, image, originKind) {
+    function identity(name, author, origin, iconName, image) {
       const group = el(document, 'div', 'plugin-identity');
       const art = el(document, 'span', 'plugin-identity-art'); art.setAttribute('aria-hidden', 'true');
       if (typeof image === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image) && image.length <= 90000) {
         const img = el(document, 'img'); img.alt = ''; img.src = image;
-        img.addEventListener('error', () => { img.remove(); art.append(window.TokenMonitorPluginViews.renderTree(document, { type: 'icon', name: iconName || 'dot', size: 20 })); }, { once: true });
+        img.addEventListener('error', () => { img.remove(); art.append(window.TokenMonitorPluginViews.iconNode(document, iconName || 'dot', null, 20)); }, { once: true });
         art.append(img);
-      } else art.append(window.TokenMonitorPluginViews.renderTree(document, { type: 'icon', name: iconName || 'dot', size: 20 }));
+      } else art.append(window.TokenMonitorPluginViews.iconNode(document, iconName || 'dot', null, 20));
       const title = el(document, 'div', 'plugin-card-title');
       const source = el(document, 'span', 'plugin-source');
       if (author) source.append(el(document, 'span', 'plugin-author', author));
       if (origin) {
         const label = el(document, 'span', 'plugin-origin-label', origin);
-        // Trust decoration is host-owned, never inferred from the author's text.
-        if (originKind === 'official' || originKind === 'builtin') {
-          label.classList.add('plugin-origin-official');
-          source.classList.add('plugin-source-official');
-          const shield = el(document, 'span', 'plugin-shield'); shield.setAttribute('aria-hidden', 'true');
-          source.prepend(shield);
-        }
         source.append(label);
       }
       title.append(el(document, 'span', 'plugin-name', name), source);
@@ -312,18 +297,14 @@
       const panel = el(document, 'section', 'plugin-consent plugin-package-preview');
       panel.dataset.errorTarget = 'package';
       panel.setAttribute('aria-label', t('plugins.package.review'));
-      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, p.origin.kind));
+      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon));
       const meta = el(document, 'div', 'plugin-card-meta');
       meta.append(el(document, 'span', 'plugin-version', `${p.installedVersion ? `${p.installedVersion} → ` : ''}${p.version}`), typeLabels(p)); panel.append(meta);
       panel.append(el(document, 'p', 'plugin-description', p.description));
       if (p.origin.kind !== 'local') panel.append(el(document, 'p', 'plugin-description', p.origin.label));
       if (p.origin.url) panel.append(el(document, 'code', 'plugin-log', p.origin.url));
       if (p.origin.packageUrl) panel.append(el(document, 'code', 'plugin-log', p.origin.packageUrl));
-      const permissions = el(document, 'ul', 'plugin-permission-list');
-      for (const permission of p.permissions) permissions.append(el(document, 'li', '', permissionLabel(t, permission, p.hosts)));
-      if (!p.permissions.length) permissions.append(el(document, 'li', '', t('settings.plugins.permission.none')));
-      panel.append(permissions);
-      if (p.risk.exfiltrationWarning) panel.append(el(document, 'p', 'plugin-risk', t('settings.plugins.riskEgress', { hosts: p.hosts.join(', ') })));
+      panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
       panel.append(el(document, 'p', 'settings-note', t(p.operation === 'install' ? 'plugins.package.enableLater' : 'plugins.package.grants')));
       const details = el(document, 'details', 'plugin-logs'); details.append(el(document, 'summary', '', t('plugins.package.integrity')));
       details.append(el(document, 'code', 'plugin-log', p.sha256)); panel.append(details);
@@ -398,7 +379,7 @@
         const cards = entries.map(entry => {
           const card = el(document, 'article', 'plugin-card'); card.dataset.catalogId = entry.id;
           const head = el(document, 'div', 'plugin-card-head');
-          head.append(identity(entry.name, entry.author || entry.id, t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon, entry.origin.kind));
+          head.append(identity(entry.name, entry.author || entry.id, t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon));
           card.append(head, el(document, 'p', 'plugin-description', entry.description));
           const meta = el(document, 'div', 'plugin-card-meta');
           meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`), typeLabels(entry));
@@ -411,7 +392,7 @@
           if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => {
             catalogReview = entry; await previewCatalog(entry, version?.version || entry.version); return null;
           })));
-          if (entry.installedVersion) actions.append(button(t(entry.status === 'builtin' ? 'plugins.catalog.builtin' : 'plugins.catalog.installed'), () => { activeTab = 'installed'; selectedPluginId = ''; diagnostics = false; render(); container.querySelector(`[data-plugin-id="${entry.id}"]`)?.scrollIntoView({ block: 'nearest' }); }, 'plugin-installed-link plugin-installed-check'));
+          if (entry.installedVersion) actions.append(button(t('plugins.catalog.installed'), () => { activeTab = 'installed'; selectedPluginId = ''; diagnostics = false; render(); container.querySelector(`[data-plugin-id="${entry.id}"]`)?.scrollIntoView({ block: 'nearest' }); }, 'plugin-installed-link plugin-installed-check'));
           if (!entry.installedVersion && !available) actions.append(el(document, 'span', 'settings-note', t('plugins.catalog.incompatible')));
           head.append(actions); return card;
         });
@@ -469,20 +450,7 @@
     function consentPanel(plugin) {
       const panel = el(document, 'div', 'plugin-consent');
       panel.append(el(document, 'div', 'plugin-consent-title', t('settings.plugins.consentTitle', { name: plugin.name })));
-      const items = el(document, 'ul', 'plugin-permission-list');
-      const permissions = plugin.permissions.length ? plugin.permissions : [];
-      for (const permission of permissions) {
-        const item = el(document, 'li', `plugin-permission plugin-permission-${permission.replace('.', '-')}`);
-        item.textContent = permissionLabel(t, permission, plugin.hosts);
-        if (plugin.missing?.permissions?.includes(permission) && plugin.enabled) item.classList.add('is-new');
-        items.append(item);
-      }
-      if (!permissions.length) items.append(el(document, 'li', 'plugin-permission', t('settings.plugins.permission.none')));
-      panel.append(items);
-      if (plugin.risk?.exfiltrationWarning) {
-        panel.append(el(document, 'p', 'plugin-risk', t('settings.plugins.riskEgress', { hosts: plugin.hosts.join(', ') })));
-      }
-      if (plugin.hasCode) panel.append(el(document, 'p', 'settings-note plugin-sandbox-note', t('settings.plugins.sandboxNote')));
+      panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const cancel = el(document, 'button', '', t('settings.plugins.cancel'));
       cancel.type = 'button';
@@ -564,7 +532,7 @@
 
     function pluginIdentity(plugin) {
       const head = el(document, 'div', 'plugin-card-head');
-      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon, plugin.installation?.origin.kind || plugin.source));
+      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon));
       if (!plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) {
         const toggle = el(document, 'input', 'plugin-enable');
         toggle.type = 'checkbox'; toggle.checked = plugin.enabled; toggle.disabled = !list?.enabled;
@@ -756,28 +724,7 @@
       status.textContent = state.message ? t(`plugins.authorSettings.${state.message}`)
         : snapshot.readOnly ? t('plugins.authorSettings.newerSchema')
           : Object.keys(state.errors).length ? t('plugins.authorSettings.invalid') : '';
-      const richDocument = plugin.webDocuments?.find(doc => doc.target === 'settings');
-      const canEditRich = presentation && richDocument && list.enabled && plugin.enabled && plugin.status === 'active' && !snapshot.readOnly;
-      if (editorPluginId === plugin.id && !canEditRich) editorPluginId = '';
-      if (canEditRich) {
-        const open = editorPluginId === plugin.id;
-        const toggle = button(t(`plugins.authorSettings.${open ? 'closeEditor' : 'editor'}`), () => {
-          editorPluginId = open ? '' : plugin.id; render();
-          content.querySelector('[data-control-key="author-editor"]')?.focus({ preventScroll: true });
-        });
-        toggle.dataset.controlKey = 'author-editor'; toggle.setAttribute('aria-expanded', String(open));
-        const editorId = `${container.id || 'plugin-settings'}-author-editor`;
-        toggle.setAttribute('aria-controls', editorId);
-        const editorActions = el(document, 'div', 'settings-actions'); editorActions.append(toggle); section.append(editorActions);
-        const retained = open && editorBody?.isConnected && editorBody.dataset.pluginId === plugin.id;
-        const body = retained ? editorBody : el(document, 'div', 'plugin-author-editor'); body.id = editorId;
-        body.dataset.pluginId = plugin.id;
-        body.replaceChildren(form, status); section.append(body);
-        if (open) {
-          editorBody = body;
-          if (!retained) presentation.track({ container: body, ref: plugin.id });
-        }
-      } else section.append(form, status);
+      section.append(form, status);
       return section;
     }
 
@@ -827,6 +774,11 @@
         wrap.append(placements);
       }
       if (plugin.status === 'active') {
+        for (const view of plugin.views || []) if (mountSettings && view.surfaces.includes('settings')) {
+          if (!settingsMounts.has(view.ref)) settingsMounts.set(view.ref, { node: el(document, 'div', 'plugin-author-settings'), pluginId: plugin.id, revision: view.revision });
+          const custom = settingsMounts.get(view.ref).node;
+          wrap.append(custom); mountSettings(custom, view);
+        }
         if (plugin.views?.some(view => view.surfaces.some(surface => SURFACE_ORDER.includes(surface)))) wrap.append(viewRows(plugin));
         if (plugin.background?.supported) {
           const label = el(document, 'label', 'checkbox-label settings-item plugin-background');
@@ -856,6 +808,14 @@
             actions.append(open);
           }
           wrap.append(detailSection(t('plugins.ui.pages'), el(document, 'p', 'settings-note', t('plugins.ui.pagesNote')), actions));
+        }
+      }
+      for (const view of plugin.status === 'active' ? plugin.views || [] : []) {
+        for (const target of view.mode === 'replace' ? view.targets || [] : []) {
+          const selected = list.contentSelections?.[target] === view.ref;
+          const row = el(document, 'div', 'settings-actions');
+          row.append(el(document, 'span', 'settings-note', target), button(t(selected ? 'plugins.trusted.restore' : 'plugins.trusted.useContent'), () => void run(() => api.selectContent(target, selected ? null : view.ref))));
+          wrap.append(row);
         }
       }
       const utility = el(document, 'div', 'settings-actions plugin-detail-utilities');
@@ -922,7 +882,6 @@
       if (actionError && actionError.scope !== errorScope()) actionError = null;
       const saved = rememberPosition();
       reconcileSettings();
-      presentation?.suspend();
       const nodes = [];
       if (!list) {
         const notice = errorNotice();
@@ -1060,7 +1019,7 @@
         render();
       },
       render,
-      dispose() { presentation?.dispose(); authorSettings.clear(); },
+      dispose() { authorSettings.clear(); for (const held of settingsMounts.values()) unmountSettings(held.node); settingsMounts.clear(); },
       summary() {
         if (!list) return '';
         const active = list.plugins.filter((plugin) => plugin.status === 'active').length;

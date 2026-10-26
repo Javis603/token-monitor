@@ -1,9 +1,0 @@
-{
-  "id": "memory",
-  "version": "1.0.0",
-  "tmApi": "^1",
-  "name": "Memory-bomb fixture",
-  "main": "main.js",
-  "metrics": [{ "id": "held", "kind": "number" }],
-  "views": [{ "id": "held", "title": "Held", "surfaces": ["home"], "layout": { "type": "stat", "value": { "$": "@held" } } }]
-}

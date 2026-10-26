@@ -1550,7 +1550,7 @@ test('Notch subscriptions isolate channels, unsubscribe and preserve callback er
   const ipcRenderer = new EventEmitter();
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/notch/preload.js'), 'utf8');
   vm.runInNewContext(source, { require: () => ({ ipcRenderer,
-    contextBridge: { exposeInMainWorld: (_name, value) => { api = value; } }
+    contextBridge: { exposeInMainWorld: (name, value) => { if (name === 'tokenMonitorEdgeDock') api = value; } }
   }) });
   const sent = [];
   ipcRenderer.send = (channel, payload) => sent.push({ channel, payload });
@@ -1589,7 +1589,7 @@ test('Notch and the side dock share refresh feedback rendering and retain indepe
   const channels = [];
   const preload = fs.readFileSync(path.join(__dirname, '../../src/electron/notch/preload.js'), 'utf8');
   vm.runInNewContext(preload, { require: () => ({
-    contextBridge: { exposeInMainWorld: (_name, value) => { api = value; } },
+    contextBridge: { exposeInMainWorld: (name, value) => { if (name === 'tokenMonitorEdgeDock') api = value; } },
     ipcRenderer: { invoke: channel => { channels.push(channel); return Promise.resolve(result); } }
   }) });
   assert.equal(await api.refreshLimits(), result);
@@ -2640,7 +2640,7 @@ test('Notch visibility transitions settle summary motion without rebuilding its 
   const code = source.slice(source.indexOf('function renderNotch('), source.indexOf('    let notchAnimation ='));
   let settles = 0;
   const payload = { expanded: false, summary: null, cells: [], appearance: {}, geometry: { gapWidth: 179, notched: true } };
-  const context = { state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0,
+  const context = { pluginContent: null, state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0,
     notchHeaderKey: '', panel: { suspend() {} }, settleNotchNumbers: () => settles++, settleNotchStatNumbers() {},
     resetRefreshVisit() {}, paintRefreshButton() {}, root: { classList: { toggle() {} }, style: { setProperty() {} } },
     runningSessionSummary() {}, contentLayer: { querySelector: () => null, prepend() {} },
@@ -2670,7 +2670,7 @@ test('Notch refreshes an expired waiting indicator without rebuilding an unchang
   const payload = { expanded: false, summary: { needsClock: false,
     items: [{ type: 'icon', providerCell: { sessions } }, { type: 'text', text: '51.7M' }] },
   cells: [], appearance: {}, geometry: { gapWidth: 0, summaryRingSize: 42, notched: false } };
-  const context = { state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0, notchHeaderKey: '',
+  const context = { pluginContent: null, state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0, notchHeaderKey: '',
     runningSessionSummary: rows => presentation.runningSessionSummary(rows, now),
     presentation: { waitingSessionSummary: rows => presentation.waitingSessionSummary(rows, now) },
     settleNotchNumbers() {}, panel: { suspend() {} }, settleNotchStatNumbers() {}, resetRefreshVisit() {}, paintRefreshButton() {},

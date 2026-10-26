@@ -8,22 +8,20 @@ const { parsePackage } = require('../../src/electron/plugins/package');
 const { normalizePluginStates } = require('../../src/electron/plugins/manager');
 
 function webPackage(main, asset) {
-  const manifest = { id: 'portable-demo', name: 'Demo', version: '1.0.0', tmApi: '^1', main,
-    permissions: ['ui.web', 'tm.pages'], webUi: { version: 1, assets: ['ui/index.html', asset],
-      documents: [{ id: 'models', entry: 'ui/index.html', target: 'model', slot: 'replace' }] } };
-  return JSON.stringify({ format: 1, manifest, code: '', assets: { 'ui/index.html': '', [asset]: '' } });
+  const manifest = { id: 'portable-demo', name: 'Demo', version: '1.0.0', tmApi: 2, backend: main, files: [main, asset] };
+  return JSON.stringify({ format: 2, manifest, files: { [main]: '', [asset]: '' } });
 }
 for (const [main, asset] of [['lib/main.js', 'lib/Main.js'], ['lib/main.js', 'LIB/MAIN.js'], ['lib/main.js', 'lib/main.js/child.js'], ['lib/main.js/child.js', 'LIB/main.js'], ['manifest.json/entry.js', 'lib/app.js']]) {
   test(`package rejects portable file collision ${main} / ${asset}`, () => {
-    assert.throws(() => parsePackage(webPackage(main, asset)), /conflict/);
+    assert.throws(() => parsePackage(webPackage(main, asset)), /conflict|duplicate/);
   });
 }
 test('distinct entry and asset names retain package bytes and content', () => {
   const bytes = webPackage('lib/main.js', 'lib/view.js');
   const pkg = parsePackage(bytes);
   assert.equal(pkg.bytes.toString(), bytes);
-  assert.equal(pkg.code, '');
-  assert.ok(Object.hasOwn(pkg.assets, 'lib/view.js'));
+  assert.equal(pkg.files['lib/main.js'].length, 0);
+  assert.ok(Object.hasOwn(pkg.files, 'lib/view.js'));
 });
 
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');

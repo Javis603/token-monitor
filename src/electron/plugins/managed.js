@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const semver = require('semver');
 const { ID_RE, MAX_PACKAGE_BYTES, contentDigest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage } = require('./package');
 const { removePluginPlacements } = require('./placementSettings');
-const SETTING_KEYS = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'notchPluginPages', 'pluginMainPages'];
+const SETTING_KEYS = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections'];
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const MAX_JOURNAL_BYTES = 2 * 1024 * 1024;
 function boundedJson(value, limit) {
@@ -20,7 +20,7 @@ function atomicJson(file, value, limit = Infinity) {
   try { fs.writeFileSync(fd, json); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
   fs.renameSync(tmp, file);
 }
-// One synchronous transaction at a time. A prepared journal always rolls back;
+// One transaction at a time. A prepared journal always rolls back;
 // only a persisted committed journal permits removal of the recovery copies.
 function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, manager, getSettings, saveSettings, getLocale = () => 'en', now = Date.now, fault = () => {} }) {
   const registryFile = path.join(root, 'installed.json');
@@ -86,8 +86,8 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       if (fs.existsSync(old)) {
         fs.rmSync(target, { recursive: true, force: true }); fs.renameSync(old, target);
       } else if (!j.hadTarget && !fs.existsSync(stage) && j.operation !== 'uninstall') fs.rmSync(target, { recursive: true, force: true });
-      const dataBackup = path.join(txDir, 'data.json');
-      if (fs.existsSync(dataBackup)) { fs.mkdirSync(dataDir, { recursive: true }); fs.renameSync(dataBackup, path.join(dataDir, `${j.id}.json`)); }
+      const directoryBackup = path.join(txDir, 'plugin-data');
+      if (fs.existsSync(directoryBackup)) { fs.mkdirSync(dataDir, { recursive: true }); fs.renameSync(directoryBackup, path.join(dataDir, j.id)); }
       const settingsBackup = path.join(txDir, 'author-settings.json');
       if (settingsDir && fs.existsSync(settingsBackup)) { fs.mkdirSync(settingsDir, { recursive: true }); fs.renameSync(settingsBackup, path.join(settingsDir, `${j.id}.json`)); }
       const previous = path.join(historyDir, `${j.id}.tmplugin`), previousBackup = path.join(txDir, 'previous.tmplugin');
@@ -147,7 +147,6 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
   function assertInstallable(pkg, origin) {
     assertAvailable();
     const id = pkg.manifest.id, installed = manager.list().plugins.find(p => p.id === id);
-    if (installed?.source === 'builtin') throw new Error('built-in plugins are updated with the application');
     if (!registry[id] && (installed || fs.existsSync(path.join(userDir, id)))) throw new Error('a development plugin already uses this id; remove or rename that folder first');
     if (registry[id]) {
       managed(id);
@@ -163,16 +162,17 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     for (const [key, item] of previews) if (item.expires < now()) previews.delete(key);
     if (previews.size >= 8) previews.delete(previews.keys().next().value);
     previews.set(token, { pkg, origin: structuredClone(origin), expires: now() + 10 * 60 * 1000, baseline: JSON.stringify(registry[pkg.manifest.id] || null) });
-    return { ...describePackage(pkg, { locale: getLocale(), grant: getSettings().pluginStates?.[pkg.manifest.id]?.grant }), token,
+    return { ...describePackage(pkg, { locale: getLocale() }), token,
       operation: registry[pkg.manifest.id] ? 'update' : 'install', installedVersion: registry[pkg.manifest.id]?.version || null, origin };
   }
-  function transact(id, operation, pkg, origin, options = {}) {
+  async function transact(id, operation, pkg, origin, options = {}) {
     assertAvailable();
     if (busy) throw new Error('another plugin operation is in progress');
     if (fs.existsSync(journalFile)) throw new Error('plugin recovery is pending; restart the application before changing plugins');
     busy = true;
     let prepared = false, began = false, committed = false, recovered = true;
     try {
+      await manager.beginMutation(); began = true;
       const target = path.join(userDir, id), stage = path.join(txDir, 'stage');
       const hadTarget = hasTarget(target);
       let current = null;
@@ -196,7 +196,6 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       if (operation === 'uninstall') delete next[id];
       else next[id] = { version: pkg.manifest.version, sha256: pkg.hash, contentSha256: contentDigest(pkg), origin, installedAt: now(), previousVersion: current?.manifest.version || null, previousSha256: current?.hash || null };
       boundedJson(next, MAX_REGISTRY_BYTES);
-      manager.beginMutation(); began = true;
       const before = settingsSnapshot();
       const j = { id, operation, phase: 'prepared', hadTarget, hadPrevious, registry, settings: before };
       boundedJson({ ...j, phase: 'committed' }, MAX_JOURNAL_BYTES);
@@ -210,25 +209,24 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       if (operation === 'uninstall') {
         delete patch.pluginStates[id];
         if (!options.keepPlacements) Object.assign(patch, removePluginPlacements(getSettings(), id));
-        if (!options.keepData && fs.existsSync(path.join(dataDir, `${id}.json`))) fs.renameSync(path.join(dataDir, `${id}.json`), path.join(txDir, 'data.json'));
+        if (!options.keepData && fs.existsSync(path.join(dataDir, id))) fs.renameSync(path.join(dataDir, id), path.join(txDir, 'plugin-data'));
         if (!options.keepData && settingsDir && fs.existsSync(path.join(settingsDir, `${id}.json`))) fs.renameSync(path.join(settingsDir, `${id}.json`), path.join(txDir, 'author-settings.json'));
         fs.rmSync(previous, { force: true });
       } else {
         if (current) fs.writeFileSync(previous, current.bytes, { mode: 0o600 });
         else fs.rmSync(previous, { force: true });
-        if (operation === 'install') patch.pluginStates[id] = { enabled: false, background: false, grant: { permissions: [], hosts: [] } };
-        // Updating never grants new capabilities. The manager pauses an enabled
-        // plugin when its new manifest exceeds the previously accepted grant.
+        if (operation === 'install') patch.pluginStates[id] = { enabled: false, background: false, trustedRevision: null };
+        // A changed revision needs an explicit new trust decision before execution.
       }
       atomicJson(registryFile, next, MAX_REGISTRY_BYTES); fault('registry-written');
       saveSettings(patch); fault('settings-written');
-      manager.reload(); fault('reloaded');
+      await manager.reload(); fault('reloaded');
       atomicJson(journalFile, { ...j, phase: 'committed' }, MAX_JOURNAL_BYTES); committed = true; registry = next;
       cleanup();
       return describe(id);
     } catch (error) {
       if (prepared && !committed) {
-        try { recover(); manager.reload(); } catch (recoveryError) { recovered = false; throw new Error(`${error.message}; recovery pending: ${recoveryError.message}`, { cause: recoveryError }); }
+        try { recover(); await manager.reload(); } catch (recoveryError) { recovered = false; throw new Error(`${error.message}; recovery pending: ${recoveryError.message}`, { cause: recoveryError }); }
       }
       throw error;
     } finally {
@@ -244,7 +242,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     previewDirectory(dir) { assertAvailable(); return preview(packageDirectory(dir)); },
     cancel(token) { previews.delete(token); },
     cancelSource(id) { for (const [token, preview] of previews) if (preview.origin.id === id) previews.delete(token); },
-    install(token) {
+    async install(token) {
       assertAvailable();
       const item = previews.get(token); previews.delete(token);
       if (!item || item.expires < now()) throw new Error('package preview expired; select the package again');
@@ -252,7 +250,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       assertInstallable(item.pkg, item.origin);
       return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin);
     },
-    rollback(id) {
+    async rollback(id) {
       const old = managed(id);
       if (!old.previousVersion) throw new Error('no previous version is available');
       const pkg = parsePackage(readBounded(path.join(historyDir, `${id}.tmplugin`), MAX_PACKAGE_BYTES));

@@ -292,6 +292,7 @@ test('Dots visibility refresh only delays its own settings save, including after
   const guardEnd = main.indexOf('\nfunction settingsForRenderer(', guardStart);
   assert.ok(guardStart >= 0 && guardEnd > guardStart);
   vm.runInNewContext(main.slice(guardStart, guardEnd) + registration, {
+    pluginRuntime: null,
     ipcMain: { handle: (_name, handler) => { update = handler; } },
     getSyncContentRuntime: () => contentRuntime,
     latestUsageHost: { transformSettingsApplied: async () => {} },
@@ -327,6 +328,7 @@ test('a delayed Dots visibility reply keeps the settings saved by a later write'
   const guardEnd = main.indexOf('\nfunction settingsForRenderer(', guardStart);
   assert.ok(guardStart >= 0 && guardEnd > guardStart);
   vm.runInNewContext(main.slice(guardStart, guardEnd) + registration, {
+    pluginRuntime: null,
     ipcMain: { handle: (_name, handler) => { update = handler; } },
     getSyncContentRuntime: () => contentRuntime,
     latestUsageHost: { transformSettingsApplied: async () => {} },

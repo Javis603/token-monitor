@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
-const { app, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
@@ -670,6 +670,7 @@ function defaultSettings() {
     notchPageOrder: [],
     notchBuiltinPages: [...pluginPlacements.NOTCH_BUILTIN_PAGES],
     pluginMainPages: [],
+    pluginContentSelections: {},
     lastViewState: { period: 'today', breakdown: 'home' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
@@ -2816,6 +2817,7 @@ function readSettings() {
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
+    merged.pluginContentSelections = pluginPlacements.normalizeContentSelections(merged.pluginContentSelections);
     merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
     delete merged.pluginSkinRef;
     merged.pluginMainPages = pluginPlacements.normalizeRefList(merged.pluginMainPages, 32);
@@ -5759,7 +5761,7 @@ function ensureNotchController() {
     onToggleRateMode: toggleDockRateMode,
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
-    onWebSurfaceChanged: () => pluginRuntime?.refreshWebSurfaces(),
+    onWebSurfaceChanged: () => pluginRuntime?.refreshSurfaces(),
     installNonActivatingInput: (win) => preventAppActivation(win),
     blurAvailable: () => nativeTheme.prefersReducedTransparency !== true,
     applyBlurMask: (win, mask, display) => {
@@ -6179,7 +6181,7 @@ function ensureEdgeDockController() {
       return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
-    onWebSurfaceChanged: () => pluginRuntime?.refreshWebSurfaces(),
+    onWebSurfaceChanged: () => pluginRuntime?.refreshSurfaces(),
     installNonActivatingInput: (win) => process.platform === 'darwin' ? preventAppActivation(win)
       : installWindowsNonActivatingInput(win, { logger: (message) => console.log(message) }),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
@@ -6492,6 +6494,11 @@ function ensureTray() {
   if (!shouldCreateTray(settings)) return false;
   if (tray && !tray.isDestroyed()) return;
   tray = createTray({
+    onRestartPluginsSafe: () => {
+      app.relaunch({ args: [...process.argv.slice(1).filter(arg => arg !== '--plugins-safe-mode'), '--plugins-safe-mode'] });
+      disposePluginRuntime();
+      app.exit(0);
+    },
     getMenuState: () => {
       const codex = trayCodexMenuState();
       return {
@@ -6763,7 +6770,10 @@ function stopAll() {
 
 // Plugin teardown must never skip the host's own collector and stream shutdown.
 function disposePluginRuntime() {
-  try { pluginRuntime?.dispose(); } catch (error) { console.warn(`[plugins] dispose failed: ${error.message}`); }
+  try {
+    const pending = pluginRuntime?.dispose();
+    pending?.catch(error => console.warn(`[plugins] dispose failed: ${error.message}`));
+  } catch (error) { console.warn(`[plugins] dispose failed: ${error.message}`); }
 }
 
 let quitRequested = false;
@@ -7611,7 +7621,7 @@ function createWindow(boundsOverride, options = {}) {
   // last real window closes, which window-all-closed relies on for quitting.
   win.on('closed', () => {
     if (quitRequested || process.platform === 'darwin') return;
-    if (BrowserWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other) || pluginRuntime?.owns(other)))) app.quit();
+    if (BrowserWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other)))) app.quit();
   });
   win.on('show', () => syncPluginWindowVisibility(win));
   win.on('hide', () => syncPluginWindowVisibility(win));
@@ -7988,6 +7998,7 @@ app.whenReady().then(() => {
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.
   ipcMain.handle('settings:update', async (event, patch) => {
+    const finishPluginChange = await pluginRuntime?.beforeSettingsChange(event, patch);
     assertPluginSkinRequest(event, patch);
     const contentRuntime = getSyncContentRuntime();
     const sharedEdit = patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined
@@ -8000,6 +8011,7 @@ app.whenReady().then(() => {
     applySettingsPatch(patch, (refresh) => { dotsVisibilityApplied = refresh; });
     await latestUsageHost?.transformSettingsApplied?.();
     await dotsVisibilityApplied;
+    finishPluginChange?.();
     // Other settings writes may finish while this visibility projection waits.
     // Return the latest saved selection rather than restoring an older one.
     return settingsForRenderer();
@@ -8055,6 +8067,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.syncContentStatus;
     delete normalizedPatch.syncContentBase;
     delete normalizedPatch.pluginStates;
+    delete normalizedPatch.pluginContentSelections;
     // Account fields declared persist:'never' (managed account lists, profile
     // maps, workbuddy session fields) are stripped by the registry walk below.
     normalizeAccountPatch(patch, normalizedPatch);
@@ -9674,7 +9687,7 @@ app.whenReady().then(() => {
     const action = activateWindowAction({
       mainWindow,
       windows: BrowserWindow.getAllWindows(),
-      isDockOwned: (win) => Boolean(edgeDockController?.owns(win) || notchController?.owns(win) || pluginRuntime?.owns(win))
+      isDockOwned: (win) => Boolean(edgeDockController?.owns(win) || notchController?.owns(win))
     });
     if (action === 'focusWindow') focusExistingWindow();
     else if (action === 'createWindow') {
@@ -9690,7 +9703,8 @@ app.whenReady().then(() => {
   function startPluginRuntime() {
     try {
       pluginRuntime = createPluginRuntime({
-        electron: { app, BrowserWindow, WebContentsView, powerMonitor, Notification, ipcMain, session, shell, dialog },
+        getAppSettings: settingsForRenderer,
+        electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, session, shell, dialog },
         userDataDir: app.getPath('userData'),
         getSettings: () => settings,
         applySettingsPatch,
@@ -9701,7 +9715,7 @@ app.whenReady().then(() => {
         },
         persistManagementSettings: (patch) => {
           // Main-owned transaction state only; never exposed as generic renderer settings.
-          const allowed = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'notchPluginPages', 'pluginMainPages'];
+          const allowed = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections'];
           settings = { ...settings, ...Object.fromEntries(allowed.filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]])) };
           settings.pluginStates = normalizePluginStates(settings.pluginStates);
           saveSettings({ throwOnError: true });
@@ -9753,10 +9767,8 @@ app.whenReady().then(() => {
             trayPresetLayout: notchSummaryLayout({ ...settings, notchSummaryMode: 'tray' }, stats)
           };
         },
-        tokenRateApi,
-        presentation: edgeDockPresentationApi
       });
-      pluginRuntime.start();
+      void pluginRuntime.start().catch(error => console.warn(`[plugins] startup: ${error.message}`));
       pluginRuntime.manager.onChanged(repaintDockSurfaces);
       if (latestStats) pluginRuntime.publishStats(electronPresentationStats(latestStats), latestStats);
     } catch (error) {

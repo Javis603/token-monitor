@@ -22,7 +22,7 @@ function catalogHarness() {
   vm.runInContext(`let pluginCatalogKey = ''; ${extract('applyPluginCatalog')}`, context);
   return { calls, context, apply: context.applyPluginCatalog };
 }
-const catalog = () => ({ enabled: true, plugins: [{ id: 'test', name: 'Design', status: 'active', webRevision: 1,
+const catalog = () => ({ enabled: true, plugins: [{ id: 'test', name: 'Design', status: 'active', revision: 1,
   views: [{ ref: 'test/card', title: 'Card', surfaces: ['home', 'page'], placements: { page: true } }],
   skins: [{ id: 'blue', name: 'Blue', colors: { accent: '#123456' } }],
   webDocuments: [{ ref: 'test/models', title: 'Models', target: 'models', slot: 'replace', height: 240 }],
@@ -36,9 +36,7 @@ test('identical and metric-only catalogs update state without any app redraw', (
   assert.deepEqual(h.calls, []);
 });
 for (const [label, mutate] of [
-  ['document revision', p => p.webRevision++],
-  ['document geometry', p => p.webDocuments[0].height++],
-  ['document removal', p => p.webDocuments = []],
+  ['code revision', p => p.revision++],
   ['plugin name', p => p.name = 'New name'],
   ['skin palette', p => p.skins[0].colors.accent = '#abcdef'],
   ['skin title', p => p.skins[0].name = 'New title'],
@@ -54,7 +52,7 @@ for (const [label, mutate] of [
 function preloadBridge() {
   let exposed;
   vm.runInNewContext(fs.readFileSync(path.join(root, 'src/electron/preload.js'), 'utf8'), {
-    require: id => { assert.equal(id, 'electron'); return { contextBridge: { exposeInMainWorld: (_name, api) => { exposed = api; } }, ipcRenderer: { on() {}, invoke() {} } }; },
+    require: id => { assert.equal(id, 'electron'); return { contextBridge: { exposeInMainWorld: (name, api) => { if (name === 'tokenMonitor') exposed = api; } }, ipcRenderer: { on() {}, invoke() {} } }; },
     process: { platform: 'darwin', versions: {} }
   });
   return exposed.plugins;

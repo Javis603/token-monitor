@@ -27,22 +27,21 @@ const copy = {
 async function main() {
   app.dock?.hide();
   const html = path.join(scratch, 'fixture.html');
-  fs.writeFileSync(html, `<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="file://${root}/src/electron/renderer/styles.css"><style>body{overflow:auto;padding:16px}#settings{max-width:640px;margin:auto}.settings-panel{display:block!important}h1{font-size:14px}</style></head><body><h1>Synthetic author settings fixture</h1><div id="settings" class="settings-panel"></div><button id="outside">Outside</button><script src="file://${root}/src/shared/plugins/localized.js"></script><script src="file://${root}/src/electron/renderer/selectControl.js"></script><script src="file://${root}/src/electron/renderer/pluginPresentationWeb.js"></script><script src="file://${root}/src/electron/renderer/pluginSettings.js"></script></body></html>`);
+  fs.writeFileSync(html, `<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="file://${root}/src/electron/renderer/styles.css"><style>body{overflow:auto;padding:16px}#settings{max-width:640px;margin:auto}.settings-panel{display:block!important}h1{font-size:14px}</style></head><body><h1>Synthetic author settings fixture</h1><div id="settings" class="settings-panel"></div><button id="outside">Outside</button><script src="file://${root}/src/shared/plugins/localized.js"></script><script src="file://${root}/src/electron/renderer/selectControl.js"></script><script src="file://${root}/src/electron/renderer/pluginSettings.js"></script></body></html>`);
   const win = new BrowserWindow({ show: false, width: 420, height: 900, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
   await win.loadFile(html);
   win.webContents.debugger.attach('1.3');
   await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
   const result = await win.webContents.executeJavaScript(`(async () => {
-    window.TokenMonitorPluginViews = { renderTree: () => document.createElement('span') };
+    window.TokenMonitorPluginViews = { iconNode: () => document.createElement('span') };
     const schema = ${JSON.stringify(schema)}, copy = ${JSON.stringify(copy)};
     const checks = []; const check = (name, condition) => checks.push({ name, ok: Boolean(condition) });
     const box = document.getElementById('settings');
     const tick = () => new Promise(resolve => setTimeout(resolve, 25));
-    let mode = 'ok', resolveSave, writes = 0, reads = 0; const presentations = [];
+    let mode = 'ok', resolveSave, writes = 0, reads = 0; const mounts = [];
     let saved = { pluginId: 'demo', schema, schemaVersion: 1, storedSchemaVersion: 1, revision: 0, values: {grid:true,width:2,note:'Saved title',mode:'pen'}, errors:{}, readOnly:false,status:'ready' };
-    const data = {enabled:false, safeMode:true, plugins:[{id:'demo',name:'Sketch Pad',author:'Fixture author',version:'1.0.0',source:'user',status:'disabled',enabled:false,settings:true,views:[],permissions:[],hosts:[]}]};
-    const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,t:key=>copy[key.replace('plugins.authorSettings.','')] || ({'plugins.ui.back':'Back','plugins.ui.manage':'Manage','plugins.catalog.installed':'Installed','plugins.catalog.official':'Official','plugins.catalog.community':'Community','plugins.ui.noPlacements':'No selected locations','plugins.ui.selectedLocations':'Selected locations','settings.plugins.source.user':'Local plugin'})[key] || key,api:{
-      syncWebPresentation:async input=>{presentations.push(input);return {mounted:[]}},
+    const data = {enabled:false, safeMode:true, plugins:[{id:'demo',name:'Preferences fixture',author:'Fixture author',version:'1.0.0',source:'user',status:'disabled',enabled:false,settings:true,views:[]}]};
+    const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,mountSettings:(container,view)=>{mounts.push(view.ref);if(!container.firstChild){const marker=document.createElement('span');marker.textContent='Custom settings';container.append(marker)}},t:key=>copy[key.replace('plugins.authorSettings.','')] || ({'plugins.ui.back':'Back','plugins.ui.manage':'Manage','plugins.catalog.installed':'Installed','plugins.catalog.official':'Official','plugins.catalog.community':'Community','plugins.ui.noPlacements':'No selected locations','plugins.ui.selectedLocations':'Selected locations','settings.plugins.source.user':'Local plugin'})[key] || key,api:{
       list:async()=>structuredClone(data),
       getSettings:async()=>{reads++;if(mode==='load-error')throw Error('read failed');return structuredClone(saved)},
       updateSettings:async(id,request)=>{
@@ -81,19 +80,14 @@ async function main() {
     check('failed-reload-keeps-old-snapshot-and-retry',control('note').disabled===true&&box.querySelector('.plugin-author-status').textContent===copy.loadFailed);
     mode='ok';control('reload').click();await tick();
     check('narrow-layout-no-horizontal-overflow',document.documentElement.scrollWidth<=window.innerWidth);
-    data.plugins[0].webDocuments=[{target:'home',ref:'demo/wrong',height:150},{target:'settings',ref:'demo/editor',height:400}];
-    data.plugins[0].settingsIdentity='install-1'; await panel.refresh(); await tick();
-    check('disabled-rich-entry-not-offered-host-form-editable',!control('editor')&&!control('note').disabled);
-    data.enabled=true;data.safeMode=false;data.plugins[0].enabled=true;data.plugins[0].status='active';data.plugins[0].webRevision=1;
+    data.plugins[0].views=[{ref:'demo/editor',surfaces:['settings'],revision:'one'}];
+    data.plugins[0].settingsIdentity='install-1';await panel.refresh();await tick();
+    check('disabled-author-code-is-not-mounted',mounts.length===0&&!control('note').disabled);
+    data.enabled=true;data.safeMode=false;data.plugins[0].enabled=true;data.plugins[0].status='active';
     await panel.refresh();await tick();
-    check('declared-rich-entry-with-no-placement',control('editor')&&data.plugins[0].views.length===0&&control('editor').getAttribute('aria-expanded')==='false');
-    edit('note','Retain this draft');control('editor').click();await new Promise(resolve=>setTimeout(resolve,300));
-    check('settings-document-only-mapped-to-presentation',presentations.some(p=>p.entries?.some(e=>e.viewRef==='demo'&&e.ref==='demo/editor'))&&!presentations.some(p=>p.entries?.some(e=>e.ref==='demo/wrong')));
-    check('not-ready-rich-keeps-editable-fallback',control('note').value==='Retain this draft'&&!control('note').disabled&&getComputedStyle(control('note')).visibility==='visible');
-    control('editor').click();await tick();
-    check('close-editor-restores-form-and-focus',control('editor').getAttribute('aria-expanded')==='false'&&document.activeElement===control('editor')&&control('note').value==='Retain this draft');
-    const readsBefore=reads;data.plugins[0].webRevision=2;await panel.refresh();await tick();
-    check('runtime-revision-refresh-retains-draft',reads===readsBefore&&control('note').value==='Retain this draft');
+    check('active-settings-view-mounted-without-display-placement',mounts.includes('demo/editor'));
+    edit('note','Retain this draft');const readsBefore=reads;await panel.refresh();await tick();
+    check('settings-refresh-retains-form-draft',reads===readsBefore&&control('note').value==='Retain this draft');
     data.plugins[0].settingsIdentity='install-2';await panel.refresh();await tick();
     check('reinstall-identity-invalidates-draft',reads===readsBefore+1&&control('note').value===saved.values.note);
     edit('note','Uninstalled draft');const plugin=data.plugins.pop();await panel.refresh();data.plugins.push(plugin);await panel.refresh();box.querySelector('.plugin-manage').click();await tick();

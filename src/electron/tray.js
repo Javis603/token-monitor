@@ -416,6 +416,7 @@ function buildTrayMenuTemplate(options = {}) {
     { type: 'separator' },
     { label: t('trayMenu.version', { version: state.appVersion || '' }), enabled: false },
     { label: t('trayMenu.settings'), click: callback('onOpenSettings') },
+    { label: t('plugins.trusted.safeMode'), click: callback('onRestartPluginsSafe') },
     {
       label: t('trayMenu.quit'),
       // macOS draws a menu item's shortcut from `accelerator` as that item's key
@@ -452,6 +453,7 @@ function createTray({
   electron = require('electron'),
   getMenuState,
   onOpenSettings,
+  onRestartPluginsSafe,
   onOpenView,
   onQuit,
   onRefresh,
@@ -476,6 +478,7 @@ function createTray({
     state,
     platform,
     onOpenSettings,
+  onRestartPluginsSafe,
     onOpenView,
     onQuit,
     onRefresh,

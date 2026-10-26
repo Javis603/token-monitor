@@ -424,7 +424,7 @@ test('a direct main render defers only while the window is hidden', () => {
   let surface = 'bubble';
   let scheduled = 0;
   const render = rendererFunction('render', '\nfunction setStatus(', {
-    pluginPageDesigns: null,
+    pluginContent: null, pluginViewHost: null,
     visibleStatsSurface: () => surface,
     statsRenderScheduler: { request() { scheduled += 1; } },
     state: { stats: null }

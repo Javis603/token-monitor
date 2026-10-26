@@ -139,7 +139,7 @@ test('WorkBuddy preload exposes dedicated IPC and rejects membership through gen
   vm.runInNewContext(fs.readFileSync(path.join(renderer, '../preload.js'), 'utf8'), {
     require: (name) => {
       assert.equal(name, 'electron');
-      return { ipcRenderer, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } } };
+      return { ipcRenderer, contextBridge: { exposeInMainWorld: (name, value) => { if (name === 'tokenMonitor') bridge = value; } } };
     }
   });
   await bridge.workbuddy.accounts();

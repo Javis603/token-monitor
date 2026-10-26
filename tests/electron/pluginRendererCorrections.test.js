@@ -81,68 +81,10 @@ test('composer names plugin entries and keeps remove/reorder without quota contr
  assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'system-monitor/memory');
 });
 
-test('correction fixture accepts the exact active Notch chip list', () => {
- // 10: use the exact catalog literal in the correction fixture, real production renderer.
- const fixture=fs.readFileSync(path.join(root,'scripts/test-plugin-corrections-ui.cjs'),'utf8');
- const catalogLiteral=fixture.match(/let settings=\{\},fail=false;const catalog=(.*);\n/)[1];
- const catalog=vm.runInNewContext('('+catalogLiteral+')');
+test('Notch choices exclude inactive plugins without removing native pages', () => {
+ const catalog={enabled:true,plugins:[{status:'active',views:[{ref:'demo/first',title:'First',surfaces:['notch'],placements:{notch:true}},{ref:'demo/second',title:'Second',surfaces:['notch'],placements:{notch:true}}]},{status:'disabled',views:[{ref:'idle/main',title:'Idle',surfaces:['notch'],placements:{notch:true}}]}]};
  const d=makeDoc(), container=d.createElement('div');d.body.append(container);
  req('src/electron/renderer/notch/pageSettings.js').render({document:d,container,settings:{},catalog,t,save:async()=>{},place:async()=>{},onError:e=>{throw e;}});
- const chips=container.querySelectorAll('.notch-page-chip');const idle=chips.find(n=>n.dataset.page==='plugin:idle/main');
- const oldPass=chips.length===7&&idle.disabled;
- assert.equal(oldPass,false);assert.equal(chips.length,6);assert.equal(idle,undefined);
- const checkLine=fixture.split('\n').find(line=>line.includes("check('settings-chips-render'"));
- const originalQuery=container.querySelector.bind(container);container.querySelector=selector=>selector==='[data-page="plugin:idle/main"]'?idle:originalQuery(selector);
- let passes=false; vm.runInNewContext(checkLine,{container,check:(_name,ok)=>{passes=ok;}});
- assert.equal(passes,true);
-});
-
-test('Rich withdraws ready zero content on loading or unavailable native ranges', async () => {
- // 5: exact wrapper AND entire native renderer; unavailability branch returns before unrelated native rendering.
- const fapi=req('src/electron/renderer/fixedPeriodRanges.js');
-
- for(const mode of ['history-disabled','history-failed','loading','device-detail-unavailable']){
-  const d=makeDoc();const els={};for(const key of ['shell','breakdown','fixedPeriodMessage','totalTokens','homePanel','serviceStatusPanel','limitsPanel','trendsPanel','sessionDetail','sessionDetailHead','sessionPagerHost','toolDetailFooter','projectBreakdownFooter']){els[key]=d.createElement('div');d.body.append(els[key]);}els.shell.className='shell';
-  const target=mode==='device-detail-unavailable'?'device':'model';
-  const selectedDoc={ref:'demo/design',target,title:'Design',slot:'replace',height:120};
-  const state={period:'last7',breakdown:target,stats:{periods:{}},settings:{historyEnabled:mode!=='history-disabled'},fixedPeriodHistoryRequested:mode!=='loading',fixedPeriodHistoryFailed:mode==='history-failed',fixedPeriodHistorySignature:'fixture',fixedPeriodHistoryBusy:mode==='loading',floatingBubble:{collapsed:false},pluginCatalog:{plugins:[{id:'demo',name:'Demo',status:'active',webDocuments:[selectedDoc]}]}};
-  const payloads=[];let host,lastInput;
-  const window={innerHeight:800,matchMedia:()=>({matches:false}),addEventListener(){}};
-  const css={getPropertyValue:()=>'',borderTopColor:'#333',fontFamily:'system-ui',colorScheme:'dark'};
-  const hostContext=vm.createContext({window,document:d,MutationObserver:class{observe(){}disconnect(){}},getComputedStyle:()=>css,clearTimeout,setTimeout});
-  vm.runInContext(fs.readFileSync(path.join(root,'src/electron/renderer/pluginPageDesigns.js'),'utf8'),hostContext);
-  const api={webSync:async payload=>{payloads.push(payload);return {selections:{[target]:selectedDoc.ref},mounted:true};},onWebRestore(){},onWebFailed(){}};
-  host=window.TokenMonitorPluginPageDesigns.create({document:d,window,api,t,breakdown:els.breakdown,update:()=>host.render(lastInput)});
-  const functions=['render',...(source.includes('function periodContentAvailability(')?['periodContentAvailability']:[]),'renderAppContent','hidePeriodContentForMessage','fixedPeriodMessage','buildFixedPeriodSnapshot','rowsForPeriod','modelRowsForPeriod','periodAttributionRows'];
-  const bindings={state,els,fixedPeriodRangesApi:fapi,visibleStatsSurface:()=> 'main',isSettingsPanelOpen:()=>false,isRendererWindowHidden:()=>false,prefersReducedMotion:()=>false,pluginPageDesigns:{render:input=>{lastInput=input;host.render(input);}},pluginMainPages:null,pluginPageOptions:()=>[],allTimeSessions:{ensure(){}},fixedPeriodHistorySignature:()=> 'fixture',loadFixedPeriodHistory:async()=>{},buildFixedPeriodSourcesSnapshot:()=>({status:'ready',period:{totalTokens:123,costUsd:1,models:{demo:123}}}),t,formatNumber:String,usageAttributionRowsApi:req('src/electron/renderer/usageAttributionRows.js'),formatCost:n=>String(n),deviceRowsForPeriod:()=>[],renderFloatingBubbleContent(){}};
-  for(const name of ['ensureBreakdownVisible','stopHomeSessionRepaint','stopSessionStatusRepaint','syncLiveTokenRateFooterState','renderSessionUsageArchiveStatus','renderViewSwitcher','cancelNumberAnimation','updateTotalCompact','setTotalCost','renderSessionPager','signalContentReady'])bindings[name]=()=>{};
-  const ctx=scope(functions,bindings);
-  // Establish a selected, visible document with genuinely zero ready usage.
-  // The native unavailable branches below run in full; unrelated ready rendering is outside this test.
-  const nativeRender=ctx.renderAppContent;
-  ctx.renderAppContent=()=>{state.fixedPeriodSnapshot={status:'ready'};state.fixedPeriodHistory={deviceHistories:[]};state.stats.periods.last7={totalTokens:0,costUsd:0,models:{}};};
-  ctx.render();for(let i=0;i<5;i++)await new Promise(setImmediate);
-  assert.ok(payloads.some(p=>p.visible===true&&p.snapshot.totalTokens===0),'genuine zero usage remains eligible');
-  payloads.length=0;delete state.fixedPeriodHistory;ctx.renderAppContent=nativeRender;
-  ctx.render();for(let i=0;i<5;i++)await new Promise(setImmediate);
-
-  assert.equal(payloads.at(-1)?.visible,false,mode);
-  assert.equal(els.fixedPeriodMessage.classList.contains('hidden'),false);
-  assert.notEqual(els.fixedPeriodMessage.textContent,'');
-  assert.equal(els.breakdown.classList.contains('hidden'),true);
-  assert.equal(d.body.querySelector('.plugin-page-designs').hidden,true);
-  assert.equal(d.body.querySelector('.plugin-web-panel'),null);
- }
-});
-
-
-test('plugin action errors localize full Dock and corrupt package recovery', () => {
- const {actionErrorMessage}=req('src/electron/renderer/pluginSettings.js');
- const handler=error=>actionErrorMessage(error,key=>key);
- for(const error of [new Error('edgeDock-full'),new Error("Error invoking remote method 'plugin:place': Error: edgeDock-full")]){
-  assert.equal(handler(error),'settings.plugins.edgeDockFull');
- }
- for(const error of [Object.assign(new Error('raw manifest parse failure'),{code:'installed-package-invalid'}),new Error("Error invoking remote method 'plugin:install': Error: installed-package-invalid")]){
-  assert.equal(handler(error),'plugins.package.repairRequired');
- }
+ const chips=container.querySelectorAll('.notch-page-chip');
+ assert.equal(chips.length,6);assert.equal(chips.some(n=>n.dataset.page==='plugin:idle/main'),false);
 });
