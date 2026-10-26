@@ -36,7 +36,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
   function validateRegistry(data) {
     if (!isRecord(data) || Object.entries(data).some(([id, item]) => !ID_RE.test(id) || !isRecord(item)
       || !semver.valid(item.version) || typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sha256)
-      || (item.contentSha256 !== undefined && (typeof item.contentSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.contentSha256)))
+      || (typeof item.contentSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.contentSha256))
       || !isRecord(item.origin) || typeof item.origin.id !== 'string' || !item.origin.id
       || !Number.isFinite(item.installedAt))) throw new Error('invalid installed plugin registry');
     return Object.assign(Object.create(null), data);

@@ -8126,7 +8126,7 @@ function renderThemePresetChips() {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'theme-preset-chip';
-    chip.classList.toggle('active', preset.id === activeId);
+    chip.classList.toggle('active', !state.settings?.pluginAuthorSkin && preset.id === activeId);
     chip.dataset.presetId = preset.id;
     const dot = document.createElement('span');
     dot.className = 'theme-preset-dot';
@@ -8137,18 +8137,8 @@ function renderThemePresetChips() {
     chip.addEventListener('click', () => selectThemePreset(preset.id));
     els.themePresetChips.appendChild(chip);
   }
-  if (state.settings?.pluginAuthorSkin) {
-    const clear = document.createElement('button');
-    clear.type = 'button'; clear.className = 'theme-preset-chip';
-    const skin = { ref: null };
-    clear.dataset.pluginSkin = JSON.stringify(skin);
-    clear.textContent = t('settings.plugins.clearSkin');
-    clear.addEventListener('click', () => void applyAppearancePluginSkin(skin, clear));
-    els.themePresetChips.appendChild(clear);
-  }
   // Skins from active plugins sit beside the built-in presets; applying one
   // writes ordinary theme colours, so it survives the plugin being removed.
-  const resolved = themePresetsApi.mergeThemeColors(state.settings?.themeColors);
   for (const plugin of state.pluginCatalog?.plugins || []) {
     if (plugin.status !== 'active') continue;
     for (const skin of plugin.skins || []) {
@@ -8157,7 +8147,7 @@ function renderThemePresetChips() {
       chip.type = 'button';
       chip.className = 'theme-preset-chip theme-preset-chip-plugin';
       chip.dataset.pluginSkin = JSON.stringify(skin);
-      chip.classList.toggle('active', !activeId && themePresetsApi.INTERFACE_COLOR_KEYS.every((key) => resolved[key] === colors[key]));
+      chip.classList.toggle('active', state.settings?.pluginAuthorSkin?.ref === skin.ref);
       chip.setAttribute('aria-description', t('settings.plugins.skinFrom', { name: plugin.name }));
       const dot = document.createElement('span');
       dot.className = 'theme-preset-dot';
@@ -8263,15 +8253,15 @@ async function selectThemePreset(presetId) {
   for (const key of themePresetsApi.INTERFACE_COLOR_KEYS) {
     if (preset.colors[key] !== themePresetsApi.DEFAULT_THEME[key]) next[key] = preset.colors[key];
   }
-  await commitThemeColors(next);
+  await commitThemeColors(next, true);
 }
 
-async function commitThemeColors(overrides) {
+async function commitThemeColors(overrides, resetPluginStyle = false) {
   state.settings.themeColors = overrides;
   applyThemeColors(overrides);
   buildAppearanceColorControls();
   renderSettingsSummaries();
-  await saveSettings({ themeColors: overrides });
+  await saveSettings({ themeColors: overrides, ...(resetPluginStyle ? { pluginSkinRef: null } : {}) });
 }
 
 function showThemeCodeStatus(key, type = '') {
@@ -13685,7 +13675,7 @@ els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
 els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
 void loadBackgroundImage();
-els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
+els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}, true));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
 els.textSizeInput?.addEventListener('change', async () => {
   await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });

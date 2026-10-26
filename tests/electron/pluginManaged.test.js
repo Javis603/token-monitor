@@ -131,28 +131,7 @@ test('content integrity accepts archive formatting, manifest key ordering and ex
   restarted.rollback('test-plugin'); assert.equal(read().contentSha256, fingerprint);
   restarted.rollback('test-plugin'); assert.equal(read().version, '2.0.0');
 });
-for (const operationName of ['update', 'rollback', 'uninstall', 'missing update']) {
-  test(`content integrity legacy record without fingerprint supports safe ${operationName}`, t => {
-    const f = historyFixture(t), file = path.join(f.args.root, 'installed.json');
-    const registry = JSON.parse(fs.readFileSync(file)); delete registry['test-plugin'].contentSha256;
-    fs.writeFileSync(file, JSON.stringify(registry));
-    const api = createManagedPlugins(f.args); api.recover(); assert.equal(api.status().available, true);
-    if (operationName === 'update') {
-      const before = snapshot(f);
-      assert.throws(() => api.preview(parsePackage(bytes('3.0.0'))), { code: 'installed-package-invalid' });
-      assert.deepEqual(snapshot(f), before);
-    } else if (operationName === 'uninstall') { api.uninstall('test-plugin'); assert.equal(api.describe('test-plugin'), null); }
-    else {
-      if (operationName === 'missing update') {
-        fs.rmSync(path.join(f.args.userDir, 'test-plugin'), { recursive: true });
-        api.install(api.preview(parsePackage(bytes('3.0.0'))).token);
-      } else api.rollback('test-plugin');
-      assert.equal(api.describe('test-plugin').previousVersion, null);
-      assert.match(JSON.parse(fs.readFileSync(file))['test-plugin'].contentSha256, /^[a-f0-9]{64}$/);
-    }
-  });
-}
-for (const invalid of [null, 123, 'not-a-digest']) {
+for (const invalid of [undefined, null, 123, 'not-a-digest']) {
   test(`content integrity rejects malformed stored fingerprint ${JSON.stringify(invalid)}`, t => {
     const f = fixture(t); f.install('1.0.0');
     const file = path.join(f.args.root, 'installed.json'), registry = JSON.parse(fs.readFileSync(file));

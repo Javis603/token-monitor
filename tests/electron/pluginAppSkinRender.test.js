@@ -156,22 +156,31 @@ for (const scenario of ['rollback rebuild', 'removed skin', 'changed skin', 'new
   });
 }
 
-test('clear style remains reachable after author removal and sends the explicit reset command', async () => {
+test('built-in themes and reset clear author tokens atomically; individual colors retain them', async () => {
+  const h = skinHarness();
+  vm.runInContext(extract('selectThemePreset') + '\n' + extract('commitThemeColors'), h.context);
+  h.context.state.settings.pluginAuthorSkin = { ref: 'removed/skin', appearance: { font: 'mono' } };
+  await h.context.selectThemePreset(themePresetsApi.THEME_PRESETS[0].id);
+  assert.equal(h.saved[0].pluginSkinRef, null);
+  await h.context.commitThemeColors({}, true);
+  assert.deepEqual(h.saved[1], { themeColors: {}, pluginSkinRef: null });
+  await h.context.commitThemeColors({ accent: '#123456' });
+  assert.deepEqual(h.saved[2], { themeColors: { accent: '#123456' } });
+  assert.match(source, /resetThemeColorsButton\?\.addEventListener\('click', \(\) => commitThemeColors\(\{\}, true\)\)/);
+});
+test('theme selection uses author identity and has no separate clear button', () => {
   const { Element } = require('../helpers/notchPanel');
   const document = { createElement: tag => new Element(tag, document) };
   const container = document.createElement('div'); container.appendChild = node => container.append(node);
   Object.defineProperty(container, 'innerHTML', { set() { container.replaceChildren(); } });
   const h = skinHarness();
   Object.assign(h.context, { document, els: { themePresetChips: container }, selectThemePreset() {} });
-  h.context.state.settings.pluginAuthorSkin = { ref: 'removed/skin', appearance: { font: 'mono' } };
-  h.context.state.pluginCatalog = { plugins: [] };
-  let pending;
-  h.context.applyAppearancePluginSkin = skin => { pending = h.context.applyPluginSkin(skin); };
+  h.context.state.settings.pluginAuthorSkin = { ref: 'author/mono' };
+  h.context.state.pluginCatalog = { plugins: [{ status: 'active', name: 'Author', skins: [{ ref: 'author/mono', name: 'Mono', colors: {} }, { ref: 'other/mono', name: 'Other', colors: {} }] }] };
   vm.runInContext(extract('matchingThemePresetId') + '\n' + extract('renderThemePresetChips'), h.context);
   h.context.renderThemePresetChips();
-  const clear = container.querySelectorAll('button').find(node => node.dataset.pluginSkin === '{"ref":null}');
-  assert.ok(clear); clear.fire('click'); await pending;
-  assert.deepEqual(h.saved, [{ pluginSkinRef: null }]);
-  h.context.state.settings.pluginAuthorSkin = null; h.context.renderThemePresetChips();
-  assert.equal(container.querySelectorAll('button').some(node => node.dataset.pluginSkin), false);
+  const buttons = container.querySelectorAll('button');
+  assert.equal(buttons.length, themePresetsApi.THEME_PRESETS.length + 2);
+  assert.equal(buttons.filter(b => b.classList.contains('active')).length, 1);
+  assert.equal(JSON.parse(buttons.find(b => b.classList.contains('active')).dataset.pluginSkin).ref, 'author/mono');
 });

@@ -50,7 +50,7 @@ Focused DTO/store tests do not establish Worker/Rich transport, native multi-win
 - Authored pages cannot access host DOM, credentials, arbitrary IPC or unauthorized sources. Selection/save failure preserves the prior document and persisted selection. Owner close, reload and capability loss revoke active and cached documents.
 - Hidden retained documents freeze timers/animation and release subscriptions. Author retention never overrides global count/memory limits or revocation. Long numeric retention must not overflow Node timers.
 - Numeric motion and continuous charts respect reduced motion and author overrides. Charts retain missing-data gaps, do not invent samples or increase source cadence, and stop animation when inactive or caught up with a stopped source.
-- Settings preserve focus, drafts and scroll across refresh. Safe mode must not overwrite the saved master preference. App theme inheritance remains distinct from read-only legacy appearance compatibility.
+- Settings preserve focus, drafts and scroll across refresh. Safe mode must not overwrite the saved master preference. Built-in theme selection and interface-theme reset clear copied plugin appearance; individual color edits retain it.
 
 ## Outstanding manual acceptance
 

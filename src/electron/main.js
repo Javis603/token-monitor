@@ -5473,8 +5473,11 @@ function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
 function preparePluginSkinSettings(patch, current, runtime) {
   if (Object.hasOwn(patch, 'pluginAuthorSkin')) throw new Error('author skin snapshots are host-owned');
   if (!Object.hasOwn(patch, 'pluginSkinRef')) return { patch, authorSkin: normalizePluginAuthorSkin(current.pluginAuthorSkin) };
+  if (patch.pluginSkinRef === null && Object.keys(patch).every(key => ['pluginSkinRef', 'themeColors'].includes(key))) {
+    const { pluginSkinRef: _reset, ...colors } = patch;
+    return { patch: colors, authorSkin: null };
+  }
   if (Object.keys(patch).length !== 1) throw new Error('plugin skin selection must be a standalone command');
-  if (patch.pluginSkinRef === null) return { patch: {}, authorSkin: null };
   const skin = runtime?.resolveSkin(patch.pluginSkinRef);
   if (!skin) throw new Error('plugin skin is unavailable');
   const authorSkin = normalizePluginAuthorSkin({ ref: skin.ref, appearance: skin.appearance || {} });
@@ -5491,7 +5494,7 @@ function preparePluginSkinSettings(patch, current, runtime) {
 function assertPluginSkinRequest(event, patch) {
   if (Object.hasOwn(patch, 'pluginAuthorSkin')) throw new Error('author skin snapshots are host-owned');
   if (!Object.hasOwn(patch, 'pluginSkinRef')) return;
-  if (Object.keys(patch).length !== 1) throw new Error('plugin skin selection must be a standalone command');
+  if (Object.keys(patch).length !== 1 && !(patch.pluginSkinRef === null && Object.keys(patch).every(key => ['pluginSkinRef', 'themeColors'].includes(key)))) throw new Error('plugin skin selection must be a standalone command');
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
     || !event.senderFrame || event.senderFrame !== event.sender.mainFrame) throw new Error('plugin skin selection requires the main window');
 }

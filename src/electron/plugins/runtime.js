@@ -17,7 +17,6 @@ const { createPluginSandbox, PLUGIN_SCHEME } = require('./sandbox');
 const { createWebUi, WEB_UI_SCHEME, configureWebUiNetworkIsolation } = require('./webUi');
 const { createPluginPages } = require('./pages');
 const { createManagedPlugins } = require('./managed');
-const { createPluginAppearance } = require('./appearance');
 const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const { createPluginManager } = require('./manager');
@@ -140,7 +139,6 @@ function createPluginRuntime({
     }
   }
 
-  const appearance = createPluginAppearance({ file: path.join(userDataDir, 'plugin-appearance.json') });
   let manager = null;
   const sandbox = safeMode ? null : createPluginSandbox({
     electron: { BrowserWindow, session, app },
@@ -161,7 +159,7 @@ function createPluginRuntime({
     getSettings,
     saveStates: persistPluginStates,
     getLocale,
-    getAppearance: () => normalizePluginAuthorSkin(getSettings()?.pluginAuthorSkin)?.appearance || appearance.get(),
+    getAppearance: () => normalizePluginAuthorSkin(getSettings()?.pluginAuthorSkin)?.appearance || normalizeAppearance(),
     safeMode,
     log
   });

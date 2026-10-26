@@ -48,6 +48,9 @@ test('protected snapshot cannot be forged; command is standalone and main-frame-
   const sender = { mainFrame: {} }, mainWindow = { webContents: null, isDestroyed: () => false }; mainWindow.webContents = sender;
   const h = helpers({ mainWindow }); const event = { sender, senderFrame: sender.mainFrame };
   h.assertPluginSkinRequest(event, { pluginSkinRef: 'author/mono' });
+  h.assertPluginSkinRequest(event, { pluginSkinRef: null, themeColors: {} });
+  assert.throws(() => h.assertPluginSkinRequest(event, { pluginSkinRef: null, vendorColors: {} }), /standalone/);
+  assert.throws(() => h.assertPluginSkinRequest({ sender: {}, senderFrame: {} }, { pluginSkinRef: null, themeColors: {} }), /main window/);
   for (const patch of [{ pluginAuthorSkin: null }, { pluginAuthorSkin: { ref: 'author/mono', appearance: tokens } }, { pluginSkinRef: 'author/mono', themeColors: {} }]) {
     assert.throws(() => h.assertPluginSkinRequest(event, patch));
     assert.throws(() => h.preparePluginSkinSettings(patch, {}, {}));
@@ -142,7 +145,7 @@ test('real manager DTOs and runtime resolve active identities; snapshot survives
   const restarted = fixture(t, { pluginAuthorSkin: JSON.parse(JSON.stringify(f.settings.pluginAuthorSkin)) });
   assert.throws(() => restarted.runtime.resolveSkin(skin.ref), /unavailable/);
   assert.deepEqual(plain(restarted.runtime.payload('home').appearance), tokens);
-  f.settings.pluginAuthorSkin = null; assert.equal(f.getAppearance().font, 'system'); assert.equal(f.getAppearance().corners, 'square');
+  f.settings.pluginAuthorSkin = null; assert.equal(f.getAppearance().font, 'inherit'); assert.equal(f.getAppearance().corners, 'rounded');
 });
 
 test('actual settings IPC revalidates sender and active selection after async publication', async () => {
@@ -175,7 +178,7 @@ test('every finite appearance option reaches actual plugin-content DOM projectio
   }
 });
 
-test('explicit clear restores underlying plugin appearance without changing the App palette', t => {
+test('reset ignores obsolete appearance files and restores defaults', t => {
   const f = fixture(t, { themeColors: { accent: '#123456' }, vendorColors: { test: '#abcdef' }, pluginAuthorSkin: { ref: 'removed/skin', appearance: tokens } });
   const h = helpers({ mainWindow: null });
   const cleared = h.preparePluginSkinSettings({ pluginSkinRef: null }, f.settings, null);
@@ -185,11 +188,11 @@ test('explicit clear restores underlying plugin appearance without changing the 
   f.runtime.settingsChanged();
   assert.deepEqual(f.settings.themeColors, { accent: '#123456' });
   assert.deepEqual(f.settings.vendorColors, { test: '#abcdef' });
-  assert.equal(f.runtime.payload('home').appearance.font, 'system');
-  assert.equal(f.runtime.payload('home').appearance.corners, 'square');
+  assert.equal(f.runtime.payload('home').appearance.font, 'inherit');
+  assert.equal(f.runtime.payload('home').appearance.corners, 'rounded');
   assert.equal(fs.readFileSync(f.legacyFile, 'utf8'), f.legacy);
   const restarted = fixture(t, plain(f.settings));
-  assert.equal(restarted.runtime.payload('home').appearance.corners, 'square');
-  assert.throws(() => h.preparePluginSkinSettings({ pluginSkinRef: null, themeColors: {} }, f.settings, null), /standalone/);
+  assert.equal(restarted.runtime.payload('home').appearance.corners, 'rounded');
+  assert.deepEqual(plain(h.preparePluginSkinSettings({ pluginSkinRef: null, themeColors: {} }, f.settings, null)), { patch: { themeColors: {} }, authorSkin: null });
   assert.throws(() => h.assertPluginSkinRequest({ sender: {}, senderFrame: {} }, { pluginSkinRef: null }), /main window/);
 });

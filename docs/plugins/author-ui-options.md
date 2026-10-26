@@ -104,9 +104,9 @@ One host sampler serves all subscribed projections at the fastest permitted inte
 
 ## Appearance and distribution
 
-Plugin content follows App appearance by default. Existing `plugin-appearance.json` is read-only compatibility data and remains untouched; existing skin/theme preset capabilities remain. Authors own their document design and plugin-specific controls. Whole-App themes continue through the host theme contract, not arbitrary App CSS.
+Plugin content follows App appearance by default. Obsolete `plugin-appearance.json` files are not read or modified; skin/theme preset capabilities remain. Authors own their document design and plugin-specific controls. Whole-App themes continue through the host theme contract, not arbitrary App CSS.
 
-In Appearance, **Clear plugin style** removes the copied author font, density, corner, panel and content-color overrides without changing the App palette. It returns plugin content to its default appearance (or the existing read-only local appearance settings). This action remains available after the author plugin is disabled or removed; choosing an App color preset alone does not clear the copied style.
+In Appearance, selecting a built-in theme or resetting interface themes clears the copied plugin appearance together with applying the palette. Selecting another plugin skin replaces its appearance snapshot. Individual color edits and palette-code imports preserve plugin appearance. There is no separate clear-style button.
 
 Official app-shipped listings plus user-added HTTPS indexes are the supported catalog model. Catalog inclusion does not imply a safety review. Users explicitly add community sources; plugins cannot enroll or publish a source themselves.
 

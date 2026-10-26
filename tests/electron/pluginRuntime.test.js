@@ -29,7 +29,6 @@ function fixture({ rich = false, businessAdapters = {} } = {}) {
     './pages': { createPluginPages: options => { detachedDemand = options.onDemand; return ({presentationContext: () => null, refreshVisibility() { visibilityRefreshes.push('pages'); }, refresh() {}, dispose() {}}); } },
     './appSources': { createAppSources: () => ({ publish() {} }) },
     './manager': { createPluginManager: () => manager },
-    './appearance': { createPluginAppearance: () => ({ get: () => ({}) }) },
     './managed': { createManagedPlugins: () => ({ recover() {}, describe() {}, dispose() {} }) },
     './catalog': { createPluginCatalog: () => ({ dispose() {} }) },
     '../limits/fetch': { createElectronNetFetch: () => () => {} },
