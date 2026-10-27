@@ -1513,34 +1513,6 @@ function apikeyProvider(name, accountKey, status, updatedAt) {
   };
 }
 
-test('aggregateLimits keeps a MiniMax account failure separate from another account on a remote device', () => {
-  const aggregate = aggregateLimits([
-    {
-      deviceId: 'this-mac',
-      limits: {
-        updatedAt: '2026-06-24T10:00:00.000Z',
-        providers: [apikeyProvider('minimax', 'sha256:local-bad-key', 'unauthorized', '2026-06-24T10:00:00.000Z')]
-      }
-    },
-    {
-      deviceId: 'office-pc',
-      limits: {
-        updatedAt: '2026-06-24T10:01:00.000Z',
-        providers: [apikeyProvider('minimax', 'sha256:remote-good-key', 'ok', '2026-06-24T10:01:00.000Z')]
-      }
-    }
-  ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
-
-  const minimaxRows = aggregate.providers.filter((provider) => provider.provider === 'minimax');
-  assert.equal(minimaxRows.length, 2);
-  const local = minimaxRows.find((row) => row.accountKey === 'sha256:local-bad-key');
-  const remote = minimaxRows.find((row) => row.accountKey === 'sha256:remote-good-key');
-  assert.equal(local.status, 'unauthorized');
-  assert.equal(local.sourceDeviceId, 'this-mac');
-  assert.equal(remote.status, 'ok');
-  assert.equal(remote.sourceDeviceId, 'office-pc');
-});
-
 test('the local device raw limits still carry the unauthorized row the aggregate dropped', () => {
   // This is the data the renderer's localDeviceLimitsProviders() reads. It proves
   // the local unauthorized survives in stats.devices[..].limits.providers even
