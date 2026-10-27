@@ -195,7 +195,7 @@ async function fetchPersonalPlanKeys(run, profile) {
   const subscribed = new Set();
   const unknown = new Set();
   for (const plan of body.plans) {
-    if (!plan || typeof plan.key !== 'string' || !['personal', 'team'].includes(plan.scope)) throw probeError();
+    if (!plan || typeof plan.key !== 'string') throw probeError();
     if (!Object.hasOwn(PERSONAL_PLANS, plan.key)) continue;
     if (plan.scope !== 'personal' || Object.hasOwn(plan, 'error') || typeof plan.status !== 'string' || !plan.status) unknown.add(plan.key);
     else subscribed.add(plan.key);

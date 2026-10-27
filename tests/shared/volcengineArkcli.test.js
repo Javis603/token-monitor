@@ -352,6 +352,122 @@ test('a failed sibling query does not hide a healthy personal plan', async () =>
     assert.ok(!JSON.stringify(rows).includes('private'));
   }
 });
+test('account-scoped refresh never publishes a sibling plan or another viewer', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  for (const target of ['Agent Plan', 'Coding Plan']) {
+    for (const outcome of ['ok', 'failed', 'cancelled', 'other-viewer']) {
+      await t.test(`${target}: ${outcome}`, async () => {
+        let time = Date.parse(now);
+        let refreshing = false;
+        const runtime = createLimitsRuntime({ limitProviders: ['volcengine'] }, {
+          autoStart: false, now: () => time,
+          probeProvider: (_provider, options) => fetchVolcengineLimits(options, {
+            env: {}, now: () => time, runArkcli: cliMock(async args => {
+              if (args[0] === 'auth') return auth;
+              const product = args[3];
+              const isTarget = (product === 'agent-plan' ? 'Agent Plan' : 'Coding Plan') === target;
+              if (refreshing && isTarget && outcome === 'failed') throw new Error('timeout');
+              const body = product === 'agent-plan' ? response() : codingResponse();
+              if (refreshing) {
+                if (outcome === 'other-viewer') body.viewer.user_id = 'different';
+                if (isTarget && outcome === 'cancelled') body.items[0].subscribed = false;
+                if (product === 'agent-plan') body.items[0].periods[0].used = 40;
+                else body.items[0].periods[0].percent = 60;
+              }
+              return body;
+            })
+          })
+        });
+        try {
+          await runtime.refresh({}, 'manual');
+          const initial = runtime.getSnapshot().providers;
+          const selected = initial.find(row => row.accountLabel === target);
+          const sibling = initial.find(row => row.accountLabel !== target);
+          refreshing = true;
+          time += 300_000;
+          await runtime.refresh({ provider: 'volcengine', accountKey: selected.accountKey }, 'reset-boundary');
+          const rows = runtime.getSnapshot().providers;
+          assert.deepEqual(rows.find(row => row.accountKey === sibling.accountKey), sibling);
+          assert.equal(rows.length, outcome === 'cancelled' ? 1 : 2);
+          const result = rows.find(row => row.accountKey === selected.accountKey);
+          if (outcome === 'cancelled') assert.equal(result, undefined);
+          else {
+            assert.equal(result.accountLabel, target);
+            assert.equal(result.status, outcome === 'ok' ? 'ok' : 'unavailable');
+            if (outcome === 'ok') assert.equal(result.windows[0].usedPercent, target === 'Agent Plan' ? 40 : 60);
+            else {
+              assert.deepEqual(result.windows, selected.windows);
+              assert.equal(result.updatedAt, selected.updatedAt);
+            }
+          }
+        } finally { runtime.stop(); }
+      });
+    }
+  }
+});
+test('unknown subscription products cannot block a healthy personal plan', async () => {
+  const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+    if (args[0] === 'auth') return auth;
+    if (args[0] === 'plans') return { plans: [
+      { key: 'future-plan', error: 'unsupported product' }, ...subscriptions('coding-plan').plans
+    ] };
+    assert.equal(args[3], 'coding-plan');
+    return codingResponse();
+  } });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].accountLabel, 'Coding Plan');
+  assert.equal(rows[0].status, 'ok');
+});
+test('automatic reset timer preserves both CLI product identities and sibling freshness', { timeout: 2000 }, async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  let time = Date.parse(now);
+  const start = time;
+  const timers = new Map();
+  let id = 0;
+  const startup = Promise.withResolvers();
+  const boundary = Promise.withResolvers();
+  const scopes = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['volcengine'] }, {
+    now: () => time,
+    setTimeout: (fn, delay) => { timers.set(++id, { fn, delay }); return id; },
+    clearTimeout: timer => timers.delete(timer),
+    onEvent: event => {
+      if (event.type !== 'probe-finish') return;
+      if (event.reason === 'startup') startup.resolve();
+      if (event.reason === 'reset-boundary') boundary.resolve();
+    },
+    probeProvider: (_provider, options) => {
+      scopes.push(options.limitRefreshScope);
+      return fetchVolcengineLimits(options, { env: {}, now: () => time, runArkcli: cliMock(async args => {
+        if (args[0] === 'auth') return auth;
+        const agent = args[3] === 'agent-plan';
+        const body = agent ? response() : codingResponse();
+        for (const period of body.items[0].periods) period.reset_at = new Date(start + (agent ? 1000 : 600_000)).toISOString();
+        if (time > start) {
+          if (agent) body.items[0].periods[0].used = 40;
+          else body.items[0].periods[0].percent = 60;
+        }
+        return body;
+      }) });
+    }
+  });
+  try {
+    await startup.promise;
+    const initial = runtime.getSnapshot().providers;
+    const agent = initial.find(row => row.accountLabel === 'Agent Plan');
+    const coding = initial.find(row => row.accountLabel === 'Coding Plan');
+    const timer = [...timers.values()].find(entry => entry.delay === 31_000);
+    assert.ok(timer, 'real reset scheduler must arm the Agent Plan boundary');
+    time += 31_000;
+    timer.fn();
+    await boundary.promise;
+    assert.equal(scopes[1].accountKey, agent.accountKey);
+    const rows = runtime.getSnapshot().providers;
+    assert.equal(rows.length, 2);
+    assert.equal(rows.find(row => row.accountKey === agent.accountKey).windows[0].usedPercent, 40);
+    assert.deepEqual(rows.find(row => row.accountKey === coding.accountKey), coding);
+  } finally { runtime.stop(); }
+});
 test('percentage-only CLI periods reject missing or invalid quota rather than showing zero', () => {
   for (const percent of [undefined, null, '0', -1, NaN, Infinity]) {
     const body = codingResponse();
