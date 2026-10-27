@@ -405,9 +405,15 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')],
     ['workbuddy-projects', path.join(home, '.workbuddy-ai', 'projects')]
   );
-  // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl. The fork
-  // parses it from tokscale's effective home, like the Qoder CN paths below.
-  add('proma', ['proma-sessions', path.join(tokscaleHome, '.proma', 'agent-sessions')]);
+  // Proma — tokscale reads the Agent journals and both SDK transcript trees of
+  // the release (.proma) and dev (.proma-dev) homes under its effective home.
+  // The optional agent-sessions.json index beside them is linking metadata,
+  // not usage, and is left to the periodic full tick rather than watching the
+  // whole home with its config and credentials.
+  add('proma', ...['.proma', '.proma-dev'].flatMap((base) => (
+    ['agent-sessions', path.join('sdk-config', 'sessions'), path.join('sdk-config', 'projects')]
+      .map((dir) => ['proma-sessions', path.join(tokscaleHome, base, dir)])
+  )));
   // AI Chat Models (vicanent.gcmp) — per-hour usage JSONL under each VS Code
   // variant's globalStorage. Watch the usages dir directly; its parent holds
   // only state this extension rewrites itself (inter-instance events), and the

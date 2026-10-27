@@ -138,6 +138,18 @@
 
 大多数用量监控工具只在它运行的那台机器上有用。Token Monitor 是为多设备工作流而设计的：每台设备监视自己的本地日志、把汇总更新发送到你的 hub，每个连接中的小部件几乎都能实时看到 Token 变化。
 
+## 快速安装
+
+macOS 可通过官方 [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor) 安装：
+
+```bash
+brew install --cask token-monitor
+```
+
+也可从 [GitHub Releases](https://github.com/Javis603/token-monitor/releases) 下载 macOS、Windows 或 Linux 版 App。
+
+启动 App 即可开始追踪这台设备的本地用量，无需配置 hub。完整说明请见[安装](#安装)。
+
 ## 功能特性
 
 ### 用量追踪
@@ -219,7 +231,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 与 `kiro-cli` 数据库 | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志 | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（仅限中国版） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
@@ -269,6 +281,26 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 
 - AI Chat Models（`vicanent.gcmp`）的 Token 用量来自该扩展在 VS Code globalStorage 下按小时写入的 usage JSONL —— 在 Settings → tools 中启用（可选，默认关闭）。仅统计最终 `completed` 状态的记录，忽略 estimated 占位行，并直接采用其记录的缓存 token 与成本估算。它记录的每个请求同样会出现在 VS Code 自己的 `workspaceStorage/*/chatSessions/` 中（即 GitHub Copilot 一行的数据来源）。两者请只启用一个，否则同一批请求会被重复计数。
 </details>
+
+### 其他功能支持
+
+| 功能 | 支持的工具／来源 | 补充说明 |
+|---------|-------------------------|------------|
+| 会话标题 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| 每次提示／回复的用量与工具调用 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 明细仅在本地读取，不会同步。 |
+| 上下文用量／剩余空间 | Claude Code, Codex, DeepSeek Harness | Claude Code 的上下文上限根据模型估算。 |
+| 缓存用量／会话缓存命中率 | 提供缓存字段的来源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 有缓存用量数据时才显示命中率。 |
+| 缓存剩余时间估算 | Claude Code, Codex | Claude Code：5 分钟或 1 小时；Codex：约 30 分钟（估算）。 |
+| 输出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 为输出速度，`tok/min` 为总 Token 消耗速率；计时可能包含等待。 |
+| 推理强度设置 | Claude Code, Codex | 仅显示会话中明确记录的设置值。 |
+| 推理 Token 数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| 原生运行中／等待输入状态 | Claude Code, Codex | — |
+| 父会话／子代理分组 | Codex, Antigravity, Oh My Pi, ZCode；具有可验证父会话链接的 T3 Code 会话 | Claude Code 的分组通过 T3 Code 提供。 |
+| 同一对话的续接记录分组 | Codex；具有已验证线程链接的 T3 Code 会话 | — |
+| 切换本地账号 | Codex | 可切换至已添加到 Token Monitor 的账号。 |
+| 额度重置时间／倒计时 | 提供重置时间的来源，例如 Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| 可用额度重置券 | Claude Code, Codex | 显示剩余次数及到期时间，仅供查看。 |
+| 额度重置预测 | Codex | 可选的 codex-resets.com 第三方预测。 |
 
 ## 安装
 

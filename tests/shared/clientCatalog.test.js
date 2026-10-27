@@ -66,7 +66,7 @@ test('derived DEFAULT_CLIENTS keeps the existing default-tracked CSV', () => {
 });
 
 test('derived FORK_ONLY_CLIENT_IDS lists exactly the clients the tokscale fork owns', () => {
-  assert.deepEqual([...FORK_ONLY_CLIENT_IDS], ['proma', 'catpaw', 'qodercn']);
+  assert.deepEqual([...FORK_ONLY_CLIENT_IDS], ['catpaw', 'qodercn']);
 });
 
 test('derived LOCALLY_PARSED_CLIENT_IDS lists exactly the in-process adapters', () => {
