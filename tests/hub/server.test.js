@@ -634,7 +634,7 @@ test('the stats stream coalesces bursts and negotiates timestamp-only freshness 
     const base = {
       deviceId: 'dev-a',
       updatedAt: initialAt,
-      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } },
+      today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: initialAt } } } },
       clientHealth: {
         version: 1,
         clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
@@ -644,8 +644,8 @@ test('the stats stream coalesces bursts and negotiates timestamp-only freshness 
     hub.ingest(base);
     const { port } = hub.server.address();
     const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
-    modern = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
-    legacy = await openSse(streamUrl, { authorization: 'Bearer shh' });
+    modern = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' });
+    legacy = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
     await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
     assert.equal(modern.events[0].event, 'snapshot');
     assert.equal(legacy.events[0].event, 'snapshot');
@@ -659,6 +659,19 @@ test('the stats stream coalesces bursts and negotiates timestamp-only freshness 
     assert.equal(modern.events[0].data.stats.devices[0].clientHealthObservedAt, refreshedAt);
     assert.equal(legacy.events[0].event, 'stats');
     assert.equal(legacy.events[0].data.stats.devices[0].updatedAt, refreshedAt);
+    modern.events.length = 0;
+    legacy.events.length = 0;
+
+    // A session-only lease renewal must not resend accounting detail.
+    hub.ingest({ ...base, today: { ...base.today, sessions: { a: {
+      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: refreshedAt }
+    } } } });
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modern.events[0].event, 'freshness');
+    assert.equal(Object.values(modern.events[0].data.stats.sessionActivityObservedAt.today)[0], refreshedAt);
+    assert.equal(Object.values(modern.events[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], refreshedAt);
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(Object.values(legacy.events[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, refreshedAt);
     modern.events.length = 0;
     legacy.events.length = 0;
 
@@ -782,8 +795,8 @@ test('SSE subscribers receive identical frames and delete/subscription writes st
     hub.ingest(base);
     const { port } = hub.server.address();
     const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
-    modernA = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
-    modernB = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
+    modernA = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' });
+    modernB = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' });
     legacy = await openSse(streamUrl, { authorization: 'Bearer shh' });
     await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
     assert.deepEqual(modernA.events[0].data.stats.periods, modernB.events[0].data.stats.periods);
@@ -864,7 +877,7 @@ test('SSE skips empty fan-out and isolates a throwing response from later client
       responses.push(res);
       hub.server.emit('request', {
         method: 'GET', url: '/api/stats/stream',
-        headers: freshnessEvents ? { 'x-token-monitor-stream': '2' } : {}
+        headers: freshnessEvents ? { 'x-token-monitor-stream': '3' } : {}
       }, res);
       assert.equal(res.frames.length, 1);
       res.frames.length = 0;
