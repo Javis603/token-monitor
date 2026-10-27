@@ -282,6 +282,13 @@ for (const provider of ['workbuddy', 'minimax']) {
   });
 }
 
+test('MiniMax bindings without a stable key do not adopt a sole or similarly named lane', () => {
+  const api = { provider: 'minimax', source: 'api', accountKey: 'api-key', accountName: 'Same name', accountEmail: 'same@example.com' };
+  for (const binding of [{}, { profileName: api.accountName, accountEmail: api.accountEmail }]) {
+    assert.equal(matchProviderAccount(subscription({ provider: 'minimax', binding }), [api]), null);
+  }
+});
+
 test('needsRebinding only fires on a genuine ambiguity', () => {
   const sub = subscription({ provider: 'qoder', binding: { accountKey: 'sha256:stale' } });
 

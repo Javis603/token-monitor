@@ -537,11 +537,11 @@
     if (binding.accountKey) {
       const byKey = accounts.find((account) => accountIdentityKeys(account).has(binding.accountKey));
       if (byKey) return byKey;
-      // WorkBuddy context keys and MiniMax's selected group/key must not heal
-      // onto another account. A different MiniMax key/source is unassociated
-      // until its server identity is verified, even if the labels agree.
-      if (subscription?.provider === 'workbuddy' || subscription?.provider === 'minimax') return null;
+      // WorkBuddy context keys cannot heal onto a sibling identity.
+      if (subscription?.provider === 'workbuddy') return null;
     }
+    // Code and API pools coexist; labels or a sole row do not establish identity.
+    if (subscription?.provider === 'minimax') return null;
     if (binding.accountEmail) {
       const byEmail = accounts.find(
         (account) => cleanText(account?.accountEmail || account?.email).toLowerCase() === binding.accountEmail
