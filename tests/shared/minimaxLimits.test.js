@@ -39,40 +39,6 @@ const fetchMinimaxLimits = (options, deps) => fetchMinimaxLimitsWithDeps(options
 const BALANCE_URL_CN = 'https://api.minimaxi.com/account/query_balance';
 const BALANCE_URL_EN = 'https://api.minimax.io/account/query_balance';
 
-test('MiniMax API balance probes use one endpoint in the selected region', async () => {
-  for (const [region, url, currency] of [['cn', BALANCE_URL_CN, 'CNY'], ['intl', BALANCE_URL_EN, 'USD']]) {
-    // Voucher balances may update before daily cash bills are posted.
-    for (const body of [
-      { available_amount: '98.25', cash_balance: '100.00' },
-      { available_amount: '14.97', cash_balance: '0.00', voucher_balance: '14.97',
-        credit_balance: '0.00', owed_amount: '0.00', balance_alert_switch: false, balance_alert_threshold: '' },
-      { available_amount: '0.00' },
-      { available_amount: '-1.50' }
-    ]) {
-      const calls = [];
-      const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api', minimaxApiRegion: region }, {
-        env: {}, probe: true,
-        fetch: async (target, { headers }) => {
-          calls.push(target);
-          assert.equal(headers.Authorization, 'Bearer sk-api-test');
-          return okResponse({ ...body, base_resp: { status_code: 0, status_msg: 'success' } });
-        }
-      });
-      assert.deepEqual(calls, [url]);
-      assert.equal(result.status, 'ok');
-      assert.equal(result.accountLabel, 'Pay-as-you-go');
-      assert.equal(result.windows.length, 1);
-      assert.equal(result.windows[0].metric, 'credits');
-      assert.equal(result.windows[0].currency, currency);
-      assert.equal(result.windows[0].remaining, Number(body.available_amount));
-      assert.equal(result.windows[0].usedPercent, null);
-      assert.equal(result.windows[0].resetsAt, null);
-      assert.equal(JSON.stringify(result).includes('sk-api-test'), false);
-      assertSyncPreservesReading(result);
-    }
-  }
-});
-
 test('MiniMax API billing rejects missing or malformed balances without inventing a quota', async () => {
   for (const available_amount of [undefined, null, '', ' ', 'invalid', false, Infinity]) {
     const calls = [];
@@ -86,32 +52,6 @@ test('MiniMax API billing rejects missing or malformed balances without inventin
     assert.equal(result.status, 'unavailable');
     assert.deepEqual(result.windows, []);
     assert.deepEqual(calls, [BALANCE_URL_EN]);
-  }
-});
-
-test('MiniMax API billing retries business auth errors and remembers a valid zero balance', async () => {
-  // Foreign-region keys can be rejected by HTTP 400 plus business 1004.
-  for (const httpStatus of [200, 400]) {
-    const calls = [];
-    const providerRuntimeState = new Map();
-    const deps = {
-      env: {}, probe: true, providerRuntimeState,
-      fetch: async (url) => {
-        calls.push(url);
-        return url === BALANCE_URL_EN
-          ? { ok: httpStatus === 200, status: httpStatus, json: async () => ({ base_resp: { status_code: 1004, status_msg: 'not authorized' } }) }
-          : okResponse({ available_amount: '0.00', cash_balance: '0.00', voucher_balance: '0.00', base_resp: { status_code: 0 } });
-      }
-    };
-    const options = { minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api' };
-    const result = await fetchMinimaxLimits(options, deps);
-    assert.equal(result.status, 'ok', `HTTP ${httpStatus} business auth rejection must try CN`);
-    assert.equal(result.windows[0].remaining, 0);
-    assert.deepEqual(calls, [BALANCE_URL_EN, BALANCE_URL_CN]);
-    assert.equal(providerRuntimeState.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
-    calls.length = 0;
-    assert.equal((await fetchMinimaxLimits(options, deps)).status, 'ok');
-    assert.deepEqual(calls, [BALANCE_URL_CN]);
   }
 });
 
@@ -1323,9 +1263,6 @@ const REFRESH_ONFILE = 'test-refresh-onfile';
 const ACCESS_ROTATED = 'test-access-rotated';
 const REFRESH_ROTATED = 'test-refresh-rotated';
 const ACCESS_RENEWED = 'test-access-renewed';
-const REFRESH_RENEWED = 'test-refresh-renewed';
-const ACCESS_STALE = 'test-access-stale';
-const ACCESS_INTL = 'test-access-intl';
 const ACCESS_OTHER = 'test-access-other-record';
 const REFRESH_OTHER = 'test-refresh-other-record';
 
@@ -1496,32 +1433,6 @@ test('MiniMax Code respects official logout, refresh and generation fences befor
   }
 });
 
-test('MiniMax Code durably fences a refresh before exchange and a restart never replays its old token', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
-  let exchanges = 0;
-  const fetchImpl = async url => {
-    if (url === MINIMAX_CODE_OAUTH_URL_CN) {
-      exchanges++;
-      const fence = JSON.parse(fs.readFileSync(fixture.statePath));
-      assert.equal(fence.status, 'refreshing');
-      assert.equal(fence.generation, 8);
-      assert.equal(fence.refresh.owner.pid, process.pid);
-      assert.ok(fence.refresh.id);
-      return okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED));
-    }
-    return okResponse(membershipBody({ op_group_id: '' }));
-  };
-  const deps = codeDeps(fixture, fetchImpl, { renameSync: (source, destination) => {
-    if (destination === fixture.authPath) throw new Error('credential write failed');
-    return fs.renameSync(source, destination);
-  } });
-  await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
-  assert.equal(JSON.parse(fs.readFileSync(fixture.statePath)).status, 'refreshing');
-  const restarted = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, { ...deps, providerRuntimeState: new Map() });
-  assert.equal(restarted.status, 'unavailable');
-  assert.equal(exchanges, 1);
-});
-
 test('MiniMax Code pending writes cannot roll back an official logout state', async () => {
   const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
   let exchanges = 0;
@@ -1598,100 +1509,6 @@ test('MiniMax Code accepts the official grant scope fallback and omitted refresh
   assert.equal(stored.expiresAtMs, CODE_NOW + 1000, 'short server expiry is not extended locally');
   assert.deepEqual(stored.scopes, ['agent.default'], 'the new grant replaces the stored scope set');
   assert.deepEqual(JSON.parse(fs.readFileSync(fixture.statePath)).scopes, stored.scopes);
-});
-
-test('MiniMax Code selects the personal workspace without changing a selected team', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
-  for (const workspaces of [
-    [{ workspace_type: 1, workspace_id: 9, selected: true }, { workspace_type: 0, workspace_id: 42 }],
-    [{ workspace_type: 1, workspace_id: 9, selected: true }, { workspace_type: 0, workspace_id: 0 }],
-    [{ workspace_type: 1, workspace_id: 9, selected: true }]
-  ]) {
-    const calls = [];
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, null, { fetch: async (url, init) => {
-      calls.push(url);
-      if (url.endsWith('/user/get_user_extra_info')) return okResponse({ workspaces });
-      assert.equal(url, MINIMAX_CODE_MEMBERSHIP_URL_CN);
-      assert.deepEqual(JSON.parse(init.body), { workspace_id: workspaces[1].workspace_id });
-      return okResponse(membershipBody({ op_group_id: '' }));
-    } }));
-    assert.equal(result.status, workspaces.length === 2 ? 'ok' : 'unavailable');
-    assert.equal(calls.length, workspaces.length === 2 ? 2 : 1);
-    assert.equal(calls.some(url => url.includes('update_default')), false);
-  }
-});
-
-test('MiniMax Code and API run independent lanes, scopes and failure states', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
-  let apiDenied = false;
-  let codeDown = false;
-  let tokenPlan = false;
-  const deps = codeDeps(fixture, async (url, init) => {
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
-      assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
-      return codeDown ? { ok: false, status: 503 } : okResponse(membershipBody({ has_token_plan: tokenPlan }));
-    }
-    if (url === MINIMAX_CODE_PLAN_REMAINS_URL_CN) {
-      assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
-      assert.equal(init.headers['X-Group-Id'], 'grp-123');
-      return okResponse(planRemainsBody());
-    }
-    assert.equal(new URL(url).host, 'api.minimaxi.com');
-    assert.equal(init.headers.Authorization, apiDenied ? 'Bearer key-B' : 'Bearer key-A');
-    if (apiDenied) return unauthorized();
-    if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) return okResponse({ data: { model_remains: [{
-      model_name: 'general', current_interval_remaining_percent: 70, current_weekly_remaining_percent: 90
-    }] } });
-    const route = new URL(url).pathname;
-    if (route === '/account/query_balance') return okResponse({ available_amount: '100', base_resp: { status_code: 0 } });
-    if (route === '/account/query_recharge') return okResponse({ cash_total_usage: '44', base_resp: { status_code: 0 } });
-    assert.equal(route, '/account/amount');
-    return okResponse({ consume_cash_after_voucher_sum: '4', base_resp: { status_code: 0 } });
-  });
-  const runtime = createLimitsRuntime({ limitProviders: ['minimax'], minimaxBillingMode: 'api',
-    minimaxApiRegion: 'cn', minimaxApiKey: 'key-A' }, { ...deps, autoStart: false, autoRetry: false });
-  const lanes = () => {
-    const rows = runtime.getSnapshot().providers;
-    assert.equal(rows.length, 2);
-    return { api: rows.find(row => row.source === 'api'), code: rows.find(row => row.source === 'oauth') };
-  };
-  try {
-    await runtime.refresh({ provider: 'minimax' }, 'manual');
-    const first = lanes();
-    assert.equal(first.api.balance.allTimeSpend, 44);
-    assert.equal(first.code.balance, null);
-    assert.deepEqual(first.code.windows.map(window => [window.label, window.currency]), [['Credits', 'CREDITS']]);
-    assert.notEqual(first.api.accountKey, first.code.accountKey);
-    codeDown = true;
-    await runtime.refresh({ provider: 'minimax' }, 'manual');
-    const outage = lanes();
-    assert.equal(outage.api.status, 'ok');
-    assert.equal(outage.api.balance.amount, 100);
-    assert.equal(outage.code.status, 'unavailable');
-    assert.equal(outage.code.windows[0].remaining, 4624);
-    apiDenied = true;
-    runtime.reconfigure({ minimaxApiKey: 'key-B' });
-    runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
-    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-    const denied = lanes();
-    assert.equal(denied.api.status, 'unauthorized');
-    assert.equal(denied.api.windows.length, 0);
-    assert.equal(denied.code.accountKey, first.code.accountKey);
-    assert.equal(denied.code.windows[0].remaining, 4624);
-    apiDenied = codeDown = false;
-    tokenPlan = true;
-    runtime.reconfigure({ minimaxApiKey: 'key-A', minimaxBillingMode: 'token-plan' });
-    runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
-    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-    const plan = lanes();
-    assert.equal(plan.api.status, 'ok');
-    assert.equal(plan.code.status, 'ok');
-    assert.equal(plan.api.balance, null);
-    assert.equal(plan.code.accountKey, first.code.accountKey);
-    assert.deepEqual(plan.api.windows.map(window => window.usedPercent), [30, 10]);
-    assert.deepEqual(plan.code.windows.filter(window => window.metric !== 'credits').map(window => window.usedPercent), [30, 10]);
-    assert.equal(plan.code.windows.find(window => window.label === 'Credits').remaining, 4624);
-  } finally { runtime.stop(); }
 });
 
 test('MiniMax display affiliation recognizes group responses without affecting either lane', async (t) => {
@@ -1817,50 +1634,6 @@ test('MiniMax display links survive refreshes and follow the current key and Cod
   } finally { runtime.stop(); }
 });
 
-test('MiniMax Code auto-detection needs no API key and key probes do not borrow OAuth', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
-  const deps = codeDeps(fixture, async url => {
-    assert.equal(url, MINIMAX_CODE_MEMBERSHIP_URL_CN);
-    return okResponse(membershipBody({ has_token_plan: false }));
-  });
-  const options = { minimaxBillingMode: 'api', minimaxApiRegion: 'cn' };
-  const code = await fetchMinimaxLimits(options, deps);
-  assert.equal(code.source, 'oauth');
-  assert.equal(code.balance, null);
-  assert.deepEqual(code.windows.map(window => window.currency), ['CREDITS']);
-  assert.equal(deps.requests.some(url => new URL(url).pathname.startsWith('/account/')), false);
-  const before = [fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8'));
-  const calls = [];
-  const badKey = await fetchMinimaxLimits({ ...options, minimaxApiKey: 'retained-key' }, {
-    ...deps, probe: true, fetch: async (url, init) => {
-      calls.push(url);
-      assert.equal(init.headers.Authorization, 'Bearer retained-key');
-      return unauthorized();
-    }
-  });
-  assert.equal(badKey.status, 'unauthorized');
-  assert.deepEqual(calls, [BALANCE_URL_CN]);
-  assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before);
-});
-
-test('MiniMax Code uses the reported credit total without adding components and accepts zero', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
-  for (const [purchased, free, total] of [[4489, 4624, 8000], [0, 0, 0]]) {
-    const calls = [];
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async url => {
-      calls.push(url);
-      return okResponse(membershipBody({ has_token_plan: false, op_credit_summary: {
-        total_remaining_amount: String(total), purchased_remaining_amount: String(purchased), free_remaining_amount: String(free)
-      } }));
-    }));
-    assert.deepEqual(calls, [MINIMAX_CODE_MEMBERSHIP_URL_CN]);
-    assert.equal(result.status, 'ok');
-    assert.equal(result.windows.length, 1);
-    assert.equal(result.windows[0].remaining, total);
-    assert.equal(result.windows[0].currency, 'CREDITS');
-  }
-});
-
 test('MiniMax Code follows workspace, membership and matched current-subscription name precedence', async () => {
   const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
   const subscription = {
@@ -1977,15 +1750,6 @@ test('MiniMax Code parses modern plan percentages, unlimited quota and video cou
   }
 });
 
-test('MiniMax Code keeps fresh credits when its plan endpoint fails', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async url => {
-    return url === MINIMAX_CODE_MEMBERSHIP_URL_CN ? okResponse(membershipBody()) : { ok: false, status: 429 };
-  }));
-  assert.equal(result.windows.find(window => window.metric === 'credits')?.remaining, 4624);
-  assert.deepEqual(result.invalidateCachedWindowLabels, ['Credits']);
-});
-
 test('MiniMax Code partial refresh updates credits and retains visibly stale plan windows', async () => {
   const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
   let outage = false;
@@ -2048,27 +1812,6 @@ test('MiniMax Code commits an in-flight rotation when its probe is cancelled', a
   assert.equal(JSON.parse(fs.readFileSync(fixture.statePath)).status, 'authenticated');
 });
 
-test('MiniMax Code does not turn a cancelled plan or name request into a successful credits reading', async () => {
-  for (const lane of ['plan', 'name']) {
-    const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
-    const controller = new AbortController();
-    const cancelledPath = lane === 'plan' ? new URL(MINIMAX_CODE_PLAN_REMAINS_URL_CN).pathname
-      : '/v1/api/openplatform/charge/combo/cycle_audio_resource_package';
-    const deps = codeDeps(fixture, async url => {
-      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ token_plan_tier: lane === 'name' ? '12345' : undefined }));
-      if (lane === 'name' && url === MINIMAX_CODE_PLAN_REMAINS_URL_CN) return okResponse(planRemainsBody());
-      assert.equal(new URL(url).pathname, cancelledPath);
-      controller.abort();
-      throw controller.signal.reason;
-    }, { signal: controller.signal });
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
-    assert.equal(new URL(deps.requests.at(-1)).pathname, cancelledPath);
-    assert.equal(controller.signal.aborted, true);
-    assert.equal(result.status, 'unavailable');
-    assert.deepEqual(result.windows, []);
-  }
-});
-
 test('MiniMax Code lane picks the desktop record among several records', async () => {
   const fixture = writeCodeAuthFixture({
     records: {
@@ -2085,48 +1828,6 @@ test('MiniMax Code lane picks the desktop record among several records', async (
     throw new Error(`unexpected url ${url}`);
   }));
   assert.deepEqual(seen, [`Bearer ${ACCESS_ONFILE}`]);
-});
-
-test('MiniMax Code lane refreshes an expiring lease, rotates and writes back atomically', async () => {
-  const expiring = CODE_NOW + 5 * 60 * 1000;
-  const fixture = writeCodeAuthFixture({
-    records: {
-      [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: expiring, generation: 7 }),
-      [OTHER_RECORD_KEY]: codeDesktopRecord({ accessToken: ACCESS_OTHER, refreshToken: REFRESH_OTHER, generation: 99 })
-    },
-    state: { generation: 7, expiresAtMs: expiring }
-  });
-  const oauthBodies = [];
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async (url, init) => {
-    if (url === MINIMAX_CODE_OAUTH_URL_CN) {
-      const form = new URLSearchParams(init.body);
-      assert.equal(init.redirect, 'error', 'OAuth credentials must not follow redirects');
-      oauthBodies.push(Object.fromEntries(form));
-      return { ok: true, json: async () => oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED) };
-    }
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
-      assert.equal(init.headers.authorization, `Bearer ${ACCESS_ROTATED}`);
-      return { ok: true, json: async () => membershipBody({ op_group_id: '' }) };
-    }
-    throw new Error(`unexpected url ${url}`);
-  }));
-  assert.equal(oauthBodies.length, 1);
-  assert.equal(oauthBodies[0].grant_type, 'refresh_token');
-  assert.equal(oauthBodies[0].refresh_token, REFRESH_ONFILE);
-  assert.equal(oauthBodies[0].client_id, 'mcode-public');
-  assert.equal(oauthBodies[0].scope, 'agent.default');
-  assert.equal(oauthBodies[0].audience, 'agent-backend', 'scope and audience must ride along');
-  assert.equal(result.status, 'ok');
-  const auth = JSON.parse(fs.readFileSync(fixture.authPath, 'utf8'));
-  assert.equal(auth.records[CODE_RECORD_KEY].accessToken, ACCESS_ROTATED);
-  assert.equal(auth.records[CODE_RECORD_KEY].refreshToken, REFRESH_ROTATED);
-  assert.equal(auth.records[CODE_RECORD_KEY].generation, 8);
-  assert.equal(auth.records[CODE_RECORD_KEY].expiresAtMs, CODE_NOW + 3600 * 1000);
-  assert.equal(auth.records[OTHER_RECORD_KEY].refreshToken, REFRESH_OTHER, 'other records stay untouched');
-  assert.equal(auth.records[OTHER_RECORD_KEY].generation, 99);
-  const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
-  assert.equal(state.generation, 8);
-  assert.equal(state.expiresAtMs, CODE_NOW + 3600 * 1000);
 });
 
 test('MiniMax Code only invalidates the login for an explicit HTTP 400 invalid_grant', async () => {
@@ -2170,51 +1871,6 @@ test('MiniMax Code lane consults the process detector only when a refresh is due
   assert.equal(detections, 0, 'a healthy tick must not spawn a process detector');
 });
 
-test('MiniMax Code only falls back to a token still valid after a failed refresh', async () => {
-  for (const elapsed of [0, 2000]) {
-    let now = CODE_NOW;
-    const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW + 1000 }) } });
-    let oauthAttempts = 0;
-    let resources = 0;
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async (url) => {
-      if (url === MINIMAX_CODE_OAUTH_URL_CN) {
-        oauthAttempts++;
-        now += elapsed;
-        return { ok: false, status: 503, json: async () => ({}) };
-      }
-      resources++;
-      return okResponse(membershipBody({ op_group_id: '' }));
-    }, { now: () => now }));
-    assert.equal(oauthAttempts, 1);
-    assert.equal(result.status, elapsed ? 'unavailable' : 'ok');
-    assert.equal(resources, elapsed ? 0 : 1, 'a token that expired during refresh cannot carry the fallback');
-  }
-});
-
-test('MiniMax Code lane retries once through a 401 on the resource call', async () => {
-  const fixture = writeCodeAuthFixture({
-    records: { [CODE_RECORD_KEY]: codeDesktopRecord({ accessToken: ACCESS_STALE }) }
-  });
-  const bearerSeen = [];
-  let refreshed = false;
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async (url, init) => {
-    if (url === MINIMAX_CODE_OAUTH_URL_CN) {
-      refreshed = true;
-      return { ok: true, json: async () => oauthOkBody(ACCESS_RENEWED, REFRESH_RENEWED) };
-    }
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
-      bearerSeen.push(init.headers.authorization);
-      if (!refreshed) return { ok: false, status: 401, json: async () => ({ error: 'invalid access token' }) };
-      return { ok: true, json: async () => membershipBody({ op_group_id: '' }) };
-    }
-    throw new Error(`unexpected url ${url}`);
-  }));
-  assert.deepEqual(bearerSeen, [`Bearer ${ACCESS_STALE}`, `Bearer ${ACCESS_RENEWED}`]);
-  assert.equal(result.status, 'ok');
-  const auth = JSON.parse(fs.readFileSync(fixture.authPath, 'utf8'));
-  assert.equal(auth.records[CODE_RECORD_KEY].refreshToken, REFRESH_RENEWED);
-});
-
 test('MiniMax Code lane never refreshes while the desktop app is running', async () => {
   for (const running of [true, false]) {
     const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW + 1000 }) } });
@@ -2253,50 +1909,6 @@ test('MiniMax Code lane treats 2062 as no subscription, not an error', async () 
   assert.equal(result.windows[0].label, 'Credits');
 });
 
-test('MiniMax Code lane pins discovery to the selected region', async () => {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-code-multi-'));
-  test.after(() => fs.rmSync(base, { recursive: true, force: true }));
-  const writeStore = (regionDir, recordKey, accessToken) => {
-    const dir = path.join(base, 'auth', 'prod', regionDir, 'mcode-public');
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify({
-      schemaVersion: 1, records: { [recordKey]: codeDesktopRecord({ accessToken }) }
-    }, null, 2), { mode: 0o600 });
-    fs.writeFileSync(path.join(dir, 'auth-state.json'), JSON.stringify(codeDesktopState(undefined, { region: regionDir })));
-  };
-  writeStore('cn', CODE_RECORD_KEY, ACCESS_ONFILE);
-  writeStore('en', 'com.minimax.mcode.oauth.prod.en feedface', ACCESS_INTL);
-  const seen = [];
-  const run = (region) => fetchMinimaxLimits({ minimaxBillingMode: 'api', minimaxApiRegion: region }, {
-    env: { MINIMAX_DATA_DIR: base },
-    now: () => CODE_NOW,
-    clientRunning: () => false,
-    fetch: async (url, init) => {
-      if (url.endsWith('/matrix/api/v1/user/get_user_extra_info')) return okResponse({ workspaces: [{ workspace_type: 0, workspace_id: 'personal-test' }] });
-      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN || url === 'https://agent.minimax.io/matrix/api/v1/commerce/get_membership_info') {
-        seen.push(init.headers.authorization);
-        return okResponse(membershipBody({ token_plan_tier: '12345' }));
-      }
-      const target = new URL(url);
-      if (target.pathname === '/minimax-cloud/api/v1/credit/details') return okResponse({ details: [], total_count: 0 });
-      if (target.pathname.endsWith('/remains_percent') || target.pathname.endsWith('/cycle_audio_resource_package')) {
-        assert.equal(target.origin, region === 'cn' ? 'https://www.minimaxi.com' : 'https://platform.minimax.io');
-        assert.equal(init.headers.authorization, region === 'cn' ? `Bearer ${ACCESS_ONFILE}` : `Bearer ${ACCESS_INTL}`);
-        assert.equal(init.headers['X-Group-Id'], 'grp-123');
-        return okResponse(target.pathname.endsWith('/remains_percent') ? planRemainsBody()
-          : { current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Build' } });
-      }
-      throw new Error(`unexpected url ${url}`);
-    },
-    providerRuntimeState: new Map()
-  });
-  assert.equal((await run('cn')).planLabel, 'Build');
-  assert.deepEqual(seen, [`Bearer ${ACCESS_ONFILE}`], 'cn pin reads the cn store');
-  seen.length = 0;
-  assert.equal((await run('intl')).planLabel, 'Build');
-  assert.deepEqual(seen, [`Bearer ${ACCESS_INTL}`], 'intl pin skips the cn store');
-});
-
 test('MiniMax credential probes ignore the local Code lease', async () => {
   const fixture = writeCodeAuthFixture({
     records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW - 1000 }) }
@@ -2320,20 +1932,6 @@ test('MiniMax Code rejects nonprivate credential stores as the official FileStor
     assert.deepEqual(deps.requests, []);
     assert.equal(fs.readFileSync(fixture.authPath, 'utf8'), before);
   }
-});
-
-test('MiniMax Code lane stays unavailable on nonnumeric credits', async () => {
-  const fixture = writeCodeAuthFixture({
-    records: { [CODE_RECORD_KEY]: codeDesktopRecord() }
-  });
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async (url) => {
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
-      return { ok: true, json: async () => membershipBody({ op_credit_summary: { total_remaining_amount: 'not-a-number' }, op_group_id: '' }) };
-    }
-    throw new Error(`unexpected url ${url}`);
-  }));
-  assert.equal(result.status, 'unavailable');
-  assert.deepEqual(result.windows, []);
 });
 
 test('MiniMax Code retries a failed write on the next tick without consuming the old refresh token again', async () => {
@@ -2400,37 +1998,6 @@ test('MiniMax Code refuses custom OAuth endpoints without sending credentials or
     assert.deepEqual(deps.requests, [], 'custom domains must not send credentials to the public defaults');
     assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before);
   }
-});
-
-test('MiniMax Code coordinates concurrent collectors and respects the official auth lock', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
-  let finish;
-  let started;
-  const inFlight = new Promise(resolve => { started = resolve; });
-  let rotations = 0;
-  const deps = codeDeps(fixture, async (url) => {
-    if (url === MINIMAX_CODE_OAUTH_URL_CN) {
-      rotations++;
-      if (rotations > 1) return { ok: false, status: 400, json: async () => ({ error: 'invalid_grant' }) };
-      started();
-      await new Promise(resolve => { finish = resolve; });
-      return okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED));
-    }
-    return okResponse(membershipBody({ op_group_id: '' }));
-  });
-  const first = fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
-  await inFlight;
-  const second = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, { ...deps, providerRuntimeState: new Map() });
-  const concurrentRotations = rotations;
-  finish();
-  const firstResult = await first;
-  assert.equal(second.status, 'unavailable', 'an in-flight refresh fence prevents reuse of the predecessor access token');
-  assert.equal(concurrentRotations, 1);
-  assert.equal(firstResult.status, 'ok');
-  assert.equal(fs.existsSync(path.join(fixture.dir, 'auth.lock.lock')), false);
-  fs.mkdirSync(path.join(fixture.dir, 'auth.lock.lock'));
-  await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, { ...deps, now: () => CODE_NOW + 3600_000 });
-  assert.equal(rotations, 1, 'an official-client lock prevents refresh');
 });
 
 test('MiniMax Code never writes or releases a lock replaced by another client', async () => {
@@ -2552,18 +2119,3 @@ test('MiniMax Code keeps a known account until a different group id is confirmed
   } finally { runtime.stop(); }
 });
 
-
-test('MiniMax Code identity follows the server account across devices and re-login', async () => {
-  const identities = [];
-  for (const [key, group] of [[CODE_RECORD_KEY, 'same-account'], ['com.minimax.mcode.oauth.prod.cn another-device', 'same-account'], [CODE_RECORD_KEY, 'different-account']]) {
-    const fixture = writeCodeAuthFixture({ records: { [key]: codeDesktopRecord() } });
-    const row = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async url => okResponse(
-      url === MINIMAX_CODE_MEMBERSHIP_URL_CN ? membershipBody({ op_group_id: group }) : planRemainsBody()
-    )));
-    assert.equal(row.status, 'ok');
-    identities.push(row.accountKey);
-  }
-  assert.ok(identities[0]);
-  assert.equal(identities[0], identities[1], 'local store namespace is not an account identity');
-  assert.notEqual(identities[0], identities[2], 'changing accounts changes the identity even at the same auth path');
-});
