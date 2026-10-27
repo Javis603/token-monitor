@@ -224,21 +224,23 @@ function applyReasoningEffort(state, entry) {
   if (entry.isSidechain === true || entry.isApiErrorMessage === true) return;
   // A non-null per-turn override describes this response more specifically
   // than the session setting. Older clients may record neither field.
+  const hasConfiguration = Object.hasOwn(entry, 'effort') || entry.perTurnEffort != null;
+  const stopReason = entry.message?.stop_reason;
+  if (!hasConfiguration && !(typeof stopReason === 'string' && stopReason)) return;
   state.reasoningEffort = normalizeReasoningEffort(entry.perTurnEffort ?? entry.effort);
 }
 
 function assistantMetadataFromTail(tail) {
+  // Keep a message-level stop reason when available: complete JSON can still
+  // describe a streamed response whose missing configuration supplies no clear.
+  for (const match of tail.matchAll(/"(?:stop_reason|usage)"\s*:/g)) {
+    try { return JSON.parse('{"message":{' + tail.slice(match.index)); } catch (_) { /* Not a complete message suffix. */ }
+  }
   // Prove a candidate belongs to the root by parsing its complete suffix.
   // Nested tool inputs leave unmatched enclosing braces and are rejected.
   // This uses the existing 8 KiB fragment, never the unbounded message body.
   for (const match of tail.matchAll(/"(?:effort|perTurnEffort|isSidechain|isApiErrorMessage|uuid|timestamp|sessionId)"\s*:/g)) {
     try { return JSON.parse('{' + tail.slice(match.index)); } catch (_) { /* Nested or incomplete suffix. */ }
-  }
-  // When message is the last root field, its own complete suffix can prove
-  // closure without any trailing root metadata. Missing effort then clears,
-  // just as on the ordinary JSON path. Incomplete/nested suffixes still fail.
-  for (const match of tail.matchAll(/"(?:stop_reason|usage)"\s*:/g)) {
-    try { return JSON.parse('{"message":{' + tail.slice(match.index)); } catch (_) { /* Not a complete message suffix. */ }
   }
   return null;
 }

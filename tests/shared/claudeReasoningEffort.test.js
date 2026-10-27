@@ -76,6 +76,31 @@ test('Claude new prompts clear effort while bookkeeping, children and API errors
   assert.equal(f.read(), undefined, 'replacement without configuration supplies no evidence');
 });
 
+for (const size of [10, 600_000]) test(`Claude ${size}-byte response content without configuration or a stop reason preserves effort`, t => {
+  const f = fixture(t);
+  const message = stop_reason => ({ content: [{ type: 'text', text: 'x'.repeat(size) }], stop_reason });
+  fs.writeFileSync(f.file, record(assistant({ effort: 'high' })));
+  assert.equal(f.read(), 'high');
+  for (const reason of [null, undefined, '', 7]) {
+    fs.appendFileSync(f.file, record(assistant({ message: message(reason) })));
+    assert.equal(f.read(), 'high', 'a mid-response metadata miss supplies no clear');
+  }
+  fs.appendFileSync(f.file, record(assistant({ message: message(null), perTurnEffort: null })));
+  assert.equal(f.read(), 'high', 'no per-turn override is not an explicit session clear');
+  for (const [fields, expected] of [[{ effort: 'low' }, 'low'], [{ perTurnEffort: 'max' }, 'max'],
+    [{ effort: null }, null], [{ effort: '<invalid>' }, null]]) {
+    fs.appendFileSync(f.file, record(assistant({ message: message(null), ...fields })));
+    assert.equal(f.read(), expected, 'explicit settings still apply before a stop reason');
+  }
+  for (const reason of ['tool_use', 'end_turn']) {
+    fs.appendFileSync(f.file, record(assistant({ effort: 'high' })));
+    assert.equal(f.read(), 'high');
+    fs.appendFileSync(f.file, record(assistant({ message: message(reason) })));
+    assert.equal(f.read(), null, 'a completed response observation without configuration still clears');
+  }
+  assert.equal(f.bytesRead(), fs.statSync(f.file).size, 'metadata follows the existing append-only read');
+});
+
 test('oversized Claude records use bounded fragments and reject nested effort', t => {
   const f = fixture(t);
   const huge = 'x'.repeat(600_000);
