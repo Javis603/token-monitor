@@ -192,9 +192,13 @@ async function probeLimitProvider(provider, options = {}, context = {}, deps = {
   if (!fetcher) return [statusProvider(provider, 'notConfigured', nowIso(nowMs))];
   try {
     const signal = context.signal ?? deps.signal;
+    const transport = resolveProviderFetch(provider, deps);
     const result = await fetcher(options, {
       ...deps,
-      fetch: createProbeFetch(resolveProviderFetch(provider, deps), { ...context, signal }, deps),
+      fetch: createProbeFetch(transport, { ...context, signal }, deps),
+      // A started credential rotation must finish even if its usage probe is
+      // superseded, or the server's successor token can be lost.
+      credentialFetch: createProbeFetch(transport, { ...context, signal: undefined }, deps),
       signal
     });
     return (Array.isArray(result) ? result : [result]).filter(Boolean);

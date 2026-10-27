@@ -537,10 +537,10 @@
     if (binding.accountKey) {
       const byKey = accounts.find((account) => accountIdentityKeys(account).has(binding.accountKey));
       if (byKey) return byKey;
-      // WorkBuddy's realm/user/enterprise key is a stable context identity.
-      // Missing credentials cannot rotate it into a sibling's identity, so a
-      // saved key never heals through email/name or sole-account fallback.
-      if (subscription?.provider === 'workbuddy') return null;
+      // WorkBuddy context keys and MiniMax's selected group/key must not heal
+      // onto another account. A different MiniMax key/source is unassociated
+      // until its server identity is verified, even if the labels agree.
+      if (subscription?.provider === 'workbuddy' || subscription?.provider === 'minimax') return null;
     }
     if (binding.accountEmail) {
       const byEmail = accounts.find(

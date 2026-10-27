@@ -629,6 +629,9 @@ function providerCollapseKey(provider) {
   if (provider.provider === 'antigravity') return providerAggregateKey(provider);
   if (
     (provider.provider === 'claude'
+      // Code carries a regional group identity; API keys carry a credential
+      // identity. Neither proves that a differently keyed row is the same account.
+      || provider.provider === 'minimax'
       || provider.provider === 'codex'
       || provider.provider === 'opencode'
       || provider.provider === 'openrouter'

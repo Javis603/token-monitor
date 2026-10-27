@@ -82,6 +82,7 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 
 `src/shared/usage/deviceRuntime.js` separates usage from limits. `LimitsRuntime` owns scheduling, bounded concurrency, per-provider latest-wins lanes, deadlines, backoff and last-good/last-attempt retention. Credential changes refresh only the affected lane, without restarting usage; provider exceptions are documented in their notes.
 
+- Account fields may declare `invalidationSource` when an edit affects only one independently observed source. Source-scoped clearing fences in-flight provider work but preserves sibling accounts; shared setting edits still clear the provider. Refresh and account identity semantics are unchanged.
 - Fixed/adaptive mode is separate from the interval value. Local token usage never triggers a limits refresh, and `burn-rate` never bypasses cooldowns. Manual refresh waits for usage while limits run in the background; successful button feedback is not proof that every provider succeeded.
 - `limits/collector.js` dispatches through `limits/registry.js`; require-free provider `account.js` leaves declare account/credential metadata. Main-process `electron/limits/accountSettings.js` binds normalization and redaction. Forms receive serializable display/action DTOs, never store paths, resolvers or secrets.
 - Only registry-declared forms may save credentials. Probes use the injected transport with write-backs disabled. Reject incomplete, invalid or unauthorized drafts; persist a probe-renewed credential instead of its stale input. Saves use `applySettingsPatch()` for ordinary invalidation/reconfiguration, and same-provider revisions discard superseded probes.
@@ -92,7 +93,7 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 
 ### Outbound transport
 
-`src/electron/limits/fetch.js` injects the same transport into collection and credential probes: env-proxy-aware `outboundFetch.js` when configured, otherwise Electron `net.fetch` for OS proxy support. Providers must preserve an injected fetch; custom transports do not inherit these guarantees and must be documented in the provider note.
+`src/electron/limits/fetch.js` injects the same transport into collection and credential probes: env-proxy-aware `outboundFetch.js` when configured, otherwise Electron `net.fetch` for OS proxy support. Providers must preserve an injected fetch; custom transports do not inherit these guarantees and must be documented in the provider note. The probe supplies `credentialFetch` over the same transport and retry-header handling without its cancellation signal: once a rotating credential exchange starts, it must finish and persist its successor even if usage collection is superseded. Providers still check cancellation before starting that transaction and bound the exchange with their own timeout; ordinary resource calls use the cancellable `fetch`.
 
 Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies cannot shadow provider-managed cookies, and expect cross-origin `Referer` paths to be cancelled without a suitable `referrerPolicy`.
 

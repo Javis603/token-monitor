@@ -8,6 +8,7 @@ module.exports = {
     {
       key: 'minimaxApiKey',
       kind: 'credential',
+      invalidationSource: 'api',
       storePath: ['providers', 'minimax', 'apiKey'],
       resolve: 'minimaxToken',
       resolveStyle: 'explicit'
@@ -28,6 +29,7 @@ module.exports = {
     {
       key: 'minimaxBillingMode',
       kind: 'setting',
+      invalidationSource: 'api',
       normalize: { fn: 'normalizeMinimaxBillingMode', style: 'value' },
       configDefault: 'token-plan',
       initial: 'token-plan',

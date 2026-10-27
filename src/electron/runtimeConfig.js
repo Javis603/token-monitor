@@ -9,7 +9,7 @@ const {
 } = require('../shared/limits/collector');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
 const { normalizeCustomScanPaths } = require('../shared/customScanPaths');
-const { limitProviderSettingKeys } = require('../shared/limits/accounts');
+const { limitAccountField, limitProviderSettingKeys } = require('../shared/limits/accounts');
 const { normalizeCursorAccountIds } = require('../shared/providers/cursor/account');
 const { limitsAccountConfig } = require('./limits/accountSettings');
 
@@ -223,7 +223,11 @@ function envelopeFromSettings(settings = {}, context = {}) {
 function classifySettingsChange(previous = {}, next = {}) {
   const limitScopes = [];
   for (const [provider, keys] of Object.entries(LIMIT_PROVIDER_SETTING_KEYS)) {
-    if (changedAny(previous, next, keys)) limitScopes.push({ provider });
+    const changed = keys.filter(key => !equalSetting(previous?.[key], next?.[key]));
+    if (!changed.length) continue;
+    const sources = changed.map(key => limitAccountField(provider, key)?.invalidationSource);
+    const source = sources[0];
+    limitScopes.push({ provider, ...(source && sources.every(value => value === source) ? { source } : {}) });
   }
   return {
     modeStructural: changedAny(previous, next, MODE_STRUCTURAL_KEYS),
