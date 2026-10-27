@@ -137,6 +137,18 @@ Uso de tokens, limites de ferramentas de IA e detalhes de sessão das ferramenta
 
 A maioria dos monitores de uso só é útil na máquina em que roda. O Token Monitor foi feito para o trabalho multidispositivo: cada dispositivo observa seus próprios registros locais, envia resumos ao seu hub e todos os widgets conectados veem as mudanças de tokens quase imediatamente.
 
+## Instalação rápida
+
+No macOS, instale pelo [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor) oficial:
+
+```bash
+brew install --cask token-monitor
+```
+
+Ou baixe o app para macOS, Windows ou Linux nas [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
+
+Abra o app para começar a acompanhar o uso local deste dispositivo, sem configurar um hub. Veja os detalhes em [Instalação](#instalação).
+
 ## Recursos
 
 ### Acompanhamento de uso
@@ -260,6 +272,30 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 - O mapeamento personalizado associa campos JSON numéricos de um único endpoint GET de saldo; compatibilidade apenas com OpenAI ou Anthropic não é suficiente.
 - O Qoder CN vem desativado por padrão; ative-o em Configurações → ferramentas. As sessões atuais são arquivos JSONL em `~/.qoder-cn/projects` (`TOKEN_MONITOR_QODER_CN_PROJECTS_PATH` e, depois, `QODERCN_CONFIG_DIR/projects`); versões mais antigas usavam um banco SQLite, sobrescrevível com `TOKEN_MONITOR_QODER_CN_DB_PATH`. Uma fonte ilegível mantém a última leitura completa. Sessões do banco legado registram apenas o nome do projeto, então aparecem sem projeto. Linhas JSONL faturadas por plano que informam créditos mas nenhuma contagem de tokens são omitidas dos totais de tokens; esses créditos permanecem nos Limites de Ferramentas de IA, e as linhas BYOK com tokens medidos são contadas. Veja as [notas da origem do Qoder](docs/providers/qodercn.md).
 </details>
+
+### Suporte a recursos adicionais
+
+| Recurso | Ferramentas/fontes suportadas | Condições |
+|---------|-------------------------|------------|
+| Títulos de sessão | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | A fonte precisa fornecer um título de conversa legível; algumas ferramentas só fornecem títulos em formatos específicos de transcrição ou banco de dados. |
+| Uso por prompt/resposta e chamadas de ferramentas | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Exige registros locais detalhados. Os nomes das ferramentas e o uso por turno dependem dos campos registrados; o uso agregado, por si só, não oferece todos os detalhes. |
+| Uso de contexto/espaço restante | Claude Code, Codex, DeepSeek Harness | Usa uma observação recente do contexto, em vez do total acumulado de tokens. O tamanho da janela do Claude Code é inferido pelo modelo, portanto configurações personalizadas podem resultar em estimativas. |
+| Uso de cache/taxa de acerto do cache da sessão | Fontes com campos de cache, por exemplo: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | São exemplos, não uma lista completa. As leituras e gravações de cache nem sempre estão ambas disponíveis; a ausência de dados não significa uma taxa de acerto de 0%. |
+| Estimativa de tempo restante do cache | Claude Code, Codex | O Claude Code usa a faixa de cache registrada de 5 minutos ou 1 hora. O Codex usa uma estimativa de 30 minutos definida pelo produto, sem garantir a validade do cache no servidor. |
+| Velocidade de saída/taxa de consumo de tokens | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` mede a velocidade de saída; `tok/min` mede o consumo total de tokens. Exige contagens de tokens correspondentes e uma duração válida, disponíveis apenas em alguns formatos de origem. O tempo pode incluir espera, não apenas decodificação. |
+| Contagem de tokens de raciocínio | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Exige uso de raciocínio informado pela fonte. São contagens de tokens, não configurações de esforço de raciocínio como high ou medium. |
+| Estado nativo: em execução/aguardando entrada | Claude Code, Codex | Usa leitores dedicados de atividade nativa. Os indicadores de atividade recente de outras ferramentas não oferecem um estado equivalente. |
+| Agrupamento de sessões pai e subagentes | Codex, Antigravity, Oh My Pi, ZCode; sessões do T3 Code com vínculos verificáveis à sessão pai | Exige um ID explícito da sessão pai ou um vínculo verificado do T3 Code; contabilizar tokens de subagentes não implica agrupamento. O Claude Code só é agrupado pela associação do T3 Code, não pelos metadados brutos de sessão pai do Claude. |
+| Agrupamento de registros de continuação da mesma conversa | Codex; sessões do T3 Code com vínculos verificados à mesma thread | Agrupa os registros apenas na exibição, preservando cada registro de contabilização. Títulos semelhantes não estabelecem que se trata da mesma conversa. |
+| Monitoramento de cotas/saldos de várias contas | Claude Code, Codex, OpenCode, Cursor, Antigravity, MiMo, WorkBuddy, OpenRouter, APIs de terceiros | Cada conta/perfil precisa de credenciais utilizáveis ou de um login local suportado; os perfis do OpenCode usam dados de cota da API/Web. Monitorar várias contas não alterna o login ativo da ferramenta. |
+| Alternar contas locais | Codex | Alterna para uma conta registrada com credenciais utilizáveis e atualiza o login local do Codex; não é um filtro de gráfico. |
+| Horários de renovação de cota/contagem regressiva | Fontes que informam horários de renovação de cota, por exemplo: Claude Code, Codex, OpenCode, Cursor, Antigravity | Usa os horários ou as descrições de renovação informados, quando disponíveis. A expiração de créditos é exibida como expiração, não como renovação de cota. |
+| Créditos de redefinição de cota disponíveis | Claude Code, Codex | Mostra as redefinições disponíveis e os prazos de expiração informados pela conta. O Claude Code também mostra o escopo e as restrições de uso. Apenas para consulta; não é possível usar os créditos de redefinição no app. |
+| Previsão de redefinição de cota | Codex | Previsões opcionais de terceiros do codex-resets.com; não substituem a cota ou os horários oficiais de redefinição. |
+| Cotas adicionais/específicas por modelo | Fontes com cotas separadas, por exemplo: Claude Code, Codex, Cursor, Antigravity | As cotas disponíveis dependem da fonte, do plano e da conta. Uma cota compartilhada não implica uma cota separada para cada modelo. |
+| Saldos pré-pagos e créditos para uso extra | Fontes que informam saldos, por exemplo: Claude Code, OpenCode, Cursor, Cline, Factory Droid, MiMo, WorkBuddy, DeepSeek, TypeSafe, OpenRouter, APIs de terceiros | Exige acesso ao saldo da conta/produto correspondente; o saldo pré-pago do Claude Code usa o Claude Web. As unidades variam por provedor. O Claude Code e o TypeSafe também mostram detalhes de expiração dos créditos concedidos, quando disponíveis. |
+| Resumos de gastos da conta | Fontes que informam gastos, por exemplo: Claude Code, Cursor, Cline, DeepSeek, TypeSafe, OpenRouter, APIs de terceiros | A cobertura e os períodos variam. O DeepSeek calcula os gastos a partir de mudanças no saldo pago observadas localmente; o TypeSafe usa uma estimativa baseada no uso. Esses valores são separados das estimativas de custo de tokens do Tokscale. |
+| Estimativa de quando o saldo vai acabar | Contas de saldo com um histórico de recargas registrado manualmente | Exige o saldo atual e histórico suficiente para estimar um gasto médio positivo. Estima quando o saldo pode acabar; não é uma garantia do provedor. |
 
 ## Instalação
 

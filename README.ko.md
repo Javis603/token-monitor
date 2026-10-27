@@ -137,6 +137,18 @@ Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 47개 이상의 AI
 
 대부분의 사용량 모니터는 실행 중인 그 기기에서만 유용합니다. Token Monitor는 멀티 디바이스 작업을 위해 만들어졌습니다. 각 기기가 로컬 로그를 감시하고 hub로 요약을 보내면, 연결된 모든 위젯이 토큰 변화를 거의 실시간으로 볼 수 있습니다.
 
+## 빠른 설치
+
+macOS에서는 공식 [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor)로 설치할 수 있습니다:
+
+```bash
+brew install --cask token-monitor
+```
+
+또는 [GitHub Releases](https://github.com/Javis603/token-monitor/releases)에서 macOS, Windows, Linux용 앱을 다운로드하세요.
+
+앱을 실행하면 이 기기의 로컬 사용량 추적이 시작되며, hub 설정은 필요하지 않습니다. 자세한 내용은 [설치](#설치)를 참고하세요.
+
 ## 기능
 
 ### 사용량 추적
@@ -265,6 +277,30 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 
 고급 로컬 통합이지만 두 형식 모두 추가 런타임이 필요 없습니다. 읽을 수 없는 소스는 마지막으로 완전히 읽은 데이터를 유지합니다. 이전 데이터베이스 세션은 경로가 아닌 프로젝트 이름만 기록하므로 프로젝트 없이 표시됩니다. 실제 토큰 필드가 있는 JSONL 행만 집계합니다. 현재 자사 플랜 행은 credits와 context 비율만 기록할 수 있고 신뢰할 수 있는 세션별 context window가 없으므로 토큰을 추측하지 않습니다. Credits는 AI Tool Limits에 표시되며 실제 토큰이 있는 BYOK/사용자 지정 모델은 정상 집계됩니다.
 </details>
+
+### 추가 기능 지원
+
+| 기능 | 지원 도구／데이터 소스 | 조건 |
+|---------|-------------------------|------------|
+| 세션 제목 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | 소스에서 읽을 수 있는 대화 제목을 제공해야 합니다. 일부 도구는 특정 대화 기록이나 데이터베이스 형식에서만 제목을 제공합니다. |
+| 프롬프트／응답별 사용량 및 도구 호출 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 로컬 상세 기록이 필요합니다. 도구 이름과 턴별 사용량은 기록된 필드에 따라 달라지며, 집계 사용량만으로 전체 상세 정보를 제공하지는 못합니다. |
+| 컨텍스트 사용량／남은 공간 | Claude Code, Codex, DeepSeek Harness | 누적 토큰 사용량이 아닌 최근 컨텍스트 관측값을 사용합니다. Claude Code의 창 크기는 모델을 기준으로 추정하므로 사용자 지정 설정에서는 추정치일 수 있습니다. |
+| 캐시 사용량／세션 캐시 적중률 | 캐시 필드를 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 나열된 도구는 예시이며 전체 목록이 아닙니다. 캐시 읽기와 쓰기 데이터가 모두 제공되는 것은 아닙니다. 캐시 사용량이 보고되지 않았다고 해서 적중률이 0%라는 뜻은 아닙니다. |
+| 예상 캐시 잔여 시간 | Claude Code, Codex | Claude Code는 기록된 5분 또는 1시간 캐시 등급을 사용합니다. Codex의 30분은 이 제품의 추정치이며 서버 측 캐시 유효 기간을 보장하지 않습니다. |
+| 출력 속도／토큰 소비 속도 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s`는 출력 속도, `tok/min`은 전체 토큰 소비 속도입니다. 서로 대응하는 토큰 수와 유효한 소요 시간이 필요하며 일부 소스 형식에서만 제공됩니다. 대기 시간이 포함될 수 있어 순수 디코딩 시간과는 다를 수 있습니다. |
+| 추론 토큰 수 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 소스에서 보고한 추론 사용량이 필요합니다. 이는 토큰 수이며 high나 medium 같은 추론 강도 설정이 아닙니다. |
+| 네이티브 실행 중／입력 대기 상태 | Claude Code, Codex | 전용 네이티브 활동 리더를 사용합니다. 다른 도구의 최근 활동 표시는 동일한 상태를 제공하지 않습니다. |
+| 부모 세션／하위 에이전트 그룹화 | Codex, Antigravity, Oh My Pi, ZCode; 부모 세션 연결을 검증할 수 있는 T3 Code 세션 | 명시적인 부모 세션 ID 또는 검증된 T3 Code 연결이 필요합니다. 하위 에이전트 토큰을 집계한다고 그룹화를 지원하는 것은 아닙니다. Claude Code는 T3 Code 연결을 통해서만 그룹화하며 원시 Claude 부모 세션 메타데이터를 사용하지 않습니다. |
+| 동일 대화의 이어진 기록 그룹화 | Codex; 검증된 스레드 연결이 있는 T3 Code 세션 | 각 사용량 집계 기록은 유지하고 표시만 그룹화합니다. 제목이 비슷하다는 이유만으로 동일한 대화로 판단하지 않습니다. |
+| 여러 계정의 한도／잔액 모니터링 | Claude Code, Codex, OpenCode, Cursor, Antigravity, MiMo, WorkBuddy, OpenRouter, 서드파티 API | 각 계정／프로필에 사용 가능한 인증 정보 또는 지원되는 로컬 로그인이 필요합니다. OpenCode 프로필은 API／Web 한도 데이터를 사용합니다. 여러 계정을 모니터링해도 도구의 현재 로그인은 전환되지 않습니다. |
+| 로컬 계정 전환 | Codex | 사용 가능한 인증 정보가 있는 등록된 계정으로 전환하고 로컬 Codex 로그인을 갱신합니다. 차트 필터가 아닙니다. |
+| 한도 초기화 시간／카운트다운 | 초기화 시간을 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Antigravity | 제공되는 경우 보고된 초기화 시각이나 설명을 사용합니다. 크레딧 만료는 한도 초기화와 구분하여 표시합니다. |
+| 사용 가능한 한도 초기화권 | Claude Code, Codex | 계정에서 보고한 사용 가능한 초기화 횟수와 만료 시간을 표시합니다. Claude Code는 적용 범위와 사용 제한도 표시합니다. 조회 전용이며 앱에서 초기화권을 사용할 수는 없습니다. |
+| 한도 초기화 예측 | Codex | 선택 사항인 codex-resets.com의 서드파티 예측이며 공식 한도나 초기화 시간을 대체하지 않습니다. |
+| 추가／모델별 한도 풀 | 별도 한도 풀을 제공하는 소스. 예: Claude Code, Codex, Cursor, Antigravity | 사용 가능한 풀은 소스, 요금제, 계정에 따라 다릅니다. 공유 풀이 있다고 해서 각 모델에 별도 한도가 있다는 뜻은 아닙니다. |
+| 선불 잔액 및 추가 사용 크레딧 | 잔액을 제공하는 소스. 예: Claude Code, OpenCode, Cursor, Cline, Factory Droid, MiMo, WorkBuddy, DeepSeek, TypeSafe, OpenRouter, 서드파티 API | 해당 계정／제품의 잔액에 접근할 수 있어야 합니다. Claude Code의 선불 잔액은 Claude Web을 사용합니다. 단위는 제공업체마다 다릅니다. Claude Code와 TypeSafe는 제공되는 경우 부여된 크레딧의 만료 정보도 표시합니다. |
+| 계정 지출 요약 | 지출 데이터를 제공하는 소스. 예: Claude Code, Cursor, Cline, DeepSeek, TypeSafe, OpenRouter, 서드파티 API | 범위와 기간은 소스마다 다릅니다. DeepSeek는 로컬에서 관측한 유료 잔액 변화를 통해 지출을 계산하고, TypeSafe는 사용량 기반 추정치를 사용합니다. 이 수치는 Tokscale의 토큰 비용 추정치와 별개입니다. |
+| 잔액 소진 시점 추정 | 충전 내역을 수동으로 기록한 잔액 계정 | 현재 잔액과 양수의 평균 지출을 추정할 수 있을 만큼의 기록이 필요합니다. 잔액이 언제 소진될지에 대한 추정이며 제공업체의 보장이 아닙니다. |
 
 ## 설치
 

@@ -137,6 +137,18 @@
 
 大多數用量監控工具只在它執行的那台機器上有用。Token Monitor 是為多裝置工作流而設計的：每台裝置監看自己的本機紀錄、把摘要更新送到你的 hub，每個連線中的小工具幾乎都能即時看到 Token 變化。
 
+## 快速安裝
+
+macOS 可透過官方 [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor) 安裝：
+
+```bash
+brew install --cask token-monitor
+```
+
+也可從 [GitHub Releases](https://github.com/Javis603/token-monitor/releases) 下載 macOS、Windows 或 Linux 版 App。
+
+啟動 App 即可開始追蹤這台裝置的本機用量，無需設定 hub。完整說明請見[安裝](#安裝)。
+
 ## 功能特色
 
 ### 用量追蹤
@@ -265,6 +277,30 @@ Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 
 
 這是進階本機整合，但兩種格式都不需要額外執行環境。無法讀取的來源會保留上一次完整讀取的資料。舊資料庫的 session 只記錄專案名稱而非路徑，因此不會顯示所屬專案。只統計有實際 Token 欄位的 JSONL 記錄；目前第一方方案模型可能只有 credits 與 context 使用比例，欠缺可靠的每 session context window，因此不會猜測 Token。Credits 仍會顯示於 AI Tool Limits，含實際 Token 的 BYOK／自訂模型會正常統計。
 </details>
+
+### 其他功能支援
+
+| 功能 | 支援的工具／來源 | 條件 |
+|---------|-------------------------|------------|
+| 會話標題 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | 來源必須提供可讀取的對話標題；部分工具只在特定逐字稿或資料庫格式中提供標題。 |
+| 每次提示／回覆的用量與工具呼叫 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 需要本機詳細紀錄。工具名稱與每回合用量取決於紀錄欄位；只有彙總用量並不代表有完整明細。 |
+| 上下文用量／剩餘空間 | Claude Code, Codex, DeepSeek Harness | 使用近期的上下文觀測值，而非累積 Token 用量。Claude Code 的視窗大小依模型推斷，因此自訂設定可能只能估算。 |
+| 快取用量／會話快取命中率 | 提供快取欄位的來源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 這些只是例子，並非完整清單。快取讀取與寫入資料不一定同時提供；未回報快取用量不代表命中率為 0%。 |
+| 快取剩餘時間估算 | Claude Code, Codex | Claude Code 使用紀錄中的 5 分鐘或 1 小時快取層級。Codex 使用產品定義的 30 分鐘估算，不保證伺服器端快取在此期間有效。 |
+| 輸出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 表示輸出速度；`tok/min` 表示總 Token 消耗速率。需要相互對應的 Token 數與有效時長，僅部分來源格式提供。計時可能包含等待時間，而非純解碼時間。 |
+| 推理 Token 數 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 需要來源回報推理用量。這是 Token 數，不是 high 或 medium 等推理強度設定。 |
+| 原生執行中／等待輸入狀態 | Claude Code, Codex | 使用專用的原生活動讀取器。其他工具的近期活動指示不代表同等狀態。 |
+| 父會話／子代理分組 | Codex, Antigravity, Oh My Pi, ZCode；具有可驗證父會話連結的 T3 Code 會話 | 需要明確的父會話 ID 或已驗證的 T3 Code 關聯；計入子代理 Token 不代表支援分組。Claude Code 只透過 T3 Code 關聯分組，不使用原始 Claude 父會話中繼資料。 |
+| 同一對話的延續紀錄分組 | Codex；具有已驗證討論串連結的 T3 Code 會話 | 只將紀錄分組顯示，仍保留各筆用量計算紀錄。相似標題不足以判定為同一對話。 |
+| 多帳戶額度／餘額監察 | Claude Code, Codex, OpenCode, Cursor, Antigravity, MiMo, WorkBuddy, OpenRouter, 第三方 API | 每個帳戶／設定檔都需要可用憑證或受支援的本機登入；OpenCode 設定檔使用 API／Web 額度資料。監察多個帳戶不會切換工具目前的登入。 |
+| 切換本機帳戶 | Codex | 切換至具有可用憑證的已登錄帳戶，並更新本機 Codex 登入；這不是圖表篩選。 |
+| 額度重設時間／倒數 | 提供重設時間的來源，例如 Claude Code, Codex, OpenCode, Cursor, Antigravity | 在有資料時使用回報的重設時間戳記或描述。點數到期會標示為到期，而非額度重設。 |
+| 可用額度重設券 | Claude Code, Codex | 顯示帳戶回報的可用重設次數及到期時間。Claude Code 亦顯示重設券涵蓋範圍與使用限制。僅供查看，無法在 App 內使用重設券。 |
+| 額度重設預測 | Codex | 可選的 codex-resets.com 第三方預測，不能取代官方額度或重設時間。 |
+| 額外／模型專屬額度池 | 提供獨立額度池的來源，例如 Claude Code, Codex, Cursor, Antigravity | 可用額度池取決於來源、方案與帳戶。共用額度池不代表每個模型都有獨立額度。 |
+| 預付餘額與額外用量點數 | 提供餘額資料的來源，例如 Claude Code, OpenCode, Cursor, Cline, Factory Droid, MiMo, WorkBuddy, DeepSeek, TypeSafe, OpenRouter, 第三方 API | 需要相關帳戶／產品的餘額存取權；Claude Code 的預付餘額使用 Claude Web。單位依供應商而異。Claude Code 與 TypeSafe 亦會在有資料時顯示各筆點數的到期詳情。 |
+| 帳戶支出摘要 | 提供支出資料的來源，例如 Claude Code, Cursor, Cline, DeepSeek, TypeSafe, OpenRouter, 第三方 API | 涵蓋範圍與期間因來源而異。DeepSeek 依本機觀察到的付費餘額變化計算支出；TypeSafe 使用依用量估算的數值。這些數值與 Tokscale 的 Token 成本估算分開。 |
+| 餘額耗盡時間估算 | 已手動記錄增值明細的餘額帳戶 | 需要目前餘額與足夠的歷史紀錄，以估算正值的平均支出。只估算餘額可能何時耗盡，並非供應商保證。 |
 
 ## 安裝
 
