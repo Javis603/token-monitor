@@ -429,6 +429,10 @@ async function probeTokscaleCapabilities(command, options = {}) {
   return supported;
 }
 
+function reportsPromaUsage(period) {
+  return Object.values(period?.sessions || {}).some((session) => session.client === 'proma');
+}
+
 function tokscaleClientFilter(clients) {
   const ordered = [];
   const seen = new Set();
@@ -1130,7 +1134,7 @@ async function collectUsageOnce(options) {
   const windowsPeriods = { today, month, allTime };
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
-  const scannedWslHomes = [];
+  const promaReportingWslHomes = [];
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
@@ -1157,7 +1161,7 @@ async function collectUsageOnce(options) {
         runTokscale: runTokscaleFn,
         logger: options.logger,
         decoratePeriods: (periods, home) => {
-          scannedWslHomes.push(home);
+          if (reportsPromaUsage(periods.allTime)) promaReportingWslHomes.push(home);
           applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled });
         }
       });
@@ -1288,12 +1292,14 @@ async function collectUsageOnce(options) {
   // would resurrect its contribution after a native rollout takes precedence.
   if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
   // Private archive hint, like sessionUsageArchiveFullScan: fork-keyed Proma
-  // journals this full scan has just reported under upstream ids.
+  // journals this full scan has just reported under upstream ids. A home whose
+  // scan reported no Proma usage at all (a binary without upstream Proma drops
+  // the id through capability filtering) proves nothing about its journals.
   if (!anchorUsed && trackedClientSet.has('proma')) {
     const hostHome = tokscaleHomeDir({ env: options.env || process.env, platform: platformValue, homeDir: options.homeDir });
     summary.legacyPromaSessionKeys = [
-      ...legacyPromaSessionKeys([hostHome], { platform: platformValue }),
-      ...legacyPromaSessionKeys(scannedWslHomes, { platform: 'win32' })
+      ...(reportsPromaUsage(windowsPeriods.allTime) ? legacyPromaSessionKeys([hostHome], { platform: platformValue }) : []),
+      ...legacyPromaSessionKeys(promaReportingWslHomes, { platform: 'win32' })
     ];
   }
   if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {

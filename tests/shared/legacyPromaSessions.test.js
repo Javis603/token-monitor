@@ -108,7 +108,7 @@ test('only a completed full scan retires fork rows, and never one it still repor
   assert.equal(watch.allTime.totalTokens, 4240);
 });
 
-test('the collector lists rescanned fork journals on full scans only', async t => {
+test('the collector lists fork journals only after a full scan reported Proma usage', async t => {
   const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-proma-collector-'));
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
@@ -136,4 +136,8 @@ test('the collector lists rescanned fork journals on full scans only', async t =
   assert.equal(Object.hasOwn(watch, 'legacyPromaSessionKeys'), false);
   const untracked = await collectUsageOnce({ ...options, clients: 'claude' });
   assert.equal(Object.hasOwn(untracked, 'legacyPromaSessionKeys'), false);
+  // A binary without upstream Proma drops the id and reports nothing for it:
+  // the journals exist, but no replacement usage was reported.
+  const unsupported = await collectUsageOnce({ ...options, runTokscale: async () => ({ entries: [] }) });
+  assert.deepEqual(unsupported.legacyPromaSessionKeys, []);
 });
