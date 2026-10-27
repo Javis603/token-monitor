@@ -82,7 +82,6 @@ function appSource(from, to) {
 }
 
 function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, providerSource = 'api', providerRows, keyConfigured = false } = {}) {
-  const slice = appSource;
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
   const { group, document } = renderPanel(form);
   group.byId('minimaxSettingsDetails').classList.remove('hidden');
@@ -114,9 +113,9 @@ function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, provider
     t: (key, params) => translated(key, params)
   };
   vm.runInNewContext(
-    slice('function externalProviderForAccount(', '\nfunction setAccountPanelMessage(')
-      + slice('function apiKeyAccountStatusText(', '\nfunction setExternalAccountExpanded(')
-      + slice('function renderExternalProviderStatus(', '\n// The override inputs'),
+    appSource('function externalProviderForAccount(', '\nfunction setAccountPanelMessage(')
+      + appSource('function apiKeyAccountStatusText(', '\nfunction setExternalAccountExpanded(')
+      + appSource('function renderExternalProviderStatus(', '\n// The override inputs'),
     context
   );
   context.renderExternalProviderStatus('minimax');
