@@ -305,9 +305,8 @@ function consumeMetadataBytes(state, chunk) {
       // `stop_reason` in the next read chunk, so the previous reading
       // survived and the row kept a turn state the transcript had replaced.
       keepLongLineTail(state, bytes.subarray(lineStart, index));
-      applyLongLineFragments(state);
+      applyLongLineFragments(state, true);
       state.droppingLongLine = false;
-      state.longLineJson = null;
     } else {
       let lineEnd = index;
       if (lineEnd > lineStart && bytes[lineEnd - 1] === 0x0d) lineEnd -= 1;
@@ -328,8 +327,6 @@ function consumeMetadataBytes(state, chunk) {
     // resume at the next newline.
     state.longLineHead = Buffer.from(remainder.subarray(0, LONG_LINE_HEAD_BYTES));
     state.longLineTail = Buffer.from(remainder.subarray(-LONG_LINE_TAIL_BYTES));
-    state.longLineJson = { depth: 0, inString: false, escaped: false, started: false, invalid: false };
-    trackLongLineJson(state, remainder);
     state.trailing = Buffer.alloc(0);
     state.droppingLongLine = true;
   } else {
@@ -383,7 +380,6 @@ function emptyIndex() {
     droppingLongLine: false,
     longLineHead: Buffer.alloc(0),
     longLineTail: Buffer.alloc(0),
-    longLineJson: null,
     promptCacheState: createPromptCacheState(),
     contextObserved: false,
     contextTokens: 0,
@@ -391,35 +387,10 @@ function emptyIndex() {
   };
 }
 
-function trackLongLineJson(state, bytes) {
-  // Only structural state survives between existing read chunks. A balanced
-  // suffix inside tool input must not stand in for the enclosing JSON record.
-  const json = state.longLineJson;
-  if (!json) return;
-  for (let index = 0; index < bytes.length; index += 1) {
-    const byte = bytes[index];
-    if (json.inString) {
-      if (json.escaped) json.escaped = false;
-      else if (byte === 0x5c) json.escaped = true;
-      else if (byte === 0x22) json.inString = false;
-    } else if (byte === 0x22) {
-      if (json.depth === 0) json.invalid = true;
-      json.inString = true;
-    } else if (byte === 0x7b || byte === 0x5b) {
-      if (json.depth === 0 && (json.started || byte !== 0x7b)) json.invalid = true;
-      json.started = true;
-      json.depth += 1;
-    } else if (byte === 0x7d || byte === 0x5d) {
-      if (--json.depth < 0) json.invalid = true;
-    } else if (json.depth === 0 && ![0x20, 0x09, 0x0d].includes(byte)) json.invalid = true;
-  }
-}
-
 // Accumulate the tail of an oversized record: the last bytes written are the
 // ones the next newline will close, so only the newest window is worth keeping.
 function keepLongLineTail(state, remainder) {
   if (!remainder.length) return;
-  trackLongLineJson(state, remainder);
   const previous = state.longLineTail || Buffer.alloc(0);
   const combined = previous.length > 0 ? Buffer.concat([previous, remainder]) : remainder;
   state.longLineTail = combined.length > LONG_LINE_TAIL_BYTES
@@ -449,16 +420,16 @@ function oversizedRecordKind(head, tail) {
 // than a tool_result, and an assistant record reports the stop_reason it ends
 // with. Anything else leaves the state untouched, exactly as a full parse of an
 // unrelated record would.
-function applyLongLineFragments(state) {
+function applyLongLineFragments(state, lineTerminated = false) {
   const head = (state.longLineHead || Buffer.alloc(0)).toString('utf8');
   const tail = (state.longLineTail || Buffer.alloc(0)).toString('utf8');
-  const json = state.longLineJson;
-  const complete = Boolean(json?.started && !json.invalid && !json.inString && json.depth === 0);
   state.longLineHead = Buffer.alloc(0);
   state.longLineTail = Buffer.alloc(0);
   const kind = oversizedRecordKind(head, tail);
   if (kind === 'assistant') {
-    const metadata = complete ? assistantMetadataFromTail(tail) : null;
+    // Effort only uses terminated JSONL records on this bounded path. Keep
+    // prior effort at EOF rather than scanning discarded content for closure.
+    const metadata = lineTerminated ? assistantMetadataFromTail(tail) : null;
     // The flags can precede message content in the head or follow it in the
     // root suffix. Never let a sidechain or synthetic error replace main effort.
     const messageAt = head.indexOf('"message"');
@@ -534,14 +505,14 @@ function applyLongLineFragments(state) {
   if (asString) {
     if (asString[1].trim().length > 0) {
       state.userSinceStop = true;
-      if (complete && !/"isSidechain"\s*:\s*true/.test(flags)) state.reasoningEffort = null;
+      if (lineTerminated && !/"isSidechain"\s*:\s*true/.test(flags)) state.reasoningEffort = null;
     }
     return;
   }
   if (/"type"\s*:\s*"tool_result"/.test(after.slice(0, 400))) return;
   if (/"type"\s*:\s*"(text|image)"/.test(after.slice(0, 400))) {
     state.userSinceStop = true;
-    if (complete && !/"isSidechain"\s*:\s*true/.test(flags)) state.reasoningEffort = null;
+    if (lineTerminated && !/"isSidechain"\s*:\s*true/.test(flags)) state.reasoningEffort = null;
   }
 }
 
@@ -579,7 +550,6 @@ function readSessionTitle(filePath, deps = {}) {
         // to finish reading that record's boundary from the fragments it kept.
         longLineHead: Buffer.isBuffer(cached.longLineHead) ? Buffer.from(cached.longLineHead) : Buffer.alloc(0),
         longLineTail: Buffer.isBuffer(cached.longLineTail) ? Buffer.from(cached.longLineTail) : Buffer.alloc(0),
-        longLineJson: cached.longLineJson ? { ...cached.longLineJson } : null,
         promptCacheState: { ...cached.promptCacheState },
         contextObserved: cached.contextObserved === true,
         contextTokens: tokenCount(cached.contextTokens),

@@ -119,8 +119,10 @@ test('oversized Claude records use bounded fragments and reject nested effort', 
   fs.appendFileSync(f.file, full.slice(0, -5));
   assert.equal(f.read(), null);
   fs.appendFileSync(f.file, full.slice(-5));
+  assert.equal(f.read(), null, 'oversized effort waits for the line terminator');
+  fs.appendFileSync(f.file, '\n');
   assert.equal(f.read(), 'medium');
-  fs.appendFileSync(f.file, '\n' + record(large({ isSidechain: true, effort: 'low' })));
+  fs.appendFileSync(f.file, record(large({ isSidechain: true, effort: 'low' })));
   assert.equal(f.read(), 'medium');
   fs.appendFileSync(f.file, record({ effort: 'xhigh', ...large({}) }));
   assert.equal(f.read(), 'xhigh', 'root fields before message content use the bounded head');
@@ -135,16 +137,19 @@ test('complete oversized responses without root suffix metadata clear effort lik
     const f = fixture(t);
     fs.writeFileSync(f.file, record(assistant({ effort: 'high' })));
     assert.equal(f.read(), 'high');
-    // No uuid, timestamp, sessionId or effort follows message. Only its own
-    // stop_reason proves that the suffix belongs to a complete response.
+    // No uuid, timestamp, sessionId or effort follows message. The bounded
+    // message suffix still supplies the stop reason once the line ends.
     const response = record({ type: 'assistant', message: {
       content: [{ type: 'text', text: 'x'.repeat(size) }], stop_reason: 'end_turn'
     } }).trimEnd();
     fs.appendFileSync(f.file, response.slice(0, -2));
     assert.equal(f.read(), 'high', 'incomplete responses retain earlier evidence');
     fs.appendFileSync(f.file, response.slice(-2));
+    assert.equal(f.read(), size > 64 * 1024 ? 'high' : null,
+      'ordinary JSON can apply at EOF; oversized effort waits for a newline');
+    fs.appendFileSync(f.file, '\n');
     assert.equal(f.read(), null, 'a complete response with no effort clears the setting');
-    fs.appendFileSync(f.file, '\n' + record(assistant({ effort: 'high' })));
+    fs.appendFileSync(f.file, record(assistant({ effort: 'high' })));
     assert.equal(f.read(), 'high');
     fs.appendFileSync(f.file, record({ isSidechain: true, type: 'assistant', message: {
       content: [{ type: 'text', text: 'x'.repeat(size) }], stop_reason: 'end_turn'
@@ -190,6 +195,8 @@ test('a split oversized sidechain user cannot clear main effort before its trail
     fs.appendFileSync(f.file, full.slice(0, split));
     assert.equal(f.read(), 'high', 'unwritten ownership must not clear main effort');
     fs.appendFileSync(f.file, full.slice(split));
+    assert.equal(f.read(), 'high', 'even complete oversized JSON waits for its line terminator');
+    fs.appendFileSync(f.file, '\n');
     assert.equal(f.read(), sidechain ? 'high' : null, 'complete ownership decides whether to clear');
     assert.equal(f.bytesRead(), fs.statSync(f.file).size, 'both scans read only the appended bytes');
   }
@@ -206,11 +213,13 @@ test('a nested tool suffix cannot prove completion of an oversized assistant rec
   fs.appendFileSync(f.file, prefix);
   assert.equal(f.read(), 'high', 'nested closure cannot clear a partial outer response');
   fs.appendFileSync(f.file, '}],"stop_reason":"end_turn"}}');
+  assert.equal(f.read(), 'high', 'outer closure alone does not finish the JSONL line');
+  fs.appendFileSync(f.file, '\n');
   assert.equal(f.read(), null, 'the actual completed response with no effort clears normally');
   assert.equal(f.bytesRead(), fs.statSync(f.file).size);
 });
 
-test('oversized JSON completion preserves escaped-string state across append scans', t => {
+test('oversized effort waits for LF or CRLF across append scans and cold reads', t => {
   const f = fixture(t);
   fs.writeFileSync(f.file, record(assistant({ effort: 'high' })));
   assert.equal(f.read(), 'high');
@@ -223,6 +232,15 @@ test('oversized JSON completion preserves escaped-string state across append sca
   fs.appendFileSync(f.file, full.slice(split, -1));
   assert.equal(f.read(), 'high', 'closed inner values still do not close the root');
   fs.appendFileSync(f.file, full.slice(-1));
+  assert.equal(f.read(), 'high', 'complete oversized JSON without a newline retains prior effort');
+  f.cache.clear();
+  assert.equal(f.read(), 'high', 'cold reads use the same line boundary');
+  const bytes = f.bytesRead();
+  fs.appendFileSync(f.file, '\r');
+  assert.equal(f.read(), 'high', 'CR alone does not terminate a JSONL line');
+  fs.appendFileSync(f.file, '\n');
   assert.equal(f.read(), 'low');
-  assert.equal(f.bytesRead(), fs.statSync(f.file).size);
+  assert.equal(f.bytesRead() - bytes, 2, 'only the appended terminator is read');
+  f.cache.clear();
+  assert.equal(f.read(), 'low', 'a cold read agrees after the line terminator');
 });
