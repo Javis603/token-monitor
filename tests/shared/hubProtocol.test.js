@@ -92,6 +92,76 @@ test('Hub content keys ignore transport timestamps but retain usage and limit fr
   assert.notEqual(hubStatsContentKey(original), hubStatsContentKey(providerRefreshed));
 });
 
+function health(observedAt, overall = 'healthy') {
+  return {
+    version: 1,
+    clients: {
+      codex: {
+        source: { state: 'detected', detectedCount: 1, checkedCount: 1 },
+        collection: { state: 'direct' },
+        data: { liveTokens: 1 },
+        overall
+      }
+    },
+    observedAt
+  };
+}
+
+function withHealth(clientHealth) {
+  const base = stats();
+  return stats({ devices: [{ ...base.devices[0], clientHealth }] });
+}
+
+test('Hub content keys ignore clientHealth.observedAt but keep health content', () => {
+  const original = withHealth(health('2026-09-09T10:00:00.000Z'));
+  const rescanned = withHealth(health('2026-09-09T10:01:00.000Z'));
+  assert.equal(hubStatsContentKey(original), hubStatsContentKey(rescanned));
+
+  const degraded = withHealth(health('2026-09-09T10:01:00.000Z', 'warning'));
+  assert.notEqual(hubStatsContentKey(original), hubStatsContentKey(degraded));
+});
+
+test('Hub content keys change when clientHealth.observedAt appears or disappears', () => {
+  const stamped = withHealth(health('2026-09-09T10:00:00.000Z'));
+  const { observedAt: _observedAt, ...unstampedHealth } = health('2026-09-09T10:00:00.000Z');
+  const unstamped = withHealth(unstampedHealth);
+  // A freshness event can only refresh the stamp, never remove it, so a
+  // dropped stamp has to reach clients as a full stats frame.
+  assert.notEqual(hubStatsContentKey(stamped), hubStatsContentKey(unstamped));
+});
+
+test('freshness events carry clientHealth.observedAt without replacing the health record', () => {
+  const original = withHealth(health('2026-09-09T10:00:00.000Z'));
+  const current = withHealth(health('2026-09-09T10:01:00.000Z'));
+  const event = freshnessEvent(current, 'ingest', '2026-09-09T10:01:02.000Z');
+
+  assert.equal(event.stats.devices[0].clientHealthObservedAt, '2026-09-09T10:01:00.000Z');
+  // A stream-v2 client built before this field existed shallow-merges each
+  // device entry, so a nested clientHealth object would replace its record.
+  assert.equal('clientHealth' in event.stats.devices[0], false);
+
+  const applied = applyFreshnessEvent(original, event);
+  assert.equal(applied.devices[0].clientHealth.observedAt, '2026-09-09T10:01:00.000Z');
+  assert.deepEqual(applied.devices[0].clientHealth.clients, original.devices[0].clientHealth.clients);
+  assert.equal('clientHealthObservedAt' in applied.devices[0], false);
+});
+
+test('freshness events omit clientHealthObservedAt for devices without health', () => {
+  const original = stats();
+  const event = freshnessEvent(refreshedStats(original), 'ingest', '2026-09-09T10:01:02.000Z');
+  assert.equal('clientHealthObservedAt' in event.stats.devices[0], false);
+
+  const applied = applyFreshnessEvent(original, {
+    ...event,
+    stats: {
+      ...event.stats,
+      devices: [{ ...event.stats.devices[0], clientHealthObservedAt: '2026-09-09T10:01:00.000Z' }]
+    }
+  });
+  assert.equal('clientHealth' in applied.devices[0], false);
+  assert.equal('clientHealthObservedAt' in applied.devices[0], false);
+});
+
 test('freshness events update live metadata without replacing sessions or projects', () => {
   const original = stats();
   const current = stats({
