@@ -134,66 +134,26 @@ function selectMinimaxGeneralBucket(body) {
   return rows.find((row) => row && row.model_name === 'general') || null;
 }
 
-// A status==3 lane is the server's "no entitlement here" placeholder; it
-// shows up as 100% / null percent depending on the plan. Suppress it so the
-// widget doesn't render an empty meter. Matches the CodexBar placeholder
-// guard the reviewer cross-checked against.
-function isPlaceholderMinimaxLane(item, percentField, statusField) {
-  if (!item) return true;
-  if (parseNumberOrNull(item[statusField]) !== 3) return false;
-  const pct = parseNumberOrNull(item[percentField]);
-  return pct === null || pct >= 100;
-}
-
-// 5h window: `current_interval_remaining_percent` is "remaining" (0-100).
-// Emit whenever a usable percent is present; suppress only the placeholder
-// lane above. percents arrive as strings in the live response.
-function buildMinimaxSessionWindow(item) {
-  if (!item) return null;
-  if (isPlaceholderMinimaxLane(item, 'current_interval_remaining_percent', 'current_interval_status')) return null;
-  const remainPct = parseNumberOrNull(item.current_interval_remaining_percent);
-  if (remainPct === null) return null;
-  const used = Math.max(0, Math.min(100, 100 - remainPct));
-  return {
-    kind: 'session',
-    label: '5h',
-    usedPercent: used,
-    remainingPercent: Math.max(0, Math.min(100, remainPct)),
-    resetsAt: millisToIso8601(item.end_time),
-    windowMinutes: MINIMAX_WINDOW_MINUTES_5H,
-    showMeter: true
-  };
-}
-
-// Weekly window: same shape as session, gated on the weekly fields.
-function buildMinimaxWeeklyWindow(item) {
-  if (!item) return null;
-  if (isPlaceholderMinimaxLane(item, 'current_weekly_remaining_percent', 'current_weekly_status')) return null;
-  const remainPct = parseNumberOrNull(item.current_weekly_remaining_percent);
-  if (remainPct === null) return null;
-  const used = Math.max(0, Math.min(100, 100 - remainPct));
-  return {
-    kind: 'weekly',
-    label: 'Weekly',
-    usedPercent: used,
-    remainingPercent: Math.max(0, Math.min(100, remainPct)),
-    resetsAt: millisToIso8601(item.weekly_end_time),
-    windowMinutes: MINIMAX_WINDOW_MINUTES_WEEKLY,
-    showMeter: true
-  };
-}
-
-// Body must already be the parsed JSON. Returns the windows array, never
-// throws. Returns [] when the response lacks the expected shape so the
-// collector can still surface the provider row with status 'unavailable'.
+// Preserve the API-key placeholder rule for status 3 with missing/100%
+// remaining. Code's different endpoint uses status 3 for unlimited quota.
 function parseMinimaxTiers(body) {
   const item = selectMinimaxGeneralBucket(body);
   if (!item) return [];
   const windows = [];
-  const session = buildMinimaxSessionWindow(item);
-  if (session) windows.push(session);
-  const weekly = buildMinimaxWeeklyWindow(item);
-  if (weekly) windows.push(weekly);
+  for (const [prefix, kind, label, resetField, windowMinutes] of [
+    ['current_interval', 'session', '5h', 'end_time', MINIMAX_WINDOW_MINUTES_5H],
+    ['current_weekly', 'weekly', 'Weekly', 'weekly_end_time', MINIMAX_WINDOW_MINUTES_WEEKLY]
+  ]) {
+    const remaining = parseNumberOrNull(item[`${prefix}_remaining_percent`]);
+    if (remaining === null || (parseNumberOrNull(item[`${prefix}_status`]) === 3 && remaining >= 100)) continue;
+    windows.push({
+      kind, label,
+      usedPercent: Math.max(0, Math.min(100, 100 - remaining)),
+      remainingPercent: Math.max(0, Math.min(100, remaining)),
+      resetsAt: millisToIso8601(item[resetField]),
+      windowMinutes, showMeter: true
+    });
+  }
   return windows;
 }
 
