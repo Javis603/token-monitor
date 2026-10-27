@@ -1052,6 +1052,10 @@ test('normalizeClientName folds both Kilo sources together and keeps Oh My Pi se
   assert.equal(period.clients.omp, 18);
   assert.equal(period.clients.pi, undefined);
   assert.ok(!('kilocode' in period.clients));
+  assert.equal(normalizeClientName('senpi'), 'senpi');
+  assert.equal(normalizeClientName('OmO Native'), 'senpi');
+  assert.equal(normalizeClientName('Senpi (OmO Native)'), 'senpi');
+  assert.notEqual(normalizeClientName('senpi'), 'pi');
 });
 
 test('normalizeClientName keeps Qoder CN distinct from international Qoder', () => {

@@ -140,6 +140,10 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
     ? configured
     : DEFAULT_PROVIDER_PHYSICAL_BOUND_MS;
   let jobs = 1;
+  if (provider === 'claude') {
+    jobs = claudeLimits.normalizeClaudeManagedAccounts(options.claudeManagedAccounts).filter((account) => account.enabled).length
+      + (claudeWebCookie(deps.env || process.env, options) ? 1 : 0) + 1;
+  }
   if (provider === 'codex') {
     const managed = normalizeCodexManagedAccounts(options.codexManagedAccounts || deps.codexManagedAccounts);
     jobs = options.limitRefreshScope?.provider === 'codex' && [

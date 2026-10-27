@@ -110,6 +110,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
+  muse: 'settings.limits.connection.muse',
   kiro: 'settings.limits.connection.kiro',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
@@ -240,6 +241,8 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Sign in again': 'settings.limits.status.signInAgain',
   'Run grok login': 'settings.limits.status.runGrokLogin',
   'Run kiro-cli login': 'settings.limits.status.runKiroLogin',
+  'Install Muse Code': 'settings.limits.status.installMuseCode',
+  'Run muse login': 'settings.limits.status.runMuseLogin',
   'Open Cline': 'settings.limits.status.openCline',
   'Re-login': 'settings.limits.status.relogin',
   Limited: 'settings.limits.status.limited',
@@ -402,7 +405,6 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
-  experimentalFeaturesGroup: document.getElementById('experimentalFeaturesGroup'),
   notchFeature: document.getElementById('notchFeature'),
   notchInput: document.getElementById('notchInput'),
   notchOptions: document.getElementById('notchOptions'),
@@ -760,6 +762,8 @@ function applySettingsTranslations() {
   setSubscriptionFormMode();
   diagnosticsPanel?.render();
 }
+
+let displaySettings = null;
 
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
@@ -5785,13 +5789,8 @@ function openSettingsPanel(section) {
   syncSettingsForm();
   ensureServiceStatusTicker();
   if (section === 'notch') {
-    setSettingsSectionExpanded('general', true);
-    setSettingsAccordionExpanded(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails, true);
-    setSettingsAccordionExpanded(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails, true);
-    requestAnimationFrame(() => {
-      els.notchFeature?.scrollIntoView({ block: 'start' });
-      els.notchInput?.focus({ preventScroll: true });
-    });
+    setSettingsSectionExpanded('window', true);
+    displaySettings?.open('notch');
   }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
@@ -6461,6 +6460,7 @@ function renderHomeLimitModule() {
     for (const window of row.windows) {
       const metric = document.createElement('div');
       metric.className = 'home-limit-window';
+      if (window.fullWidth) metric.classList.add('home-limit-window-wide');
       const line = document.createElement('div');
       line.className = 'home-limit-window-line';
       const label = document.createElement('span');
@@ -6479,7 +6479,15 @@ function renderHomeLimitModule() {
           value.style.setProperty('--home-limit-accent', row.color);
         }
       }
-      line.append(label, value);
+      const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
+      if (info) {
+        const right = document.createElement('span');
+        right.className = 'home-limit-window-value';
+        right.append(value, info);
+        line.append(label, right);
+      } else {
+        line.append(label, value);
+      }
       metric.append(line);
       // Money and fixed labels retain a remaining meter; only percentage
       // labels follow the global used/remaining display preference.
@@ -7718,6 +7726,32 @@ function restartTimer() {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value)));
+}
+
+function initFooterActionDisclosure() {
+  const actions = els.utilityActions?.closest('.footer-update-actions');
+  if (!actions) return;
+  // The footer group's width changes on every frame of the update's margin
+  // transition. Observe it so an open card follows both motion and instant
+  // reduced-motion changes without a permanent animation-frame loop.
+  const anchorObserver = new ResizeObserver(() => {
+    if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();
+  });
+  anchorObserver.observe(actions);
+  window.addEventListener('unload', () => anchorObserver.disconnect(), { once: true });
+  const reveal = () => actions.classList.add('is-disclosed');
+  const hide = () => actions.classList.remove('is-disclosed');
+  els.utilityActions.addEventListener('pointerenter', reveal);
+  actions.addEventListener('pointerleave', () => {
+    if (!actions.querySelector(':focus-visible')) hide();
+  });
+  actions.addEventListener('focusin', (event) => {
+    if (event.target.matches(':focus-visible') && els.utilityActions.contains(event.target)) reveal();
+  });
+  actions.addEventListener('focusout', (event) => {
+    if (!actions.contains(event.relatedTarget) && !actions.matches(':hover')) hide();
+  });
+  window.addEventListener('blur', () => hide());
 }
 
 function applyControlLayout(swapSettingsAndRefresh) {
@@ -9522,9 +9556,9 @@ function syncSettingsForm() {
   els.trayModeInput.checked = showTrayIcon && Boolean(state.settings.trayMode);
   syncHideAppIconControl(showTrayIcon, els.trayModeInput.checked);
   els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
-  els.trayContentInput.disabled = !showTrayIcon;
+  els.trayContentInput.disabled = false;
   els.showTrayProviderBadgeInput.checked = state.settings.showTrayProviderBadge === true;
-  els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
+  els.showTrayProviderBadgeInput.disabled = false;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !state.settings.trayMode);
   refreshTrayComposers();
@@ -9575,6 +9609,7 @@ function syncSettingsForm() {
   }
   modelAliasForm?.syncSettings();
   renderCursorStatus();
+  displaySettings?.sync();
 }
 
 function enabledClientSet() {
@@ -11833,6 +11868,11 @@ function moveOpenCodeLocalFallbackSetting() {
 // generated and hand-built panels share this, including which messages they
 // may override (`messages.required` / `rejected` / `invalidFormat`).
 let claudeOrganizationChoicesRevision = 0;
+let claudeWebAccountId = 'new';
+// null opens the initial empty-account form; an explicit cancel stays closed.
+let claudeWebFormOpen = null;
+const claudeAccountActions = accountShellApi.createBusyGuard();
+
 async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
@@ -11841,12 +11881,15 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   renderExternalProviderStatus(id);
   let result;
   try {
-    result = await commitAccountCredential(() => window.tokenMonitor.limits.saveCredential(id, values));
+    result = await commitAccountCredential(() => id === 'claude' && values.claudeWebAccountId
+      ? claudeAccountActions.run('claude', null, () => window.tokenMonitor.claude.saveWebAccount(values))
+      : window.tokenMonitor.limits.saveCredential(id, values));
   } catch (error) {
     setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
     renderExternalProviderStatus(id);
     return result;
   }
+  if (id === 'claude' && values.claudeWebAccountId && result === undefined) return result;
   if (result?.verdict === 'superseded') return result;
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
@@ -11856,6 +11899,11 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     return result;
   }
   if (!result?.saved) {
+    if (id === 'claude' && result?.errorCode === 'credentialStorageUnavailable') {
+      setAccountPanelMessage(id, { key: failedKey, params: { message: t('settings.common.error') } });
+      renderExternalProviderStatus(id);
+      return result;
+    }
     const rejection = {
       required: { key: messages.required || 'settings.common.credentialRequired' },
       invalidFormat: { key: messages.invalidFormat || 'settings.common.credentialInvalidFormat' }
@@ -11867,7 +11915,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   clearInput();
   // Marked only once the credential is stored: marking drops the provider's
   // current record, and a rejected key must leave the linked status on screen.
-  markExternalProviderCheckPending(id);
+  markExternalProviderCheckPending(id, result.checkedSince);
   if (result.verdict === 'indeterminate') {
     const throttled = result.status === 'rateLimited' || result.status === 'sourceRateLimited';
     setAccountPanelMessage(id, {
@@ -11878,7 +11926,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     });
   }
   renderExternalProviderStatus(id);
-  await refreshStats({ force: true });
+  await refreshStats();
   renderExternalProviderStatus(id);
   return result;
 }
@@ -11898,6 +11946,14 @@ async function submitAccountCredential(button, id, values, options) {
   }
 }
 
+async function refreshLimitProviderQuota(providerName) {
+  try {
+    await window.tokenMonitor.limits?.refresh?.(providerName);
+  } catch (_) {
+    // The next scheduled poll still settles the record.
+  }
+}
+
 async function clearAccountCredential(id) {
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   setAccountPanelMessage(id, null);
@@ -11909,7 +11965,7 @@ async function clearAccountCredential(id) {
   clearExternalProviderCheckPending(id);
   clearExternalProviderPendingStatus(id);
   renderExternalProviderStatus(id);
-  await refreshStats({ force: true });
+  await refreshStats();
 }
 
 async function commitAccountCredential(request) {
@@ -11969,6 +12025,7 @@ async function loadClaudeOrganizationChoices() {
 // one, so switching drops it instead of leaving a key that can only fail.
 async function saveAccountFormSetting({ id }, field, value) {
   if (id === 'claude' && field.key === 'claudeWebOrganizationId') {
+    if (claudeWebAccountId !== 'legacy') return;
     if (!value || !state.settings?.claudeWebCookieConfigured || document.getElementById('claudeWebCookieInput')?.value) return;
     claudeOrganizationChoicesRevision += 1;
     await saveSettings({ claudeWebOrganizationId: value });
@@ -12000,11 +12057,22 @@ function setupLimitAccountPanels() {
         provider: externalProviderForAccount(form.id)
       })),
       onRefresh: async () => {
-        if (form.id === 'claude') await loadClaudeOrganizationChoices();
-        await refreshStats({ force: true });
+        if (form.id === 'claude' && claudeWebAccountId === 'legacy') await loadClaudeOrganizationChoices();
+        await refreshLimitProviderQuota(form.id);
+        await refreshStats();
       },
       onClear: ({ id }) => clearAccountCredential(id),
-      onSave: ({ id, messages, failedKey }, values, clearInput) => saveAccountCredential(id, values, { messages, failedKey, clearInput }),
+      onSave: async ({ id, messages, failedKey }, values, clearInput) => {
+        if (id === 'claude' && claudeWebAccountId !== 'legacy') values.claudeWebAccountId = claudeWebAccountId;
+        const result = await saveAccountCredential(id, values, { messages, failedKey, clearInput });
+        if (id === 'claude' && result?.saved) {
+          claudeWebFormOpen = false;
+          claudeWebAccountId = 'new';
+          renderClaudeOrganizationChoices([]);
+          renderExternalProviderStatus(id);
+        }
+        return result;
+      },
       onFieldChange: (form, field, value) => saveAccountFormSetting(form, field, value),
       onFieldError: ({ id, failedKey }, error) => {
         setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
@@ -12019,7 +12087,6 @@ function setupLimitAccountPanels() {
     added = true;
     setExternalAccountExpanded(form.id, false);
     limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
-    if (form.id === 'claude' && state.settings?.claudeWebCookieConfigured) void loadClaudeOrganizationChoices();
     renderExternalProviderStatus(form.id);
   }
   if (added) initSettingsAnimationWrappers();
@@ -12897,7 +12964,7 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp' && client !== 'senpi') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
@@ -12925,6 +12992,7 @@ els.pinButton.addEventListener('click', (event) => {
   if (event.detail > 0) els.pinButton.blur();
   saveSettings({ windowBehavior: nextWindowBehavior(currentWindowBehavior()) });
 });
+initFooterActionDisclosure();
 els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
@@ -13493,7 +13561,6 @@ function syncDockControls() {
   }
   const notchAvailable = state.appInfo?.platform === 'darwin';
   const notchEnabled = notchAvailable && state.settings?.notchEnabled === true;
-  els.experimentalFeaturesGroup?.classList.toggle('hidden', !notchAvailable);
   els.notchFeature?.classList.toggle('hidden', !notchAvailable);
   if (els.notchInput) els.notchInput.checked = notchEnabled;
   els.notchOptions?.classList.toggle('hidden', !notchEnabled);
@@ -13510,8 +13577,8 @@ function syncDockControls() {
   syncNotchHoverControls();
   if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
-  if (enabled) edgeDockComposer?.render();
-  if (notchEnabled) notchItemsComposer?.render();
+  if (available) edgeDockComposer?.render();
+  if (notchAvailable) notchItemsComposer?.render();
 }
 
 function syncNotchSummaryMode() {
@@ -13695,8 +13762,8 @@ els.showTrayIconInput?.addEventListener('change', () => {
   state.settings.showTrayIcon = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
   if (!showTrayIcon) els.trayModeInput.checked = false;
-  els.trayContentInput.disabled = !showTrayIcon;
-  els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
+  els.trayContentInput.disabled = false;
+  els.showTrayProviderBadgeInput.disabled = false;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !els.trayModeInput.checked);
   if (!showTrayIcon) state.settings.hideAppIcon = false;
@@ -15196,9 +15263,9 @@ function syncCustomTrayClockTimer() {
 
 function refreshTrayComposers() {
   const surfaces = [
-    { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
-    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true },
-    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom' }
+    { id: 'tray', root: els.trayComposer, visible: true },
+    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: true },
+    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchSummaryMode === 'custom' }
   ];
   window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
     surfaces,
@@ -15206,6 +15273,7 @@ function refreshTrayComposers() {
     createTrayComposer
   );
   Object.values(trayComposers).forEach((composer) => composer?.refresh());
+  displaySettings?.refreshLivePreview();
   syncCustomTrayClockTimer();
 }
 
@@ -16183,6 +16251,8 @@ function externalProviderForAccount(providerName) {
   const updatedAt = Date.parse(provider.updatedAt || '');
   if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
   state[config.pendingKey] = 0;
+  cancelExternalProviderCheckSettle(providerName);
+  externalProviderCheckSettled.delete(providerName);
   return provider;
 }
 
@@ -16197,14 +16267,43 @@ function setAccountPanelMessage(providerName, message) {
   else delete state.accountPanelMessages[providerName];
 }
 
-function markExternalProviderCheckPending(providerName) {
+const externalProviderCheckSettleTimers = new Map();
+const externalProviderCheckSettled = new Set();
+const EXTERNAL_PROVIDER_CHECK_SETTLE_MS = 15_000;
+
+function cancelExternalProviderCheckSettle(providerName) {
+  const timer = externalProviderCheckSettleTimers.get(providerName);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  externalProviderCheckSettleTimers.delete(providerName);
+}
+
+function scheduleExternalProviderCheckSettle(providerName) {
+  cancelExternalProviderCheckSettle(providerName);
+  const timer = setTimeout(() => {
+    externalProviderCheckSettleTimers.delete(providerName);
+    const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+    if (!config || Number(state[config.pendingKey] || 0) <= 0) return;
+    // Stop the spinner, but keep the save-time cutoff: a record dated before
+    // this save must never be able to confirm the new credential.
+    externalProviderCheckSettled.add(providerName);
+    renderExternalProviderStatus(providerName);
+  }, EXTERNAL_PROVIDER_CHECK_SETTLE_MS);
+  externalProviderCheckSettleTimers.set(providerName, timer);
+}
+
+function markExternalProviderCheckPending(providerName, checkedSince = Date.now()) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (!config) return;
-  state[config.pendingKey] = Date.now();
+  state[config.pendingKey] = checkedSince;
+  externalProviderCheckSettled.delete(providerName);
   clearExternalProviderPendingStatus(providerName);
+  scheduleExternalProviderCheckSettle(providerName);
 }
 
 function clearExternalProviderCheckPending(providerName) {
+  cancelExternalProviderCheckSettle(providerName);
+  externalProviderCheckSettled.delete(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (config) state[config.pendingKey] = 0;
 }
@@ -16310,6 +16409,191 @@ function kimiPlatformUrl() {
   return 'https://www.kimi.com/code/console';
 }
 
+function editClaudeWebAccount(account = null) {
+  claudeOrganizationChoicesRevision += 1;
+  claudeWebAccountId = account?.id || 'new';
+  claudeWebFormOpen = true;
+  const input = document.getElementById('claudeWebCookieInput');
+  if (input) input.value = '';
+  renderClaudeOrganizationChoices(account?.organizationId
+    ? [{ id: account.organizationId, name: account.accountName || account.organizationId }]
+    : [], account?.organizationId || '');
+  setAccountPanelMessage('claude', null);
+  renderExternalProviderStatus('claude');
+  input?.focus();
+  if (account?.id === 'legacy') void loadClaudeOrganizationChoices();
+}
+
+function cancelClaudeWebAccountEdit(restoreFocus = document.activeElement?.id === 'claudeCancelWebAccountButton') {
+  claudeOrganizationChoicesRevision += 1;
+  claudeWebAccountId = 'new';
+  claudeWebFormOpen = false;
+  const input = document.getElementById('claudeWebCookieInput');
+  if (input) input.value = '';
+  renderClaudeOrganizationChoices([]);
+  setAccountPanelMessage('claude', null);
+  renderExternalProviderStatus('claude');
+  if (restoreFocus) document.getElementById('claudeAddWebAccountButton')?.focus({ preventScroll: true });
+}
+
+async function runClaudeAccountAction(button, operation) {
+  return claudeAccountActions.run('claude', button, async () => {
+    setAccountPanelMessage('claude', null);
+    try {
+      const result = await commitAccountCredential(operation);
+      if (!result?.ok) throw new Error(t('settings.common.error'));
+      await refreshStats();
+      renderExternalProviderStatus('claude');
+      return result;
+    } catch (error) {
+      setAccountPanelMessage('claude', { key: 'settings.claude.saveFailed', params: { message: error.message } });
+      renderExternalProviderStatus('claude');
+      return null;
+    }
+  });
+}
+
+function claudeWebSettingsAccounts(providers) {
+  const accounts = [...(state.settings?.claudeManagedAccounts || [])];
+  if (state.settings?.claudeWebLegacyCookieConfigured) {
+    const legacy = state.settings.claudeWebLegacyAccount || providers.find((provider) => provider.source === 'web'
+      && !accounts.some((account) => account.accountKey === provider.accountKey));
+    accounts.unshift({ ...legacy, id: 'legacy', enabled: true, organizationId: state.settings.claudeWebOrganizationId || '' });
+  }
+  return accounts;
+}
+
+function claudeAccountStatusText(fallback, enabled) {
+  const providers = localProviderStatuses('claude');
+  const accounts = claudeWebSettingsAccounts(providers);
+  // Count configured Web logins even before their first result, and include
+  // discovered local identities without double-counting the same subscription.
+  const identities = new Map();
+  for (const account of accounts) {
+    const key = account.accountKey || `managed:${account.id}`;
+    const linked = enabled && account.enabled !== false
+      && providers.some((provider) => provider.accountKey && provider.accountKey === account.accountKey && provider.status === 'ok');
+    identities.set(key, identities.get(key) === true || linked);
+  }
+  for (const provider of providers) {
+    if (!provider.accountKey || provider.source === 'web' || provider.status === 'notConfigured') continue;
+    identities.set(provider.accountKey, identities.get(provider.accountKey) === true || (enabled && provider.status === 'ok'));
+  }
+  return identities.size ? t('settings.opencode.connected', {
+    linked: [...identities.values()].filter(Boolean).length, total: identities.size
+  }) : fallback;
+}
+
+function renderClaudeWebAccounts() {
+  const list = document.getElementById('claudeWebAccountList');
+  if (!list) return;
+  const providers = localProviderStatuses('claude');
+  const accounts = claudeWebSettingsAccounts(providers);
+  const statusTexts = accounts.map((account) => [account.id === 'legacy' ? t('settings.claude.legacyLogin') : '', account.accountName, account.accountLabel,
+    account.enabled === false ? t('settings.codex.disabled')
+      : apiKeyAccountStatusText('claude', { status: state.settings?.claudeWebLoginStatuses?.[account.id] || 'notChecked' },
+        true, 'settings', limitProviderEnabled('claude'))].filter(Boolean).join(' · '));
+  const signature = JSON.stringify([accounts.map((account) => [account.id, account.accountKey, account.accountEmail,
+    account.accountName, account.accountLabel, account.organizationId, account.enabled]),
+  claudeWebAccountId, claudeWebFormOpen, state.settings?.claudeWebLegacyCookieSource, currentLocale()]);
+  if (list.dataset.signature === signature) {
+    list.querySelectorAll('.managed-account-info').forEach((info, index) => {
+      info.textContent = statusTexts[index];
+      info.setAttribute('aria-label', info.textContent);
+    });
+    return;
+  }
+  list.dataset.signature = signature;
+  list.replaceChildren();
+  for (const [index, account] of accounts.entries()) {
+    const row = document.createElement('div');
+    row.className = 'managed-account-row claude-web-account-row';
+    row.classList.toggle('disabled', account.enabled === false);
+    const labelText = account.accountEmail || account.accountName || t('settings.codex.unnamedAccount');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'managed-account-checkbox';
+    input.checked = account.enabled !== false;
+    input.disabled = account.id === 'legacy';
+    input.setAttribute('aria-label', t('settings.codex.toggleAccount', { account: labelText }));
+    input.addEventListener('change', async () => {
+      await runClaudeAccountAction(input, () => window.tokenMonitor.claude.setAccountEnabled(account.id, input.checked));
+      input.checked = (state.settings?.claudeManagedAccounts || []).find((entry) => entry.id === account.id)?.enabled !== false;
+    });
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const label = document.createElement('div');
+    label.className = 'managed-account-email';
+    label.textContent = labelText;
+    const info = document.createElement('div');
+    info.className = 'managed-account-info';
+    info.textContent = statusTexts[index];
+    info.setAttribute('aria-label', info.textContent);
+    main.append(label, info);
+    const actions = document.createElement('span');
+    actions.className = 'managed-account-right';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.textContent = t('settings.claude.updateAccount');
+    edit.addEventListener('click', () => claudeAccountActions.run('claude', edit, () => editClaudeWebAccount(account)));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.setAttribute('aria-label', t('settings.codex.remove'));
+    let confirmingRemove = false;
+    remove.addEventListener('click', () => {
+      if (!confirmingRemove) {
+        confirmingRemove = true;
+        remove.classList.add('confirming');
+        remove.textContent = '✓';
+        remove.setAttribute('aria-label', t('settings.codex.removeConfirm', { account: labelText }));
+        return;
+      }
+      return runClaudeAccountAction(remove, async () => {
+        const result = account.id === 'legacy'
+          ? { ...(await window.tokenMonitor.limits.clearCredential('claude')), ok: true }
+          : await window.tokenMonitor.claude.removeWebAccount(account.id);
+        if (result?.ok && claudeWebAccountId === account.id) {
+          claudeWebAccountId = 'new';
+          claudeWebFormOpen = false;
+          renderClaudeOrganizationChoices([]);
+        }
+        return result;
+      });
+    });
+    remove.classList.toggle('hidden', account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env');
+    const controls = document.createElement('span');
+    controls.className = 'settings-actions';
+    controls.append(edit);
+    actions.append(controls, remove);
+    row.append(input, main, actions);
+    list.append(row);
+  }
+  const add = document.createElement('button');
+  add.id = 'claudeAddWebAccountButton';
+  add.type = 'button';
+  add.textContent = t('settings.codex.addAccount');
+  add.setAttribute('aria-expanded', String(claudeWebFormOpen ?? accounts.length === 0));
+  add.addEventListener('click', () => claudeAccountActions.run('claude', add, () => editClaudeWebAccount()));
+  const actions = document.createElement('div');
+  actions.className = 'settings-actions';
+  actions.append(add);
+  if (claudeWebFormOpen ?? accounts.length === 0) {
+    const cancel = document.createElement('button');
+    cancel.id = 'claudeCancelWebAccountButton';
+    cancel.type = 'button';
+    cancel.textContent = t('settings.common.cancel');
+    cancel.addEventListener('click', () => {
+      // Capture before the busy guard disables Cancel and blurs it.
+      const restoreFocus = document.activeElement === cancel;
+      return claudeAccountActions.run('claude', cancel, () => cancelClaudeWebAccountEdit(restoreFocus));
+    });
+    actions.append(cancel);
+  }
+  list.append(actions);
+}
+
 function renderExternalProviderStatus(providerName) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
@@ -16336,7 +16620,8 @@ function renderExternalProviderStatus(providerName) {
   errorEl.classList.toggle('error', message?.tone !== 'notice');
   const configured = Boolean(state.settings?.[config.configuredKey]);
   const enabled = limitProviderEnabled(providerName);
-  const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
+  const settled = externalProviderCheckSettled.has(providerName);
+  const pending = enabled && Number(state[config.pendingKey] || 0) > 0 && !settled;
   const linked = externalProviderAccountLinked(providerName);
   // A pending check that comes back linked folds the panel: the refresh that
   // followed the save may have returned before the new record did.
@@ -16344,10 +16629,15 @@ function renderExternalProviderStatus(providerName) {
   const form = limitAccountForm(providerName);
   if (form) limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
   if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
-  setCursorStatusText(
-    statusEl,
-    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
-  );
+  if (providerName === 'claude') renderClaudeWebAccounts();
+  // Once the settle window lapses without a fresh record, show "not checked"
+  // instead of a permanent spinner; the cutoff above still blocks the old
+  // record from being read as a confirmed link.
+  const statusProvider = provider || (settled && configured && enabled ? { status: 'noSyncedData' } : null);
+  const statusText = pending ? t('settings.common.checking')
+    : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
+  setCursorStatusText(statusEl, providerName === 'claude' && !pending
+    ? claudeAccountStatusText(statusText, enabled) : statusText);
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
   // auto-discovered plans still exist, so the pill shows auto-detect instead
   // of the final "disabled" state the generic seven-state map lands on.
@@ -16362,6 +16652,12 @@ function renderExternalProviderStatus(providerName) {
     manualPanel.classList.toggle('hidden', linked);
     openBtn.classList.toggle('hidden', linked);
   }
+  if (providerName === 'claude') {
+    const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
+    manualPanel.classList.toggle('hidden', !showForm);
+    document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || !document.getElementById('claudeWebOrganizationIdInput')?.options.length);
+    openBtn.classList.remove('hidden');
+  }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin');
   if (discoveredLogin) {
@@ -16373,6 +16669,7 @@ function renderExternalProviderStatus(providerName) {
   }
   const canClearConfiguredCredential = source === 'settings' && configured;
   logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
+  if (providerName === 'claude') logoutBtn.classList.add('hidden');
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
@@ -17982,7 +18279,7 @@ function setupCursorAccountUI() {
     addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
 
     document.getElementById('opencodeOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://opencode.ai/auth');
+      window.tokenMonitor.openExternal('https://opencode.ai/console');
     });
 
     // API key is the default: it needs no browser round trip. The cookie stays
@@ -18639,6 +18936,15 @@ setupSettingsAccordion(
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
 );
 setupSettingsSections();
+const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create({
+  window, document, bridge: window.tokenMonitor, settings: () => state.settings,
+  bitmap: trayComposerPreview, stats: () => state.stats, t
+});
+displaySettings = window.TokenMonitorDisplaySettings.create({
+  document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
+  scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
+  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction
+});
 setupCursorAccountUI();
 setupCustomPricingUI();
 setupModelAliasesUI();

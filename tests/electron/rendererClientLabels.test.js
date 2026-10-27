@@ -199,6 +199,13 @@ test('Devin has a label and uses the standard mask-safe icon path', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'devin.png')));
 });
 
+test('OmO Native has a label and a mask-safe app icon', () => {
+  assert.equal(CLIENT_LABELS.senpi, 'OmO Native');
+  assertUsageMarks('senpi');
+  assert.match(rendererStyles(), /\.row-icon-senpi\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/senpi\.svg["']?\)/s);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'senpi.svg')));
+});
+
 test('Cline carries the Cline brand purple', () => {
   const { clientColors } = require('../../src/electron/renderer/usageCharts');
   // Cline's own docs theme declares it (docs/docs.json: colors.primary #9D4EDD), and

@@ -305,7 +305,7 @@
     }
 
     function paintTabs() {
-      tabs.setAttribute('aria-label', t('settings.notch.experimentalTitle'));
+      tabs.setAttribute('aria-label', t('settings.notch.title'));
       for (const [page, button] of tabButtons) {
         const selected = page === view.page;
         button.classList.toggle('is-selected', selected);

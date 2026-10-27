@@ -362,8 +362,8 @@ time.sleep(10)
 });
 
 test('PTY trust selection waits for a complete menu and selected Yes before confirming', { skip: !hasPython }, async t => {
-  for (const mode of ['default-no', 'default-yes', 'fragmented', 'slow-start', 'no-color-env', 'trusted']) {
-    for (const command of ['slow-start', 'no-color-env'].includes(mode) ? ['status'] : ['usage', 'status']) await t.test(`${mode}: /${command}`, async t => {
+  for (const mode of ['default-no', 'default-yes', 'fragmented', 'paused-after-menu', 'paused-during-guard', 'premature-input', 'slow-start', 'no-color-env', 'trusted']) {
+    for (const command of ['slow-start', 'no-color-env', 'paused-after-menu', 'premature-input'].includes(mode) ? ['status'] : ['usage', 'status']) await t.test(`${mode}: /${command}`, async t => {
       const f = fixture(t);
       const fake = path.join(f.root, 'trust-menu.py');
       const receipt = path.join(f.root, 'trust.json');
@@ -379,9 +379,22 @@ def read_key():
     key = os.read(0, 128)
     keys.append(key.decode())
     return key
-def quiet(delay):
-    if select.select([0], [], [], delay)[0]:
+def quiet_until(deadline, pause=False):
+    remaining = deadline - time.monotonic()
+    if pause:
+        # Model descheduling after computing the timeout but before select.
+        time.sleep(0.5)
+        # Leave input queued so the guarded select must observe readiness.
+        if not select.select([0], [], [], 12)[0]:
+            sys.exit(8)
+    # Readiness can be delivered after the deadline if the process is paused
+    # around select. A queued key has no timestamp, so only reject input while
+    # the guard is still active when we actually observe it.
+    if remaining > 0 and select.select([0], [], [], remaining)[0] and time.monotonic() < deadline:
+        sys.stderr.write('probe sent input before the trust fixture was ready\\n')
         sys.exit(9)
+def quiet(delay):
+    quiet_until(time.monotonic() + delay)
 def menu(yes):
     if yes and mode == 'no-color-env' and ('NO_COLOR' in os.environ or os.environ.get('FORCE_COLOR') != '1'):
         # An unstyled Ink selection changes only the marker, not its label.
@@ -394,15 +407,21 @@ def menu(yes):
 if mode != 'trusted':
     if mode == 'slow-start':
         quiet(5.2)
-    if mode == 'fragmented':
+    if mode in ('fragmented', 'paused-after-menu'):
         print('Ready to code here?\\r', flush=True)
         quiet(0.2)
         print('❯ No, exit\\r', flush=True)
         quiet(0.2)
         print('  Yes, I trust this folder\\r', flush=True)
         quiet(0.2)
+    # Anchor the mount guard before publishing the menu. If this fixture is
+    # descheduled after flush, a key queued after the guard is legitimate.
+    # The faulty-probe control checks rejection, not subsecond scheduling.
+    confirm_after = time.monotonic() + (12 if mode == 'premature-input' else 0.15)
     menu(mode == 'default-yes')
-    quiet(0.15)
+    if mode == 'paused-after-menu':
+        time.sleep(0.5)
+    quiet_until(confirm_after, pause=mode == 'paused-during-guard')
     if mode != 'default-yes':
         if read_key() != b'\\x1b[B':
             sys.exit(1)
@@ -425,6 +444,7 @@ if slash not in ('/usage', '/status'):
 print('Current session 12% left' if slash == '/usage' else 'Account: fixture', flush=True)
 time.sleep(10)
 `, { mode: 0o700 });
+      let probeExitCode = null;
       const deps = {
         env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake, TRUST_MODE: mode, TRUST_RECEIPT: receipt },
         claudeProbeDir: path.join(f.root, 'probe'), pythonCommand: python,
@@ -432,13 +452,36 @@ time.sleep(10)
         stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
         isClaudeCliAuthenticated: async () => true, runClaudeVersion: async () => '',
         fetch: async () => { throw new Error('network forbidden'); },
-        spawn: (cmd, args, options) => { assert.equal(cmd, python); return spawn(cmd, args, options); }
+        spawn: (cmd, args, options) => {
+          assert.equal(cmd, python);
+          if (mode === 'premature-input') {
+            // Negative control: the real probe with its mount wait disabled
+            // must still be rejected by the fixture's quiet guard.
+            assert.ok(args[2].includes('if now - trust_ready_at < 0.25:'));
+            args = [...args];
+            args[2] = args[2].replace('if now - trust_ready_at < 0.25:', 'if False:');
+          }
+          const child = spawn(cmd, args, options);
+          let output = '';
+          child.stdout.on('data', chunk => { output += chunk; });
+          child.stderr.on('data', chunk => { output += chunk; });
+          child.on('close', code => {
+            probeExitCode = code;
+            if (code && !(mode === 'premature-input' && code === 9)) t.diagnostic(`PTY fixture exited ${code}: ${output}`);
+          });
+          return child;
+        }
       };
       if (mode === 'no-color-env') {
         Object.assign(deps.env, { NO_COLOR: '1', FORCE_COLOR: '0', USER: 'fixture-user' });
         deps.claudeStatusTimeoutSeconds = 6;
       }
       const parentEnv = { ...deps.env };
+      if (mode === 'premature-input') {
+        await assert.rejects(touchClaudeAuthPath(deps), error => error.status === 'unavailable');
+        assert.equal(probeExitCode, 9);
+        return;
+      }
       if (command === 'usage') {
         const usage = await fetchClaudeLimits({}, deps);
         assert.equal(usage.source, 'cli');
