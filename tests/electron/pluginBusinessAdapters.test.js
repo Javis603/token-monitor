@@ -16,7 +16,8 @@ function functionSource(name) {
   assert.ok(start >= 0);
   return `${name === 'saveSubscriptions' ? 'async ' : ''}${main.slice(start, main.indexOf('\n}', start) + 2)}`;
 }
-const auth = { active: true, pluginId: 'probe', permissions: ['tm.data.sessions', 'tm.data.devices', 'tm.data.subscriptions'] };
+const auth = { active: true, pluginId: 'probe' };
+const deviceRef = id => `device_${require('node:crypto').createHmac('sha256', 'adapter-test').update(JSON.stringify(['probe', 'default', '1', 'device', id])).digest('base64url')}`;
 const query = { version: 1, resource: 'sessions', period: 'allTime' };
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function device(deviceId) {
@@ -29,7 +30,7 @@ function sessionService(stats, captured) {
   const start = main.indexOf('loadAllTime: ({ stats }) => {', main.indexOf('        businessAdapters:'));
   const end = main.indexOf('\n          },', start);
   const loadAllTime = vm.runInNewContext(`({ ${main.slice(start, end)}\n} }).loadAllTime`, { completeLocalSyncStats, snapshotLocalDevices, mergedLocalAllTimeSessions, materializeActivity });
-  const service = createBusinessDataService({ loadAllTime });
+  const service = createBusinessDataService({ loadAllTime, identitySecret: 'adapter-test' });
   service.publish(stats);
   return service;
 }
@@ -53,10 +54,10 @@ test('App all-time adapter never promotes remote Month detail; scopes and mixed 
         const isLocal = filtered.rows.length > 0;
         assert.equal(filtered.aggregateCoverage.kind, isLocal ? 'authorizedCollection' : 'unavailable');
       }
-      const restricted = await service.query(query, { ...auth, scope: { deviceIds: ['remote'] } });
+      const restricted = await service.query({ ...query, filter: { deviceId: deviceRef('remote') } }, auth);
       assert.equal(restricted.aggregateCoverage.kind, 'unavailable');
       assert.equal(restricted.rows.length, 0);
-      const localOnly = await service.query(query, { ...auth, scope: { deviceIds: ['local'] } });
+      const localOnly = await service.query({ ...query, filter: { deviceId: deviceRef('local') } }, auth);
       assert.equal(localOnly.aggregateCoverage.kind, kind === 'remote' ? 'unavailable' : 'authorizedCollection');
       if (kind !== 'remote') assert.deepEqual(localOnly.rows.map(r => r.totalTokens).sort((a, b) => a - b), [100, 200]);
     } finally { service.dispose(); }
@@ -109,7 +110,7 @@ test('App all-time adapter reports absent accounting as unavailable, not an empt
   try {
     for (const resource of ['usage', 'models', 'tools', 'sessions', 'projects']) {
       const result = await service.query({ version: 1, resource, period: 'allTime' }, {
-        active: true, pluginId: 'probe', permissions: ['tm.data.usage', 'tm.data.sessions', 'tm.data.projects']
+        active: true, pluginId: 'probe'
       });
       assert.equal(result.availability, 'notCollected', resource);
       assert.equal(result.aggregateCoverage.kind, 'unavailable', resource);
@@ -122,14 +123,15 @@ test('business identities never override hidden session titles in any period or 
   const period = { totalTokens: 1, sessions: { s: { sessionId: 's', client: 'codex', totalTokens: 1, title: 'PRIVATE TITLE', projectId: '/project', projectLabel: 'project' } } };
   const stats = { periods: { today: period, month: period, allTime: period }, devices: [{ deviceId: 'd', periods: { today: period, month: period, allTime: period } }] };
   const service = createBusinessDataService({ loadAllTime: async () => period });
-  const identities = { ...auth, permissions: [...auth.permissions, 'tm.data.identities'] };
   try {
     for (const enabled of [true, false]) {
       service.publish(stats, { preferences: { sessionTitlesEnabled: enabled } });
-      for (const period of ['today', 'month', 'allTime']) for (const scope of [undefined, { deviceIds: ['d'] }]) {
-        const result = await service.query({ version: 1, resource: 'sessions', period }, { ...identities, scope });
+      for (const period of ['today', 'month', 'allTime']) for (const deviceFiltered of [false, true]) {
+        const devices = await service.query({ version: 1, resource: 'devices' }, auth);
+        const filter = deviceFiltered ? { deviceId: devices.rows[0].id } : {};
+        const result = await service.query({ version: 1, resource: 'sessions', period, filter }, auth);
         assert.equal(result.rows[0].title, enabled ? 'PRIVATE TITLE' : null);
-        assert.equal(result.rows[0].projectPath, '/project', 'unrelated granted identity stays available');
+        assert.equal(result.rows[0].projectPath, '/project', 'project path remains available');
         if (!enabled) assert.doesNotMatch(JSON.stringify(result), /PRIVATE TITLE/);
       }
     }

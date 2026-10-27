@@ -117,8 +117,7 @@ function createPluginRuntime({
     ? createOutboundFetch(env)
     : createElectronNetFetch({ fetch: (input, init) => session.fromPartition(NET_PARTITION, { cache: false }).fetch(input, init) });
 
-  const queryPermissions = ['usage', 'devices', 'projects', 'status', 'sessions', 'history', 'limits', 'subscriptions', 'identities'].map(name => `tm.data.${name}`);
-  const auth = id => () => ({ pluginId: id, active: manager.active(id), permissions: queryPermissions });
+  const auth = id => () => ({ pluginId: id, active: manager.active(id) });
   async function hostCall(id, method, args) {
     if (!manager.active(id)) throw new Error('Plugin is disabled');
     if (method === 'data.query') return businessData.query({ version: 1, ...args }, auth(id), { owner: id });

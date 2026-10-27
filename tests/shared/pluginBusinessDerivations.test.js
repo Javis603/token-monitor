@@ -10,8 +10,7 @@ const currency = require('../../src/shared/currency');
 
 const date = '2026-03-15';
 const context = { date, rates: { USD: 1, HKD: 7.8, CNY: 7, TWD: 32 } };
-const permissions = ['tm.data.sessions', 'tm.data.subscriptions', 'tm.data.limits', 'tm.data.identities'];
-const authority = (overrides = {}) => ({ active: true, pluginId: 'derivations', permissions, ...overrides });
+const authority = (overrides = {}) => ({ active: true, pluginId: 'derivations', ...overrides });
 const opaque = (kind, key) => `${kind}_${createHmac('sha256', 'fixture-secret').update(key).digest('hex')}`;
 const q = (resource, options = {}) => normalizeQuery({ version: 1, resource, ...options });
 function subscription(overrides = {}) {
@@ -91,16 +90,16 @@ test('long host session identifiers are hashed in full for both ends of a relati
   assert.doesNotMatch(JSON.stringify(rows), /private-long-/);
 });
 
-test('parent IDs agree for aggregate/device/allTime provenance and remain redacted with titles hidden', () => {
+test('parent IDs agree for aggregate/device/allTime provenance and keep titles hidden by host preference', () => {
   const stats = sessionsFixture(), extras = { allTime: { sessionSources: stats.devices }, preferences: { sessionTitlesEnabled: false } };
   const aggregate = sessionRows(stats, extras);
   const lifetime = sessionRows(stats, extras, { period: 'allTime' });
   const month = sessionRows(stats, extras, { period: 'month' });
   assert.deepEqual(lifetime.map(r => [r.id, r.parentId]), aggregate.map(r => [r.id, r.parentId]));
   assert.deepEqual(month.map(r => [r.id, r.parentId]), aggregate.map(r => [r.id, r.parentId]));
-  const auth = authority({ scope: { deviceIds: ['private-device'], identities: false }, permissions: ['tm.data.sessions'] });
-  const device = sessionRows(stats, extras, {}, auth);
-  const deviceLifetime = sessionRows(stats, extras, { period: 'allTime' }, auth);
+  const filter = { deviceId: opaque('device', 'private-device') };
+  const device = sessionRows(stats, extras, { filter });
+  const deviceLifetime = sessionRows(stats, extras, { period: 'allTime', filter });
   assert.deepEqual(deviceLifetime.map(r => [r.id, r.parentId]), device.map(r => [r.id, r.parentId]));
   assert.equal(device[1].parentId, device[0].id);
   assert.notEqual(device[0].id, aggregate[0].id);
@@ -245,31 +244,15 @@ test('projection does not read clock/random/global mutable rates or repair malfo
   } finally { global.Date = originalDate; Math.random = random; currency.configureRates(); }
 });
 
-test('forecast requires limits permission without inspecting providers', () => {
-  const stats = { limits: { get providers() { throw new Error('read without limits grant'); } } };
-  const result = row(topup(), { stats, auth: authority({ permissions: ['tm.data.subscriptions'] }) });
-  assert.equal(result.derived.forecast.status, 'denied');
-  assert.equal(result.derived.forecast.reason, 'limitsPermission');
-  assert.equal(result.derived.forecast.accountId, null);
-  assert.equal(result.derived.topUpTotalMinor, 15000);
-  assert.doesNotMatch(JSON.stringify(result), /private-account|private@example|private-topup/);
-});
-
-test('forecast matches the complete provider set before applying account scope', () => {
+test('forecast matches the complete provider set and preserves rotated account aliases', () => {
   const record = topup({ binding: { accountKey: 'rotated-key' } });
   const providers = [provider({ accountKey: 'rotated-key' }), provider({ accountKey: 'another-key' })];
-  const inScope = authority({ scope: { accountIds: ['rotated-key'] } });
-  const ambiguous = row(record, { providers: providers.map(p => ({ ...p, accountKey: p.accountKey === 'rotated-key' ? 'current-key' : p.accountKey })), auth: inScope });
+  const ambiguous = row(record, { providers: providers.map(p => ({ ...p, accountKey: p.accountKey === 'rotated-key' ? 'current-key' : p.accountKey })) });
   assert.equal(ambiguous.derived.forecast.status, 'ambiguous');
   assert.equal(ambiguous.derived.forecast.accountId, null);
-  const denied = row(record, { providers: [provider({ accountKey: 'current-key' })], auth: inScope }).derived.forecast;
-  assert.equal(denied.status, 'denied');
-  assert.equal(denied.reason, 'accountScope');
-  assert.equal(denied.accountId, null);
-  const allowed = row(record, { providers: [provider({ accountKey: 'current-key', accountKeyAliases: ['rotated-key'] })], auth: authority({ scope: { accountIds: ['rotated-key', 'current-key'] } }) }).derived.forecast;
+  const allowed = row(record, { providers: [provider({ accountKey: 'current-key', accountKeyAliases: ['rotated-key'] })] }).derived.forecast;
   assert.equal(allowed.status, 'available');
   assert.equal(allowed.accountId, opaque('account', 'openrouter:current-key'));
-  assert.equal(row(record, { auth: authority({ scope: { accountIds: ['unrelated'] } }) }), undefined);
 });
 
 test('duplicate key/email, unmatched and unbound multi-account forecasts remain explicit', () => {

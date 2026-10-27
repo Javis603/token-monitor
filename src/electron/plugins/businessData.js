@@ -3,7 +3,7 @@
 const { performance } = require('node:perf_hooks');
 const { createHmac, randomBytes } = require('node:crypto');
 const { CURRENCY_CODES } = require('../../shared/currency');
-const { normalizeQuery, projectResource, RESOURCES, sessionSources, projectSessionRow, matchesRow, compareRows } = require('../../shared/plugins/businessData');
+const { normalizeQuery, projectResource, sessionSources, projectSessionRow, matchesRow, compareRows } = require('../../shared/plugins/businessData');
 
 const { setImmediate: immediate } = require('node:timers/promises');
 const { createSessionBacking, buildSessionIndex, isLargeSessionPlan, PAGE_SCRATCH_BYTES } = require('./lazySessions');
@@ -102,7 +102,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
     b.tokens -= cost;
     return b;
   }
-  function preflight(stats, extras, q, a, opaque) {
+  function preflight(stats, extras, q, opaque) {
     let count = 0, work = 0;
     function inspect(value, top = false, depth = 0) {
       if (!value || typeof value !== 'object') return;
@@ -115,13 +115,13 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
         if (child && typeof child === 'object') inspect(child, false, depth + 1);
       }
     }
-    const restricted = !!a.scope.deviceIds || !!q.filter.deviceId;
-    const allowed = d => (!a.scope.deviceIds || a.scope.deviceIds.includes(d.deviceId)) && (!q.filter.deviceId || q.filter.deviceId === opaque('device', d.deviceId));
+    const restricted = !!q.filter.deviceId;
+    const allowed = d => !q.filter.deviceId || q.filter.deviceId === opaque('device', d.deviceId);
     const devices = stats?.devices || [];
     if (devices.length > MAX_COLLECTION_ROWS) throw new Error('budgetExceeded');
     let sources = restricted ? devices.filter(allowed) : [stats];
     if (q.resource === 'sessions') {
-      for (const context of sessionSources(stats, extras, q, a, opaque).contexts) {
+      for (const context of sessionSources(stats, extras, q, opaque).contexts) {
         inspect(context.sessions, true);
         inspect(context.sessionActivity);
       }
@@ -145,8 +145,8 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
     } else if (q.resource === 'subscriptions') {
       const d = extras.subscriptions ?? stats?.subscriptions;
       inspect(Array.isArray(d) ? d : d?.subscriptions, true);
-      // Forecast matching uses the complete source account set before scope.
-      if (a.permissions.includes('tm.data.limits')) inspect(stats?.limits?.providers, true);
+      // Forecast matching traverses the complete source account set.
+      inspect(stats?.limits?.providers, true);
     } else if (q.resource === 'limits') {
       for (const source of sources) inspect(source?.limits?.providers, true);
     } else if (q.resource === 'status') {
@@ -176,9 +176,9 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
   function authority(value) {
     const a = currentAuth(value);
     if (!a || a.active !== true || typeof a.pluginId !== 'string' || !a.pluginId) throw new Error('denied');
-    return { pluginId: a.pluginId, active: true, permissions: [...(a.permissions || [])].sort(), scope: a.scope || {}, revision: a.revision ?? null, epoch: epochs.get(a.pluginId) || 0 };
+    return { pluginId: a.pluginId, active: true, revision: a.revision ?? null, epoch: epochs.get(a.pluginId) || 0 };
   }
-  // Binds normalized grants, scope and generation; this is not a password hash.
+  // Binds plugin ownership and generation; this is not a password hash.
   const authorityFingerprint = a => sign(a);
   const queryKey = q => sign({ ...q, page: { limit: q.page.limit } });
   function envelope(code, revision = latest.revision) {
@@ -381,7 +381,6 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       request.query = q; request.fence = cursorFence(latest, q);
       request.check();
       a = authority(auth); key = authorityFingerprint(a);
-      if (!a.permissions.includes(`tm.data.${RESOURCES[q.resource]}`)) return envelope('denied');
       sweep();
       if (q.page.cursor) {
         const [snapshotId, rawOffset, signature] = q.page.cursor.split('.');
@@ -391,11 +390,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
         snapshot.traversed = true;
         return snapshot.lazy ? await lazyPage(snapshot, offset, q, request) : page(snapshot, offset, q);
       }
-      if ((a.scope.deviceIds || q.filter.deviceId) && ['history', 'subscriptions'].includes(q.resource)) return envelope('scopeUnavailable');
-      if (a.scope.accountIds && !['limits', 'subscriptions'].includes(q.resource)) return envelope('scopeUnavailable');
-      // Identity-based filters must be checked before using a neutral cached
-      // projection, otherwise removing search from that query would bypass auth.
-      if ((!a.permissions.includes('tm.data.identities') || a.scope.identities === false) && (q.filter.search || q.sort.field === 'label')) return envelope('denied');
+      if (q.filter.deviceId && ['history', 'subscriptions'].includes(q.resource)) return envelope('scopeUnavailable');
       let captured = latest;
       const stamp = dependency(captured, q), qKey = queryKey(q), capturedAt = now();
       const reusable = [...snapshots.values()].find(s => s.stamp === stamp && s.authorityFingerprint === key && s.queryKey === qKey);
@@ -416,7 +411,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       if (!projection && q.resource === 'sessions') {
         const identityScope = [a.pluginId, extras.sourceId || 'default', extras.identityEpoch || '1'];
         const opaque = (kind, value) => `${kind}_${sign([...identityScope, kind, String(value)])}`;
-        const plan = sessionSources(captured.stats, extras, q, a, opaque);
+        const plan = sessionSources(captured.stats, extras, q, opaque);
         if (isLargeSessionPlan(plan)) {
           // Async work only pins selected session maps/records and scalar source
           // metadata, never the unrelated graph reachable from captured stats.
@@ -436,7 +431,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
           const identityScope = [a.pluginId, extras.sourceId || 'default', extras.identityEpoch || '1'];
           const opaque = (kind, value) => `${kind}_${sign([...identityScope, kind, String(value)])}`;
           try {
-            preflight(captured.stats, extras, neutral, a, opaque);
+            preflight(captured.stats, extras, neutral, opaque);
             const projected = projectResource(captured.stats, extras, neutral, a, opaque);
             if (projected.rows.length > MAX_COLLECTION_ROWS) throw new Error('budgetExceeded');
             let bytes = 0;
@@ -543,7 +538,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
     subscribe(owner, raw, getAuth, callback, requestedId) {
       if (disposed || typeof owner !== 'string' || !owner || typeof callback !== 'function') throw new Error('invalidSubscription');
       const q = normalizeQuery(raw), a = authority(getAuth);
-      if (q.page.cursor || !a.permissions.includes(`tm.data.${RESOURCES[q.resource]}`)) throw new Error('denied');
+      if (q.page.cursor) throw new Error('denied');
       const id = requestedId || `business-${++sequence}`;
       if (!/^[a-zA-Z0-9_-]{1,80}$/.test(id) || subscriptions.has(id) || subscriptions.size >= 128 || [...subscriptions.values()].filter(s => s.owner === owner).length >= 16) throw new Error('subscriptionLimit');
       const subscription = { controller: new AbortController(), id, owner, query: q, queryKey: queryKey(q), retryAt: 0, timerAt: 0, stamp: dependency(latest, q), fence: cursorFence(latest, q), reset: false, pluginId: a.pluginId, getAuth, callback, authorityFingerprint: authorityFingerprint(a), initialized: false, closed: false, timer: null, sequence: 0 };

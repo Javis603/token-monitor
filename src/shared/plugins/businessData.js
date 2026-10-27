@@ -91,19 +91,17 @@ function subscriptionDerivation(record, context, forecast) {
   }
   return result;
 }
-function subscriptionForecast(record, context, stats, auth, id, visit) {
+function subscriptionForecast(record, context, stats, id, visit) {
   const result = { status: 'unavailable', reason: null, accountId: null,
     balanceUpdatedAt: null, currency: null, balanceAmount: null,
     dailyBurn: null, daysRemaining: null, exhaustDate: null };
   const finish = (status, reason) => ({ ...result, status, reason });
   if (record.kind !== 'topup') return finish('notApplicable', 'notTopUp');
-  if (!auth.permissions?.includes('tm.data.limits')) return finish('denied', 'limitsPermission');
   if (!calendarDate(context?.date)) return finish('unavailable', 'missingContext');
   if (!validSubscription(record)) return finish('unavailable', 'invalidRecord');
   const providers = stats?.limits?.providers;
   if (!Array.isArray(providers)) return finish('unavailable', 'missingLimits');
   // Charge both full matching passes to the projector's cumulative work bound.
-  // Matching after scope filtering could turn an ambiguity into a sole match.
   const candidates = visit(providers).map(([, provider]) => provider);
   // Matching builds identity sets from aliases on each pass, so repeated
   // subscription matches must also pay for this nested source traversal.
@@ -114,7 +112,6 @@ function subscriptionForecast(record, context, stats, auth, id, visit) {
   // in reverse order proves that match is ambiguous; do not guess a balance.
   const reversed = visit(providers).map(([, provider]) => provider).reverse();
   if (subscriptionDisplay.matchProviderAccount(record, reversed) !== account) return finish('ambiguous', 'accountMatch');
-  if (auth.scope?.accountIds && !auth.scope.accountIds.includes(account.accountKey)) return finish('denied', 'accountScope');
   result.accountId = account.accountKey ? id('account', `${account.provider}:${account.accountKey}`) : null;
   result.balanceUpdatedAt = text(account.updatedAt);
   if (stats?.stale === true || stats?.limits?.stale === true || account.stale === true || account.status === 'stale') return finish('stale', 'markedStale');
@@ -168,12 +165,10 @@ function normalizeQuery(raw) {
   return { version: VERSION, resource: raw.resource, period, filter, sort, resolution, groupBy, page: { limit, cursor: raw.page?.cursor ?? null } };
 }
 // One source/coverage and allowlist authority for eager and lazy sessions.
-function sessionSources(stats, extras, query, auth, opaque) {
-  const identities = auth.permissions.includes('tm.data.identities') && auth.scope?.identities !== false;
+function sessionSources(stats, extras, query, opaque) {
   const id = (kind, key) => opaque(kind, String(key));
-  const restricted = !!auth.scope?.deviceIds || !!query.filter.deviceId;
-  const allowed = d => (!auth.scope?.deviceIds || auth.scope.deviceIds.includes(d.deviceId))
-    && (!query.filter.deviceId || query.filter.deviceId === id('device', d.deviceId));
+  const restricted = !!query.filter.deviceId;
+  const allowed = d => !query.filter.deviceId || query.filter.deviceId === id('device', d.deviceId);
   const lifetime = query.period === 'allTime';
   const devices = Array.isArray(stats?.devices) ? stats.devices : [];
   const candidates = lifetime && extras.allTime?.sessionSources
@@ -198,8 +193,8 @@ function sessionSources(stats, extras, query, auth, opaque) {
   });
   const available = lifetime ? detailed > 0 : sources.length > 0 && periods === sources.length;
   incomplete ||= lifetime && available && detailed < sources.length;
-  return { contexts, identities, titles: identities && extras.preferences?.sessionTitlesEnabled !== false,
-    availability: available ? 'available' : 'notCollected', redacted: !identities, incomplete };
+  return { contexts, titles: extras.preferences?.sessionTitlesEnabled !== false,
+    availability: available ? 'available' : 'notCollected', redacted: false, incomplete };
 }
 function* sessionEntries(plan) {
   for (const context of plan.contexts) for (const key in context.sessions) {
@@ -222,7 +217,7 @@ function projectSessionRow(locator, plan, id, visit = entries) {
   const { session, key, context } = locator;
   return { ...sessionFields(locator, plan, id), ...context.base, ...usage(session),
     ...pick(session, 'startedAt sessionKind', '', 'turnEnded'), ...sessionParent(session, key, context.scopeKey, id),
-    projectPath: plan.identities ? text(session.projectId) : null,
+    projectPath: text(session.projectId),
     promptCache: pick(session.promptCache, 'observedAt', 'ttlSeconds'), liveActivity: locator.liveActivity ?? projectSessionActivity(locator),
     waitingForInput: typeof session.waitingForInput === 'boolean' ? session.waitingForInput : null,
     models: visit(session.models).map(([model, tokens]) => ({ model: text(model), totalTokens: number(tokens), knownUsd: number(session.modelCosts?.[model]) })),
@@ -252,13 +247,9 @@ function projectResource(stats, extras, query, auth, opaque) {
   let work = 0;
   const boundedEntries = entries;
   function visit(value) { const items = boundedEntries(value); work += items.length; if (work > MAX_ROWS * 4) failure('budgetExceeded'); return items; }
-  const grants = new Set(auth.permissions || []);
-  if (auth.active !== true || !grants.has(`tm.data.${RESOURCES[query.resource]}`)) failure('denied');
-  const identities = grants.has('tm.data.identities') && auth.scope?.identities !== false;
-  if (!identities && (query.filter.search || query.sort.field === 'label')) failure('denied');
+  if (auth.active !== true) failure('denied');
   if (query.resource === 'sessions') {
-    if (auth.scope?.accountIds) failure('scopeUnavailable');
-    const plan = sessionSources(stats, extras, query, auth, opaque), rows = [];
+    const plan = sessionSources(stats, extras, query, opaque), rows = [];
     for (const locator of sessionEntries(plan)) {
       if (++work > MAX_ROWS * 4 || rows.length >= MAX_ROWS) failure('budgetExceeded');
       rows.push(projectSessionRow(locator, plan, opaque, visit));
@@ -270,10 +261,8 @@ function projectResource(stats, extras, query, auth, opaque) {
   const add = row => { if (rows.length >= MAX_ROWS) failure('budgetExceeded'); rows.push(row); };
   const devices = Array.isArray(stats?.devices) ? stats.devices : [];
   if (devices.length > MAX_ROWS) failure('budgetExceeded');
-  const deviceAllowed = d => !auth.scope?.deviceIds || auth.scope.deviceIds.includes(d.deviceId);
-  const selected = devices.filter(d => deviceAllowed(d) && (!query.filter.deviceId || query.filter.deviceId === id('device', d.deviceId)));
-  const restricted = !!auth.scope?.deviceIds || !!query.filter.deviceId;
-  if (auth.scope?.accountIds && !['limits', 'subscriptions'].includes(query.resource)) failure('scopeUnavailable');
+  const selected = devices.filter(d => !query.filter.deviceId || query.filter.deviceId === id('device', d.deviceId));
+  const restricted = !!query.filter.deviceId;
   let sources = restricted ? selected : [{ ...stats, deviceId: null }];
   const periodFor = source => {
     const period = source.periods?.[query.period];
@@ -308,12 +297,12 @@ function projectResource(stats, extras, query, auth, opaque) {
       }
       if (query.resource === 'projects') {
         incomplete ||= !!source.projectsIncomplete || !!source.periodProjectsOmitted?.[query.period] || source.projectsEnabled === false || (query.period === 'allTime' && (!!source.allTimeProjectsOmitted || !!source.allTimeProjectsIncomplete));
-        for (const [key, project] of visit(period.projects)) add({ id: id('project', `${scopeKey}:${key}`), ...base, ...usage(project), label: identities ? text(project.label) : null, models: visit(project.models).map(([model, tokens]) => ({ model: text(model), totalTokens: number(tokens) })), clients: visit(project.clients).map(([client, tokens]) => ({ client: text(client), totalTokens: number(tokens) })) });
+        for (const [key, project] of visit(period.projects)) add({ id: id('project', `${scopeKey}:${key}`), ...base, ...usage(project), label: text(project.label), models: visit(project.models).map(([model, tokens]) => ({ model: text(model), totalTokens: number(tokens) })), clients: visit(project.clients).map(([client, tokens]) => ({ client: text(client), totalTokens: number(tokens) })) });
       }
     }
   } else if (query.resource === 'devices') {
     available = Array.isArray(stats?.devices);
-    for (const d of selected) add({ id: id('device', d.deviceId), ...pick(d, 'platform osName osVersion agentVersion agentRuntime updatedAt receivedAt', 'ageMs syncUploadIntervalMs', 'stale historyAvailable projectsEnabled'), hostname: identities ? text(d.hostname) : null, displayName: identities ? text(d.displayName) : null, trackedClients: visit(d.trackedClients).map(([, value]) => text(value)), clientStatus: visit(d.clientStatus).map(([client, state]) => ({ client: text(client), state: text(state) })), wslStatus: { state: text(d.wslStatus?.state), detected: visit(d.wslStatus?.detected).map(([, value]) => text(value)), withData: visit(d.wslStatus?.withData).map(([, value]) => text(value)) } });
+    for (const d of selected) add({ id: id('device', d.deviceId), ...pick(d, 'platform osName osVersion agentVersion agentRuntime updatedAt receivedAt', 'ageMs syncUploadIntervalMs', 'stale historyAvailable projectsEnabled'), hostname: text(d.hostname), displayName: text(d.displayName), trackedClients: visit(d.trackedClients).map(([, value]) => text(value)), clientStatus: visit(d.clientStatus).map(([client, state]) => ({ client: text(client), state: text(state) })), wslStatus: { state: text(d.wslStatus?.state), detected: visit(d.wslStatus?.detected).map(([, value]) => text(value)), withData: visit(d.wslStatus?.withData).map(([, value]) => text(value)) } });
   } else if (query.resource === 'history') {
     const history = extras.history ?? stats?.history;
     if (restricted) failure('scopeUnavailable');
@@ -329,9 +318,8 @@ function projectResource(stats, extras, query, auth, opaque) {
     available = Array.isArray(records);
     for (const [, p] of visit(records)) {
       const accountKey = p.accountKey || `${p.provider}:unidentified:${p.source || ''}:${p.adapterId || ''}`;
-      if (auth.scope?.accountIds && !auth.scope.accountIds.includes(p.accountKey)) continue;
       const accountId = p.accountKey ? id('account', `${p.provider}:${accountKey}`) : null;
-      add({ id: accountId, accountId, identityAvailable: !!p.accountKey, ...pick(p, 'provider planLabel status workspaceKind updatedAt region source sourceDetail actionRequired', 'balanceUsd'), ...(identities ? pick(p, 'accountLabel accountName accountEmail') : { accountLabel: null, accountName: null, accountEmail: null }), windows: visit(p.windows).map(([, w]) => pick(w, 'kind metric source boundaryKind label resetsAt resetDescription detail currency', 'used limit remaining usedPercent remainingPercent windowMinutes', 'showMeter additional')), balance: pick(p.balance, 'currency expiresAt trackingSince planStatus todayUsageDate latestModelUsageDate todayUsageBasis snapshotDate', 'amount todaySpend weekSpend monthSpend allTimeSpend requestCount giftBalance cashBalance planUsed planLimit planPercent todayTokenTotal', 'monthSinceTracking'), balanceTranches: visit(p.balance?.tranches).map(([, t]) => pick(t, 'currency expiresAt', 'amount')), usageSummary: pick(p.usageSummary, 'period', 'requests todayTokens weekTokens inputTokens outputTokens cacheReadTokens cacheCreationTokens totalTokens standardCost actualCost averageDurationMs'), resetCredits: { ...pick(p.resetCredits, 'nextExpiresAt', 'availableCount'), expirations: visit(p.resetCredits?.expirations).map(([, value]) => text(value)), grants: visit(p.resetCredits?.grants).map(([, g]) => ({ ...pick(g, 'label startsAt endsAt', 'resetsLeft resetsTotal', 'usableNow useRequiresLimit paused'), clears: visit(g.clears).map(([, value]) => text(value)) })) } });
+      add({ id: accountId, accountId, identityAvailable: !!p.accountKey, ...pick(p, 'provider planLabel status workspaceKind updatedAt region source sourceDetail actionRequired', 'balanceUsd'), ...pick(p, 'accountLabel accountName accountEmail'), windows: visit(p.windows).map(([, w]) => pick(w, 'kind metric source boundaryKind label resetsAt resetDescription detail currency', 'used limit remaining usedPercent remainingPercent windowMinutes', 'showMeter additional')), balance: pick(p.balance, 'currency expiresAt trackingSince planStatus todayUsageDate latestModelUsageDate todayUsageBasis snapshotDate', 'amount todaySpend weekSpend monthSpend allTimeSpend requestCount giftBalance cashBalance planUsed planLimit planPercent todayTokenTotal', 'monthSinceTracking'), balanceTranches: visit(p.balance?.tranches).map(([, t]) => pick(t, 'currency expiresAt', 'amount')), usageSummary: pick(p.usageSummary, 'period', 'requests todayTokens weekTokens inputTokens outputTokens cacheReadTokens cacheCreationTokens totalTokens standardCost actualCost averageDurationMs'), resetCredits: { ...pick(p.resetCredits, 'nextExpiresAt', 'availableCount'), expirations: visit(p.resetCredits?.expirations).map(([, value]) => text(value)), grants: visit(p.resetCredits?.grants).map(([, g]) => ({ ...pick(g, 'label startsAt endsAt', 'resetsLeft resetsTotal', 'usableNow useRequiresLimit paused'), clears: visit(g.clears).map(([, value]) => text(value)) })) } });
     }
   } else if (query.resource === 'subscriptions') {
     if (restricted) failure('scopeUnavailable');
@@ -339,8 +327,7 @@ function projectResource(stats, extras, query, auth, opaque) {
     const list = Array.isArray(document) ? document : document?.subscriptions;
     available = Array.isArray(list);
     for (const [, s] of visit(list)) {
-      if (auth.scope?.accountIds && !auth.scope.accountIds.includes(s.binding?.accountKey)) continue;
-      add({ id: id('subscription', s.id), accountId: s.binding?.accountKey ? id('account', `${s.provider}:${s.binding.accountKey}`) : null, ...pick(s, 'provider kind planName currency interval startDate nextRenewalOverride endDate updatedAt', 'amountMinor intervalCount', 'autoRenew'), note: identities ? text(s.note) : null, derived: subscriptionDerivation(s, extras.subscriptionContext, subscriptionForecast(s, extras.subscriptionContext, stats, auth, id, visit)), topUps: visit(s.topUps).map(([, t]) => ({ id: id('topup', `${s.id}:${t.id}`), ...pick(t, 'date', 'amountMinor') })) });
+      add({ id: id('subscription', s.id), accountId: s.binding?.accountKey ? id('account', `${s.provider}:${s.binding.accountKey}`) : null, ...pick(s, 'provider kind planName currency interval startDate nextRenewalOverride endDate updatedAt', 'amountMinor intervalCount', 'autoRenew'), note: text(s.note), derived: subscriptionDerivation(s, extras.subscriptionContext, subscriptionForecast(s, extras.subscriptionContext, stats, id, visit)), topUps: visit(s.topUps).map(([, t]) => ({ id: id('topup', `${s.id}:${t.id}`), ...pick(t, 'date', 'amountMinor') })) });
     }
   } else if (query.resource === 'status') {
     for (const d of selected) {
@@ -348,6 +335,6 @@ function projectResource(stats, extras, query, auth, opaque) {
     }
     if (!restricted) add({ id: id('status', 'host'), ...pick(stats, 'updatedAt', '', 'projectsIncomplete'), ...pick(extras.status, 'collection sync availability'), preferences: pick(extras.preferences, 'currency timeZone locale', '', 'sessionTitlesEnabled historyEnabled projectsEnabled') });
   }
-  return { rows, availability: available ? 'available' : 'notCollected', redacted: !identities, incomplete };
+  return { rows, availability: available ? 'available' : 'notCollected', redacted: false, incomplete };
 }
 module.exports = { VERSION, RESOURCES, MAX_ROWS, normalizeQuery, projectResource, sessionSources, sessionEntries, sessionFields, projectSessionRow, projectSessionActivity, sessionModelMatches, matchesRow, compareRows };

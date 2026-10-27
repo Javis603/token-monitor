@@ -4,8 +4,7 @@ const assert = require('node:assert/strict');
 const { createBusinessDataService } = require('../src/electron/plugins/businessData');
 const { RESOURCES } = require('../src/shared/plugins/businessData');
 const { normalizePeriod, aggregateDevices } = require('../src/shared/usage');
-const permissions = [...new Set(Object.values(RESOURCES))].map(p => `tm.data.${p}`).concat('tm.data.identities');
-const auth = () => ({ pluginId: 'example', active: true, permissions, revision: 1 });
+const auth = () => ({ pluginId: 'example', active: true, revision: 1 });
 const q = (resource, options = {}) => ({ version: 1, resource, ...options });
 
 test('model and tool completeness uses normalized parent zero without fabricating unknown child costs', async t => {
@@ -106,16 +105,15 @@ test('IDs survive label, insertion order, sort and publish changes and are isola
   assert.notEqual((await service.query(q('sessions'), auth)).rows[0].id, first.rows[0].id);
   service.dispose();
 });
-test('legacy grants do not widen and denied identity filters cannot act as an oracle', async () => {
-  const service = createBusinessDataService(); service.publish(fixture());
-  assert.equal((await service.query(q('sessions'), { ...auth(), permissions: ['tm.sessions', 'tm.pages'] })).availability, 'denied');
-  const limited = { ...auth(), permissions: ['tm.data.sessions'] };
-  const result = await service.query(q('sessions'), limited);
-  assert.equal(result.rows[0].title, null); assert.equal(result.rows[0].projectPath, null);
-  assert.equal((await service.query(q('sessions', { filter: { search: 'Session' } }), limited)).availability, 'denied');
+test('active trusted plugins query identities without grants; disabled plugins and invalid filters are rejected', async t => {
+  const service = createBusinessDataService(); t.after(() => service.dispose()); service.publish(fixture());
+  const result = await service.query(q('sessions', { filter: { search: 'Session' } }), auth);
+  assert.equal(result.availability, 'available');
+  assert.deepEqual(result.rows.map(row => row.title).sort(), ['Session 0', 'Session 1', 'Session 2']); assert.equal(result.rows[0].projectPath, '/private/work/project');
+  assert.equal((await service.query(q('sessions'), { ...auth(), active: false })).availability, 'denied');
+  assert.throws(() => service.subscribe('owner', q('sessions'), { ...auth(), active: false }, () => {}), /denied/);
   assert.equal((await service.query(q('sessions', { filter: { rawPath: 'anything' } }), auth)).availability, 'invalidFilter');
-  assert.equal((await service.query(q('sessions'), { ...auth(), scope: { deviceIds: ['missing'] } })).rows.length, 0);
-  service.dispose();
+  assert.equal((await service.query(q('sessions', { filter: { deviceId: 'missing' } }), auth)).rows.length, 0);
 });
 test('unknown cost is not free and missing components are not fabricated', async () => {
   const service = createBusinessDataService(); service.publish(fixture());
@@ -196,12 +194,11 @@ test('payload stays below transport budget and scope/loader failures are explici
   service.publish(fixture(700));
   const result = await service.query(q('sessions', { page: { limit: 500 } }), auth);
   assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 56 * 1024);
-  assert.equal((await service.query(q('history'), { ...auth(), scope: { deviceIds: ['raw-device'] } })).availability, 'scopeUnavailable');
+  assert.equal((await service.query(q('history', { filter: { deviceId: 'missing' } }), auth)).availability, 'scopeUnavailable');
   assert.equal(calls, 0);
   const failed = await service.query(q('history'), auth);
   assert.equal(failed.availability, 'temporarilyUnavailable');
   assert.doesNotMatch(JSON.stringify(failed), /credential-bearing/);
-  assert.equal((await service.query(q('usage'), { ...auth(), scope: { accountIds: ['x'] } })).availability, 'scopeUnavailable');
   service.dispose();
 });
 test('closing the only owner before initial delivery does not start its lazy cache loader', async () => {

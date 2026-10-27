@@ -34,7 +34,7 @@ const { buildSessionIndex } = require('../../src/electron/plugins/lazySessions')
 const { applyActivityPatch } = require('../../src/shared/sessionActivityProjection');
 const { sessionWithActivity } = require('../../src/shared/sessionLive');
 const secret = 'lazy-test';
-const authority = { pluginId: 'reader', active: true, revision: 1, permissions: ['tm.data.sessions', 'tm.data.identities'] };
+const authority = { pluginId: 'reader', active: true, revision: 1 };
 const q = (rest = {}) => ({ version: 1, resource: 'sessions', page: { limit: 500 }, ...rest });
 const id = (kind, value) => `${kind}_${createHmac('sha256', secret).update(JSON.stringify(['reader', 'default', '1', kind, String(value)])).digest('base64url')}`;
 
@@ -201,13 +201,9 @@ for (const sort of ['totalTokens', 'id', 'knownUsd', 'lastUsedAt', 'label', 'upd
   const query = q({ filter: { client: 'codex', model: 'a' }, sort: { field: sort, direction: 'desc' } });
   assert.deepEqual(await traverse(service, query), oracle(stats, query));
 });
-test('large redacted and title-disabled sessions cannot search hidden values; relation filters use opaque canonical IDs', async t => {
+test('large title-disabled sessions cannot search hidden values; relation filters use opaque canonical IDs', async t => {
   const stats = fixture(), service = setup(t, stats), query = q({ filter: { projectId: id('project', 'aggregate:project') }, sort: { field: 'totalTokens' } });
   assert.deepEqual(await traverse(service, query), oracle(stats, query));
-  const noIdentity = { ...authority, permissions: ['tm.data.sessions'] };
-  const hidden = await admitted(service, q(), noIdentity);
-  assert.equal(hidden.availability, 'available'); assert.ok(hidden.rows.every(r => r.title === null && r.projectPath === null));
-  assert.equal((await admitted(service, q({ filter: { search: 'Session' } }), noIdentity)).availability, 'denied');
   service.publish(stats, { preferences: { sessionTitlesEnabled: false } });
   const empty = await admitted(service, q({ filter: { search: 'Session' } }), authority);
   assert.equal(empty.aggregateCoverage.totalRows, 0);
@@ -226,10 +222,8 @@ test('large lifetime coverage distinguishes partial, scoped complete and remote 
   const rows = await traverse(service, query, authority, first);
   assert.deepEqual(rows, oracle(stats, query, authority, extras));
   assert.equal(rows.length, 10037); assert.equal(new Set(rows.map(r => r.id)).size, 10036);
-  const local = { ...authority, scope: { deviceIds: ['local'] } };
-  assert.equal((await admitted(service, query, local)).aggregateCoverage.kind, 'authorizedCollection');
-  const remote = { ...authority, scope: { deviceIds: ['remote'] } };
-  assert.equal((await admitted(service, query, remote)).availability, 'notCollected');
+  assert.equal((await admitted(service, { ...query, filter: { deviceId: id('device', 'local') } }, authority)).aggregateCoverage.kind, 'authorizedCollection');
+  assert.equal((await admitted(service, { ...query, filter: { deviceId: id('device', 'remote') } }, authority)).availability, 'notCollected');
 });
 for (const action of ['releaseOwner', 'signal', 'revoke', 'dispose', 'auth', 'privacy-roundtrip', 'source-roundtrip']) test(`pending large build cancels on ${action}`, async t => {
   const stats = fixture(), service = setup(t, stats), controller = new AbortController(); let active = true;
@@ -306,7 +300,7 @@ test('bounded distinct builds refuse excess demand; exact query siblings share o
   assert.equal((await sibling).availability, 'available');
 });
 test('bounded sort/merge yields after scanning and cancels before admission', async () => {
-  const stats = fixture(), query = shared.normalizeQuery(q()), plan = shared.sessionSources(stats, {}, query, authority, id);
+  const stats = fixture(), query = shared.normalizeQuery(q()), plan = shared.sessionSources(stats, {}, query, id);
   let checks = 0, sortChecks = 0, scanning = true;
   const last = stats.periods.today.sessions['key-10036'];
   Object.defineProperty(last, 'title', { enumerable: true, get() { scanning = false; return 'last'; } });

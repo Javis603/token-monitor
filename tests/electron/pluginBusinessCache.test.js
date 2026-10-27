@@ -9,8 +9,7 @@ const servicePath = path.resolve(__dirname, '../../src/electron/plugins/business
 const serviceRequire = createRequire(servicePath);
 const source = fs.readFileSync(process.env.BUSINESS_SERVICE_PATH || servicePath, 'utf8');
 const shared = serviceRequire('../../shared/plugins/businessData');
-const permissions = [...new Set(Object.values(shared.RESOURCES))].map(p => `tm.data.${p}`).concat('tm.data.identities');
-const auth = (pluginId = 'reader') => ({ pluginId, active: true, permissions, revision: 1 });
+const auth = (pluginId = 'reader') => ({ pluginId, active: true, revision: 1 });
 const q = (resource = 'sessions', rest = {}) => ({ version: 1, resource, ...rest });
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const tick = () => new Promise(resolve => setTimeout(resolve, 120));
@@ -148,14 +147,12 @@ test('identity epoch expires cursors; data refresh preserves traversal and its o
   assert.equal((await service.query(next(query, third), auth())).availability, 'snapshotExpired');
 });
 
-test('search and sort variations share an authorized projection and cannot bypass identity permission', async t => {
+test('search and sort variations share a projection for an active trusted plugin', async t => {
   const { service, calls } = setup(t);
   service.publish(fixture(100));
   for (let i = 0; i < 5; i++) assert.equal((await service.query(q('sessions', { filter: { search: String(i) }, sort: { field: i % 2 ? 'id' : 'totalTokens' } }), auth())).availability, 'available');
   assert.equal(calls(), 1, 'one projection despite five distinct filters/sorts');
-  const noIdentity = { ...auth(), permissions: ['tm.data.sessions'] };
-  assert.equal((await service.query(q(), noIdentity)).rows[0].title, null);
-  assert.equal((await service.query(q('sessions', { filter: { search: 'Session' } }), noIdentity)).availability, 'denied');
+
 });
 
 test('expensive filter flood is bounded per plugin and does not expire another plugin cursor', async t => {
@@ -534,13 +531,12 @@ test('subscription context is detached at publish before any projection or async
   assert.equal(result.rows[0].date, '2026-10-23'); assert.equal(result.rows[0].rate, 8);
 });
 
-test('subscription forecast preflight bounds all account candidates before scoped matching', async t => {
+test('subscription forecast preflight bounds all account candidates', async t => {
   const { service, calls } = setup(t);
   service.publish({ ...fixture(), limits: { providers: Array.from({ length: 5001 }, (_, i) => ({ accountKey: `a${i}` })) } }, { subscriptions: [] });
-  assert.equal((await service.query(q('subscriptions'), { ...auth(), scope: { accountIds: ['a1'] } })).availability, 'budgetExceeded');
-  assert.equal(calls(), 0, 'scope cannot hide costly matching input from the preflight budget');
-  const restricted = { ...auth('without-limits'), permissions: ['tm.data.subscriptions'] };
-  assert.equal((await service.query(q('subscriptions'), restricted)).availability, 'available', 'without limits grant no account matching work is needed');
+  assert.equal((await service.query(q('subscriptions'), auth())).availability, 'budgetExceeded');
+  assert.equal(calls(), 0, 'all matching input is charged to the preflight budget');
+
 });
 
 
