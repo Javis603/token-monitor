@@ -91,6 +91,24 @@
     return windows;
   }
 
+  function compactAccountWindows(providerId, windows) {
+    if (providerId !== 'ollama') return windows.slice(0, 2);
+    const wallet = windows.find((window) => window.metric === 'credits' && window.showMeter === false);
+    const spend = windows.find((window) => window.metric === 'spend' && window.showMeter === false);
+    if (!wallet) {
+      const selected = windows.filter((window) => window !== spend).slice(0, 2);
+      if (spend) selected.push(spend);
+      return selected.map((window) => ({ ...window, fullWidth: true }));
+    }
+    return [
+      ...windows.filter((window) => window !== wallet && window !== spend).slice(0, 2),
+      { ...wallet, resetDescription: '', detailEntries: [
+        ...(spend?.value ? [[spend.label, spend.value]] : []),
+        ...(wallet.resetDescription ? [{ full: wallet.resetDescription }] : [])
+      ] }
+    ].map((window) => ({ ...window, fullWidth: true }));
+  }
+
   // `isWindowHidden(providerId, window)` drops the rows the user unchecked on
   // the provider's usage-item list. It runs after the MiMo plan is synthesized,
   // so hiding the plan hides the placeholder built from the balance as well.
@@ -109,7 +127,7 @@
               // Credits windows carry money; their meter percentage is derived
               // here rather than read off the wire.
               remainingPercent: credits
-                ? balanceDisplay.creditsMeterPercent(account, window)
+                ? balanceDisplay.creditsMeterPercent(account, window, { inferBalance: providerId !== 'ollama' || window.showMeter !== false })
                 : remainingPercent(window),
               remaining: credits
                 ? balanceDisplay.creditsAmount(account, window)
@@ -118,7 +136,8 @@
               resetsAt: window.resetsAt,
               ...(window.boundaryKind ? { boundaryKind: window.boundaryKind } : {}),
               resetDescription: window.resetDescription || '',
-              value: window.value || '',
+              value: window.value || (window.metric === 'spend' && window.showMeter === false && finiteNumber(window.used) !== null
+                ? balanceDisplay.formatMoney(window.used, window.currency) : ''),
               planStatus: window.planStatus || '',
               showMeter: window.showMeter !== false,
               detail: window.detail || '',
@@ -129,10 +148,10 @@
             || window.planStatus === 'expired'
             || window.value
             || (window.metric === 'credits' && (window.remaining != null || window.detail)))
-          .sort((a, b) => compactWindowRank(providerId, a) - compactWindowRank(providerId, b) || a.index - b.index)
-          .slice(0, 2)
+          .sort((a, b) => compactWindowRank(providerId, a) - compactWindowRank(providerId, b) || a.index - b.index);
+        const compactWindows = compactAccountWindows(providerId, windows)
           .map(({ index: _index, ...window }) => window);
-        if (windows.length === 0) return null;
+        if (compactWindows.length === 0) return null;
         return {
           key: account.key || String(index),
           providerId: account.providerId || '',
@@ -140,8 +159,8 @@
           name: account.name || '',
           plan: account.plan || '',
           color: account.color || '',
-          lowestRemaining: Math.min(...windows.map((window) => window.remainingPercent ?? 100)),
-          windows,
+          lowestRemaining: Math.min(...compactWindows.map((window) => window.remainingPercent ?? 100)),
+          windows: compactWindows,
           index
         };
       })

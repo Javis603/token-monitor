@@ -3,7 +3,7 @@
 const os = require('node:os');
 const path = require('node:path');
 const { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchBounds, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
-const { toSvgPath } = require('../renderer/edgeDock/shapes');
+const { toSvgPath, toPolygons } = require('../renderer/edgeDock/shapes');
 const { notchGlassGeometry } = require('../renderer/notch/renderer');
 const { readMacNotchScreens } = require('./screen');
 const { notchBlurBounds } = require('./blur');
@@ -127,6 +127,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   let motionGeneration = 0, refreshInFlight = null, refreshEpoch = 0;
   let fullScreen = false, fullScreenCheckedAt = -Infinity, fullScreenDisplayId = null;
   let progress = 0, commands = null, frame = null, layoutKey = '', viewport = null;
+  let hitCommands = null, hitPolygons = [];
   let viewportDisplayId = null;
   let summaryMeasured = false, summaryMeasurement = null, summaryGeneration = 0, settleSummary = false;
   const settings = () => getSettings() || {};
@@ -217,7 +218,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // choose those items, so only the display bounds the summary.
     const closedMaxWidth = maxWidth;
     const summaryBudget = Math.max(0, Math.floor(compact ? closedMaxWidth - 2 * ((geometry.notched ? NOTCH_METRICS.restingFlare : 0) + 8)
-      : (closedMaxWidth - geometry.gapWidth) / 2 - 16 - NOTCH_METRICS.restingFlare));
+      : (closedMaxWidth - geometry.gapWidth) / 2 - 8 - NOTCH_METRICS.cameraClearance - NOTCH_METRICS.restingFlare));
     const boundedSlots = activeSlots && !compact
       ? { left: Math.min(activeSlots.left, summaryBudget), right: Math.min(activeSlots.right, summaryBudget) } : activeSlots;
     const closed = notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom(), closedMaxWidth);
@@ -362,8 +363,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       const gapLeft = current.geometry.centerX - current.geometry.gapWidth / 2 - canvas.x;
       const gapRight = gapLeft + current.geometry.gapWidth;
       const left = frame.summaryEdges.left + frame.summaryIconInset - current.summaryIconInset;
-      const leftScale = slots.left > 0 ? (gapLeft - 8 - left) / slots.left : Infinity;
-      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - 8) / slots.right : Infinity;
+      const leftScale = slots.left > 0 ? (gapLeft - NOTCH_METRICS.cameraClearance - left) / slots.left : Infinity;
+      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - NOTCH_METRICS.cameraClearance) / slots.right : Infinity;
       frame.summaryScale = Math.max(0, Math.min(frame.summaryScale, leftScale, rightScale));
     }
     // The camera cap must share the native material's compositor transaction.
@@ -634,6 +635,29 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return peeked ? notchPeekBounds(closed) : closed;
   }
 
+  function shellContains(current, point) {
+    // An empty camera-free summary retains its existing invisible wake target.
+    if (!expanded && current.closed.width === 0) return rectContains(entryBounds(current), point);
+    if (!commands) return false;
+    if (hitCommands !== commands) {
+      hitCommands = commands;
+      hitPolygons = toPolygons(commands);
+    }
+    const canvas = viewport || current.canvas;
+    const x = point.x - canvas.x, y = point.y - canvas.y;
+    // Use the same flattened curves as the native mask. Cache per painted
+    // frame so cursor polls neither grow the target ahead of the spring nor
+    // include transparent flares, rounded corners or the drop shadow.
+    return hitPolygons.some(polygon => {
+      let inside = false;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const [xi, yi] = polygon[i], [xj, yj] = polygon[j];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    });
+  }
+
   function startScrollMonitor() {
     if (!monitorScrollGesture || scrollBinding || locked) return;
     const win = windows.notch;
@@ -690,7 +714,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!current) return;
     const band = { x: current.open.x, y: current.open.y, width: current.open.width,
       height: current.geometry.notched && current.geometry.gapWidth > 0 ? current.geometry.height : NOTCH_BAND_HEIGHT * zoom() };
-    if (!rectContains(expanded ? band : entryBounds(current), screen.getCursorScreenPoint())) { scrollGesture.travel = 0; return; }
+    const point = screen.getCursorScreenPoint();
+    if (!shellContains(current, point) || (expanded && !rectContains(band, point))) { scrollGesture.travel = 0; return; }
     scrollGesture.travel += hand;
     if (Math.abs(scrollGesture.travel) < SCROLL_GESTURE_DISTANCE) return;
     const down = scrollGesture.travel > 0;
@@ -706,7 +731,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const current = layout();
     // The press reached the page, so the window was taking input; confirm it
     // landed on the entry rather than a transparent part of the canvas.
-    if (current && rectContains(entryBounds(current), screen.getCursorScreenPoint())) { setExpanded(true); schedulePoll(); }
+    if (current && shellContains(current, screen.getCursorScreenPoint())) { setExpanded(true); schedulePoll(); }
   }
 
   function poll(now = Date.now()) {
@@ -727,19 +752,20 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // target reaches inward by half the side dock's physical wake depth. It
     // never widens across menu items.
     const approach = fullScreen;
-    // The grown outline keeps the hover it was grown for.
-    const entry = entryBounds(current);
+    // Full-screen approach extends below the entry; transparent corners beside
+    // the painted shell must not become an alternate way to trigger it.
+    const entry = current.closed.width > 0 ? current.closed : entryBounds(current);
     const trigger = { ...entry, height: entry.height + (approach ? M.wakeDepth / 2 : 0) };
-    const onEntry = rectContains(entry, point);
+    const onEntry = shellContains(current, point);
     // null: the button state is unreadable (no native bridge).
     const button = primaryButtonDown();
-    const nearEntry = approach && rectContains(trigger, point) && button !== true;
-    const inside = expanded ? rectContains(current.open, point) : onEntry || nearEntry;
+    const nearEntry = approach && point.y >= entry.y + entry.height && rectContains(trigger, point) && button !== true;
+    const inside = onEntry || (!expanded && nearEntry);
     const depth = point.y - current.display.bounds.y;
     nearTop = depth >= 0 && depth < NEAR_TOP_DEPTH && Math.abs(point.x - current.geometry.centerX) < current.canvas.width;
     setPeeked(!expanded && (onEntry || nearEntry));
     // Transparent parts of the stable canvas must not swallow desktop clicks.
-    pointerInside = rectContains(expanded ? current.open : entryBounds(current), point);
+    pointerInside = shellContains(current, point);
     syncCapture(button);
     if (inside) {
       leaveAt = null;

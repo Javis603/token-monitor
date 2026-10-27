@@ -4,22 +4,25 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Edge Dock glass on Windows:** Adds a System glass style that follows the dock's curves on Windows 11; Windows 10 keeps the tinted style. (#1165)
-- **Edge Dock and Notch Panel glass on macOS:** Adds Transparent to the Edge Dock's glass style, and the dock and notch styles now apply even when the widget's glass is off. (#1187)
-- **ZCode session titles:** Shows saved ZCode titles in Sessions and groups subagent sessions under their parent. (#1183)
+- **Claude Web accounts:** Manage multiple Web accounts alongside the automatically detected Claude Code account, with per-account login renewal, enable switches and removal. (#1220)
+- **Muse Code quota:** Supports session and weekly subscription limits from Muse Code 1.4.13+ after signing in with `muse login`. Existing installs can enable it under Settings → AI Tool Limits. (#1209)
+- **Ollama API keys:** Supports API-key authentication as an alternative to Cookie credentials. (#1188)
+- **Ollama credits:** Supports monthly included credits and purchased credit balances through API-key or Cookie credentials. (#1205)
+
+### Improved
+- **Notch Panel session summary:** In “Session activity only” mode, groups client icons and shows separate counts for running and waiting sessions. (#1217)
+- **Notch Panel spacing:** Reduces the gap beside the camera housing for a more compact collapsed summary. (#1218)
 
 ### Fixed
-- **Hover tooltips:** Removes system tooltips that could linger over other apps, including the Edge Dock's. (#1176)
-- **Edge Dock on Windows:** Revealing a card no longer leaves the rail behind other windows. (#1186)
-- **Claude quota checks:** Run in a private app folder instead of the shared temporary directory. (#1161)
+- **Notch Panel hover:** Prevents transparent corners and unfinished hover animations from triggering expansion or capturing input outside the visible outline. (#1215)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.78.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.78.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-Setup-0.78.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.78.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -55,23 +58,26 @@ Tokscale is bundled with this app and updated through Token Monitor releases. Se
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **Windows 侧边栏玻璃：** 新增“系统”玻璃样式，在 Windows 11 上贴合侧边栏的弧形轮廓；Windows 10 沿用着色样式。 （#1165）
-- **macOS 侧边栏与刘海面板玻璃：** 侧边栏玻璃样式新增“透明”，侧边栏和刘海面板的样式在主窗口关闭玻璃时同样生效。 （#1187）
-- **ZCode 会话标题：** 在“会话”中显示 ZCode 已保存的标题，并将子代理会话归入其父会话。 （#1183）
+- **Claude Web 账号：** 支持管理多个 Web 账号，与自动检测的 Claude Code 账号同时显示，并可分别更新登录、启用、停用或移除。 （#1220）
+- **Muse Code 额度：** 支持读取 Muse Code 1.4.13+ 的会话及每周订阅额度，需先通过 `muse login` 登录；已有安装可在“设置 → AI 工具额度”中启用。 （#1209）
+- **Ollama API 密钥：** 支持使用 API 密钥作为 Cookie 之外的认证方式。 （#1188）
+- **Ollama 点数：** 支持通过 API 密钥或 Cookie 显示每月包含点数及购买点数余额。 （#1205）
+
+### 改进
+- **刘海面板会话摘要：** 在“仅会话活动”模式下合并显示工具图标，并分别显示运行中及等待中的会话数量。 （#1217）
+- **刘海面板间距：** 缩小摄像头两侧的留白，让收起摘要更紧凑。 （#1218）
 
 ### 修复
-- **悬停提示：** 移除可能滞留在其他应用上方的系统悬停提示，包括侧边栏的提示。 （#1176）
-- **Windows 侧边栏：** 展开卡片时，侧边栏不再被其他窗口遮挡。 （#1186）
-- **Claude 额度检查：** 改在应用私有目录中运行，不再使用共享临时目录。 （#1161）
+- **刘海面板悬停：** 修复透明圆角和未完成的悬停动画导致面板提前展开或在可见轮廓外拦截输入的问题。 （#1215）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.78.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.78.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-Setup-0.78.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.78.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -102,7 +108,7 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.77.0...v0.78.0">v0.77.0...v0.78.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.79.0...v0.80.0">v0.79.0...v0.80.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -120,23 +126,26 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **Windows 側邊欄玻璃：** 新增「系統」玻璃樣式，在 Windows 11 上貼合側邊欄的弧形輪廓；Windows 10 沿用著色樣式。 （#1165）
-- **macOS 側邊欄與瀏海面板玻璃：** 側邊欄玻璃樣式新增「透明」，側邊欄與瀏海面板的樣式在主視窗關閉玻璃時同樣生效。 （#1187）
-- **ZCode 會話標題：** 在「會話」中顯示 ZCode 已儲存的標題，並將子代理會話歸入其父會話。 （#1183）
+- **Claude Web 帳號：** 支援管理多個 Web 帳號，與自動偵測的 Claude Code 帳號同時顯示，並可分別更新登入、啟用、停用或移除。 （#1220）
+- **Muse Code 額度：** 支援讀取 Muse Code 1.4.13+ 的會話及每週訂閱額度，需先透過 `muse login` 登入；既有安裝可在「設定 → AI 工具額度」中啟用。 （#1209）
+- **Ollama API 金鑰：** 支援使用 API 金鑰作為 Cookie 以外的驗證方式。 （#1188）
+- **Ollama 點數：** 支援透過 API 金鑰或 Cookie 顯示每月內含點數及購買點數餘額。 （#1205）
+
+### 改進
+- **瀏海面板會話摘要：** 在「僅會話活動」模式下合併顯示工具圖示，並分別顯示進行中及等待中的會話數量。 （#1217）
+- **瀏海面板間距：** 縮小相機兩側的留白，讓收合摘要更緊湊。 （#1218）
 
 ### 修復
-- **懸停提示：** 移除可能滯留在其他應用程式上方的系統懸停提示，包括側邊欄的提示。 （#1176）
-- **Windows 側邊欄：** 展開卡片時，側邊欄不再被其他視窗遮住。 （#1186）
-- **Claude 額度檢查：** 改在應用程式私有目錄中執行，不再使用共用暫存目錄。 （#1161）
+- **瀏海面板懸停：** 修復透明圓角和未完成的懸停動畫導致面板提早展開或在可見輪廓外攔截輸入的問題。 （#1215）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.78.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.78.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-Setup-0.78.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.78.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
 
 </details>
 
@@ -149,23 +158,26 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **Windows 가장자리 도크 글래스:** Windows 11에서 도크의 곡선 윤곽에 맞는 '시스템' 글래스 스타일을 추가했습니다. Windows 10은 기존 틴트 스타일을 유지합니다. (#1165)
-- **macOS 가장자리 도크·노치 패널 글래스:** 가장자리 도크의 글래스 스타일에 '투명'을 추가했고, 위젯의 글래스를 꺼도 도크와 노치 패널의 스타일이 적용됩니다. (#1187)
-- **ZCode 세션 제목:** '세션'에 ZCode에 저장된 제목을 표시하고, 서브에이전트 세션을 상위 세션 아래로 묶어 보여줍니다. (#1183)
+- **Claude Web 계정:** 자동으로 감지한 Claude Code 계정과 함께 여러 Web 계정을 관리할 수 있습니다. 계정별로 로그인을 갱신하거나 사용 여부를 바꾸고 삭제할 수 있습니다. (#1220)
+- **Muse Code 한도:** Muse Code 1.4.13+에서 `muse login`으로 로그인하면 세션 및 주간 구독 한도를 확인할 수 있습니다. 기존 설치에서는 '설정 → AI 도구 한도'에서 켤 수 있습니다. (#1209)
+- **Ollama API 키:** 쿠키 대신 API 키로 인증할 수 있습니다. (#1188)
+- **Ollama 크레딧:** API 키 또는 쿠키로 월간 포함 크레딧과 구매한 크레딧 잔액을 확인할 수 있습니다. (#1205)
+
+### 개선
+- **노치 패널 세션 요약:** '세션 활동만' 모드에서 도구 아이콘을 모아 표시하고, 실행 중인 세션과 입력을 기다리는 세션 수를 구분해 보여 줍니다. (#1217)
+- **노치 패널 간격:** 카메라 양옆의 여백을 줄여 접힌 요약이 차지하는 공간을 줄였습니다. (#1218)
 
 ### 수정
-- **마우스 오버 툴팁:** 다른 앱 위에 남아 있을 수 있던 시스템 툴팁(가장자리 도크 포함)을 제거했습니다. (#1176)
-- **Windows 가장자리 도크:** 카드를 펼칠 때 도크가 다른 창 뒤에 가려지지 않습니다. (#1186)
-- **Claude 한도 확인:** 공용 임시 디렉터리 대신 앱 전용 폴더에서 실행합니다. (#1161)
+- **노치 패널 마우스 오버:** 투명한 모서리나 진행 중인 확대 애니메이션 때문에 패널이 미리 열리거나 보이는 윤곽 밖에서 입력을 가로채는 문제를 해결했습니다. (#1215)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.78.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.78.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-Setup-0.78.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.78.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
 
 </details>
 
@@ -178,23 +190,26 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Windows エッジドックのガラス:** Windows 11 でドックの曲線に沿う「システム」ガラススタイルを追加しました。Windows 10 では従来のティントスタイルを維持します。 (#1165)
-- **macOS エッジドックとノッチパネルのガラス:** エッジドックのガラススタイルに「透明」を追加し、ウィジェットのガラスをオフにしてもドックとノッチパネルのスタイルが適用されます。 (#1187)
-- **ZCode のセッションタイトル:** 「セッション」に保存済みの ZCode タイトルを表示し、サブエージェントのセッションを親セッションの下にまとめます。 (#1183)
+- **Claude Web アカウント:** 自動検出した Claude Code アカウントと併せて、複数の Web アカウントを管理できます。アカウントごとにログインの更新、有効・無効の切り替え、削除ができます。 (#1220)
+- **Muse Code のクォータ:** Muse Code 1.4.13+ で `muse login` を使ってログインすると、セッションと週間のサブスクリプション上限を確認できます。既存のインストールでは「設定 → AIツール制限」で有効にできます。 (#1209)
+- **Ollama API キー:** Cookie に加え、API キーでの認証に対応しました。 (#1188)
+- **Ollama クレジット:** API キーまたは Cookie を使って、月間の付与クレジットと購入済みクレジットの残高を確認できます。 (#1205)
+
+### 改善
+- **ノッチパネルのセッション概要:** 「セッション活動のみ」モードでツールのアイコンをまとめ、実行中と入力待ちのセッション数を分けて表示します。 (#1217)
+- **ノッチパネルの余白:** カメラの両側の余白を減らし、折りたたんだ概要をコンパクトにしました。 (#1218)
 
 ### 修正
-- **ホバーツールチップ:** ほかのアプリの上に残ることがあったシステムツールチップ（エッジドックのものを含む）を削除しました。 (#1176)
-- **Windows エッジドック:** カードを表示した際に、ドックがほかのウィンドウの背面に残らないようにしました。 (#1186)
-- **Claude の上限チェック:** 共有の一時ディレクトリではなく、アプリ専用フォルダーで実行します。 (#1161)
+- **ノッチパネルのホバー:** 透明な角や拡大途中のアニメーションによって、見える輪郭の外側でパネルが開いたり入力を奪ったりする問題を修正しました。 (#1215)
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.78.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.78.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-Setup-0.78.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.78.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.78.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.78.0/Token-Monitor-0.78.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
 
 </details>
 

@@ -115,6 +115,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
     volcengineAgentAccessKeyId: ['providers', 'volcengine', 'agentAccessKeyId'],
     volcengineAgentSecretAccessKey: ['providers', 'volcengine', 'agentSecretAccessKey'],
+    ollamaApiKey: ['providers', 'ollama', 'apiKey'],
     ollamaCookie: ['providers', 'ollama', 'cookie'],
     traeAccessToken: ['providers', 'trae', 'accessToken'],
     traeDeviceId: ['providers', 'trae', 'deviceId'],
@@ -170,7 +171,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
       'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
       'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
     ],
-    ollama: ['ollamaCookie'],
+    ollama: ['ollamaApiKey', 'ollamaCookie'],
     trae: ['traeAccessToken', 'traeDeviceId'],
     alibaba: ['alibabaCookie', 'alibabaVariant'],
     thirdparty: ['thirdPartyProfiles']
@@ -191,7 +192,8 @@ test('limitsConfigFromSettings env fallbacks and precedence', () => {
     TOKEN_MONITOR_TYPESAFE_COOKIE: 'env-typesafe-tm',
     TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN: 'env-wb-tok',
     WORKBUDDY_ACCESS_TOKEN: 'env-wb-legacy',
-    TOKEN_MONITOR_WORKBUDDY_DOMAIN: 'env-wb-domain'
+    TOKEN_MONITOR_WORKBUDDY_DOMAIN: 'env-wb-domain',
+    TOKEN_MONITOR_OLLAMA_API_KEY: 'env-ollama-key'
   };
   const config = limitsConfigFromSettings({}, { env });
   assert.equal(config.claudeWebCookie, 'env-claude');
@@ -202,14 +204,16 @@ test('limitsConfigFromSettings env fallbacks and precedence', () => {
   assert.equal(config.typesafeCookie, 'env-typesafe-tm');
   assert.equal(config.workbuddyAccessToken, 'env-wb-tok');
   assert.equal(config.workbuddyDomain, 'env-wb-domain');
+  assert.equal(config.ollamaApiKey, 'env-ollama-key');
   // Legacy bare env names fill in when the prefixed one is absent.
   const legacyOnly = limitsConfigFromSettings({}, {
-    env: { TRAE_ACCESS_TOKEN: 'legacy-trae', ZED_COOKIE: 'legacy-zed', TYPESAFE_COOKIE: 'legacy-typesafe', WORKBUDDY_ACCESS_TOKEN: 'legacy-wb' }
+    env: { TRAE_ACCESS_TOKEN: 'legacy-trae', ZED_COOKIE: 'legacy-zed', TYPESAFE_COOKIE: 'legacy-typesafe', WORKBUDDY_ACCESS_TOKEN: 'legacy-wb', OLLAMA_API_KEY: 'legacy-ollama' }
   });
   assert.equal(legacyOnly.traeAccessToken, 'legacy-trae');
   assert.equal(legacyOnly.zedCookie, 'legacy-zed');
   assert.equal(legacyOnly.typesafeCookie, 'legacy-typesafe');
   assert.equal(legacyOnly.workbuddyAccessToken, 'legacy-wb');
+  assert.equal(legacyOnly.ollamaApiKey, 'legacy-ollama');
   // The Minimax region reaches the probe through the config layer, so the env
   // names must be declared on the field — minimaxRegion's own env lane is
   // shadowed by the configDefault this resolves to.
@@ -276,7 +280,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId'
+    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId'
   ].sort());
   for (const key of normalizedKeys) {
     const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
@@ -284,9 +288,9 @@ test('settings:update normalizes provider fields and strips separately managed a
     const patch = { [key]: value };
     const normalized = { ...patch };
     normalizeAccountPatch(patch, normalized);
-    assert.equal(normalized[key], normalizeAccountField(key, value), key);
+    assert.deepEqual(normalized[key], normalizeAccountField(key, value), key);
     if (fields.find((field) => field.key === key).persist !== 'spread') {
-      assert.equal(finalAccountSettings(patch, {})[key], normalized[key], key);
+      assert.deepEqual(finalAccountSettings(patch, {})[key], normalized[key], key);
     }
   }
   assert.equal(finalAccountSettings({}, {}).zaiApiRegion, 'global');
@@ -299,7 +303,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   assert.equal(Object.hasOwn(finalAccountSettings({ kimiApiKey: 'x' }, {}), 'kimiApiKey'), false);
 
   const managedKeys = [
-    'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
+    'claudeManagedAccounts', 'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
     'workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId',
     'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo',
     'openrouterProfiles', 'thirdPartyProfiles'
@@ -498,7 +502,8 @@ test('the renderer account config names the settings keys main must project', ()
 test('static account statuses refresh in both paths while descriptor panels use the form loop', () => {
   const config = evalTopLevel(appSource, 'const externalLimitAccountConfig = {', '\nfunction clearDisabledLimitProviderPendingChecks(');
   const expected = Object.keys(config).sort();
-  const calls = [...appSource.matchAll(/renderExternalProviderStatus\('([a-z]+)'\)/g)].map((match) => match[1]);
+  const calls = [...appSource.matchAll(/renderExternalProviderStatus\('([a-z]+)'\)/g)].map((match) => match[1])
+    .filter((provider) => expected.includes(provider));
   assert.deepEqual(calls.slice(0, expected.length).sort(), expected);
   assert.deepEqual(calls.slice(expected.length, expected.length * 2).sort(), expected);
   for (const provider of expected) {
@@ -510,12 +515,12 @@ test('static account statuses refresh in both paths while descriptor panels use 
 test('every provider with an account panel has its group and status markup in index.html', () => {
   const nodes = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_NODES = {', '\nconst LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
   const groupIds = Object.fromEntries(Object.entries(nodes).map(([provider, node]) => [provider, node.group]));
-  // Not every catalog provider has a hand-written panel: grok and kiro
+  // Not every catalog provider has a hand-written panel: grok, muse and kiro
   // take their credentials from the tool itself, and the account-form providers
   // get theirs generated. The map is the list of those whose markup is static.
   assert.deepEqual(
     LIMIT_PROVIDER_IDS.filter((provider) => !groupIds[provider]).sort(),
-    ['grok', 'kiro', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
+    ['grok', 'muse', 'kiro', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
   );
   for (const [provider, id] of Object.entries(groupIds)) {
     assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);

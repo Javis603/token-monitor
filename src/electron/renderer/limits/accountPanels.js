@@ -43,10 +43,21 @@ function resolveOpenUrl(form, { document, provider }) {
 // Selects and plain-text settings mirror what is stored; secrets never do.
 // Dependent hints and conditional notes then follow the current values.
 function syncCredentialFields(form, { document, settings }) {
+  if (form.credentialChoice) {
+    const choice = document.getElementById(controlId(form.credentialChoice));
+    const configured = form.credentialChoice.fields.find((key) => settings?.[form.fields.find((field) => field.key === key).configuredKey]) || '';
+    // A stats/settings redraw must not reset a type the user is drafting.
+    // A changed effective credential (save, clear, or another window) may.
+    if (choice && choice.dataset.configuredCredential !== configured) {
+      choice.value = configured || form.credentialChoice.fields[0];
+      choice.dataset.configuredCredential = configured;
+    }
+  }
   for (const field of form.fields) {
     const control = document.getElementById(controlId(field));
     if (!control) continue;
     if (field.input === 'select') {
+      if (form.multipleAccounts && field.key === 'claudeWebOrganizationId') continue;
       const stored = settings?.[field.key];
       control.value = [...(control.options || field.options)].some((option) => option.value === stored) ? stored : field.options[0].value;
     } else if (field.prefill && !control.value && document.activeElement !== control) {
@@ -59,8 +70,15 @@ function syncCredentialFields(form, { document, settings }) {
 function refreshFieldDependents(form, { document }) {
   for (const hint of document.querySelectorAll?.(`[data-credential-form="${form.id}"][data-by-field]`) || []) {
     const spec = JSON.parse(hint.dataset.byField);
-    if (hint.dataset.dependent === 'note') {
+    if (hint.dataset.dependent === 'note' || hint.dataset.dependent === 'credential') {
       hint.classList.toggle('hidden', !spec.values.includes(fieldValue(document, spec.field)));
+      if (hint.dataset.dependent === 'credential' && hint.dataset.credentialField) {
+        const control = document.getElementById(`${hint.dataset.credentialField}Input`);
+        if (control) {
+          control.disabled = hint.classList.contains('hidden');
+          if (control.disabled) control.value = '';
+        }
+      }
     } else {
       hint.textContent = byFieldValue(document, spec);
     }
@@ -162,7 +180,7 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     }
     return input;
   };
-  const block = (spec) => {
+  const blockContent = (spec) => {
     if (spec.note) {
       const note = localized(element('p', '', 'settings-note'), spec.note);
       if (spec.when) dependent(note, 'note', spec.when);
@@ -192,8 +210,38 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     row.append(label, input);
     return row;
   };
+  const block = (spec) => {
+    const node = blockContent(spec);
+    if (spec.whenCredential) {
+      dependent(node, 'credential', { field: form.credentialChoice.key, values: [spec.whenCredential] });
+      const hidden = spec.whenCredential !== form.credentialChoice.fields[0];
+      node.classList.toggle('hidden', hidden);
+      if (spec.field) {
+        node.dataset.credentialField = spec.field;
+        inputs.get(form.fields.find((field) => field.key === spec.field)).disabled = hidden;
+      }
+    }
+    return node;
+  };
 
   const manual = element('div', 'ManualPanel', 'credential-manual-panel');
+  if (form.credentialChoice) {
+    const row = element('div', '', 'settings-row');
+    const select = document.createElement('select');
+    select.id = controlId(form.credentialChoice);
+    const label = localized(document.createElement('label'), form.credentialChoice.labelKey);
+    label.setAttribute('for', select.id);
+    for (const key of form.credentialChoice.fields) {
+      const field = form.fields.find((field) => field.key === key);
+      const option = localized(document.createElement('option'), field.labelKey || field.ariaLabelKey);
+      option.value = key;
+      select.append(option);
+    }
+    select.value = form.credentialChoice.fields[0];
+    select.addEventListener('change', () => refreshFieldDependents(form, { document }));
+    row.append(label, select);
+    manual.append(row);
+  }
   manual.append(...form.manual.map(block));
   const submitActions = element('div', '', 'settings-actions');
   const submit = localized(element('button', 'CredentialSubmit'), form.saveKey);
@@ -201,7 +249,8 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
   manual.append(submitActions);
   const error = element('div', 'ErrorMessage', 'settings-note error hidden');
   error.setAttribute('role', 'alert');
-  details.append(actions, ...form.top.map(block), manual, error);
+  const accountList = form.multipleAccounts ? element('div', 'WebAccountList', 'managed-account-list') : null;
+  details.append(actions, ...(accountList ? [accountList] : []), ...form.top.map(block), manual, error);
   group.append(toggle, details);
 
   toggle.addEventListener('click', () => onToggle(form));
@@ -212,6 +261,8 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
   submit.addEventListener('click', async () => {
     if (saving) return;
     saving = true;
+    const choice = form.credentialChoice && document.getElementById(controlId(form.credentialChoice));
+    if (choice) choice.disabled = true;
     submit.disabled = true;
     submit.textContent = translate('settings.common.checking');
     try {
@@ -226,12 +277,15 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
       }
       const values = Object.fromEntries([...inputs]
         .filter(([field]) => field.submitWithCredential !== false)
+        .filter(([field]) => !form.credentialChoice?.fields.includes(field.key)
+          || field.key === fieldValue(document, form.credentialChoice.key))
         .map(([field, input]) => [field.key, input.value]));
       await onSave(form, values, () => {
         for (const [field, input] of inputs) if (field.secret) input.value = '';
       });
     } finally {
       saving = false;
+      if (choice) choice.disabled = false;
       submit.disabled = false;
       submit.textContent = translate(form.saveKey);
     }
