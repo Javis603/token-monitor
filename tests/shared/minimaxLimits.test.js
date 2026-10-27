@@ -1333,8 +1333,8 @@ function oauthOkBody(accessToken, refreshToken) {
 
 const readCode = deps => fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
 
-function assertFields(actual, expected) {
-  assert.deepEqual(Object.fromEntries(Object.keys(expected).map(key => [key, actual[key]])), expected);
+function assertFields(actual, expected, message) {
+  assert.deepEqual(Object.fromEntries(Object.keys(expected).map(key => [key, actual[key]])), expected, message);
 }
 
 function storedLease(fixture) {
@@ -1416,9 +1416,9 @@ test('MiniMax Code lane reads a live on-disk token without refreshing', async ()
   assert.equal(result.source, 'oauth');
   assert.equal(calls.length, 2);
   assert.ok(!calls.some(([url]) => url === MINIMAX_CODE_OAUTH_URL_CN), 'a live token must not trigger a refresh');
-  // Membership reports no allowance or percentage, so the summary has no quota meter.
   assertFields(result.windows.find((window) => window.metric === 'credits'),
-    { label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false, usedPercent: null, limit: null });
+    { label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false, usedPercent: null, limit: null },
+    'membership reports no allowance or percentage, so the summary has no quota meter');
   assert.equal(result.windows.length, 3, 'credits + 5h + weekly');
   assert.equal(result.windows.filter((window) => window.kind === 'session' || window.kind === 'weekly').length, 2);
   assert.equal(result.windows.find(window => window.kind === 'session').usedPercent, 30);
@@ -1718,9 +1718,9 @@ test('MiniMax Code meters a complete grant list and keeps the amount when the li
     return result.windows.find(window => window.label === 'Credits');
   };
   assertFields(await read([{ details: [grant(100, 50)], total_count: 1 }], 50),
-    { remaining: 50, currency: 'CREDITS', limit: 100, showMeter: true });
+    { remaining: 50, currency: 'CREDITS', limit: 100, showMeter: true }, 'complete grant list');
   assertFields(await read([{ details: [grant(100, 50)], total_count: 2 }, { details: [], total_count: 2 }], 50),
-    { remaining: 50, limit: null, showMeter: false });
+    { remaining: 50, limit: null, showMeter: false }, 'incomplete grant list');
 });
 
 test('MiniMax Code parses modern plan percentages, unlimited quota and video counts', async () => {
