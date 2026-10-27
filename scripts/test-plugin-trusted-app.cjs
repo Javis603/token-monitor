@@ -69,6 +69,10 @@ registerPluginScheme(protocol);
 app.on('window-all-closed', () => {});
 let runtime, win;
 const errors = [];
+function assertConsoleClean(expected = []) {
+  const unexpected = errors.filter(text => !text.includes('Electron Security Warning') && !text.includes('Autofill.') && !expected.some(value => text.includes(value)));
+  assert.deepEqual(unexpected, [], 'unexpected renderer console errors');
+}
 const deadline = setTimeout(() => { console.error('App fixture deadline'); app.exit(1); }, 90000);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 function defaults() {
@@ -119,7 +123,15 @@ app.whenReady().then(async () => {
     ipcMain.removeHandler(channel); ipcMain.handle(channel, handler);
   }
   const patch = value => { settings = { ...settings, ...value }; win.webContents.send('settings:push', settings); };
-  runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain, session, utilityProcess,
+  const pluginCalls = [];
+  const pluginIpc = Object.create(ipcMain);
+  pluginIpc.handle = (channel, handler) => ipcMain.handle(channel, (event, ...args) => {
+    pluginCalls.push({ channel, frameUrl: event.senderFrame?.url });
+    return handler(event, ...args);
+  });
+  const demandListener = event => pluginCalls.push({ channel: 'plugins:demand', frameUrl: event.senderFrame?.url });
+  ipcMain.on('plugins:demand', demandListener);
+  runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain: pluginIpc, session, utilityProcess,
     dialog: { showMessageBox: async () => ({ response: 1 }), showOpenDialog: async () => ({ canceled: false, filePaths: [fixtureDir] }) } },
     userDataDir: scratch, getSettings: () => settings, getAppSettings: () => settings, getContext: () => ({ source: 'fixture' }), getLocale: () => 'zh-TW',
     isMainSender: event => event.sender === win.webContents, persistPluginStates: pluginStates => patch({ pluginStates }), persistManagementSettings: patch,
@@ -137,6 +149,69 @@ app.whenReady().then(async () => {
   fs.writeFileSync(path.join(evidence, 'comparison-native.png'), (await capture()).toPNG());
   await js("openViewFromTray('home')");
   console.log('PASS actual App renderer initialized without plugin work');
+  if (process.env.TM_PREVIEWS_ONLY === '1') {
+    const baseline = process.env.TM_EXPECT_BASELINE === '1';
+    const results = [];
+    await js(`window.previewMessages=[];window.addEventListener('message',event=>{
+      if(event.data?.type?.startsWith('display-preview-'))window.previewMessages.push({type:event.data.type,url:event.source.location.href});
+    });els.settingsButton.click();document.querySelector('[data-settings-section=window]').click()`);
+    await pause(500);
+    for (const surface of ['edgeDock','notch']) {
+      const entry = surface === 'edgeDock' ? '.display-settings-row:first-child .display-settings-open' : '#display-tab-notch';
+      await js(`document.querySelector('${entry}').scrollIntoView({block:'center',behavior:'instant'});document.querySelector('${entry}').click()`);
+      const stage = `#display-page-${surface} .display-settings-preview`;
+      await waitFor(`document.querySelector('${stage} iframe')`, `${surface} iframe creation`);
+      if (baseline) await pause(3400);
+      else await waitFor(`document.querySelector('${stage} iframe')?.dataset.ready==='true' && !document.querySelector('${stage} iframe').hidden`, `${surface} ready/render`);
+      await pause(500);
+      await js(`document.querySelector('#display-page-${surface} .display-settings-title').scrollIntoView({block:'start',behavior:'instant'})`);
+      await pause(200);
+      fs.writeFileSync(path.join(evidence, `${surface}-preview.png`), (await capture()).toPNG());
+      if (baseline) {
+        assert.equal(await js(`document.querySelector('${stage} iframe')?.dataset.ready==='true'`), false);
+        results.push({surface,ready:false,errors:[...errors]});
+        continue;
+      }
+      const frame = win.webContents.mainFrame.frames.find(frame => frame.url.includes(`surface=${surface === 'notch' ? 'notch' : 'rail'}&settingsPreview=1`));
+      assert.ok(frame, `${surface} real child frame`);
+      const read = () => frame.executeJavaScript(`({trusted:typeof window.tokenMonitorTrustedPlugins,node:typeof require,preview:bridge.isSettingsPreview,host:pluginHost===null,content:pluginContent===null,payload:state.payload,shapes:document.querySelectorAll('.edge-dock-shape path').length,text:document.getElementById('edgeDockRoot').textContent})`);
+      const first = await read();
+      assert.equal(first.trusted,'undefined');assert.equal(first.node,'undefined');assert.equal(first.preview,true);
+      assert.equal(first.host,true);assert.equal(first.content,true);assert.ok(first.payload);assert.ok(first.shapes>0);assert.ok(first.text.trim());
+      const firstZoom = surface === 'notch' ? first.payload.appearance.zoomFactor : first.payload.side;
+      if (surface === 'notch') {
+        await js("document.querySelector('#display-notch-appearance-tab').click();document.querySelector('input[name=notchSize][value=large]').click()");
+      } else {
+        await js("document.querySelector('#display-edgeDock-appearance-tab').click();document.querySelector('input[name=edgeDockSide][value=left]').click()");
+      }
+      let updated;
+      for(let i=0;i<100;i++) {
+        updated=await read();
+        if((surface==='notch'?updated.payload.appearance.zoomFactor:updated.payload.side)!==firstZoom)break;
+        await pause(40);
+      }
+      assert.notEqual(surface==='notch'?updated.payload.appearance.zoomFactor:updated.payload.side,firstZoom, `${surface} settings reaches existing renderer`);
+      if(surface==='notch') {
+        await js("document.querySelector('#display-page-notch [data-phase=closed]').click()");
+        for(let i=0;i<100&&(await read()).payload.expanded;i++)await pause(40);
+        assert.equal((await read()).payload.expanded,false);
+        await js("document.querySelector('#display-page-notch [data-phase=open]').click()");
+        for(let i=0;i<100&&!(await read()).payload.expanded;i++)await pause(40);
+        assert.equal((await read()).payload.expanded,true);
+      }
+      results.push({surface,ready:true,noTrustedBridge:true,noNode:true,pluginHost:false,nativeShapes:first.shapes,settingsUpdated:true});
+    }
+    const messages=await js('window.previewMessages');
+    const previewCalls=pluginCalls.filter(call=>call.frameUrl?.includes('settingsPreview=1'));
+    assert.deepEqual(previewCalls,[]);assert.equal(runtime.manager.backendCount(),0);
+    assert.ok(pluginCalls.some(call=>!call.frameUrl?.includes('settingsPreview=1')), 'runtime observation includes parent calls');
+    if(baseline) {assert.ok(errors.some(text=>text.includes('contentSelections')));assert.equal(messages.filter(message=>message.type==='display-preview-ready').length,0);}
+    else {assertConsoleClean();assert.equal(messages.filter(message=>message.type==='display-preview-ready').length,2);}
+    fs.writeFileSync(path.join(evidence,'preview-results.json'),JSON.stringify({baseline,results,messages,previewCalls,backendCount:runtime.manager.backendCount(),errors,electron:process.versions.electron,chrome:process.versions.chrome},null,2));
+    console.log('PASS actual no-preload preview iframe checks',JSON.stringify(results));
+    ipcMain.removeListener('plugins:demand',demandListener);
+    await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
+  }
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
   await js("pluginApi.setEnabled('trusted-fixture',true)");
@@ -223,6 +298,7 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(evidence, 'idle-diagnostics.png'), (await capture()).toPNG());
     await captureRegion('idle-detail.png', "document.querySelector('.plugin-detail').getBoundingClientRect()");
     fs.writeFileSync(path.join(evidence, 'placement-results.json'), JSON.stringify(placementResults,null,2));
+    assertConsoleClean();
     console.log('PASS real App composer choices/save/reorder/remove and idle diagnostics', placementResults);
     await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
   }
@@ -352,7 +428,7 @@ app.whenReady().then(async () => {
   console.log('PASS all native page roots, session detail, section/inline, navigation order, native factory, settings, Tray callback, disable/reload/restoration');
   console.log('PASS Home mount/draft, local backend, explicit original-page replacement and native restoration');
   assert.equal(errors.filter(text => text.includes('Intentional fixture update failure')).length, 1);
-  assert.deepEqual(errors.filter(text => !text.includes('Electron Security Warning') && !text.includes('Autofill.') && !text.includes('Intentional fixture update failure')), []);
+  assertConsoleClean(['Intentional fixture update failure']);
   fs.writeFileSync(path.join(evidence, 'app-results.json'), JSON.stringify({ electron: process.versions.electron, chrome: process.versions.chrome, errors, pid, scope: 'production index.html/app.js/preload + real plugin runtime; synthetic non-plugin IPC, not full main collector' }, null, 2));
   clearTimeout(deadline);
   if (process.argv.includes('--demo')) {

@@ -121,7 +121,9 @@ const pluginContent = pluginHost ? window.TokenMonitorPluginContent.create({ doc
   host: { mount: (container, view, context) => pluginHost.mount(container, view.ref, pluginSurface, context), unmount: container => pluginHost.unmount(container) },
   getViews: () => pluginHost.descriptors(pluginSurface), selection: target => contentSelections[target]
 }) : null;
-void window.tokenMonitorTrustedPlugins.contentSelections().then(value => { contentSelections = value; if (state.payload) render(state.payload); });
+// Settings previews have no preload/plugin host; keep native ready/render wiring
+// independent of trusted plugin APIs.
+if (pluginHost) void window.tokenMonitorTrustedPlugins.contentSelections().then(value => { contentSelections = value; if (state.payload) render(state.payload); });
 let pluginContentsKey = '';
 function updatePluginViews(payload) {
   if (payload?.surface !== pluginSurface) return;
@@ -137,8 +139,10 @@ function updatePluginViews(payload) {
     else if (state.payload) render(state.payload);
   });
 }
-bridge.onPluginViews?.(updatePluginViews);
-void window.tokenMonitorTrustedPlugins.views(pluginSurface).then(updatePluginViews);
+if (pluginHost) {
+  bridge.onPluginViews(updatePluginViews);
+  void window.tokenMonitorTrustedPlugins.views(pluginSurface).then(updatePluginViews);
+}
 
 function pluginCellLabel(ref) {
   const view = pluginHost?.state('edgeDock', ref);
