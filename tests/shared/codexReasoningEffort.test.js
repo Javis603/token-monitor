@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const zlib = require('node:zlib');
+const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
 const { readCodexSessionState } = require('../../src/shared/providers/codex/sessionContext');
 const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
@@ -69,8 +71,10 @@ test('bounded cold reads, truncation, replacement and read failures do not inven
   const f = fixture(t);
   fs.writeFileSync(f.file, turn({ effort: 'high' }) + '\n'.repeat(1200_000)
     + record('event_msg', { type: 'task_complete' }));
-  assert.equal(f.read().reasoningEffort, null, 'metadata outside the existing tail is unavailable');
+  assert.equal(Object.hasOwn(f.read(), 'reasoningEffort'), false, 'metadata outside the existing tail supplies no evidence');
   assert.equal(f.bytesRead(), 1024 * 1024, 'the badge does not widen the read');
+  fs.writeFileSync(f.file, turn({ effort: 'high' }) + '\n'.repeat(1200_000));
+  assert.equal(Object.hasOwn(f.read(), 'reasoningEffort'), false, 'widening for a boundary does not turn older configuration into a clear');
   fs.writeFileSync(f.file, turn({ effort: 'high' }));
   assert.equal(f.read().reasoningEffort, 'high');
   fs.writeFileSync(f.file, start());
@@ -82,6 +86,40 @@ test('bounded cold reads, truncation, replacement and read failures do not inven
   fs.unlinkSync(f.file);
   assert.equal(f.read().reasoningEffort, undefined, 'read failure returns no earlier setting');
 });
+
+for (const compressed of [false, true]) {
+  test(`bounded cold ${compressed ? 'compressed' : 'plain'} reads retain catalog effort through archive capture`, t => {
+    const f = fixture(t);
+    const file = f.file + (compressed ? '.zst' : '');
+    let transcript = turn({ effort: 'high' }) + '\n'.repeat(1200_000)
+      + record('event_msg', { type: 'task_complete' }, next);
+    const write = () => fs.writeFileSync(file, compressed ? zlib.zstdCompressSync(Buffer.from(transcript)) : transcript);
+    write();
+    const dbPath = path.join(f.home, '.codex', 'state_5.sqlite');
+    const db = new DatabaseSync(dbPath);
+    db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, reasoning_effort TEXT)');
+    db.prepare('INSERT INTO threads VALUES (?, ?, ?)').run(f.id, 'Saved title', 'high');
+    db.close();
+    const state = readCodexSessionState(file, f.deps);
+    assert.equal(Object.hasOwn(state, 'reasoningEffort'), false);
+    if (!compressed) assert.equal(f.bytesRead(), 1024 * 1024, 'cold read retains its existing budget');
+    const periods = { today: normalizePeriod({ sessions: { ['codex:' + f.id]: {
+      client: 'codex', sessionId: f.id, totalTokens: 10, lastUsedAt: next
+    } } }) };
+    const resolve = () => {
+      applySessionMetadata(periods, f.home, { now: Date.parse(next), env: {}, resolveProjects: false,
+        readT3Meta: () => new Map(), codexDeps: { ...f.deps, dbPaths: [dbPath], sqlite: { DatabaseSync } } });
+      return periods.today.sessions['codex:' + f.id].reasoningEffort;
+    };
+    assert.equal(resolve(), 'high', 'a bounded miss must not override the SQLite setting');
+    const saved = updateSessionUsageArchive(null, periods, new Date(next)).archive;
+    assert.equal(normalizeSessionUsageArchive(saved).sessions['codex:' + f.id].periods.today.reasoningEffort, 'high');
+    transcript += start(); write();
+    assert.equal(resolve(), null, 'an observed new turn still clears the catalog setting');
+    transcript += turn({ effort: 'low' }); write();
+    assert.equal(resolve(), 'low');
+  });
+}
 
 test('effort survives age and read misses while fresh turn metadata can clear it', t => {
   const f = fixture(t);

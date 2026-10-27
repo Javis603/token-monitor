@@ -521,3 +521,37 @@ test('anchored watch updates replace and clear Codex effort in all displayed per
     }
   }
 });
+
+test('anchored effort misses preserve only the same observation through archive capture', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const { emptyPeriod } = require('../../src/shared/usage');
+  const { updateSessionUsageArchive, normalizeSessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
+  const observedAt = new Date().toISOString();
+  const newer = new Date(Date.parse(observedAt) + 1000).toISOString();
+  const older = new Date(Date.parse(observedAt) - 1000).toISOString();
+  const makePeriod = () => ({ ...emptyPeriod(), totalTokens: 50, clients: { codex: 50 }, sessions: {
+    'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 50, lastUsedAt: observedAt, reasoningEffort: 'high' }
+  } });
+  const cases = [
+    [observedAt, {}, 'high'], [observedAt, { reasoningEffort: null }, null],
+    [observedAt, { reasoningEffort: 'low' }, 'low'], [newer, {}, null],
+    [older, {}, 'high'], [older, { reasoningEffort: 'low' }, 'high']
+  ];
+  for (const rawTimestamp of [false, true]) for (const [lastUsedAt, fields, expected] of cases) {
+    const anchor = { dateKey: localTodayKey(), today: makePeriod(), month: makePeriod(), allTime: makePeriod() };
+    const saved = updateSessionUsageArchive(null, anchor, new Date(observedAt)).archive;
+    const summary = await collectUsageOnce({
+      ...baseOptions, clients: 'codex', todayOnlyAnchor: anchor,
+      runTokscale: async () => ({ entries: [{ client: 'codex', sessionId: 's1', model: 'fixture', input: 50,
+        ...(rawTimestamp ? { lastUsedAt } : {}) }] }),
+      sessionMetadataDeps: { sessionMetadataResolvers: new Map([['codex', () => new Map([['s1', { lastUsedAt, ...fields }]])]]) }
+    });
+    updateSessionUsageArchive(saved, summary, new Date(newer));
+    const archive = normalizeSessionUsageArchive(saved);
+    for (const name of ['month', 'allTime']) {
+      assert.equal(summary[name].sessions['codex:s1'].reasoningEffort, expected, `${name}: ${lastUsedAt} ${JSON.stringify(fields)} raw=${rawTimestamp}`);
+      assert.equal(archive.sessions['codex:s1'].periods[name].reasoningEffort, expected);
+      assert.equal(summary[name].totalTokens, 50);
+    }
+  }
+});

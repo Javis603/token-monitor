@@ -44,7 +44,7 @@ function applyLine(state, line, position, contextStart, cacheStart) {
   // An unreadable new configuration cannot leave the previous turn's badge.
   // Only inspect the bounded record prefix; never decode large tool output.
   const configuration = /"type"\s*:\s*"turn_context"/.test(line.subarray(0, 512).toString('utf8'));
-  if (configuration) state.reasoningEffort = null;
+  if (configuration && position >= contextStart) state.reasoningEffort = null;
   // Metadata records are small; never decode arbitrarily large tool output.
   if (!line.length || line.length > MAX_METADATA_LINE_BYTES) return;
   let entry;
@@ -114,7 +114,7 @@ function readCodexSessionState(filePath, deps = {}) {
     const compressed = isCompressedCodexTranscript(filePath);
     const appendOnly = !compressed && cached?.identity === identity && stat.size > cached.size;
     const state = appendOnly ? { ...cached, pendingInputCalls: new Set(cached.pendingInputCalls), promptCacheState: { ...cached.promptCacheState } }
-      : { context: null, reasoningEffort: null, turnEnded: undefined, pendingInputCalls: new Set(), promptCacheState: createPromptCacheState(), trailing: Buffer.alloc(0), droppingLine: false };
+      : { context: null, turnEnded: undefined, pendingInputCalls: new Set(), promptCacheState: createPromptCacheState(), trailing: Buffer.alloc(0), droppingLine: false };
     if (compressed) {
       const bytes = readCompressedCodexTranscript(filePath, deps);
       const start = Math.max(0, bytes.length - TURN_READ_MAX_BYTES);

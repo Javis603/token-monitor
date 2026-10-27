@@ -2009,6 +2009,19 @@ function deltaValue(base, fresh, anchor, key) {
       delete result.parentSessionId;
       delete result.parentClient;
       applyParentLink(result, base?.parentSessionId ? base : fresh || {});
+      // Compare before lastUsedAt is projected to the maximum: a missing
+      // setting preserves only the same observation, never a newer turn.
+      if (sample.client === 'codex') {
+        const freshAt = timestampMs(fresh?.lastUsedAt);
+        const retainedAt = timestampMs(base?.lastUsedAt);
+        if (freshAt < retainedAt) {
+          if (hasOwn(base || {}, 'reasoningEffort')) result.reasoningEffort = normalizeReasoningEffort(base.reasoningEffort);
+          else delete result.reasoningEffort;
+        } else if (!hasOwn(fresh || {}, 'reasoningEffort')) {
+          if (freshAt > retainedAt) result.reasoningEffort = null;
+          else if (!hasOwn(base || {}, 'reasoningEffort')) delete result.reasoningEffort;
+        }
+      }
     }
     return result;
   }

@@ -552,7 +552,8 @@
           && native.sessionId === session.sessionId && ['running', 'waiting'].includes(sessionActivityState(native, now))) {
           session = { ...session, archived: false, deleted: false, sourceDeleted: false,
             lastUsedAt: native.lastUsedAt, liveActivity: native.liveActivity,
-            turnEnded: native.turnEnded, waitingForInput: native.waitingForInput };
+            turnEnded: native.turnEnded, waitingForInput: native.waitingForInput,
+            ...(session.client === 'codex' ? { reasoningEffort: native.reasoningEffort ?? null } : {}) };
         }
         if (isReasonixSyntheticSession(session, key)) return null;
         const value = finiteNumber(session?.totalTokens);
