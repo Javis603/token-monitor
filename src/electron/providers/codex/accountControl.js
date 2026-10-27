@@ -130,10 +130,9 @@
       button.type = 'button';
       button.className = 'limit-account-switch-button';
       button.disabled = Boolean(controlState.switchingAccountId);
-      button.title = failed || translate('limits.codex.switchAccountTitle', {
+      button.setAttribute('aria-label', failed || translate('limits.codex.switchAccountTitle', {
         account: accountLabel || translate('settings.codex.unnamedAccount')
-      });
-      button.setAttribute('aria-label', button.title);
+      }));
       button.textContent = switching
         ? translate('limits.codex.switching')
         : failed

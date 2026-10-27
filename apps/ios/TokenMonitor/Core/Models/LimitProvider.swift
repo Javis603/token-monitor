@@ -132,6 +132,9 @@ nonisolated struct LimitProvider: Decodable, Identifiable, Sendable {
         if let percent = window.effectiveRemainingPercent {
             return percent
         }
+        // Ollama wallet credits have no quota denominator. Keep existing
+        // inferred top-up meters for other balance providers (e.g. Sub2API).
+        if normalizedProviderID == "ollama", window.showMeter == false { return nil }
         let amount = window.remaining ?? balance?.amount
         guard let amount else {
             return nil

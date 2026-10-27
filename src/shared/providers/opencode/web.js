@@ -1,6 +1,7 @@
 'use strict';
 
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
+const consoleApi = require('./console');
 
 const BASE_URL = 'https://opencode.ai';
 const SERVER_URL = 'https://opencode.ai/_server';
@@ -14,13 +15,14 @@ const RESET_SEC_KEYS = ['resetInSec', 'resetInSeconds', 'resetSeconds', 'reset_s
 const RESET_AT_KEYS = ['resetAt', 'resetsAt', 'reset_at', 'resets_at', 'nextReset', 'next_reset', 'renewAt', 'renew_at'];
 const BALANCE_KEYS = ['balanceUSD', 'balanceUsd', 'currentBalance', 'zenBalance', 'currentBalanceUSD'];
 
-function sanitizeCookieHeader(raw) {
+function sanitizeCookieHeader(raw, bareCookieName = 'auth') {
   let text = String(raw || '').trim();
   if (!text) return '';
   text = text.replace(/^cookie\s*:\s*/i, '');
   const cleaned = text.split(';').map((p) => p.trim()).filter(Boolean).join('; ');
-  // A bare value pasted without a name= is almost always the `auth` session cookie.
-  if (cleaned && !cleaned.includes('=')) return `auth=${cleaned}`;
+  // Existing stored/env values keep their legacy interpretation. The Console
+  // form selects its session name so users can paste the browser's Value alone.
+  if (cleaned && !cleaned.includes('=')) return `${bareCookieName}=${cleaned}`;
   return cleaned;
 }
 
@@ -170,25 +172,24 @@ function looksSignedOut(text) {
     || l.includes('not associated with an account') || l.includes('actor of type "public"');
 }
 
-// Accept a raw `wrk_…` id or a `https://opencode.ai/workspace/<id>/…` URL.
+// Accept workspace/org IDs and same-origin legacy or Console URLs.
 function normalizeWorkspaceId(raw) {
-  const text = String(raw || '').trim();
-  if (!text) return null;
-  const m = text.match(/wrk_[A-Za-z0-9]+/);
-  return m ? m[0] : null;
+  return consoleApi.normalizeWorkspaceId(raw);
 }
 
 async function fetchServerText(req, cookieHeader, deps) {
   const doFetch = deps.fetch || globalThis.fetch;
+  deps.signal?.throwIfAborted();
   const url = serverRequestUrl(req.serverId, req.args, req.method);
   const headers = buildHeaders(req.serverId, cookieHeader, req.referer);
-  const init = { method: req.method, headers };
+  const init = { method: req.method, headers, signal: deps.signal };
   if (req.method !== 'GET' && Array.isArray(req.args)) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(req.args);
   }
   const res = await doFetch(url, init);
   const text = await res.text();
+  deps.signal?.throwIfAborted();
   return { status: res.status, text };
 }
 
@@ -197,8 +198,16 @@ async function fetchServerText(req, cookieHeader, deps) {
 // override. Returns { status: 'ok' | 'unauthorized' | 'unavailable', workspaceId }.
 // Network errors are left to throw — callers wrap in try/catch.
 async function resolveWorkspaceId(cookie, deps = {}) {
-  const override = normalizeWorkspaceId(deps.workspaceId || (deps.env || process.env).TOKEN_MONITOR_OPENCODE_WORKSPACE_ID);
+  const override = normalizeWorkspaceId(deps.workspaceId || (deps.env || process.env).TOKEN_MONITOR_OPENCODE_WORKSPACE_ID)
+    || deps.opencodeWebContext?.workspaceId;
   if (override) return { status: 'ok', workspaceId: override };
+  if (deps.opencodeWebContext) {
+    const context = deps.opencodeWebContext;
+    context.legacyWorkspace ||= resolveWorkspaceId(cookie, { ...deps, opencodeWebContext: undefined });
+    const result = await context.legacyWorkspace;
+    if (result.status === 'ok') context.workspaceId = result.workspaceId;
+    return result;
+  }
   let wsText = await fetchServerText({ serverId: WORKSPACES_SERVER_ID, args: null, method: 'GET', referer: BASE_URL }, cookie, deps);
   if (wsText.status === 401 || wsText.status === 403 || looksSignedOut(wsText.text)) return { status: 'unauthorized', workspaceId: '' };
   let ids = parseWorkspaceIds(wsText.text);
@@ -211,7 +220,7 @@ async function resolveWorkspaceId(cookie, deps = {}) {
   return { status: 'ok', workspaceId: ids[0] };
 }
 
-async function fetchZen(cookieRaw, deps = {}) {
+async function fetchLegacyZen(cookieRaw, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const cookie = sanitizeCookieHeader(cookieRaw);
   if (!cookie) return { status: 'notConfigured', windows: [], balanceUsd: null };
@@ -243,7 +252,8 @@ async function fetchZen(cookieRaw, deps = {}) {
       parsed = parseSubscription(subText.text, nowMs);
     }
     return { status: 'ok', workspaceId, windows: parsed.windows, balanceUsd: parsed.balanceUsd };
-  } catch (_) {
+  } catch (error) {
+    consoleApi.throwIfTerminal(error, deps.signal);
     return fail('unavailable');
   }
 }
@@ -300,9 +310,11 @@ function parseGoUsage(text, nowMs) {
 
 async function fetchGoPageText(workspaceId, cookieHeader, deps) {
   const doFetch = deps.fetch || globalThis.fetch;
+  deps.signal?.throwIfAborted();
   const url = `${BASE_URL}/workspace/${workspaceId}/go`;
   const res = await doFetch(url, {
     method: 'GET',
+    signal: deps.signal,
     headers: {
       Cookie: cookieHeader,
       'User-Agent': BROWSER_USER_AGENT,
@@ -310,13 +322,14 @@ async function fetchGoPageText(workspaceId, cookieHeader, deps) {
     }
   });
   const text = await res.text();
+  deps.signal?.throwIfAborted();
   return { status: res.status, text };
 }
 
 // Fetches the real OpenCode Go limits from the dashboard page. Returns
 // { status, windows, workspaceId }. workspaceId is included even on a post-
 // resolution failure so the caller can reuse it for the Zen request.
-async function fetchGoWeb(cookieRaw, deps = {}) {
+async function fetchLegacyGo(cookieRaw, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const cookie = sanitizeCookieHeader(cookieRaw);
   if (!cookie) return { status: 'notConfigured', windows: [], workspaceId: '' };
@@ -332,14 +345,65 @@ async function fetchGoWeb(cookieRaw, deps = {}) {
     const windows = parseGoUsage(page.text, nowMs);
     if (windows.length === 0) return fail('unavailable', workspaceId);
     return { status: 'ok', windows, workspaceId };
-  } catch (_) {
+  } catch (error) {
+    consoleApi.throwIfTerminal(error, deps.signal);
     return fail('unavailable');
   }
 }
 
+async function fetchWithConsole(kind, cookieRaw, deps) {
+  const cookie = sanitizeCookieHeader(cookieRaw);
+  const legacy = kind === 'go' ? fetchLegacyGo : fetchLegacyZen;
+  if (!consoleApi.hasCookie(cookie, ['__Host-console_session'])) return legacy(cookie, deps);
+  // Standalone probes also keep discovery and any legacy fallback in one scope.
+  const scoped = deps.opencodeWebContext ? deps : consoleApi.createProbeDeps(deps);
+  try {
+    return await consoleApi.fetchConsole(kind, cookie, scoped);
+  } catch (error) {
+    consoleApi.throwIfTerminal(error, deps.signal);
+    const failure = { status: error.status || 'unavailable', windows: [],
+      workspaceId: scoped.opencodeWebContext.workspaceId || '', ...(kind === 'zen' ? { balanceUsd: null } : {}) };
+    if (!consoleApi.hasCookie(cookie, ['auth', '__Host-auth'])) return failure;
+    const fallback = await legacy(cookie, scoped);
+    const usable = fallback.status === 'ok' && (fallback.windows.length > 0 || Number.isFinite(fallback.balanceUsd));
+    if (usable) return fallback;
+    // Console permission/scope failures must not become expired auth or an empty success.
+    return failure.status === 'unauthorized' && fallback.status !== 'ok' ? fallback : failure;
+  }
+}
+
+function fetchGoWeb(cookie, deps = {}) { return fetchWithConsole('go', cookie, deps); }
+function fetchZen(cookie, deps = {}) { return fetchWithConsole('zen', cookie, deps); }
+
+// A terminal transport failure must not retry legacy authentication, but it
+// also must not discard independent API quotas, sibling sources or accounts.
+async function probeWebSource(probe, cookie, deps = {}) {
+  try {
+    deps.signal?.throwIfAborted();
+    const result = await probe(cookie, deps);
+    deps.signal?.throwIfAborted();
+    return result;
+  } catch (error) {
+    deps.signal?.throwIfAborted();
+    if (error?.name === 'AbortError' || error?.code === 'ABORT_ERR') throw error;
+    return { status: 'unavailable', windows: [], balanceUsd: null,
+      workspaceId: deps.opencodeWebContext?.workspaceId || '' };
+  }
+}
+
+async function fetchWeb(cookie, deps = {}, { isolateErrors = false } = {}) {
+  const scoped = consoleApi.createProbeDeps(deps);
+  // Credential saves retain strict transport errors; status observations can
+  // opt into partial results without weakening credential validation.
+  if (!isolateErrors) return Promise.all([fetchGoWeb(cookie, scoped), fetchZen(cookie, scoped)]);
+  return Promise.all([
+    probeWebSource(fetchGoWeb, cookie, scoped),
+    probeWebSource(fetchZen, cookie, scoped)
+  ]);
+}
+
 // Summarizes what a single opencode.ai cookie unlocks, from the two probe
-// results. The cookie is always "linked" (this is only called when one is set);
-// `expired` means BOTH sources rejected it as unauthorized. `go`/`zen` flag
+// results. `expired` means BOTH sources rejected it as unauthorized. `go`/`zen` flag
 // whether real usage / Zen data was actually returned (not just reachable).
 function summarizeLink(go = {}, zen = {}) {
   const goOk = go.status === 'ok';
@@ -357,12 +421,15 @@ function summarizeLink(go = {}, zen = {}) {
   if (go.status === 'unauthorized' && zen.status === 'unauthorized') {
     return { linked: true, expired: true, go: false, zen: false, hasBalance: false };
   }
-  return { linked: true, expired: false, go: false, zen: false, hasBalance: false, error: go.status || zen.status || 'unavailable' };
+  const error = [go.status, zen.status].find(status => status && status !== 'notConfigured')
+    || go.status || zen.status || 'unavailable';
+  return { linked: false, expired: false, go: false, zen: false, hasBalance: false, error };
 }
 
 module.exports = {
   BASE_URL, SERVER_URL, WORKSPACES_SERVER_ID, SUBSCRIPTION_SERVER_ID,
   sanitizeCookieHeader, serverRequestUrl, buildHeaders,
   parseWorkspaceIds, parseSubscription, fetchZen, normalizeWorkspaceId,
-  resolveWorkspaceId, fetchGoWeb, parseGoUsage, summarizeLink
+  resolveWorkspaceId, fetchGoWeb, fetchWeb, parseGoUsage, summarizeLink,
+  createProbeDeps: consoleApi.createProbeDeps, probeWebSource
 };

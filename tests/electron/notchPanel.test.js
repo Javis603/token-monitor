@@ -49,7 +49,7 @@ test('Notch renderer forwards the TPS formatter through live, retained-idle and 
   t.mock.timers.tick(8001);
   assert.equal(renderRate().classList.contains('is-idle'), true, 'idle retains the last useful reading');
   assert.equal(f.find('notch-rate-value').textContent, '50');
-  assert.match(f.find('notch-rate').title, /Idle/);
+  assert.match(f.find('notch-rate').attributes['aria-label'], /Idle/);
   renderRate('burn');
   assert.equal(f.find('notch-rate-value').textContent, '6.0K');
   assert.equal(f.find('notch-rate-unit').textContent, 'TPM');
@@ -277,6 +277,38 @@ test('session context retains shared eligibility, tooltips and small meters with
   assert.equal(remaining.querySelector('.notch-session-context').attributes['aria-valuenow'], '63');
 });
 
+for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and recent rows share persistent main-session effort without tooltips`, t => {
+  const f = panelFixture(t), data = payload();
+  const now = Date.now(), ago = minutes => new Date(now - minutes * 60000).toISOString();
+  const row = (id, extra) => ({ key: `${client}:${id}`, client, sessionId: id, title: id,
+    totalTokens: 100, models: { 'gpt-test': 100 }, startedAt: ago(20), lastUsedAt: ago(1), ...extra });
+  const main = row('running', { reasoningEffort: 'high', liveActivity: { state: 'running', observedAt: ago(0) } });
+  data.cells[1].sessions = [
+    { ...main, models: { 'gpt-test': 100, child: 100 }, groupRows: [main, row('child', { reasoningEffort: 'low' })] },
+    row('waiting', { reasoningEffort: 'xhigh', liveActivity: { state: 'waiting', observedAt: ago(0) } }),
+    row('idle', { reasoningEffort: 'medium', lastUsedAt: ago(60), turnEnded: true }),
+    row('archived', { reasoningEffort: 'high', archived: true, lastUsedAt: ago(120) }),
+    row('unknown', { reasoningEffort: null, lastUsedAt: ago(60) })
+  ];
+  f.panel.render(data);
+  const home = f.find('notch-now-meta');
+  assert.ok(home.textContent.includes(`${client === 'codex' ? 'Codex' : 'Claude Code'} · 2 models · high`));
+  assert.equal(home.querySelector('.session-models').tooltipEntries.length, 2, 'model breakdown retains its tooltip');
+  f.panel.selectPage('sessions');
+  const page = f.find('notch-page-sessions');
+  const active = page.querySelectorAll('.notch-active');
+  assert.deepEqual(active.map(node => node.querySelector('.session-reasoning-effort').textContent), ['high', 'xhigh']);
+  const recent = page.querySelectorAll('.notch-recent');
+  assert.deepEqual(recent.map(node => node.querySelector('.session-reasoning-effort')?.textContent), ['medium', 'high', undefined]);
+  assert.equal(recent[0].querySelector('.notch-session-context'), null);
+  assert.equal(recent[2].querySelector('.notch-recent-meta').textContent.includes(' ·  · '), false);
+  for (const setting of [...home.querySelectorAll('.session-reasoning-effort'), ...page.querySelectorAll('.session-reasoning-effort')]) {
+    assert.equal(setting.tooltipEntries, undefined);
+    assert.equal(setting.getAttribute('tabindex'), undefined);
+    assert.ok(setting.getAttribute('aria-label'));
+  }
+});
+
 test('cache expiry refreshes within the same minute without a new stats push', t => {
   const f = panelFixture(t), data = payload(), now = Date.now();
   data.cells[1].sessions = [{ key: 'claude:cache', client: 'claude', sessionId: 'cache', title: 'cached session', totalTokens: 10,
@@ -390,6 +422,14 @@ test('active sessions remain reachable and retain independent scroll and focus a
   assert.equal(page.querySelector('.notch-recent-list').scrollTop, 75);
   assert.equal(f.document.activeElement.dataset.focusKey, 'active:list');
   assert.equal(page.querySelectorAll('.notch-active-title').at(-1).textContent, 'Active 6');
+  f.panel.selectPage('home');
+  for (let reopen = 0; reopen < 2; reopen++) {
+    f.panel.suspend();
+    f.panel.render(data, { opening: true });
+  }
+  f.panel.selectPage('sessions');
+  assert.equal(page.querySelector('.notch-active-list').scrollTop, 150, 'reopening retains the hidden active list position');
+  assert.equal(page.querySelector('.notch-recent-list').scrollTop, 75, 'reopening retains the hidden recent list position');
   data.cells[1].sessions = quiet; f.panel.render(data);
   assert.equal(page.querySelector('.notch-active-list'), null);
   assert.ok(page.querySelector('.notch-sessions-empty'));
@@ -581,7 +621,7 @@ test('a grant measured against an allowance reads as a percentage while a bare b
   const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: records.map(record => ({ type: 'limit', provider: record.provider })) });
   f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
   assert.deepEqual(f.all('notch-limit-number').map(node => node.textContent), ['48']);
-  assert.equal(f.all('notch-limit-value')[0].title, '$4.79 / $10.00');
+  assert.equal(f.all('notch-limit-value')[0].attributes['aria-label'], '$4.79 / $10.00');
   assert.equal(f.all('notch-limit-money').length, 1);
   assert.match(f.find('notch-limit-money').textContent, /6\.86/);
 });
@@ -649,6 +689,231 @@ test('limit columns past one page scroll a page per wheel gesture and keep their
   assert.equal(f.find('notch-limits').scrollLeft, 0);
 });
 
+
+test('the first limits wheel gesture works after a quick close and reopen', t => {
+  const f = panelFixture(t);
+  const providers = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: String(index),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }] }));
+  const data = { ...payload(), cells: buildEdgeDockCells({ limits: { providers } }, { items: [{ type: 'limit', provider: 'codex' }] }) };
+  f.panel.render(data); f.panel.selectPage('limits');
+  const wheel = deltaY => f.find('notch-limits').fire('wheel', { deltaX: 0, deltaY, preventDefault() {} });
+  wheel(30);
+  assert.equal(f.panel.view.limitPage, 1);
+  f.panel.suspend();
+  t.mock.timers.tick(250);
+  f.panel.render(data, { opening: true });
+  wheel(-30);
+  assert.equal(f.panel.view.limitPage, 0);
+});
+
+function swipe(f, id, phase, amount, complete = false, hit = 'page') {
+  if (phase === 'began') f.document.elementFromPoint = () => f.find(hit === 'strip' ? 'notch-limits' : 'notch-band');
+  f.scroll({ id, phase, amount, complete, x: 0, y: 0 });
+}
+
+function assertPageMotionCleared(f) {
+  for (const page of f.all('notch-page')) {
+    assert.deepEqual([page.style.opacity, page.style.transform, page.style.filter], ['', '', '']);
+  }
+}
+
+test('native pages slide with a fixed gap and settle without momentum', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  const pill = f.find('notch-tab-pill');
+  let layoutReads = 0;
+  Object.defineProperty(pill, 'offsetWidth', { get() { layoutReads++; return 36; } });
+  f.panel.render(payload(150));
+  assert.equal(layoutReads, 0, 'ordinary pushes do not force the tab highlight layout');
+  swipe(f, 1, 'began', 0);
+  swipe(f, 1, 'changed', 0.4);
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 1);
+  assert.equal(Number(f.find('notch-page-limits').style.opacity), 1);
+  const pageX = page => Number(f.find(`notch-page-${page}`).style.transform.match(/translateX\(([-\d.]+)px\)/)[1]);
+  assert.equal(pageX('home'), -256);
+  assert.equal(pageX('limits') - pageX('home') - 600, 40, 'neighboring pages retain their content gap');
+  assert.equal(f.find('notch-page-home').style.filter, 'none');
+  swipe(f, 1, 'changed', 0);
+  assert.equal(pageX('home'), 0);
+  assert.equal(pageX('limits'), 640, 'returning to zero keeps the neighbor outside the viewport');
+  swipe(f, 1, 'changed', 0.4);
+  f.panel.render(payload(200));
+  assert.equal(pageX('limits'), 384, 'a live data push preserves swipe progress');
+  swipe(f, 1, 'ended', 0.4);
+  swipe(f, 1, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'limits');
+  assert.equal(pill.style.transition, '', 'completion restores the normal tab transition');
+  assertPageMotionCleared(f);
+});
+
+test('swipes prepare only the target and refresh hidden data when selected', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', 0.2);
+  assert.ok(f.find('notch-page-limits').children.length > 0);
+  assert.equal(f.find('notch-page-sessions').children.length, 0);
+  assert.equal(f.find('notch-page-breakdown').children.length, 0);
+  swipe(f, 1, 'ended', 0.2);
+  swipe(f, 1, 'none', 1, true);
+  const homeText = f.find('notch-page-home').textContent;
+  f.panel.render(payload(300));
+  assert.equal(f.find('notch-page-home').textContent, homeText);
+  f.panel.selectPage('home');
+  assert.equal(f.find('notch-big').textContent, '300');
+  f.panel.selectPage('sessions');
+  assert.equal(f.find('notch-page-breakdown').children.length, 0);
+});
+
+test('a native cancellation returns to the origin and clears the preview', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', 0.1);
+  swipe(f, 1, 'cancelled', 0.2);
+  swipe(f, 1, 'none', 0, true);
+  assert.equal(f.panel.view.page, 'home');
+  assert.equal(f.find('notch-pages').classList.contains('is-handoff'), false);
+  assertPageMotionCleared(f);
+});
+
+test('reduced motion settles pages and accounts when fingers lift', t => {
+  const f = panelFixture(t, { reduceMotion: true });
+  const providers = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: String(index),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }] }));
+  f.panel.render({ ...payload(), cells: buildEdgeDockCells({ limits: { providers } }, { items: [{ type: 'limit', provider: 'codex' }] }) });
+  swipe(f, 1, 'began', 0.3);
+  swipe(f, 1, 'ended', 0.3);
+  assert.equal(f.panel.view.page, 'limits');
+  assertPageMotionCleared(f);
+  swipe(f, 1, 'none', 0.7);
+  assertPageMotionCleared(f);
+  swipe(f, 1, 'none', 1, true);
+  swipe(f, 2, 'began', 0.4, false, 'strip');
+  swipe(f, 2, 'ended', 0.4, false, 'strip');
+  assert.equal(f.panel.view.limitPage, 1);
+  assert.equal(f.find('notch-limits').scrollLeft, 120);
+  swipe(f, 2, 'none', 0.7);
+  assert.equal(f.find('notch-limits').scrollLeft, 120);
+  swipe(f, 2, 'none', 1, true);
+  swipe(f, 3, 'began', -0.4, false, 'strip');
+  swipe(f, 3, 'cancelled', -0.4, false, 'strip');
+  assert.equal(f.panel.view.limitPage, 1);
+  assert.equal(f.find('notch-pages').classList.contains('is-handoff'), false);
+  assertPageMotionCleared(f);
+});
+
+test('a new finger gesture interrupts the old animation at its decided page', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', 0.1);
+  swipe(f, 1, 'ended', 0.3);
+  swipe(f, 2, 'began', 0.1);
+  assert.equal(f.panel.view.page, 'limits');
+  swipe(f, 2, 'ended', 0.3);
+  swipe(f, 2, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'sessions');
+});
+
+test('main-page endpoints stay visible and a reverse swipe remains available', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', -0.5);
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 1);
+  assert.equal(Number(f.find('notch-page-breakdown').style.opacity), 0);
+  assert.equal(f.find('notch-page-limits').children.length, 0);
+  swipe(f, 1, 'ended', -0.5);
+  swipe(f, 1, 'none', -1, true);
+  assert.equal(f.panel.view.page, 'home');
+  swipe(f, 2, 'began', 0.5);
+  swipe(f, 2, 'ended', 0.5);
+  swipe(f, 2, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'limits');
+  f.panel.selectPage('breakdown');
+  swipe(f, 3, 'began', 0.5);
+  assert.equal(Number(f.find('notch-page-breakdown').style.opacity), 1);
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 0);
+  swipe(f, 3, 'ended', 0.5);
+  swipe(f, 3, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'breakdown');
+  swipe(f, 4, 'began', -0.5);
+  swipe(f, 4, 'ended', -0.5);
+  swipe(f, 4, 'none', -1, true);
+  assert.equal(f.panel.view.page, 'sessions');
+});
+
+test('account paging has priority, then the next gesture leaves its edge', t => {
+  const f = panelFixture(t);
+  const providers = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: String(index),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }] }));
+  f.panel.render({ ...payload(), cells: buildEdgeDockCells({ limits: { providers } }, { items: [{ type: 'limit', provider: 'codex' }] }) });
+  f.panel.selectPage('limits');
+  const strip = f.find('notch-limits');
+  swipe(f, 1, 'began', 0.4, false, 'strip');
+  assert.equal(strip.scrollLeft, 48);
+  swipe(f, 1, 'ended', 0.4, false, 'strip');
+  swipe(f, 2, 'began', 0.2, false, 'strip');
+  assert.equal(strip.scrollLeft, 120);
+  assert.equal(f.panel.view.page, 'limits');
+  swipe(f, 2, 'ended', 0.2, false, 'strip');
+  swipe(f, 2, 'none', 1, true, 'strip');
+  assert.equal(f.panel.view.page, 'sessions');
+});
+
+test('one gesture can reverse between account and main pages without retaining either preview', t => {
+  const f = panelFixture(t);
+  const providers = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: String(index),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }] }));
+  f.panel.render({ ...payload(), cells: buildEdgeDockCells({ limits: { providers } }, { items: [{ type: 'limit', provider: 'codex' }] }) });
+  f.panel.selectPage('limits');
+  const strip = f.find('notch-limits');
+  const tabPosition = f.find('notch-tab-pill').style.transform;
+  f.document.elementFromPoint = () => strip.children[0];
+  f.scroll({ id: 1, phase: 'began', amount: -0.4, x: 0, y: 0 });
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 1);
+  swipe(f, 1, 'changed', 0.2);
+  assert.equal(Number(f.find('notch-page-home').style.opacity), 0);
+  assert.equal(Number(f.find('notch-page-limits').style.opacity), 1);
+  assert.equal(f.find('notch-tab-pill').style.transform, tabPosition);
+  assert.equal(strip.scrollLeft, 24);
+  swipe(f, 1, 'changed', -0.3);
+  assert.equal(strip.scrollLeft, 0, 'returning to main pages restores the account origin');
+  swipe(f, 1, 'cancelled', -0.3);
+  swipe(f, 1, 'none', 0, true);
+  assert.equal(f.panel.view.page, 'limits');
+  assert.equal(f.panel.view.limitPage, 0);
+  strip.scrollTo({ left: 120 });
+  swipe(f, 2, 'began', 0.4, false, 'strip');
+  swipe(f, 2, 'changed', -0.2);
+  assert.equal(Number(f.find('notch-page-sessions').style.opacity), 0);
+  assert.equal(strip.scrollLeft, 96);
+  swipe(f, 2, 'changed', 0.3);
+  assert.equal(strip.scrollLeft, 120);
+  swipe(f, 2, 'ended', 0.3);
+  swipe(f, 2, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'sessions');
+  assert.equal(f.panel.view.limitPage, 1);
+});
+
+test('tab changes and collapse ignore remaining native animation frames', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  swipe(f, 1, 'began', 0.5);
+  f.panel.selectPage('breakdown');
+  assertPageMotionCleared(f);
+  swipe(f, 1, 'none', 1, true);
+  assert.equal(f.panel.view.page, 'breakdown');
+  swipe(f, 2, 'began', -0.5);
+  f.panel.suspend();
+  swipe(f, 2, 'ended', -0.5);
+  swipe(f, 2, 'none', -1, true);
+  f.panel.render(payload());
+  assert.equal(f.panel.view.page, 'breakdown');
+  assertPageMotionCleared(f);
+  swipe(f, 3, 'began', -0.5);
+  f.pageHide();
+  assert.equal(f.scrollSubscribed, false);
+  assertPageMotionCleared(f);
+});
+
 test('limit boundaries use the Limits view wording, so an expiring grant never reads as a reset', t => {
   const f = panelFixture(t);
   const now = Date.now(), hours = h => new Date(now + h * 3600000).toISOString();
@@ -697,7 +962,7 @@ test('a cached offline reading says Stale with the Limits view wording and dims 
   assert.equal(codexA.dataset.tone, undefined);
   assert.equal(codexA.querySelector('.notch-limit-stale'), null);
   assert.equal(codexB.querySelector('.notch-limit-stale').textContent, 'Stale');
-  assert.equal(codexB.querySelector('.notch-limit-stale').title, 'Stale · 55m ago');
+  assert.equal(codexB.querySelector('.notch-limit-stale').attributes['aria-label'], 'Stale · 55m ago');
   f.state.locale = 'zh-TW'; f.state.appearanceKey = 'zh'; f.panel.render({ ...payload(), cells });
   assert.equal(f.all('notch-limit')[2].querySelector('.notch-limit-stale').textContent, 'Stale', 'matches the Limits view on every locale');
 });

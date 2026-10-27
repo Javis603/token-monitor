@@ -75,6 +75,19 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-activity-count { font-weight: 600; }
 .notch-activity-waiting { color: var(--yellow); }
 .notch-waiting-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+/* Session-only marks are one measured group, with a surface-coloured separator. */
+.notch-session-icons { display: inline-flex; align-items: center; isolation: isolate; }
+.notch-session-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 21px; width: 21px; height: 21px; border-radius: 50%; background: rgb(var(--glass-rgb)); }
+.notch-session-icon + .notch-session-icon { margin-left: -9px; }
+.is-notch-attached .notch-session-icon, html.notch-black .notch-session-icon { background: #000; }
+.notch-session-activity { --notch-waiting-color: #e7b764; gap: 6px; }
+.notch-session-activity .notch-activity-count { color: var(--notch-accent, var(--text)); font-size: 1.3em; font-weight: 600; line-height: 1; }
+.notch-session-activity .notch-activity-count.is-mixed { background: linear-gradient(115deg, #81d9e0 8%, #adbfdf 48%, #efb08e 95%); background-clip: text; -webkit-background-clip: text; color: transparent; }
+.notch-waiting-badge { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; padding: 3px 4px; border-radius: 5px; color: var(--notch-waiting-color); background: color-mix(in srgb, var(--notch-waiting-color) 14%, transparent); font-size: 1em; font-weight: 600; line-height: 1; }
+.notch-waiting-badge svg { width: 11px; height: 11px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.is-light-session-summary .notch-session-activity { --notch-waiting-color: #8a570a; }
+.is-light-session-summary .notch-activity-count { color: var(--text); }
+.is-light-session-summary .notch-activity-count.is-mixed { background-image: linear-gradient(115deg, #17626c 8%, #575a88 48%, #8f4d32 95%); color: transparent; }
 .notch-wave { display: inline-flex; align-items: center; gap: 2.5px; height: 16px; }
 .notch-summary .notch-wave { scale: 1 1.15; }
 .notch-wave i { width: 3px; border-radius: 2px; background: var(--notch-accent, var(--text)); animation: notch-wave 1.05s ease-in-out infinite; }
@@ -92,7 +105,7 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-body { position: absolute; top: 0; left: 0; width: 100%; height: calc(var(--notch-header-height, 32px) + var(--notch-body-height, 0px)); overflow: hidden;
   opacity: var(--notch-content-opacity, 0); filter: blur(calc((1 - var(--notch-content-progress, 0)) * 10px)); }
 .notch-panel {
-  --notch-band-height: 34px; --notch-gap-width: 0px;
+  --notch-band-height: 34px; --notch-gap-width: 0px; --notch-page-gap: 40px;
   --notch-ink: var(--text); --notch-dim: var(--muted); --notch-faint: color-mix(in srgb, var(--muted) 82%, transparent);
   --notch-rule: rgba(var(--overlay-rgb), .085); --notch-fill: rgba(var(--overlay-rgb), .055); --notch-fill-strong: rgba(var(--overlay-rgb), .13);
   --notch-ui: var(--ui-font, ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace);
@@ -139,8 +152,9 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-status-rule { width: 1px; height: 12px; background: var(--notch-rule); }
 .notch-status .edge-dock-refresh { width: 24px; height: 24px; }
 
-/* Pages share one fixed slot and cross-fade sideways. */
 .notch-pages { position: relative; height: 176px; margin-top: 6px; }
+.notch-pages.is-handoff { overflow: clip; }
+.notch-pages.is-handoff .notch-page { overflow: clip; transition: none; }
 .notch-page { position: absolute; inset: 0; opacity: 0; transform: translateX(12px); filter: blur(5px); pointer-events: none;
   transition: opacity .22s ease, transform .38s var(--notch-spring), filter .28s ease; }
 .notch-page.is-before { transform: translateX(-12px); }
@@ -223,8 +237,9 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 /* Limits */
 /* Three columns per page; past one page the strip scrolls sideways, snapping a
    page at a time, and the next column peeks in under a fade. */
-.notch-limits { --notch-limit-gap: 40px; --notch-limit-peek: 0px; display: flex; column-gap: var(--notch-limit-gap); height: 160px;
+.notch-limits { --notch-limit-gap: var(--notch-page-gap); --notch-limit-peek: 0px; display: flex; column-gap: var(--notch-limit-gap); height: 160px;
   overflow: auto hidden; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; }
+.notch-limits.is-handoff { scroll-snap-type: none; }
 .notch-limits::-webkit-scrollbar { display: none; }
 .notch-limits.is-paged { --notch-limit-peek: 64px; }
 .notch-limits.has-after { mask-image: linear-gradient(to right, #000 calc(100% - var(--notch-limit-peek)), transparent); }

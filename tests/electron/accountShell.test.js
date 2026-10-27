@@ -26,7 +26,7 @@ test('one shell renders status, error, and login progress independently', () => 
   const progress = node();
   render({ status, statusText: '2 of 3 linked', error, errorText: 'Try again', progress, progressText: 'Waiting' });
   assert.equal(status.textContent, '2 of 3 linked');
-  assert.equal(status.title, status.textContent);
+  assert.equal(status.getAttribute('aria-label'), status.textContent);
   assert.equal(error.classList.contains('hidden'), false);
   assert.equal(progress.classList.contains('hidden'), false);
   render({ error, errorText: '', progress, progressText: '' });

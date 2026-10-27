@@ -21,5 +21,6 @@ contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   refreshLimits: () => ipcRenderer.invoke('topNotch:refreshLimits'),
   toggleRateMode: () => ipcRenderer.send('topNotch:toggleRateMode'),
   switchCodexAccount: (accountId) => ipcRenderer.invoke('topNotch:switchCodexAccount', { accountId }),
-  onRender: (callback) => subscribe('topNotch:render', callback)
+  onRender: (callback) => subscribe('topNotch:render', callback),
+  onScroll: (callback) => subscribe('topNotch:scroll', callback)
 });

@@ -130,11 +130,11 @@ function notchActivity(cells, nowMs = Date.now()) {
   return { running: running.count, waiting: waiting.count, clients };
 }
 
-function activitySummary(cells, options) {
+function activitySummary(cells, options, sessionOnly = false) {
   const activity = notchActivity(cells, options.nowMs);
   if (activity) {
     const providers = activity.clients.slice(0, 3);
-    return { version: trayLayout.VERSION, needsClock: false, automatic: 'activity', items: [
+    return { version: trayLayout.VERSION, needsClock: false, automatic: 'activity', sessionOnly, items: [
       ...providers.map((client, index) => ({ type: 'icon', id: `notch-activity-icon-${index}`, provider: client, available: true, selection: null })),
       { type: 'activity', id: 'notch-activity', available: true, running: activity.running, waiting: activity.waiting,
         provider: activity.clients[0] || '' }
@@ -169,7 +169,7 @@ function buildNotchData(stats, cells, settings, options = {}) {
   const panel = { week: notchWeek(stats, new Date(options.nowMs ?? Date.now()), settings.historyEnabled === false ? null : stats?.historyPreview) };
   if (settings.notchSummaryEnabled === false) return { cells, summary: null, panel };
   const mode = notchSummaryMode(settings);
-  if (mode === 'sessions') return { cells, summary: activitySummary(cells, options), panel };
+  if (mode === 'sessions') return { cells, summary: activitySummary(cells, options, true), panel };
   if (mode === 'auto') {
     const automatic = automaticSummary(stats, cells, settings, options);
     if (automatic) return { cells, summary: automatic, panel };

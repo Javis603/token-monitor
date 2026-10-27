@@ -512,7 +512,6 @@ function paintRefreshButton() {
   const key = refreshBusy ? 'refreshButton.refreshing'
     : refreshResult === 'success' ? 'refreshButton.refreshed'
       : refreshResult === 'error' ? 'refreshButton.failed' : 'edgeDock.refreshLimits';
-  refreshButton.title = t(key);
   refreshButton.setAttribute('aria-label', t(key));
   refreshButton.setAttribute('aria-busy', String(refreshBusy));
   refreshButton.disabled = refreshBusy || state.payload?.refreshable !== true;
@@ -559,14 +558,14 @@ function renderPeek(payload) {
     if (state.payload === payload) bridge.peekPainted?.(payload.peekMode || 'handle', payload.shape?.key);
   }));
   if (payload.peekMode === 'refresh') {
-    root.title = '';
+    root.setAttribute('aria-label', '');
     root.classList.remove('is-handle-hidden');
     ensureRefreshButton();
     if (contentLayer.firstChild !== refreshButton) contentLayer.replaceChildren(refreshButton);
     paintRefreshButton();
     return;
   }
-  root.title = t('settings.display.edgeDock');
+  root.setAttribute('aria-label', t('settings.display.edgeDock'));
   // The handle is the silhouette itself (updateShape), tinted and outlined as the
   // rail is; the refresh button is the only content this window carries.
   if (contentLayer.firstChild) contentLayer.replaceChildren();
@@ -832,7 +831,7 @@ function statCellNode(cell) {
   node.append(el('span', 'edge-dock-stat-label', statShortLabel(cell)));
   if (cell.metric === 'liveRate') {
     node.classList.toggle('is-idle', cell.idle === true);
-    node.title = t('edgeDock.rate.switch');
+    node.setAttribute('aria-description', t('edgeDock.rate.switch'));
     node.append(markRoll(el('span', 'edge-dock-stat-value', cell.rate === null || cell.rate === undefined ? '—' : formatRate(cell.rate)),
       `${cell.id}:value`, cell.rate));
   } else if (cell.metric === presentation.SESSIONS_METRIC) {
@@ -1293,14 +1292,16 @@ function sessionKey(session) {
 // session that has simply gone quiet.
 function stateMark(session, key, state) {
   const dot = el('span', 'edge-dock-session-dot');
-  dot.setAttribute('aria-hidden', 'true');
   // The glyphs come from the shared builder, so this card and the Sessions list
   // cannot drift into different spinner or check shapes.
   dot.innerHTML = SESSION_STATE_GLYPHS;
   dot.dataset.state = state;
-  if (state === 'running') dot.title = t('session.running');
-  else if (state === 'waiting') dot.title = t('session.waiting');
-  else if (state === 'ended') dot.title = t('session.finished');
+  const labelKey = { running: 'session.running', waiting: 'session.waiting', ended: 'session.finished' }[state];
+  dot.setAttribute('aria-hidden', labelKey ? 'false' : 'true');
+  if (labelKey) {
+    dot.setAttribute('role', 'img');
+    dot.setAttribute('aria-label', t(labelKey));
+  }
   const previous = lastActivityBySession.get(key) || 0;
   const next = Date.parse(session.lastUsedAt || '') || 0;
   if (next > 0) lastActivityBySession.set(key, next);
@@ -1408,23 +1409,18 @@ function sessionsContainer(sessions, options = {}) {
     // for the same session. The label is the tooltip trigger there too: one
     // row per model with its tokens and share.
     const modelLabel = sessionRowsApi.sessionModelLabel(session);
+    const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(session);
     const age = relativeAgo(session.lastUsedAt || session.startedAt);
-    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(session, {
+    description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...session, modelLabel }, {
+      translate: t, view: limitWindowsView,
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatBreakdownTokens
-    });
-    if (modelLabel) {
-      if (modelEntries.length > 1) {
-        const models = el('span', 'session-models', modelLabel);
-        limitWindowsView.setDetailTooltip(models, modelEntries);
-        description.append(models);
-      } else description.append(document.createTextNode(modelLabel));
-    }
+    }));
     if (memberLabel) {
-      if (modelLabel) description.append(document.createTextNode(' · '));
+      if (metadataLabel) description.append(document.createTextNode(' · '));
       description.append(el('span', 'edge-dock-session-member-count', memberLabel));
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
+    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
     meta.append(description);
     const status = sessionRowsApi.sessionStatusNode(document, session, { prefix: 'edge-dock-session', translate: t,
       view: limitWindowsView, showUsed: appearance().sessionContextMetric !== 'remaining' });
@@ -1519,7 +1515,7 @@ function appendLiveRate(card, head, cell) {
   const headline = el('div', 'edge-dock-stat-headline edge-dock-rate-headline');
   const figure = el('button', 'edge-dock-rate-figure');
   figure.type = 'button';
-  figure.title = t('edgeDock.rate.switch');
+  figure.setAttribute('aria-description', t('edgeDock.rate.switch'));
   const unit = el('span', 'edge-dock-rate-unit', t(burnMode ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'));
   figure.append(el('strong', '', hasSample ? formatRate(cell.rate) : '—'), unit, el('span', 'edge-dock-rate-swap', '⇄'));
   // Press-activated, not click: the card is rebuilt whenever the rate moves, and
@@ -1963,6 +1959,7 @@ let selfRepaintTimer = null;
 function scheduleSelfRepaint() {
   if (selfRepaintTimer) clearTimeout(selfRepaintTimer);
   selfRepaintTimer = null;
+  if (bridge.isSettingsPreview) return;
   const delay = selfRepaintDelayMs();
   // 0 means this surface has nothing to wake for: a rail with no sessions expiry, or
   // the peek handle. Leaving the timer unarmed is what keeps the rail push-driven.

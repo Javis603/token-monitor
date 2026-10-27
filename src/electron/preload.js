@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   discardOrphanedSubscriptions: () => ipcRenderer.invoke('subscriptions:discardOrphans'),
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
+  getDisplayPreview: (surface, phase, slots) => ipcRenderer.invoke('settings:displayPreview', surface, phase, slots),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
   getBackgroundImage: () => ipcRenderer.invoke('appearance:getBackgroundImage'),
   chooseBackgroundImage: () => ipcRenderer.invoke('appearance:chooseBackgroundImage'),
@@ -90,7 +91,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('theme:systemUi', listener);
   },
   onOpenSettings: (callback) => {
-    const listener = () => { try { callback(); } catch (_) {} };
+    const listener = (_event, section) => { try { callback(section); } catch (_) {} };
     ipcRenderer.on('settings:open', listener);
     return () => ipcRenderer.removeListener('settings:open', listener);
   },
@@ -178,10 +179,17 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),
     status: (options = {}) => ipcRenderer.invoke('cursor:status', options)
   },
+  claude: {
+    accounts: () => ipcRenderer.invoke('claude:accounts'),
+    saveWebAccount: (values) => ipcRenderer.invoke('claude:saveWebAccount', values),
+    removeWebAccount: (id) => ipcRenderer.invoke('claude:removeWebAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('claude:setAccountEnabled', id, enabled)
+  },
   limits: {
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
     listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
-    clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)
+    clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId),
+    refresh: (providerId) => ipcRenderer.invoke('limits:refresh', providerId)
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),

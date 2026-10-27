@@ -244,6 +244,7 @@
         // could not reproduce from a flattened winner.
         models: session.models || (session.model ? { [session.model]: finite(session.totalTokens) || 0 } : {}),
         promptCache: session.promptCache || null,
+        reasoningEffort: sessionLive.isSessionReasoningEffortClient(session.client) ? session.reasoningEffort || null : null,
         contextTokens: finite(session.contextTokens),
         contextWindow: finite(session.contextWindow),
         totalTokens: finite(session.totalTokens) || 0,

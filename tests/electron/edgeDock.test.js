@@ -199,7 +199,8 @@ const edgeDockPresentation = require('../../src/electron/renderer/edgeDock/prese
 // tests assert the same reading a surface would.
 const sessionLive = require('../../src/shared/sessionLive');
 const verticalDragSort = require('../../src/electron/renderer/verticalDragSort');
-const { matchProviderAccount } = require('../../src/shared/subscriptionDisplay');
+const { matchProviderAccount, needsRebinding } = require('../../src/shared/subscriptionDisplay');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 const accountIdentity = require('../../src/electron/renderer/accountIdentity');
 const {
   buildEdgeDockCells,
@@ -1573,6 +1574,43 @@ function provider(id, overrides = {}) {
     ...overrides
   };
 }
+
+test('edge dock keeps anonymous Muse accounts from every synced device', () => {
+  const museRow = (remainingPercent, updatedAt, overrides = {}) => provider('muse', {
+    accountKey: '',
+    updatedAt,
+    windows: [{ kind: 'session', label: 'Session', remainingPercent, resetsAt: '2026-09-17T12:00:00.000Z' }],
+    ...overrides
+  });
+  // Local raw row (41%) differs from its aggregate copy (40%) so the surviving
+  // subscription account proves the local copy won without being duplicated.
+  const devices = [
+    { deviceId: 'device-a', limits: { providers: [museRow(41, '2026-08-31T10:00:00.000Z')] } },
+    { deviceId: 'device-b', limits: { providers: [museRow(70, '2026-08-31T10:02:00.000Z')] } }
+  ];
+  const aggregate = aggregateLimits([
+    { deviceId: 'device-a', limits: { providers: [museRow(40, '2026-08-31T10:00:00.000Z')] } },
+    devices[1]
+  ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
+  const stats = { devices, limits: aggregate };
+  const [cell] = buildEdgeDockCells(stats, {
+    items: [{ type: 'limit', provider: 'muse' }],
+    localDeviceId: 'device-a'
+  });
+
+  // The drawn card reads the raw aggregate: both devices display.
+  assert.equal(cell.accountCount, 2);
+  assert.deepEqual(cell.accounts.map((account) => account.record.sourceDeviceId), ['device-a', 'device-b']);
+  // The subscription universe dedupes local + aggregate per device: exactly
+  // A and B, local first, no local duplicate.
+  assert.deepEqual(cell.subscriptionAccounts.map((account) => account.sourceDeviceId), ['device-a', 'device-b']);
+  assert.equal(cell.subscriptionAccounts[0].windows[0].remainingPercent, 41);
+  assert.equal(devices[0].limits.providers[0].sourceDeviceId, undefined, 'stats are not mutated');
+
+  const anonymous = { provider: 'muse', binding: { accountKey: '', accountEmail: '', profileName: '' } };
+  assert.equal(matchProviderAccount(anonymous, cell.subscriptionAccounts), null);
+  assert.equal(needsRebinding(anonymous, cell.subscriptionAccounts), true);
+});
 
 test('automatic items follow the limits order and enabled set, capped at the default count', () => {
   const stats = {

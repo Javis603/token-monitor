@@ -14,9 +14,16 @@
       : WINDOWS_BACKDROP_ACRYLIC;
   }
 
+  // Concave dock curves use a clipped HostBackdrop, independent of the main
+  // window's Acrylic/Accent choice. Existing installs follow System Glass.
+  function normalizeWindowsDockBackdropMode(value) {
+    return value === 'transparent' || value === 'host-backdrop' ? value : 'inherit';
+  }
+
   return {
     WINDOWS_BACKDROP_ACRYLIC,
     WINDOWS_BACKDROP_ACCENT,
-    normalizeWindowsBackdropMode
+    normalizeWindowsBackdropMode,
+    normalizeWindowsDockBackdropMode
   };
 });

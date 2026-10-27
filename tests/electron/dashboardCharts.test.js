@@ -53,6 +53,14 @@ test('modelVendorFor maps families and modelColor falls back deterministically',
   assert.equal(modelVendorFor('muse-spark-1.2-contributor-free'), 'meta');
   assert.equal(modelVendorFor('muse-spark-1.3-contributor-free'), 'meta');
   assert.equal(modelVendorFor('opencode/muse-spark-1.3-contributor-free'), 'meta');
+  assert.equal(modelVendorFor('muse-wonder-1.0'), 'meta');
+  assert.equal(modelVendorFor('openrouter/muse-wonder-1.0'), 'meta');
+  assert.equal(modelVendorFor('muse-glimmer'), 'meta');
+  assert.equal(modelVendorFor('muse-image'), 'meta');
+  assert.equal(modelVendorFor('muse-voice-transcribe'), 'meta');
+  assert.equal(modelVendorFor('muse-spark-open'), 'meta');
+  assert.equal(modelVendorFor('amuse-wonder-1.0'), null);
+  assert.equal(modelVendorFor('muse-wonderful'), null);
   assert.equal(modelVendorFor('kimi-k2'), 'kimi');
   assert.equal(modelVendorFor('moonshot-v1'), 'kimi');
   assert.equal(modelVendorFor('k2d6-agent'), 'kimi');
@@ -100,7 +108,7 @@ test('clampDaily keeps the last N days, or all for falsy/all', () => {
   assert.deepEqual(clampDaily(daily, 7).map((d) => d.date).slice(0, 1), ['d33']);
 });
 
-test('barsChartSvg renders one rect per segment with colorFor fill and a per-bar title', () => {
+test('barsChartSvg renders one rect per segment with colorFor fill and a per-bar description', () => {
   const model = dailyBarsChart(
     [{ date: '2026-06-01', perClient: { claude: { tokens: 10 }, codex: { tokens: 5 } } }],
     { width: 100, height: 100, padTop: 0, padRight: 0, padBottom: 0, padLeft: 0, gap: 0, stackBy: 'client', metric: 'tokens' }
@@ -116,7 +124,7 @@ test('barsChartSvg renders one rect per segment with colorFor fill and a per-bar
   assert.match(svg, /<path d="M[\d.,\sLQZ-]+" fill="#49a3b0" class="bar-seg">/); // top segment gets a rounded-top cap
   assert.equal((svg.match(/class="bar-hover"/g) || []).length, 1); // plus a transparent hover overlay
   assert.match(svg, /fill="#cc7c5e"/);
-  assert.match(svg, /<title>total 15<\/title>/);
+  assert.match(svg, /<desc>total 15<\/desc>/);
 });
 
 test('barsChartSvg always emits a data-indexed hover target and draws y-axis ticks on request', () => {
@@ -129,7 +137,7 @@ test('barsChartSvg always emits a data-indexed hover target and draws y-axis tic
   assert.match(plain, /class="bar-hover"/);
   assert.match(plain, /data-i="0"/);
   assert.match(plain, /data-i="1"/);
-  assert.doesNotMatch(plain, /<title>/);
+  assert.doesNotMatch(plain, /<desc>/);
   // yTicks -> gridlines + y-axis labels.
   const withAxis = barsChartSvg(model, { colorFor: () => '#fff', yTicks: 4, formatTick: (v) => `${v}` });
   assert.equal((withAxis.match(/class="grid-line"/g) || []).length, 5); // 0..4 inclusive
@@ -146,7 +154,7 @@ test('candleChartSvg marks up/down candles and splits each wick from the body mi
   assert.match(svg, /class="candle-stack" data-motion-key="2026-06-01"/);
   assert.match(svg, /candle-wick candle-wick-high candle-up/);
   assert.match(svg, /candle-wick candle-wick-low candle-up/);
-  assert.match(svg, /<title>o10c30<\/title>/);
+  assert.match(svg, /<desc>o10c30<\/desc>/);
 });
 
 test('contribHeatmap spans a fixed window when startDate/endDate are given', () => {
@@ -166,7 +174,7 @@ test('heatmapSvg colors cells by intensity level class', () => {
   assert.match(svg, /heat lvl-4/);
   assert.match(svg, /heat lvl-0/);
   assert.match(svg, /data-d="2026-06-01"/); // drives the custom hover tooltip
-  assert.match(svg, /<title>2026-06-01<\/title>/);
+  assert.match(svg, /<desc>2026-06-01<\/desc>/);
 });
 
 test('heatmapSvg can hide entry cells in the initial SVG markup', () => {

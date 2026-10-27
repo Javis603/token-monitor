@@ -301,6 +301,14 @@ function assertAccountForm(entry, form) {
   if (Object.keys(form.messages || {}).some((key) => !FORM_MESSAGE_KEYS.has(key))) fail('unknown message override');
   if (form.kind === 'custom') return;
   const blocks = [...form.top, ...form.manual];
+  if (form.credentialChoice) {
+    const { key, fields } = form.credentialChoice;
+    if (!key || declared.has(key) || !fields?.length || new Set(fields).size !== fields.length) fail('invalid credential choice');
+    for (const key of fields) {
+      if (!form.fields.some((field) => field.key === key && field.secret && (field.labelKey || field.ariaLabelKey))) fail(`invalid credential choice field ${key}`);
+    }
+  }
+  if (blocks.some((block) => block.whenCredential && !form.credentialChoice?.fields.includes(block.whenCredential))) fail('unknown conditional credential');
   const placed = blocks.filter((block) => block.field).map((block) => block.field);
   if (placed.length !== form.fields.length || form.fields.some((field) => !placed.includes(field.key))) {
     fail('every field must be placed exactly once');
@@ -337,6 +345,8 @@ function limitAccountFormsForRenderer() {
       top: form.top,
       manual: form.manual,
       openUrl: form.openUrl,
+      ...(form.credentialChoice ? { credentialChoice: form.credentialChoice } : {}),
+      ...(form.multipleAccounts ? { multipleAccounts: true } : {}),
       ...(form.messages ? { messages: form.messages } : {}),
       status: { configuredKey, sourceKey, pendingKey }
     }))];

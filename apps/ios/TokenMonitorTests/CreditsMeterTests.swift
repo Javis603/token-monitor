@@ -3,6 +3,19 @@ import Testing
 @testable import TokenMonitor
 
 struct CreditsMeterTests {
+    @Test func ollamaIncludedCreditsRetainMeterButWalletsHaveNoInferredQuota() throws {
+        let provider = try JSONDecoder().decode(LimitProvider.self, from: Data(#"{"provider":"ollama","balance":{"amount":20,"currency":"USD","monthSpend":80},"windows":[{"kind":"billing","metric":"credits","label":"Included credits","remaining":5,"remainingPercent":25,"showMeter":true},{"kind":"billing","metric":"credits","label":"Credit balance","remaining":20,"showMeter":false}]}"#.utf8))
+        let windows = try #require(provider.windows)
+        #expect(provider.remainingPercent(for: windows[0]) == 25)
+        #expect(provider.remainingPercent(for: windows[1]) == nil)
+        let stats = try JSONDecoder().decode(HubStats.self, from: Data(#"{"limits":{"providers":[{"provider":"ollama","balance":{"amount":20,"monthSpend":80},"windows":[{"metric":"credits","remaining":20,"showMeter":false}]}]}}"#.utf8))
+        let projected = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: .empty)
+        #expect(projected.limits.first?.windows.first?.remainingPercent == nil)
+        #expect(projected.limits.first?.windows.first?.amount == 20)
+        let sub2api = try JSONDecoder().decode(LimitProvider.self, from: Data(#"{"provider":"thirdparty","balance":{"amount":20,"monthSpend":80},"windows":[{"metric":"credits","remaining":20,"showMeter":false}]}"#.utf8))
+        #expect(sub2api.remainingPercent(for: try #require(sub2api.windows?.first)) == 20)
+    }
+
     @Test
     func derivesTopUpBalanceMeterFromCurrentFundsAndMonthSpend() {
         let window = LimitWindow(

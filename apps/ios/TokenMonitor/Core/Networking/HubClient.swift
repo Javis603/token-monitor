@@ -121,7 +121,7 @@ actor HubClient: HubDataClient, LiveActivityClient {
     ) -> AsyncThrowingStream<HubStats, any Error> {
         var request = request(path: "api/stats/stream", configuration: configuration)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        request.setValue("2", forHTTPHeaderField: "x-token-monitor-stream")
+        request.setValue("3", forHTTPHeaderField: "x-token-monitor-stream")
         let session = session
 
         return AsyncThrowingStream(bufferingPolicy: .bufferingNewest(1)) { continuation in

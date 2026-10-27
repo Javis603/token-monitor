@@ -305,6 +305,7 @@ enum ActivityPalette {
         case "kilo", "kilocode": rgb(0xf8f676)
         case "commandcode": rgb(0x8c4edd)
         case "muse": rgb(0x0866ff)
+        case "senpi": rgb(0x00d4ff)
         case "codebuddy": rgb(0x6c4dff)
         case "workbuddy": rgb(0x0dc8a5)
         case "cherrystudio": rgb(0xea5e5d)

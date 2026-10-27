@@ -72,6 +72,10 @@ The icon-only native tab bar provides Overview, Limits, Sessions, Insights and S
 
 The Sessions screen shows bounded today/month summaries from authenticated Hub stats, with tool, model and project search. It does not fetch conversation transcripts. Canonical titles appear only if the sending device and Hub have enabled title sync. Omitted session detail is disclosed while aggregate totals remain complete.
 
+Codex and Claude rows show the recorded reasoning effort beside the model, including grouped conversations, without tying that setting to context/cache expiry. Senpi uses the Desktop artwork, and Muse Code follows the shared provider order. New provider accounts and quota windows remain driven by Hub data; configure their credentials in Desktop or the collector.
+
+The app requests SSE stream v3 and applies session observation clocks to existing aggregate and device sessions without replacing their state, usage or transcript timestamps. Older Hubs retain their full-snapshot fallback. Ollama wallet balances stay monetary without an inferred quota meter, while included credits retain their reported percentage.
+
 Untitled session rows put the tool and model on the same first line, matching the desktop fallback. The optional live speed beside the Overview brand mark uses differences in each device's timed output and timed duration between Hub frames. It is separate from the period's average speed: without consecutive timed samples it shows a dash, and an idle reading dims before clearing.
 
 ## Distribution preparation

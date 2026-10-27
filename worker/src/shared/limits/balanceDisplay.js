@@ -65,11 +65,12 @@
   // total) use it; otherwise visualize the balance against this month's
   // inferred starting funds: current / (current + observed month spend).
   // Display-only — this number is deliberately never written to the wire.
-  function creditsMeterPercent(provider, window) {
+  function creditsMeterPercent(provider, window, { inferBalance = true } = {}) {
     const used = finiteNumber(window?.usedPercent);
     if (used !== null) return clampPercent(100 - used);
     const remaining = finiteNumber(window?.remainingPercent);
     if (remaining !== null) return clampPercent(remaining);
+    if (!inferBalance) return null;
     const amount = creditsAmount(provider, window);
     if (amount === null) return null;
     const funds = Math.max(0, amount);

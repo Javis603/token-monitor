@@ -53,6 +53,7 @@ nonisolated struct SSEDecoder {
                 for key in ["updatedAt", "staleAfterMs"] {
                     if let value = stats[key], !(value is NSNull) { current[key] = value }
                 }
+                Self.applyActivityClocks(to: &current, clocks: stats["sessionActivityObservedAt"])
                 if let patch = stats["limits"] as? [String: Any] {
                     var limits = current["limits"] as? [String: Any] ?? [:]
                     if let value = patch["updatedAt"] { limits["updatedAt"] = value }
@@ -67,6 +68,12 @@ nonisolated struct SSEDecoder {
                     var merged = device
                     for key in ["updatedAt", "receivedAt", "ageMs", "stale"] {
                         if let value = patch[key] { merged[key] = value }
+                    }
+                    Self.applyActivityClocks(to: &merged, clocks: patch["sessionActivityObservedAt"])
+                    if let observedAt = patch["clientHealthObservedAt"] as? String,
+                       var health = merged["clientHealth"] as? [String: Any] {
+                        health["observedAt"] = observedAt
+                        merged["clientHealth"] = health
                     }
                     return merged
                 }
@@ -85,5 +92,27 @@ nonisolated struct SSEDecoder {
         guard eventBytes <= Self.maximumEventBytes else { throw HubClientError.invalidResponse }
         dataLines.append(value)
         return nil
+    }
+
+    /// Stream v3 moves only observation clocks out of full snapshots. A clock
+    /// patch cannot create a session, renew transcript activity, or change state.
+    private static func applyActivityClocks(to stats: inout [String: Any], clocks: Any?) {
+        guard let clocks = clocks as? [String: [String: Any]],
+              var periods = stats["periods"] as? [String: [String: Any]] else { return }
+        for (name, updates) in clocks {
+            guard var period = periods[name],
+                  var sessions = period["sessions"] as? [String: [String: Any]] else { continue }
+            for (key, value) in updates {
+                guard let observedAt = value as? String, Date.hubTimestamp(from: observedAt) != nil,
+                      var session = sessions[key],
+                      var activity = session["liveActivity"] as? [String: Any] else { continue }
+                activity["observedAt"] = observedAt
+                session["liveActivity"] = activity
+                sessions[key] = session
+            }
+            period["sessions"] = sessions
+            periods[name] = period
+        }
+        stats["periods"] = periods
     }
 }

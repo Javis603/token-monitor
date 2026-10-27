@@ -1365,7 +1365,7 @@
         current.items.forEach((item) => {
           const itemEl = button('tray-composer-item', '');
           itemEl.dataset.itemId = item.id;
-          itemEl.title = itemTitle(item);
+          itemEl.setAttribute('aria-label', itemTitle(item));
           itemEl.setAttribute('aria-label', `${itemTitle(item)}. ${l('trayComposer.itemHint', 'Drag to reorder; click to configure.')}`);
           itemEl.classList.toggle('selected', selectedId === item.id);
           itemEl.classList.toggle('is-spacer', item.type === 'spacer');

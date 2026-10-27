@@ -60,6 +60,37 @@ test('random identity survives CredentialStore reload, compares private credenti
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('a failed destination identity write cannot become cached or discard pending cleanup', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-content-identity-failure-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = new CredentialStore(dir);
+  const queue = createSyncContentCredentialQueue(() => store);
+  const previous = { mode: 'client', url: 'https://old.example', secret: 'old-secret', deviceId: 'one' };
+  previous.identity = queue.resolveIdentity(previous);
+  queue.save(previous);
+  const document = store.readDocument();
+  const replacement = { ...previous, url: 'https://new.example', secret: 'new-secret' };
+  const failure = Object.assign(new Error('identity write denied'), { code: 'EACCES' });
+  const writeDocument = store.writeDocument.bind(store);
+  let writes = 0;
+  t.mock.method(store, 'writeDocument', (next) => {
+    writes += 1;
+    if (writes === 1) throw failure;
+    return writeDocument(next);
+  });
+
+  assert.throws(() => queue.resolveIdentity(replacement), (error) => error === failure);
+  assert.deepEqual(new CredentialStore(dir).readDocument(), document);
+  assert.deepEqual(queue.read(), [[previous.identity, previous]]);
+
+  const identity = queue.resolveIdentity(replacement);
+  assert.equal(writes, 2, 'retry must persist an identity rather than return an uncommitted cached ID');
+  assert.notEqual(identity, previous.identity);
+  const reloaded = createSyncContentCredentialQueue(() => new CredentialStore(dir));
+  assert.equal(reloaded.resolveIdentity(replacement), identity);
+  assert.deepEqual(reloaded.read(), [[previous.identity, previous]]);
+});
+
 test('legacy cleanup journal migrates to random IDs privately and survives immediate restart', () => {
   let document = { version: 1, credentials: { hub: { syncTitleCleanup: { ['a'.repeat(64)]: {
     mode: 'client', url: 'https://old.example', secret: 'private', deviceId: 'one'

@@ -31,12 +31,19 @@ class Element {
   }
   replaceChildren(...nodes) { this.children.forEach(node => { node.parent = null; }); this.children = []; this.append(...nodes); }
   setAttribute(key, value) { this.attributes[key] = String(value); }
+  getAttribute(key) { return this.attributes[key]; }
   removeAttribute(key) { delete this.attributes[key]; }
   addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); }
   fire(name, event = {}) { for (const fn of this.listeners[name] || []) fn(event); }
   scrollTo({ left }) { this.scrollLeft = left; this.fire('scroll'); }
   // Every child is laid out 40 units after the previous one.
   get parentNode() { return this.parent || null; }
+  closest(selector) {
+    for (let node = this; node; node = node.parentNode) {
+      if (node.classList.contains(selector.slice(1))) return node;
+    }
+    return null;
+  }
   get offsetLeft() { return this.parent ? this.parent.children.indexOf(this) * 40 : 0; }
   contains(node) { return this === node || this.children.some(child => child.contains(node)); }
   focus() {
@@ -61,6 +68,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   const document = { activeElement: null };
   document.createElementNS = (_ns, tag) => new Element(tag, document);
   document.createElement = (tag) => new Element(tag, document);
+  document.createTextNode = value => { const node = new Element('#text', document); node.textContent = value; return node; };
   const el = (tag, className = '', value) => {
     const node = new Element(tag, document); node.className = className;
     if (value !== undefined) node.textContent = value;
@@ -68,9 +76,12 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   };
   const rolls = [], settled = [];
   const resizeObservers = [];
+  const pageEvents = new EventTarget();
+  let scrollListener = null;
+  const pageHide = () => pageEvents.dispatchEvent(new Event('pagehide'));
   const window = {
-    addEventListener() {},
-    getComputedStyle: () => ({ columnGap: '40px' }),
+    addEventListener: (...args) => pageEvents.addEventListener(...args),
+    getComputedStyle: () => ({ width: '600px', columnGap: '40px', getPropertyValue: name => name === '--notch-page-gap' ? '40px' : '' }),
     ResizeObserver: class {
       constructor(callback) { this.callback = callback; resizeObservers.push(this); }
       observe(node) { this.node = node; }
@@ -146,7 +157,9 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
     el, shared.formatCost, (key, params) => i18n.translate(state.locale, key, params), shared.formatCardTokens, shared.limitWindowsView
   );
   const deps = { document, window, el, t: (key, params) => i18n.translate(state.locale, key, params), state,
-    bridge: { toggleRateMode() {}, onAnimate() {}, onMotion() {} }, shared };
+    bridge: { toggleRateMode() {}, onAnimate() {}, onMotion() {},
+      onScroll(callback) { scrollListener = callback; return () => { scrollListener = null; }; }
+    }, shared };
   let panel;
   if (viaRenderer) {
     // Exercise the real dependency handoff instead of giving the panel helpers
@@ -160,8 +173,10 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
         shared: { ...shared, el, t: deps.t } });
     } finally { global.ResizeObserver = previousObserver; }
   } else panel = createNotchPanel(deps);
-  t.after(() => panel.suspend());
-  return { panel, document, state, settings, rolls, settled, el, overflowText,
+  t.after(pageHide);
+  return { panel, document, state, settings, rolls, settled, el, overflowText, pageHide,
+    scroll: record => scrollListener?.(record),
+    get scrollSubscribed() { return scrollListener !== null; },
     resize: () => resizeObservers.forEach(observer => { if (observer.node) observer.callback(); }),
     find: className => panel.node.querySelector(`.${className}`),
     all: className => panel.node.querySelectorAll(`.${className}`) };

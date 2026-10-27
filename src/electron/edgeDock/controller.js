@@ -28,6 +28,8 @@ const {
   scaledEdgeDockMetrics
 } = require('./geometry');
 const { shapeRectsFromPolygons } = require('./mask');
+const { normalizeWindowsDockBackdropMode } = require('../windowsBackdropMode');
+const { normalizeEdgeDockBackdropMode } = require('../macBackdropMode');
 const { bubbleCommands, peekCommands, railCommands, refreshCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
 
 const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
@@ -58,8 +60,8 @@ function canUseEdgeDock(settings = {}, platform = process.platform) {
 // Every surface is a frameless window whose silhouette (rail shoulders, card
 // tail) is drawn by the renderer from edgeDockShapes.js. On macOS the native
 // material behind it is clipped to the same silhouette through a mask. Windows
-// uses a transparent shaped window and lets the renderer paint the tint: both
-// DWM backdrop APIs paint the full BrowserWindow rectangle despite setShape().
+// uses a separate, geometrically clipped HostBackdrop underlay: the HWND-wide
+// Acrylic/Accent APIs cannot follow the concave outline.
 function createEdgeDockController(deps) {
   const {
     BrowserWindow,
@@ -75,6 +77,7 @@ function createEdgeDockController(deps) {
     // null for the classic masked vibrancy.
     liquidGlass = () => null,
     createGlass,
+    windowsBackdrop,
     prefersReducedMotion = () => false,
     onPlacementChange,
     applyShapeMask,
@@ -95,6 +98,7 @@ function createEdgeDockController(deps) {
   const ready = { peek: false, rail: false, bubble: false };
   const visibleTargets = { peek: false, rail: false, bubble: false };
   const fades = new Map();
+  const backdrops = new Map();
   const intent = createEdgeDockIntent();
   let running = false;
   let pollTimer = null;
@@ -111,6 +115,7 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleVisible = false;
   let railVisible = false;
+  let pointerOnRail = false;
   const refreshHapticTarget = Symbol('refresh');
   let hapticTarget = null;
   // How many times the rail has been revealed, as an event the page can key the
@@ -308,11 +313,20 @@ function createEdgeDockController(deps) {
     fades.delete(win);
   }
 
+  function setOpacity(win, opacity) {
+    win.setOpacity(opacity);
+    backdrops.get(win)?.setOpacity(opacity);
+  }
+
+  function reorderBackdrops() {
+    for (const backdrop of backdrops.values()) backdrop.reorder();
+  }
+
   function fade(win, to, duration, done) {
     if (!alive(win)) return;
     cancelFade(win);
     if (prefersReducedMotion() || duration <= 0) {
-      win.setOpacity(to);
+      setOpacity(win, to);
       done?.();
       return;
     }
@@ -324,7 +338,7 @@ function createEdgeDockController(deps) {
       step += 1;
       const t = step / steps;
       const eased = 1 - Math.pow(1 - t, 3);
-      win.setOpacity(from + (to - from) * eased);
+      setOpacity(win, from + (to - from) * eased);
       if (step >= steps) {
         cancelFade(win);
         done?.();
@@ -345,7 +359,7 @@ function createEdgeDockController(deps) {
     if (surface === 'peek') setPeekIgnoresMouse(win, ignore, visible);
     else win.setIgnoreMouseEvents(ignore);
     if (!win.isVisible()) {
-      win.setOpacity(0);
+      setOpacity(win, 0);
       win.showInactive();
       // Reassert native topmost and taskbar exclusion after showInactive. The
       // floating level can be demoted when Electron moves the HWND behind a
@@ -356,11 +370,10 @@ function createEdgeDockController(deps) {
         win.setAlwaysOnTop(true, 'pop-up-menu');
       }
     } else if (platform === 'win32' && revealing) {
-      // Opacity-only reveals never show the HWND again. After desktop restore,
-      // Windows can retain WS_EX_TOPMOST while stacking it behind ordinary
-      // windows. Reapply native ordering on each reveal, even if the flag is
-      // still true, without repeatedly raising it during a steady hover.
-      win.setAlwaysOnTop(true, 'pop-up-menu');
+      // Restoring only the newly revealed card leaves an already-visible rail
+      // behind other windows. Repair the visible Dock together, even when its
+      // HWNDs still report topmost, preserving the card/refresh stacking.
+      restoreWindowsTopmost(true);
     }
     // The nested refresh circle overlaps the rail's transparent shoulder, but
     // macOS still hit-tests that rail rectangle. Keep the action above it,
@@ -370,6 +383,7 @@ function createEdgeDockController(deps) {
       windows.peek?.moveTop?.();
     }
     fade(win, visible ? 1 : 0, duration);
+    if (platform === 'win32') reorderBackdrops();
   }
 
   // The handle's own visibility, kept beside the fade it drives: the page plays the
@@ -541,9 +555,8 @@ function createEdgeDockController(deps) {
       // window has no shape-aware shadow to offer.
       hasShadow: macMaterial,
       backgroundColor: '#00000000',
-      // DWM's Acrylic and Accent policies both paint the full native rectangle
-      // even after Electron applies a shaped region. Windows therefore keeps
-      // the transparent renderer-backed surface used by the no-glass mode.
+      // Windows keeps the content transparent over its native underlay. Its
+      // region owns hit testing; the helper clips the actual backdrop visual.
       transparent: true,
       // `type: 'toolbar'` sets WS_EX_TOOLWINDOW on the native HWND. Without it,
       // the three always-shown surfaces are unowned top-level windows that
@@ -567,6 +580,18 @@ function createEdgeDockController(deps) {
       }
     });
     if (win32 || mac) installNonActivatingInput(win);
+    if (materialKey === 'win-host') {
+      try {
+        const backdrop = windowsBackdrop.attach(win, (enabled) => {
+          if (windows[surface] !== win) return;
+          nativeMaterial[surface] = enabled;
+          render(surface);
+        });
+        backdrops.set(win, backdrop);
+      } catch (error) {
+        logger(`[edge-dock] ${surface} HostBackdrop unavailable: ${error.message}`);
+      }
+    }
     if (mac) {
       win.setAlwaysOnTop(true, 'floating');
       win.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
@@ -590,6 +615,8 @@ function createEdgeDockController(deps) {
     });
     win.on('closed', () => {
       cancelFade(win);
+      backdrops.get(win)?.dispose();
+      backdrops.delete(win);
       if (windows[surface] === win) disposeGlass(surface, { windowClosed: true });
       if (windows[surface] === win) {
         windows[surface] = null;
@@ -630,6 +657,8 @@ function createEdgeDockController(deps) {
   function destroyWindows() {
     for (const surface of SURFACES) {
       const win = windows[surface];
+      backdrops.get(win)?.dispose();
+      backdrops.delete(win);
       windows[surface] = null;
       ready[surface] = false;
       visibleTargets[surface] = false;
@@ -641,6 +670,7 @@ function createEdgeDockController(deps) {
       }
     }
     railVisible = false;
+    pointerOnRail = false;
     peeking = false;
     peekNear = false;
     pointerOnHandle = false;
@@ -711,6 +741,7 @@ function createEdgeDockController(deps) {
     const closed = Array.isArray(built) ? built : built.closed;
     const outline = Array.isArray(built) ? built : built.outline;
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline) };
+    backdrops.get(win)?.update({ key, commands: closed });
     if (glasses[surface] && (surface !== 'peek' || peekMode === 'refresh') && shapeGlass(surface, closed, width, height)) {
       // Shaped Liquid Glass needs no mask.
     } else if (builtGlass && platform === 'darwin' && nativeMaterial[surface]) {
@@ -745,9 +776,13 @@ function createEdgeDockController(deps) {
   }
 
   function buildWindows() {
-    const glass = Boolean(nativeGlass());
-    const materialKey = !glass || platform !== 'darwin' ? 'none'
-      : liquidGlass() && createGlass ? 'mac-glass' : 'mac';
+    const ownStyle = platform === 'win32' ? normalizeWindowsDockBackdropMode(settings().edgeDockWindowsBackdrop)
+      : platform === 'darwin' ? normalizeEdgeDockBackdropMode(settings().edgeDockMacBackdrop) : 'inherit';
+    // An explicit dock style overrides System Glass either way; inherit follows it.
+    const glass = ownStyle === 'inherit' ? Boolean(nativeGlass()) : ownStyle !== 'transparent';
+    const materialKey = !glass ? 'none'
+      : platform === 'win32' ? (windowsBackdrop ? 'win-host' : 'none')
+        : platform === 'darwin' ? (liquidGlass() && createGlass ? 'mac-glass' : 'mac') : 'none';
     if (builtMaterial === materialKey && SURFACES.every((surface) => alive(windows[surface]))) return;
     destroyWindows();
     builtMaterial = materialKey;
@@ -1003,6 +1038,8 @@ function createEdgeDockController(deps) {
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
           cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length, metrics()) : null
         };
+        const enteredRail = input.inRail && !pointerOnRail;
+        pointerOnRail = input.inRail;
         // The refresh action shares the readouts' enter-once hover feedback.
         const hoveredTarget = inRefresh
           ? (!peekPaintPending && settings().edgeDockRefreshEnabled === true && canRefreshLimits() === true
@@ -1016,6 +1053,9 @@ function createEdgeDockController(deps) {
         applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
         refreshHovered = input.inRail || input.inBubble || input.inCorridor;
         syncRefresh(current);
+        // An always-visible rail has no reveal transition of its own. Recover
+        // on entry (including a return from its card), never on every poll.
+        if (platform === 'win32' && revealed && enteredRail) restoreWindowsTopmost(true);
       }
     } catch (error) {
       logger(`[edge-dock] poll failed: ${error.message}`);
@@ -1246,15 +1286,15 @@ function createEdgeDockController(deps) {
     schedulePoll();
   }
 
-  // These windows stay shown at opacity zero between reveals. Desktop restore
-  // can leave them behind ordinary windows, including after resume has fired
-  // but before the user unlocks. Repair both events, including open surfaces.
-  // Restore the native level and stacking without changing content or focus.
-  function restoreWindowsTopmost() {
+  // Opacity-only surfaces can retain their topmost flags while their ordering
+  // is stale. Power events repair all HWNDs; reveals and rail entry repair the
+  // visible group without changing content, visibility or focus.
+  function restoreWindowsTopmost(visibleOnly = false) {
     if (!running) return;
     // The refresh button uses peek and must stay above the rail's shoulder.
     const surfaces = refreshVisible && !peekPaintPending ? ['rail', 'bubble', 'peek'] : SURFACES;
     for (const surface of surfaces) {
+      if (visibleOnly && !visibleTargets[surface]) continue;
       const win = windows[surface];
       if (!alive(win)) continue;
       try {
@@ -1263,6 +1303,7 @@ function createEdgeDockController(deps) {
         logger(`[edge-dock] ${surface} topmost restore failed: ${error.message}`);
       }
     }
+    reorderBackdrops();
   }
 
   function onWake() {

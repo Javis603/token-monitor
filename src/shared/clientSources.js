@@ -20,6 +20,7 @@ const {
   devinCliDbDirs,
   devinDesktopAcpDirs
 } = require('./providers/devin/paths');
+const { senpiWatchSources } = require('./providers/senpi/paths');
 
 // Windows only: libuv asserts that the filename ReadDirectoryChangesW hands
 // back starts with the directory string it was given, and calls abort() when it
@@ -313,6 +314,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // rather than inventing an env override the scan does not honor.
   add('pi', ...simpleHostSourceRoots('pi', home));
   add('omp', ...simpleHostSourceRoots('omp', home));
+  if (enabled.has('senpi')) add('senpi', ...(options.senpiSources || senpiWatchSources({ ...options, homeDir: home, env, platform })).roots);
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
   // cfg(macos)/cfg(windows) blocks) — watch all three so native mac/win users get
@@ -399,9 +401,15 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')],
     ['workbuddy-projects', path.join(home, '.workbuddy-ai', 'projects')]
   );
-  // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl. The fork
-  // parses it from tokscale's effective home, like the Qoder CN paths below.
-  add('proma', ['proma-sessions', path.join(tokscaleHome, '.proma', 'agent-sessions')]);
+  // Proma — tokscale reads the Agent journals and both SDK transcript trees of
+  // the release (.proma) and dev (.proma-dev) homes under its effective home.
+  // The optional agent-sessions.json index beside them is linking metadata,
+  // not usage, and is left to the periodic full tick rather than watching the
+  // whole home with its config and credentials.
+  add('proma', ...['.proma', '.proma-dev'].flatMap((base) => (
+    ['agent-sessions', path.join('sdk-config', 'sessions'), path.join('sdk-config', 'projects')]
+      .map((dir) => ['proma-sessions', path.join(tokscaleHome, base, dir)])
+  )));
   if (enabled.has('catpaw')) {
     const catpaw = catpawDataSources({ ...options, platform, env });
     add('catpaw',

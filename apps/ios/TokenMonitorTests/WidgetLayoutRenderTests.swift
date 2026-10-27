@@ -144,6 +144,38 @@ struct WidgetLayoutRenderTests {
         }
     }
 
+    @Test func newSessionMetadataRendersAtPhoneAndAccessibilitySizes() throws {
+        let sessions = try JSONDecoder().decode([String: SessionUsage].self, from: Data(#"{"codex:main":{"client":"codex","sessionId":"main","title":"Inspect the latest Hub stream","models":{"gpt-6.1":400},"totalTokens":400,"costUsd":0.01,"reasoningEffort":"xhigh","lastUsedAt":"2026-10-28T00:00:00Z"},"codex:child":{"client":"codex","sessionId":"child","parentSessionId":"main","models":{"gpt-6.1":100},"totalTokens":100,"costUsd":0.01,"reasoningEffort":"low","lastUsedAt":"2026-10-27T23:59:00Z"},"claude:solo":{"client":"claude","sessionId":"solo","models":{"claude-opus":300},"totalTokens":300,"costUsd":0.01,"reasoningEffort":"high","lastUsedAt":"2026-10-27T23:00:00Z"},"senpi:a":{"client":"senpi","sessionId":"a","models":{"gpt-6.1":200},"totalTokens":200,"costUsd":0.01}}"#.utf8))
+        let now = try #require(Date.hubTimestamp(from: "2026-10-28T00:20:00Z"))
+        let entries = SessionListEntry.rows(sessions, now: now)
+        #expect(entries.first?.session?.displayReasoningEffort == "xhigh")
+        let suite = "SessionMetadataRender-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferences(defaults: defaults, snapshotStore: .init(fileURL: nil))
+        for accessibility in [false, true] {
+            for dark in [false, true] {
+                let content = VStack(alignment: .leading, spacing: 20) {
+                    ForEach(entries) { entry in
+                        if entry.isSessionGroup {
+                            SessionGroupRow(entry: entry, maximum: 500, now: now)
+                        } else if let session = entry.session {
+                            SessionRow(session: session, sessionKey: entry.id, maximum: 500, now: now)
+                        }
+                    }
+                }
+                .padding(20).frame(width: 350).background(.background)
+                .environment(preferences)
+                .environment(\.dynamicTypeSize, accessibility ? .accessibility2 : .large)
+                .environment(\.colorScheme, dark ? .dark : .light)
+                let renderer = ImageRenderer(content: content)
+                renderer.scale = 3
+                let image = try #require(renderer.uiImage)
+                write(image, name: "main-sync-sessions-\(dark ? "dark" : "light")-\(accessibility ? "accessibility" : "phone")")
+            }
+        }
+    }
+
     @Test func emptySnapshotAndStaleVariantsRender() {
         for content in ["overview", "limits", "activity"] {
             check(

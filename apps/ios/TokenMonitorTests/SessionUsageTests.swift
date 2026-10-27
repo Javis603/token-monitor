@@ -3,6 +3,25 @@ import Testing
 @testable import TokenMonitor
 
 struct SessionUsageTests {
+    @Test func reasoningEffortPersistsWithoutContextOrCacheAndUsesCanonicalBounds() throws {
+        for client in ["codex", "claude"] {
+            for effort in ["high", "xhigh", "max", "None", "custom_1", String(repeating: "a", count: 32)] {
+                let data: [String: Any] = ["client": client, "reasoningEffort": "  \(effort)  ", "archived": true]
+                let session = try JSONDecoder().decode(SessionUsage.self, from: JSONSerialization.data(withJSONObject: data))
+                #expect(session.displayReasoningEffort == effort)
+                #expect(session.contextUsedPercent(at: .now) == nil)
+                #expect(session.cacheMinutesRemaining(at: .now) == nil)
+            }
+            for effort in ["", "unknown", "UNKNOWN", "bad value", "1high", "high\nother", "éffort", String(repeating: "a", count: 33)] {
+                let session = try JSONDecoder().decode(SessionUsage.self, from: JSONSerialization.data(withJSONObject: ["client": client, "reasoningEffort": effort]))
+                #expect(session.displayReasoningEffort == nil)
+            }
+        }
+        #expect(try decode(#"{"client":"cursor","reasoningEffort":"high"}"#).displayReasoningEffort == nil)
+        #expect(try decode(#"{"client":"codex","reasoningEffort":null}"#).displayReasoningEffort == nil)
+        #expect(try decode(#"{"client":"claude"}"#).displayReasoningEffort == nil)
+    }
+
     @Test func capsSpeedAtMeasuredOutputAndKeepsAbsentDurationsUnknown() throws {
         let value = try decode(#"{"totalTokens":100,"outputTokens":20,"timedOutputTokens":50,"timedDurationMs":2000}"#)
         #expect(value.outputTokensPerSecond == 10)

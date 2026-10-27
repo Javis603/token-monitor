@@ -263,20 +263,19 @@ test('Claude prepaid balance copy points to its merged provider panel', () => {
   assert.doesNotMatch(translate('ja', 'settings.limits.prepaidBalanceDesc'), /Claudeアカウント/);
 });
 
-test('applyTranslations updates text, title, aria-label, placeholders, and document lang', () => {
+test('applyTranslations updates accessible names without native tooltips', () => {
   const title = fakeElement({ i18n: 'settings.sync.title' });
-  const button = fakeElement({ i18nTitle: 'settings.sync.copySecret' });
+  const button = fakeElement({ i18nAriaLabel: 'settings.sync.copySecret' });
   const dismiss = fakeElement({ i18nAriaLabel: 'settings.appUpdate.dismiss' });
   const input = fakeElement({ i18nPlaceholder: 'settings.sync.secretPlaceholder' });
-  const paste = fakeElement({ i18nTitle: 'settings.sync.pasteSecret', i18nAriaLabel: 'settings.sync.pasteSecret' });
+  const paste = fakeElement({ i18nAriaLabel: 'settings.sync.pasteSecret' });
   const langOption = fakeElement({ i18n: 'settings.language.zhTW' });
   const documentElement = fakeElement();
   const root = {
     documentElement,
     querySelectorAll(selector) {
       if (selector === '[data-i18n]') return [title, langOption];
-      if (selector === '[data-i18n-title]') return [button, paste];
-      if (selector === '[data-i18n-aria-label]') return [dismiss, paste];
+      if (selector === '[data-i18n-aria-label]') return [button, dismiss, paste];
       if (selector === '[data-i18n-placeholder]') return [input];
       return [];
     }
@@ -285,8 +284,9 @@ test('applyTranslations updates text, title, aria-label, placeholders, and docum
   applyTranslations(root, 'zh-TW');
 
   assert.equal(title.textContent, '多裝置同步');
-  assert.equal(button.title, '複製密鑰');
-  assert.equal(paste.title, '貼上密鑰');
+  assert.equal(button.getAttribute('aria-label'), '複製密鑰');
+  assert.equal(button.getAttribute('title'), undefined);
+  assert.equal(paste.getAttribute('title'), undefined);
   assert.equal(paste.getAttribute('aria-label'), '貼上密鑰');
   assert.equal(dismiss.getAttribute('aria-label'), '忽略此版本');
   assert.equal(input.placeholder, '選填的共享密鑰');
@@ -333,8 +333,8 @@ test('Notch settings and shared labels are present in every bundled locale', () 
   const fs = require('node:fs');
   const path = require('node:path');
   const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
-  const notch = html.split('id="notchFeature"')[1].split('id="tokscaleGroup"')[0];
-  const keys = [...new Set(['settings.advanced.experimental', 'settings.notch.experimentalNote',
+  const notch = html.split('id="notchFeature"')[1].split('id="floatingBubbleOptions"')[0];
+  const keys = [...new Set(['settings.notch.title',
     'settings.notch.accountTitle', 'settings.notch.summaryModeNote',
     ...['sessions', 'tray', 'custom'].map(mode => `settings.notch.summaryMode.${mode}Note`),
     ...[...notch.matchAll(/data-i18n="([^"]+)"/g)].map(match => match[1])])];

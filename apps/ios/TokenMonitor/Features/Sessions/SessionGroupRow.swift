@@ -50,7 +50,7 @@ struct SessionGroupRow: View {
 
     /// Tool and model joined for one line — the group's merged model readout.
     private var identity: String {
-        ([clientName, modelLabel].compactMap { $0 }).joined(separator: " · ")
+        ([clientName, modelLabel, display?.displayReasoningEffort].compactMap { $0 }).joined(separator: " · ")
     }
 
     /// The line under the title: `client · model · N subagents` for a titled
@@ -91,7 +91,7 @@ struct SessionGroupRow: View {
                             .lineLimit(1).truncationMode(.tail)
                         if hasSubtitle {
                             subtitle.font(.caption2).foregroundStyle(.secondary)
-                                .lineLimit(1).truncationMode(.tail)
+                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
                         }
                         if let activity, !activity.isEmpty {
                             Text(activity).font(.caption2).foregroundStyle(.secondary)

@@ -49,6 +49,14 @@ struct LimitProviderOrderTests {
         #expect(LimitProviderOrder.ordered([provider("thirdparty"), provider("notion")], order: []).map(\.normalizedProviderID) == ["notion", "thirdparty"])
     }
 
+    @Test func museUsesDesktopCatalogOrderAndSenpiUsesBundledArtwork() {
+        #expect(LimitProviderOrder.ordered([provider("zai"), provider("muse"), provider("mimo")], order: []).map(\.normalizedProviderID) == ["mimo", "muse", "zai"])
+        #expect(LimitProviderOrder.ordered([provider("muse"), provider("claude")], order: ["muse"]).first?.provider == "muse")
+        #expect(ClientPresentation.displayName(for: "senpi") == "OmO Native")
+        #expect(ClientPresentation.assetName(for: "senpi") == "VendorSenpi")
+        #expect(WidgetPresentation.displayName(for: "muse") == "Muse Code")
+    }
+
     @Test func savedOrderWinsThenCatalogFillsIn() {
         let providers = [
             provider("claude"),

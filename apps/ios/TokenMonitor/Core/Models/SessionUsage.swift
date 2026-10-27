@@ -73,6 +73,17 @@ nonisolated struct SessionUsage: Decodable, Sendable {
     var waitingForInput: Bool? = nil
     var liveActivity: LiveSessionActivity? = nil
     var unpricedTokens: Double? = nil
+    var reasoningEffort: String? = nil
+
+    /// Persistent provider setting, independent of the context/cache leases.
+    /// Matches shared/sessionLive.normalizeReasoningEffort.
+    var displayReasoningEffort: String? {
+        guard client == "codex" || client == "claude", let reasoningEffort else { return nil }
+        let value = reasoningEffort.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.lowercased() != "unknown",
+              value.range(of: #"\A[a-zA-Z][a-zA-Z0-9_-]{0,31}\z"#, options: .regularExpression) != nil else { return nil }
+        return value
+    }
 
     func identityKey(fallback key: String) -> String {
         let id = sessionId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

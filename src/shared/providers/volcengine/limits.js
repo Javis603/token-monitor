@@ -529,7 +529,23 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
       || Object.entries(env).some(([key, value]) =>
         /^(VOLCENGINE|VOLC|DOUBAO|ARK)_.*(KEY|SECRET)/.test(key) && cleanSecret(value));
     if (explicit || env.TOKEN_MONITOR_VOLCENGINE_ARKCLI === '0') return [statusRow('notConfigured')];
-    return fetchArkcliLimits(deps, updatedAt);
+    const rows = await fetchArkcliLimits(deps, updatedAt, options.previousLimits);
+    const scope = options.limitRefreshScope?.provider === 'volcengine' ? options.limitRefreshScope : null;
+    const identity = scope && [
+      ['accountKey', scope.accountKey],
+      ['accountId', scope.accountId ?? scope.managedAccountId ?? scope.id],
+      ['accountEmail', scope.accountEmail ?? scope.email],
+      ['accountName', scope.accountName ?? scope.name],
+      ['accountLabel', scope.accountLabel]
+    ].find(([, value]) => String(value || '').trim());
+    if (!identity) return rows;
+    const [field, value] = identity;
+    const selected = rows.filter(row => String(row[field] || '').trim().toLowerCase() === String(value).trim().toLowerCase());
+    // Account-scoped dispatches bind every returned row to their target. Never
+    // return a sibling or a newly logged-in viewer under that target's identity.
+    return selected.length ? selected : [normalizeLimitProvider({
+      provider: 'volcengine', source: 'cli', status: 'unavailable', updatedAt, windows: []
+    })];
   }
 
   const tryArkFallback = async () => {

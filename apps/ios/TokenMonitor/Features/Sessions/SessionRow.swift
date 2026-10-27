@@ -37,25 +37,13 @@ struct SessionRow: View {
                                 .padding(16).frame(idealWidth: 280, maxWidth: 280, alignment: .leading)
                                 .presentationCompactAdaptation(.popover)
                         }
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text(clientName)
-                            if !session.modelEntries.isEmpty {
-                                Text("·")
-                                modelLabel
-                            }
-                        }
+                        identity
                         .font(.caption2).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.tail)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
                     } else {
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text(clientName).fixedSize(horizontal: true, vertical: false)
-                            if !session.modelEntries.isEmpty {
-                                Text("·")
-                                modelLabel
-                            }
-                        }
+                        identity
                         .font(DesignTokens.rowTitle)
-                        .lineLimit(1).truncationMode(.tail)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
                         .accessibilityElement(children: .combine)
                     }
                     Text(activity).font(.caption2).foregroundStyle(.secondary)
@@ -99,6 +87,37 @@ struct SessionRow: View {
     private var clientName: String { ClientPresentation.displayName(for: session.client ?? "unknown") }
     private var activity: String { session.activitySummary(now: now) }
 
+    @ViewBuilder private var identity: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(clientName)
+                modelLabel
+                if let effort = session.displayReasoningEffort {
+                    Text(verbatim: effort).accessibilityLabel(Text("Reasoning effort: \(effort)"))
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(clientName).fixedSize(horizontal: true, vertical: false)
+                if !session.modelEntries.isEmpty {
+                    Text("·")
+                    modelLabel
+                }
+                reasoningEffortLabel
+            }
+        }
+    }
+
+    @ViewBuilder private var reasoningEffortLabel: some View {
+        if let effort = session.displayReasoningEffort {
+            Text("·")
+            Text(verbatim: effort)
+                .accessibilityLabel(Text("Reasoning effort: \(effort)"))
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
     @ViewBuilder private var modelLabel: some View {
         if session.modelEntries.count > 1 {
             Button { showsModels = true } label: {
@@ -130,7 +149,7 @@ struct SessionRow: View {
                 .presentationCompactAdaptation(.popover)
             }
         } else if let model = session.modelEntries.first {
-            Text(model.id).lineLimit(1).truncationMode(.tail)
+            Text(model.id).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
         }
     }
 

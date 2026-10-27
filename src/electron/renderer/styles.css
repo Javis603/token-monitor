@@ -464,28 +464,28 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   width: 34px;
   isolation: isolate;
 }
-.utility-actions::before {
-  content: "";
-  position: absolute;
-  inset: 0 100% 0 auto;
-  width: 6px;
-}
+/* The shared footer container retains disclosure across gaps after entry.
+   Clip the secondary action instead of hiding its visibility so Tab can reach
+   it. The delayed clip transition also excludes it from pointer hit-testing. */
 .utility-actions .settings-icon-button {
+  clip-path: inset(-8px);
   position: relative;
   z-index: 2;
   flex: 0 0 34px;
-  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease, background 160ms ease;
+  transition: clip-path 0s var(--footer-secondary-reveal-delay, 0ms), opacity 160ms ease var(--footer-secondary-reveal-delay, 0ms), transform 180ms cubic-bezier(0.22, 1, 0.36, 1) var(--footer-secondary-reveal-delay, 0ms), border-color 160ms ease, background 160ms ease;
 }
 .utility-actions .refresh-button {
+  clip-path: inset(50%);
   position: absolute;
   right: calc(100% + 6px);
   z-index: 1;
   opacity: 0;
   pointer-events: none;
   transform: translateX(8px) scale(0.96);
-  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.25, 1, 0.5, 1), background 160ms cubic-bezier(0.25, 1, 0.5, 1), color 160ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow 160ms cubic-bezier(0.25, 1, 0.5, 1);
+  transition: clip-path 0s var(--footer-secondary-reveal-delay, 0ms), opacity 160ms ease var(--footer-secondary-reveal-delay, 0ms), transform 180ms cubic-bezier(0.22, 1, 0.36, 1) var(--footer-secondary-reveal-delay, 0ms), border-color 160ms cubic-bezier(0.25, 1, 0.5, 1), background 160ms cubic-bezier(0.25, 1, 0.5, 1), color 160ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow 160ms cubic-bezier(0.25, 1, 0.5, 1);
 }
 .utility-actions.is-swapped .settings-icon-button {
+  clip-path: inset(50%);
   position: absolute;
   right: calc(100% + 6px);
   opacity: 0;
@@ -493,6 +493,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   transform: translateX(8px) scale(0.96);
 }
 .utility-actions.is-swapped .refresh-button {
+  clip-path: inset(-8px);
   position: relative;
   right: auto;
   opacity: 1;
@@ -503,6 +504,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .utility-actions:not(.is-swapped):has(:focus-visible) .refresh-button,
 .shell.settings-open .utility-actions:not(.is-swapped) .refresh-button,
 .utility-actions .refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error) {
+  clip-path: inset(-8px);
   opacity: 1;
   pointer-events: auto;
   transform: none;
@@ -510,6 +512,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .utility-actions.is-swapped:hover .settings-icon-button,
 .utility-actions.is-swapped:has(:focus-visible) .settings-icon-button,
 .shell.settings-open .utility-actions.is-swapped .settings-icon-button {
+  clip-path: inset(-8px);
   opacity: 1;
   pointer-events: auto;
   transform: none;
@@ -1251,6 +1254,28 @@ span.settings-note.settings-item-desc {
   gap: 6px;
 }
 .managed-account-list:empty { display: none; }
+#claudeWebAccountList { container-type: inline-size; }
+.claude-web-account-row .managed-account-info {
+  max-width: none;
+}
+.claude-web-account-row .settings-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.claude-web-account-row .settings-actions button {
+  padding: 4px 6px;
+  font-size: 0.625rem;
+}
+@container (max-width: 360px) {
+  .claude-web-account-row.managed-account-row {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+  .claude-web-account-row .managed-account-right {
+    grid-column: 2;
+    justify-self: end;
+    max-width: 100%;
+  }
+}
 .codex-workspace-selection {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -3830,7 +3855,8 @@ html.is-windows .settings-panel select option {
   margin-left: 0;
   gap: 10px;
 }
-.home-limit-window:only-child {
+.home-limit-window:only-child,
+.home-limit-window-wide {
   grid-column: 1 / -1;
   max-width: none;
 }
@@ -3851,6 +3877,12 @@ html.is-windows .settings-panel select option {
 .home-limit-window .home-list-value {
   font-size: 0.625rem;
   line-height: 1.1;
+}
+.home-limit-window-value {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
 }
 .home-limit-value-low {
   color: var(--home-limit-accent, var(--yellow));
@@ -5777,8 +5809,17 @@ html.is-windows .limit-live-badge {
   background: rgba(var(--overlay-rgb), var(--control-alpha));
 }
 .shell.settings-open .tool-detail-footer { display: none; }
+/* At the 240px minimum window width, the detail options must yield space to
+   the update and disclosed action instead of pushing the primary offscreen. */
+.footer:has(.footer-update-actions .update-pill:not(.hidden)) .tool-detail-footer {
+  min-width: 0;
+  flex-shrink: 1;
+}
 .tool-detail-footer-option {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 7px;
   border: 0;
   background: transparent;
@@ -6158,20 +6199,69 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .mode-button { width: auto; max-width: 52%; min-width: 0; height: 30px; padding: 0 10px; overflow: hidden; color: var(--muted); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .mode-button:hover { border-color: rgba(115, 189, 245, 0.62); color: var(--blue); }
 .error { color: var(--red); }
-/* The footer update control is one icon button, the size of the settings gear
-   beside it. Its state reads from the icon (download, progress ring, restart),
-   and the version and release notes live in the hover card above it. */
+/* Keep the primary utility action at the right edge, with or without an update.
+   A disclosed secondary action needs 34px + its 6px gap. Reserve that space by
+   moving the update left; never hide it under Refresh (issue #1190). */
+.footer-update-actions {
+  --footer-disclosure-width: 0px;
+  --footer-secondary-reveal-delay: 0ms;
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+/* Without an update, the group is only as wide as the primary button.
+   Bridge its gap only after disclosure so direct gap entry stays inert. */
+.footer-update-actions.is-disclosed:has(.update-pill.hidden)::before {
+  content: "";
+  position: absolute;
+  inset: 0 100% 0 auto;
+  width: 6px;
+}
+.footer-update-actions.is-disclosed,
+.footer-update-actions:has(.utility-actions:hover),
+.footer-update-actions:has(.utility-actions :focus-visible),
+.footer-update-actions:has(.utility-actions:not(.is-swapped) .refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)),
+.shell.settings-open .footer-update-actions {
+  --footer-disclosure-width: 40px;
+  /* The secondary must not intercept the update's old hit area while it moves.
+     The resting 0ms delay disables it immediately when the controls collapse. */
+  --footer-secondary-reveal-delay: 180ms;
+}
+.footer-update-actions:has(.update-pill.hidden) .utility-actions {
+  --footer-secondary-reveal-delay: 0ms;
+}
+/* Pointer disclosure stays open across the update button and the gaps, so
+   reaching the moved update does not collapse the controls under the pointer. */
+.footer-update-actions.is-disclosed .utility-actions:not(.is-swapped) .refresh-button,
+.footer-update-actions.is-disclosed .utility-actions.is-swapped .settings-icon-button {
+  clip-path: inset(-8px);
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
 .update-pill {
   display: inline-flex;
   flex: 0 0 auto;
-  transition: opacity 120ms ease;
+  margin-right: var(--footer-disclosure-width, 0px);
+  transition: opacity 120ms ease, margin-right 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.footer:has(.utility-actions:hover) .update-pill,
-.footer:has(.utility-actions :focus-visible) .update-pill,
-.footer:has(.refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)) .update-pill,
-.shell.settings-open .footer .update-pill {
-  opacity: 0;
-  pointer-events: none;
+/* Keyboard focus reveals the action and clears its space immediately. Keep
+   the focused control visible instead of waiting for the pointer animation. */
+.footer-update-actions:has(.utility-actions :focus-visible) .update-pill,
+.footer-update-actions:has(.utility-actions :focus-visible) .utility-actions > button {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .update-pill { transition: none; }
+  :root:not([data-reduce-motion="off"]) .footer-update-actions .utility-actions {
+    --footer-secondary-reveal-delay: 0ms;
+  }
+}
+:root[data-reduce-motion="on"] .update-pill { transition: none; }
+:root[data-reduce-motion="on"] .footer-update-actions .utility-actions {
+  --footer-secondary-reveal-delay: 0ms;
 }
 .update-pill-action {
   position: relative;
@@ -6587,6 +6677,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-back-arrow { flex: 0 0 auto; font: inherit; }
 .detail-heading { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; color: var(--muted, #8a8a90); }
 .fade-overflow.is-overflow-enabled { text-overflow: clip; scrollbar-width: none; }
+.fade-overflow.is-overflow-enabled.is-overflow-static { overflow-x: auto; }
 .is-overflow-enabled > .overflow-text-content { display: inline-block; width: max-content; }
 .is-hover-scrolling > .overflow-text-content { will-change: transform; }
 .fade-overflow::-webkit-scrollbar { display: none; }
@@ -6827,6 +6918,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   transform-origin: bottom center;
 }
 .trends-spark .spark-bar--last { opacity: 1; }
+.trends-spark .spark-bar[data-active="true"] { opacity: 1; }
 .trends-spark .spark-zero-marker {
   stroke: var(--chart-bar);
   stroke-width: 1;
@@ -8322,3 +8414,66 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 [hidden] {
   display: none !important;
 }
+
+/* Display settings keep mounted controls; navigation has no height animation. */
+.settings-section-details-inner > .display-settings { min-width: 0; margin-top: 0; }
+.display-settings .settings-window-group { margin-top: 0; padding-top: 0; border-top: 0; }
+.display-settings-list { margin-top: 8px; border-top: 1px solid var(--line); }
+.display-settings-row { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid rgba(var(--line-rgb), .12); }
+.display-settings-open { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; padding: 16px 0; border: 0; background: none; text-align: left; color: inherit; }
+.display-settings-row:first-child .display-settings-open { padding-top: 10px; }
+.display-settings-labels { display: grid; gap: 5px; min-width: 0; }
+.display-settings-labels .settings-item-desc { margin: 0; }
+.display-settings-thumb { flex: 0 0 66px; height: 43px; position: relative; border: 1px solid rgba(var(--line-rgb), .3); border-radius: 5px; background: rgba(var(--line-rgb), .05); overflow: hidden; }
+.display-settings-thumb::before { content: ''; position: absolute; inset: 0 0 auto; height: 4px; background: rgba(var(--line-rgb), .12); }
+.display-settings-thumb i { position: absolute; background: var(--text); opacity: .65; }
+.display-settings-thumb-edge i { width: 7px; height: 27px; top: 9px; right: 0; border-radius: 4px 0 0 4px; }
+.display-settings-thumb-notch i { width: 30px; height: 8px; top: 0; left: 18px; border-radius: 0 0 5px 5px; }
+.display-settings-thumb-bubble i { width: 25px; height: 10px; left: 50%; top: 50%; transform: translate(-50%, -50%); border-radius: 8px; }
+.display-settings-thumb-tray i { width: 19px; height: 3px; top: 1px; right: 5px; }
+.display-settings[data-edge-side=left] .display-settings-thumb-edge i { right: auto; left: 0; border-radius: 0 4px 4px 0; }
+.display-settings[data-platform=win32] .display-settings-thumb::before { top: auto; bottom: 0; }
+.display-settings[data-platform=win32] .display-settings-thumb-tray i { top: auto; bottom: 1px; }
+.display-settings[data-platform=linux] .display-settings-thumb::before { display: none; }
+.display-settings[data-platform=linux] .display-settings-thumb-tray i { width: 10px; height: 10px; top: 50%; right: auto; left: 50%; transform: translate(-50%, -50%); border-radius: 2px; }
+/* Match the plugin settings' back action and category-tab typography. */
+.display-settings-back { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 8px; margin: 0 0 12px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: .6875rem; cursor: pointer; }
+.display-settings-back::before { content: ''; width: 5px; height: 5px; border-top: 1px solid currentColor; border-right: 1px solid currentColor; transform: rotate(-135deg); }
+.display-settings-back:hover { background: rgba(var(--overlay-rgb), .09); }
+.display-settings-quick, .display-settings-states { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: rgba(var(--line-rgb), .06); }
+.display-settings-quick { margin-bottom: 16px; }
+.display-settings-quick button, .display-settings-states button { flex: 1; min-width: 0; padding: 7px 3px; border: 0; border-radius: 5px; font-size: 11px; background: none; color: var(--muted); }
+.display-settings-quick [aria-selected=true], .display-settings-states [aria-pressed=true] { color: var(--text); background: rgba(var(--line-rgb), .13); }
+.display-settings-title .settings-item-title { font-size: 15px; }
+.display-settings-categories { display: flex; gap: 14px; margin-top: 18px; border-bottom: 1px solid var(--line); }
+.display-settings-categories button { min-height: 30px; padding: 5px 0 10px; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); font: inherit; font-size: .6875rem; }
+.display-settings-categories [aria-selected=true] { border-bottom-color: var(--text); color: var(--text); }
+.display-settings-fields > * { margin-top: 4px; }
+/* A collapsed description between two rows must not break their shared separator. */
+.display-settings-fields > .settings-item + .presence-feature-body.hidden + .settings-item { margin-top: 0; border-top: 1px solid rgba(var(--line-rgb), .06); }
+.display-settings-preview { position: relative; height: 166px; margin: 12px 0 8px; overflow: hidden; border: 1px solid rgba(var(--line-rgb), .2); border-radius: 9px; background: rgba(var(--line-rgb), .06); contain: layout paint; }
+.display-settings-preview iframe { border: 0; position: absolute; left: 50%; top: 8px; transform-origin: top left; pointer-events: none; }
+.display-settings-preview-note { font-size: 10px; margin-top: 8px; }
+.display-settings-preview[data-surface=floatingBubble] { height: 64px; }
+.display-settings-preview[data-surface=tray] { height: 48px; }
+.display-settings-preview[data-surface=edgeDock] { height: 248px; }
+.display-settings-bitmap { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; width: max-content; min-width: 40px; max-width: calc(100% - 32px); padding: 6px 10px; border: 1px solid rgba(var(--line-rgb), .24); border-radius: 20px; white-space: nowrap; }
+.display-settings-bitmap img { height: 24px; width: auto; max-width: 100%; min-width: 0; object-fit: contain; }
+/* The edge-attached strip holds the full 24px content plus 8px on either side;
+   its background must not cut through a multi-row tray bitmap. */
+.display-settings-preview[data-surface=tray] .display-settings-bitmap { top: 0; left: 0; right: 0; width: auto; height: 40px; max-width: none; padding: 8px 12px; justify-content: flex-end; transform: none; border-radius: 0; border: 0; font-size: 12px; }
+.display-settings-preview[data-surface=tray]::before { content: ''; position: absolute; height: 40px; inset: 0 0 auto; background: rgba(var(--line-rgb), .1); }
+.display-settings[data-platform=win32] .display-settings-preview[data-surface=tray]::before { top: auto; bottom: 0; }
+.display-settings[data-platform=win32] .display-settings-preview[data-surface=tray] .display-settings-bitmap { top: auto; bottom: 0; }
+.display-settings[data-platform=linux] .display-settings-preview[data-surface=tray]::before { display: none; }
+.display-settings[data-platform=linux] .display-settings-preview[data-surface=tray] .display-settings-bitmap { top: 50%; transform: translateY(-50%); justify-content: center; }
+
+.display-settings-open { font-size: .6875rem; cursor: pointer; }
+.display-settings-switch { flex: 0 0 34px; }
+.display-settings-open::after { content: ''; width: 5px; height: 5px; flex: 0 0 5px; border-right: 1px solid var(--muted); border-top: 1px solid var(--muted); transform: rotate(45deg); margin-left: auto; }
+.display-settings button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.display-settings-preview[data-surface=notch] { height: 100px; }
+
+.display-settings-page-flat > .display-settings-fields:not([hidden]) { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
+.display-settings-page-flat > .display-settings-fields > :first-child { margin-top: 0; }

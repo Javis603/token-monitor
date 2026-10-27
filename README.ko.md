@@ -30,9 +30,173 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 46개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 47개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 앱입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다. 메인 창, MacBook 노치, 메뉴 막대나 시스템 트레이, 화면 가장자리, 플로팅 버블, 네이티브 macOS 위젯 등 시선이 닿는 곳 어디서나 확인할 수 있습니다.
 
 ## 지원 도구
+
+이미 쓰고 있는 AI 코딩 도구와 공급자에서 토큰 사용량, AI 도구 한도, 세션 상세를 읽어 옵니다.
+
+<p align="center">
+    <img src=".github/assets/tools-icon/claude.png" width="40" alt="Claude Code" title="Claude Code" />
+    <img src=".github/assets/tools-icon/codex.png" width="40" alt="Codex" title="Codex" />
+    <img src=".github/assets/tools-icon/opencode.png" width="40" alt="OpenCode" title="OpenCode" />
+    <img src=".github/assets/tools-icon/hermes-agent.png" width="40" alt="Hermes Agent" title="Hermes Agent" />
+    <img src=".github/assets/tools-icon/openclaw.png" width="40" alt="OpenClaw" title="OpenClaw" />
+    <img src=".github/assets/tools-icon/cursor.png" width="40" alt="Cursor" title="Cursor" />
+    <img src=".github/assets/tools-icon/antigravity.png" width="40" alt="Antigravity" title="Antigravity" />
+    <img src=".github/assets/tools-icon/cline.png" width="40" alt="Cline" title="Cline" />
+    <img src=".github/assets/tools-icon/amp.png" width="40" alt="Amp" title="Amp" />
+    <img src=".github/assets/tools-icon/droid.png" width="40" alt="Factory Droid" title="Factory Droid" />
+    <img src=".github/assets/tools-icon/kimi.png" width="40" alt="Kimi" title="Kimi" />
+    <img src=".github/assets/tools-icon/qwen.png" width="40" alt="Qwen" title="Qwen" />
+    <img src=".github/assets/tools-icon/xai.png" width="40" alt="Grok Build" title="Grok Build" />
+    <img src=".github/assets/tools-icon/copilot.png" width="40" alt="GitHub Copilot" title="GitHub Copilot" />
+    <img src=".github/assets/tools-icon/pi.png" width="40" alt="Pi" title="Pi" />
+    <img src=".github/assets/tools-icon/omp.png" width="40" alt="Oh My Pi" title="Oh My Pi" />
+    <img src=".github/assets/tools-icon/senpi.png" width="40" alt="OmO Native" title="OmO Native" />
+    <img src=".github/assets/tools-icon/goose.png" width="40" alt="Goose" title="Goose" />
+    <img src=".github/assets/tools-icon/zed.png" width="40" alt="Zed" title="Zed" />
+    <img src=".github/assets/tools-icon/kilo.png" width="40" alt="Kilo" title="Kilo" />
+    <img src=".github/assets/tools-icon/commandcode.png" width="40" alt="Command Code" title="Command Code" />
+    <img src=".github/assets/tools-icon/mimo.png" width="40" alt="MiMo" title="MiMo" />
+    <img src=".github/assets/tools-icon/muse.png" width="40" alt="Muse Code" title="Muse Code" />
+    <img src=".github/assets/tools-icon/zcode.png" width="40" alt="ZCode" title="ZCode" />
+    <img src=".github/assets/tools-icon/kiro.png" width="40" alt="Kiro" title="Kiro" />
+    <img src=".github/assets/tools-icon/codebuddy.png" width="40" alt="CodeBuddy" title="CodeBuddy" />
+    <img src=".github/assets/tools-icon/workbuddy.png" width="40" alt="WorkBuddy" title="WorkBuddy" />
+    <img src=".github/assets/tools-icon/proma.png" width="40" alt="Proma" title="Proma" />
+    <img src=".github/assets/tools-icon/catpaw.png" width="40" alt="CatPaw" title="CatPaw" />
+    <img src=".github/assets/tools-icon/qoder.png" width="40" alt="Qoder" title="Qoder" />
+    <img src=".github/assets/tools-icon/reasonix.png" width="40" alt="Reasonix" title="Reasonix" />
+    <img src=".github/assets/tools-icon/deepseek.png" width="40" alt="DeepSeek" title="DeepSeek" />
+    <img src=".github/assets/tools-icon/cherrystudio.png" width="40" alt="Cherry Studio" title="Cherry Studio" />
+    <img src=".github/assets/tools-icon/lmstudio.png" width="40" alt="LM Studio" title="LM Studio" />
+    <img src=".github/assets/tools-icon/unsloth.png" width="40" alt="Unsloth" title="Unsloth" />
+    <img src=".github/assets/tools-icon/devin.png" width="40" alt="Devin" title="Devin" />
+    <img src=".github/assets/tools-icon/fx.png" width="40" alt="fx" title="fx" />
+    <img src=".github/assets/tools-icon/minimax.png" width="40" alt="MiniMax" title="MiniMax" />
+    <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
+    <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
+    <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
+    <img src=".github/assets/tools-icon/ollama.png" width="40" alt="Ollama" title="Ollama" />
+    <img src=".github/assets/tools-icon/trae.png" width="40" alt="Trae CN" title="Trae CN" />
+    <img src=".github/assets/tools-icon/alibaba.png" width="40" alt="Alibaba Cloud" title="Alibaba Cloud" />
+    <img src=".github/assets/tools-icon/stepfun.png" width="40" alt="StepFun" title="StepFun" />
+    <img src=".github/assets/tools-icon/notion.png" width="40" alt="Notion AI" title="Notion AI" />
+    <img src=".github/assets/tools-icon/thirdparty.gif" width="40" alt="서드파티 API" title="서드파티 API" />
+</p>
+
+<p align="center"><a href="#지원-도구-상세">도구별 지원 범위와 데이터 경로 보기 →</a></p>
+
+## 쇼케이스
+
+### 데스크톱에서
+
+<table>
+<tr>
+<td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="노치 패널"><br><sub><b>노치 패널</b> — 실행 중인 세션을 노치 옆에 표시. 아래로 스와이프하면 오늘 사용량, 모든 계정의 한도, 세션, 분류를 확인</sub></td>
+</tr>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="가장자리 도크"><br><sub><b>가장자리 도크</b> — 화면 가장자리에 한도와 사용량을 고정. 호버하면 한도, 최근 세션, 토큰을 표시</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="메뉴 막대와 팝오버"><br><sub><b>메뉴 막대와 트레이</b> — 프리셋을 고르거나 직접 구성: 도구 아이콘, 한도 바, 초기화 시간, 비용, 실시간 tok/s</sub></td>
+</tr>
+</table>
+
+### 앱 내부
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/limits-view.png" width="250" alt="한도 보기"><br><sub>여러 계정을 나란히, Codex는 로컬 계정을 원클릭 전환</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/tools-view.png" width="250" alt="도구 보기"><br><sub>도구를 클릭해 입력／출력과 캐시 히트 상세를 펼치기</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/sessions-view.png" width="250" alt="세션 보기"><br><sub>단일 세션을 열어 프롬프트별 토큰과 사용 도구로 분해</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>더 많은 보기 — 프로젝트, 모델, 기기</summary>
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/projects-view.png" width="250" alt="프로젝트 보기"><br><sub>프로젝트별 사용량과 비용, 도구·기기 전체 합산</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/models-view.png" width="250" alt="모델 보기"><br><sub>도구 전반에서 각 모델의 사용량과 비용을 집계</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/devices-view.png" width="250" alt="기기 보기"><br><sub>각 기기의 사용량·비용·동기화 상태, 펼치면 기기별 상세</sub></td>
+</tr>
+</table>
+</details>
+
+### 사용 대시보드
+
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-overview.png" width="400" alt="사용 대시보드 개요"><br><sub>모든 기기를 아우른 1년치 활동 히트맵과 연속 일수</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-trends.png" width="400" alt="사용 대시보드 추세"><br><sub>1년치 일별 추세, 도구／모델별 누적, K선 지원</sub></td>
+</tr>
+</table>
+
+## Token Monitor를 쓰는 이유
+
+대부분의 사용량 모니터는 실행 중인 그 기기에서만 유용합니다. Token Monitor는 멀티 디바이스 작업을 위해 만들어졌습니다. 각 기기가 로컬 로그를 감시하고 hub로 요약을 보내면, 연결된 모든 위젯이 토큰 변화를 거의 실시간으로 볼 수 있습니다.
+
+## 빠른 설치
+
+macOS에서는 공식 [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor)로 설치할 수 있습니다:
+
+```bash
+brew install --cask token-monitor
+```
+
+또는 [GitHub Releases](https://github.com/Javis603/token-monitor/releases)에서 macOS, Windows, Linux용 앱을 다운로드하세요.
+
+앱을 실행하면 이 기기의 로컬 사용량 추적이 시작되며, hub 설정은 필요하지 않습니다. 자세한 내용은 [설치](#설치)를 참고하세요.
+
+## 기능
+
+### 사용량 추적
+
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 38개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
+- **실시간 토큰 속도** — 생성 속도를 `tok/s`로, 총 소모를 `tok/min`으로 보여주는 선택형 실시간 표시
+- **세션별 상세** — 세션을 열면 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
+- **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
+- **비용과 통화** — 토큰 수와 함께 비용 표시. USD, TWD, HKD, CNY 지원, 환율은 매일 자동 갱신, 설정에서 수동 덮어쓰기 가능
+- **사용자 지정 스캔 경로** — 세션이 기본 위치에 없을 때 도구별로 추가 폴더를 지정할 수 있습니다
+- **WSL 사용량 (Windows)** — 실행 중인 WSL 배포판의 파일 기반 사용량을 약 5분마다 자동 감지해 합산합니다. OpenCode와 Hermes 같은 SQLite 기반 도구는 [WSL 내부 헤드리스 에이전트](docs/wsl-sqlite-setup.md)가 필요할 수 있습니다
+
+### 한도·추세·내보내기
+
+- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, OpenRouter, 서드파티 API, GLM, Kimi 등 30개 이상 공급자의 session/daily/weekly/billing/credits, 여러 OpenRouter/서드파티 프로필, 잔액형 계정(Claude 크레딧, DeepSeek 선불 잔액과 사용 내역, 서드파티 잔액)
+- **여러 계정과 Codex 전환** — 한 공급자에서 여러 계정을 추적하고 각각의 한도를 표시. 추적 중인 Codex 계정은 재인증 없이 로컬 계정으로 한 번에 전환 가능
+- **Codex 초기화 예측** — 선택적으로 켜는 서드파티 초기화 예측. 예상 초기화 시각, 초기화 유형(Regular 또는 Banked), 마지막 초기화 시각을 표시
+- **삭제된 세션 사용량 유지** — 많은 도구가 오래된 세션을 정리합니다(Claude Code는 기본적으로 30일 후 트랜스크립트 삭제). 켜면 Token Monitor가 관측한 일별 도구/모델 사용량을 로컬에 보관해, 원본 파일이 사라져도 히트맵과 추세를 유지합니다(아래 [세션 데이터 보존 기간](#세션-데이터-보존-기간) 참고)
+- **사용 추세 & 대시보드** — 홈 화면 활동 히트맵·추세 차트, 연속 일수·기기 전체 도구/모델별 누적 사용(막대·K선) 전용 대시보드 창
+- **고정 기간 범위** — 기본 일·월·전체에 더해 이번 주, 최근 7일, 최근 30일로 전환 가능
+- **상태 보기** (선택) — Claude, OpenAI, Cursor, DeepSeek 상태 페이지 수동/주기 확인
+- **데이터 내보내기** — 도구 무관 CSV + JSON으로 수동 내보내기 또는 폴더 자동 기록 (스프레드시트, Obsidian, Grafana, 스크립트용); [docs/export.md](docs/export.md) 참고
+- **구독 기록** — 각 AI 계정의 실제 비용을 직접 기록합니다. 요금제 라벨의 툴팁에 요금, 다음 갱신일 또는 종료일, 구독 기간, 이번 달 사용량 비용이 지불액의 몇 배인지가 표시되며, 정기 요금제와 충전 내역 모두 지원합니다
+
+### 멀티 디바이스와 배포
+
+- **멀티 디바이스 동기화** — Hub 동기화는 Server-Sent Events로 수 초 내 다른 기기에 반영되며, iCloud Drive 동기화는 eventual consistency 방식입니다
+- **로컬 우선** — 단일 기기는 서버 불필요
+- **자체 호스트 동기화** — 위젯 내 hub, Node CLI hub, Cloudflare Worker
+- **Headless agent** — 데스크톱 앱 없이 서버, SSH 호스트, WSL의 사용량을 보고합니다. [Headless agent](#headless-agent) 참고
+- **iOS 위젯** — Worker hub + Widgy, Scriptable
+- **프라이버시 우선** — 프롬프트, 응답, 소스 코드, 파일 내용은 모두 기기에만 보관
+
+### 인터페이스와 표시
+
+- **노치 패널(macOS)** — 실행 중·대기 중인 세션을 노치 옆에 표시(노치가 없는 화면에서는 알약 모양으로 표시). 호버하거나 아래로 스와이프하면 오늘과 최근 7일 사용량, 모든 계정의 한도 나란히 보기, 진행 중·최근 세션, 도구/모델별 분석 페이지를 열 수 있습니다
+- **가장자리 도크 (macOS·Windows)** — 화면 가장자리에서 한도와 사용량을 확인할 수 있으며 자동 숨김, 항상 표시, 전체 화면 자동 숨김 모드를 선택할 수 있습니다. 항목에 마우스를 올리면 계정별 한도, 최근 세션, 토큰 사용량을 카드로 보여 줍니다. 설정에서 항목을 선택하고 정렬·구성할 수 있으며 메뉴 막대나 시스템 트레이에서도 켜고 끌 수 있습니다
+- **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, 또는 소진에 가장 가까운 공급자 한도 %를 아이콘 옆에 표시
+- **메뉴 막대 레이아웃 편집** — 메뉴 막대와 플로팅 버블은 내장 프리셋을 쓰거나 '사용자 지정…'으로 직접 배치. AI 도구 아이콘, 한도 바, 백분율, 초기화 시간, 비용, 토큰 속도, 사용자 텍스트를 추가하고 실시간 미리보기와 함께 드래그로 정렬, 항목마다 AI 도구·계정·한도 기간·글꼴 지정
+- **플로팅 버블** — 드래그 가능한 미니 창, 클릭/호버 미리보기
+- **네이티브 macOS 위젯** — macOS 14 이상에서 소형·중형·대형 레이아웃으로 토큰 사용량과 비용, 추세, AI 도구별 잔여 할당량과 재설정 시간, 활동 히트맵, 도구·모델별 분석을 확인할 수 있습니다
+- **분류 보기** — 도구, 기기, 모델, 세션, 프로젝트, 계정 한도별
+- **외관** — 테마(라이트 포함), 도구별 색, 글래스 투명도·블러, 투명 창, 글꼴 사용자 지정
+- **도구 목록 커스터마이즈** — 추적은 유지한 채 숨기기, 고정, 순서 변경
+- **전역 단축키** — 어디서든 창 표시/숨김
+- **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)
+
+## 지원 도구 상세
 
 Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 각각 지원합니다.
 
@@ -54,17 +218,18 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`, `~/.copilot/` (`otel/`, `data.db`, `session-store.db`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/senpi.png" width="28" alt="OmO Native" /> | OmO Native | `~/.omo/agent/sessions/`, `~/.senpi/agent/sessions/`, `~/.omo/senpi-task/children/`, `<project>/.omo/senpi-task/children/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `~/.local/share/goose/sessions/sessions.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`, VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage 및 `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 확장 로그 | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`(중국판 전용) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
@@ -78,7 +243,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie (청구 잔액 및 토큰 사용량 기반 예상 지출) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 키 (사용량/키 한도, credits 접근 승인 시 잔액 표시; 공식 문서는 Management 키 지정) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 또는 Volcengine AK/SK (Volcengine API로 Ark Coding Plan / Agent Plan 할당량 조회) | — | ✅ | — |
-| <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud cookie (ollama.com/settings에서 session/weekly 사용량 조회) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud API 키 또는 Cookie（월간 포함 사용량, 기존 세션／주간 한도 및 크레딧 잔액） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token (trae.cn에서 Trae CN/SOLO credits 조회) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | Alibaba Cloud 콘솔 쿠키 (Bailian/Model Studio Token Plan 할당량, Team 및 Personal) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token (Coding Plan / Token Plan 할당량) | — | ✅ | — |
@@ -90,9 +255,11 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 <br>
 
-- 위 경로는 기본값입니다. Token Monitor는 Tokscale과 동일한 환경 변수 재정의를 따릅니다 — `~/.local/share/` 아래 경로는 `$XDG_DATA_HOME`, 도구별로는 `$CODEX_HOME`, `$GROK_HOME`, `$HERMES_HOME`, `$GOOSE_PATH_ROOT`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME`, `$CLINE_*` 계열입니다.
+- 위 경로는 기본값입니다. Token Monitor는 Tokscale과 동일한 환경 변수 재정의를 따릅니다 — `~/.local/share/` 아래 경로는 `$XDG_DATA_HOME`, 도구별로는 `$CODEX_HOME`, `$SENPI_CODING_AGENT_DIR`, `$SENPI_CODING_AGENT_SESSION_DIR`, `$GROK_HOME`, `$HERMES_HOME`, `$GOOSE_PATH_ROOT`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME`, `$CLINE_*` 계열입니다.
+- Muse Code 구독 한도는 Muse Code 1.4.13+의 `muse usage --json`과 기존 로그인을 사용합니다. 할당량이 없거나 API 키 결제인 경우 비율을 표시할 수 없습니다. [Muse 데이터 소스 설명](docs/providers/muse.md)을 참고하세요.
 - Goose 사용량은 이후 날짜에 사용한 양도 세션 생성일에 포함됩니다. 원격 goosed와 사용자 지정 스캔 경로는 지원하지 않습니다. [Goose 데이터 소스 설명](docs/providers/goose.md)을 참고하세요.
 - CatPaw는 기본적으로 꺼져 있으며 Settings → tools에서 활성화할 수 있습니다. macOS와 Windows의 중국판·해외판 어시스턴트 데이터베이스를 읽습니다. 경로와 검증 범위는 [CatPaw 데이터 소스 안내](docs/providers/catpaw.md)를 참고하세요.
+- OmO Native는 OmO Native와 독립형 Senpi의 로컬 세션 기록을 함께 집계합니다. 새로 설치하면 추적됩니다. 저장된 도구 선택은 업그레이드 때 자동으로 추가되지 않으므로 Settings → tools에서 OmO Native를 활성화하세요. [OmO Native 데이터 소스 안내](docs/providers/senpi.md)를 참고하세요. 일부 하위 작업 로그는 사용량에만 포함되며 세션 상세는 아직 지원하지 않습니다.
 - 현재 LM Studio 추적은 서버 로그에 기록된 OpenAI 호환 `/v1/chat/completions` 및 `/v1/responses` 요청만 포함합니다. LM Studio 내장 Chat UI에서 시작한 대화와 네이티브 `/api/v1/chat` 요청은 포함하지 않습니다.
 - Unsloth Studio는 `studio.db`에서 Studio 채팅과 로컬 API의 추론 사용량을 추적합니다. 로컬 추론의 API 비용은 0이며, 식별 가능한 종량제 제공업체에는 Tokscale의 추정 가격을 사용합니다. 학습 토큰은 포함하지 않습니다. [Unsloth 데이터 소스 설명](docs/providers/unsloth.md)을 참고하세요.
 - Devin은 로컬 `sessions.db`에서 Devin CLI 세션을, `acp-events` ACP 로그에서 Devin Desktop 에이전트 세션을 추적합니다. 같은 세션이 양쪽에 있으면 CLI 데이터베이스가 우선입니다. Desktop 적용 범위는 연결된 ACP 에이전트에 따라 달라집니다. 로컬에 `usage_update` 이벤트를 기록하는 에이전트만 집계되며, Devin Desktop의 기본 `devin-cloud` 에이전트는 서버 측에서 계측되므로 기본 Desktop 구성에서는 Desktop 토큰이 보고되지 않습니다. 세션 제목과 프로젝트 귀속은 CLI 데이터베이스에서 가져옵니다. [Devin 데이터 소스 설명](docs/providers/devin.md)을 참고하세요.
@@ -111,77 +278,25 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 고급 로컬 통합이지만 두 형식 모두 추가 런타임이 필요 없습니다. 읽을 수 없는 소스는 마지막으로 완전히 읽은 데이터를 유지합니다. 이전 데이터베이스 세션은 경로가 아닌 프로젝트 이름만 기록하므로 프로젝트 없이 표시됩니다. 실제 토큰 필드가 있는 JSONL 행만 집계합니다. 현재 자사 플랜 행은 credits와 context 비율만 기록할 수 있고 신뢰할 수 있는 세션별 context window가 없으므로 토큰을 추측하지 않습니다. Credits는 AI Tool Limits에 표시되며 실제 토큰이 있는 BYOK/사용자 지정 모델은 정상 집계됩니다.
 </details>
 
-## 쇼케이스
+### 추가 기능 지원
 
-<table>
-<tr>
-<td width="290" align="center"><img src=".github/assets/home-view.png" width="250" alt="홈 보기"><br><sub>커스터마이즈 가능한 대시보드 — 표시할 모듈과 순서를 선택</sub></td>
-<td width="290" align="center"><img src=".github/assets/limits-view.png" width="250" alt="한도 보기"><br><sub>여러 계정을 나란히, Codex는 로컬 계정을 원클릭 전환</sub></td>
-<td width="290" align="center"><img src=".github/assets/tools-view.png" width="250" alt="도구 보기"><br><sub>도구를 클릭해 입력／출력과 캐시 히트 상세를 펼치기</sub></td>
-</tr>
-<tr>
-<td width="290" align="center"><img src=".github/assets/sessions-view.png" width="250" alt="세션 보기"><br><sub>단일 세션을 열어 프롬프트별 토큰과 사용 도구로 분해</sub></td>
-<td width="290" align="center"><img src=".github/assets/models-view.png" width="250" alt="모델 보기"><br><sub>도구 전반에서 각 모델의 사용량과 비용을 집계</sub></td>
-<td width="290" align="center"><img src=".github/assets/devices-view.png" width="250" alt="기기 보기"><br><sub>각 기기의 사용량·비용·동기화 상태, 펼치면 기기별 상세</sub></td>
-</tr>
-</table>
-
-<table>
-<tr>
-<td width="435" align="center"><img src=".github/assets/dashboard-overview.png" width="400" alt="사용 대시보드 개요"><br><sub>모든 기기를 아우른 1년치 활동 히트맵과 연속 일수</sub></td>
-<td width="435" align="center"><img src=".github/assets/dashboard-trends.png" width="400" alt="사용 대시보드 추세"><br><sub>1년치 일별 추세, 도구／모델별 누적, K선 지원</sub></td>
-</tr>
-</table>
-
-## Token Monitor를 쓰는 이유
-
-대부분의 사용량 모니터는 실행 중인 그 기기에서만 유용합니다. Token Monitor는 멀티 디바이스 작업을 위해 만들어졌습니다. 각 기기가 로컬 로그를 감시하고 hub로 요약을 보내면, 연결된 모든 위젯이 토큰 변화를 거의 실시간으로 볼 수 있습니다.
-
-## 기능
-
-### 사용량 추적
-
-- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 37개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
-- **실시간 토큰 속도** — 생성 속도를 `tok/s`로, 총 소모를 `tok/min`으로 보여주는 선택형 실시간 표시
-- **세션별 상세** — 세션을 열면 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
-- **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
-- **비용과 통화** — 토큰 수와 함께 비용 표시. USD, TWD, HKD, CNY 지원, 환율은 매일 자동 갱신, 설정에서 수동 덮어쓰기 가능
-- **사용자 지정 스캔 경로** — 세션이 기본 위치에 없을 때 도구별로 추가 폴더를 지정할 수 있습니다
-- **WSL 사용량 (Windows)** — 실행 중인 WSL 배포판의 파일 기반 사용량을 약 5분마다 자동 감지해 합산합니다. OpenCode와 Hermes 같은 SQLite 기반 도구는 [WSL 내부 헤드리스 에이전트](docs/wsl-sqlite-setup.md)가 필요할 수 있습니다
-
-### 한도·추세·내보내기
-
-- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, OpenRouter, 서드파티 API, GLM, Kimi 등 29개 이상 공급자의 session/daily/weekly/billing/credits, 여러 OpenRouter/서드파티 프로필, 잔액형 계정(Claude 크레딧, DeepSeek 선불 잔액과 사용 내역, 서드파티 잔액)
-- **여러 계정과 Codex 전환** — 한 공급자에서 여러 계정을 추적하고 각각의 한도를 표시. 추적 중인 Codex 계정은 재인증 없이 로컬 계정으로 한 번에 전환 가능
-- **Codex 초기화 예측** — 선택적으로 켜는 서드파티 초기화 예측. 예상 초기화 시각, 초기화 유형(Regular 또는 Banked), 마지막 초기화 시각을 표시
-- **삭제된 세션 사용량 유지** — 많은 도구가 오래된 세션을 정리합니다(Claude Code는 기본적으로 30일 후 트랜스크립트 삭제). 켜면 Token Monitor가 관측한 일별 도구/모델 사용량을 로컬에 보관해, 원본 파일이 사라져도 히트맵과 추세를 유지합니다(아래 [세션 데이터 보존 기간](#세션-데이터-보존-기간) 참고)
-- **사용 추세 & 대시보드** — 홈 화면 활동 히트맵·추세 차트, 연속 일수·기기 전체 도구/모델별 누적 사용(막대·K선) 전용 대시보드 창
-- **고정 기간 범위** — 기본 일·월·전체에 더해 이번 주, 최근 7일, 최근 30일로 전환 가능
-- **상태 보기** (선택) — Claude, OpenAI, Cursor, DeepSeek 상태 페이지 수동/주기 확인
-- **데이터 내보내기** — 도구 무관 CSV + JSON으로 수동 내보내기 또는 폴더 자동 기록 (스프레드시트, Obsidian, Grafana, 스크립트용); [docs/export.md](docs/export.md) 참고
-- **구독 기록** — 각 AI 계정의 실제 비용을 직접 기록합니다. 요금제 라벨의 툴팁에 요금, 다음 갱신일 또는 종료일, 구독 기간, 이번 달 사용량 비용이 지불액의 몇 배인지가 표시되며, 정기 요금제와 충전 내역 모두 지원합니다
-
-### 멀티 디바이스와 배포
-
-- **멀티 디바이스 동기화** — Hub 동기화는 Server-Sent Events로 수 초 내 다른 기기에 반영되며, iCloud Drive 동기화는 eventual consistency 방식입니다
-- **로컬 우선** — 단일 기기는 서버 불필요
-- **자체 호스트 동기화** — 위젯 내 hub, Node CLI hub, Cloudflare Worker
-- **Headless agent** — 데스크톱 앱 없이 서버, SSH 호스트, WSL의 사용량을 보고합니다. [Headless agent](#headless-agent) 참고
-- **iOS 위젯** — Worker hub + Widgy, Scriptable
-- **프라이버시 우선** — 프롬프트, 응답, 소스 코드, 파일 내용은 모두 기기에만 보관
-
-### 인터페이스와 표시
-
-- **분류 보기** — 도구, 기기, 모델, 세션, 프로젝트, 계정 한도별
-- **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, 또는 소진에 가장 가까운 공급자 한도 %를 아이콘 옆에 표시
-- **플로팅 버블** — 드래그 가능한 미니 창, 클릭/호버 미리보기
-- **가장자리 도크 (macOS·Windows)** — 화면 가장자리에서 한도와 사용량을 확인할 수 있으며 자동 숨김, 항상 표시, 전체 화면 자동 숨김 모드를 선택할 수 있습니다. 항목에 마우스를 올리면 계정별 한도, 최근 세션, 토큰 사용량을 카드로 보여 줍니다. 설정에서 항목을 선택하고 정렬·구성할 수 있으며 메뉴 막대나 시스템 트레이에서도 켜고 끌 수 있습니다
-- **메뉴 막대 레이아웃 편집** — 메뉴 막대와 플로팅 버블은 내장 프리셋을 쓰거나 '사용자 지정…'으로 직접 배치. AI 도구 아이콘, 한도 바, 백분율, 초기화 시간, 비용, 토큰 속도, 사용자 텍스트를 추가하고 실시간 미리보기와 함께 드래그로 정렬, 항목마다 AI 도구·계정·한도 기간·글꼴 지정
-- **외관** — 테마(라이트 포함), 도구별 색, 글래스 투명도·블러, 투명 창, 글꼴 사용자 지정
-- **네이티브 macOS 위젯** — macOS 14 이상에서 소형·중형·대형 레이아웃으로 토큰 사용량과 비용, 추세, AI 도구별 잔여 할당량과 재설정 시간, 활동 히트맵, 도구·모델별 분석을 확인할 수 있습니다
-- **도구 목록 커스터마이즈** — 추적은 유지한 채 숨기기, 고정, 순서 변경
-- **전역 단축키** — 어디서든 창 표시/숨김
-- **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)
+| 기능 | 지원 도구／데이터 소스 | 참고 |
+|---------|-------------------------|------------|
+| 세션 제목 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| 프롬프트／응답별 사용량 및 도구 호출 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 상세 정보는 로컬에서만 읽으며 동기화하지 않습니다. |
+| 컨텍스트 사용량／남은 공간 | Claude Code, Codex, DeepSeek Harness | Claude Code의 컨텍스트 한도는 모델을 기준으로 추정합니다. |
+| 캐시 사용량／세션 캐시 적중률 | 캐시 필드를 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 캐시 사용량 데이터가 있을 때 적중률을 표시합니다. |
+| 예상 캐시 잔여 시간 | Claude Code, Codex | Claude Code: 5분 또는 1시간. Codex: 약 30분(추정). |
+| 출력 속도／토큰 소비 속도 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 출력 속도는 `tok/s`, 전체 토큰 소비 속도는 `tok/min`이며, 측정 시간에 대기가 포함될 수 있습니다. |
+| 추론 강도 설정 | Claude Code, Codex | 세션에 명시적으로 기록된 설정값만 표시합니다. |
+| 추론 토큰 수 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| 네이티브 실행 중／입력 대기 상태 | Claude Code, Codex | — |
+| 부모 세션／하위 에이전트 그룹화 | Codex, Antigravity, Oh My Pi, ZCode; 부모 세션 연결을 검증할 수 있는 T3 Code 세션 | Claude Code의 그룹화는 T3 Code를 통해 제공합니다. |
+| 동일 대화의 이어진 기록 그룹화 | Codex; 검증된 스레드 연결이 있는 T3 Code 세션 | — |
+| 로컬 계정 전환 | Codex | Token Monitor에 추가한 계정으로 전환합니다. |
+| 한도 초기화 시간／카운트다운 | 초기화 시간을 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| 사용 가능한 한도 초기화권 | Claude Code, Codex | 남은 횟수와 만료 시간을 표시하며 조회 전용입니다. |
+| 한도 초기화 예측 | Codex | 선택 사항인 codex-resets.com의 서드파티 예측입니다. |
 
 ## 설치
 

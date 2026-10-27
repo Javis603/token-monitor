@@ -298,6 +298,24 @@ for (const [runtime, api] of [
     assert.equal(zero.quotas[0].windows[0].creditsCurrency, 'CNY');
   });
 
+  test(`${runtime} Ollama wallets retain money without inventing a quota denominator`, () => {
+    const stats = { limits: { providers: [{
+      provider: 'ollama', balance: { amount: 20, monthSpend: 80, currency: 'USD' },
+      windows: [
+        { kind: 'billing', metric: 'credits', label: 'Included credits', remaining: 5, remainingPercent: 25, showMeter: true },
+        { kind: 'billing', metric: 'credits', label: 'Credit balance', remaining: 20, showMeter: false }
+      ]
+    }] } };
+    const before = structuredClone(stats);
+    const windows = api.buildLiveActivityContentState(stats, registration(), now).quotas[0].windows;
+    assert.equal(windows[0].remainingPercent, 25);
+    assert.equal(windows[1].remainingPercent, undefined);
+    assert.equal(windows[1].creditsAmount, 20);
+    assert.deepEqual(stats, before);
+    stats.limits.providers[0].provider = 'thirdparty';
+    assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quotas[0].windows[1].remainingPercent, 20);
+  });
+
   test(`${runtime} all stale devices override a recent source without rewriting its date`, () => {
     const stats = { devices: [{ updatedAt: new Date(now).toISOString(), stale: true }] };
     const state = api.buildLiveActivityContentState(stats, registration(), now);

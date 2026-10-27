@@ -13,7 +13,7 @@ const assetVersion = "20261013-v070";
 // draws as ink — the brands whose art renders black — are copied verbatim and flattened
 // to white by the marquee rule in styles/components.css; the rest are brand-colored.
 // tray-claude / tray-codex are the real tray glyphs, masked to monochrome in the surfaces section.
-const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "codebuddy", "workbuddy", "reasonix", "dsh", "openrouter", "newapi", "volcengine", "os-apple", "os-windows", "os-linux", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "kimi", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilo", "kiro", "mimo", "devin", "amp", "droid", "omp", "commandcode", "qoder", "trae", "cherrystudio", "lmstudio", "unsloth", "alibaba", "typesafe", "ollama", "proma", "catpaw", "fx", "stepfun", "spinner", "token-monitor"];
+const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "codebuddy", "workbuddy", "reasonix", "dsh", "openrouter", "newapi", "volcengine", "os-apple", "os-windows", "os-linux", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "kimi", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilo", "kiro", "mimo", "devin", "amp", "droid", "omp", "senpi", "commandcode", "qoder", "trae", "cherrystudio", "lmstudio", "unsloth", "alibaba", "typesafe", "ollama", "proma", "catpaw", "fx", "stepfun", "spinner", "token-monitor"];
 const viewIconNames = ["home", "limits", "tool", "model", "device", "session", "project", "trends", "status"];
 const assets = [
   ["assets/app.png", "assets/app.png"], // full app icon used by the Discord mockup

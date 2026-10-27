@@ -39,6 +39,7 @@ nonisolated enum ProviderPresentation {
         case "kilo", "kilocode": "Kilo"
         case "amp": "Amp"
         case "omp": "Oh My Pi"
+        case "senpi": "OmO Native"
         case "goose": "Goose"
         case "catpaw": "CatPaw"
         case "notion": "Notion AI"
@@ -80,6 +81,7 @@ nonisolated enum ProviderPresentation {
         case "openclaw": rgb(0xff4d4d)
         case "qwen", "alibaba": rgb(0x615ced)
         case "omp": rgb(0xed4abf)
+        case "senpi": rgb(0x00d4ff)
         case "catpaw": rgb(0x00ffa2)
         case "zed": rgb(0x4173e7)
         case "kilo", "kilocode": rgb(0xf8f676)

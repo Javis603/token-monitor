@@ -522,7 +522,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       lastAttempt: null
     };
     if (status === 'ok') {
-      const retainedWindows = existing.lastGood && invalidatedWindowLabels?.size
+      const retainedWindows = existing.lastGood && invalidatedWindowLabels
         ? existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label)
           && !row.windows.some((current) => current.label === window.label))
         : [];
@@ -530,12 +530,13 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         // The wire has row-level freshness only. Update independently reported
         // windows, but keep cached windows visibly stale and eligible for retry.
         status = 'unavailable';
-        row = { ...row, status, updatedAt: existing.lastGood.updatedAt, windows: [...retainedWindows, ...row.windows] };
+        row = { ...row, status, updatedAt: existing.lastGood.updatedAt, windows: [...retainedWindows, ...row.windows],
+          ...(!row.balance && retainedWindows.some((window) => window.metric === 'credits') ? { balance: existing.lastGood.balance } : {}) };
       }
       existing.lastGood = row;
     } else if (!TRANSIENT_STATUSES.has(status)) {
       existing.lastGood = null;
-    } else if (existing.lastGood && invalidatedWindowLabels?.size) {
+    } else if (existing.lastGood && invalidatedWindowLabels) {
       existing.lastGood = {
         ...existing.lastGood,
         windows: existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label))

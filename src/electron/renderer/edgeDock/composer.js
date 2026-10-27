@@ -138,7 +138,6 @@
       else button.dataset.itemId = id;
       button.classList.toggle('is-selected', ui.selected === id);
       button.classList.toggle('is-stat', item.type === 'stat');
-      button.title = itemLabel(item);
       button.setAttribute('aria-label', itemLabel(item));
       button.setAttribute('aria-pressed', String(ui.selected === id));
       button.append(markFor(item));
@@ -385,7 +384,7 @@
             ? [identity, product].filter(Boolean).join(' · ')
             : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
-          text.title = name;
+          text.setAttribute('aria-label', name);
           const plan = account.planLabel && name !== account.planLabel ? el('span', 'edge-dock-composer-account-plan', account.planLabel) : null;
           label.append(input, text);
           if (plan) label.append(plan);
@@ -443,7 +442,6 @@
       for (const item of items) rail.append(railItem(item, items.length));
       const add = el('button', 'edge-dock-composer-add', '+');
       add.type = 'button';
-      add.title = t('settings.edgeDock.add');
       add.setAttribute('aria-label', t('settings.edgeDock.add'));
       add.setAttribute('aria-expanded', String(ui.menuOpen));
       add.classList.toggle('is-open', ui.menuOpen);

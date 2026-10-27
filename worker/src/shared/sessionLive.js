@@ -44,6 +44,16 @@
   const RUNNING_WINDOW_MS = 10 * 60 * 1000;
   const LIVE_ACTIVITY_TTL_MS = 30_000;
 
+  function isSessionReasoningEffortClient(client) {
+    return client === 'codex' || client === 'claude';
+  }
+
+  function normalizeReasoningEffort(value) {
+    if (typeof value !== 'string') return null;
+    const effort = value.trim();
+    return /^[a-z][a-z0-9_-]{0,31}$/i.test(effort) && effort.toLowerCase() !== 'unknown' ? effort : null;
+  }
+
   function normalizeLiveActivity(value) {
     if (!value || !['running', 'waiting', 'idle', 'unknown'].includes(value.state)) return null;
     const observedAt = timestampMs(value.observedAt);
@@ -264,6 +274,8 @@
     RUNNING_WINDOW_MS,
     LIVE_ACTIVITY_TTL_MS,
     normalizeLiveActivity,
+    normalizeReasoningEffort,
+    isSessionReasoningEffortClient,
     canReplaceLiveActivity,
     sessionWithActivity,
     liveActivityExpiryAt,

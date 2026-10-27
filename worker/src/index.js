@@ -202,7 +202,8 @@ export class HubDO {
   }
 
   async setSyncTitlePolicy(deviceId, enabled) {
-    return this.mutate(() => this.withStorageTransaction(async (storage) => {
+    let changed = false;
+    const policy = await this.mutate(() => this.withStorageTransaction(async (storage) => {
       if (enabled === true && !this.syncSessionTitles) {
         const error = new Error('session title sync is disabled on the server');
         error.code = 'forbidden';
@@ -217,8 +218,13 @@ export class HubDO {
         const record = await storage.get(`dev:${deviceId}`);
         if (record) await storage.put(`dev:${deviceId}`, stripSessionTextFromDeviceRecord(record));
       }
+      changed = true;
       return next;
     }));
+    // Agents revalidate an enabled policy every minute; that stores nothing, so
+    // only a stored change broadcasts, matching the Node Hub.
+    if (changed) this.broadcast('sync-titles').catch(() => {});
+    return policy;
   }
 
   get secret() {
@@ -518,7 +524,6 @@ export class HubDO {
           return jsonResponse(400, { error: 'bad_request', message: 'enabled must be a boolean' });
         }
         const policy = await this.setSyncTitlePolicy(decodeURIComponent(titlesMatch[1]), payload.enabled);
-        this.broadcast('sync-titles').catch(() => {});
         return jsonResponse(200, { ok: true, ...policy });
       } catch (error) {
         if (error.code === 'stale_write') return jsonResponse(409, { error: 'stale_write', ...error.current });

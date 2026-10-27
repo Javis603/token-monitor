@@ -258,7 +258,7 @@ test('device versions get their own line rather than competing with sync status'
   });
   const [, main, side] = row.children;
   const [title, meta] = main.children;
-  assert.equal(title.children[0].title, 'Long workstation name · workstation.local');
+  assert.equal(title.children[0]['aria-label'], 'Long workstation name · workstation.local');
   assert.equal(meta.children.length, 1);
   assert.equal(meta.children[0].textContent, 'Windows 11 25H2 · Widget v0.64.0');
   assert.equal(side.children.length, 2);

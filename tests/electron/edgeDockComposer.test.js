@@ -30,7 +30,8 @@ class Element {
   replaceChildren(...children) { this.children = []; this.append(...children); }
   get firstChild() { return this.children[0]; }
   addEventListener(name, handler) { this.listeners[name] = handler; }
-  setAttribute() {}
+  setAttribute(name, value) { (this.attributes ||= {})[name] = value; }
+  getAttribute(name) { return this.attributes?.[name]; }
   contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
 }
 
@@ -309,7 +310,7 @@ test('Refresh can be added and removed without freezing automatic providers or c
     });
     const all = (node) => [node, ...node.children.flatMap(all)];
     const find = (className) => all(root).find((node) => node.className === className);
-    const labels = () => all(root).filter((node) => node.className === 'edge-dock-composer-item').map((node) => node.title);
+    const labels = () => all(root).filter((node) => node.className === 'edge-dock-composer-item').map((node) => node.getAttribute('aria-label'));
     const openAdd = () => find('edge-dock-composer-add').listeners.click();
     const refreshOption = () => all(root).find((node) => node.className === 'edge-dock-composer-menu-option'
       && node.children.some((child) => child.textContent === 'settings.common.refresh'));
@@ -321,7 +322,7 @@ test('Refresh can be added and removed without freezing automatic providers or c
     assert.equal(settings.edgeDockItems, null);
     assert.deepEqual(labels(), ['claude', 'settings.common.refresh']);
     assert.equal(find('edge-dock-composer-hint').textContent, 'settings.edgeDock.refreshNote');
-    const action = all(root).find((node) => node.title === 'settings.common.refresh');
+    const action = all(root).find((node) => node.getAttribute('aria-label') === 'settings.common.refresh');
     assert.equal(action.dataset.itemId, undefined, 'fixed action stays outside drag ordering');
     assert.equal(action.listeners.pointerdown, undefined);
     providers = ['claude', 'codex'];
@@ -329,7 +330,7 @@ test('Refresh can be added and removed without freezing automatic providers or c
     assert.deepEqual(labels(), ['claude', 'codex', 'settings.common.refresh']);
     openAdd();
     assert.equal(refreshOption(), undefined, 'an enabled action cannot be added twice');
-    all(root).find((node) => node.title === 'settings.common.refresh').listeners.click();
+    all(root).find((node) => node.getAttribute('aria-label') === 'settings.common.refresh').listeners.click();
     find('edge-dock-composer-remove').listeners.click();
     assert.deepEqual(saves.at(-1), { edgeDockRefreshEnabled: false });
     assert.equal(settings.edgeDockItems, null);
