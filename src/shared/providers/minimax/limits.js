@@ -671,7 +671,7 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
       if (error.status === 'unauthorized') return row('unauthorized');
       try { authState = minimaxCodeAuthState(session, deps, state?.get(pendingKey)); }
       catch (stateError) { return row(stateError.status || 'unavailable'); }
-      if (authState.status !== 'authenticated' || expiry <= (deps.now || Date.now)()) return row('unavailable');
+      if (authState.status !== 'authenticated') return row('unavailable');
     }
   }
   if (session.record.expiresAtMs <= (deps.now || Date.now)()) return row('unavailable');
