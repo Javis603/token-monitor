@@ -708,6 +708,7 @@ function defaultSettings() {
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
     cursorManualAccountIds: [],
+    cursorBillingAccountIds: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
@@ -2752,6 +2753,7 @@ function readSettings() {
     merged.vendorColors = migrateVendorColors(merged.vendorColors);
     merged.cursorDisabledAccountIds = normalizeCursorDisabledAccountIds(merged.cursorDisabledAccountIds);
     merged.cursorManualAccountIds = normalizeCursorAccountIds(merged.cursorManualAccountIds);
+    merged.cursorBillingAccountIds = normalizeCursorAccountIds(merged.cursorBillingAccountIds);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
     delete merged.workbuddyEndpoint;
@@ -7980,6 +7982,8 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptionsShared;
     delete normalizedPatch.subscriptionsHub;
     delete normalizedPatch.subscriptionsUpdatedAt;
+    // Billing sessions can only be enabled through the explicit account action.
+    delete normalizedPatch.cursorBillingAccountIds;
     if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
     if (patch.customScanPaths !== undefined) {
       const limitError = customScanPathLimitError(patch.customScanPaths);
@@ -8652,6 +8656,7 @@ app.whenReady().then(() => {
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
       bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
+      reconfigureUsageRuntimeForMode();
       return { ok: true, email: probeResult.user.email, status: await cursorStatusValue() };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -8745,6 +8750,7 @@ app.whenReady().then(() => {
       settings.cursorDisabledAccountIds = disabled;
       settings.cursorManualAccountIds = [...manual].filter((id) => id !== removeId);
       saveSettings({ throwOnError: true });
+      reconfigureUsageRuntimeForMode();
       if (limitsChanged) {
         deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       }

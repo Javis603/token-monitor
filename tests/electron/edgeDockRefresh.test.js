@@ -7,6 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const { runManualDeviceRefresh } = require('../../src/electron/deviceRuntimeCoordinator');
 const { createStatsPublicationBatcher } = require('../../src/electron/statsPublisher');
+const { clientsCsvForSetting } = require('../../src/shared/clientTracking');
 
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const refreshSource = main.slice(main.indexOf('let manualStatsRefreshInFlight ='), main.indexOf('function managedPricingSidecarPath('));
@@ -33,7 +34,10 @@ function fixture() {
     },
     hubModeGeneration: 1,
     statsPushRevision: 0,
-    settings: { hubMode: 'local', limitsEnabled: false, limitProviders: [] },
+    settings: { hubMode: 'local', clients: 'codex', limitsEnabled: false, limitProviders: [] },
+    clientsCsvForSetting,
+    session: {},
+    refreshCursorBillingAccounts: () => assert.fail('disabled Cursor must not fetch billing'),
     mode: 'local',
     localStats: { updatedAt: '2026-10-07T00:00:00Z' },
     currentHubStatsIdentity: () => 'local',
@@ -52,7 +56,7 @@ function fixture() {
       fixedPeriodSnapshotFromDevices: (_, devices) => ({ status: 'ready', period: devices[0] })
     },
     getDashboardHistory: () => history.promise,
-    app: { getLocale: () => 'en' },
+    app: { getLocale: () => 'en', getPath: () => '/test/userData' },
     resolveRegionalLocale: () => 'en',
     trayMenuLocale: () => 'en',
     syncCodexPresentationActiveAccount() {},
@@ -77,6 +81,15 @@ function fixture() {
   vm.runInNewContext(`${refreshSource}\n${dockSource}\n${pushSource}`, context);
   return { context, usage, limits, history, calls };
 }
+
+test('manual refresh collects Cursor usage without waiting for Grok billing', async () => {
+  const { context, usage, calls } = fixture();
+  context.settings.clients = 'cursor,codex';
+  const refresh = context.refreshManualStats();
+  assert.deepEqual(calls.map(call => call[0]), ['limits', 'usage']);
+  usage.resolve(true);
+  await refresh;
+});
 
 for (const first of ['App', 'Edge Dock']) {
   test(`${first} and the other refresh button share the existing App refresh`, async () => {

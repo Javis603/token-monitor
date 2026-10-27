@@ -21,6 +21,7 @@ function attachLocalNativeViews(stats, localDevice) {
   // data can never look like it came from another device.
   delete stats.nativeSessions;
   delete stats.nativeProjects;
+  delete stats.cursorLocalModelEstimates;
   delete stats.localRecentUsageActivity;
   // Electron-only identity evidence travels with this snapshot, not with the
   // device/Hub record. Look up only current DAY/MONTH ids in captured history;
@@ -30,6 +31,7 @@ function attachLocalNativeViews(stats, localDevice) {
   ], [localDevice && rawAllTime(localDevice)?.sessions, stats.periods?.allTime?.sessions]);
   if (hasOwn(localDevice, 'nativeSessions')) stats.nativeSessions = localDevice.nativeSessions;
   if (hasOwn(localDevice, 'nativeProjects')) stats.nativeProjects = localDevice.nativeProjects;
+  if (hasOwn(localDevice, 'cursorLocalModelEstimates')) stats.cursorLocalModelEstimates = localDevice.cursorLocalModelEstimates;
   // The tray's recent provider is a local-only presentation projection. Build
   // it here, before the renderer sees cross-device aggregate sessions, and
   // never add it to the device record or Hub payload.
