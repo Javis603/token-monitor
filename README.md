@@ -394,6 +394,8 @@ Output lands in `dist/`. Windows and Linux use the matching `dist:*` script abov
 
 Runtime and packaging scripts explicitly ensure the pinned tokscale binary on every target with a vendored build. Other source platforms keep the npm binary and filter clients it does not support; `npm install`, lint, and tests do not download it.
 
+For lint and tests, run `npm run verify`. Run `npm run test:coverage` for JavaScript coverage reports; see [testing and coverage](docs/testing.md) for scope, report files and interpretation limits.
+
 ## How it works
 
 ```text

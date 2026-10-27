@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Full Node coverage on Linux; latest-Node smoke on macOS/Windows to
+        # Both supported Node versions on Linux; latest-Node smoke on macOS/Windows to
         # catch platform-specific bugs (tray on macOS, WSL/paths on Windows).
         os: [ubuntu-latest]
         node-version: ['22', '24']
@@ -45,7 +45,23 @@ jobs:
           git diff --exit-code worker/src/shared \
             || { echo "::error::worker/src/shared is stale — run 'npm run sync:worker' and commit."; exit 1; }
       - run: npm run lint
-      - run: npm test
+      - name: Run tests with coverage
+        id: coverage
+        if: runner.os == 'Linux' && matrix.node-version == '24'
+        run: npm run test:coverage
+      - name: Run tests
+        if: runner.os != 'Linux' || matrix.node-version != '24'
+        run: npm test
+      - name: Upload coverage reports
+        if: ${{ !cancelled() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: javascript-coverage
+          path: |
+            coverage/
+            !coverage/tmp/**
+          if-no-files-found: error
+          retention-days: 14
 
   timezones:
     # Every GitHub-hosted runner sets its clock to UTC on every OS, so the

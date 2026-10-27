@@ -634,7 +634,12 @@ test('the stats stream coalesces bursts and negotiates timestamp-only freshness 
     const base = {
       deviceId: 'dev-a',
       updatedAt: initialAt,
-      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } },
+      clientHealth: {
+        version: 1,
+        clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
+        observedAt: initialAt
+      }
     };
     hub.ingest(base);
     const { port } = hub.server.address();
@@ -647,10 +652,11 @@ test('the stats stream coalesces bursts and negotiates timestamp-only freshness 
     modern.events.length = 0;
     legacy.events.length = 0;
 
-    hub.ingest({ ...base, updatedAt: refreshedAt });
+    hub.ingest({ ...base, updatedAt: refreshedAt, clientHealth: { ...base.clientHealth, observedAt: refreshedAt } });
     await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
     assert.equal(modern.events[0].event, 'freshness');
     assert.equal(modern.events[0].data.stats.devices[0].updatedAt, refreshedAt);
+    assert.equal(modern.events[0].data.stats.devices[0].clientHealthObservedAt, refreshedAt);
     assert.equal(legacy.events[0].event, 'stats');
     assert.equal(legacy.events[0].data.stats.devices[0].updatedAt, refreshedAt);
     modern.events.length = 0;
