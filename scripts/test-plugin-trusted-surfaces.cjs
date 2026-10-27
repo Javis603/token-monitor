@@ -71,8 +71,10 @@ app.whenReady().then(async () => {
     const payload = payloads.get('bubble'); payload.placed = { cellId: value.cellId, height: value.height }; push('bubble');
   });
   for (const kind of ['rail', 'bubble', 'notch']) {
+    // Match the native controllers: occlusion/lock must not throttle the
+    // renderer used to prepare content; runtime gates demand separately.
     const win = new BrowserWindow({ show: true, width: kind === 'rail' ? 120 : 700, height: 420,
-      webPreferences: { preload: path.join(root, `src/electron/${kind === 'notch' ? 'notch' : 'edgeDock'}/preload.js`), sandbox: true, contextIsolation: true, nodeIntegration: false } });
+      webPreferences: { preload: path.join(root, `src/electron/${kind === 'notch' ? 'notch' : 'edgeDock'}/preload.js`), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
     windows.set(kind, win);
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) { errors.push(message); console.log(kind, message); } });
     await win.loadFile(path.join(root, 'src/electron/renderer/edgeDock/index.html'), { query: { surface: kind } });
