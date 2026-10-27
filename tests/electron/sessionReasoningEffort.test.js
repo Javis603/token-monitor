@@ -3,7 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { recentSessionRows } = require('../../src/electron/renderer/edgeDock/presentation');
-const { sessionStatusNode, sessionReasoningEffortForRow } = require('../../src/electron/renderer/sessionRows');
+const { sessionStatusNode, sessionReasoningEffortForRow, sessionModelMetadataNode, sessionModelMetadataLabel,
+  sessionRowsForPeriod, groupSessionRows } = require('../../src/electron/renderer/sessionRows');
 const { translate, MESSAGES } = require('../../src/electron/renderer/i18n');
 const at = Date.parse('2026-10-25T10:00:00Z');
 const iso = offset => new Date(at + offset).toISOString();
@@ -19,18 +20,19 @@ function render(row, now = at, locale = 'en') {
 }
 function text(node) { return node ? [node.textContent || '', ...node.children.map(text)].join('') : ''; }
 
-test('effort shares context/cache visibility while the metrics slot keeps only its reading', () => {
+test('effort stays visible after context/cache expiry and archive retention', () => {
   const row = session();
   const context = render(row);
   assert.equal(text(context), '60%');
   assert.equal(sessionReasoningEffortForRow(row, at), 'high');
-  assert.match(context.entries.at(-1).full, /Latest main-session turn.*high/);
+  assert.equal(context.entries.length, 2, 'context/cache tooltip does not repeat effort');
   const cached = render(row, at + 600_001);
   assert.match(text(cached), /20m/);
   assert.doesNotMatch(text(cached), /high/);
   assert.equal(sessionReasoningEffortForRow(row, at + 600_001), 'high');
-  assert.equal(sessionReasoningEffortForRow(row, at + 1800_000), null);
-  assert.equal(render(row, at + 1800_000), null, 'expiry removes effort with the status');
+  assert.equal(sessionReasoningEffortForRow(row, at + 1800_000), 'high');
+  assert.equal(render(row, at + 1800_000), null, 'only live metrics expire');
+  assert.equal(sessionReasoningEffortForRow(session({ archived: true }), at + 86400_000), 'high');
   assert.equal(render(session({ promptCache: null }), at + 600_001), null);
   assert.equal(render(session({ archived: true })), null);
   for (const effort of [null, undefined, {}, ' ', '<script>', 'x'.repeat(33)]) {
@@ -38,8 +40,8 @@ test('effort shares context/cache visibility while the metrics slot keeps only i
     assert.doesNotMatch(text(render(session({ reasoningEffort: effort }))), /high|script/);
   }
   for (const locale of Object.keys(MESSAGES)) {
-    assert.match(render(row, at, locale).entries.at(-1).full, /high/);
-    assert.notEqual(translate(locale, 'session.reasoningEffortTooltip', { effort: 'high' }), 'session.reasoningEffortTooltip');
+    assert.equal(render(row, at, locale).entries.length, 2);
+    assert.notEqual(translate(locale, 'session.reasoningEffortLabel', { effort: 'high' }), 'session.reasoningEffortLabel');
   }
 });
 
@@ -59,4 +61,33 @@ test('Dock carries latest main effort independently of cumulative models and chi
     assert.equal(sessionReasoningEffortForRow(group, at), effort);
     assert.equal(text(render(group)), '60%');
   }
+});
+
+test('shared model metadata renders the same persistent setting in plain and grouped rows', () => {
+  const document = {
+    createTextNode: textContent => ({ textContent, children: [] }),
+    createElement: () => ({ children: [], attributes: {},
+      append(...nodes) { this.children.push(...nodes); },
+      setAttribute(key, value) { this.attributes[key] = value; } })
+  };
+  const options = { translate: (key, values) => translate('en', key, values),
+    view: { setDetailTooltip(node, entries) { node.entries = entries; } } };
+  const raw = session({ archived: true, title: 'Saved conversation', models: { 'gpt-test': 10 } });
+  const [row] = sessionRowsForPeriod({ sessions: { 'codex:s': raw } }, { now: new Date(at + 86400_000) });
+  assert.equal(row.subtitle, 'codex · gpt-test · high');
+  assert.equal(text(sessionModelMetadataNode(document, row, options)), 'gpt-test · high');
+  assert.equal(text(sessionModelMetadataNode(document, raw, options)), 'gpt-test · high');
+  const child = session({ sessionId: 'child', parentSessionId: 's', reasoningEffort: 'low', models: { child: 10 } });
+  const [group] = groupSessionRows(sessionRowsForPeriod({ sessions: { 'codex:s': raw, 'codex:child': child } }, {
+    now: new Date(at + 86400_000)
+  }));
+  assert.equal(sessionModelMetadataLabel(group), '2 models · high');
+  const node = sessionModelMetadataNode(document, group, options);
+  assert.equal(text(node), '2 models · high');
+  assert.equal(node.children[0].entries.length, 2, 'model breakdown retains its own tooltip');
+  assert.match(node.children.at(-1).attributes['aria-label'], /high/);
+  assert.equal(node.children.at(-1).entries, undefined, 'effort is plain text without a tooltip');
+  assert.equal(node.children.at(-1).attributes.tabindex, undefined);
+  assert.equal(sessionModelMetadataLabel({ ...raw, client: 'claude' }), 'gpt-test');
+  assert.equal(sessionModelMetadataLabel({ ...raw, reasoningEffort: null }), 'gpt-test');
 });

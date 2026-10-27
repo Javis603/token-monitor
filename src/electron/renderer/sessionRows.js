@@ -20,14 +20,13 @@
   const isGrokBotSession = sessionLive.isGrokBotSession;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
-  function setSessionTooltip(node, context, promptCache, translate, view, effort) {
+  function setSessionTooltip(node, context, promptCache, translate, view) {
     const entries = [];
     if (context?.contextTokens > 0 && context?.contextWindow > 0) {
       const compact = (value) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
       entries.push({ full: `${compact(context.contextTokens)} / ${compact(context.contextWindow)}` });
     }
     if (promptCache) entries.push({ full: translate('session.cacheEstimateTooltip', { minutes: promptCache.minutes }) });
-    if (effort) entries.push({ full: translate('session.reasoningEffortTooltip', { effort }) });
     view.setDetailTooltip(node, entries);
   }
 
@@ -38,12 +37,43 @@
       ? statusRow.context || sessionContextForRow(statusRow, now) || null : null;
     const promptCache = sessionLive.sessionPromptCacheForRow(statusRow, now);
     if (!context && !promptCache) return null;
-    const effort = statusRow.client === 'codex' ? sessionLive.normalizeReasoningEffort(statusRow.reasoningEffort) : null;
-    return { statusRow, context, promptCache, effort };
+    return { statusRow, context, promptCache };
   }
 
-  function sessionReasoningEffortForRow(row, now = Date.now()) {
-    return sessionStatusForRow(row, now)?.effort || null;
+  function sessionReasoningEffortForRow(row) {
+    const main = row?.groupRows?.[0] || row;
+    return main?.client === 'codex' ? sessionLive.normalizeReasoningEffort(main.reasoningEffort) : null;
+  }
+
+  function sessionModelMetadataLabel(row) {
+    return [row?.modelLabel ?? sessionModelLabel(row), sessionReasoningEffortForRow(row)].filter(Boolean).join(' · ');
+  }
+
+  // Shared by full session rows and compact Home/Dock/Notch rows. Settings
+  // remain visible after live metrics expire, including archived sessions.
+  function sessionModelMetadataNode(document, row, { translate, view, ...options }) {
+    const node = document.createElement('span');
+    node.className = 'session-model-metadata';
+    const modelLabel = row?.modelLabel ?? sessionModelLabel(row);
+    const entries = row?.modelTooltipEntries ?? sessionModelTooltipEntries(row, options);
+    if (modelLabel) {
+      const model = document.createElement('span');
+      model.className = 'session-models';
+      model.textContent = modelLabel;
+      if (entries.length > 1) view.setDetailTooltip(model, entries);
+      node.append(model);
+    }
+    const effort = sessionReasoningEffortForRow(row);
+    if (effort) {
+      if (modelLabel) node.append(document.createTextNode(' · '));
+      const setting = document.createElement('span');
+      setting.className = 'session-reasoning-effort';
+      setting.textContent = effort;
+      const label = translate('session.reasoningEffortLabel', { effort });
+      setting.setAttribute('aria-label', label);
+      node.append(setting);
+    }
+    return node;
   }
 
   // The compact status every glanceable session row shows (Home list, Edge Dock
@@ -53,7 +83,7 @@
   function sessionStatusNode(document, row, { prefix, translate, view, showUsed = true, now = Date.now() }) {
     const reading = sessionStatusForRow(row, now);
     if (!reading) return null;
-    const { statusRow, context, promptCache, effort } = reading;
+    const { statusRow, context, promptCache } = reading;
     const span = (className, text) => {
       const node = document.createElement('span');
       node.className = className;
@@ -62,7 +92,7 @@
     };
     if (!context) {
       const badge = span(`${prefix}-cache`, translate('session.cacheEstimate', { minutes: promptCache.minutes }));
-      setSessionTooltip(badge, statusRow, promptCache, translate, view, effort);
+      setSessionTooltip(badge, statusRow, promptCache, translate, view);
       return badge;
     }
     const percent = showUsed ? context.percentUsed : context.percentLeft;
@@ -79,7 +109,7 @@
     fill.style.setProperty('--bar-scale', String(percent / 100));
     meter.append(fill);
     node.append(meter, span(`${prefix}-context-value`, `${percent}%`));
-    setSessionTooltip(node, context, promptCache, translate, view, effort);
+    setSessionTooltip(node, context, promptCache, translate, view);
     return node;
   }
 
@@ -262,7 +292,7 @@
       client,
       clientLabel,
       modelLabel,
-      titleParts: [clientLabel, modelLabel].filter(Boolean)
+      titleParts: [clientLabel, modelLabel, sessionReasoningEffortForRow(session)].filter(Boolean)
     };
   }
 
@@ -729,7 +759,7 @@
     const group = { client: parent.client, models, totalTokens: value };
     const modelLabel = sessionModelLabel(group);
     const display = main[0];
-    const titleParts = [display.clientLabel || display.client, modelLabel].filter(Boolean).join(' · ');
+    const titleParts = [display.clientLabel || display.client, modelLabel, sessionReasoningEffortForRow(display)].filter(Boolean).join(' · ');
     const usageMetrics = sessionUsageMetrics();
     for (const row of groupRows) {
       const metrics = row.usageMetrics;
@@ -869,6 +899,8 @@
     setSessionTooltip,
     sessionStatusNode,
     sessionReasoningEffortForRow,
+    sessionModelMetadataLabel,
+    sessionModelMetadataNode,
     applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,

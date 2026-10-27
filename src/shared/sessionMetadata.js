@@ -515,7 +515,9 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
-      if (session.client === 'codex') session.reasoningEffort = normalizeReasoningEffort(meta.reasoningEffort);
+      if (session.client === 'codex' && Object.prototype.hasOwnProperty.call(meta, 'reasoningEffort')) {
+        session.reasoningEffort = normalizeReasoningEffort(meta.reasoningEffort);
+      }
       if (session.client === 'codex' && typeof meta.waitingForInput === 'boolean') {
         session.waitingForInput = meta.waitingForInput;
       }

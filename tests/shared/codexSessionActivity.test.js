@@ -64,6 +64,16 @@ function fixture(t) {
   return { home, db, catalog, file, id, key, write, options, summary, runtimeFile };
 }
 
+test('pre-token sessions carry effort from the existing activity transcript read', async t => {
+  const f = fixture(t);
+  f.write([started, entry('turn_context', { effort: 'xhigh' })]);
+  const summary = { today: { sessions: {} }, month: { sessions: {} }, allTime: { sessions: {} } };
+  const result = await activity.readSessionActivity(summary, f.options);
+  assert.equal(result.sessions[f.key].reasoningEffort, 'xhigh');
+  const next = activity.projectSessionActivity(summary, result, now);
+  assert.equal(presentation.recentSessionRows({ periods: next, nativeSessions: next.nativeSessions })[0].reasoningEffort, 'xhigh');
+});
+
 test('large Codex session metadata verifies T3 identity with bounded header reads', async t => {
   const f = fixture(t);
   const header = entry('session_meta', { instructions: 'x'.repeat(160_000), id: nativeId });

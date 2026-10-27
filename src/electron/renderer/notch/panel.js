@@ -426,11 +426,13 @@
       body.append(sessionHeading(row, 'notch-now-title'));
       const meta = el('div', 'notch-now-meta');
       if (running) meta.append(wave());
-      const parts = [clientLabel(row.client), sessionRows.sessionModelLabel(row)];
-      if (running) parts.push(duration(row.startedAt, nowMs));
-      else if (!live) parts.push(relativeAgo(row.lastUsedAt, nowMs));
-      else parts.unshift(t('notch.waiting'));
-      meta.append(text('', parts.filter(Boolean).join(' · ')));
+      const label = el('span');
+      if (!running && live) label.append(text('', `${t('notch.waiting')} · `));
+      label.append(text('', clientLabel(row.client)));
+      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
+      const time = running ? duration(row.startedAt, nowMs) : !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
+      if (time) label.append(text('', ` · ${time}`));
+      meta.append(label);
       const extra = (running ? waitingCount : Math.max(0, waitingCount - 1));
       if (extra > 0) meta.append(text('notch-waiting-note', t('notch.moreWaiting', { count: extra })));
       body.append(meta);
@@ -858,6 +860,13 @@
         showUsed: appearance().sessionContextMetric !== 'remaining', now: nowMs });
     }
 
+    function sessionModelMetadata(row) {
+      return sessionRows.sessionModelMetadataNode(document, row, {
+        translate: t, view: limitWindowsView, formatTokens: formatBreakdownTokens,
+        unattributedLabel: t('dashboard.tooltip.unclassified')
+      });
+    }
+
     function activeRow(row, stateName, nowMs) {
       const node = el('div', `notch-active is-${stateName}`);
       node.setAttribute('role', 'listitem');
@@ -867,7 +876,12 @@
       const meta = el('div', 'notch-active-meta');
       if (stateName === 'running') meta.append(wave());
       else meta.append(text('notch-pill', t('notch.waiting')));
-      meta.append(text('', [clientLabel(row.client), sessionRows.sessionModelLabel(row), duration(row.startedAt, nowMs)].filter(Boolean).join(' · ')));
+      const label = el('span');
+      label.append(text('', clientLabel(row.client)));
+      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
+      const time = duration(row.startedAt, nowMs);
+      if (time) label.append(text('', ` · ${time}`));
+      meta.append(label);
       body.append(meta);
       const value = el('div', 'notch-active-value');
       value.append(sessionTokens(row, 'notch-active-tokens', false));
@@ -919,8 +933,11 @@
         const line = el('div', 'notch-recent');
         line.setAttribute('role', 'listitem');
         const body = el('div', 'notch-recent-body');
-        body.append(sessionHeading(row, 'notch-recent-title'),
-          text('notch-recent-meta', [sessionRows.sessionModelLabel(row), relativeAgo(row.lastUsedAt, nowMs)].filter(Boolean).join(' · ')));
+        const meta = el('span', 'notch-recent-meta');
+        meta.append(sessionModelMetadata(row));
+        const age = relativeAgo(row.lastUsedAt, nowMs);
+        if (age) meta.append(text('', `${sessionRows.sessionModelMetadataLabel(row) ? ' · ' : ''}${age}`));
+        body.append(sessionHeading(row, 'notch-recent-title'), meta);
         const value = el('div', 'notch-recent-value');
         value.append(sessionTokens(row, 'notch-recent-tokens'));
         const status = sessionStatus(row, nowMs);

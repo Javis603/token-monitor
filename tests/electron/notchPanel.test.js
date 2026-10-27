@@ -277,6 +277,38 @@ test('session context retains shared eligibility, tooltips and small meters with
   assert.equal(remaining.querySelector('.notch-session-context').attributes['aria-valuenow'], '63');
 });
 
+test('Notch Home, active and recent rows share persistent main-session effort without tooltips', t => {
+  const f = panelFixture(t), data = payload();
+  const now = Date.now(), ago = minutes => new Date(now - minutes * 60000).toISOString();
+  const row = (id, extra) => ({ key: `codex:${id}`, client: 'codex', sessionId: id, title: id,
+    totalTokens: 100, models: { 'gpt-test': 100 }, startedAt: ago(20), lastUsedAt: ago(1), ...extra });
+  const main = row('running', { reasoningEffort: 'high', liveActivity: { state: 'running', observedAt: ago(0) } });
+  data.cells[1].sessions = [
+    { ...main, models: { 'gpt-test': 100, child: 100 }, groupRows: [main, row('child', { reasoningEffort: 'low' })] },
+    row('waiting', { reasoningEffort: 'xhigh', liveActivity: { state: 'waiting', observedAt: ago(0) } }),
+    row('idle', { reasoningEffort: 'medium', lastUsedAt: ago(60), turnEnded: true }),
+    row('archived', { reasoningEffort: 'high', archived: true, lastUsedAt: ago(120) }),
+    row('unknown', { reasoningEffort: null, lastUsedAt: ago(60) })
+  ];
+  f.panel.render(data);
+  const home = f.find('notch-now-meta');
+  assert.match(home.textContent, /Codex · 2 models · high/);
+  assert.equal(home.querySelector('.session-models').tooltipEntries.length, 2, 'model breakdown retains its tooltip');
+  f.panel.selectPage('sessions');
+  const page = f.find('notch-page-sessions');
+  const active = page.querySelectorAll('.notch-active');
+  assert.deepEqual(active.map(node => node.querySelector('.session-reasoning-effort').textContent), ['high', 'xhigh']);
+  const recent = page.querySelectorAll('.notch-recent');
+  assert.deepEqual(recent.map(node => node.querySelector('.session-reasoning-effort')?.textContent), ['medium', 'high', undefined]);
+  assert.equal(recent[0].querySelector('.notch-session-context'), null);
+  assert.equal(recent[2].querySelector('.notch-recent-meta').textContent.includes(' ·  · '), false);
+  for (const setting of [...home.querySelectorAll('.session-reasoning-effort'), ...page.querySelectorAll('.session-reasoning-effort')]) {
+    assert.equal(setting.tooltipEntries, undefined);
+    assert.equal(setting.getAttribute('tabindex'), undefined);
+    assert.ok(setting.getAttribute('aria-label'));
+  }
+});
+
 test('cache expiry refreshes within the same minute without a new stats push', t => {
   const f = panelFixture(t), data = payload(), now = Date.now();
   data.cells[1].sessions = [{ key: 'claude:cache', client: 'claude', sessionId: 'cache', title: 'cached session', totalTokens: 10,

@@ -2664,7 +2664,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2725,39 +2725,35 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   // A multi-model session abbreviates to "N models"; that label opens the same
   // tooltip the context gauge carries, one row per model with its tokens and
   // share of the session. A titled row prints the label inside the
-  // client · model line, so the trigger is just the "N models" span; an
-  // untitled row folds it into the title instead, whose whole text then opens
-  // the tooltip. The trigger mirrors the row's own wording rather than adding
-  // chrome, so there is nothing extra on a single-model row. A review heading
-  // explicitly identifies its model span before the trailing time.
+  // client · model line; untitled rows fold it into the title instead. Both
+  // use the shared model/effort node so each label keeps its own tooltip.
+  // A review heading explicitly identifies its model span before the time.
   const modelEntries = Array.isArray(modelTooltipEntries) && modelTooltipEntries.length > 1
     ? modelTooltipEntries : null;
-  const subtitleShowsModel = Boolean(!titleModelLabel && modelEntries && modelLabel && String(subtitleText || '').endsWith(modelLabel));
+  const metadataRow = { client, modelLabel: modelLabel || '', modelTooltipEntries: modelTooltipEntries || [], reasoningEffort };
+  const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(metadataRow);
+  const hasMetadata = Boolean(modelEntries || sessionRowsApi.sessionReasoningEffortForRow(metadataRow));
+  const replaceMetadata = (element, text, start) => {
+    const content = element.querySelector('.overflow-text-content') || element;
+    content.replaceChildren(document.createTextNode(text.slice(0, start)),
+      sessionRowsApi.sessionModelMetadataNode(document, metadataRow, { translate: t, view: limitWindowsView }),
+      document.createTextNode(text.slice(start + metadataLabel.length)));
+    overflowText.update(element);
+  };
+  const subtitleShowsModel = Boolean(!titleModelLabel && hasMetadata && metadataLabel && String(subtitleText || '').endsWith(metadataLabel));
   if (subtitleShowsModel) {
-    const models = document.createElement('span');
-    models.className = 'session-models';
-    models.textContent = modelLabel;
-    // Inside the marquee's own wrapper, so a long line still scrolls on hover.
-    const subtitleContent = subtitleTextEl.querySelector('.overflow-text-content') || subtitleTextEl;
-    subtitleContent.replaceChildren(document.createTextNode(subtitleText.slice(0, -modelLabel.length)), models);
-    overflowText.update(subtitleTextEl);
-    limitWindowsView.setDetailTooltip(models, modelEntries);
+    replaceMetadata(subtitleTextEl, subtitleText, subtitleText.length - metadataLabel.length);
   } else {
     setHoverMarqueeText(subtitleTextEl, subtitleText);
   }
-  if (modelEntries && titleModelLabel && String(name || '').startsWith(titleModelLabel)) {
-    const models = document.createElement('span');
-    models.className = 'session-models';
-    models.textContent = titleModelLabel;
-    const titleContent = titleEl.querySelector('.overflow-text-content') || titleEl;
-    titleContent.replaceChildren(models, document.createTextNode(name.slice(titleModelLabel.length)));
-    overflowText.update(titleEl);
-    limitWindowsView.setDetailTooltip(models, modelEntries);
+  if (hasMetadata && titleModelLabel && metadataLabel && String(name || '').startsWith(metadataLabel)) {
+    replaceMetadata(titleEl, name, 0);
   }
-  if (!subtitleShowsModel && !titleModelLabel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
-    limitWindowsView.setDetailTooltip(titleEl, modelEntries);
-  } else if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
+  if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
     limitWindowsView.setDetailTooltip(titleEl, null);
+  }
+  if (!subtitleShowsModel && !titleModelLabel && hasMetadata && metadataLabel && String(name || '').endsWith(metadataLabel)) {
+    replaceMetadata(titleEl, name, name.length - metadataLabel.length);
   }
   subtitleEl.classList.toggle('hidden', !subtitle);
   // The activity line carries time, calls, cache hit and tok/s; a narrow window
@@ -5356,13 +5352,13 @@ function sessionGroupRunNode(row, max, parent) {
   const subagentGroup = parent.summary?.subagentGroup === true;
   const namedGroup = subagentGroup || parent.summary?.sessionGroup === 'cursor-grok-bot';
   const title = namedGroup ? row.name
-    : [row.modelLabel, sessionRowsApi.compactSessionTime(row.sortTime)].filter(Boolean).join(' · ')
+    : [sessionRowsApi.sessionModelMetadataLabel(row), sessionRowsApi.compactSessionTime(row.sortTime)].filter(Boolean).join(' · ')
       || t('sessions.backgroundReviews');
   // Group members are still session rows. Share the template, metrics, tooltip
   // and activity rendering; exchange rows belong only to the actual transcript.
   const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
   if (subagentGroup) {
-    member.subtitle = [row.clientLabel, row.modelLabel].filter(Boolean).join(' · ');
+    member.subtitle = [row.clientLabel, sessionRowsApi.sessionModelMetadataLabel(row)].filter(Boolean).join(' · ');
     member.activity = row.activitySummary;
   }
   const wrap = rowTemplate(member);
@@ -6716,27 +6712,20 @@ function renderHomeSessionModule(rows) {
     // The same "N models" hover the Sessions list draws: the label stays the
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
-    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(row, {
+    const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(row);
+    description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
+      translate: t, view: limitWindowsView,
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
-    });
-    if (modelLabel) {
-      if (modelEntries.length > 1) {
-        const models = document.createElement('span');
-        models.className = 'session-models';
-        models.textContent = modelLabel;
-        limitWindowsView.setDetailTooltip(models, modelEntries);
-        description.append(models);
-      } else description.append(document.createTextNode(modelLabel));
-    }
+    }));
     if (memberLabel) {
-      if (modelLabel) description.append(document.createTextNode(' · '));
+      if (metadataLabel) description.append(document.createTextNode(' · '));
       const count = document.createElement('span');
       count.className = 'home-session-member-count';
       count.textContent = memberLabel;
       description.append(count);
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
+    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
     meta.append(description);
     const status = sessionRowsApi.sessionStatusNode(document, row, { prefix: 'home-session', translate: t,
       view: limitWindowsView, showUsed: state.settings?.sessionContextMetric !== 'remaining' });

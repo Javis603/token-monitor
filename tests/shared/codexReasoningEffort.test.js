@@ -8,7 +8,7 @@ const test = require('node:test');
 const { readCodexSessionState } = require('../../src/shared/providers/codex/sessionContext');
 const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
 const { normalizePeriod, mergePeriods, applyPeriodDelta } = require('../../src/shared/usage');
-const { normalizeSessionUsageArchive, updateSessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
+const { normalizeSessionUsageArchive, updateSessionUsageArchive, applySessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
 
 const at = '2026-10-25T10:00:00.000Z';
 const next = '2026-10-25T10:01:00.000Z';
@@ -83,7 +83,7 @@ test('bounded cold reads, truncation, replacement and read failures do not inven
   assert.equal(f.read().reasoningEffort, undefined, 'read failure returns no earlier setting');
 });
 
-test('real Codex resolver carries clears and keeps the thirty-minute gate', t => {
+test('effort survives age and read misses while fresh turn metadata can clear it', t => {
   const f = fixture(t);
   const periods = { today: { sessions: { ['codex:' + f.id]: {
     client: 'codex', sessionId: f.id, totalTokens: 10, reasoningEffort: 'old'
@@ -96,10 +96,14 @@ test('real Codex resolver carries clears and keeps the thirty-minute gate', t =>
   fs.writeFileSync(f.file, turn({ effort: 'high' }));
   assert.equal(resolve(Date.parse(at) + 1800_000), 'high');
   const bytes = f.bytesRead();
-  assert.equal(resolve(Date.parse(at) + 1800_001), null);
+  assert.equal(resolve(Date.parse(at) + 1800_001), 'high');
   assert.equal(f.bytesRead(), bytes, 'out-of-window resolution does not read state again');
   fs.appendFileSync(f.file, start());
   assert.equal(resolve(Date.parse(next)), null);
+  fs.appendFileSync(f.file, turn({ effort: 'low' }, next));
+  assert.equal(resolve(Date.parse(next)), 'low');
+  fs.unlinkSync(f.file);
+  assert.equal(resolve(Date.parse(next)), 'low', 'a missing transcript is not an explicit new configuration');
 });
 
 test('normalization, merge and deltas replace effort snapshots including unknown', () => {
@@ -121,10 +125,25 @@ test('normalization, merge and deltas replace effort snapshots including unknown
     reasoningEffort: 'high' } } }).sessions['claude:s'].reasoningEffort, undefined);
 });
 
-test('session archives do not retain or restore reasoning effort', () => {
+test('session archives retain effort independently of expiring activity', () => {
   const session = { client: 'codex', sessionId: 's', totalTokens: 10, lastUsedAt: at, reasoningEffort: 'high' };
   const { archive } = updateSessionUsageArchive(null, { today: { sessions: { 'codex:s': session } } }, new Date(at));
-  assert.equal(archive.sessions['codex:s'].periods.today.reasoningEffort, undefined);
-  archive.sessions['codex:s'].periods.today.reasoningEffort = 'old';
-  assert.equal(normalizeSessionUsageArchive(archive).sessions['codex:s'].periods.today.reasoningEffort, undefined);
+  assert.equal(archive.sessions['codex:s'].periods.today.reasoningEffort, 'high');
+  assert.equal(normalizeSessionUsageArchive(archive).sessions['codex:s'].periods.today.reasoningEffort, 'high');
+  archive.sessions['codex:s'].periods.today.reasoningEffort = '<script>';
+  assert.equal(normalizeSessionUsageArchive(archive).sessions['codex:s'].periods.today.reasoningEffort, null);
+});
+
+test('a later collection preserves effort only for the same unchanged observation', () => {
+  const snapshot = extra => ({ today: normalizePeriod({ sessions: { 'codex:s': {
+    client: 'codex', sessionId: 's', totalTokens: 10, lastUsedAt: at, ...extra
+  } } }) });
+  for (const [extra, expected] of [[{}, 'high'], [{ reasoningEffort: null }, null], [{ lastUsedAt: next }, undefined]]) {
+    const saved = updateSessionUsageArchive(null, snapshot({ reasoningEffort: 'high' }), new Date(at)).archive;
+    const current = snapshot(extra);
+    updateSessionUsageArchive(saved, current, new Date(next));
+    const restored = applySessionUsageArchive(current, normalizeSessionUsageArchive(saved), { now: new Date(next) });
+    assert.equal(restored.today.sessions['codex:s'].reasoningEffort, expected);
+    assert.equal(current.today.sessions['codex:s'].reasoningEffort, extra.reasoningEffort, 'capture does not mutate the scanner row');
+  }
 });
