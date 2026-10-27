@@ -121,6 +121,15 @@ test('Hub content keys ignore clientHealth.observedAt but keep health content', 
   assert.notEqual(hubStatsContentKey(original), hubStatsContentKey(degraded));
 });
 
+test('Hub content keys change when clientHealth.observedAt appears or disappears', () => {
+  const stamped = withHealth(health('2026-09-09T10:00:00.000Z'));
+  const { observedAt: _observedAt, ...unstampedHealth } = health('2026-09-09T10:00:00.000Z');
+  const unstamped = withHealth(unstampedHealth);
+  // A freshness event can only refresh the stamp, never remove it, so a
+  // dropped stamp has to reach clients as a full stats frame.
+  assert.notEqual(hubStatsContentKey(stamped), hubStatsContentKey(unstamped));
+});
+
 test('freshness events carry clientHealth.observedAt without replacing the health record', () => {
   const original = withHealth(health('2026-09-09T10:00:00.000Z'));
   const current = withHealth(health('2026-09-09T10:01:00.000Z'));
