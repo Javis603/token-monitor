@@ -224,3 +224,66 @@ test('master pause checks drafts before mutation and disposes after persistence;
   f.settings.pluginsEnabled=true;f.runtime.settingsChanged();await resume();
   assert.equal(f.runtime.manager.active('trusted-fixture'),true);assert.equal(f.main.webContents.reloads,0);
 });
+
+
+test('an unrelated silent host cannot block enable, disable, or re-enable', async t => {
+  const f = await runtimeFixture(t); await f.install();
+  f.events.get('plugins:lifecycleHost')(f.event(f.notch), true);
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  f.lifecycle(f.main, () => ({ loaded: true, unsaved: false }));
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  assert.equal(f.runtime.manager.active('trusted-fixture'), true);
+  assert.equal(f.notch.webContents.sent.filter(message => message.channel === 'plugins:lifecycle').length, 0);
+  assert.equal(f.dialogs.length, 0); assert.equal(f.notch.webContents.reloads, 0);
+  const actions = f.main.webContents.sent.filter(message => message.channel === 'plugins:lifecycle').map(message => message.value.action);
+  assert.deepEqual(actions, ['inspect', 'release', 'resume']);
+});
+test('ownership of another plugin does not join lifecycle operations; navigation clears ownership', async t => {
+  const f = await runtimeFixture(t); await f.install();
+  const folder = path.join(f.dir, 'plugins', 'other-fixture');
+  fs.cpSync(path.join(f.dir, 'plugins', 'trusted-fixture'), folder, { recursive: true });
+  const file = path.join(folder, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file));
+  manifest.id = 'other-fixture'; fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  f.events.get('plugins:lifecycleHost')(f.event(f.notch), true);
+  f.events.get('plugins:uiLoading')?.(f.event(f.notch), 'other-fixture');
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+  assert.equal(f.notch.webContents.sent.filter(message => message.channel === 'plugins:lifecycle').length, 0);
+  f.notch.webContents.emit('did-start-navigation', {}, '', false, true);
+  f.events.get('plugins:lifecycleHost')(f.event(f.notch), true);
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: false });
+  assert.equal(f.dialogs.length, 0);
+});
+
+
+test('same-document navigation retains lifecycle ownership and draft checks', async t => {
+  const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  f.lifecycle(f.main, () => ({ loaded: true, unsaved: true }));
+  f.main.webContents.emit('did-start-navigation', {}, 'file:///index.html#author', true, true);
+  f.cancel(); await assert.rejects(f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false }), /cancelled/);
+  assert.equal(f.runtime.manager.active('trusted-fixture'), true);
+});
+test('failed relevant resume offers explicit recovery and cancellation preserves disabled state', async t => {
+  const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  f.lifecycle(f.main, request => { if (request.action === 'resume') throw Error('resume failed'); return { loaded: true }; });
+  f.events.get('plugins:lifecycleHost')(f.event(f.notch), true);
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+  f.cancel(); await assert.rejects(f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true }), /cancelled/);
+  assert.equal(f.runtime.manager.active('trusted-fixture'), false); assert.equal(f.main.webContents.reloads, 0);
+  f.accept(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true }); await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(f.main.webContents.reloads, 1); assert.equal(f.notch.webContents.reloads, 0);
+});
+test('master pause and resume send only each hosts loaded plugin ids', async t => {
+  const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  const folder = path.join(f.dir, 'plugins', 'other-fixture'); fs.cpSync(path.join(f.dir, 'plugins', 'trusted-fixture'), folder, { recursive: true });
+  const file = path.join(folder, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file)); manifest.id = 'other-fixture'; fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  const calls = []; f.lifecycle(f.main, request => { calls.push(request); return { loaded: true }; });
+  const finish = await f.runtime.beforeSettingsChange(f.event(f.main), { pluginsEnabled: false });
+  f.settings.pluginsEnabled = false; f.runtime.settingsChanged(); await finish();
+  const resume = await f.runtime.beforeSettingsChange(f.event(f.main), { pluginsEnabled: true });
+  f.settings.pluginsEnabled = true; f.runtime.settingsChanged(); await resume();
+  assert.deepEqual(calls.map(request => request.ids), [['trusted-fixture'], ['trusted-fixture'], ['trusted-fixture']]);
+});

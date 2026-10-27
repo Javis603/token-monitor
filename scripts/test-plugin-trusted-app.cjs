@@ -56,6 +56,18 @@ export function activate(ctx) {
         container.dataset.period = next.period || '';
       }, hasUnsavedChanges:()=>Boolean(input.value), dispose(){container.replaceChildren();} };
     }
+    if (context.surface === 'page' && globalThis.fixtureDeferredMount) {
+      const title=document.createElement('p');title.textContent='非同步重繪測試';
+      const input=document.createElement('input');input.setAttribute('aria-label','Fixture draft');
+      container.append(title,input);
+      return { update() {
+        if (!globalThis.fixtureDeferUpdate) return;
+        globalThis.fixtureDeferUpdate=false;
+        return new Promise(resolve=>{globalThis.fixtureFinishUpdate=()=>{
+          const late=document.createElement('input');late.setAttribute('aria-label','Late redraw');late.value='停用後不應留下的控制項';container.append(late);resolve();
+        };});
+      }, dispose(){title.remove();input.remove();globalThis.fixtureDeferredDisposed=true;} };
+    }
     const mounted=basic.mount(container,context);
     const image=document.createElement('img');image.src=ctx.asset('fixture.png');image.alt='套件內的用量圖';image.dataset.fixtureAsset='true';image.style.cssText='width:320px;max-width:100%;image-rendering:pixelated';
     const background=document.createElement('div');background.dataset.fixtureBackground='true';background.style.cssText='width:160px;height:60px;background-size:contain';background.style.backgroundImage='url("'+ctx.asset('fixture.png')+'")';
@@ -132,9 +144,9 @@ app.whenReady().then(async () => {
   });
   const demandListener = event => pluginCalls.push({ channel: 'plugins:demand', frameUrl: event.senderFrame?.url });
   ipcMain.on('plugins:demand', demandListener);
-  const toggleDialogs = []; let toggleResponse = 1;
+  const toggleDialogs = []; let toggleResponse = 1, selectedDirectory = fixtureDir;
   runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain: pluginIpc, session, utilityProcess,
-    dialog: { showMessageBox: async (_owner, options) => { toggleDialogs.push(options); return { response: toggleResponse }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [fixtureDir] }) } },
+    dialog: { showMessageBox: async (_owner, options) => { toggleDialogs.push(options); return { response: toggleResponse }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [selectedDirectory] }) } },
     userDataDir: scratch, getSettings: () => settings, getAppSettings: () => settings, getContext: () => ({ source: 'fixture' }), getLocale: () => 'zh-TW',
     isMainSender: event => event.sender === win.webContents, persistPluginStates: pluginStates => patch({ pluginStates }), persistManagementSettings: patch,
     applySettingsPatch: patch, env: {}, log: console.log });
@@ -285,6 +297,64 @@ app.whenReady().then(async () => {
       assert.equal(runtime.manager.active('trusted-fixture'),true);assert.equal(toggleDialogs.length,dialogCount);
       assert.equal(mainLoads,0);assert.equal(detachedLoads,0);
       console.log('PASS production settings bridge master off/on reuses trust without reload');
+      // A different plugin in its own busy renderer must not join A's lifecycle.
+      const otherDir=path.join(scratch,'other-author');fs.mkdirSync(otherDir);
+      fs.writeFileSync(path.join(otherDir,'manifest.json'),JSON.stringify({tmApi:2,id:'other-fixture',name:'Other fixture',version:'1.0.0',ui:'ui.mjs',files:['ui.mjs'],views:[{id:'panel',surfaces:['page']}]}));
+      fs.writeFileSync(path.join(otherDir,'ui.mjs'),"export function mount(container){const p=document.createElement('p');p.textContent='Unrelated plugin B';container.append(p);return {dispose(){p.remove();}};}");
+      selectedDirectory=otherDir;
+      await js("pluginApi.importPackage('directory').then(p=>pluginApi.install(p.token))");
+      selectedDirectory=fixtureDir;
+      await js("pluginApi.setEnabled('other-fixture',true);void 0");
+      for(let i=0;i<100&&!runtime.manager.active('other-fixture');i++)await pause(30);
+      await js("tokenMonitor.plugins.openPage('other-fixture/panel')");
+      let unrelated;
+      for(let i=0;i<150;i++) {
+        unrelated=BrowserWindow.getAllWindows().find(item=>item!==win&&item!==detached);
+        if(unrelated&&!unrelated.webContents.isLoading()&&await unrelated.webContents.executeJavaScript("document.body.textContent.includes('Unrelated plugin B')"))break;
+        await pause(30);
+      }
+      assert.ok(unrelated);
+      assert.notEqual(unrelated.webContents.getOSProcessId(),win.webContents.getOSProcessId());
+      const unrelatedLifecycle=[],send=unrelated.webContents.send.bind(unrelated.webContents);
+      unrelated.webContents.send=(channel,...args)=>{if(channel==='plugins:lifecycle')unrelatedLifecycle.push(args[0]);return send(channel,...args);};
+      await unrelated.webContents.executeJavaScript("setTimeout(()=>{const end=performance.now()+6200;while(performance.now()<end){};globalThis.busyFinished=true;},50);true");
+      await pause(100);const dialogBefore=toggleDialogs.length,started=Date.now();
+      await js("pluginApi.setEnabled('trusted-fixture',false)");
+      await js("pluginApi.setEnabled('trusted-fixture',true)");
+      const toggleMs=Date.now()-started;
+      assert.ok(toggleMs<5000, 'unrelated busy renderer must not incur lifecycle timeout');
+      assert.deepEqual(unrelatedLifecycle,[]);assert.equal(toggleDialogs.length,dialogBefore);
+      await unrelated.webContents.executeJavaScript('busyFinished');
+      unrelated.destroy();await js("pluginApi.uninstall('other-fixture')");
+      console.log('PASS unrelated busy plugin renderer excluded from disable/resume', {toggleMs});
+      // Same-document navigation must not unregister a live author host.
+      await detached.webContents.executeJavaScript("location.hash='author-section';document.querySelector('[aria-label=\"Fixture draft\"]').value='hash navigation draft'");
+      await pause(100); toggleResponse=0;
+      assert.match(await js("pluginApi.setEnabled('trusted-fixture',false).then(()=>'unexpected success',error=>String(error.message||error))"),/cancelled/);
+      toggleResponse=1;await detached.webContents.executeJavaScript("document.querySelector('[aria-label=\"Fixture draft\"]').value=''");
+      console.log('PASS real same-document navigation retains draft inspection');
+      await js("pluginApi.setEnabled('trusted-fixture',false)");
+      await detached.webContents.executeJavaScript('globalThis.fixtureDeferredMount=true');
+      await js("pluginApi.setEnabled('trusted-fixture',true)");
+      for(let i=0;i<100&&!await detached.webContents.executeJavaScript("Boolean(document.querySelector('[aria-label=\"Fixture draft\"]'))");i++)await pause(30);
+      await detached.webContents.executeJavaScript('globalThis.fixtureDeferUpdate=true');
+      const [width,height]=detached.getSize();detached.setSize(width+20,height);
+      for(let i=0;i<100&&!await detached.webContents.executeJavaScript("typeof fixtureFinishUpdate==='function'");i++)await pause(30);
+      assert.equal(await detached.webContents.executeJavaScript("typeof fixtureFinishUpdate==='function'"),true);
+      await detached.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+      fs.writeFileSync(path.join(evidence,'pending-redraw-active.png'),(await detached.webContents.capturePage()).toPNG());
+      const stopping=js("pluginApi.setEnabled('trusted-fixture',false)");
+      for(let i=0;i<100&&await detached.webContents.executeJavaScript("Boolean(document.querySelector('[aria-label=\"Fixture draft\"]'))");i++)await pause(30);
+      assert.equal(await detached.webContents.executeJavaScript("document.querySelector('[aria-label=\"Fixture draft\"]')===null"),true);
+      await detached.webContents.executeJavaScript('fixtureFinishUpdate()');await stopping;
+      assert.equal(await detached.webContents.executeJavaScript('fixtureDeferredDisposed'),true);
+      assert.equal(await detached.webContents.executeJavaScript("document.querySelector('[aria-label=\"Late redraw\"]')===null"),true);
+      await detached.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+      fs.writeFileSync(path.join(evidence,'pending-redraw-disabled.png'),(await detached.webContents.capturePage()).toPNG());
+      assert.equal(detachedLoads,0);assert.equal(mainLoads,0);
+      console.log('PASS actual detached pending redraw drains with no connected controls after disable');
+      await detached.webContents.executeJavaScript('globalThis.fixtureDeferredMount=false');
+      await js("pluginApi.setEnabled('trusted-fixture',true)");
       toggleResponse=0;await js("globalThis.fixtureCleanupFailure=true;pluginApi.setEnabled('trusted-fixture',false)");
       assert.equal(runtime.manager.active('trusted-fixture'),false);assert.equal(mainLoads,0);
       assert.match(await js("pluginApi.setEnabled('trusted-fixture',true).then(()=>'unexpected success',error=>String(error.message||error))"),/cancelled/);

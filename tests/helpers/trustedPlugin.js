@@ -54,7 +54,7 @@ async function runtimeFixture(t, { safeMode = false, delayedExit = false, busine
   async function install() { const preview = await invoke('plugins:import', 'directory'); await invoke('plugins:install', preview.token); }
   return { dir, runtime, children, handlers, events, main, notch, windows, invoke, send, install, event,
     get settings() { return settings; }, dialogs, cancel() { confirmation = 0; }, accept() { confirmation = 1; },
-    lifecycle(win, callback) {
+    lifecycle(win, callback, ids = ['trusted-fixture']) {
       const original = win.webContents.send;
       win.webContents.send = (channel, value) => {
         original(channel, value);
@@ -64,6 +64,7 @@ async function runtimeFixture(t, { safeMode = false, delayedExit = false, busine
         });
       };
       events.get('plugins:lifecycleHost')(event(win), true);
+      for (const id of ids) events.get('plugins:uiLoading')?.(event(win), id);
     } };
 }
 module.exports = { fakeFork, runtimeFixture };

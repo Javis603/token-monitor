@@ -8,6 +8,7 @@
   if (root) root.TokenMonitorPluginUi = api;
 })(typeof window !== 'undefined' ? window : null, function createApi() {
   function createHost({ document, window, bridge, services = {}, importModule = url => import(url), onError = () => {}, onLoaded = () => {} }) {
+    const owners = new WeakMap();
     const modules = new Map(), mounts = new Map(), blocked = new Set(), jobs = new Map(), failures = new Map();
     let disposed = false;
     function report(error, record) {
@@ -39,6 +40,8 @@
       if (disposed || blocked.has(descriptor.pluginId)) return Promise.reject(new Error('Plugin UI is disabled'));
       const key = `${descriptor.pluginId}:${descriptor.revision}`;
       if (!modules.has(key)) modules.set(key, (async () => {
+        // Register ownership before importing author code, including pending activation.
+        bridge.uiLoading?.(descriptor.pluginId);
         const cleanup = [], listeners = new Set();
         let latestData = descriptor.data, released = false;
         cleanup.push(() => { released = true; });
@@ -121,8 +124,14 @@
       mounts.delete(container); record.observer?.disconnect();
       record.context.onMountStatus?.(false);
       if (record.instance) cleanup(record.descriptor.pluginId, async () => {
-        if (record.updates?.size) await Promise.all([...record.updates]);
-        await record.instance.dispose?.();
+        try {
+          if (record.updates?.size) await Promise.all([...record.updates]);
+          await record.instance.dispose?.();
+        } finally {
+          // A settled redraw may have repopulated this now-unmounted container.
+          // Never clear a newer mount that has since taken ownership.
+          if (owners.get(container) === record) container.replaceChildren();
+        }
       });
       container.replaceChildren();
     }
@@ -138,7 +147,7 @@
       }
       unmount(container);
       const record = { container, descriptor, context: value };
-      mounts.set(container, record);
+      mounts.set(container, record); owners.set(container, record);
       try {
         const loaded = await load(descriptor);
         if (disposed || blocked.has(descriptor.pluginId) || mounts.get(container) !== record) return;

@@ -296,3 +296,39 @@ test('disable waits for an asynchronous visibility update before disposing its r
   const release=host.release(['fixture']);await new Promise(setImmediate);assert.deepEqual(order,[]);
   finish();await release;assert.deepEqual(order,['update finished','disposed']);await host.dispose();
 });
+
+
+test('unmounted async redraw is cleared after release, including a connected page container', async () => {
+  const document = dom(), node = document.createElement('div'); document.body.append(node);
+  let finish, disposals = 0;
+  const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(container) { return {
+    update: () => new Promise(resolve => { finish = () => { container.append(document.createElement('input')); resolve(); }; }),
+    dispose() { disposals++; }
+  }; } }) });
+  await host.mount(node, descriptor); host.setVisibility(node, false); host.unmount(node);
+  const released = host.release(['fixture']); await new Promise(setImmediate); finish(); await released;
+  assert.equal(node.isConnected, true); assert.equal(disposals, 1); assert.equal(node.children.length, 0);
+  await host.dispose();
+});
+test('old asynchronous disposal never clears a newer mount in the same container', async () => {
+  const document = dom(), node = document.createElement('div'); document.body.append(node);
+  let finish;
+  const host = createHost({ document, window: {}, bridge: {}, importModule: async url => ({ mount(container) {
+    container.append(document.createElement('input'));
+    return url.includes('/one/') ? { dispose: () => new Promise(resolve => { finish = resolve; }) } : {};
+  } }) });
+  await host.mount(node, descriptor); host.unmount(node);
+  await host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
+  const replacement = node.children[0]; finish(); await new Promise(setImmediate);
+  assert.equal(node.children[0], replacement); assert.equal(node.children.length, 1); await host.dispose();
+});
+test('host announces plugin ownership before import and again after release/resume', async () => {
+  const events = []; let lifecycle;
+  const host = createHost({ document: dom(), window: {}, bridge: {
+    uiLoading: id => events.push(['loading', id]), onLifecycle(fn) { lifecycle = fn; }
+  }, importModule: async () => { events.push(['import']); return { mount() {} }; } });
+  await host.load(descriptor); await host.load(descriptor);
+  assert.deepEqual(events, [['loading', 'fixture'], ['import']]);
+  await host.release(['fixture']); await lifecycle({ action: 'resume', ids: ['fixture'] }); await host.load(descriptor);
+  assert.deepEqual(events, [['loading', 'fixture'], ['import'], ['loading', 'fixture'], ['import']]); await host.dispose();
+});

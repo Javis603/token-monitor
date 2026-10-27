@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('tokenMonitorPluginPage', {
 
 // Trusted plugin UI shares this renderer. This is routing, not plugin isolation.
 contextBridge.exposeInMainWorld('tokenMonitorTrustedPlugins', {
+  uiLoading: id => ipcRenderer.send('plugins:uiLoading', id),
   onLifecycle(callback) {
     const listener = async (_event, request) => {
       try { ipcRenderer.send('plugins:lifecycleReply', { request: request.request, value: await callback(request) }); }

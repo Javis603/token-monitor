@@ -299,7 +299,7 @@ function createPluginRuntime({
     }
   }
 
-  const lifecycleHosts = new Set(), observedLifecycleHosts = new WeakSet(), lifecycleRequests = new Map(), failedCleanup = new Map();
+  const lifecycleHosts = new Set(), lifecyclePlugins = new Map(), observedLifecycleHosts = new WeakSet(), lifecycleRequests = new Map(), failedCleanup = new Map();
   let lifecycleSequence = 0;
   function requestLifecycle(host, action, ids) {
     if (host.isDestroyed()) return Promise.resolve({});
@@ -315,9 +315,10 @@ function createPluginRuntime({
     });
   }
   async function inspectHosts(ids) {
-    const results = await Promise.all([...lifecycleHosts].map(async host => {
-      try { return { host, ...await requestLifecycle(host, 'inspect', ids) }; }
-      catch (error) { return { host, loaded: true, error: error.message }; }
+    const results = await Promise.all([...lifecycleHosts].filter(host => ids.some(id => lifecyclePlugins.get(host)?.get(id) === 'loaded')).map(async host => {
+      const loadedIds = ids.filter(id => lifecyclePlugins.get(host)?.get(id) === 'loaded');
+      try { return { host, ids: loadedIds, ...await requestLifecycle(host, 'inspect', loadedIds) }; }
+      catch (error) { return { host, ids: loadedIds, loaded: true, error: error.message }; }
     }));
     return results.filter(item => !item.host.isDestroyed() && item.loaded);
   }
@@ -341,12 +342,19 @@ function createPluginRuntime({
     else if (affected.some(item => item.unsaved)) await confirm(event, 'plugins.trusted.unsavedNote');
     return async () => {
       const reload = affected.filter(item => item.error).map(item => item.host);
-      const results = await Promise.all(affected.filter(item => !item.error).map(async ({ host }) => {
-        try { await requestLifecycle(host, 'release', ids); return null; }
-        catch (error) { log(`[plugins] UI cleanup failed: ${error.message}`); return host; }
+      const results = await Promise.all(affected.filter(item => !item.error).map(async ({ host, ids: loadedIds }) => {
+        try {
+          await requestLifecycle(host, 'release', loadedIds);
+          for (const id of loadedIds) if (lifecyclePlugins.get(host)?.has(id)) lifecyclePlugins.get(host).set(id, 'released');
+          return null;
+        }
+        catch (error) {
+          log(`[plugins] UI cleanup failed: ${error.message}`);
+          failedCleanup.set(host, new Set([...(failedCleanup.get(host) || []), ...loadedIds]));
+          return host;
+        }
       }));
       const failed = results.filter(host => host && !host.isDestroyed());
-      for (const host of failed) failedCleanup.set(host, new Set([...(failedCleanup.get(host) || []), ...ids]));
       if (failed.length) {
         // The disable already persisted. Declining recovery must not silently
         // re-enable partially disposed code; another enable will offer it again.
@@ -362,8 +370,18 @@ function createPluginRuntime({
   }
   async function resumeHosts(event, ids) {
     const failed = [...failedCleanup].filter(([host, values]) => !host.isDestroyed() && ids.some(id => values.has(id))).map(([host]) => host);
+    await Promise.all([...lifecycleHosts].filter(host => !failed.includes(host) && ids.some(id => lifecyclePlugins.get(host)?.get(id) === 'released')).map(async host => {
+      const releasedIds = ids.filter(id => lifecyclePlugins.get(host)?.get(id) === 'released');
+      try {
+        await requestLifecycle(host, 'resume', releasedIds);
+        for (const id of releasedIds) if (lifecyclePlugins.get(host)?.get(id) === 'released') lifecyclePlugins.get(host).delete(id);
+      } catch (error) {
+        log(`[plugins] UI resume failed: ${error.message}`);
+        failedCleanup.set(host, new Set([...(failedCleanup.get(host) || []), ...releasedIds]));
+        failed.push(host);
+      }
+    }));
     if (failed.length) await confirm(event, 'plugins.trusted.reloadNote');
-    await Promise.all([...lifecycleHosts].filter(host => !failed.includes(host)).map(host => requestLifecycle(host, 'resume', ids)));
     return () => reloadHosts(failed);
   }
   async function changeCode(event, change, ids = manager.list().plugins.map(plugin => plugin.id)) {
@@ -475,18 +493,24 @@ function createPluginRuntime({
     on('plugins:lifecycleHost', (event, registered) => {
       try { requireHost(event); } catch { return; }
       const host = event.sender;
-      if (!registered) { lifecycleHosts.delete(host); return; }
+      if (!registered) { lifecycleHosts.delete(host); lifecyclePlugins.delete(host); return; }
       if (lifecycleHosts.has(host)) return;
       lifecycleHosts.add(host);
       if (observedLifecycleHosts.has(host)) return;
       observedLifecycleHosts.add(host);
       const clear = () => {
-        lifecycleHosts.delete(host); failedCleanup.delete(host);
+        lifecycleHosts.delete(host); lifecyclePlugins.delete(host); failedCleanup.delete(host);
         for (const pending of lifecycleRequests.values()) if (pending.host === host) pending.finish(null, {});
       };
-      const navigate = (_event, _url, _inPlace, mainFrame) => { if (mainFrame !== false) clear(); };
+      const navigate = (_event, _url, inPlace, mainFrame) => { if (mainFrame !== false && !inPlace) clear(); };
       host.once('destroyed', clear); host.on('did-start-navigation', navigate);
       observerCleanup.push(() => { host.removeListener('destroyed', clear); host.removeListener('did-start-navigation', navigate); });
+    });
+    on('plugins:uiLoading', (event, id) => {
+      try { requireHost(event); } catch { return; }
+      if (!lifecycleHosts.has(event.sender) || !manager.active(id)) return;
+      if (!lifecyclePlugins.has(event.sender)) lifecyclePlugins.set(event.sender, new Map());
+      lifecyclePlugins.get(event.sender).set(id, 'loaded');
     });
     on('plugins:lifecycleReply', (event, reply) => {
       const pending = lifecycleRequests.get(reply?.request);
@@ -600,7 +624,7 @@ function createPluginRuntime({
       for (const [channel, listener] of ipcListeners) ipcMain.removeListener(channel, listener);
       observerCleanup.forEach(cleanup => cleanup());
       for (const pending of lifecycleRequests.values()) pending.finish('Plugin runtime disposed');
-      lifecycleHosts.clear(); failedCleanup.clear();
+      lifecycleHosts.clear(); lifecyclePlugins.clear(); failedCleanup.clear();
       subscribers.clear(); listListeners.clear();
       if (changedTimer) clearTimeout(changedTimer);
       catalog.dispose();
