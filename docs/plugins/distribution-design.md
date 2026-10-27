@@ -16,6 +16,8 @@ Executable updates, Reload and removal warn before reloading hosts with affected
 
 ## Atomic management
 
+Transactions pause and rediscover only their target plugin, including during rollback; unrelated mounts, drafts and backends stay live. An explicit discovery Reload remains a full reload.
+
 The registry and prepared/committed journal remain authoritative. A prepared transaction recovers the previous package, registry, management settings and owned data copies. A committed transaction completes cleanup. Before replacement, the current managed directory and content digest are rechecked. Invalid registry/journal bytes block mutations and remain intact for diagnosis.
 
 One verified previous compatible package is retained for rollback. Rollback swaps code; it does not reverse backend data migrations. Missing managed directories retain management-only entries, with rollback/uninstall available and execution forbidden. A corrupt existing package is rejected early with repair guidance; uninstall/reinstall with retention is the recovery route.
