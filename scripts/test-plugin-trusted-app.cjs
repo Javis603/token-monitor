@@ -101,6 +101,7 @@ app.whenReady().then(async () => {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [require('../src/electron/contentSecurityPolicy').contentSecurityPolicyForRequest(details)] } }));
   const handlers = {
     'settings:get': () => settings,
+    'settings:displayPreview': (_event, surface, phase, slots) => require('../src/electron/displayPreview').buildDisplayPreview(settings, surface, phase, process.platform, Date.now(), slots),
     'settings:update': async (event, patch) => { const after = await runtime.beforeSettingsChange(event, patch); settings = { ...settings, ...patch }; runtime.settingsChanged(); after(); return settings; },
     'app:getInfo': () => ({ version: 'fixture', platform: process.platform, systemUiTheme: 'dark', loginItemSupported: false }),
     'appUpdate:get': () => ({}), 'appearance:getNativeMaterial': () => null,
@@ -144,21 +145,50 @@ app.whenReady().then(async () => {
     const placementBaseline = process.env.TM_EXPECT_BASELINE === '1';
     const placementSettingsBefore = structuredClone(settings);
     const placementResults = {};
+    // Wait for accordion/scroll anchoring before framing evidence. A mounted
+    // control can still live in a hidden display-settings subpage.
+    const frameVisible = async selector => {
+      await pause(500);
+      await js(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center',behavior:'instant'})`);
+      await pause(200);
+      assert.equal(await js(`(() => {
+        const node=document.querySelector(${JSON.stringify(selector)});
+        const r=node.getBoundingClientRect();
+        const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+        return r.width>0 && r.height>0 && (node===hit || node.contains(hit));
+      })()`),true, `visible capture target: ${selector}`);
+    };
+    const captureRegion = async (name, expression) => {
+      const rect = await js(`(() => { const r=${expression}; return {x:Math.floor(r.left),y:Math.floor(r.top),width:Math.ceil(r.width),height:Math.ceil(r.height)}; })()`);
+      fs.writeFileSync(path.join(evidence,name),(await win.webContents.capturePage(rect)).toPNG());
+    };
     await js("els.settingsButton.click();document.querySelector('[data-settings-section=window]').click()");
     for (const [surface, key] of [['floatingBubble', 'floatingBubbleCustomLayout'], ['notch', 'notchCustomLayout']]) {
+      const entry = surface === 'floatingBubble' ? '.display-settings-row:nth-child(3) .display-settings-open' : '#display-tab-notch';
+      await frameVisible(entry);
+      await js(`document.querySelector('${entry}').click()`);
       if (surface === 'floatingBubble') {
         await js("if(!els.floatingBubbleInput.checked)els.floatingBubbleInput.click();els.floatingBubbleContentInput.value='custom';els.floatingBubbleContentInput.dispatchEvent(new Event('change',{bubbles:true}))");
       } else {
-        await js("if(!els.notchInput.checked)els.notchInput.click();document.querySelector('#notchMoreOptionsToggle').click();els.notchSummaryModeInput.value='custom';els.notchSummaryModeInput.dispatchEvent(new Event('change',{bubbles:true}))");
+        await js("if(!els.notchInput.checked)els.notchInput.click();els.notchSummaryModeInput.value='custom';els.notchSummaryModeInput.dispatchEvent(new Event('change',{bubbles:true}))");
       }
       await waitFor(`document.querySelector('#${surface === 'notch' ? 'notch' : 'floatingBubble'}Composer .tray-composer-add')`, `${surface} composer`);
       const selector = `#${surface === 'notch' ? 'notch' : 'floatingBubble'}Composer`;
-      await js(`document.querySelector('${selector} .tray-composer-add').scrollIntoView({block:'center'});document.querySelector('${selector} .tray-composer-add').click()`);
+      await frameVisible(`${selector} .tray-composer-add`);
+      fs.writeFileSync(path.join(evidence, `${surface}-context.png`), (await capture()).toPNG());
+      await js(`document.querySelector('${selector} .tray-composer-add').click()`);
       const choices = await js("Array.from(document.querySelectorAll('.tray-composer-gallery [data-plugin-ref]'),node=>node.dataset.pluginRef)");
       placementResults[surface] = { choices };
       assert.equal(choices.includes('trusted-fixture/panel'), !placementBaseline);
-      await js("document.querySelector('.tray-composer-gallery section:last-child').scrollIntoView({block:'end'})");
+      await frameVisible('.tray-composer-gallery section:last-child button:last-child');
       fs.writeFileSync(path.join(evidence, `${surface}-choices.png`), (await capture()).toPNG());
+      await captureRegion(`${surface}-choice-detail.png`, `(() => {
+        const gallery=document.querySelector('.tray-composer-gallery');
+        const groups=[...gallery.querySelectorAll('section')];
+        const spacing=groups.find(section=>section.textContent.includes('分隔點'));
+        const a=gallery.getBoundingClientRect(),b=spacing.getBoundingClientRect();
+        return {left:a.left,top:b.top,width:a.width,height:a.bottom-b.top};
+      })()`);
       if (!placementBaseline) {
         await js("document.querySelector('.tray-composer-gallery [data-plugin-ref=\"trusted-fixture/panel\"]').click()");
         for(let i=0;i<100&&!settings[key]?.items?.some(item=>item.ref==='trusted-fixture/panel');i++)await pause(20);
@@ -167,8 +197,13 @@ app.whenReady().then(async () => {
         await js(`document.querySelector('${selector} [data-item-id="${id}"]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))`);
         for(let i=0;i<100&&settings[key].items[0].id!==id;i++)await pause(20);
         assert.equal(settings[key].items[0].id,id);
-        await js(`document.querySelector('${selector}').scrollIntoView({block:'center'})`);
+        await frameVisible(`${selector} [data-item-id="${id}"]`);
         fs.writeFileSync(path.join(evidence, `${surface}-placed.png`), (await capture()).toPNG());
+        if(surface==='notch') await captureRegion('notch-placement-detail.png', `(() => {
+          const a=els.notchSummaryModeInput.closest('.settings-item').getBoundingClientRect();
+          const b=document.querySelector('#notchComposer').getBoundingClientRect();
+          return {left:b.left,top:a.top,width:b.width,height:b.bottom-a.top};
+        })()`);
         await js(`document.querySelector('${selector} [data-item-id="${id}"]').click();document.querySelector('.tray-composer-editor .tray-composer-danger').click()`);
         for(let i=0;i<100&&settings[key].items.some(item=>item.id===id);i++)await pause(20);
         assert.ok(!settings[key].items.some(item=>item.id===id));
@@ -184,8 +219,9 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('.plugin-runtime-text')", 'idle diagnostics');
     placementResults.idle = await js("document.querySelector('.plugin-runtime-text').textContent");
     assert.equal(placementResults.idle.includes('settings.plugins.runtimeState.idle'),placementBaseline);
-    await js("document.querySelector('.plugin-runtime-text').scrollIntoView({block:'center'})");
+    await frameVisible('.plugin-runtime-text');
     fs.writeFileSync(path.join(evidence, 'idle-diagnostics.png'), (await capture()).toPNG());
+    await captureRegion('idle-detail.png', "document.querySelector('.plugin-detail').getBoundingClientRect()");
     fs.writeFileSync(path.join(evidence, 'placement-results.json'), JSON.stringify(placementResults,null,2));
     console.log('PASS real App composer choices/save/reorder/remove and idle diagnostics', placementResults);
     await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
