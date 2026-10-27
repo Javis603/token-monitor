@@ -53,7 +53,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
     claudeAccountService: () => ({ legacyAccount: () => null, loginStatuses: () => [] }),
     effectiveRates: {}, rateCache: null, currentWindowToggleShortcutStatus: () => ({})
   });
-  const projected = JSON.parse(JSON.stringify(project()));
+  const projected = structuredClone(project());
   const encoded = JSON.stringify(projected);
   for (const secret of secrets) assert.ok(!encoded.includes(secret), secret);
   assert.equal(projected.hubHostSecret, settings.hubHostSecret);
