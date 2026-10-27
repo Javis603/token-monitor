@@ -280,27 +280,22 @@ Qoder CN のトークン使用量は API ではなくアプリのローカルデ
 
 ### 追加機能の対応状況
 
-| 機能 | 対応ツール／データソース | 条件 |
+| 機能 | 対応ツール／データソース | 補足 |
 |---------|-------------------------|------------|
-| セッションタイトル | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | 読み取れる会話タイトルが必要です。取得可否は会話ログやデータベースの形式に依存します。 |
-| プロンプト／応答ごとの使用量とツール呼び出し | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | ローカルの詳細レコードが必要です。ツール名とターンごとの使用量は記録項目に依存し、集計値だけでは完全な詳細を表示できません。 |
-| コンテキスト使用量／残り容量 | Claude Code, Codex, DeepSeek Harness | 累積使用量ではなく最近のコンテキストを使用します。Claude Code はモデルからウィンドウを推定するため、カスタム設定では概算になる場合があります。 |
-| キャッシュ使用量／セッションのキャッシュヒット率 | キャッシュ項目を提供するデータソース。例： Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 記載は一例です。キャッシュの読み書きのデータは揃わない場合があり、未報告はヒット率 0% を意味しません。 |
-| キャッシュ残存時間の推定 | Claude Code, Codex | Claude Code は記録された 5 分／1 時間の区分を使用します。Codex の 30 分は本製品の推定で、サーバー側キャッシュの有効期間を保証しません。 |
-| 出力速度／トークン消費速度 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` は出力速度、`tok/min` は総消費速度です。対応するトークン数と有効な所要時間が記録されている必要があり、待機時間を含む場合があります。 |
-| 推論トークン数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | データソースが報告する推論トークン数が必要です。high や medium などの推論強度設定ではありません。 |
-| ネイティブの実行中／入力待ち状態 | Claude Code, Codex | 専用のネイティブアクティビティリーダーを使用します。他のツールの最近のアクティビティ表示は、同等の状態を示すものではありません。 |
-| 親セッション／サブエージェントのグループ化 | Codex, Antigravity, Oh My Pi, ZCode；親セッションへのリンクを検証できる T3 Code セッション | 明示的な親 ID または検証済みの T3 Code リンクが必要です。サブエージェントのトークン計上だけではグループ化を意味せず、Claude Code は T3 Code 経由でのみグループ化します。 |
-| 同じ会話の継続レコードのグループ化 | Codex；検証済みのスレッドリンクを持つ T3 Code セッション | 使用量集計の各レコードを保持し、表示のみグループ化します。似たタイトルだけでは同じ会話とは判定しません。 |
-| 複数アカウントのクォータ／残高の監視 | Claude Code, Codex, OpenCode, Cursor, Antigravity, MiMo, WorkBuddy, OpenRouter, サードパーティAPI | 各アカウント／プロファイルに有効な認証情報か対応するローカルログインが必要です。OpenCode のプロファイルは API／Web のクォータを使用し、監視で現在のログインは切り替わりません。 |
-| ローカルアカウントの切り替え | Codex | 有効な認証情報を持つ登録済みアカウントでローカルの Codex ログインを更新します。グラフのフィルターではありません。 |
-| クォータのリセット時刻／カウントダウン | リセット時刻を提供するデータソース。例： Claude Code, Codex, OpenCode, Cursor, Antigravity | 取得できるリセット時刻や説明を使用します。クレジットの有効期限とクォータリセットは区別して表示します。 |
-| 利用可能なクォータリセット権 | Claude Code, Codex | 報告されたリセット回数と有効期限を表示し、Claude Code では適用範囲と制限も表示します。表示専用で、アプリ内ではリセット権を使用できません。 |
-| クォータリセット予測 | Codex | 任意で有効にできる codex-resets.com のサードパーティ予測です。公式のクォータやリセット時刻に代わるものではありません。 |
-| 追加／モデル別のクォータプール | 個別のクォータプールを提供するデータソース。例： Claude Code, Codex, Cursor, Antigravity | プールはデータソース、プラン、アカウントに依存します。共有プールはモデルごとの個別枠を意味しません。 |
-| 前払い残高と追加使用クレジット | 残高を提供するデータソース。例： Claude Code, OpenCode, Cursor, Cline, Factory Droid, MiMo, WorkBuddy, DeepSeek, TypeSafe, OpenRouter, サードパーティAPI | 対象アカウント／製品の残高へのアクセスが必要です。Claude Code は Claude Web を使用します。単位はプロバイダーごとに異なり、Claude Code と TypeSafe は取得できるクレジットの有効期限も表示します。 |
-| アカウントの支出サマリー | 支出データを提供するデータソース。例： Claude Code, Cursor, Cline, DeepSeek, TypeSafe, OpenRouter, サードパーティAPI | 範囲と期間は異なります。DeepSeek はローカルで観測した有料残高の変化、TypeSafe は使用量に基づく推定を使います。Tokscale のトークンコスト推定とは別の数値です。 |
-| 残高が尽きる時期の推定 | チャージ履歴を手動で記録した残高アカウント | 現在の残高と履歴から正の平均支出を算出できる必要があります。残高が尽きる日は推定で、プロバイダーの保証ではありません。 |
+| セッションタイトル | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| プロンプト／応答ごとの使用量とツール呼び出し | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 詳細はローカルで読み取り、同期されません。 |
+| コンテキスト使用量／残り容量 | Claude Code, Codex, DeepSeek Harness | Claude Code のコンテキスト上限はモデルから推定します。 |
+| キャッシュ使用量／セッションのキャッシュヒット率 | キャッシュ項目を提供するデータソース。例： Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | キャッシュ使用量のデータがある場合にヒット率を表示します。 |
+| キャッシュ残存時間の推定 | Claude Code, Codex | Claude Code：5 分または 1 時間。Codex：約 30 分（推定）。 |
+| 出力速度／トークン消費速度 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 出力速度は `tok/s`、総トークン消費速度は `tok/min`。計測時間には待機を含む場合があります。 |
+| 推論トークン数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| ネイティブの実行中／入力待ち状態 | Claude Code, Codex | — |
+| 親セッション／サブエージェントのグループ化 | Codex, Antigravity, Oh My Pi, ZCode；親セッションへのリンクを検証できる T3 Code セッション | Claude Code のグループ化は T3 Code 経由で提供します。 |
+| 同じ会話の継続レコードのグループ化 | Codex；検証済みのスレッドリンクを持つ T3 Code セッション | — |
+| ローカルアカウントの切り替え | Codex | Token Monitor に追加済みのアカウントへ切り替えます。 |
+| クォータのリセット時刻／カウントダウン | リセット時刻を提供するデータソース。例： Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| 利用可能なクォータリセット権 | Claude Code, Codex | 残り回数と有効期限を表示します。表示専用です。 |
+| クォータリセット予測 | Codex | 任意で有効にできる codex-resets.com のサードパーティ予測です。 |
 
 ## インストール
 

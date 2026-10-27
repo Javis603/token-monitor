@@ -275,27 +275,22 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 ### Additional Feature Support
 
-| Feature | Supported tools/sources | Conditions |
+| Feature | Supported tools/sources | Notes |
 |---------|-------------------------|------------|
-| Session titles | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | Requires a readable conversation title; availability can depend on the transcript or database format. |
-| Per-prompt/reply usage and tool calls | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Requires local detailed records; tool names and per-turn usage depend on recorded fields. Aggregates alone do not provide full detail. |
-| Context usage/remaining space | Claude Code, Codex, DeepSeek Harness | Uses recent context, not cumulative usage. Claude Code's window is inferred from the model; custom configurations may be estimated. |
-| Cache usage/session cache hit rate | Sources exposing cache fields, including Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | Examples are not exhaustive. Read/write fields may be missing; unreported cache usage does not mean a 0% hit rate. |
-| Estimated cache time remaining | Claude Code, Codex | Claude Code uses the recorded 5-minute/1-hour tier. Codex's 30-minute product estimate does not guarantee server-side cache validity. |
-| Output speed/token consumption rate | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` measures output speed; `tok/min` measures total consumption. Requires matching token counts and valid timing where reported; timing may include waiting. |
-| Reasoning token counts | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Requires source-reported reasoning tokens, not effort settings such as high or medium. |
-| Native running/waiting-for-input status | Claude Code, Codex | Uses dedicated native activity readers. Other tools' recent-activity indicators do not provide equivalent status. |
-| Parent/subagent grouping | Codex, Antigravity, Oh My Pi, ZCode; T3 Code sessions with verifiable parent links | Requires explicit parent IDs or verified T3 Code links. Counting subagent tokens alone does not imply grouping; Claude Code groups only through T3 Code. |
-| Continuation-record grouping for the same conversation | Codex; T3 Code sessions with verified thread links | Groups records for display, preserving all accounting records. Similar titles alone do not establish a shared conversation. |
-| Multiple-account quota/balance monitoring | Claude Code, Codex, OpenCode, Cursor, Antigravity, MiMo, WorkBuddy, OpenRouter, Third-party APIs | Requires usable credentials or a supported local sign-in per account/profile; OpenCode profiles use API/Web quota data. Monitoring does not switch the active login. |
-| Switch local accounts | Codex | Updates the local Codex login to a registered account with usable credentials; not a chart filter. |
-| Quota reset times/countdowns | Sources exposing reset times, e.g. Claude Code, Codex, OpenCode, Cursor, Antigravity | Uses reported reset times or descriptions when available. Credit expiry is distinct from quota reset. |
-| Available quota reset credits/grants | Claude Code, Codex | Shows account-reported available resets and expiry; Claude Code adds grant coverage and restrictions. Display only; resets cannot be redeemed in the app. |
-| Quota reset forecast | Codex | Optional third-party predictions from codex-resets.com, not a replacement for official quota or reset times. |
-| Additional/model-specific quota pools | Sources exposing separate pools, e.g. Claude Code, Codex, Cursor, Antigravity | Pools depend on source, plan, and account. Shared pools do not imply separate allowances for each model. |
-| Prepaid balances and extra-usage credits | Sources exposing balances, e.g. Claude Code, OpenCode, Cursor, Cline, Factory Droid, MiMo, WorkBuddy, DeepSeek, TypeSafe, OpenRouter, Third-party APIs | Requires account/product balance access; Claude Code uses Claude Web. Units vary; Claude Code and TypeSafe show credit-grant expiry when available. |
-| Account spending summaries | Sources exposing spending data, e.g. Claude Code, Cursor, Cline, DeepSeek, TypeSafe, OpenRouter, Third-party APIs | Coverage and periods vary. DeepSeek uses locally observed paid-balance changes; TypeSafe uses a usage-based estimate. Separate from Tokscale's token-cost estimates. |
-| Balance depletion estimate | Balance accounts with a manually recorded top-up ledger | Current balance and recorded history must establish positive average spend. The depletion date is an estimate, not a provider guarantee. |
+| Session titles | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| Per-prompt/reply usage and tool calls | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Details are read locally and are not synced. |
+| Context usage/remaining space | Claude Code, Codex, DeepSeek Harness | Claude Code's context limit is estimated from the model. |
+| Cache usage/session cache hit rate | Sources exposing cache fields, including Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | Hit rate is shown when cache usage data is available. |
+| Estimated cache time remaining | Claude Code, Codex | Claude Code: 5 minutes or 1 hour; Codex: about 30 minutes (estimated). |
+| Output speed/token consumption rate | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Output speed in `tok/s`, total token consumption in `tok/min`; timing can include waiting. |
+| Reasoning token counts | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| Native running/waiting-for-input status | Claude Code, Codex | — |
+| Parent/subagent grouping | Codex, Antigravity, Oh My Pi, ZCode; T3 Code sessions with verifiable parent links | Claude Code grouping is available through T3 Code. |
+| Continuation-record grouping for the same conversation | Codex; T3 Code sessions with verified thread links | — |
+| Switch local accounts | Codex | Switches between accounts added in Token Monitor. |
+| Quota reset times/countdowns | Sources exposing reset times, e.g. Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| Available quota reset credits/grants | Claude Code, Codex | Shows remaining resets and expiry dates; display only. |
+| Quota reset forecast | Codex | Optional third-party forecasts from codex-resets.com. |
 
 ## Installation
 

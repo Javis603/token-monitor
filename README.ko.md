@@ -280,27 +280,22 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 
 ### 추가 기능 지원
 
-| 기능 | 지원 도구／데이터 소스 | 조건 |
+| 기능 | 지원 도구／데이터 소스 | 참고 |
 |---------|-------------------------|------------|
-| 세션 제목 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | 읽을 수 있는 대화 제목이 필요하며, 제공 여부는 대화 기록이나 데이터베이스 형식에 따라 다릅니다. |
-| 프롬프트／응답별 사용량 및 도구 호출 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 로컬 상세 기록이 필요합니다. 도구 이름과 턴별 사용량은 기록 필드에 따라 달라지며 집계값만으로 전체 상세 정보를 제공하지는 못합니다. |
-| 컨텍스트 사용량／남은 공간 | Claude Code, Codex, DeepSeek Harness | 누적 사용량이 아닌 최근 컨텍스트를 사용합니다. Claude Code의 창 크기는 모델로 추정하므로 사용자 지정 설정에서는 추정치일 수 있습니다. |
-| 캐시 사용량／세션 캐시 적중률 | 캐시 필드를 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 목록은 예시입니다. 캐시 읽기／쓰기 데이터가 모두 제공되지 않을 수 있으며, 미보고가 적중률 0%를 뜻하지는 않습니다. |
-| 예상 캐시 잔여 시간 | Claude Code, Codex | Claude Code는 기록된 5분／1시간 등급을 사용합니다. Codex의 30분은 제품 추정치로, 서버 측 캐시 유효 기간을 보장하지 않습니다. |
-| 출력 속도／토큰 소비 속도 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s`는 출력 속도, `tok/min`은 전체 소비 속도입니다. 대응하는 토큰 수와 유효한 소요 시간이 기록되어야 하며, 대기 시간이 포함될 수 있습니다. |
-| 추론 토큰 수 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 소스가 보고한 추론 토큰 수가 필요하며, high나 medium 같은 추론 강도 설정이 아닙니다. |
-| 네이티브 실행 중／입력 대기 상태 | Claude Code, Codex | 전용 네이티브 활동 리더를 사용합니다. 다른 도구의 최근 활동 표시는 동일한 상태를 제공하지 않습니다. |
-| 부모 세션／하위 에이전트 그룹화 | Codex, Antigravity, Oh My Pi, ZCode; 부모 세션 연결을 검증할 수 있는 T3 Code 세션 | 명시적 부모 ID 또는 검증된 T3 Code 연결이 필요합니다. 하위 에이전트 토큰 집계만으로 그룹화를 뜻하지 않으며, Claude Code는 T3 Code로만 그룹화합니다. |
-| 동일 대화의 이어진 기록 그룹화 | Codex; 검증된 스레드 연결이 있는 T3 Code 세션 | 모든 사용량 집계 기록을 유지하고 표시만 그룹화합니다. 비슷한 제목만으로 동일 대화로 판단하지 않습니다. |
-| 여러 계정의 한도／잔액 모니터링 | Claude Code, Codex, OpenCode, Cursor, Antigravity, MiMo, WorkBuddy, OpenRouter, 서드파티 API | 계정／프로필마다 사용 가능한 인증 정보나 지원되는 로컬 로그인이 필요합니다. OpenCode 프로필은 API／Web 한도 데이터를 사용하며, 모니터링은 현재 로그인을 전환하지 않습니다. |
-| 로컬 계정 전환 | Codex | 사용 가능한 인증 정보가 있는 등록 계정으로 로컬 Codex 로그인을 갱신합니다. 차트 필터가 아닙니다. |
-| 한도 초기화 시간／카운트다운 | 초기화 시간을 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Antigravity | 제공되는 초기화 시각이나 설명을 사용하며, 크레딧 만료는 한도 초기화와 구분합니다. |
-| 사용 가능한 한도 초기화권 | Claude Code, Codex | 계정이 보고한 초기화 횟수와 만료 시간을 표시하며 Claude Code는 적용 범위와 제한도 표시합니다. 조회 전용으로, 앱에서 초기화권을 사용할 수 없습니다. |
-| 한도 초기화 예측 | Codex | 선택 사항인 codex-resets.com의 서드파티 예측이며 공식 한도나 초기화 시간을 대체하지 않습니다. |
-| 추가／모델별 한도 풀 | 별도 한도 풀을 제공하는 소스. 예: Claude Code, Codex, Cursor, Antigravity | 풀은 소스, 요금제, 계정에 따라 다릅니다. 공유 풀이 모델별 별도 한도를 뜻하지는 않습니다. |
-| 선불 잔액 및 추가 사용 크레딧 | 잔액을 제공하는 소스. 예: Claude Code, OpenCode, Cursor, Cline, Factory Droid, MiMo, WorkBuddy, DeepSeek, TypeSafe, OpenRouter, 서드파티 API | 해당 계정／제품의 잔액 접근 권한이 필요하며 Claude Code는 Claude Web을 사용합니다. 단위는 제공업체마다 다르고, Claude Code와 TypeSafe는 제공되는 크레딧 만료 정보도 표시합니다. |
-| 계정 지출 요약 | 지출 데이터를 제공하는 소스. 예: Claude Code, Cursor, Cline, DeepSeek, TypeSafe, OpenRouter, 서드파티 API | 범위와 기간은 다릅니다. DeepSeek는 로컬에서 관측한 유료 잔액 변화, TypeSafe는 사용량 기반 추정치를 사용합니다. Tokscale의 토큰 비용 추정치와는 별개입니다. |
-| 잔액 소진 시점 추정 | 충전 내역을 수동으로 기록한 잔액 계정 | 현재 잔액과 기록으로 양수의 평균 지출을 산출할 수 있어야 합니다. 소진 날짜는 추정치로, 제공업체의 보장이 아닙니다. |
+| 세션 제목 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| 프롬프트／응답별 사용량 및 도구 호출 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 상세 정보는 로컬에서만 읽으며 동기화하지 않습니다. |
+| 컨텍스트 사용량／남은 공간 | Claude Code, Codex, DeepSeek Harness | Claude Code의 컨텍스트 한도는 모델을 기준으로 추정합니다. |
+| 캐시 사용량／세션 캐시 적중률 | 캐시 필드를 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 캐시 사용량 데이터가 있을 때 적중률을 표시합니다. |
+| 예상 캐시 잔여 시간 | Claude Code, Codex | Claude Code: 5분 또는 1시간. Codex: 약 30분(추정). |
+| 출력 속도／토큰 소비 속도 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 출력 속도는 `tok/s`, 전체 토큰 소비 속도는 `tok/min`이며, 측정 시간에 대기가 포함될 수 있습니다. |
+| 추론 토큰 수 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| 네이티브 실행 중／입력 대기 상태 | Claude Code, Codex | — |
+| 부모 세션／하위 에이전트 그룹화 | Codex, Antigravity, Oh My Pi, ZCode; 부모 세션 연결을 검증할 수 있는 T3 Code 세션 | Claude Code의 그룹화는 T3 Code를 통해 제공합니다. |
+| 동일 대화의 이어진 기록 그룹화 | Codex; 검증된 스레드 연결이 있는 T3 Code 세션 | — |
+| 로컬 계정 전환 | Codex | Token Monitor에 추가한 계정으로 전환합니다. |
+| 한도 초기화 시간／카운트다운 | 초기화 시간을 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| 사용 가능한 한도 초기화권 | Claude Code, Codex | 남은 횟수와 만료 시간을 표시하며 조회 전용입니다. |
+| 한도 초기화 예측 | Codex | 선택 사항인 codex-resets.com의 서드파티 예측입니다. |
 
 ## 설치
 
