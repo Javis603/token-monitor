@@ -73,6 +73,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false, pluginHost = null
   document.fire = (name, event = {}) => { for (const fn of document.listeners[name] || []) fn(event); };
   document.createElementNS = (_ns, tag) => new Element(tag, document);
   document.createElement = (tag) => new Element(tag, document);
+  document.createTextNode = value => { const node = new Element('#text', document); node.textContent = value; return node; };
   const el = (tag, className = '', value) => {
     const node = new Element(tag, document); node.className = className;
     if (value !== undefined) node.textContent = value;

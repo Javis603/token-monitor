@@ -1513,23 +1513,18 @@ function sessionsContainer(sessions, options = {}) {
     // for the same session. The label is the tooltip trigger there too: one
     // row per model with its tokens and share.
     const modelLabel = sessionRowsApi.sessionModelLabel(session);
+    const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(session);
     const age = relativeAgo(session.lastUsedAt || session.startedAt);
-    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(session, {
+    description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...session, modelLabel }, {
+      translate: t, view: limitWindowsView,
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatBreakdownTokens
-    });
-    if (modelLabel) {
-      if (modelEntries.length > 1) {
-        const models = el('span', 'session-models', modelLabel);
-        limitWindowsView.setDetailTooltip(models, modelEntries);
-        description.append(models);
-      } else description.append(document.createTextNode(modelLabel));
-    }
+    }));
     if (memberLabel) {
-      if (modelLabel) description.append(document.createTextNode(' · '));
+      if (metadataLabel) description.append(document.createTextNode(' · '));
       description.append(el('span', 'edge-dock-session-member-count', memberLabel));
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
+    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
     meta.append(description);
     const status = sessionRowsApi.sessionStatusNode(document, session, { prefix: 'edge-dock-session', translate: t,
       view: limitWindowsView, showUsed: appearance().sessionContextMetric !== 'remaining' });

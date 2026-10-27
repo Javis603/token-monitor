@@ -179,7 +179,7 @@ test('Home sessions respect a smaller count while retaining an active session be
     sessionPresentationOptions: () => ({}), homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }),
     applyHomeListMark() {}, iconKindFor() {}, clientColors: {}, stableColor() {}, fallbackModelColors: [], bindHoverMarquee() {},
     formatCompact: String, homeSessionAgo: () => '', t: key => key, limitWindowsView: {},
-    sessionRowsApi: { sessionModelLabel: () => '', sessionModelTooltipEntries: () => [], sessionStatusNode: () => null }
+    sessionRowsApi: require('../../src/electron/renderer/sessionRows')
   };
   vm.runInNewContext(`${source('renderHomeSessionModule', 'renderHomeDeviceModule')}; renderHomeSessionModule();`, context);
   assert.equal(context.body.children.length, 3);

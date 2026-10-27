@@ -5,6 +5,7 @@ const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { normalizeSessionContext } = require('./sessionContext');
+const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const antigravitySessionMetadata = require('./providers/antigravity/sessionMetadata');
 const codebuddySession = require('./providers/codebuddy/sessionMetadata');
@@ -514,6 +515,9 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
+      if (isSessionReasoningEffortClient(session.client) && Object.prototype.hasOwnProperty.call(meta, 'reasoningEffort')) {
+        session.reasoningEffort = normalizeReasoningEffort(meta.reasoningEffort);
+      }
       if (session.client === 'codex' && typeof meta.waitingForInput === 'boolean') {
         session.waitingForInput = meta.waitingForInput;
       }
