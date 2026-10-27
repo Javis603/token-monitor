@@ -103,7 +103,6 @@ function createUsageTransform(options = {}) {
           mutate: true
         });
     delete visibleSummary.sessionUsageArchiveFullScan;
-    delete visibleSummary.legacyPromaRoots;
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }
 

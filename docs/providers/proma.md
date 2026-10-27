@@ -14,12 +14,14 @@ Upstream tokscale (`sessions/proma.rs`, documented in its `docs/proma.md`) reads
 
 ## Invariants and known gaps
 
-Before upstream supported Proma, Token Monitor's tokscale fork read only `agent-sessions/*.jsonl` and keyed each journal as `<file stem>@<namespace>`, the namespace being the first 6 bytes of sha256 over the normalized journal root. Upstream keys the same usage by the records' own session ids (else the stem), a Pi header id, or the native session its index entry links through `sdkSessionId`, so the session archive would replay fork rows beside their upstream copies.
+Before upstream supported Proma, Token Monitor's tokscale fork read only `agent-sessions/*.jsonl` and keyed each journal as `<file stem>@<12 hex namespace>`. Upstream reports the same usage under Proma, SDK or Pi session ids, after deduplicating across journals and native transcripts. The session archive keeps only per-session aggregates, so a fork-era row cannot be matched to the upstream rows that now cover it: replaying it would count rescanned journals twice, and retiring it by inference can erase usage only the fork read.
 
-A completed full scan therefore passes the journal roots it read (`legacyPromaRoots`, host plus successfully scanned WSL homes; a private summary hint stripped before sync). For each fork row with usage under one of those roots, the archive derives the session ids its journal can be reported under, mirroring upstream's reader, and records an explicit zero only when the scan's All time reports one of them. Retirement is per journal, never per home: a journal that is gone, unreadable, without usage records, or whose ids the scan did not report keeps its fork usage, so a scan that misses a journal (including a binary without upstream Proma, which drops the id through capability filtering) cannot erase history. A period stored after the capture is left alone, and a fork id the scan still reports stays live. Usage the index hands to a native session only through `piSessionFile` is not matched, because Token Monitor does not open paths stored in the index; such a journal keeps its fork row and can count beside the native usage.
+Fork-era rows (`isForkEraPromaSession` in `src/shared/providers/proma/sessionGuard.js`: client `proma` and a session id of the form `<no @>@<12 lowercase hex>`; Proma names journals after `randomUUID()` ids) therefore stay in the session archive unchanged but are not replayed into Today, Month or All time. Totals count what upstream reports now, and its rows are archived under their upstream ids, so they are retained after their sources are deleted. Usage that only a fork-era row held, such as a journal deleted before the upgrade or records upstream does not read, is not part of the totals any more. This is a deliberate scope, not a lossless migration. Daily trends keep the per-day maximum the history archive already retained for each client and model, so days where the fork counted more can still show the fork value there.
 
 Custom scan paths stay unsupported for Proma; upstream accepts extra roots, but offering them is a separate feature.
 
 ## Verification
 
-`node --test tests/shared/legacyPromaSessions.test.js tests/shared/clientHealth.test.js tests/shared/clientRegistrationConsistency.test.js`
+`node --test tests/shared/promaForkArchive.test.js tests/shared/clientHealth.test.js tests/shared/clientRegistrationConsistency.test.js`
+
+`tests/fixtures/proma-fork-upgrade.json` holds report entries from the released fork build and the upstream reader over the same Proma homes.

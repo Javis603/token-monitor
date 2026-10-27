@@ -16,13 +16,13 @@ const {
 } = require('../archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('../config');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('../providers/reasonix/sessionGuard');
+const { isForkEraPromaSession } = require('../providers/proma/sessionGuard');
 const { splitClientIdFor } = require('../clientIdentitySplits');
 const {
   isLegacyCursorEntry,
   legacyCursorLookup,
   supersedingCursorSessionId
 } = require('../providers/cursor/sessionGuard');
-const { parseLegacyPromaSessionId, promaJournalSessionIds } = require('./legacyPromaSessions');
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');
@@ -272,38 +272,8 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
     }
   }
 
-  if (fullScan) retireRescannedLegacyProma(archive, deviceRecord.legacyPromaRoots, liveKeys, captureDate, changedKeys);
   if (options.cursorUsageEvents) linkLegacyCursorEvents(archive, changedKeys, options.cursorUsageEvents);
   return { archive, changedKeys };
-}
-
-// A fork-keyed Proma row (see legacyPromaSessions.js) records an explicit zero
-// once this full scan reported a session its journal's usage belongs to, so the
-// same usage does not replay twice. Only roots the scan just read are judged.
-// A row whose journal is gone, unreadable or not confirmed by the scan keeps
-// replaying, as does one the scan still reports under its fork id. Like the
-// observations above, a period stored after this capture is left alone.
-function retireRescannedLegacyProma(archive, roots, liveKeys, captureDate, changedKeys) {
-  if (!Array.isArray(roots) || roots.length === 0 || !liveKeys) return;
-  const rootByNamespace = new Map(roots.map(({ namespace, root }) => [namespace, root]));
-  const captureTime = captureDate.getTime();
-  const capturedAt = captureDate.toISOString();
-  for (const [key, entry] of Object.entries(archive.sessions)) {
-    if (entry.client !== 'proma' || liveKeys.has(key)) continue;
-    const legacy = parseLegacyPromaSessionId(entry.sessionId);
-    const root = legacy && rootByNamespace.get(legacy.namespace);
-    if (!root) continue;
-    const periods = Object.keys(entry.periods || {}).filter((name) => hasSessionUsage(entry.periods[name])
-      && !(Date.parse(entry.periodWindows?.[name]?.capturedAt || entry.capturedAt || '') > captureTime));
-    if (periods.length === 0) continue;
-    const ids = promaJournalSessionIds(root, legacy.stem);
-    if (!ids || ![...ids].some((id) => liveKeys.has(sessionKey('proma', id)))) continue;
-    for (const name of periods) {
-      entry.periods[name] = { client: entry.client, sessionId: entry.sessionId, totalTokens: 0, costUsd: 0 };
-      entry.periodWindows[name] = { ...entry.periodWindows[name], capturedAt };
-    }
-    changedKeys.add(key);
-  }
 }
 
 // Every capture asks the Cursor JSON cache about the legacy rows that still
@@ -468,6 +438,8 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   // Select zeros too, so a newer zero cannot resurrect an older alias's usage.
   const retainedRows = new Map();
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
+    // Retained, not replayed: see providers/proma/sessionGuard.js.
+    if (isForkEraPromaSession(entry.client, entry.sessionId)) continue;
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
       if (!session || !shouldApplyPeriod(periodName, entry, now)) continue;
