@@ -30,16 +30,6 @@
     view.setDetailTooltip(node, entries);
   }
 
-  function sessionStatusForRow(row, now) {
-    const statusRow = row?.groupRows?.[0] || row;
-    if (!statusRow) return null;
-    const context = sessionActivityState(statusRow, now) !== 'idle'
-      ? statusRow.context || sessionContextForRow(statusRow, now) || null : null;
-    const promptCache = sessionLive.sessionPromptCacheForRow(statusRow, now);
-    if (!context && !promptCache) return null;
-    return { statusRow, context, promptCache };
-  }
-
   function sessionReasoningEffortForRow(row) {
     const main = row?.groupRows?.[0] || row;
     return sessionLive.isSessionReasoningEffortClient(main?.client) ? sessionLive.normalizeReasoningEffort(main.reasoningEffort) : null;
@@ -81,9 +71,12 @@
   // prompt-cache estimate. The cache badge's tooltip still names the context
   // size when the transcript reported one. Surfaces differ only in class names.
   function sessionStatusNode(document, row, { prefix, translate, view, showUsed = true, now = Date.now() }) {
-    const reading = sessionStatusForRow(row, now);
-    if (!reading) return null;
-    const { statusRow, context, promptCache } = reading;
+    const statusRow = row?.groupRows?.[0] || row;
+    if (!statusRow) return null;
+    const context = sessionActivityState(statusRow, now) !== 'idle'
+      ? statusRow.context || sessionContextForRow(statusRow, now) || null : null;
+    const promptCache = sessionLive.sessionPromptCacheForRow(statusRow, now);
+    if (!context && !promptCache) return null;
     const span = (className, text) => {
       const node = document.createElement('span');
       node.className = className;
