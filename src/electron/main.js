@@ -6499,8 +6499,7 @@ function ensureTray() {
     onPluginMenu: (id, action) => { void pluginRuntime?.trayAction(id, action).catch(error => console.warn(`[plugins] Tray action: ${error.message}`)); },
     onRestartPluginsSafe: () => {
       app.relaunch({ args: [...process.argv.slice(1).filter(arg => arg !== '--plugins-safe-mode'), '--plugins-safe-mode'] });
-      disposePluginRuntime();
-      app.exit(0);
+      requestAppQuit();
     },
     getMenuState: () => {
       const codex = trayCodexMenuState();

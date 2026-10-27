@@ -10,6 +10,11 @@ const { defaultEdgeDockItems, normalizeEdgeDockItems, MAX_ITEMS: MAX_EDGE_DOCK_I
 
 const PLACEMENT_SURFACES = Object.freeze(['home', 'edgeDock', 'tray', 'notch', 'page']);
 
+function summaryBitmapRefs(settings) {
+  return settings.notchSummaryMode === 'custom' && settings.notchSummaryEnabled !== false
+    ? trayLayout.trayLayoutPluginRefs(settings.notchCustomLayout) : [];
+}
+
 function splitList(value) {
   return String(value || '').split(',').map((entry) => entry.trim().toLowerCase()).filter(Boolean);
 }
@@ -97,4 +102,4 @@ function removePluginPlacements(settings, id) {
     notchPluginPages: placements.normalizeNotchPluginPages(settings.notchPluginPages).filter(ref => !owns(ref))
   };
 }
-module.exports = { PLACEMENT_SURFACES, placementPatch, placementsFor, removePluginPlacements };
+module.exports = { summaryBitmapRefs, PLACEMENT_SURFACES, placementPatch, placementsFor, removePluginPlacements };

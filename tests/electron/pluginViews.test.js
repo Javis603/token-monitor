@@ -160,9 +160,46 @@ test('overlapping selectors keep the selected additive order at the same native 
   const content = create({ document, host:{mount(node,view){node.textContent=view.ref;},unmount(){}}, getViews:()=>views });
   content.render('main.home.content',native);
   assert.deepEqual(native.children.slice(1).map(node=>node.textContent),['fixture/v0','fixture/v1']);
+  let moves = 0;
+  const insert = native.insertBefore;
+  native.insertBefore = (...args) => { moves++; return insert(...args); };
+  content.render('main.home.content',native);
+  assert.equal(moves, 0, 'unchanged final order must never detach a focused author descendant');
   views[0].contentOrder['main.home.content']=2;
   content.render('main.home.content',native);
   assert.deepEqual(native.children.slice(1).map(node=>node.textContent),['fixture/v1','fixture/v0']);
+});
+
+test('ended data subscriptions release cleanup records; teardown drains every live subscription', async () => {
+  const document = dom(); let next = 0, listeners = 0; const removed = [];
+  const host = createHost({ document, window: {}, bridge: {
+    onData() { listeners++; return () => listeners--; }, subscribeData: async () => ++next,
+    unsubscribeData: async id => removed.push(id)
+  }, importModule: async () => ({ mount() {} }) });
+  const loaded = await host.load(descriptor), initial = loaded.cleanup.length;
+  for (let i = 0; i < 100; i++) (await loaded.ctx.data.subscribe({}, () => {}))();
+  assert.equal(loaded.cleanup.length, initial); assert.equal(listeners, 0);
+  for (let i = 0; i < 3; i++) await loaded.ctx.data.subscribe({}, () => {});
+  await host.dispose(); assert.equal(listeners, 0); assert.equal(new Set(removed).size, 103);
+});
+
+test('initial view requests coalesce, cannot overwrite pushes or revive a disposed host, and rejection is contained', async t => {
+  const { createPluginViewHost } = require('../../src/electron/renderer/pluginViews');
+  const document = dom(); document.addEventListener = document.removeEventListener = () => {};
+  let resolve, reject, calls = 0, paints = 0;
+  const window = { requestAnimationFrame: () => 1, cancelAnimationFrame() {},
+    tokenMonitorTrustedPlugins: { views: () => { calls++; return new Promise((yes,no) => { resolve=yes; reject=no; }); } },
+    TokenMonitorPluginUi: { createHost: () => ({ mount(){paints++;},unmount(){},sweep(){},setVisibility(){},dispose(){} }) } };
+  const host = createPluginViewHost({ document, window });
+  const mount = surface => { const node=document.createElement('div'); node.style.removeProperty=()=>{}; host.mount(node,descriptor.ref,surface); };
+  mount('home'); mount('home'); await new Promise(setImmediate); assert.equal(calls,1);
+  host.update({surface:'home',views:{[descriptor.ref]:descriptor}});
+  resolve({views:{[descriptor.ref]:{...descriptor,revision:'old'}}}); await new Promise(setImmediate);
+  assert.equal(host.state('home',descriptor.ref).revision,descriptor.revision);
+  let errors=0; t.mock.method(console,'error',()=>errors++);
+  mount('page'); await new Promise(setImmediate); reject(Error('IPC failure')); await new Promise(setImmediate); assert.equal(errors,1);
+  mount('page'); await new Promise(setImmediate); await host.dispose(); const before=paints;
+  resolve({views:{[descriptor.ref]:descriptor}}); await new Promise(setImmediate); assert.equal(paints,before); assert.equal(host.state('page',descriptor.ref),null);
 });
 
 

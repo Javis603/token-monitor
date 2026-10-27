@@ -97,6 +97,7 @@ test('a hidden floating-bubble state update changes state without touching DOM',
         }
       },
       isRendererWindowHidden: () => true,
+      syncPluginTrayDemand() {},
       state,
       statsRenderScheduler: { request() { scheduledRenders += 1; } }
     }

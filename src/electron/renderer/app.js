@@ -8474,6 +8474,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   const wasCollapsed = state.floatingBubble.collapsed;
   const side = payload?.collapsed && ['left', 'right'].includes(payload.side) ? payload.side : null;
   state.floatingBubble = { collapsed: Boolean(side), side };
+  syncPluginTrayDemand();
   if (isRendererWindowHidden()) {
     statsRenderScheduler.request();
     return;
@@ -12944,7 +12945,7 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
     navigate: openViewFromTray
   },
   getContext: () => ({ period: state.period, source: state.settings?.hubMode, stats: state.stats }),
-  onLoaded: () => { void maybeUpdateBarsIcon(); },
+  onLoaded: () => { void maybeUpdateBarsIcon(); renderFloatingBubbleContent(); },
   onDemand: (surface, refs) => pluginBridge.setDemand(surface, refs),
   motionAllowed: () => !prefersReducedMotion(),
   motionMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
@@ -13059,12 +13060,15 @@ function syncPluginTrayDemand() {
   if (!pluginViewHost) return;
   const refs = state.settings?.showTrayIcon !== false && state.settings?.trayContent === 'custom'
     ? trayLayoutApi.trayLayoutPluginRefs(state.settings?.trayCustomLayout) : [];
-  pluginViewHost.setExplicitDemand('tray', refs);
+  if (!isRendererWindowHidden() && state.floatingBubble.collapsed && state.settings?.floatingBubbleContent === 'custom') {
+    refs.push(...trayLayoutApi.trayLayoutPluginRefs(state.settings.floatingBubbleCustomLayout));
+  }
+  pluginViewHost.setExplicitDemand('tray', [...new Set(refs)]);
 }
 
-function pluginTrayViews() {
+function pluginTrayViews(layout) {
   const views = {};
-  for (const ref of trayLayoutApi.trayLayoutPluginRefs(state.settings?.trayCustomLayout)) {
+  for (const ref of trayLayoutApi.trayLayoutPluginRefs(layout)) {
     views[ref] = pluginViewHost?.state('tray', ref) || null;
   }
   return views;
@@ -13106,7 +13110,7 @@ async function applyAppearancePluginSkin(skin, chip) {
 if (pluginBridge) {
   pluginBridge.onViews((payload) => {
     pluginViewHost?.update(payload);
-    if (payload?.surface === 'tray') void maybeUpdateBarsIcon();
+    if (payload?.surface === 'tray') { void maybeUpdateBarsIcon(); renderFloatingBubbleContent(); }
   });
   pluginBridge.onChanged(() => void refreshPluginCatalog());
 }
@@ -14452,6 +14456,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
 function handleWindowVisibilityChange() {
+  syncPluginTrayDemand();
   pluginViewHost?.refreshDemand();
   if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
   if (!statsRenderScheduler.visibilityChanged()) return;
@@ -15249,7 +15254,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     availableProviderIds: Object.keys(trayProviderImages),
     liveTokenRates: options.liveTokenRates || displayLiveTokenRateSamples(),
     liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value)),
-    pluginViews: pluginTrayViews()
+    pluginViews: pluginTrayViews(layout)
   });
   const items = resolved.items.filter(item => item.type !== 'plugin' || item.available).map((item) => (
     item.type === 'text'

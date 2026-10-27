@@ -542,10 +542,10 @@ test('header outer margins stay equal through motion at each summary zoom', () =
     const right = { style: {}, getBoundingClientRect: () => ({ width: widthRight }) };
     const body = {};
     const properties = {};
-    const head = { dataset: {}, style: {}, querySelector: (selector) => selector.includes('notch-left') ? left : right };
+    const head = { children: [], dataset: {}, style: {}, querySelector: (selector) => selector.includes('notch-left') ? left : right };
     let styleReads = 0;
     const apply = vm.runInNewContext(`${source}; applyNotchMotion`, {
-      contentLayer: { querySelector: (selector) => selector === '.notch-summary' ? head : body },
+      contentLayer: { querySelectorAll: () => [], querySelector: (selector) => selector === '.notch-summary' ? head : body },
       shapeLayer: { firstChild: true, dataset: {}, setAttribute() {}, querySelector: () => ({ setAttribute() {} }) },
       root: { style: { setProperty(key, value) { properties[key] = value; } } }, state: { payload: { geometry: header } },
       paintHardwareShade() {},
@@ -1201,11 +1201,11 @@ test('the renderer scales each ear around its outer edge without scaling the cam
   assert.match(css, /\.notch-right \.notch-slot-content\s*\{[^}]*transform-origin:\s*right center/);
   for (const summaryZoom of [0.8, 1, 1.2]) {
     const left = { style: {} }, right = { style: {} }, gap = { style: { width: '179px' } };
-    const head = { dataset: {}, style: {}, querySelector: selector => selector.includes('notch-left') ? left : selector.includes('notch-right') ? right : gap };
+    const head = { children: [], dataset: {}, style: {}, querySelector: selector => selector.includes('notch-left') ? left : selector.includes('notch-right') ? right : gap };
     const apply = vm.runInNewContext(`${code}; applyNotchMotion`, {
       state: { payload: { geometry: { headerX: 0, headerWidth: 300, shoulder: 8, summaryZoom } } },
       shapeLayer: { firstChild: true, dataset: {}, setAttribute() {}, querySelector: () => ({ setAttribute() {} }) },
-      contentLayer: { querySelector: selector => selector === '.notch-summary' ? head : null },
+      contentLayer: { querySelectorAll: () => [], querySelector: selector => selector === '.notch-summary' ? head : null },
       root: { style: { setProperty() {} } }, paintHardwareShade() {}
     });
     apply({ shape: { d: '', width: 400, height: 100 }, progress: 0, summaryHeight: 37, summaryScale: 37 / 32, summaryEdges: { left: 10, right: 290 } });
@@ -1678,7 +1678,7 @@ test('camera-free renderer fits the display limit while reserving a complete pri
     fitNotchSlot: (slot, budget) => ({ minimum: slot.minimum, width: Math.max(slot.minimum, Math.min(slot.width, budget ?? Infinity)) }),
     lastNotchSlots: '', bridge: { reportNotchSize: (_height, slots) => { reported = slots; } }
   });
-  report({ dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
+  report({ children: [], dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
   assert.ok(reported.left + reported.right + 12 <= 76, 'display limit applies to the complete compact group');
   assert.ok(reported.right >= 40, 'extra icons cannot truncate the primary readout');
   left.children = [{
@@ -1687,7 +1687,7 @@ test('camera-free renderer fits the display limit while reserving a complete pri
     querySelector: () => ({ getBoundingClientRect: () => ({ left: 20 }) })
   }];
   left.getBoundingClientRect = () => ({ left: 0 });
-  report({ dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
+  report({ children: [], dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
   assert.equal(reported.iconInset, 0, 'an app mark must not borrow the second provider mark inset');
 });
 
@@ -1702,7 +1702,7 @@ test('live summary measurement ignores hover enlargement and restores both visua
     fitNotchSlot: slot => ({ width: slot.width * (slot.style.transform === 'none' ? 1 : 1.15625), minimum: slot.width }),
     lastNotchSlots: '', bridge: { reportNotchSize: (_height, slots) => reports.push(slots) }
   });
-  const head = { dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right };
+  const head = { children: [], dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right };
   report(head);
   assert.equal(reports[0].left, 17);
   assert.equal(reports[0].right, 42);
@@ -2255,7 +2255,7 @@ test('summary resize batches fit text before reporting slots', () => {
   const head = {};
   vm.runInNewContext(code, {
     ResizeObserver: class { constructor(fn) { callback = fn; } },
-    contentLayer: { querySelector: () => head },
+    contentLayer: { querySelectorAll: () => [], querySelector: () => head },
     fitNotchTypeface: target => events.push(target.id),
     reportNotchSlots: target => { assert.equal(target, head); events.push('report'); },
     animateNotchNumbers: () => events.push('animate')
@@ -2381,7 +2381,7 @@ test('both physical ears use the same finite budget', () => {
     fitNotchSlot: (slot, budget) => ({ minimum: slot.minimum, width: Math.max(slot.minimum, Math.min(slot.width, budget)) }),
     lastNotchSlots: '', bridge: { reportNotchSize: (_height, slots) => { reported = slots; } }
   });
-  report({ dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
+  report({ children: [], dataset: {}, querySelector: selector => selector.includes('notch-left') ? left : right });
   assert.equal(reported.left, 50);
   assert.equal(reported.right, 50);
 });
@@ -2543,7 +2543,7 @@ test('transformed summary measurements ignore subpixel noise before rounding log
   const context = { state: { payload: { summary: {}, geometry: { gapWidth: 179 }, appearance: { zoomFactor: 1 } } },
     fitNotchSlot: slot => slot, lastNotchSlots: '', bridge: { reportNotchSize: (_height, slots) => reports.push(slots) } };
   const report = vm.runInNewContext(`${code};reportNotchSlots`, context);
-  const head = { dataset: {}, querySelector: name => name.includes('notch-left') ? left : right };
+  const head = { children: [], dataset: {}, querySelector: name => name.includes('notch-left') ? left : right };
   report(head);
   left.width = left.minimum = 28.0000038;
   report(head);
@@ -2640,10 +2640,10 @@ test('Notch visibility transitions settle summary motion without rebuilding its 
   const code = source.slice(source.indexOf('function renderNotch('), source.indexOf('    let notchAnimation ='));
   let settles = 0;
   const payload = { expanded: false, summary: null, cells: [], appearance: {}, geometry: { gapWidth: 179, notched: true } };
-  const context = { pluginContent: null, state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0,
+  const context = { pluginContent: null, pluginHost: null, state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0,
     notchHeaderKey: '', panel: { suspend() {} }, settleNotchNumbers: () => settles++, settleNotchStatNumbers() {},
     resetRefreshVisit() {}, paintRefreshButton() {}, root: { classList: { toggle() {} }, style: { setProperty() {} } },
-    runningSessionSummary() {}, contentLayer: { querySelector: () => null, prepend() {} },
+    runningSessionSummary() {}, contentLayer: { querySelectorAll: () => [], querySelector: () => null, prepend() {} },
     captureRingResetMotion() {}, notchSummary: () => ({ style: {} }), animateRingResets() {},
     notchSummaryObserver: { disconnect() {}, observe() {} }, renderNotchPanel() {}, applyNotchMotion() {}, reportNotchContentSize() {} };
   vm.runInNewContext(code, context);
@@ -2670,12 +2670,12 @@ test('Notch refreshes an expired waiting indicator without rebuilding an unchang
   const payload = { expanded: false, summary: { needsClock: false,
     items: [{ type: 'icon', providerCell: { sessions } }, { type: 'text', text: '51.7M' }] },
   cells: [], appearance: {}, geometry: { gapWidth: 0, summaryRingSize: 42, notched: false } };
-  const context = { pluginContent: null, state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0, notchHeaderKey: '',
+  const context = { pluginContent: null, pluginHost: null, state: { appearanceKey: 'same' }, notchExpanded: false, notchClock: 0, notchHeaderKey: '',
     runningSessionSummary: rows => presentation.runningSessionSummary(rows, now),
     presentation: { waitingSessionSummary: rows => presentation.waitingSessionSummary(rows, now) },
     settleNotchNumbers() {}, panel: { suspend() {} }, settleNotchStatNumbers() {}, resetRefreshVisit() {}, paintRefreshButton() {},
     root: { classList: { toggle() {} }, style: { setProperty() {} } },
-    contentLayer: { querySelector: () => head, prepend: node => { head = node; } },
+    contentLayer: { querySelectorAll: () => [], querySelector: () => head, prepend: node => { head = node; } },
     captureRingResetMotion() {}, animateRingResets() {},
     notchSummary: () => ({ style: {}, waiting: waiting(), text: payload.summary.items[1].text,
       remove() {}, querySelectorAll: () => [] }),

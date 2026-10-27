@@ -8,6 +8,9 @@ const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trusted-surfaces-'));
 const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 fs.mkdirSync(evidence, { recursive: true });
+const authorSource=path.join(scratch,'author-source');fs.cpSync(path.join(root,'tests/fixtures/trusted-plugin'),authorSource,{recursive:true});
+const authorManifest=JSON.parse(fs.readFileSync(path.join(authorSource,'manifest.json')));
+authorManifest.views.push({id:'bitmap',surfaces:['tray']});fs.writeFileSync(path.join(authorSource,'manifest.json'),JSON.stringify(authorManifest));
 app.setPath('userData', path.join(scratch, 'profile'));
 app.commandLine.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1');
 registerPluginScheme(protocol);
@@ -18,6 +21,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const deadline = setTimeout(() => { console.error('Surface fixture deadline'); app.exit(1); }, 90000);
 async function wait(win, source, label) {
   for (let i = 0; i < 150; i++) { if (await win.webContents.executeJavaScript(source)) return; await pause(40); }
+  console.error('Surface timeout state', await win.webContents.executeJavaScript("({payload:state.payload,views:pluginHost.descriptors(state.payload?.surface==='notch'?'notch':'edgeDock'),content:document.querySelector('.edge-dock-content')?.innerHTML})"));
   throw new Error(`Timed out: ${label}`);
 }
 app.whenReady().then(async () => {
@@ -25,7 +29,7 @@ app.whenReady().then(async () => {
   const main = new BrowserWindow({ show: true, webPreferences: { preload: path.join(root, 'src/electron/preload.js'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
   const surfaceOf = wc => [...windows].find(([, win]) => win.webContents === wc)?.[0];
   runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain, session, utilityProcess,
-    dialog: { showMessageBox: async () => ({ response: 1 }), showOpenDialog: async () => ({ canceled: false, filePaths: [path.join(root, 'tests/fixtures/trusted-plugin')] }) } },
+    dialog: { showMessageBox: async () => ({ response: 1 }), showOpenDialog: async () => ({ canceled: false, filePaths: [authorSource] }) } },
     userDataDir: scratch, getSettings: () => settings, getContext: () => ({ source: 'fixture' }), getLocale: () => 'en', env: {},
     isMainSender: event => event.sender === main.webContents,
     isSurfaceSender: (event, surface) => surfaceOf(event.sender) === 'notch' ? surface === 'notch' : Boolean(surfaceOf(event.sender)) && surface === 'edgeDock',
@@ -118,6 +122,8 @@ app.whenReady().then(async () => {
   await wait(windows.get('notch'), "!document.querySelector('[data-plugin-target=\"notch.home.content\"]')", 'Notch native fallback');
   const collapsed = payloads.get('notch'); collapsed.expanded = false;
   collapsed.motion = { ...collapsed.motion, progress: 0, bodyHeight: 0, headerHeight: 32 };
+  collapsed.geometry.summaryBudget=300;
+  collapsed.summary={items:[{id:'tokens',type:'text',text:'125K tokens'},{id:'cost',type:'text',text:'$4.25'}]};
   push('notch'); runtime.refreshSurfaces();
   await js("tokenMonitorTrustedPlugins.selectContent('notch.summary.content','trusted-fixture/content')");
   await wait(windows.get('notch'), "document.querySelector('[data-plugin-target=\"notch.summary.content\"] input')", 'compact summary extension');
@@ -125,10 +131,37 @@ app.whenReady().then(async () => {
   assert.equal(runtime.manager.backendCount(), 1, 'collapsed summary alone maintains demand before any explicit call');
   const summaryPid = await windows.get('notch').webContents.executeJavaScript("tokenMonitorTrustedPlugins.call('trusted-fixture','start')");
   await wait(windows.get('notch'), "Number(document.querySelector('[data-plugin-target=\"notch.summary.content\"] output').dataset.update) >= 3", 'collapsed summary receives repeated backend publications');
+  const notch=windows.get('notch');
+  await notch.webContents.executeJavaScript("tokenMonitorTrustedPlugins.call('trusted-fixture','stop')");await pause(100);
+  const captureSummary=async name=>{await notch.webContents.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');fs.writeFileSync(path.join(evidence,name),(await notch.webContents.capturePage()).toPNG());};
+  await captureSummary('summary-replace.png');
+  await notch.webContents.executeJavaScript("const snapshot=pluginHost.descriptors('notch'); snapshot.find(v=>v.ref==='trusted-fixture/content').mode='append';updatePluginViews({surface:'notch',views:Object.fromEntries(snapshot.map(v=>[v.ref,v]))})");
+  await pause(100);await captureSummary('summary-append.png');
+  const summaryGeometry=await notch.webContents.executeJavaScript(`(()=>{const h=document.querySelector('.notch-summary'),p=h.querySelector(':scope > .plugin-content'),a=h.getBoundingClientRect(),b=p.getBoundingClientRect();return {headerHeight:a.height,pluginBottom:b.bottom-a.top,pluginWidth:b.width,nativeHidden:p.previousElementSibling.hidden};})()`);
+  fs.writeFileSync(path.join(evidence,'summary-geometry.json'),JSON.stringify(summaryGeometry));
+  assert.ok(summaryGeometry.pluginBottom<=summaryGeometry.headerHeight+0.1,'author summary remains inside the fixed header');
+  assert.equal(summaryGeometry.nativeHidden,false);
+  collapsed.geometry={...collapsed.geometry,notched:true,gapWidth:180,gapOffset:250};push('notch');await pause(100);
+  const cameraGeometry=await notch.webContents.executeJavaScript(`(()=>{const h=document.querySelector('.notch-summary'),p=h.querySelector(':scope > .plugin-content'),a=h.getBoundingClientRect(),b=p.getBoundingClientRect();return {left:b.left-a.left,right:b.right-a.left,bottom:b.bottom-a.top};})()`);
+  assert.ok(cameraGeometry.left>=430 && cameraGeometry.right<=680.1 && cameraGeometry.bottom<=32.1,'root append stays outside camera gap');
+  await captureSummary('summary-camera.png');
+  collapsed.geometry={...collapsed.geometry,notched:false,gapWidth:0};push('notch');
+  // Restore the manager's descriptor before testing selection removal.
+  await notch.webContents.executeJavaScript("tokenMonitorTrustedPlugins.views('notch').then(updatePluginViews)");await pause(100);
   await js("tokenMonitorTrustedPlugins.selectContent('notch.summary.content',null)");
   await wait(windows.get('notch'), "!document.querySelector('[data-plugin-target=\"notch.summary.content\"]')", 'compact summary restoration');
   for (let i = 0; i < 150 && runtime.manager.backendCount() !== 0; i++) await pause(40);
   assert.equal(runtime.manager.backendCount(), 0, 'removing the last summary demand stops its backend');
+  settings={...settings,notchSummaryMode:'custom',notchCustomLayout:{items:[{id:'bitmap',type:'plugin',ref:'trusted-fixture/bitmap'}]}};
+  runtime.settingsChanged();
+  collapsed.summary=require('../src/electron/notch/data').buildNotchData({},[],settings).summary;
+  push('notch');runtime.refreshSurfaces();
+  await wait(notch,"document.querySelector('.notch-plugin-bitmap')?.getContext('2d').getImageData(1,1,1,1).data[3]===255",'custom Notch bitmap uses the actual author renderTray');
+  await captureSummary('summary-bitmap.png');
+  assert.equal(runtime.manager.backendCount(),1);
+  notch.hide();runtime.refreshSurfaces();
+  for(let i=0;i<100&&runtime.manager.backendCount();i++)await pause(20);
+  assert.equal(runtime.manager.backendCount(),0,'hidden bitmap summary releases final demand');
   assert.deepEqual(errors, []);
   fs.writeFileSync(path.join(evidence, 'surface-results.json'), JSON.stringify({ pids, summaryPid, summaryPublications: 3, finalBackendCount: runtime.manager.backendCount(), notchPages: ['home','limits','sessions','breakdown'], sizeReports, errors, electron: process.versions.electron, scope: 'production secondary renderer/preloads/runtime, synthetic controller payloads; not OS hit-testing acceptance' }, null, 2));
   console.log('PASS rail/bubble/Notch native content replacement, shared process, visibility union and restoration');

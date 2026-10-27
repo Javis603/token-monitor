@@ -40,6 +40,13 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .edge-dock-root[data-surface="notch"] .edge-dock-content { overflow: hidden; }
 /* Retain the summary in its own compositor layer while the silhouette changes. */
 .notch-summary { opacity: var(--notch-summary-opacity, 1); pointer-events: none; transform: translate3d(0, calc(-1 * var(--notch-progress, 0) * var(--edge-dock-card-enter-shift)), 0); z-index: 1; position: absolute; top: 0; display: grid; align-items: center; flex: 0 0 auto; gap: 0; padding: 0; box-sizing: border-box; }
+/* Root extensions share one compact row. Native slots retain the camera gap;
+   replacements use the safe shoulder (the full width on camera-free entries). */
+.notch-summary:has(> .plugin-native-content) { display: flex; overflow: hidden; }
+.notch-summary > .plugin-native-content:not([hidden]) { display: grid; grid-template-columns: var(--notch-native-left) var(--notch-camera-gap) minmax(0, 1fr); align-items: center; flex: 1 1 auto; width: 100%; min-width: var(--notch-plugin-clearance); height: 100%; overflow: hidden; }
+.notch-summary > .plugin-content { flex: 0 1 auto; min-width: 0; max-height: 100%; overflow: hidden; }
+.notch-summary:has(> .plugin-native-content[hidden]) { padding-left: var(--notch-plugin-clearance); }
+.notch-summary:has(> .plugin-native-content[hidden]) > .plugin-content { flex: 1 1 0; }
 .notch-slot { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; overflow: visible; white-space: nowrap; }
 .notch-left { justify-content: flex-start; padding-left: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
 .notch-right { justify-content: flex-end; padding-right: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
@@ -48,6 +55,7 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-right .notch-slot-content { transform-origin: right center; }
 .notch-summary-field { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .notch-gap { flex: 0 0 auto; }
+.notch-plugin-bitmap { width: 20px; height: 20px; flex: 0 0 20px; }
 .notch-summary .edge-dock-mark { flex-shrink: 0; width: 17px; height: 17px; }
 .notch-app-mark { font-size: 18px; font-weight: 650; line-height: 1; color: var(--text); }
 .notch-reading { display: inline-flex; flex-shrink: 0; align-items: center; font-family: var(--display-font); line-height: 1.2; font-variant-numeric: tabular-nums; }

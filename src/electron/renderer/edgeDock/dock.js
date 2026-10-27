@@ -111,6 +111,7 @@ const pluginHost = pluginViewsApi && bridge.onPluginViews ? pluginViewsApi.creat
   t,
   services: { app: bridge, native: { get quota() { return limitWindowsView; } } },
   getContext: () => ({ nativeData: state.payload, surfaceVariant: surface }),
+  onLoaded: () => { if (surface === 'notch') notchRenderer?.paintSummaryPlugins(); },
   onDemand: (_surface, refs) => bridge.setPluginDemand(refs),
   motionAllowed: () => !prefersReducedMotion(),
   motionMode: () => tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation)
@@ -125,6 +126,7 @@ let pluginContentsKey = '';
 function updatePluginViews(payload) {
   if (payload?.surface !== pluginSurface) return;
   pluginHost?.update(payload);
+  if (surface === 'notch') notchRenderer?.paintSummaryPlugins();
   if (surface === 'rail') refreshPluginCellLabels(railNode);
   const key = JSON.stringify(Object.values(payload.views || {}).map(view => [view.ref, view.revision, view.targets, view.mode, view.selector, view.contentOrder]));
   void window.tokenMonitorTrustedPlugins.contentSelections().then(value => {

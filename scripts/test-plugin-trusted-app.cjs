@@ -1,7 +1,7 @@
 'use strict';
 // Actual App HTML, renderer, preload and plugin runtime. Host collection/account
 // IPC uses synthetic records; no personal profile, collector or credentials load.
-const { app, BrowserWindow, ipcMain, session, utilityProcess, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, session, utilityProcess, protocol, nativeImage } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -24,6 +24,13 @@ manifest.views.push(
 );
 fs.renameSync(path.join(fixtureDir, 'ui.mjs'), path.join(fixtureDir, 'basic.mjs'));
 manifest.files.push('basic.mjs');
+manifest.files.push('fixture.png');
+const pixels = Buffer.alloc(160 * 60 * 4);
+for (let y=0;y<60;y++) for (let x=0;x<160;x++) {
+  const bar = x % 32 < 20 && y > 50 - (Math.floor(x/32)+1)*8;
+  const offset=(y*160+x)*4; pixels[offset]=bar?180:32; pixels[offset+1]=bar?190:32; pixels[offset+2]=bar?100:32; pixels[offset+3]=255;
+}
+fs.writeFileSync(path.join(fixtureDir,'fixture.png'),nativeImage.createFromBitmap(pixels,{width:160,height:60}).toPNG());
 fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify(manifest));
 fs.writeFileSync(path.join(fixtureDir, 'ui.mjs'), `
 import { activate as base } from './basic.mjs';
@@ -48,7 +55,10 @@ export function activate(ctx) {
         container.dataset.period = next.period || '';
       }, hasUnsavedChanges:()=>Boolean(input.value), dispose(){container.replaceChildren();} };
     }
-    return basic.mount(container,context);
+    const mounted=basic.mount(container,context);
+    const image=document.createElement('img');image.src=ctx.asset('fixture.png');image.alt='套件內的用量圖';image.dataset.fixtureAsset='true';image.style.cssText='width:320px;max-width:100%;image-rendering:pixelated';
+    const background=document.createElement('div');background.dataset.fixtureBackground='true';background.style.cssText='width:160px;height:60px;background-size:contain';background.style.backgroundImage='url("'+ctx.asset('fixture.png')+'")';
+    container.append(image,background);return mounted;
   } };
 }
 `);
@@ -160,10 +170,26 @@ app.whenReady().then(async () => {
   assert.ok(detached);
   for (let i=0;i<150;i++) { if (await detached.webContents.executeJavaScript("Boolean(document.querySelector('[aria-label=\"Fixture draft\"]'))")) break; await pause(40); }
   assert.equal(await detached.webContents.executeJavaScript("Boolean(document.querySelector('[aria-label=\"Fixture draft\"]'))"), true);
+  await waitFor("document.querySelector('[data-fixture-asset]')?.naturalWidth===160", 'main plugin package image');
+  for (let i=0;i<100;i++) { if (await detached.webContents.executeJavaScript("document.querySelector('[data-fixture-asset]')?.complete")) break; await pause(20); }
+  const assetResult=await detached.webContents.executeJavaScript("({width:document.querySelector('[data-fixture-asset]').naturalWidth,background:getComputedStyle(document.querySelector('[data-fixture-background]')).backgroundImage})");
+  fs.writeFileSync(path.join(evidence,'asset-results.json'),JSON.stringify(assetResult));
+  assert.equal(assetResult.width,160); assert.match(assetResult.background,/tm-plugin:/);
   const detachedPid = await detached.webContents.executeJavaScript("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','detached')");
   assert.equal(detachedPid.pid, (await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','shared')")).pid);
   fs.writeFileSync(path.join(evidence, 'app-detached.png'), (await detached.webContents.capturePage()).toPNG());
   detached.destroy();
+  const bitmapLayout={items:[{id:'plugin',type:'plugin',ref:'trusted-fixture/panel'}]};
+  const previousSettings={showTrayIcon:settings.showTrayIcon,trayCustomLayout:settings.trayCustomLayout,floatingBubbleContent:settings.floatingBubbleContent,floatingBubbleCustomLayout:settings.floatingBubbleCustomLayout};
+  Object.assign(settings,{showTrayIcon:false,trayCustomLayout:{items:[]},floatingBubbleContent:'custom',floatingBubbleCustomLayout:bitmapLayout});runtime.settingsChanged();
+  await js(`Object.assign(state.settings,${JSON.stringify({showTrayIcon:false,trayCustomLayout:{items:[]},floatingBubbleContent:'custom',floatingBubbleCustomLayout:bitmapLayout})});applyFloatingBubbleState({collapsed:true,side:'left'});renderFloatingBubbleContent()`);
+  await waitFor("Boolean(els.floatingBubbleContent.querySelector('img')?.complete)",'bubble-only custom plugin bitmap');
+  const bubbleResult=await js("({refs:trayLayoutApi.trayLayoutPluginRefs(state.settings.floatingBubbleCustomLayout),hasImage:Boolean(els.floatingBubbleContent.querySelector('img')),trayRefs:trayLayoutApi.trayLayoutPluginRefs(state.settings.trayCustomLayout)})");
+  assert.equal(bubbleResult.hasImage,true);assert.deepEqual(bubbleResult.trayRefs,[]);
+  fs.writeFileSync(path.join(evidence,'bubble-results.json'),JSON.stringify(bubbleResult));
+  fs.writeFileSync(path.join(evidence,'bubble-bitmap.png'),(await capture()).toPNG());
+  Object.assign(settings,previousSettings);runtime.settingsChanged();
+  await js(`Object.assign(state.settings,${JSON.stringify(previousSettings)});applyFloatingBubbleState({collapsed:false});render()`);
   const coveredPages = [];
   for (const key of pageKeys) {
     await js(`openViewFromTray(${JSON.stringify(key)})`);
@@ -211,6 +237,12 @@ app.whenReady().then(async () => {
   await js("tokenMonitorTrustedPlugins.selectContent('main.model.content','trusted-fixture/content').then(applyPluginCatalog)");
   await waitFor("document.querySelector('[data-plugin-target=\"main.model.content\"] [data-audit-native]')", 'comparison author');
   fs.writeFileSync(path.join(evidence, 'comparison-author.png'), (await capture()).toPNG());
+  await js("globalThis.reviewInput=document.querySelector('[data-plugin-target=\"main.model.content\"] input'); reviewInput.value='未提交的草稿';reviewInput.focus();reviewInput.setSelectionRange(reviewInput.value.length,reviewInput.value.length);render();render()");
+  await win.webContents.insertText('，繼續輸入');
+  const focusResult=await js("({focused:document.activeElement===reviewInput,value:reviewInput.value,sameNode:reviewInput===document.querySelector('[data-plugin-target=\"main.model.content\"] input')})");
+  fs.writeFileSync(path.join(evidence,'focus-results.json'),JSON.stringify(focusResult));
+  fs.writeFileSync(path.join(evidence,'review-focus.png'),(await capture()).toPNG());
+  assert.equal(focusResult.focused,true); assert.equal(focusResult.value,'未提交的草稿，繼續輸入'); assert.equal(focusResult.sameNode,true);
   await js("globalThis.fixtureUpdateFailure=true; document.querySelector('[data-plugin-target=\"main.model.content\"] [data-audit-native]').parentElement.style.width='95%'");
   await waitFor("document.querySelector('[data-plugin-target=\"main.model.content\"] .plugin-inline-error') && !els.breakdown.hidden", 'resize error restores native content');
   await js('render(); render()');

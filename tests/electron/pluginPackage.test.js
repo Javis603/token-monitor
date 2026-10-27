@@ -1,8 +1,19 @@
 'use strict';
+
+const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const { packageDirectory, parsePackage, unpackPackage, contentDigest } = require('../../src/electron/plugins/package');
+test('content fingerprints are invariant across process locale and file insertion order', () => {
+  const code = `const {contentDigest}=require(${JSON.stringify(require.resolve('../../src/electron/plugins/package'))}); console.log(contentDigest({rawManifest:{id:'fixture'},files:{'z.js':Buffer.from('z'),'t.js':Buffer.from('t'),'A.js':Buffer.from('a'),'_a.js':Buffer.from('a')}}));`;
+  const hashes = ['en_US.UTF-8', 'et_EE.UTF-8'].map(locale => {
+    const result = spawnSync(process.execPath, ['-e', code], { env: { ...process.env, LANG: locale, LC_ALL: locale }, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr); return result.stdout.trim();
+  });
+  assert.equal(hashes[0], hashes[1]);
+  assert.equal(hashes[0], contentDigest({ rawManifest: {id:'fixture'}, files: {'_a.js':Buffer.from('a'),'A.js':Buffer.from('a'),'t.js':Buffer.from('t'),'z.js':Buffer.from('z')} }));
+});
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-package-v2-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

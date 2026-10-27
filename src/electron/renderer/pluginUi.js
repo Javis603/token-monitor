@@ -39,6 +39,9 @@
               const dispose = () => {
                 if (cancelled) return;
                 cancelled = true; off();
+                const index = cleanup.indexOf(dispose);
+                if (index >= 0) cleanup.splice(index, 1);
+                waiting.length = 0;
                 if (subscription !== undefined) void bridge.unsubscribeData(subscription).catch(error => onError(error, descriptor));
               };
               const off = bridge.onData(message => {
@@ -53,6 +56,7 @@
                 return () => {};
               }
               for (const message of waiting) if (message.subscription === subscription) listener(message.value);
+              waiting.length = 0;
               return dispose;
             }
           },
@@ -79,7 +83,7 @@
           modules.get(key).loaded = loaded;
           onLoaded(descriptor);
           return loaded;
-        } catch (error) { for (const fn of cleanup.reverse()) { try { fn(); } catch {} } throw error; }
+        } catch (error) { for (const fn of cleanup.splice(0).reverse()) { try { fn(); } catch {} } throw error; }
       })());
       return modules.get(key);
     }
@@ -156,7 +160,7 @@
         disposed = true;
         for (const container of [...mounts.keys()]) unmount(container);
         for (const promise of modules.values()) {
-          try { const module = await promise; for (const fn of module.cleanup.reverse()) await fn(); } catch (error) { onError(error); }
+          try { const module = await promise; for (const fn of module.cleanup.splice(0).reverse()) await fn(); } catch (error) { onError(error); }
         }
         modules.clear();
       }

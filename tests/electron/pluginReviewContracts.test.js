@@ -30,6 +30,18 @@ function functionSource(name) {
   assert.ok(start >= 0);
   return main.slice(start, main.indexOf('\n}', start) + 2);
 }
+
+test('safe-mode relaunch uses synchronous host shutdown even without renderer cooperation', () => {
+  const start = main.indexOf('onRestartPluginsSafe: () => {');
+  const callback = main.slice(start + 'onRestartPluginsSafe: '.length, main.indexOf('\n    },', start) + 6);
+  const events = [];
+  const context = vm.createContext({ process: { argv: ['electron', 'app', '--plugins-safe-mode'] }, quitRequested: false, quitInProgress: false,
+    app: { relaunch: ({ args }) => events.push(['relaunch', args]), exit: code => events.push(['exit', code]) },
+    stopAll: () => events.push(['host-cleanup']), console });
+  vm.runInContext(functionSource('performQuit') + '\n' + functionSource('requestAppQuit'), context);
+  vm.runInContext(`(${callback})()`, context);
+  assert.deepEqual(JSON.parse(JSON.stringify(events)), [['relaunch', ['app', '--plugins-safe-mode']], ['host-cleanup'], ['exit', 0]]);
+});
 test('actual main plugin persistence rolls back failed consent and does not notify renderers', () => {
   const saved = { pluginsEnabled: true, pluginStates: {}, marker: 'persisted' };
   let writes = 0, pushes = 0, failed = true;

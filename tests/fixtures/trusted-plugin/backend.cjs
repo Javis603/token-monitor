@@ -16,6 +16,7 @@ exports.activate = async context => {
       if (method === 'fetch') return (await fetch(value)).text();
       if (method === 'host') return context.host.call('fixture', value);
       if (method === 'start') { timer ??= setInterval(() => context.publish(++counter), 50); return process.pid; }
+      if (method === 'stop') { clearInterval(timer); timer = null; return counter; }
       if (method === 'fail') throw new Error('Intentional fixture failure');
       throw new Error('Unknown fixture method');
     },

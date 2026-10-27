@@ -5,6 +5,31 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { runtimeFixture } = require('../helpers/trustedPlugin');
 const tick = () => new Promise(setImmediate);
+test('bubble-only bitmap demand stops on native hide; system Tray demand survives it', async t => {
+  const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', {id:'trusted-fixture',enabled:true});
+  const layout = {items:[{id:'plugin',type:'plugin',ref:'trusted-fixture/panel'}]};
+  Object.assign(f.settings,{showTrayIcon:false,floatingBubbleContent:'custom',floatingBubbleCustomLayout:layout});
+  f.send(f.main,'tray'); await tick(); assert.equal(f.runtime.manager.backendCount(),1);
+  f.main.visible=false; f.runtime.refreshWindowVisibility(f.main); await tick(); assert.equal(f.runtime.manager.backendCount(),0);
+  f.send(f.main,'tray'); await tick(); assert.equal(f.runtime.manager.backendCount(),0);
+  Object.assign(f.settings,{showTrayIcon:true,trayContent:'custom',trayCustomLayout:layout});
+  f.runtime.settingsChanged(); await tick(); assert.equal(f.runtime.manager.backendCount(),1);
+  f.settings.showTrayIcon=false; f.runtime.settingsChanged(); await tick(); assert.equal(f.runtime.manager.backendCount(),0);
+});
+test('collapsed Notch custom bitmap supports a Tray-only view and releases hidden demand', async t => {
+  let visible=true;
+  const f=await runtimeFixture(t,{surfaceContext:()=>({visible:false,summaryVisible:visible})}); await f.install();
+  const file=path.join(f.dir,'plugins/trusted-fixture/manifest.json'), manifest=JSON.parse(fs.readFileSync(file));
+  manifest.views=[{id:'bitmap',surfaces:['tray']}]; fs.writeFileSync(file,JSON.stringify(manifest)); await f.runtime.manager.reload();
+  Object.assign(f.settings,{notchSummaryMode:'custom',notchCustomLayout:{items:[{id:'plugin',type:'plugin',ref:'trusted-fixture/bitmap'}]}});
+  await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true});
+  assert.ok(f.runtime.payload('notch').views['trusted-fixture/bitmap']);
+  f.send(f.notch,'notch',['trusted-fixture/bitmap']); await tick(); assert.equal(f.runtime.manager.backendCount(),1);
+  visible=false; f.runtime.refreshSurfaces(); await tick(); assert.equal(f.runtime.manager.backendCount(),0);
+  visible=true; f.runtime.refreshSurfaces(); await tick(); assert.equal(f.runtime.manager.backendCount(),1);
+  f.settings.notchSummaryMode='sessions'; f.runtime.settingsChanged(); await tick(); assert.equal(f.runtime.manager.backendCount(),0);
+  assert.equal(f.runtime.payload('notch').views['trusted-fixture/bitmap'],undefined);
+});
 for (const surface of ['home', 'page', 'settings']) test(`native ${surface} hide, late IPC, minimize and restore bound effective backend demand`, async t => {
   const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
   assert.equal(f.runtime.manager.backendCount(), 0);
@@ -22,6 +47,7 @@ test('one backend is shared across native surfaces; final hide stops it', async 
   f.send(f.main, 'home'); f.send(f.notch, 'notch'); await tick(); assert.equal(f.children.length, 1);
   f.main.visible = false; f.runtime.refreshWindowVisibility(f.main); await tick(); assert.equal(f.runtime.manager.backendCount(), 1);
   f.notch.visible = false; f.runtime.refreshSurfaces(); await tick(); assert.equal(f.runtime.manager.backendCount(), 0);
+  f.settings.trayContent = 'custom'; f.settings.trayCustomLayout = { items: [{ id: 'plugin', type: 'plugin', ref: 'trusted-fixture/panel' }] };
   f.send(f.main, 'tray'); await tick(); assert.equal(f.runtime.manager.backendCount(), 1);
   f.main.webContents.emit('destroyed'); await tick(); assert.equal(f.runtime.manager.backendCount(), 0);
 });

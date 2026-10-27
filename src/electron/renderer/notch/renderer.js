@@ -155,6 +155,9 @@
       head.style.width = `${width}px`;
       const offset = payload.geometry.notched ? payload.geometry.gapOffset : (width - payload.geometry.gapWidth) / 2;
       head.style.gridTemplateColumns = `${offset}px ${payload.geometry.gapWidth}px ${width - offset - payload.geometry.gapWidth}px`;
+      head.style.setProperty('--notch-native-left', payload.geometry.gapWidth > 0 ? `${offset}px` : 'minmax(0, 1fr)');
+      head.style.setProperty('--notch-camera-gap', `${payload.geometry.gapWidth}px`);
+      head.style.setProperty('--notch-plugin-clearance', payload.geometry.gapWidth > 0 ? `${offset + payload.geometry.gapWidth}px` : '0px');
       head.style.setProperty('--notch-shoulder', `${payload.geometry.shoulder}px`);
       head.style.setProperty('--notch-summary-zoom', payload.geometry.summaryZoom);
       head.style.setProperty('--notch-ring-size', `${payload.geometry.summaryRingSize || 28}px`);
@@ -260,6 +263,13 @@
         && window.TokenMonitorThemePresets?.isLightHex(payload.appearance?.themeColors?.bg) === true);
       const activityProviders = new Set((payload.summary?.items || []).filter(item => item.type === 'icon').map(item => item.provider));
       for (const item of payload.summary?.items || []) {
+        if (item.type === 'plugin') {
+          const canvas = el('canvas', 'notch-plugin-bitmap');
+          canvas.dataset.pluginRef = item.ref;
+          canvas.width = canvas.height = 40;
+          parts.push(canvas);
+          continue;
+        }
         const iconProvider = item.type === 'icon' ? item.provider : item.iconProvider;
         const mark = iconProvider ? notchIcon({ ...item, provider: iconProvider }) : null;
         if (mark) mark.setAttribute('aria-label', iconProvider === 'app' ? 'Token Monitor' : providerLabel(iconProvider));
@@ -443,6 +453,9 @@
       const geometry = state.payload?.geometry;
       const compact = geometry?.gapWidth === 0;
       const budget = geometry.summaryBudget;
+      const pluginNodes = [...head.children].filter(node => node.classList.contains('plugin-content'));
+      const pluginWidth = pluginNodes.reduce((sum, node) => sum + Math.min(Number.isFinite(budget) ? budget : head.clientWidth, node.scrollWidth), 0);
+      const nativeBudget = Math.max(0, budget - pluginWidth);
       const leftContent = head.querySelector('.notch-left .notch-slot-content');
       const rightContent = head.querySelector('.notch-right .notch-slot-content');
       // Hover transforms are visual only. Fit at rest so live pushes and
@@ -451,15 +464,15 @@
       leftContent.style.transform = rightContent.style.transform = 'none';
       try {
         const gap = 12 * (Number(state.payload.appearance.zoomFactor) || 1);
-        const primaryRight = compact ? Math.min(budget, fitNotchSlot(rightContent, Infinity).minimum) : 0;
-        const left = fitNotchSlot(leftContent, compact ? Math.max(0, budget - primaryRight - gap) : budget);
-        const right = fitNotchSlot(rightContent, compact ? Math.max(0, budget - left.width - gap) : budget);
+        const primaryRight = compact ? Math.min(nativeBudget, fitNotchSlot(rightContent, Infinity).minimum) : 0;
+        const left = fitNotchSlot(leftContent, compact ? Math.max(0, nativeBudget - primaryRight - gap) : budget);
+        const right = fitNotchSlot(rightContent, compact ? Math.max(0, nativeBudget - left.width - gap) : nativeBudget);
         const firstBlock = [...leftContent.children].find(node => !node.hidden);
         const firstIcon = firstBlock?.classList.contains('notch-summary-field') ? firstBlock.firstElementChild : firstBlock;
         const firstMark = firstIcon?.querySelector('.edge-dock-mark');
         const iconInset = firstMark ? notchLogicalPoint(Math.max(0, firstMark.getBoundingClientRect().left - leftContent.getBoundingClientRect().left)) : 0;
         head.dataset.notchIconInset = iconInset;
-        const slots = { left: Math.ceil(notchLogicalPoint(left.width)), right: Math.ceil(notchLogicalPoint(right.width)), iconInset };
+        const slots = { left: Math.ceil(notchLogicalPoint(left.width)), right: Math.ceil(notchLogicalPoint(right.width + pluginWidth)), iconInset };
         const key = JSON.stringify([slots, measurement?.measuring ? measurement.id : null]);
         if (key !== lastNotchSlots) {
           lastNotchSlots = key;
@@ -590,6 +603,8 @@
     }
 
     function renderNotch(payload) {
+      const bitmapRefs = (payload.summary?.items || []).filter(item => item.type === 'plugin').map(item => item.ref);
+      pluginHost?.setExplicitDemand('notch', bitmapRefs);
       const opening = payload.expanded === true && !notchExpanded;
       if (!payload.expanded) panel.suspend();
       notchExpanded = payload.expanded === true;
@@ -631,9 +646,11 @@
           let native = summary.querySelector('.plugin-native-content');
           if (!native) { native = el('div', 'plugin-native-content'); native.append(...summary.childNodes); summary.append(native); }
           pluginContent.render(target, native, { surface: 'notch', surfaceVariant: 'summary', nativeData: payload });
+          for (const node of summary.children) if (node.classList.contains('plugin-content')) notchSummaryObserver.observe(node);
         }
         summary.style.visibility = payload.summaryMeasurement?.measuring ? 'hidden' : '';
         positionNotchSummary(summary, payload); reportNotchSlots(summary);
+        paintSummaryPlugins();
         animateNotchNumbers();
       }
       renderNotchPanel(payload, opening);
@@ -642,6 +659,13 @@
       // The native window can appear only after this measured shape and header
       // have been applied together, not when the raw width report reaches main.
       if (payload.summaryMeasurement?.measuring === false) bridge.reportNotchSize(0, null, { id: payload.summaryMeasurement.id, ready: true });
+    }
+    function paintSummaryPlugins() {
+      for (const canvas of contentLayer.querySelectorAll('.notch-plugin-bitmap')) {
+        const view = pluginHost?.state('notch', canvas.dataset.pluginRef);
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        if (view?.entry) pluginHost.renderTray(view, canvas, { height: 40, textColor: getComputedStyle(canvas).color, trackColor: 'rgba(255,255,255,.2)' });
+      }
     }
     let notchAnimation = null;
     function startNotchAnimation(config) {
@@ -697,6 +721,7 @@
           || state.payload?.expanded);
       },
       repaint() { notchClock++; renderNotch(state.payload); },
+      paintSummaryPlugins,
       pluginViewsChanged() { panel.pluginViewsChanged(); if (state.payload) renderNotch(state.payload); }
     };
   }

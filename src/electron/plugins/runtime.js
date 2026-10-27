@@ -13,7 +13,8 @@ const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const { createPluginManager } = require('./manager');
 const { translate } = require('../renderer/i18n');
-const { placementPatch, placementsFor } = require('./placementSettings');
+const { placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
+const { trayLayoutPluginRefs } = require('../../shared/trayLayout');
 const { createElectronNetFetch } = require('../limits/fetch');
 const { createOutboundFetch, resolveProxyConfig } = require('../../shared/outboundFetch');
 
@@ -163,7 +164,7 @@ function createPluginRuntime({
   const subscribers = new Map();
   const nativeDemandVisible = (webContents, surface) => { const scope = surfaceContext({ sender: webContents }, surface); return scope?.visible === true || scope?.preparing === true; };
   function demandVisible(webContents, surface) {
-    if (['home', 'page', 'settings'].includes(surface)) {
+    if (['home', 'page', 'settings', 'tray'].includes(surface)) {
       const win = BrowserWindow.fromWebContents(webContents);
       return Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized());
     }
@@ -171,12 +172,21 @@ function createPluginRuntime({
   }
   function effectiveDemand(webContents, surface, refs) {
     if (!refs.length) return refs;
+    if (surface === 'tray') {
+      const settings = getSettings();
+      const trayRefs = settings.showTrayIcon !== false && settings.trayContent === 'custom' ? trayLayoutPluginRefs(settings.trayCustomLayout) : [];
+      const win = BrowserWindow.fromWebContents(webContents);
+      const bubbleRefs = win && !win.isDestroyed() && win.isVisible() && !win.isMinimized() && settings.floatingBubbleContent === 'custom'
+        ? trayLayoutPluginRefs(settings.floatingBubbleCustomLayout) : [];
+      return refs.filter(ref => trayRefs.includes(ref) || bubbleRefs.includes(ref));
+    }
     if (demandVisible(webContents, surface)) return refs;
     // A collapsed Notch still paints its summary, but its panel is hidden.
     if (surface !== 'notch' || surfaceContext({ sender: webContents }, surface)?.summaryVisible !== true) return [];
     const summaryRefs = new Set(manager.list().plugins.filter(plugin => plugin.status === 'active')
       .flatMap(plugin => plugin.views.filter(view => view.targets?.includes('notch.summary.content')).map(view => view.ref)));
-    return refs.filter(ref => summaryRefs.has(ref));
+    const bitmapRefs = summaryBitmapRefs(getSettings());
+    return refs.filter(ref => summaryRefs.has(ref) || bitmapRefs.includes(ref));
   }
   function registerSubscriber(webContents) {
     let subscriber = subscribers.get(webContents.id);
@@ -198,9 +208,10 @@ function createPluginRuntime({
   }
   function setDemand(webContents, surface, refs) {
     const subscriber = registerSubscriber(webContents);
+    const bitmapRefs = surface === 'notch' ? summaryBitmapRefs(getSettings()) : [];
     const allowed = new Set(manager.list().plugins.filter(plugin => plugin.status === 'active')
-      .flatMap(plugin => (plugin.views || []).filter(view => (view.surfaces.includes(surface) || view.targets?.length)
-        && (view.targets?.length || !['home', 'page', 'notch', 'edgeDock'].includes(surface) || placementsFor(getSettings(), view.ref)[surface])).map(view => view.ref)));
+      .flatMap(plugin => (plugin.views || []).filter(view => (view.surfaces.includes(surface) || view.targets?.length || (view.surfaces.includes('tray') && bitmapRefs.includes(view.ref)))
+        && (view.targets?.length || bitmapRefs.includes(view.ref) || !['home', 'page', 'notch', 'edgeDock'].includes(surface) || placementsFor(getSettings(), view.ref)[surface])).map(view => view.ref)));
     const selected = Array.isArray(refs) ? refs.filter(ref => typeof ref === 'string' && allowed.has(ref)).slice(0, 32) : [];
     subscriber.demands.set(surface, selected);
     // Retain the request across native hide/show, but never grant foreground work while hidden.
@@ -474,7 +485,7 @@ function createPluginRuntime({
     refreshWindowVisibility(win) {
       if (disposed) return;
       const subscriber = subscribers.get(win?.webContents?.id);
-      if (subscriber) for (const surface of ['home', 'page', 'settings']) {
+      if (subscriber) for (const surface of ['home', 'page', 'settings', 'tray']) {
         if (subscriber.demands.has(surface)) setDemand(subscriber.webContents, surface, subscriber.demands.get(surface));
       }
       pages.refreshVisibility();
@@ -508,7 +519,7 @@ function createPluginRuntime({
       manager.settingsChanged();
         pages.refresh();
       for (const subscriber of subscribers.values()) {
-        for (const surface of ['home', 'page', 'settings', 'notch', 'edgeDock']) if (subscriber.demands.has(surface)) setDemand(subscriber.webContents, surface, subscriber.demands.get(surface));
+        for (const surface of ['home', 'page', 'settings', 'tray', 'notch', 'edgeDock']) if (subscriber.demands.has(surface)) setDemand(subscriber.webContents, surface, subscriber.demands.get(surface));
       }
     },
     // Rendered tray items need view state synchronously with the bitmap.

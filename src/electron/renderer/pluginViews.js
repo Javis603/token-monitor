@@ -60,7 +60,8 @@
     const bridge = window.tokenMonitorTrustedPlugins;
     const ui = window.TokenMonitorPluginUi.createHost({ document, window, bridge, services,
       onLoaded, onError: error => console.error('[plugins]', error) });
-    let frame = null, appearance = {};
+    const pending = new Map();
+    let frame = null, appearance = {}, disposed = false;
     const observer = window.IntersectionObserver ? new window.IntersectionObserver(entries => {
       for (const entry of entries) intersections.set(entry.target, entry.isIntersecting);
       refreshDemand();
@@ -98,12 +99,20 @@
       unmount(container) { mounts.delete(container); observer?.unobserve(container); intersections.delete(container); ui.unmount(container); refreshDemand(); },
       renderTray: (descriptor, canvas, context) => ui.renderTray(descriptor, canvas, context),
       mount(container, ref, surface, options = {}) {
+        if (disposed) return;
         const current = mounts.get(container);
         if (!current || current.ref !== ref || current.surface !== surface) mounts.set(container, { container, ref, surface, options });
         else current.options = options;
         observer?.observe(container);
         paint(mounts.get(container)); refreshDemand();
-        if (!latest.has(surface)) void bridge.views(surface).then(payload => { latest.set(surface, payload.views); for (const mount of mounts.values()) if (mount.surface === surface) paint(mount); });
+        if (!latest.has(surface) && !pending.has(surface)) {
+          const request = Promise.resolve().then(() => bridge.views(surface)).then(payload => {
+            if (disposed || latest.has(surface)) return;
+            latest.set(surface, payload.views || {});
+            for (const mount of mounts.values()) if (mount.surface === surface) paint(mount);
+          }).catch(error => { if (!disposed) console.error('[plugins]', error); }).finally(() => pending.delete(surface));
+          pending.set(surface, request);
+        }
       },
       update(payload) { appearance = payload.appearance || {}; latest.set(payload.surface, payload.views || {}); for (const mount of mounts.values()) if (mount.surface === payload.surface) paint(mount); refreshDemand(); },
       setExplicitDemand(surface, refs) {
@@ -114,7 +123,7 @@
       refreshContext() { for (const mount of mounts.values()) paint(mount); },
       refreshDemand, refreshMotion: refreshDemand,
       hasUnsavedChanges: ui.hasUnsavedChanges,
-      dispose() { observer?.disconnect(); if (frame !== null) window.cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', refreshDemand); return ui.dispose(); }
+      dispose() { disposed = true; observer?.disconnect(); if (frame !== null) window.cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', refreshDemand); return ui.dispose(); }
     };
   }
   return { iconNode, drawIcon, actionErrorMessage, createPluginViewHost };

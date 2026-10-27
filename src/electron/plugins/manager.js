@@ -7,6 +7,7 @@ const { ID_RE, SURFACES } = require('../../shared/plugins/manifest');
 const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { pluginTypes } = require('./types');
 const { createPluginBackends } = require('./backend');
+const { summaryBitmapRefs } = require('./placementSettings');
 
 function normalizePluginStates(value) {
   const result = {};
@@ -103,8 +104,9 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
       css: plugin.manifest.css.map(name => base + name), data: plugin.data, status: status(plugin) };
   }
   function payload(surface) {
+    const bitmapRefs = surface === 'notch' ? summaryBitmapRefs(getSettings()) : [];
     return { surface, appearance: normalizeAppearance(getSettings()?.pluginAuthorSkin?.appearance), views: Object.fromEntries([...plugins.values()].filter(active).flatMap(plugin => plugin.manifest.views
-      .filter(view => view.surfaces.includes(surface) || view.targets.length).map(view => { const value = descriptor(plugin, view); return [value.ref, value]; }))) };
+      .filter(view => view.surfaces.includes(surface) || view.targets.length || (view.surfaces.includes('tray') && bitmapRefs.includes(`${plugin.id}/${view.id}`))).map(view => { const value = descriptor(plugin, view); return [value.ref, value]; }))) };
   }
   function describe(plugin) {
     const m = plugin.manifest, state = states()[plugin.id];

@@ -12,7 +12,7 @@ const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const canonical = value => JSON.stringify(value, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
 function contentDigest({ rawManifest, files }) {
-  return digest(canonical(['tmplugin-content-v2', rawManifest, Object.entries(files).sort(([a], [b]) => a.localeCompare(b)).map(([name, bytes]) => [name, bytes.toString('base64')])]));
+  return digest(canonical(['tmplugin-content-v2', rawManifest, Object.keys(files).sort().map(name => [name, files[name].toString('base64')])]));
 }
 function readBounded(file, limit) {
   const fd = fs.openSync(file, 'r');

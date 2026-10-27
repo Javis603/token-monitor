@@ -2636,7 +2636,7 @@ test('switching camera clearance rebuilds the same summary without losing config
   const el = (tag, classes, text = '') => { const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node; };
   const layer = el('div', 'content');
   layer.prepend = node => { node.parent = layer; layer.children.unshift(node); };
-  const context = { el, contentLayer: layer, root: el('div', 'root'), state: { appearanceKey: 'unchanged' },
+  const context = { el, contentLayer: layer, root: el('div', 'root'), state: { appearanceKey: 'unchanged' }, pluginHost: null,
     notchHeaderKey: '', notchClock: 0, notchNumbers: new Map(), trayTypographyApi: require('../../src/electron/renderer/trayTypography'),
     refreshVisit: 0, refreshFeedbackTimer: null, refreshBusy: false, refreshResult: '',
     clearTimeout() {}, cancelAnimationFrame() {}, settleNotchNumbers() {}, panel: { suspend() {} }, settleNotchStatNumbers() {}, resetRefreshVisit() {}, paintRefreshButton() {}, captureRingResetMotion() {}, animateRingResets() {},
