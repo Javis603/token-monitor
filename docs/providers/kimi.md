@@ -101,7 +101,7 @@ for Kimi.
 Kimi web credentials deserve their own note because every obvious path is a trap. The website no
 longer refreshes the legacy `kimi-auth` cookie (it dies 30 days after login, and the Kimi frontend
 bundle does not reference it at all), and the localStorage `access_token` lives ~15 minutes. The
-durable source is the Kimi Work desktop app: `%APPDATA%kimi-desktopridge-store	oken-store.json`
+durable source is the Kimi Work desktop app: `%APPDATA%\kimi-desktop\bridge-store\token-store.json`
 holds a rotating access/refresh pair, safeStorage-encrypted (`v10` AES-GCM under a DPAPI-protected
 key from its `Local State`). `src/shared/providers/kimi/desktopSession.js` reads it as a zero-setup
 default on Windows when no manual token is set.
