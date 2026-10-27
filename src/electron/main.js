@@ -155,6 +155,7 @@ const {
 const { createCredentialCommands } = require('./limits/credentialCommands');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
+const { looksLikeKimiRefreshToken } = require('../shared/providers/kimi/desktopSession');
 const {
   codexAuthIdentity,
   codexAccountKey,
