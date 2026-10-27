@@ -22,6 +22,24 @@ function tempDataDir(t) {
   return dir;
 }
 
+test('bounded compact private writes count UTF-8 bytes before changing a file', t => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'bounded.json');
+  const value = { text: '界' };
+  const compact = `${JSON.stringify(value)}\n`;
+  const maxBytes = Buffer.byteLength(compact);
+  writePrivateJsonAtomic(filePath, value, { compact: true, maxBytes });
+  assert.equal(fs.readFileSync(filePath, 'utf8'), compact);
+  assert.throws(() => writePrivateJsonAtomic(filePath, { text: '界界' }, { compact: true, maxBytes }),
+    { code: 'PRIVATE_JSON_TOO_LARGE' });
+  assert.equal(fs.readFileSync(filePath, 'utf8'), compact);
+  assert.deepEqual(fs.readdirSync(dataDir), ['bounded.json']);
+  const newPath = path.join(dataDir, 'new-folder', 'bounded.json');
+  assert.throws(() => writePrivateJsonAtomic(newPath, value, { compact: true, maxBytes: 1 }),
+    { code: 'PRIVATE_JSON_TOO_LARGE' });
+  assert.equal(fs.existsSync(path.dirname(newPath)), false);
+});
+
 test('stores credential settings in a versioned provider document', (t) => {
   const dataDir = tempDataDir(t);
   const store = new CredentialStore(dataDir);

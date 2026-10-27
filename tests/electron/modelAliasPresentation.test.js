@@ -12,6 +12,14 @@ const {
 
 const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
 
+test('Cursor local estimate provenance follows model display aliases without changing the source', () => {
+  const stats = { periods: { today: { models: { 'grok-4.6': 35 } } },
+    cursorLocalModelEstimates: { today: { 'grok-4.6': 35 } } };
+  const result = projectModelAliasStats(stats, { 'grok-4.6': 'cursor-grok-4.6' });
+  assert.deepEqual(result.cursorLocalModelEstimates.today, { 'cursor-grok-4.6': 35 });
+  assert.deepEqual(stats.cursorLocalModelEstimates.today, { 'grok-4.6': 35 });
+});
+
 for (const labels of [['__proto__', 'app'], ['app', '__proto__']]) {
   for (const aliasedProject of labels) {
     test(`project aliases retain reserved rollup keys with ${labels.join(', ')} and ${aliasedProject} aliased`, () => {

@@ -250,6 +250,14 @@ test('the cold-start native-view fallback is local-mode only', () => {
   assert.equal(Object.hasOwn(stats, 'nativeProjects'), false);
 });
 
+test('local Cursor estimate provenance follows the local record and clears when absent', () => {
+  const evidence = { today: { 'grok-4.6': 35 }, month: {}, allTime: {} };
+  const stats = composeLocalSyncStats(null, device('local', 35, { cursorLocalModelEstimates: evidence }));
+  assert.deepEqual(stats.cursorLocalModelEstimates, evidence);
+  attachLocalPresentationNativeViews(stats, { lastCollectedDevice: device('local', 0), mode: 'local' });
+  assert.equal(stats.cursorLocalModelEstimates, undefined);
+});
+
 test('composeLocalSyncStats exposes current aggregate omission diagnostics', () => {
   const result = composeLocalSyncStats(null, device('local', 25, {
     sessionDetailsOmitted: { month: 7 },

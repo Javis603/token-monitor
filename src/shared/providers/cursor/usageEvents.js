@@ -117,4 +117,24 @@ function createCursorUsageEventIndex(options = {}) {
   };
 }
 
-module.exports = { createCursorUsageEventIndex, cursorCacheDir };
+function newestCursorUsageEventMs(options = {}) {
+  const fsImpl = options.fs || fs;
+  let newest = 0;
+  for (const file of cacheFiles(options.cacheDir || cursorCacheDir(options), fsImpl)) {
+    if (file.archived) continue;
+    let rows;
+    try {
+      rows = JSON.parse(fsImpl.readFileSync(file.filePath, 'utf8'))?.usageEventsDisplay;
+    } catch (_) {
+      continue;
+    }
+    if (!Array.isArray(rows)) continue;
+    for (const event of rows) {
+      const time = millisecondTimestamp(event?.timestamp);
+      if (time > newest) newest = time;
+    }
+  }
+  return newest;
+}
+
+module.exports = { createCursorUsageEventIndex, cursorCacheDir, newestCursorUsageEventMs };

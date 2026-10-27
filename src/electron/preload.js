@@ -174,6 +174,13 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   setTrayIcons: (icons) => ipcRenderer.invoke('tray:setIcons', icons),
   cursor: {
+    onBillingStatusChanged: (callback) => {
+      const listener = (_event, status) => callback(status);
+      ipcRenderer.on('cursor:billingStatusChanged', listener);
+      return () => ipcRenderer.removeListener('cursor:billingStatusChanged', listener);
+    },
+    connectBilling: (accountId) => ipcRenderer.invoke('cursor:connectBilling', accountId),
+    disconnectBilling: (accountId) => ipcRenderer.invoke('cursor:disconnectBilling', accountId),
     loginManual: (token) => ipcRenderer.invoke('cursor:loginManual', token),
     setAccountEnabled: (accountId, enabled) => ipcRenderer.invoke('cursor:setAccountEnabled', accountId, enabled),
     logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),

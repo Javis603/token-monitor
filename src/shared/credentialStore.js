@@ -154,6 +154,12 @@ function readRegularFileNoFollow(filePath, options = {}) {
 }
 
 function writePrivateJsonAtomic(filePath, value, options = {}) {
+  const content = `${JSON.stringify(value, null, options.compact ? undefined : 2)}\n`;
+  if (Number.isFinite(options.maxBytes) && Buffer.byteLength(content) > Math.max(0, Math.floor(options.maxBytes))) {
+    const error = new Error(`Private JSON file exceeds ${options.maxBytes} bytes; keeping the previous file`);
+    error.code = 'PRIVATE_JSON_TOO_LARGE';
+    throw error;
+  }
   const fsApi = options.fs || fs;
   const constants = fsApi.constants || fs.constants;
   const directory = path.dirname(filePath);
@@ -164,7 +170,7 @@ function writePrivateJsonAtomic(filePath, value, options = {}) {
   fsApi.mkdirSync(directory, { recursive: true, mode: 0o700 });
   try {
     descriptor = fsApi.openSync(temporary, 'wx', 0o600);
-    fsApi.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    fsApi.writeFileSync(descriptor, content, 'utf8');
     if (process.platform !== 'win32') fsApi.fchmodSync(descriptor, 0o600);
     fsApi.fsyncSync(descriptor);
     fsApi.closeSync(descriptor);

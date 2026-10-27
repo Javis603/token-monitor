@@ -397,6 +397,8 @@ function projectModelAliasStats(stats, aliases, options = {}) {
   result.modelAliasSourceIds = [...pricingSourceIds].sort();
 
   if (Array.isArray(stats.devices)) result.devices = mapRows(stats.devices, projectRecord);
+  if (stats.cursorLocalModelEstimates) result.cursorLocalModelEstimates = mapValues(
+    stats.cursorLocalModelEstimates, models => foldModelMap(models, plan.resolve));
   for (const field of ['nativeSessions', 'nativeProjects']) {
     if (stats[field]) {
       result[field] = mapValues(stats[field], (period) => mapValues(period, (row) => projectUsage(row, plan.resolve)));

@@ -19,6 +19,7 @@ const PARTIAL_USAGE_CARRY_FIELDS = Object.freeze([
   'periodProjectsOmitted',
   'nativeSessions',
   'nativeProjects',
+  'cursorLocalModelEstimates',
   'syncUploadIntervalMs'
 ]);
 

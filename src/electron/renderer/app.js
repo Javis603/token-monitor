@@ -3160,6 +3160,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
     key: model,
     unpricedTokens,
     name: model === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model,
+    subtitle: state.stats?.cursorLocalModelEstimates?.[state.period]?.[model] > 0 ? t('usage.localModelEstimate') : '',
     value,
     cost,
     unattributed,
@@ -13964,6 +13965,14 @@ els.appUpdateViewReleaseButton.addEventListener('click', async () => {
   await runAppUpdateAction();
 });
 
+window.tokenMonitor.cursor?.onBillingStatusChanged?.(({ accountId, status }) => {
+  const current = state.cursorAccount.status;
+  if (!current?.accounts) return;
+  state.cursorAccount = { ...state.cursorAccount, status: { ...current,
+    accounts: current.accounts.map(account => account.id === accountId ? { ...account, billingStatus: status } : account) } };
+  renderCursorStatus();
+});
+
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   state.settingsPushRevision += 1;
@@ -16166,6 +16175,7 @@ function renderMimoStatus() {
       }
 
       right.append(info);
+
       if (remove) right.append(remove);
       row.append(input || document.createElement('span'), main, right);
       listEl.append(row);
@@ -17716,6 +17726,41 @@ function renderCursorStatus() {
             : planLabel;
       info.setAttribute('aria-label', info.textContent);
       right.append(info);
+      const billingActions = document.createElement('div');
+      billingActions.className = 'settings-actions';
+      const connectBilling = document.createElement('button');
+      connectBilling.type = 'button';
+      connectBilling.textContent = t(account.billingEnabled ? 'settings.cursor.billingReconnect' : 'settings.cursor.billingConnect');
+      connectBilling.disabled = managementBlocked || account.expired || Boolean(account.error);
+      const runBillingAction = async (button, action) => {
+        button.disabled = true;
+        try {
+          const result = await action(account.id);
+          if (result?.ok) {
+            state.cursorAccount = { status: result.status, error: '', busy: false };
+            setAccountShellError('cursor', '');
+          } else {
+            setAccountShellError('cursor', result?.error || t('settings.common.error'));
+          }
+        } catch (error) { setAccountShellError('cursor', error.message); }
+        finally { button.disabled = false; }
+        renderCursorStatus();
+      };
+      connectBilling.addEventListener('click', () => runBillingAction(connectBilling, window.tokenMonitor.cursor.connectBilling));
+      billingActions.append(connectBilling);
+      if (account.billingEnabled) {
+        const disconnectBilling = document.createElement('button');
+        disconnectBilling.type = 'button';
+        disconnectBilling.textContent = t('settings.cursor.billingDisconnect');
+        disconnectBilling.disabled = managementBlocked;
+        disconnectBilling.addEventListener('click', () => runBillingAction(disconnectBilling, window.tokenMonitor.cursor.disconnectBilling));
+        billingActions.append(disconnectBilling);
+        const billingInfo = document.createElement('div');
+        billingInfo.className = 'settings-note';
+        billingInfo.textContent = t(`settings.cursor.billingStatus.${account.billingStatus || 'notConnected'}`);
+        main.append(billingInfo);
+      }
+      main.append(billingActions);
       if (account.removable === true && !managementBlocked) {
         const remove = document.createElement('button');
         remove.type = 'button';
