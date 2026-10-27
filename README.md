@@ -137,6 +137,18 @@ Token usage, AI Tool Limits and session details from the AI coding tools and pro
 
 Most usage monitors are useful on the machine they run on. Token Monitor is built for multi-device work: each device watches its own local logs, sends summary updates to your hub, and every connected widget sees token changes almost immediately.
 
+## Quick Install
+
+On macOS, install through the official [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor):
+
+```bash
+brew install --cask token-monitor
+```
+
+Or download the app for macOS, Windows, or Linux from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
+
+Launch the app to start tracking this device locally, with no hub setup required. See [Installation](#installation) for full details.
+
 ## Features
 
 ### Tracking usage
@@ -260,6 +272,25 @@ Token Monitor supports token usage, account-limit checks, and session details se
 - Custom maps numeric JSON fields from one GET balance endpoint; OpenAI or Anthropic compatibility alone is not enough.
 - Qoder CN is off by default; enable it in Settings → tools. Current sessions are JSONL under `~/.qoder-cn/projects` (`TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, then `QODERCN_CONFIG_DIR/projects`); older builds used a SQLite database, overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`. An unreadable source keeps its last complete read. Legacy database sessions record only a project name, so they appear without a project. Plan-billed JSONL rows that report credits but no token counts are omitted from token totals; those credits stay in AI Tool Limits, and BYOK rows with measured tokens are counted. See [Qoder source notes](docs/providers/qodercn.md).
 </details>
+
+### Additional Feature Support
+
+| Feature | Supported tools/sources | Notes |
+|---------|-------------------------|------------|
+| Session titles | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| Per-prompt/reply usage and tool calls | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Details are read locally and are not synced. |
+| Context usage/remaining space | Claude Code, Codex, DeepSeek Harness | Claude Code's context limit is estimated from the model. |
+| Cache usage/session cache hit rate | Sources exposing cache fields, including Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | Hit rate is shown when cache usage data is available. |
+| Estimated cache time remaining | Claude Code, Codex | Claude Code: 5 minutes or 1 hour; Codex: about 30 minutes (estimated). |
+| Output speed/token consumption rate | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Output speed in `tok/s`, total token consumption in `tok/min`; timing can include waiting. |
+| Reasoning token counts | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| Native running/waiting-for-input status | Claude Code, Codex | — |
+| Parent/subagent grouping | Codex, Antigravity, Oh My Pi, ZCode; T3 Code sessions with verifiable parent links | Claude Code grouping is available through T3 Code. |
+| Continuation-record grouping for the same conversation | Codex; T3 Code sessions with verified thread links | — |
+| Switch local accounts | Codex | Switches between accounts added in Token Monitor. |
+| Quota reset times/countdowns | Sources exposing reset times, e.g. Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| Available quota reset credits/grants | Claude Code, Codex | Shows remaining resets and expiry dates; display only. |
+| Quota reset forecast | Codex | Optional third-party forecasts from codex-resets.com. |
 
 ## Installation
 
