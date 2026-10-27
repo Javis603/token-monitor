@@ -198,7 +198,7 @@ function createPluginRuntime({
         subscribers.delete(webContents.id);
         demand.remove(webContents.id);
       };
-      const navigating = (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame !== false) { businessData.releaseOwner(String(webContents.id)); subscriber.demands.clear(); demand.remove(webContents.id); } };
+      const navigating = (_event, _url, inPlace, isMainFrame) => { if (isMainFrame !== false && !inPlace) { businessData.releaseOwner(String(webContents.id)); subscriber.demands.clear(); demand.remove(webContents.id); } };
       webContents.on('did-start-navigation', navigating);
       observerCleanup.push(() => webContents.removeListener('did-start-navigation', navigating));
       webContents.once('destroyed', destroyed);

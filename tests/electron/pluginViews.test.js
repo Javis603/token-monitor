@@ -332,3 +332,47 @@ test('host announces plugin ownership before import and again after release/resu
   await host.release(['fixture']); await lifecycle({ action: 'resume', ids: ['fixture'] }); await host.load(descriptor);
   assert.deepEqual(events, [['loading', 'fixture'], ['import'], ['loading', 'fixture'], ['import']]); await host.dispose();
 });
+
+for (const outcome of ['resolve', 'reject', 'dispose-reject']) test(`removed pending mount clears late DOM after ${outcome}`, async () => {
+  const document = dom(), node = document.createElement('div'); document.body.append(node);
+  let finish, entered, disposals = 0, lifecycle;
+  const started = new Promise(resolve => { entered = resolve; });
+  const host = createHost({ document, window: {}, bridge: { onLifecycle(fn) { lifecycle = fn; } }, importModule: async () => ({
+    async mount(container) {
+      entered(); await new Promise(resolve => { finish = resolve; });
+      container.append(document.createElement('input'));
+      if (outcome === 'reject') throw Error('mount rejected');
+      return { dispose() { disposals++; if (outcome === 'dispose-reject') throw Error('dispose rejected'); } };
+    }
+  }) });
+  const mounted = host.mount(node, descriptor); await started; host.unmount(node);
+  let settled = false;
+  const released = host.release(['fixture']);
+  const checked = outcome === 'dispose-reject' ? assert.rejects(released, /dispose rejected/) : released;
+  void checked.then(() => { settled = true; });
+  await new Promise(setImmediate); assert.equal(settled, false);
+  finish(); await mounted; await checked;
+  assert.equal(node.isConnected, true); assert.equal(node.children.length, 0);
+  assert.equal(disposals, outcome === 'reject' ? 0 : 1);
+  assert.equal((await lifecycle({ action: 'inspect', ids: ['fixture'] })).loaded, false);
+  await host.dispose();
+});
+for (const rejected of [false, true]) test(`stale pending mount ${rejected ? 'rejection' : 'disposal'} preserves newer owner`, async () => {
+  const document = dom(), node = document.createElement('div'); document.body.append(node);
+  let finish, entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const host = createHost({ document, window: {}, bridge: {}, importModule: async url => ({ async mount(container) {
+    if (url.includes('/one/')) {
+      entered(); await new Promise(resolve => { finish = resolve; });
+      if (rejected) throw Error('stale mount rejected');
+      return { dispose() {} };
+    }
+    container.append(document.createElement('input')); return {};
+  } }) });
+  const old = host.mount(node, descriptor); await started; host.unmount(node);
+  await host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
+  const replacement = node.children[0]; replacement.value = 'new draft';
+  finish(); await old;
+  assert.equal(node.children.length, 1); assert.equal(node.children[0], replacement); assert.equal(replacement.value, 'new draft');
+  await host.dispose();
+});

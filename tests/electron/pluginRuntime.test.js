@@ -287,3 +287,22 @@ test('master pause and resume send only each hosts loaded plugin ids', async t =
   f.settings.pluginsEnabled = true; f.runtime.settingsChanged(); await resume();
   assert.deepEqual(calls.map(request => request.ids), [['trusted-fixture'], ['trusted-fixture'], ['trusted-fixture']]);
 });
+
+for (const [name, inPlace, mainFrame, retained] of [['hash', true, true, true], ['subframe', false, false, true], ['full', false, true, false]]) {
+  test(`${name} navigation preserves only same-document subscriber demand and data`, async t => {
+    const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+    f.runtime.publishStats({ periods: { today: { totalTokens: 1, costUsd: 1 } } });
+    const subscription = await f.invoke('plugins:subscribe', 'trusted-fixture', { resource: 'usage', period: 'today' });
+    await tick(); await tick();
+    const messages = () => f.main.webContents.sent.filter(item => item.channel === 'plugins:data' && item.value.subscription === subscription);
+    assert.equal(messages().length, 1);
+    f.send(f.main, 'home'); await tick(); assert.equal(f.runtime.manager.backendCount(), 1);
+    f.main.webContents.emit('did-start-navigation', {}, 'file:///index.html#author', inPlace, mainFrame); await tick();
+    // No replacement demand or subscription IPC: the document still has the same refs.
+    f.runtime.publishStats({ periods: { today: { totalTokens: 2, costUsd: 1 } } });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(f.runtime.manager.backendCount(), retained ? 1 : 0);
+    assert.equal(messages().length > 1, retained);
+    assert.equal(await f.invoke('plugins:unsubscribe', subscription), retained);
+  });
+}

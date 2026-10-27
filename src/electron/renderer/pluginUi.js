@@ -168,6 +168,11 @@
           record.observer.observe(container);
         }
       } catch (error) { report(error, record); }
+      finally {
+        // A pending mount can append after unmount, even before rejecting.
+        // Its cleanup must not clear a newer mount in the same container.
+        if (mounts.get(container) !== record && owners.get(container) === record) container.replaceChildren();
+      }
     }
     function mount(container, descriptor, value) {
       return track(descriptor.pluginId, mountRecord(container, descriptor, value));
