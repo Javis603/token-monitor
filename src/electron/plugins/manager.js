@@ -21,10 +21,11 @@ function normalizePluginStates(value) {
 function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLocale = () => 'en', authorSettings, safeMode = false,
   fork, hostCall = async () => { throw new Error('Unknown host operation'); }, log = () => {} }) {
   const plugins = new Map(), demands = new Map(), changes = new Set(), views = new Set(), listeners = new Set();
-  let disposed = false, mutating = false, hostContext = {};
+  const mutating = new Set();
+  let disposed = false, hostContext = {};
   const states = () => normalizePluginStates(getSettings()?.pluginStates);
-  const master = () => !safeMode && !disposed && !mutating && getSettings()?.pluginsEnabled !== false;
-  const active = plugin => master() && plugin?.manifest && states()[plugin.id]?.enabled && states()[plugin.id]?.trustedRevision === plugin.revision;
+  const master = () => !safeMode && !disposed && getSettings()?.pluginsEnabled !== false;
+  const active = plugin => master() && plugin?.manifest && !mutating.has(plugin.id) && states()[plugin.id]?.enabled && states()[plugin.id]?.trustedRevision === plugin.revision;
   function addLog(id, message) {
     const plugin = plugins.get(id);
     if (!plugin) return;
@@ -123,14 +124,15 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
   }
   function requirePlugin(id) { const plugin = plugins.get(id); if (!plugin?.manifest) throw new Error('Plugin is unavailable'); return plugin; }
   function writeState(id, patch) { const current = states(); saveStates({ ...current, [id]: { ...current[id], ...patch } }); }
-  async function reload() {
-    await backends.dispose();
+  async function reload(id) {
+    await (id === undefined ? backends.dispose() : backends.stop(id));
     if (disposed) return;
-    plugins.clear();
+    if (id === undefined) plugins.clear();
+    else plugins.delete(id);
     let entries = [];
     try { entries = fs.readdirSync(userDir, { withFileTypes: true }); } catch (error) { if (error.code !== 'ENOENT') log(error.message); }
     for (const entry of entries) {
-      if (!entry.isDirectory() || !ID_RE.test(entry.name)) continue;
+      if (!entry.isDirectory() || !ID_RE.test(entry.name) || (id !== undefined && entry.name !== id)) continue;
       const plugin = { id: entry.name, dir: path.join(userDir, entry.name), manifest: null, errors: [], logs: [], calls: 0, data: null, failure: null };
       try {
         const pkg = packageDirectory(plugin.dir);
@@ -156,8 +158,13 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
     setEnabled(id, enabled) { const plugin = requirePlugin(id); writeState(id, { enabled, trustedRevision: enabled ? plugin.revision : states()[id]?.trustedRevision }); reconcile(); emit(); },
     setBackground(id, enabled) { requirePlugin(id); writeState(id, { background: enabled }); reconcile(); emit(); },
     restart(id) { const plugin = requirePlugin(id); if (plugin.starting) plugin.cancelledStart = true; backends.stop(id); plugin.failure = null; reconcile(); emit(); },
-    beginMutation() { mutating = true; return backends.dispose(); },
-    endMutation() { mutating = false; reconcile(); emit(); },
+    beginMutation(id) {
+      mutating.add(id);
+      const plugin = plugins.get(id);
+      if (plugin?.starting) plugin.cancelledStart = true;
+      return backends.stop(id);
+    },
+    endMutation(id) { mutating.delete(id); reconcile(); emit(); },
     skins() { return [...plugins.values()].filter(active).flatMap(plugin => describe(plugin).skins); },
     getAuthorSettings(id) { const plugin = requirePlugin(id); return authorSettings.get(id, plugin.manifest.settings); },
     updateAuthorSettings(id, input) { const plugin = requirePlugin(id); const result = authorSettings.update(id, plugin.manifest.settings, input); backends.update(id, { settings: result }); return result; },

@@ -172,7 +172,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     busy = true;
     let prepared = false, began = false, committed = false, recovered = true;
     try {
-      await manager.beginMutation(); began = true;
+      await manager.beginMutation(id); began = true;
       const target = path.join(userDir, id), stage = path.join(txDir, 'stage');
       const hadTarget = hasTarget(target);
       let current = null;
@@ -220,17 +220,17 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       }
       atomicJson(registryFile, next, MAX_REGISTRY_BYTES); fault('registry-written');
       saveSettings(patch); fault('settings-written');
-      await manager.reload(); fault('reloaded');
+      await manager.reload(id); fault('reloaded');
       atomicJson(journalFile, { ...j, phase: 'committed' }, MAX_JOURNAL_BYTES); committed = true; registry = next;
       cleanup();
       return describe(id);
     } catch (error) {
       if (prepared && !committed) {
-        try { recover(); await manager.reload(); } catch (recoveryError) { recovered = false; throw new Error(`${error.message}; recovery pending: ${recoveryError.message}`, { cause: recoveryError }); }
+        try { recover(); await manager.reload(id); } catch (recoveryError) { recovered = false; throw new Error(`${error.message}; recovery pending: ${recoveryError.message}`, { cause: recoveryError }); }
       }
       throw error;
     } finally {
-      if (began && recovered) manager.endMutation();
+      if (began && recovered) manager.endMutation(id);
       busy = false;
     }
   }

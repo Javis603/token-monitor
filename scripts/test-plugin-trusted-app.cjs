@@ -38,6 +38,7 @@ export function activate(ctx) {
   const basic = base(ctx);
   ctx.onDispose(() => { if (globalThis.fixtureCleanupFailure) throw Error('Intentional fixture cleanup failure'); });
   return { ...basic, mount(container, context) {
+    globalThis.fixtureMountCount = (globalThis.fixtureMountCount || 0) + 1;
     if (['section','inline','navigation','navigation-second'].includes(context.viewId)) {
       const label = document.createElement('span');
       label.textContent = context.viewId === 'inline' ? ' · 作者註解' : context.viewId === 'section' ? '合成資料 · 區段擴展' : '◇';
@@ -228,6 +229,52 @@ app.whenReady().then(async () => {
   }
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
+  if (process.env.TM_TRANSACTIONS_ONLY === '1') {
+    const baseline = process.env.TM_EXPECT_BASELINE === '1', results = [];
+    await js("pluginApi.setEnabled('trusted-fixture',true)");
+    await js("pluginApi.place('trusted-fixture/panel','home',true).then(applyPluginCatalog)");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'B author input');
+    const other = path.join(scratch, 'other-source');
+    fs.cpSync(fixtureDir, other, { recursive: true });
+    const otherManifest = { ...manifest, id: 'other-fixture', name: 'Transaction A' };
+    const setVersion = version => fs.writeFileSync(path.join(other,'manifest.json'), JSON.stringify({ ...otherManifest, version }));
+    setVersion('1.0.0'); selectedDirectory = other;
+    for (const operation of ['install','update','rollback','uninstall']) {
+      if (operation === 'update') setVersion('2.0.0');
+      const token = ['install','update'].includes(operation) ? (await js("pluginApi.importPackage('directory')")).token : null;
+      await js("globalThis.transactionInput=document.querySelector('[aria-label=\"Fixture draft\"]');transactionInput.value='';transactionInput.scrollIntoView({block:'center',behavior:'instant'});transactionInput.focus()");
+      win.focus();
+      await win.webContents.insertText('B draft');
+      await waitFor("transactionInput.value==='B draft'", 'native typing');
+      const pidBefore = (await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','before')")).pid;
+      const mountsBefore = await js('fixtureMountCount');
+      const dialogCount = toggleDialogs.length;
+      fs.writeFileSync(path.join(evidence, `transaction-${operation}-before.png`), (await capture()).toPNG());
+      if (token) await js(`pluginApi.install(${JSON.stringify(token)})`);
+      else if (operation === 'rollback') await js("pluginApi.rollback('other-fixture')");
+      else await js("pluginApi.uninstall('other-fixture',{keepData:true,keepPlacements:true})");
+      await pause(200);
+      const retained = await js(`({sameInput:document.querySelector('[aria-label="Fixture draft"]')===transactionInput,
+        focused:document.activeElement===transactionInput,draft:document.querySelector('[aria-label="Fixture draft"]')?.value,mounts:fixtureMountCount})`);
+      await win.webContents.insertText(' + OK');
+      await pause(50);
+      const typed = await js("document.querySelector('[aria-label=\"Fixture draft\"]')?.value");
+      const pidAfter = (await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','after')")).pid;
+      const result = { operation, ...retained, typed, mountsBefore, pidBefore, pidAfter, dialogs:toggleDialogs.length-dialogCount };
+      results.push(result);
+      fs.writeFileSync(path.join(evidence, `transaction-${operation}-after.png`), (await capture()).toPNG());
+      fs.writeFileSync(path.join(evidence, 'transaction-results.json'), JSON.stringify({ baseline, results, electron:process.versions.electron, chrome:process.versions.chrome },null,2));
+      assert.equal(result.dialogs,0);
+      if (baseline) { assert.equal(retained.sameInput,false);assert.equal(retained.draft,'');assert.notEqual(pidAfter,pidBefore); }
+      else {
+        assert.equal(retained.sameInput,true);assert.equal(retained.focused,true);assert.equal(retained.draft,'B draft');
+        assert.equal(typed,'B draft + OK');assert.equal(retained.mounts,mountsBefore);assert.equal(pidAfter,pidBefore);
+      }
+      console.log('PASS transaction isolation',JSON.stringify(result));
+    }
+    assertConsoleClean();
+    await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
+  }
   if (process.env.TM_TOGGLE_ONLY === '1') {
     const baseline = process.env.TM_EXPECT_BASELINE === '1';
     let mainLoads = 0; win.webContents.on('did-finish-load', () => mainLoads++);
