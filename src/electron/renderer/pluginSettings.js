@@ -65,14 +65,22 @@
     let overview = null, navigation = null, tabs = null, content = null, renderedTab = 'installed';
     const overviewLabels = new Map(), guideLinks = new Map();
     const tabControls = new Map();
+    const busyControls = new Set();
 
     // Keep navigation alive. Async actions must not insert a loading row or
     // discard the focused control before the response arrives.
     function setBusy() {
       container.setAttribute('aria-busy', String(busy));
+      if (!busy) {
+        for (const control of busyControls) control.disabled = false;
+        busyControls.clear();
+      }
       for (const control of container.querySelectorAll('button, input, select, textarea')) {
         control.setAttribute('aria-disabled', String(busy || control.disabled));
-        if (busy && control !== document.activeElement && !tabs?.contains(control)) control.disabled = true;
+        if (busy && !control.disabled && control !== document.activeElement && !tabs?.contains(control)) {
+          busyControls.add(control);
+          control.disabled = true;
+        }
       }
     }
 

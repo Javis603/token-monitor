@@ -297,6 +297,34 @@ async function main() {
       { name: 'plugin-close-at-bottom-restores-original-scroll-range', ok: Math.abs(closed.height - baseline.height) <= 1 && Math.abs(closed.gap - baseline.gap) <= 1, evidence: { baseline, closed } }
     ];
   })()`);
+  const authorChecks = await win.webContents.executeJavaScript(`(async () => {
+    const box = document.createElement('div'); document.body.append(box);
+    const view = { id: 'editor', ref: 'demo/editor', revision: 'one', surfaces: ['settings', 'home'], placements: { home: false } };
+    const data = { enabled: true, plugins: [{ id: 'demo', name: 'Demo', source: 'user', version: '1.0.0', revision: 'one', settingsIdentity: 'one', status: 'active', enabled: true, trusted: true, views: [view] }] };
+    let input, disabledButton, finish;
+    const host = TokenMonitorPluginSettings.createPluginSettingsPanel({ document, container: box, t: key => key,
+      api: { list: async () => data, place: () => new Promise((resolve, reject) => { finish = fail => fail ? reject(Error('fixture placement failed')) : resolve(data); }) },
+      mountSettings: node => {
+        if (node.firstChild) return;
+        input = document.createElement('input'); input.value = 'retained draft';
+        disabledButton = document.createElement('button'); disabledButton.disabled = true;
+        node.append(input, disabledButton);
+      } });
+    await host.refresh(); box.querySelector('.plugin-manage').click();
+    const checks = [], original = input;
+    for (const fail of [false, true]) {
+      const chip = box.querySelector('.plugin-surface-chip'); chip.focus(); chip.click();
+      checks.push({ name: 'author-controls-locked-during-' + (fail ? 'failure' : 'success'), ok: input.disabled && disabledButton.disabled && box.getAttribute('aria-busy') === 'true' });
+      finish(fail); await new Promise(resolve => setTimeout(resolve, 0));
+      checks.push({ name: 'author-controls-restored-after-' + (fail ? 'failure' : 'success'), ok: input === original && box.contains(input) && !input.disabled && disabledButton.disabled && input.value === 'retained draft' && input.getAttribute('aria-disabled') === 'false' && box.getAttribute('aria-busy') === 'false' && Boolean(box.querySelector('.plugin-action-error')) === fail });
+      input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+      document.execCommand('insertText', false, '!');
+      checks.push({ name: 'author-can-continue-editing-after-' + (fail ? 'failure' : 'success'), ok: document.activeElement === input && input.value === 'retained draft!' });
+      input.value = 'retained draft';
+    }
+    host.dispose(); box.remove(); return checks;
+  })()`);
+  result.checks.push(...authorChecks);
   result.checks.push(...scrollChecks);
   for (const check of result.checks) console.log(`${check.ok ? 'PASS' : 'FAIL'} ${check.name}`, check.evidence || '');
   fs.writeFileSync(path.join(scratch, 'results.json'), JSON.stringify(result,null,2));
