@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides shared project guidance for coding agents that load it. The linked documents are read as needed; constraints that unrelated changes can break are listed under [Tripwires](#tripwires).
+This file provides shared project guidance for coding agents that load it. Read linked documents as needed. [Tripwires](#tripwires) below highlight constraints that unrelated changes could violate; the linked documents explain the reasoning.
 
 ## Commands
 
