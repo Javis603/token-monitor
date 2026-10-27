@@ -59,7 +59,7 @@ function fixture(t) {
       const res = new SlowResponse(blocked);
       responses.push(res);
       hub.server.emit('request', {
-        method: 'GET', url: '/api/stats/stream', headers: { 'x-token-monitor-stream': '2' }
+        method: 'GET', url: '/api/stats/stream', headers: { 'x-token-monitor-stream': '3' }
       }, res);
       return res;
     },

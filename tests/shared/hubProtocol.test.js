@@ -342,7 +342,7 @@ test('sseFrameForClient falls back to an empty string when the chosen frame is m
 test('Hub protocol features require explicit request headers', () => {
   assert.equal(wantsMinimalResponse({ headers: { 'X-Token-Monitor-Response': 'minimal' } }), true);
   assert.equal(wantsMinimalResponse({ headers: {} }), false);
-  assert.equal(wantsFreshnessEvents(new Headers({ 'x-token-monitor-stream': '2' })), true);
+  assert.equal(wantsFreshnessEvents(new Headers({ 'x-token-monitor-stream': '3' })), true);
   assert.equal(wantsFreshnessEvents(new Headers()), false);
   assert.equal(acceptsEncoding(new Headers({ 'accept-encoding': 'br, gzip' }), 'gzip'), true);
   assert.equal(acceptsEncoding(new Headers({ 'accept-encoding': 'br, gzip ; q=0.5' }), 'gzip'), true);

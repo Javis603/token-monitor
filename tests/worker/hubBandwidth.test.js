@@ -98,7 +98,7 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
   const base = {
     deviceId: 'dev-a',
     updatedAt: initialAt,
-    today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } },
+    today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: initialAt } } } },
     clientHealth: {
       version: 1,
       clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
@@ -110,11 +110,11 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
   const modernAbort = new AbortController();
   const legacyAbort = new AbortController();
   const modernResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
-    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' },
+    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' },
     signal: modernAbort.signal
   }));
   const legacyResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
-    headers: { authorization: 'Bearer shh' },
+    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' },
     signal: legacyAbort.signal
   }));
   const modern = [];
@@ -137,6 +137,18 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
     assert.equal(modern[0].data.stats.devices[0].clientHealthObservedAt, refreshedAt);
     assert.equal(legacy[0].event, 'stats');
     assert.equal(legacy[0].data.stats.devices[0].updatedAt, refreshedAt);
+    modern.length = 0;
+    legacy.length = 0;
+
+    await hub.fetch(ingestRequest({ ...base, today: { ...base.today, sessions: { a: {
+      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: refreshedAt }
+    } } } }, { 'x-token-monitor-response': 'minimal' }));
+    await waitFor(() => modern.length === 1 && legacy.length === 1);
+    assert.equal(modern[0].event, 'freshness');
+    assert.equal(Object.values(modern[0].data.stats.sessionActivityObservedAt.today)[0], refreshedAt);
+    assert.equal(Object.values(modern[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], refreshedAt);
+    assert.equal(legacy[0].event, 'stats');
+    assert.equal(Object.values(legacy[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, refreshedAt);
     modern.length = 0;
     legacy.length = 0;
 
@@ -259,11 +271,11 @@ test('Worker subscribers receive identical frames and delete/subscription writes
   const modernB = [];
   const legacy = [];
   const modernAResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
-    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' },
+    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' },
     signal: modernAAbort.signal
   }));
   const modernBResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
-    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' },
+    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' },
     signal: modernBAbort.signal
   }));
   const legacyResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
