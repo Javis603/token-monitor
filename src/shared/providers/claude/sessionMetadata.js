@@ -234,6 +234,12 @@ function assistantMetadataFromTail(tail) {
   for (const match of tail.matchAll(/"(?:effort|perTurnEffort|isSidechain|isApiErrorMessage|uuid|timestamp|sessionId)"\s*:/g)) {
     try { return JSON.parse('{' + tail.slice(match.index)); } catch (_) { /* Nested or incomplete suffix. */ }
   }
+  // When message is the last root field, its own complete suffix can prove
+  // closure without any trailing root metadata. Missing effort then clears,
+  // just as on the ordinary JSON path. Incomplete/nested suffixes still fail.
+  for (const match of tail.matchAll(/"(?:stop_reason|usage)"\s*:/g)) {
+    try { return JSON.parse('{"message":{' + tail.slice(match.index)); } catch (_) { /* Not a complete message suffix. */ }
+  }
   return null;
 }
 

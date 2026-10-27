@@ -105,6 +105,29 @@ test('oversized Claude records use bounded fragments and reject nested effort', 
   assert.equal(f.read(), 'xhigh', 'oversized synthetic errors cannot replace a successful response');
 });
 
+test('complete oversized responses without root suffix metadata clear effort like ordinary responses', t => {
+  for (const size of [10, 600_000]) {
+    const f = fixture(t);
+    fs.writeFileSync(f.file, record(assistant({ effort: 'high' })));
+    assert.equal(f.read(), 'high');
+    // No uuid, timestamp, sessionId or effort follows message. Only its own
+    // stop_reason proves that the suffix belongs to a complete response.
+    const response = record({ type: 'assistant', message: {
+      content: [{ type: 'text', text: 'x'.repeat(size) }], stop_reason: 'end_turn'
+    } }).trimEnd();
+    fs.appendFileSync(f.file, response.slice(0, -2));
+    assert.equal(f.read(), 'high', 'incomplete responses retain earlier evidence');
+    fs.appendFileSync(f.file, response.slice(-2));
+    assert.equal(f.read(), null, 'a complete response with no effort clears the setting');
+    fs.appendFileSync(f.file, '\n' + record(assistant({ effort: 'high' })));
+    assert.equal(f.read(), 'high');
+    fs.appendFileSync(f.file, record({ isSidechain: true, type: 'assistant', message: {
+      content: [{ type: 'text', text: 'x'.repeat(size) }], stop_reason: 'end_turn'
+    } }));
+    assert.equal(f.read(), 'high', 'sidechains with no configuration cannot clear main effort');
+  }
+});
+
 test('historical Claude effort flows through metadata, wire normalization and archives', t => {
   const f = fixture(t);
   fs.writeFileSync(f.file, record(assistant({ effort: 'high' })));
