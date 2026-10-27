@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const dotenv = require('dotenv');
@@ -9,7 +10,7 @@ const dotenv = require('dotenv');
 const {
   minimaxToken,
   parseMinimaxTiers,
-  fetchMinimaxLimits,
+  fetchMinimaxLimits: fetchMinimaxLimitsWithDeps,
   minimaxAttemptOrder,
   minimaxRegion,
   minimaxRegionForUrl,
@@ -24,6 +25,11 @@ const { parseLimitProviders } = require('../../src/shared/limits/collector');
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 
 const CN_REMAINS_URLS = new Set([MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+
+// Discovery must not read the developer's real login or ambient API key.
+const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-empty-home-'));
+test.after(() => fs.rmSync(emptyHome, { recursive: true, force: true }));
+const fetchMinimaxLimits = (options, deps) => fetchMinimaxLimitsWithDeps(options, { env: {}, homeDir: emptyHome, ...deps });
 
 const BALANCE_URL_CN = 'https://api.minimaxi.com/account/query_balance';
 const BALANCE_URL_EN = 'https://api.minimax.io/account/query_balance';
@@ -1237,7 +1243,6 @@ const {
   MINIMAX_CODE_MEMBERSHIP_URL_CN,
   MINIMAX_CODE_PLAN_REMAINS_URL_CN
 } = require('../../src/shared/providers/minimax/limits');
-const os = require('node:os');
 
 const CODE_NOW = 1790000000000;
 const CODE_RECORD_KEY = 'com.minimax.mcode.oauth.prod.cn deadbeef';
