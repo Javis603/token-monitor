@@ -1374,17 +1374,16 @@ function membershipBody(overrides = {}) {
 function planRemainsBody(overrides = {}) {
   return {
     base_resp: { status_code: 0 },
-    data: {
-      model_remains: [{
-        model_name: 'general',
-        current_interval_total_percent: '100',
-        current_interval_used_percent: '30',
-        current_interval_status: 1,
-        current_weekly_total_percent: '100',
-        current_weekly_used_percent: '10',
-        current_weekly_status: 1
-      }]
-    },
+    // Official queryPercent reads the top level, unlike legacy API examples.
+    model_remains: [{
+      model_name: 'general',
+      current_interval_total_percent: '100',
+      current_interval_used_percent: '30',
+      current_interval_status: 1,
+      current_weekly_total_percent: '100',
+      current_weekly_used_percent: '10',
+      current_weekly_status: 1
+    }],
     ...overrides
   };
 }
@@ -1622,14 +1621,23 @@ test('MiniMax Code and API run independent lanes, scopes and failure states', as
   const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
   let apiDenied = false;
   let codeDown = false;
+  let tokenPlan = false;
   const deps = codeDeps(fixture, async (url, init) => {
     if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
       assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
-      return codeDown ? { ok: false, status: 503 } : okResponse(membershipBody({ has_token_plan: false }));
+      return codeDown ? { ok: false, status: 503 } : okResponse(membershipBody({ has_token_plan: tokenPlan }));
+    }
+    if (url === MINIMAX_CODE_PLAN_REMAINS_URL_CN) {
+      assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
+      assert.equal(init.headers['X-Group-Id'], 'grp-123');
+      return okResponse(planRemainsBody());
     }
     assert.equal(new URL(url).host, 'api.minimaxi.com');
     assert.equal(init.headers.Authorization, apiDenied ? 'Bearer key-B' : 'Bearer key-A');
     if (apiDenied) return unauthorized();
+    if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) return okResponse({ data: { model_remains: [{
+      model_name: 'general', current_interval_remaining_percent: 70, current_weekly_remaining_percent: 90
+    }] } });
     const route = new URL(url).pathname;
     if (route === '/account/query_balance') return okResponse({ available_amount: '100', base_resp: { status_code: 0 } });
     if (route === '/account/query_recharge') return okResponse({ cash_total_usage: '44', base_resp: { status_code: 0 } });
@@ -1666,6 +1674,19 @@ test('MiniMax Code and API run independent lanes, scopes and failure states', as
     assert.equal(denied.api.windows.length, 0);
     assert.equal(denied.code.accountKey, first.code.accountKey);
     assert.equal(denied.code.windows[0].remaining, 4624);
+    apiDenied = codeDown = false;
+    tokenPlan = true;
+    runtime.reconfigure({ minimaxApiKey: 'key-A', minimaxBillingMode: 'token-plan' });
+    runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    const plan = lanes();
+    assert.equal(plan.api.status, 'ok');
+    assert.equal(plan.code.status, 'ok');
+    assert.equal(plan.api.balance, null);
+    assert.equal(plan.code.accountKey, first.code.accountKey);
+    assert.deepEqual(plan.api.windows.map(window => window.usedPercent), [30, 10]);
+    assert.deepEqual(plan.code.windows.filter(window => window.metric !== 'credits').map(window => window.usedPercent), [30, 10]);
+    assert.equal(plan.code.windows.find(window => window.label === 'Credits').remaining, 4624);
   } finally { runtime.stop(); }
 });
 
@@ -1713,14 +1734,30 @@ test('MiniMax Code uses the reported credit total without adding components and 
   }
 });
 
-test('MiniMax Code follows the official workspace and membership fallback order', async () => {
+test('MiniMax Code follows workspace, membership and matched current-subscription name precedence', async () => {
   const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
-  for (const [workspace, membership, expected, group, hasPlan, planLabel] of [
+  const subscription = {
+    current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Current subscription' },
+    current_combo_card: { combo_id: 12345, title: 'Build' }
+  };
+  const names = [
+    [okResponse(subscription), 'Build'],
+    [okResponse({ ...subscription, current_combo_card: { combo_id: 'other', title: 'Wrong card' } }), 'Current subscription'],
+    [okResponse({ ...subscription, current_combo_card: { combo_id: 12345, title: '12345' } }), 'Current subscription'],
+    [okResponse({ ...subscription, current_subscribe: { curr_subscribe_combo_id: 'other' } }), 'Subscription'],
+    [okResponse({ current_combo_card: subscription.current_combo_card }), 'Subscription'],
+    [okResponse({ current_subscribe: { curr_subscribe_combo_id: 12345, current_subscribe_title: '12345' } }), 'Subscription'],
+    [{ ok: false, status: 403 }, 'Subscription'],
+    [okResponse({ base_resp: { status_code: 1004 } }), 'Subscription']
+  ];
+  for (const [workspace, membership, expected, group, hasPlan, planLabel, metadata] of [
+    ...names.map(([response, label]) => [{ token_plan_tier: '12345' }, membershipBody(), 4624, 'grp-123', true, label, response]),
+    [{ token_plan_tier: '12345' }, membershipBody({ op_credit_summary: { total_remaining_amount: '0' } }), 0, 'grp-123', true, 'Build', okResponse(subscription)],
     [{ opcredit_balance: '1,234', op_group_id: 'workspace-group', token_plan_tier: 'starter' }, membershipBody({ token_plan_tier: 'other', has_token_plan: false }), 4624, 'workspace-group', true, 'starter'],
-    [{ opcredit_balance: '1,234', has_token_plan: true }, membershipBody({ has_token_plan: false, op_credit_summary: null }), 1234, 'grp-123', true, 'Token Plan'],
+    [{ opcredit_balance: '1,234', has_token_plan: true }, membershipBody({ has_token_plan: false, op_credit_summary: null }), 1234, 'grp-123', true, 'Subscription'],
     [{}, membershipBody({ has_token_plan: false, token_plan_tier: 'starter', op_credit_summary: { total_remaining_amount: 'invalid' }, opcredit_balance: '321' }), 321, 'grp-123', true, 'starter'],
-    [{ opcredit_balance: 'invalid' }, membershipBody({ op_credit_summary: null, opcredit_balance: 321 }), null, 'grp-123', false, 'Token Plan'],
-    [{ token_plan_tier: '12345' }, membershipBody(), 4624, 'grp-123', true, 'Token Plan'],
+    [{ opcredit_balance: 'invalid' }, membershipBody({ op_credit_summary: null, opcredit_balance: 321 }), null, 'grp-123', false, 'Subscription'],
+    [{ token_plan_tier: '12345' }, membershipBody(), 4624, 'grp-123', true, 'Subscription'],
     [{}, membershipBody({ has_token_plan: false, plan_name: 'Free' }), 4624, 'grp-123', false, 'Free']
   ]) {
     const calls = [];
@@ -1731,13 +1768,19 @@ test('MiniMax Code follows the official workspace and membership fallback order'
       if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membership);
       if (new URL(url).pathname === '/minimax-cloud/api/v1/credit/details') return okResponse({ details: [], total_count: 0 });
       groups.push(init.headers['X-Group-Id']);
+      if (new URL(url).pathname.endsWith('/charge/combo/cycle_audio_resource_package')) {
+        assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
+        assert.deepEqual(Object.fromEntries(new URL(url).searchParams), { biz_line: '2', cycle_type: '3', resource_package_type: '7', business: 'Agent', device_platform: 'desktop' });
+        return metadata || okResponse({});
+      }
       return url === MINIMAX_CODE_PLAN_REMAINS_URL_CN ? okResponse(planRemainsBody()) : okResponse({});
     } }));
     assert.equal(result.status, expected === null ? 'unavailable' : 'ok');
     assert.equal(result.planLabel, planLabel);
     assert.equal(result.windows.find(window => window.label === 'Credits')?.remaining ?? null, expected);
     assert.equal(calls.includes(MINIMAX_CODE_PLAN_REMAINS_URL_CN), hasPlan);
-    assert.deepEqual(groups, hasPlan ? [group] : []);
+    assert.deepEqual(groups, hasPlan ? Array(metadata || workspace.token_plan_tier === '12345' ? 2 : 1).fill(group) : []);
+    assert.equal(calls.includes(MINIMAX_CODE_OAUTH_URL_CN), false, 'optional metadata must not rotate credentials');
     assert.equal(result.windows.filter(window => window.metric !== 'credits').length, hasPlan ? 2 : 0);
   }
 });
@@ -1818,9 +1861,14 @@ test('MiniMax Code partial refresh updates credits and retains visibly stale pla
   const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
   let outage = false;
   let timestamp = CODE_NOW;
+  let nameRequests = 0;
   const runtime = createLimitsRuntime({ limitProviders: ['minimax'], minimaxBillingMode: 'api' }, {
     ...codeDeps(fixture, async url => {
-      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ op_credit_summary: { total_remaining_amount: outage ? '4000' : '4624' } }));
+      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ token_plan_tier: '12345', op_credit_summary: { total_remaining_amount: outage ? '4000' : '4624' } }));
+      if (new URL(url).pathname.endsWith('/charge/combo/cycle_audio_resource_package')) {
+        nameRequests++;
+        return okResponse({ current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Build' } });
+      }
       return outage ? { ok: false, status: 503 } : okResponse(planRemainsBody());
     }),
     now: () => timestamp, autoStart: false, autoRetry: false
@@ -1829,12 +1877,15 @@ test('MiniMax Code partial refresh updates credits and retains visibly stale pla
     await runtime.refresh({ provider: 'minimax' }, 'manual');
     const first = runtime.getSnapshot().providers[0];
     assert.equal(first.status, 'ok');
+    assert.equal(first.planLabel, 'Build');
     assert.equal(first.windows.filter(window => window.metric !== 'credits').length, 2);
     outage = true;
     timestamp += 60000;
     await runtime.refresh({ provider: 'minimax' }, 'manual');
     const partial = runtime.getSnapshot().providers[0];
     assert.equal(partial.status, 'unavailable');
+    assert.equal(partial.planLabel, 'Build', 'quota failure must not suppress an available subscription name');
+    assert.equal(nameRequests, 2);
     assert.equal(partial.updatedAt, first.updatedAt);
     assert.equal(partial.windows.find(window => window.metric === 'credits').remaining, 4000);
     assert.deepEqual(partial.windows.filter(window => window.metric !== 'credits'), first.windows.filter(window => window.metric !== 'credits'));
@@ -1868,20 +1919,25 @@ test('MiniMax Code commits an in-flight rotation when its probe is cancelled', a
   assert.equal(JSON.parse(fs.readFileSync(fixture.statePath)).status, 'authenticated');
 });
 
-test('MiniMax Code does not turn a cancelled plan request into a successful credits reading', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
-  const controller = new AbortController();
-  const deps = codeDeps(fixture, async url => {
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody());
-    assert.equal(url, MINIMAX_CODE_PLAN_REMAINS_URL_CN);
-    controller.abort();
-    throw controller.signal.reason;
-  }, { signal: controller.signal });
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
-  assert.equal(deps.requests.at(-1), MINIMAX_CODE_PLAN_REMAINS_URL_CN);
-  assert.equal(controller.signal.aborted, true);
-  assert.equal(result.status, 'unavailable');
-  assert.deepEqual(result.windows, []);
+test('MiniMax Code does not turn a cancelled plan or name request into a successful credits reading', async () => {
+  for (const lane of ['plan', 'name']) {
+    const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+    const controller = new AbortController();
+    const cancelledPath = lane === 'plan' ? new URL(MINIMAX_CODE_PLAN_REMAINS_URL_CN).pathname
+      : '/v1/api/openplatform/charge/combo/cycle_audio_resource_package';
+    const deps = codeDeps(fixture, async url => {
+      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ token_plan_tier: lane === 'name' ? '12345' : undefined }));
+      if (lane === 'name' && url === MINIMAX_CODE_PLAN_REMAINS_URL_CN) return okResponse(planRemainsBody());
+      assert.equal(new URL(url).pathname, cancelledPath);
+      controller.abort();
+      throw controller.signal.reason;
+    }, { signal: controller.signal });
+    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+    assert.equal(new URL(deps.requests.at(-1)).pathname, cancelledPath);
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(result.status, 'unavailable');
+    assert.deepEqual(result.windows, []);
+  }
 });
 
 test('MiniMax Code lane picks the desktop record among several records', async () => {
@@ -2091,16 +2147,25 @@ test('MiniMax Code lane pins discovery to the selected region', async () => {
       if (url.endsWith('/matrix/api/v1/user/get_user_extra_info')) return okResponse({ workspaces: [{ workspace_type: 0, workspace_id: 'personal-test' }] });
       if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN || url === 'https://agent.minimax.io/matrix/api/v1/commerce/get_membership_info') {
         seen.push(init.headers.authorization);
-        return { ok: true, json: async () => membershipBody({ op_group_id: '' }) };
+        return okResponse(membershipBody({ token_plan_tier: '12345' }));
+      }
+      const target = new URL(url);
+      if (target.pathname === '/minimax-cloud/api/v1/credit/details') return okResponse({ details: [], total_count: 0 });
+      if (target.pathname.endsWith('/remains_percent') || target.pathname.endsWith('/cycle_audio_resource_package')) {
+        assert.equal(target.origin, region === 'cn' ? 'https://www.minimaxi.com' : 'https://platform.minimax.io');
+        assert.equal(init.headers.authorization, region === 'cn' ? `Bearer ${ACCESS_ONFILE}` : `Bearer ${ACCESS_INTL}`);
+        assert.equal(init.headers['X-Group-Id'], 'grp-123');
+        return okResponse(target.pathname.endsWith('/remains_percent') ? planRemainsBody()
+          : { current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Build' } });
       }
       throw new Error(`unexpected url ${url}`);
     },
     providerRuntimeState: new Map()
   });
-  await run('cn');
+  assert.equal((await run('cn')).planLabel, 'Build');
   assert.deepEqual(seen, [`Bearer ${ACCESS_ONFILE}`], 'cn pin reads the cn store');
   seen.length = 0;
-  await run('intl');
+  assert.equal((await run('intl')).planLabel, 'Build');
   assert.deepEqual(seen, [`Bearer ${ACCESS_INTL}`], 'intl pin skips the cn store');
 });
 

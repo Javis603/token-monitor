@@ -83,7 +83,7 @@
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
-    minimax: ['Auto', 'Token Plan', 'Pay-as-you-go', 'OAuth/API'],
+    minimax: ['Auto', 'Subscription', 'Pay-as-you-go', 'OAuth/API'],
     typesafe: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],

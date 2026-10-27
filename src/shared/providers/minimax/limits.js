@@ -755,10 +755,8 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
       const membership = await minimaxCodeRequest(membershipUrl, { method: 'POST', headers, body: JSON.stringify({ workspace_id: workspaceId }) }, deps);
       const tier = workspace.token_plan_tier || membership.token_plan_tier;
       const hasPlan = Boolean(workspace.has_token_plan || membership.has_token_plan || tier);
-      // Numeric tiers are combo IDs, not names. Official UI resolves them via
-      // subscription metadata and otherwise uses the generic Token Plan label.
       const tierName = cleanSecret(tier);
-      planLabel = hasPlan ? (tierName && !/^\d+$/u.test(tierName) ? tierName : 'Token Plan') : cleanSecret(membership.plan_name);
+      planLabel = hasPlan ? (tierName && !/^\d+$/u.test(tierName) ? tierName : 'Subscription') : cleanSecret(membership.plan_name);
       const groupId = cleanSecret(workspace.op_group_id) || cleanSecret(membership?.op_group_id);
       accountKey = groupId ? hashKey('minimax', `code:${region}:${groupId}`) : '';
       const credits = minimaxCodeCredits(membership?.op_credit_summary?.total_remaining_amount)
@@ -779,6 +777,23 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
         }
       }
       if (groupId && hasPlan) {
+        if (/^\d+$/u.test(tierName)) {
+          try {
+            const url = new URL('/v1/api/openplatform/charge/combo/cycle_audio_resource_package', platformUrl);
+            url.search = new URLSearchParams({ biz_line: '2', cycle_type: '3', resource_package_type: '7', business: 'Agent', device_platform: 'desktop' }).toString();
+            const metadata = await minimaxCodeRequest(url.href, { headers: platformHeaders }, deps);
+            const current = metadata?.current_subscribe;
+            // A catalog card alone is not evidence of the current subscription.
+            if (String(current?.curr_subscribe_combo_id ?? '').trim() === tierName) {
+              const card = metadata.current_combo_card;
+              planLabel = [String(card?.combo_id ?? '').trim() === tierName ? cleanSecret(card?.title) : '',
+                cleanSecret(current.current_subscribe_title)].find(name => name && !/^\d+$/u.test(name)) || planLabel;
+            }
+          } catch (error) {
+            if (deps.signal?.aborted) throw error;
+            // Optional names cannot invalidate quota or trigger token rotation.
+          }
+        }
         try {
           const plan = await minimaxCodeRequest(platformUrl, { headers: platformHeaders }, deps);
           if (parseNumberOrNull(plan?.base_resp?.status_code) !== 2062) {
@@ -908,6 +923,7 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
         provider: 'minimax',
         accountKey,
         accountLabel: attempt.kind === 'balance' ? 'Pay-as-you-go' : 'Token Plan',
+        planLabel: attempt.kind === 'balance' ? '' : 'Subscription',
         source: 'api',
         status: windows.length ? 'ok' : 'unavailable',
         updatedAt,
@@ -955,6 +971,7 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
     provider: 'minimax',
     accountKey,
     accountLabel: normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api' ? 'Pay-as-you-go' : 'Token Plan',
+    planLabel: normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api' ? '' : 'Subscription',
     source: 'api',
     status: publishedStatus,
     updatedAt,
