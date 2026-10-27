@@ -79,6 +79,41 @@
     return Math.round(finiteNumber(value)).toLocaleString('en-US');
   }
 
+  // Three-cell token split for the hover popover on a row's total: what was
+  // fresh input, what the model wrote, and what the provider read from or wrote
+  // to its cache. Cache reads and writes are one cell because the two are not
+  // comparable prices and the popover has room for three lines, not four.
+  // Labels stay English like `tok/s` and `calls`: they name billing units, and a
+  // translated unit reads as a different measure in each locale. Lower case so
+  // they read as cells beside the numbers, not as sentence openers.
+  // Rows carrying only a total (a client that reports no components) would print
+  // three zeroes beside a non-zero total, which reads as "this session used
+  // nothing", so every cell falls back to an em dash instead.
+  // Accepts either a list row's `usageMetrics` or Session Detail's turn tokens.
+  function tokenBreakdownEntries(tokens, options = {}) {
+    if (!tokens || typeof tokens !== 'object') return null;
+    const format = typeof options.format === 'function' ? options.format : formatNumber;
+    // NaN survives the additions below, so one unusable component marks its own
+    // cell only: `input + output + cache === 0` is false for it, which keeps the
+    // other two cells printing real numbers.
+    const read = (value) => {
+      const n = Number(value ?? 0);
+      return Number.isFinite(n) ? n : NaN;
+    };
+    const input = read(tokens.inputTokens ?? tokens.input);
+    const output = read(tokens.outputTokens ?? tokens.output);
+    const cache = read(tokens.cacheReadTokens ?? tokens.cacheRead)
+      + read(tokens.cacheWriteTokens ?? tokens.cacheWrite);
+    const total = read(options.total);
+    const empty = total > 0 && input + output + cache === 0;
+    const cell = (value) => (empty || !Number.isFinite(value) ? '—' : format(value));
+    return [
+      ['in', cell(input)],
+      ['out', cell(output)],
+      ['cache', cell(cache)]
+    ];
+  }
+
   function stableColor(value, colors = fallbackColors) {
     let hash = 0;
     for (const char of String(value || '')) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
@@ -405,9 +440,19 @@
       session?.model
     );
     // Native Reasonix prompt totals include cache hits; explicit misses win,
-    // matching the detail reader's split without counting those hits twice.
+    // matching the detail reader's split without counting those hits twice. With
+    // no explicit misses the remainder is fresh input only once the cache writes
+    // are taken out too - the cache cell below counts them again.
     const cacheRead = Math.max(0, finiteNumber(session?.cacheHitTokens));
-    const cacheInput = session?.cacheMissTokens ?? Math.max(0, finiteNumber(session?.promptTokens) - cacheRead);
+    const cacheWrite = Math.max(0, finiteNumber(session?.cacheWriteTokens));
+    const promptRemainder = Math.max(0, finiteNumber(session?.promptTokens) - cacheRead - cacheWrite);
+    // The reader writes 0 for a miss counter the payload never carried, so truth
+    // - not nullishness - decides the split the tooltip prints: a positive count
+    // is the reported shape, anything else falls back to what the prompt total
+    // leaves after cache. The subtitle percentage keeps its own rule below,
+    // where an explicit zero miss still reads as an all-cache prompt.
+    const cacheInput = session?.cacheMissTokens ?? promptRemainder;
+    const tooltipInput = finiteNumber(session?.cacheMissTokens) > 0 ? session.cacheMissTokens : promptRemainder;
     // Positive explicit misses prove a cold-cache reading; prompt-only or
     // all-zero counters do not prove that cache telemetry is available.
     const cacheLabel = cacheHitLabel({
@@ -419,7 +464,12 @@
       ...session,
       ...(tokenDataUnavailable ? { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
         outputTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 } : client === 'reasonix' ? {
-        inputTokens: cacheInput, cacheReadTokens: cacheRead,
+        inputTokens: tooltipInput, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite,
+        // Native telemetry names output `completionTokens`, but rows can also
+        // carry `outputTokens`; take whichever counter actually recorded the
+        // reply so neither a zero-filled `completionTokens` nor an absent
+        // `outputTokens` can hide real output.
+        outputTokens: Math.max(0, finiteNumber(session?.completionTokens), finiteNumber(session?.outputTokens)),
         cacheReported: finiteNumber(session?.cacheMissTokens) > 0
       } : {})
     });
@@ -874,6 +924,7 @@
     sessionModelLabel,
     sessionModelTooltipEntries,
     sessionRowsForPeriod,
-    sessionTokenRate
+    sessionTokenRate,
+    tokenBreakdownEntries
   };
 });
