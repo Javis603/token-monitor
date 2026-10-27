@@ -145,7 +145,7 @@ On macOS, install through the official [Homebrew Cask](https://formulae.brew.sh/
 brew install --cask token-monitor
 ```
 
-For Windows, Linux, or manual installation, download from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
+Or download from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
 
 Launch the app to start tracking this device locally, with no hub setup required. See [Installation](#installation) for full details.
 
