@@ -1694,6 +1694,129 @@ test('MiniMax Code and API run independent lanes, scopes and failure states', as
   } finally { runtime.stop(); }
 });
 
+test('MiniMax display affiliation recognizes group responses without affecting either lane', async (t) => {
+  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+  const options = { minimaxApiRegion: 'cn', minimaxBillingMode: 'api', minimaxApiKey: 'key-A' };
+  const cases = [
+    ['no subscription', { base_resp: { status_code: 2062 }, model_remains: null }, true],
+    ['quota success', { base_resp: { status_code: 0 }, model_remains: [] }, true],
+    ['foreign group', { base_resp: { status_code: 1004 } }, false],
+    ['unknown code', { base_resp: { status_code: 1001 }, model_remains: [] }, false],
+    ['missing code', { model_remains: [] }, false],
+    ['missing rows', { base_resp: { status_code: 0 } }, false],
+    ['transport failure', null, false],
+    ['cancelled confirmation', { base_resp: { status_code: 2062 }, model_remains: [] }, false]
+  ];
+  for (const [name, response, linked] of cases) await t.test(name, async () => {
+    let confirmations = 0;
+    const controller = new AbortController();
+    const deps = codeDeps(fixture, async (url, init) => {
+      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ has_token_plan: false }));
+      const target = new URL(url);
+      assert.equal(target.host, 'api.minimaxi.com');
+      assert.equal(init.headers.Authorization, 'Bearer key-A');
+      if (target.pathname === '/v1/token_plan/remains') {
+        assert.equal(target.searchParams.get('GroupId'), 'grp-123');
+        confirmations++;
+        if (name === 'transport failure') throw new TypeError('connection reset');
+        if (name === 'cancelled confirmation') controller.abort();
+        return okResponse(response);
+      }
+      if (target.pathname === '/account/query_balance') return okResponse({ available_amount: '14.97', base_resp: { status_code: 0 } });
+      assert.ok(['/account/query_recharge', '/account/amount'].includes(target.pathname));
+      return okResponse({ base_resp: { status_code: 0 } });
+    });
+    const rows = await fetchMinimaxLimits(options, { ...deps, signal: controller.signal });
+    const api = rows.find(row => row.source === 'api');
+    const code = rows.find(row => row.source === 'oauth');
+    assert.equal(api.status, 'ok');
+    assert.equal(code.status, 'ok');
+    assert.equal(api.relatedAccountKey, linked ? code.accountKey : undefined);
+    assert.equal(code.relatedAccountKey, linked ? api.accountKey : undefined);
+    assert.equal(confirmations, 1);
+  });
+});
+
+test('MiniMax display links survive refreshes and follow the current key and Code group', async () => {
+  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+  let group = 'group-A';
+  let confirmations = 0;
+  let apiDenied = false;
+  const deps = codeDeps(fixture, async (url, init) => {
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ has_token_plan: false, op_group_id: group }));
+    const target = new URL(url);
+    if (target.pathname === '/v1/token_plan/remains' && target.searchParams.has('GroupId')) {
+      confirmations++;
+      const ownGroup = init.headers.Authorization === 'Bearer key-A' ? 'group-A' : 'group-B';
+      return okResponse(target.searchParams.get('GroupId') === ownGroup
+        ? { base_resp: { status_code: 2062 }, model_remains: null }
+        : { base_resp: { status_code: 1004 } });
+    }
+    if (target.pathname === '/v1/token_plan/remains') return okResponse(windowsBody);
+    if (target.pathname === '/account/query_balance') return apiDenied ? unauthorized()
+      : okResponse({ available_amount: '14.97', base_resp: { status_code: 0 } });
+    if (target.pathname === '/account/query_recharge') return okResponse({ cash_total_usage: '0', base_resp: { status_code: 0 } });
+    assert.equal(target.pathname, '/account/amount');
+    return okResponse({ consume_cash_after_voucher_sum: '0', base_resp: { status_code: 0 } });
+  });
+  const runtime = createLimitsRuntime({ limitProviders: ['minimax'], minimaxApiRegion: 'cn',
+    minimaxBillingMode: 'api', minimaxApiKey: 'key-A' }, { ...deps, autoStart: false, autoRetry: false });
+  const rows = () => runtime.getSnapshot().providers;
+  try {
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    const first = rows();
+    const codeA = first.find(row => row.source === 'oauth');
+    const apiA = first.find(row => row.source === 'api');
+    assert.equal(apiA.relatedAccountKey, codeA.accountKey);
+    assert.equal(confirmations, 1);
+    const rotated = codeDesktopRecord({ accessToken: ACCESS_RENEWED, generation: 8 });
+    fs.writeFileSync(fixture.authPath, JSON.stringify({ schemaVersion: 1, records: { [CODE_RECORD_KEY]: rotated } }));
+    fs.writeFileSync(fixture.statePath, JSON.stringify(codeDesktopState(rotated)));
+    await runtime.refresh({ provider: 'minimax', accountKey: codeA.accountKey }, 'manual');
+    await runtime.refresh({ provider: 'minimax', accountKey: apiA.accountKey }, 'manual');
+    assert.equal(confirmations, 1, 'normal rotation and account refresh reuse confirmation');
+    assert.ok(rows().every(row => row.relatedAccountKey));
+
+    apiDenied = true;
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    assert.equal(rows().find(row => row.source === 'api').status, 'unauthorized');
+    assert.ok(rows().every(row => row.region === 'cn' && row.relatedAccountKey), 'resource rejection does not change a confirmed regional identity');
+    apiDenied = false;
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    assert.equal(confirmations, 1);
+
+    runtime.reconfigure({ minimaxApiKey: 'key-B' });
+    runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    assert.equal(confirmations, 2);
+    assert.ok(rows().every(row => !row.relatedAccountKey), 'new key cannot inherit the old peer link');
+    group = 'group-B';
+    await runtime.refresh({ provider: 'minimax', accountKey: codeA.accountKey }, 'manual');
+    assert.equal(rows().length, 1, 'a retired account refresh cannot adopt the new Code login');
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    const second = rows();
+    assert.equal(confirmations, 3);
+    assert.equal(second.find(row => row.source === 'api').relatedAccountKey, second.find(row => row.source === 'oauth').accountKey);
+    assert.ok(second.every(row => row.accountKey !== codeA.accountKey));
+
+    runtime.reconfigure({ minimaxBillingMode: 'token-plan' });
+    runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    assert.equal(confirmations, 3, 'subscription-key mode has not been live-verified for this protocol');
+    assert.ok(rows().every(row => row.relatedAccountKey), 'billing type does not change an already verified key/group relationship');
+    runtime.reconfigure({ minimaxApiKey: 'key-C' });
+    runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    assert.equal(confirmations, 3, 'a new subscription key must remain unverified');
+    assert.ok(rows().every(row => !row.relatedAccountKey));
+    runtime.reconfigure({ minimaxBillingMode: 'api', minimaxApiRegion: 'intl' });
+    runtime.clear({ provider: 'minimax' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    assert.equal(confirmations, 3);
+    assert.ok(rows().every(row => row.region === 'en' && !row.relatedAccountKey));
+  } finally { runtime.stop(); }
+});
+
 test('MiniMax Code auto-detection needs no API key and key probes do not borrow OAuth', async () => {
   const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
   const deps = codeDeps(fixture, async url => {

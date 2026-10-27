@@ -424,11 +424,11 @@ test('MiniMax API balances reach the shared Limits and dock renderer in both cur
   }
 });
 
-test('MiniMax Code and API lanes share one card without numbered account titles', () => {
+test('MiniMax groups Code and API lanes only with a verified peer key', () => {
   const view = dockView();
   const rows = [
-    { provider: 'minimax', status: 'ok', source: 'oauth', accountKey: 'sha256:code', accountLabel: 'MiniMax Code', windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
-    { provider: 'minimax', status: 'ok', source: 'api', accountKey: 'sha256:api', accountLabel: 'Pay-as-you-go', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
+    { provider: 'minimax', status: 'ok', source: 'oauth', region: 'cn', accountKey: 'sha256:code', accountLabel: 'MiniMax Code', windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
+    { provider: 'minimax', status: 'ok', source: 'api', region: 'cn', accountKey: 'sha256:api', relatedAccountKey: 'sha256:code', accountLabel: 'Pay-as-you-go', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
   ];
   const group = view.renderLimitProviderGroup('minimax', 'Minimax', rows, '#000000');
   assert.equal(group.find('limit-plan').textContent, '');
@@ -442,6 +442,18 @@ test('MiniMax Code and API lanes share one card without numbered account titles'
   assert.equal(lanes[1].find('limit-plan').textContent, 'Pay-as-you-go');
   assert.equal(group.text.includes('Account 1'), false);
   assert.equal(group.text.includes('Account 2'), false);
+
+  const codeScoped = view.renderLimitProviderGroup('minimax', 'Minimax', [
+    { ...rows[0], relatedAccountKey: rows[1].accountKey },
+    { ...rows[1], relatedAccountKey: undefined }
+  ], '#000000');
+  assert.equal(codeScoped.find('limit-plan').textContent, '');
+  for (const patch of [{ relatedAccountKey: undefined }, { region: 'en' }]) {
+    const unlinked = view.renderLimitProviderGroup('minimax', 'Minimax', [rows[0], { ...rows[1], ...patch }], '#000000');
+    assert.match(unlinked.find('limit-plan').textContent, /2 accounts/);
+    assert.match(unlinked.text, /Account 1/);
+    assert.match(unlinked.text, /Account 2/);
+  }
 
   const refused = view.renderLimitProviderGroup('minimax', 'Minimax', [
     rows[0],

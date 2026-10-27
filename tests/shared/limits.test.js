@@ -834,6 +834,25 @@ test('publicLimits strips Codex account identity fields', () => {
   assert.equal(Object.hasOwn(payload.providers[0], 'workspaceKind'), false);
 });
 
+test('MiniMax peer links survive sync without merging identities or leaking through public stats', () => {
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const apiKey = `sha256:${'b'.repeat(64)}`;
+  const limits = { providers: [
+    { provider: 'minimax', accountKey: codeKey, source: 'oauth', status: 'ok', region: 'cn', windows: [] },
+    { provider: 'minimax', accountKey: apiKey, relatedAccountKey: codeKey, source: 'api', status: 'ok', region: 'cn', windows: [] }
+  ] };
+  assert.equal(syncLimits(limits).providers[1].relatedAccountKey, codeKey);
+  assert.equal(Object.hasOwn(publicLimits(limits).providers[1], 'relatedAccountKey'), false);
+  for (const relatedAccountKey of ['raw-group-id', 'sk-api-secret', apiKey]) {
+    assert.equal(Object.hasOwn(normalizeLimitProvider({ ...limits.providers[1], relatedAccountKey }), 'relatedAccountKey'), false);
+  }
+  assert.equal(Object.hasOwn(normalizeLimitProvider({ ...limits.providers[1], provider: 'deepseek' }), 'relatedAccountKey'), false);
+  const aggregate = aggregateLimits([{ deviceId: 'mini', limits, receivedAt: new Date().toISOString() }]);
+  assert.equal(aggregate.providers.length, 2);
+  assert.deepEqual(new Set(aggregate.providers.map(row => row.accountKey)), new Set([codeKey, apiKey]));
+  assert.equal(aggregate.providers.find(row => row.source === 'api').relatedAccountKey, codeKey);
+});
+
 test('OpenCode sync keeps the legacy profile label and explicit plan while public stats scrub both', () => {
   const limits = {
     providers: [{

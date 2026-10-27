@@ -30,6 +30,7 @@ const MINIMAX_CODE_PLAN_REMAINS_URL_INTL = 'https://platform.minimax.io/backend/
 
 const MINIMAX_CODE_REFRESH_LEEWAY_MS = 10 * 60 * 1000;
 const MINIMAX_CODE_PENDING_WRITE_STATE_KEY = 'minimax.code.pending-write';
+const MINIMAX_CODE_GROUP_STATE_KEY = 'minimax.code.group';
 
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
@@ -696,6 +697,12 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
       const credits = minimaxCodeCredits(membership?.op_credit_summary?.total_remaining_amount)
         ?? minimaxCodeCredits(workspace.opcredit_balance ?? membership?.opcredit_balance);
       if (credits === null) return row('unavailable');
+      if (region === 'cn' && groupId) {
+        const previous = state?.get(MINIMAX_CODE_GROUP_STATE_KEY);
+        context.codeIdentity = { accountKey, groupId,
+          apiAccountKey: previous?.accountKey === accountKey ? previous.apiAccountKey : '' };
+        state?.set(MINIMAX_CODE_GROUP_STATE_KEY, context.codeIdentity);
+      }
       const windows = [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: credits,
         currency: 'CREDITS', showMeter: false }];
       const platformUrl = region === 'cn' ? MINIMAX_CODE_PLAN_REMAINS_URL_CN : MINIMAX_CODE_PLAN_REMAINS_URL_INTL;
@@ -890,6 +897,46 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
   });
 }
 
+// Peer keys affect headings only; aliases would also change billing bindings.
+async function linkMinimaxAccounts(rows, options, deps, context, key, apiAccountKey) {
+  const previous = (options.previousLimits?.providers || []).filter(row => row.provider === 'minimax');
+  const api = rows.find(row => !row.removed && row.source === 'api')
+    || previous.find(row => row.source === 'api' && row.accountKey === apiAccountKey);
+  const code = rows.find(row => !row.removed && row.source === 'oauth')
+    || previous.find(row => row.source === 'oauth');
+  const apiRegion = api?.region || previous.find(row => row.accountKey === apiAccountKey)?.region;
+  // The cross-account controls cover CN pay-as-you-go keys only.
+  if (!key || api?.accountKey !== apiAccountKey || !code?.accountKey || code.region !== 'cn'
+    || (api.region && api.region !== 'cn')
+    || minimaxRegion(options, deps.env || process.env) === 'intl' || deps.signal?.aborted) return;
+  const identity = context.codeIdentity || deps.providerRuntimeState?.get(MINIMAX_CODE_GROUP_STATE_KEY);
+  let linked = (identity?.accountKey === code.accountKey && identity.apiAccountKey === apiAccountKey)
+    || previous.some(row => row.region === 'cn' && (
+      (row.accountKey === apiAccountKey && row.relatedAccountKey === code.accountKey)
+      || (row.accountKey === code.accountKey && row.relatedAccountKey === apiAccountKey)));
+  if (!linked && identity?.accountKey === code.accountKey && apiRegion === 'cn'
+    && normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api' && api.status === 'ok' && code.status === 'ok') {
+    try {
+      const url = new URL(MINIMAX_TOKEN_PLAN_REMAINS_URL_CN);
+      url.searchParams.set('GroupId', identity.groupId);
+      const fetchJson = deps.fetchJson
+        || ((u, headers) => minimaxJsonFetch(deps.fetch || fetch, u, { headers, redirect: 'error' }, deps));
+      const body = await fetchJson(url.href, { Authorization: `Bearer ${key}`, Accept: 'application/json' }, deps);
+      const status = parseNumberOrNull(body?.base_resp?.status_code);
+      // 2062 means the authorized group has no subscription, not a bad key.
+      linked = status === 2062 || (status === 0 && readMinimaxRows(body) !== null);
+    } catch (_) { /* Optional affiliation failures cannot invalidate either reading. */ }
+  }
+  if (!linked || deps.signal?.aborted) return;
+  if (identity?.accountKey === code.accountKey) identity.apiAccountKey = apiAccountKey;
+  for (const row of rows) {
+    if (row.removed) continue;
+    if (row.accountKey === apiAccountKey) row.relatedAccountKey = code.accountKey;
+    else if (row.accountKey === code.accountKey) row.relatedAccountKey = apiAccountKey;
+    if (row.relatedAccountKey) row.region ||= 'cn';
+  }
+}
+
 async function fetchMinimaxLimits(options = {}, deps = {}) {
   const now = (deps.now || Date.now)();
   const context = { now, updatedAt: new Date(now).toISOString() };
@@ -912,6 +959,7 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
     !apiScope ? fetchMinimaxCodeRows(options, deps, context) : null
   ]);
   const rows = [api, ...(Array.isArray(code) ? code : [code])].filter(Boolean);
+  await linkMinimaxAccounts(rows, options, deps, context, key, apiAccountKey);
   if (!scoped) {
     rows.push(...previous.filter(row => row.provider === 'minimax' && row.source === 'api'
       && row.accountKey && row.accountKey !== apiAccountKey)

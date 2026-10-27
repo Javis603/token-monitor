@@ -2352,10 +2352,13 @@
       && label !== 'Zen';
   }
 
-  // An OAuth/API pair is a display classification, not proof of shared ownership.
+  // Verified peer keys group sources without merging their billing identities.
   function minimaxParallelLanes(providers) {
-    const sources = new Set((providers || []).map((row) => row?.source));
-    return (providers || []).length === 2 && sources.size === 2 && sources.has('oauth') && sources.has('api');
+    if ((providers || []).length !== 2) return false;
+    const api = providers.find(row => row.source === 'api');
+    const code = providers.find(row => row.source === 'oauth');
+    return Boolean(api?.accountKey && code?.accountKey && api.region && api.region === code.region
+      && (api.relatedAccountKey === code.accountKey || code.relatedAccountKey === api.accountKey));
   }
 
   function minimaxAccountTitle(provider, index, providers) {
