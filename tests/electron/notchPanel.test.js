@@ -1338,3 +1338,15 @@ test('native swipes follow mixed selected order and release cancelled plugin pre
   swipe(f, 3, 'none', 1, true);
   assert.equal(f.panel.view.page, 'home', 'removing a page cancels the old gesture');
 });
+
+test('cached native page selection refreshes plugin demand after updating page activity', t => {
+  const active = [];
+  let f;
+  const pluginHost = { refreshDemand() { if (f) active.push(f.all('notch-page').filter(node => !node.inert).map(node => node.dataset.page)); } };
+  f = panelFixture(t, {}, { pluginHost }); f.panel.render(payload());
+  f.panel.selectPage('limits'); f.panel.selectPage('home');
+  const before = active.length;
+  f.panel.selectPage('limits');
+  assert.ok(active.length > before, 'cached content must still publish its activity change');
+  assert.deepEqual(active.at(-1), ['limits']);
+});

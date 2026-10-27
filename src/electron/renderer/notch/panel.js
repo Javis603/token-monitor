@@ -497,6 +497,7 @@
         pageNode.inert = page !== view.page;
         pageNode.setAttribute('aria-hidden', String(page !== view.page));
       }
+      pluginHost?.refreshDemand();
     }
 
     // The reading is rebuilt only when its structure changes. Live samples

@@ -112,6 +112,7 @@ const pluginHost = pluginViewsApi && bridge.onPluginViews ? pluginViewsApi.creat
   services: { app: bridge, native: { get quota() { return limitWindowsView; } } },
   getContext: () => ({ nativeData: state.payload, surfaceVariant: surface }),
   onLoaded: () => { if (surface === 'notch') notchRenderer?.paintSummaryPlugins(); },
+  isSurfaceActive: (_surface, container) => !container.closest('.notch-page')?.inert,
   onDemand: (_surface, refs) => bridge.setPluginDemand(refs),
   motionAllowed: () => !prefersReducedMotion(),
   motionMode: () => tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation)

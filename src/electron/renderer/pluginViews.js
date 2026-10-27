@@ -79,7 +79,7 @@
       for (const [container, mount] of mounts) {
         if (!container.isConnected) { mounts.delete(container); observer?.unobserve(container); intersections.delete(container); continue; }
         if (!bySurface.has(mount.surface)) bySurface.set(mount.surface, new Set());
-        const visible = document.visibilityState !== 'hidden' && isSurfaceActive(mount.surface) && container.getClientRects().length > 0 && intersections.get(container) !== false;
+        const visible = document.visibilityState !== 'hidden' && isSurfaceActive(mount.surface, container) && container.getClientRects().length > 0 && intersections.get(container) !== false;
         ui.setVisibility(container, visible);
         if (visible) bySurface.get(mount.surface).add(mount.ref);
       }

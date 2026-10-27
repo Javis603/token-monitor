@@ -376,3 +376,23 @@ for (const rejected of [false, true]) test(`stale pending mount ${rejected ? 're
   assert.equal(node.children.length, 1); assert.equal(node.children[0], replacement); assert.equal(replacement.value, 'new draft');
   await host.dispose();
 });
+
+test('per-container activity parks native-page demand without disposing retained controls', async () => {
+  const { createPluginViewHost } = require('../../src/electron/renderer/pluginViews');
+  const document = dom(); document.addEventListener = document.removeEventListener = () => {};
+  let frame, disposed = 0; const demands = [], visibility = new Map();
+  const window = { requestAnimationFrame: fn => { frame = fn; return 1; }, cancelAnimationFrame() {},
+    TokenMonitorPluginUi: { createHost: () => ({ mount() {}, unmount() { disposed++; }, sweep() {}, setVisibility(node, visible) { visibility.set(node, visible); }, dispose() {} }) } };
+  const host = createPluginViewHost({ document, window, onDemand: (_surface, refs) => demands.push(refs), isSurfaceActive: (_surface, node) => node.active });
+  host.update({ surface: 'notch', views: { [descriptor.ref]: descriptor } });
+  const nodes = [true, false].map(active => {
+    const node = document.createElement('div'); node.style.removeProperty = () => {}; node.getClientRects = () => [{}]; node.active = active;
+    document.body.append(node); host.mount(node, descriptor.ref, 'notch'); return node;
+  });
+  frame(); assert.deepEqual(demands.at(-1), [descriptor.ref]);
+  nodes[0].active = false; host.refreshDemand(); frame(); assert.deepEqual(demands.at(-1), []);
+  assert.equal(visibility.get(nodes[0]), false); assert.equal(disposed, 0);
+  nodes[1].active = true; host.refreshDemand(); frame(); assert.deepEqual(demands.at(-1), [descriptor.ref]);
+  nodes[0].active = true; nodes[1].active = false; host.refreshDemand(); frame(); assert.deepEqual(demands.at(-1), [descriptor.ref]);
+  await host.dispose();
+});

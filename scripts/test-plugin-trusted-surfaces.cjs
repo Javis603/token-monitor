@@ -101,6 +101,21 @@ app.whenReady().then(async () => {
     await wait(win, `!document.querySelector('[data-plugin-target="${target}"]')`, `${target} restoration`);
   }
   await windows.get('notch').webContents.executeJavaScript("document.querySelector('.notch-tab[data-page=home]').click()");
+  // Keep the native Home DOM/draft cached, but only the selected page demands work.
+  for (const kind of ['rail', 'bubble']) windows.get(kind).hide();
+  runtime.refreshSurfaces();
+  const pageWindow = windows.get('notch');
+  await pageWindow.webContents.executeJavaScript(`globalThis.savedPageInput=document.querySelector('[data-plugin-target="notch.home.content"] input'); savedPageInput.value='Notch draft';`);
+  await pageWindow.webContents.executeJavaScript("document.querySelector('.notch-tab[data-page=limits]').click()");
+  for (let i=0;i<150 && (notchDemand.length || runtime.manager.backendCount());i++) await pause(40);
+  assert.deepEqual(notchDemand, [], 'inactive native page must release foreground demand');
+  assert.equal(runtime.manager.backendCount(), 0, 'last visible page gone stops backend');
+  await pageWindow.webContents.executeJavaScript("document.querySelector('.notch-tab[data-page=home]').click()");
+  for (let i=0;i<150 && !runtime.manager.backendCount();i++) await pause(40);
+  assert.equal(runtime.manager.backendCount(), 1, 'cached page return restores demand');
+  assert.equal(await pageWindow.webContents.executeJavaScript(`savedPageInput === document.querySelector('[data-plugin-target="notch.home.content"] input') && savedPageInput.value === 'Notch draft'`), true, 'cached return retains draft and node');
+  for (const kind of ['rail', 'bubble']) windows.get(kind).show();
+  runtime.refreshSurfaces();
   const pids = [];
   for (const win of windows.values()) pids.push((await win.webContents.executeJavaScript("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','surface')")).pid);
   assert.equal(new Set(pids).size, 1); assert.equal(runtime.manager.backendCount(), 1);
