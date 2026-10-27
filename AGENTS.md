@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This is the entry point for project guidance shared by every coding agent (Claude Code, Codex, Cursor, …). It is loaded automatically; the documents it routes to are not, so anything an unrelated change can break is listed under [Tripwires](#tripwires) here, with the full reasoning in the linked document.
+This file provides shared project guidance for coding agents that load it. The linked documents are read as needed; constraints that unrelated changes can break are listed under [Tripwires](#tripwires).
 
 ## Commands
 
@@ -29,7 +29,7 @@ To dry-run the agent without posting: `npm run agent:once -- --dry-run`.
 | watch roots, event handling or targeted refreshes | [Watching](docs/architecture.md#watching), [partition invariants](docs/providers/README.md#partition-invariants), and the matching provider note's source rules |
 | the device wire shape or Hub endpoints | `docs/API.md` |
 
-Before editing, verify the actual runtime entry point, authoritative implementation and callers; resolve any mismatch with the guidance first.
+Before changing runtime behavior, identify the relevant entry point, authoritative implementation, and affected callers. Scale investigation to the task; resolve any mismatch with documented contracts before editing.
 
 Reading guidance does not require editing it. Update the narrowest relevant document in the same change when existing guidance becomes inaccurate or a necessary, non-obvious contract is introduced. Fixes that restore an already documented invariant and behavior-preserving refactors normally need no documentation change. Correct or remove stale claims rather than appending history.
 
