@@ -2406,6 +2406,14 @@ test('MiniMax Code keeps a known account until a different group id is confirmed
     assert.deepEqual(unidentified.windows, known.windows);
     now += 60_000;
     group = 'second-account';
+    amount = 'not-a-number';
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    const failed = runtime.getSnapshot().providers;
+    assert.equal(failed.length, 1, 'a failed replacement must not create another Code identity');
+    assert.equal(failed[0].accountKey, known.accountKey);
+    assert.deepEqual(failed[0].windows, known.windows);
+    amount = '20';
+    now += 60_000;
     await runtime.refresh({ provider: 'minimax' }, 'manual');
     const rows = runtime.getSnapshot().providers;
     assert.equal(rows.length, 1);

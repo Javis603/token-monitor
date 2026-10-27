@@ -838,7 +838,7 @@ async function fetchMinimaxCodeRows(options, deps, { now, updatedAt }) {
   const identified = previous.filter(row => row.accountKey);
   // Labels also identify runtime rows. An early failure must update known
   // accounts rather than create a separate "MiniMax Code" status identity.
-  if (!current.accountKey && identified.length) {
+  if ((current.status !== 'ok' || !current.accountKey) && identified.length) {
     return identified.map(row => ({ ...current, accountKey: row.accountKey,
       status: current.status === 'ok' ? 'unavailable' : current.status, windows: [] }));
   }
