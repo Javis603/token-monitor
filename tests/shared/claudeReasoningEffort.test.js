@@ -132,6 +132,35 @@ test('oversized Claude records use bounded fragments and reject nested effort', 
   assert.equal(f.read(), 'xhigh', 'oversized synthetic errors cannot replace a successful response');
 });
 
+test('Claude prefix configuration applies without stop reason or tail metadata after the line ends', t => {
+  for (const size of [10, 600_000]) for (const [prefix, suffix, expected] of [
+    [{ effort: 'low' }, {}, 'low'],
+    [{ effort: null }, {}, null],
+    [{ effort: 'high', perTurnEffort: 'low' }, {}, 'low'],
+    [{ perTurnEffort: 'max' }, {}, 'max'],
+    [{}, {}, 'high'],
+    [{ effort: 'low', isSidechain: true }, {}, 'high'],
+    [{ effort: 'low' }, { isSidechain: true }, 'high'],
+    [{ effort: 'low', isApiErrorMessage: true }, {}, 'high'],
+    [{ effort: 'low' }, { isApiErrorMessage: true }, 'high']
+  ]) {
+    const f = fixture(t);
+    fs.writeFileSync(f.file, record(assistant({ effort: 'high' })));
+    assert.equal(f.read(), 'high');
+    const response = JSON.stringify({ type: 'assistant', ...prefix, message: {
+      role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(size) }]
+    }, ...suffix });
+    fs.appendFileSync(f.file, response);
+    assert.equal(f.read(), size > 64 * 1024 ? 'high' : expected,
+      'bounded fragments wait for newline; ordinary JSON can apply at EOF');
+    fs.appendFileSync(f.file, '\n');
+    assert.equal(f.read(), expected, 'terminated records apply configuration with ownership guards');
+    assert.equal(f.bytesRead(), fs.statSync(f.file).size, 'reads remain append-only');
+    f.cache.clear();
+    assert.equal(f.read(), expected, 'cold and incremental reads agree');
+  }
+});
+
 test('complete oversized responses without root suffix metadata clear effort like ordinary responses', t => {
   for (const size of [10, 600_000]) {
     const f = fixture(t);

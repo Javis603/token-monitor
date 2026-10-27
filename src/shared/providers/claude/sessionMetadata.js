@@ -437,7 +437,9 @@ function applyLongLineFragments(state, lineTerminated = false) {
     if (messageAt >= 0) {
       try { prefix = JSON.parse(head.slice(0, messageAt).replace(/,\s*$/, '') + '}'); } catch (_) { /* Incomplete prefix. */ }
     }
-    if (metadata) {
+    // A complete root prefix can carry configuration even when the tail has
+    // no metadata. Missing configuration still supplies no clear on its own.
+    if (lineTerminated) {
       applyReasoningEffort(state, { ...prefix, ...metadata });
     }
     // The usage reading is taken before the stop_reason guard below, matching
