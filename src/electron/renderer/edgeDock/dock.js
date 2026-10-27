@@ -153,11 +153,11 @@ function refreshPluginCellLabels(rail) {
   }
 }
 
-function pluginCellNode(cell) {
-  const node = el('div', 'edge-dock-cell edge-dock-cell-plugin');
+function pluginCellNode(cell, retained) {
+  const node = retained || el('div', 'edge-dock-cell edge-dock-cell-plugin');
   node.dataset.pluginRef = cell.ref;
-  const mount = el('div', 'edge-dock-plugin-cell');
-  node.append(mount);
+  const mount = retained?.firstElementChild || el('div', 'edge-dock-plugin-cell');
+  if (!retained) node.append(mount);
   pluginHost?.mount(mount, cell.ref, 'edgeDock', { variant: 'compact' });
   node.setAttribute('aria-label', pluginCellLabel(cell.ref));
   return node;
@@ -1237,9 +1237,11 @@ function renderRail(payload) {
   }
   const layout = payload.cellLayout || null;
   railNode.classList.toggle('is-compact', layout?.compact === true);
+  const retainedPlugins = new Map([...railNode.children].filter(node => node.dataset.pluginRef).map(node => [node.dataset.cellId, node]));
   const nodes = [];
   (payload.cells || []).forEach((cell, index) => {
-    const node = cell.kind === 'stat' ? statCellNode(cell) : cell.kind === 'plugin' ? pluginCellNode(cell) : providerCellNode(cell);
+    const node = cell.kind === 'stat' ? statCellNode(cell) : cell.kind === 'plugin' ? pluginCellNode(cell, retainedPlugins.get(cell.id)?.dataset.pluginRef === cell.ref ? retainedPlugins.get(cell.id) : null) : providerCellNode(cell);
+    node.dataset.cellId = cell.id;
     node.dataset.index = String(index);
     // Cells are placed on the main process's layout so hover hit-testing and
     // what is painted can never drift apart.
@@ -1256,7 +1258,15 @@ function renderRail(payload) {
   }
   const ringSnapshot = captureRingResetMotion();
   const rollSnapshot = railNumberRoll.capture(railNode);
-  railNode.replaceChildren(...nodes);
+  // Keep surviving author controls connected: re-inserting an unchanged node
+  // clears browser focus even when its input object and draft survive.
+  const keep = new Set(nodes);
+  for (const node of [...railNode.children]) if (!keep.has(node)) node.remove();
+  let cursor = railNode.firstChild;
+  for (const node of nodes) {
+    if (node !== cursor) railNode.insertBefore(node, cursor);
+    cursor = node.nextSibling;
+  }
   const targets = [];
   (payload.cells || []).forEach((cell, index) => {
     if (cell.kind === 'plugin') return;

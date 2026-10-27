@@ -15607,6 +15607,8 @@ function createTrayComposer(surface) {
     getPreview: () => trayComposerPreview(surface),
     isEditable: () => isNotch || state.settings?.[contentKey] === 'custom',
     onCustomize: () => activateTrayComposer(surface),
+    pluginChoices: () => (state.pluginCatalog?.plugins || []).filter(plugin => plugin.status === 'active')
+      .flatMap(plugin => (plugin.views || []).filter(view => view.surfaces.includes('tray')).map(view => ({ ref: view.ref, title: `${plugin.name} · ${view.title || view.ref}` }))),
     providerChoices: trayComposerProviderChoices,
     accountChoices: trayComposerAccountChoices,
     windowChoices: trayComposerWindowChoices,

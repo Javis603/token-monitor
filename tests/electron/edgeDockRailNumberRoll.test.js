@@ -94,7 +94,7 @@ test('the rail rolls its readouts on the shared setting, never on a reveal', () 
   const html = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/index.html'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
   const render = dock.slice(dock.indexOf('function renderRail('), dock.indexOf('let gesture = null;'));
-  assert.ok(render.indexOf('railNumberRoll.capture(railNode)') < render.indexOf('railNode.replaceChildren('));
+  assert.ok(render.indexOf('railNumberRoll.capture(railNode)') < render.indexOf('node.remove()'));
   assert.match(render, /if \(!revealing && !prefersReducedMotion\(\)\)/);
   assert.match(dock, /mode: \(\) => tokenNumberAnimationApi\.normalize\(appearance\(\)\.tokenNumberAnimation\)/);
   assert.match(render, /const refilling = animateRingResets\(ringSnapshot\);[\s\S]*skip: \(node\) => refilling\.has\(node\)/,

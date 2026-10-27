@@ -139,6 +139,57 @@ app.whenReady().then(async () => {
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
   await js("pluginApi.setEnabled('trusted-fixture',true)");
+  if (process.env.TM_PLACEMENTS_ONLY === '1') {
+    // Exercise the installed-view route through the real existing composers.
+    const placementBaseline = process.env.TM_EXPECT_BASELINE === '1';
+    const placementSettingsBefore = structuredClone(settings);
+    const placementResults = {};
+    await js("els.settingsButton.click();document.querySelector('[data-settings-section=window]').click()");
+    for (const [surface, key] of [['floatingBubble', 'floatingBubbleCustomLayout'], ['notch', 'notchCustomLayout']]) {
+      if (surface === 'floatingBubble') {
+        await js("if(!els.floatingBubbleInput.checked)els.floatingBubbleInput.click();els.floatingBubbleContentInput.value='custom';els.floatingBubbleContentInput.dispatchEvent(new Event('change',{bubbles:true}))");
+      } else {
+        await js("if(!els.notchInput.checked)els.notchInput.click();document.querySelector('#notchMoreOptionsToggle').click();els.notchSummaryModeInput.value='custom';els.notchSummaryModeInput.dispatchEvent(new Event('change',{bubbles:true}))");
+      }
+      await waitFor(`document.querySelector('#${surface === 'notch' ? 'notch' : 'floatingBubble'}Composer .tray-composer-add')`, `${surface} composer`);
+      const selector = `#${surface === 'notch' ? 'notch' : 'floatingBubble'}Composer`;
+      await js(`document.querySelector('${selector} .tray-composer-add').scrollIntoView({block:'center'});document.querySelector('${selector} .tray-composer-add').click()`);
+      const choices = await js("Array.from(document.querySelectorAll('.tray-composer-gallery [data-plugin-ref]'),node=>node.dataset.pluginRef)");
+      placementResults[surface] = { choices };
+      assert.equal(choices.includes('trusted-fixture/panel'), !placementBaseline);
+      await js("document.querySelector('.tray-composer-gallery section:last-child').scrollIntoView({block:'end'})");
+      fs.writeFileSync(path.join(evidence, `${surface}-choices.png`), (await capture()).toPNG());
+      if (!placementBaseline) {
+        await js("document.querySelector('.tray-composer-gallery [data-plugin-ref=\"trusted-fixture/panel\"]').click()");
+        for(let i=0;i<100&&!settings[key]?.items?.some(item=>item.ref==='trusted-fixture/panel');i++)await pause(20);
+        assert.ok(settings[key].items.some(item=>item.ref==='trusted-fixture/panel'));
+        const id = settings[key].items.find(item=>item.ref==='trusted-fixture/panel').id;
+        await js(`document.querySelector('${selector} [data-item-id="${id}"]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))`);
+        for(let i=0;i<100&&settings[key].items[0].id!==id;i++)await pause(20);
+        assert.equal(settings[key].items[0].id,id);
+        await js(`document.querySelector('${selector}').scrollIntoView({block:'center'})`);
+        fs.writeFileSync(path.join(evidence, `${surface}-placed.png`), (await capture()).toPNG());
+        await js(`document.querySelector('${selector} [data-item-id="${id}"]').click();document.querySelector('.tray-composer-editor .tray-composer-danger').click()`);
+        for(let i=0;i<100&&settings[key].items.some(item=>item.id===id);i++)await pause(20);
+        assert.ok(!settings[key].items.some(item=>item.id===id));
+        placementResults[surface].saveReorderRemove = true;
+      } else await js("document.querySelector('.tray-composer-gallery').hidePopover()");
+    }
+    Object.assign(settings, placementSettingsBefore); runtime.settingsChanged();
+    await js(`Object.assign(state.settings,${JSON.stringify(placementSettingsBefore)});syncSettingsForm();document.querySelector('[data-settings-section=plugins]').click();pluginSettingsPanel.refresh()`);
+    await js("document.querySelector('[data-plugin-id=\"trusted-fixture\"] .plugin-manage').click();document.querySelector('.plugin-diagnostics').click()");
+    for(let i=0;i<100&&runtime.manager.backendCount();i++)await pause(20);
+    assert.equal(runtime.manager.backendCount(),0);
+    await js('pluginSettingsPanel.refresh()');
+    await waitFor("document.querySelector('.plugin-runtime-text')", 'idle diagnostics');
+    placementResults.idle = await js("document.querySelector('.plugin-runtime-text').textContent");
+    assert.equal(placementResults.idle.includes('settings.plugins.runtimeState.idle'),placementBaseline);
+    await js("document.querySelector('.plugin-runtime-text').scrollIntoView({block:'center'})");
+    fs.writeFileSync(path.join(evidence, 'idle-diagnostics.png'), (await capture()).toPNG());
+    fs.writeFileSync(path.join(evidence, 'placement-results.json'), JSON.stringify(placementResults,null,2));
+    console.log('PASS real App composer choices/save/reorder/remove and idle diagnostics', placementResults);
+    await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
+  }
   await js("pluginApi.place('trusted-fixture/panel','home',true)");
   await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'Home author UI');
   const pid = await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','app')");

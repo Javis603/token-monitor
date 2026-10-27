@@ -72,3 +72,26 @@ test('actual main plugin persistence rolls back failed consent and does not noti
   assert.equal(context.persistedSettingsSnapshot.pluginStates.demo.enabled, true);
   assert.equal(pushes, 1);
 });
+
+test('main management persistence includes all compact layout and Notch order transaction fields', () => {
+  const context = vm.createContext({ settings: { pluginStates: {} }, normalizePluginStates, saveSettings() {}, pushSettingsToRenderer() {} });
+  const start = main.indexOf('persistManagementSettings: ('), end = main.indexOf('\n        },', start);
+  const callback = vm.runInContext(`({${main.slice(start, end)}\n}}).persistManagementSettings`, context);
+  const patch = { floatingBubbleCustomLayout: { version: 1, items: [] }, notchCustomLayout: { version: 1, items: [] }, notchPageOrder: ['home'] };
+  callback(patch);
+  for (const key of Object.keys(patch)) assert.deepEqual(context.settings[key], patch[key]);
+});
+
+test('all emitted backend states have diagnostic translations in every locale', async t => {
+  const { runtimeFixture } = require('../helpers/trustedPlugin');
+  const { translate, MESSAGES } = require('../../src/electron/renderer/i18n');
+  const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  assert.equal(f.invoke('plugins:list').plugins[0].runtime.state, 'idle');
+  f.send(f.main, 'home'); await new Promise(setImmediate);
+  assert.equal(f.invoke('plugins:list').plugins[0].runtime.state, 'running');
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) for (const state of ['idle', 'running', 'error']) {
+    const key = `settings.plugins.runtimeState.${state}`;
+    assert.ok(Object.hasOwn(MESSAGES[locale], key), `${locale}/${state} must not depend on English fallback`);
+    assert.notEqual(translate(locale, key), key, `${locale}/${state}`);
+  }
+});

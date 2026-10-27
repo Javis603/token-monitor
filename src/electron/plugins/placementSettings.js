@@ -11,8 +11,10 @@ const { defaultEdgeDockItems, normalizeEdgeDockItems, MAX_ITEMS: MAX_EDGE_DOCK_I
 const PLACEMENT_SURFACES = Object.freeze(['home', 'edgeDock', 'tray', 'notch', 'page']);
 
 function summaryBitmapRefs(settings) {
-  return settings.notchSummaryMode === 'custom' && settings.notchSummaryEnabled !== false
-    ? trayLayout.trayLayoutPluginRefs(settings.notchCustomLayout) : [];
+  if (settings.notchSummaryEnabled === false) return [];
+  if (settings.notchSummaryMode === 'custom') return trayLayout.trayLayoutPluginRefs(settings.notchCustomLayout);
+  return settings.notchSummaryMode === 'tray' && settings.trayContent === 'custom'
+    ? trayLayout.trayLayoutPluginRefs(settings.trayCustomLayout) : [];
 }
 
 function splitList(value) {
@@ -92,6 +94,11 @@ function removePluginPlacements(settings, id) {
   const owns = ref => typeof ref === 'string' && ref.startsWith(`${id}/`);
   const tokenPrefix = placements.homeToken(`${id}/x`).slice(0, -1);
   return {
+    ...Object.fromEntries(['floatingBubbleCustomLayout', 'notchCustomLayout'].filter(key => Object.hasOwn(settings, key)).map(key => {
+      const layout = trayLayout.normalizeTrayLayout(settings[key]);
+      return [key, { ...layout, items: layout.items.filter(item => !(item.type === 'plugin' && owns(item.ref))) }];
+    })),
+    ...(Object.hasOwn(settings, 'notchPageOrder') ? { notchPageOrder: placements.normalizeNotchPageOrder(settings.notchPageOrder).filter(token => !token.startsWith(tokenPrefix)) } : {}),
     homeModuleOrder: splitList(settings.homeModuleOrder).filter(token => !token.startsWith(tokenPrefix)).join(','),
     hiddenHomeModules: splitList(settings.hiddenHomeModules).filter(token => !token.startsWith(tokenPrefix)).join(','),
     edgeDockItems: settings.edgeDockItems == null ? null : (normalizeEdgeDockItems(settings.edgeDockItems) || []).filter(item => !(item.type === 'plugin' && owns(item.ref))),

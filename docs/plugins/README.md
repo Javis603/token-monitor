@@ -31,6 +31,8 @@ Module-private variables and another process's memory are not automatically avai
 
 `name`, `description` and view titles support localized strings. Optional `author`, HTTPS `homepage` and validated `identityIcon` provide attribution, not trust. `engines.tokenMonitor` can constrain the App version. API 1 manifests fail with `incompatible-plugin-api`; there is no prerelease compatibility layer. This experimental API can break; authors must follow release changes.
 
+Bitmap views declaring `tray` can be added from the existing Tray, Floating Bubble and custom Notch-summary composers after the plugin is enabled. They use the same reorder, duplicate, remove and save controls as native items. Notch “Same as tray” follows the active Tray layout; its custom layout stays independent. Uninstall with placement removal also clears bubble/summary entries and mixed Notch page-order entries. Keeping placements retains them for a later reinstall and explicit enable.
+
 ## UI lifecycle
 
 Export `activate(ctx)` returning `{mount, renderTray?, dispose?}`, or export `mount` directly. `mount(container, context)` may be asynchronous and returns `{update?, dispose?, hasUnsavedChanges?}`. The host retains mounted controls during data updates and ordinary page switching where that surface retains its DOM. Do not assume every native surface retains nodes: dispose timers/listeners and persist important drafts. The same module activates once per plugin revision per renderer, not once globally across windows.

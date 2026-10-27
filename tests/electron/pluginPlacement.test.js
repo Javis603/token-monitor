@@ -49,7 +49,7 @@ test('placing on the tray turns the current preset into a custom layout plus the
   assert.equal(resolved.items[1].plugin.tray.text, '42%');
   const removed = placementPatch({ trayContent: 'custom', ...patch }, { ref: REF, surface: 'tray', placed: false });
   assert.deepEqual(removed.trayCustomLayout.items.map((item) => item.type), ['icon']);
-  assert.ok(!trayLayout.STYLE_IDS.includes('plugin'), 'plugin items are placed by the plugin manager, not offered as a composer style');
+  assert.ok(!trayLayout.STYLE_IDS.includes('plugin'), 'plugin choices come from installed views, not a static native style');
 });
 
 test('Notch selection is independent of visible tab capacity and preserves built-in choices', () => {
@@ -69,4 +69,16 @@ test('Edge Dock omits inactive plugin cells while retaining their saved placemen
   assert.equal(buildEdgeDockCells({}, { items, availablePluginRefs: [] }).some(c => c.kind === 'plugin'), false);
   assert.equal(buildEdgeDockCells({}, { items, availablePluginRefs: [REF] }).some(c => c.kind === 'plugin'), true);
   assert.equal(JSON.stringify(items), before);
+});
+
+test('uninstall removes only owned compact items and page-order tokens, without materializing absent settings', () => {
+  const { removePluginPlacements } = require('../../src/electron/plugins/placementSettings');
+  const layout = {version:1,items:[trayLayout.createTrayLayoutItem('appIcon',{idFactory:()=> 'native'}),trayLayout.createTrayLayoutItem('plugin',{ref:REF,idFactory:()=> 'owned'}),trayLayout.createTrayLayoutItem('plugin',{ref:'other/panel',idFactory:()=> 'other'})]};
+  const settings = {floatingBubbleCustomLayout:layout,notchCustomLayout:layout,notchPageOrder:['home',`plugin:${REF}`,'plugin:other/panel','limits']};
+  const result = removePluginPlacements(settings,'system-monitor');
+  for (const key of ['floatingBubbleCustomLayout','notchCustomLayout']) assert.deepEqual(result[key].items.map(item=>item.id),['native','other']);
+  assert.deepEqual(result.notchPageOrder,['home','plugin:other/panel','limits']);
+  assert.equal(settings.floatingBubbleCustomLayout.items.length,3);
+  const absent=removePluginPlacements({},'system-monitor');
+  for (const key of ['floatingBubbleCustomLayout','notchCustomLayout','notchPageOrder']) assert.equal(Object.hasOwn(absent,key),false);
 });

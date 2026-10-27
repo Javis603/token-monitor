@@ -14,7 +14,7 @@ function bytes(version = '1.0.0', extra = {}) {
 }
 function fixture(t, fault) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-managed-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  let settings = { pluginContentOrder: { 'main.model.content': ['test-plugin/page', 'other/page'] }, pluginContentSelections: { 'main.limits.content': 'test-plugin/page', 'main.home.content': 'other/page' }, pluginStates: {}, homeModuleOrder: 'summary,plugin:test-plugin/page,plugin:other/page', hiddenHomeModules: '', edgeDockItems: [], notchPluginPages: ['test-plugin/page', 'other/page'] };
+  let settings = { floatingBubbleCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchPageOrder: ['plugin:test-plugin/page', 'home', 'plugin:other/page'], pluginContentOrder: { 'main.model.content': ['test-plugin/page', 'other/page'] }, pluginContentSelections: { 'main.limits.content': 'test-plugin/page', 'main.home.content': 'other/page' }, pluginStates: {}, homeModuleOrder: 'summary,plugin:test-plugin/page,plugin:other/page', hiddenHomeModules: '', edgeDockItems: [], notchPluginPages: ['test-plugin/page', 'other/page'] };
   let stopped = 0;
   const manager = { list: () => ({ plugins: [] }), beginMutation: () => stopped++, endMutation() {}, reload() {} };
   const args = { root: path.join(dir, 'manager'), userDir: path.join(dir, 'plugins'), dataDir: path.join(dir, 'data'), settingsDir: path.join(dir, 'author-settings'), manager,
@@ -186,6 +186,8 @@ for (const keepData of [false, true]) for (const keepPlacements of [false, true]
       assert.equal(fs.existsSync(file), keepData);
       if (keepData) assert.equal(fs.readFileSync(file, 'utf8'), '{"keep":7}');
     }
+    for (const key of ['floatingBubbleCustomLayout', 'notchCustomLayout']) assert.deepEqual(f.settings[key].items.map(item => item.ref), keepPlacements ? ['test-plugin/page', 'other/page'] : ['other/page']);
+    assert.deepEqual(f.settings.notchPageOrder, keepPlacements ? before.notchPageOrder : ['home', 'plugin:other/page']);
     assert.equal(f.settings.homeModuleOrder, keepPlacements ? before.homeModuleOrder : 'summary,plugin:other/page');
     assert.deepEqual(f.settings.notchPluginPages, keepPlacements ? before.notchPluginPages : ['other/page']);
     assert.equal(f.settings.pluginStates['test-plugin'], undefined);
@@ -474,3 +476,19 @@ for (const version of ['0.0.0', '1.2.3', '1.2.3-alpha.1', '1.2.3+build.01']) {
     await restarted.uninstall('test-plugin'); restarted.dispose(); f.api.dispose();
   });
 }
+
+for (const keepPlacements of [false, true]) test(`compact placement transaction restores all keys after uninstall interruption, keep=${keepPlacements}`, async t => {
+  let armed = false, journal;
+  const f = await historyFixture(t, step => {
+    if (armed && step === 'settings-written') {
+      journal = JSON.parse(fs.readFileSync(path.join(f.args.root, 'transaction.json')));
+      throw new Error('compact placement interruption');
+    }
+  });
+  const before = snapshot(f); armed = true;
+  await assert.rejects(f.api.uninstall('test-plugin', { keepData: true, keepPlacements }), /compact placement interruption/);
+  for (const key of ['floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder']) assert.deepEqual(journal.settings[key], before.settings[key]);
+  assert.deepEqual(snapshot(f), before);
+  const restarted = createManagedPlugins(f.args); restarted.recover();
+  assert.deepEqual(snapshot(f), before);
+});

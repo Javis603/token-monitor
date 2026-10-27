@@ -138,3 +138,36 @@ test('removing placements does not create an absent content-order setting', () =
   const { removePluginPlacements } = require('../../src/electron/plugins/placementSettings');
   assert.equal(Object.hasOwn(removePluginPlacements({}, 'fixture'), 'pluginContentOrder'), false);
 });
+
+test('Notch mirror and custom bitmap demand follow only the effective layout and preserve other owners', async t => {
+  const f = await runtimeFixture(t, { surfaceContext: () => ({ visible: false, summaryVisible: true }) });
+  await f.install();
+  const file = path.join(f.dir, 'plugins/trusted-fixture/manifest.json'), manifest = JSON.parse(fs.readFileSync(file));
+  manifest.views = [{ id: 'bitmap', surfaces: ['tray'] }, { id: 'custom', surfaces: ['tray'] }];
+  fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
+  const layout = ref => ({ items: [{ id: 'p', type: 'plugin', ref }] });
+  const mirror = 'trusted-fixture/bitmap', custom = 'trusted-fixture/custom';
+  Object.assign(f.settings, { showTrayIcon: true, trayContent: 'custom', trayCustomLayout: layout(mirror), notchSummaryMode: 'tray', notchCustomLayout: layout(custom) });
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  assert.ok(f.runtime.payload('notch').views[mirror]); assert.equal(f.runtime.payload('notch').views[custom], undefined);
+  f.send(f.notch, 'notch', [mirror]); await tick(); assert.equal(f.runtime.manager.backendCount(), 1);
+  f.settings.notchSummaryMode = 'custom'; f.runtime.settingsChanged(); await tick();
+  assert.ok(f.runtime.payload('notch').views[custom]); assert.equal(f.runtime.payload('notch').views[mirror], undefined);
+  f.send(f.notch, 'notch', [custom]); f.send(f.main, 'tray', [mirror]); await tick(); assert.equal(f.runtime.manager.backendCount(), 1);
+  f.settings.notchSummaryEnabled = false; f.runtime.settingsChanged(); await tick(); assert.equal(f.runtime.manager.backendCount(), 1);
+  f.send(f.main, 'tray', []); await tick(); assert.equal(f.runtime.manager.backendCount(), 0);
+  f.settings.notchSummaryEnabled = true; f.settings.notchSummaryMode = 'tray'; f.settings.trayContent = 'tokens'; f.runtime.settingsChanged();
+  assert.equal(f.runtime.payload('notch').views[mirror], undefined);
+});
+
+for (const keepPlacements of [false,true]) test(`uninstall compact placements keep=${keepPlacements} survive management restart consistently`, async t => {
+  const f=await runtimeFixture(t);await f.install();await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true});
+  const ref='trusted-fixture/panel',other='other/panel';
+  const layout={items:[{id:'own',type:'plugin',ref},{id:'native',type:'icon',style:'appIcon',icon:'app'},{id:'other',type:'plugin',ref:other}]};
+  Object.assign(f.settings,{floatingBubbleCustomLayout:structuredClone(layout),notchCustomLayout:structuredClone(layout),notchPageOrder:['plugin:'+ref,'home','plugin:'+other]});
+  await f.invoke('plugins:uninstall','trusted-fixture',{keepPlacements,keepData:true});
+  for(const key of ['floatingBubbleCustomLayout','notchCustomLayout']) assert.deepEqual(f.settings[key].items.map(item=>item.id),keepPlacements?['own','native','other']:['native','other']);
+  assert.deepEqual(f.settings.notchPageOrder,keepPlacements?['plugin:'+ref,'home','plugin:'+other]:['home','plugin:'+other]);
+  await f.runtime.manager.reload();await f.install();
+  assert.equal(f.invoke('plugins:list').plugins[0].enabled,false);assert.equal(f.runtime.manager.backendCount(),0);
+});
