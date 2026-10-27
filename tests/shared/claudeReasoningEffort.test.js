@@ -152,3 +152,52 @@ test('historical Claude effort flows through metadata, wire normalization and ar
     }
   }
 });
+
+test('a split oversized sidechain user cannot clear main effort before its trailing flag arrives', t => {
+  for (const asString of [false, true]) for (const sidechain of [true, false]) {
+    const f = fixture(t);
+    fs.writeFileSync(f.file, record(assistant({ effort: 'high' })));
+    assert.equal(f.read(), 'high');
+    const text = 'x'.repeat(600_000) + ' quote " backslash \\ braces {} []';
+    const full = record({ type: 'user', message: { content: asString ? text : [{ type: 'text', text }] },
+      isSidechain: sidechain }).trimEnd();
+    const split = full.indexOf(',"isSidechain"');
+    fs.appendFileSync(f.file, full.slice(0, split));
+    assert.equal(f.read(), 'high', 'unwritten ownership must not clear main effort');
+    fs.appendFileSync(f.file, full.slice(split));
+    assert.equal(f.read(), sidechain ? 'high' : null, 'complete ownership decides whether to clear');
+    assert.equal(f.bytesRead(), fs.statSync(f.file).size, 'both scans read only the appended bytes');
+  }
+});
+
+test('a nested tool suffix cannot prove completion of an oversized assistant record', t => {
+  const f = fixture(t);
+  fs.writeFileSync(f.file, record(assistant({ effort: 'high' })));
+  assert.equal(f.read(), 'high');
+  // This prefix ends with a syntactically valid fake message suffix. The
+  // actual assistant's tool input and outer record have not closed yet.
+  const prefix = '{"type":"assistant","message":{"content":[{"type":"tool_use","input":{"padding":"'
+    + 'x'.repeat(600_000) + '","nested":{"stop_reason":"end_turn"}}';
+  fs.appendFileSync(f.file, prefix);
+  assert.equal(f.read(), 'high', 'nested closure cannot clear a partial outer response');
+  fs.appendFileSync(f.file, '}],"stop_reason":"end_turn"}}');
+  assert.equal(f.read(), null, 'the actual completed response with no effort clears normally');
+  assert.equal(f.bytesRead(), fs.statSync(f.file).size);
+});
+
+test('oversized JSON completion preserves escaped-string state across append scans', t => {
+  const f = fixture(t);
+  fs.writeFileSync(f.file, record(assistant({ effort: 'high' })));
+  assert.equal(f.read(), 'high');
+  const full = record(assistant({ message: { content: [{ type: 'text', text: 'x'.repeat(600_000)
+    + '"quoted" \\ {} []' }], stop_reason: 'end_turn' }, effort: 'low' })).trimEnd();
+  const split = full.indexOf('\\"quoted') + 1;
+  assert.ok(split > 600_000);
+  fs.appendFileSync(f.file, full.slice(0, split));
+  assert.equal(f.read(), 'high');
+  fs.appendFileSync(f.file, full.slice(split, -1));
+  assert.equal(f.read(), 'high', 'closed inner values still do not close the root');
+  fs.appendFileSync(f.file, full.slice(-1));
+  assert.equal(f.read(), 'low');
+  assert.equal(f.bytesRead(), fs.statSync(f.file).size);
+});
