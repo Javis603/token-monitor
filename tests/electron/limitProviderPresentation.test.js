@@ -2931,7 +2931,7 @@ test('MiniMax limit-row statuses keep Code sign-in separate from API-key setup',
     ['unavailable', { label: 'Unavailable', tone: 'warn' }],
     ['ok', { label: 'Live', tone: 'ok' }]
   ]) {
-    assert.deepEqual(presentation.limitProviderStatusLabel({ provider: 'minimax', status, source: 'oauth' }), expected);
+    assert.deepEqual(presentation.limitProviderStatusLabel({ provider: 'minimax', status, source: 'oauth' }), expected, `oauth ${status}`);
   }
 });
 
