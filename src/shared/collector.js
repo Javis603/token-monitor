@@ -38,7 +38,7 @@ const { createSessionActivityScheduler } = require('./sessionActivityScheduler')
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
-const { legacyPromaSessionKeys } = require('./usage/legacyPromaSessions');
+const { legacyPromaRoots } = require('./usage/legacyPromaSessions');
 const {
   createSubprocessTermination,
   terminationUnconfirmedError
@@ -427,10 +427,6 @@ async function probeTokscaleCapabilities(command, options = {}) {
     }
   }
   return supported;
-}
-
-function reportsPromaUsage(period) {
-  return Object.values(period?.sessions || {}).some((session) => session.client === 'proma');
 }
 
 function tokscaleClientFilter(clients) {
@@ -1134,7 +1130,7 @@ async function collectUsageOnce(options) {
   const windowsPeriods = { today, month, allTime };
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
-  const promaReportingWslHomes = [];
+  const scannedWslHomes = [];
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
@@ -1161,7 +1157,7 @@ async function collectUsageOnce(options) {
         runTokscale: runTokscaleFn,
         logger: options.logger,
         decoratePeriods: (periods, home) => {
-          if (reportsPromaUsage(periods.allTime)) promaReportingWslHomes.push(home);
+          scannedWslHomes.push(home);
           applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled });
         }
       });
@@ -1291,15 +1287,14 @@ async function collectUsageOnce(options) {
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
   if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
-  // Private archive hint, like sessionUsageArchiveFullScan: fork-keyed Proma
-  // journals this full scan has just reported under upstream ids. A home whose
-  // scan reported no Proma usage at all (a binary without upstream Proma drops
-  // the id through capability filtering) proves nothing about its journals.
+  // Private archive hint, like sessionUsageArchiveFullScan: the Proma journal
+  // roots this full scan read, so the archive can retire fork-keyed rows whose
+  // journals it reported under upstream ids.
   if (!anchorUsed && trackedClientSet.has('proma')) {
     const hostHome = tokscaleHomeDir({ env: options.env || process.env, platform: platformValue, homeDir: options.homeDir });
-    summary.legacyPromaSessionKeys = [
-      ...(reportsPromaUsage(windowsPeriods.allTime) ? legacyPromaSessionKeys([hostHome], { platform: platformValue }) : []),
-      ...legacyPromaSessionKeys(promaReportingWslHomes, { platform: 'win32' })
+    summary.legacyPromaRoots = [
+      ...legacyPromaRoots([hostHome], { platform: platformValue }),
+      ...legacyPromaRoots(scannedWslHomes, { platform: 'win32' })
     ];
   }
   if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {

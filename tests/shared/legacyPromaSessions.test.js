@@ -9,27 +9,55 @@ const { normalizePeriod } = require('../../src/shared/usage');
 const { applySessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
 const { createSessionUsageArchiveStore } = require('../../src/shared/usage/sessionUsageArchiveStore');
 const { createUsageTransform } = require('../../src/shared/usage/usageTransform');
-const { legacyPromaSessionKeys } = require('../../src/shared/usage/legacyPromaSessions');
+const {
+  legacyPromaRoots, parseLegacyPromaSessionId, promaJournalSessionIds
+} = require('../../src/shared/usage/legacyPromaSessions');
 const { serializeSyncPayload } = require('../../src/shared/syncPayload');
 
 const AT = new Date('2026-10-20T12:00:00Z');
 const LATER = new Date('2026-10-20T12:05:00Z');
 const LATEST = new Date('2026-10-20T12:10:00Z');
+const NEWEST = new Date('2026-10-20T12:15:00Z');
 
-// The released fork reported tm-contract.jsonl under /home/u as this id; the
-// namespace is sha256 of the normalized agent-sessions root.
-test('legacy keys reproduce the fork ids of the journals that still exist', () => {
-  const readdirSync = (root) => {
-    if (root === '/home/u/.proma/agent-sessions') return ['tm-contract.jsonl', 'notes.txt'];
-    if (root === '\\\\wsl$\\Ubuntu\\home\\u\\.proma\\agent-sessions') return ['wsl-session.jsonl'];
-    throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-  };
-  assert.deepEqual(legacyPromaSessionKeys(['/home/u', '/home/u', '/home/empty'], { platform: 'linux', readdirSync }), [
-    'proma:tm-contract@e9dd485ca6f8'
-  ]);
-  const [wslKey] = legacyPromaSessionKeys(['\\\\wsl$\\Ubuntu\\home\\u'], { platform: 'win32', readdirSync });
-  assert.match(wslKey, /^proma:wsl-session@[0-9a-f]{12}$/);
-  assert.notEqual(wslKey.split('@')[1], 'e9dd485ca6f8');
+const usageLine = (extra = {}, usage = { input_tokens: 1200, output_tokens: 340, cache_read_input_tokens: 500, cache_creation_input_tokens: 80 }) =>
+  JSON.stringify({ type: 'assistant', _createdAt: '2026-10-20T10:00:00Z', message: { id: 'msg_1', model: 'claude-sonnet-4-5', usage }, ...extra });
+
+// The released fork reported tm-contract.jsonl under /home/u with this
+// namespace (sha256 of the normalized agent-sessions root).
+test('legacy roots and ids reproduce the fork namespace', () => {
+  for (const home of ['/home/u', '/home/u/', '/home/./u']) {
+    assert.deepEqual(legacyPromaRoots([home], { platform: 'linux' }), [
+      { namespace: 'e9dd485ca6f8', root: '/home/u/.proma/agent-sessions' }
+    ]);
+  }
+  const [wsl] = legacyPromaRoots(['\\\\wsl$\\Ubuntu\\home\\u'], { platform: 'win32' });
+  assert.equal(wsl.root, '\\\\wsl$\\Ubuntu\\home\\u\\.proma\\agent-sessions');
+  assert.match(wsl.namespace, /^[0-9a-f]{12}$/);
+  assert.deepEqual(parseLegacyPromaSessionId('tm-contract@e9dd485ca6f8'), { stem: 'tm-contract', namespace: 'e9dd485ca6f8' });
+  assert.equal(parseLegacyPromaSessionId('tm-contract'), null);
+});
+
+test('journal session ids follow the upstream reader', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'proma-journal-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const write = (stem, lines) => fs.writeFileSync(path.join(root, `${stem}.jsonl`), `${lines.join('\n')}\n`);
+  write('stem-only', [usageLine()]);
+  write('recorded', [usageLine({ session_id: ' sdk-1 ' }), usageLine({ sessionId: 'sdk-2' })]);
+  write('pi', [JSON.stringify({ type: 'session', id: 'pi-header' }), usageLine({ session_id: 'ignored' })]);
+  write('no-usage', ['{broken', usageLine({}, { input_tokens: 0 }),
+    JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', usage: { input_tokens: 9 } } })]);
+  write('linked', [usageLine({ session_id: 'display-1' })]);
+  fs.writeFileSync(path.join(path.dirname(root), 'agent-sessions.json'), JSON.stringify({
+    sessions: [{ id: 'linked', sdkSessionId: 'native-1' }]
+  }));
+  t.after(() => fs.rmSync(path.join(path.dirname(root), 'agent-sessions.json'), { force: true }));
+
+  assert.deepEqual([...promaJournalSessionIds(root, 'stem-only')], ['stem-only']);
+  assert.deepEqual([...promaJournalSessionIds(root, 'recorded')], ['sdk-1', 'sdk-2']);
+  assert.deepEqual([...promaJournalSessionIds(root, 'pi')], ['pi-header']);
+  assert.deepEqual([...promaJournalSessionIds(root, 'no-usage')], []);
+  assert.deepEqual([...promaJournalSessionIds(root, 'linked')], ['display-1', 'native-1']);
+  assert.equal(promaJournalSessionIds(root, 'missing'), null);
 });
 
 function prom(sessions) {
@@ -52,69 +80,105 @@ function setup(t) {
   const options = { databasePath: path.join(dir, 'archive.sqlite'), path: path.join(dir, 'legacy.json') };
   let store = createSessionUsageArchiveStore(options);
   const transform = createUsageTransform({ store, getSettings: () => ({ projectsEnabled: false }), log: () => {} });
+  const home = path.join(dir, 'home');
+  const [proma] = legacyPromaRoots([home], { platform: process.platform });
+  fs.mkdirSync(proma.root, { recursive: true });
   t.after(() => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); });
-  return { transform, reopen() { transform.release(); store = createSessionUsageArchiveStore(options); return store; } };
+  return {
+    transform,
+    roots: [proma],
+    legacy: (stem) => `${stem}@${proma.namespace}`,
+    journal: (stem, lines) => fs.writeFileSync(path.join(proma.root, `${stem}.jsonl`), `${lines.join('\n')}\n`),
+    remove: (stem) => fs.rmSync(path.join(proma.root, `${stem}.jsonl`)),
+    reopen() { transform.release(); store = createSessionUsageArchiveStore(options); return store; },
+    peek(at) {
+      const reader = createSessionUsageArchiveStore(options);
+      try { return reader.read(at); } finally { reader.close(); }
+    }
+  };
 }
 
-const LEGACY = 'tm-contract@e9dd485ca6f8';
+const totals = (summary) => ['today', 'month', 'allTime'].map((name) => summary[name].totalTokens);
 
-test('upgrading from the fork reader does not count an archived Proma session twice', t => {
-  const { transform, reopen } = setup(t);
-  // Released fork build: the journal is reported under its fork id.
-  transform.transform(scan(AT, { [LEGACY]: 2120 }, { sessionUsageArchiveFullScan: true }));
+test('upgrading from the fork reader does not count a reported Proma journal twice', t => {
+  const { transform, roots, legacy, journal, remove, reopen } = setup(t);
+  journal('tm-contract', [usageLine()]);
+  transform.transform(scan(AT, { [legacy('tm-contract')]: 2120 }, { sessionUsageArchiveFullScan: true }));
 
-  // Upstream reader: the same journal arrives under its upstream id.
-  const upgraded = scan(LATER, { 'tm-contract': 2120 }, {
-    sessionUsageArchiveFullScan: true,
-    legacyPromaSessionKeys: [`proma:${LEGACY}`]
-  });
-  const visible = transform.transform(upgraded);
-  for (const name of ['today', 'month', 'allTime']) {
-    assert.equal(visible[name].totalTokens, 2120, name);
-    assert.ok(Math.abs(visible[name].costUsd - 0.1) < 1e-9, name);
-  }
-  assert.equal(Object.hasOwn(visible, 'legacyPromaSessionKeys'), false);
-  assert.equal(Object.hasOwn(serializeSyncPayload(visible).payload, 'legacyPromaSessionKeys'), false);
+  const visible = transform.transform(scan(LATER, { 'tm-contract': 2120 }, { sessionUsageArchiveFullScan: true, legacyPromaRoots: roots }));
+  assert.deepEqual(totals(visible), [2120, 2120, 2120]);
+  assert.ok(Math.abs(visible.allTime.costUsd - 0.1) < 1e-9);
+  assert.equal(Object.hasOwn(visible, 'legacyPromaRoots'), false);
+  assert.equal(Object.hasOwn(serializeSyncPayload(visible).payload, 'legacyPromaRoots'), false);
 
-  // The retirement is committed, and the upstream row carries the history once
-  // the journal is deleted and no longer scanned.
+  // Committed; once the journal is deleted the upstream row carries it.
+  remove('tm-contract');
   const archive = reopen().read(LATEST);
-  assert.equal(archive.sessions[`proma:${LEGACY}`].periods.allTime.totalTokens, 0);
+  assert.equal(archive.sessions[`proma:${legacy('tm-contract')}`].periods.allTime.totalTokens, 0);
   assert.equal(applySessionUsageArchive(scan(LATEST, {}), archive, { now: LATEST }).allTime.totalTokens, 2120);
 });
 
-test('a fork-keyed Proma session whose journal is gone keeps replaying', t => {
-  const { transform } = setup(t);
-  transform.transform(scan(AT, { [LEGACY]: 2120, 'deleted@e9dd485ca6f8': 500 }, { sessionUsageArchiveFullScan: true }));
-  const visible = transform.transform(scan(LATER, { 'tm-contract': 2120 }, {
-    sessionUsageArchiveFullScan: true,
-    legacyPromaSessionKeys: [`proma:${LEGACY}`]
-  }));
-  assert.equal(visible.allTime.totalTokens, 2620);
+test('a journal in the same root the scan did not report keeps its fork usage', t => {
+  const { transform, roots, legacy, journal } = setup(t);
+  journal('reported', [usageLine()]);
+  journal('unreadable', ['{corrupt']);
+  journal('unmatched', [usageLine({ session_id: 'never-reported' })]);
+  transform.transform(scan(AT, {
+    [legacy('reported')]: 2120, [legacy('unreadable')]: 800, [legacy('unmatched')]: 300, [legacy('deleted')]: 500
+  }, { sessionUsageArchiveFullScan: true }));
+  const visible = transform.transform(scan(LATER, { reported: 2120 }, { sessionUsageArchiveFullScan: true, legacyPromaRoots: roots }));
+  assert.deepEqual(totals(visible), [3720, 3720, 3720]);
 });
 
-test('only a completed full scan retires fork rows, and never one it still reports', t => {
-  const { transform } = setup(t);
-  transform.transform(scan(AT, { [LEGACY]: 2120 }, { sessionUsageArchiveFullScan: true }));
-  const legacyKeys = [`proma:${LEGACY}`];
-  // An older fork binary still reports the fork id: it stays live.
-  assert.equal(transform.transform(scan(LATER, { [LEGACY]: 2120 }, {
-    sessionUsageArchiveFullScan: true, legacyPromaSessionKeys: legacyKeys
-  })).allTime.totalTokens, 2120);
+test('usage handed to a linked native session retires its display journal', t => {
+  const { transform, roots, legacy, journal } = setup(t);
+  journal('linked', [usageLine({ session_id: 'display-1' })]);
+  fs.writeFileSync(path.join(path.dirname(roots[0].root), 'agent-sessions.json'), JSON.stringify({
+    sessions: [{ id: 'linked', sdkSessionId: 'native-1' }]
+  }));
+  transform.transform(scan(AT, { [legacy('linked')]: 2120 }, { sessionUsageArchiveFullScan: true }));
+  const visible = transform.transform(scan(LATER, { 'native-1': 2120 }, { sessionUsageArchiveFullScan: true, legacyPromaRoots: roots }));
+  assert.deepEqual(totals(visible), [2120, 2120, 2120]);
+});
+
+test('without Proma in the scan, roots it did not read, or a full scan, nothing is retired', t => {
+  const { transform, roots, legacy, journal, peek } = setup(t);
+  journal('tm-contract', [usageLine()]);
+  transform.transform(scan(AT, { [legacy('tm-contract')]: 2120 }, { sessionUsageArchiveFullScan: true }));
+  const forkUsage = () => peek(NEWEST).sessions[`proma:${legacy('tm-contract')}`].periods.allTime.totalTokens;
+  // A binary without upstream Proma drops the id and reports nothing.
+  transform.transform(scan(LATER, {}, { sessionUsageArchiveFullScan: true, legacyPromaRoots: roots }));
+  assert.equal(forkUsage(), 2120);
+  // A root the scan did not read (no hint) proves nothing.
+  transform.transform(scan(LATER, { 'tm-contract': 2120 }, { sessionUsageArchiveFullScan: true }));
+  assert.equal(forkUsage(), 2120);
   // A Today-only tick proves nothing about the other periods.
-  const watch = transform.transform(scan(LATEST, { 'tm-contract': 2120 }, {
-    sessionUsageArchiveFullScan: false, legacyPromaSessionKeys: legacyKeys
-  }));
-  assert.equal(watch.allTime.totalTokens, 4240);
+  transform.transform(scan(LATER, { 'tm-contract': 2120 }, { sessionUsageArchiveFullScan: false, legacyPromaRoots: roots }));
+  assert.equal(forkUsage(), 2120);
+  // An older fork binary still reporting the fork id keeps it live.
+  transform.transform(scan(LATEST, { [legacy('tm-contract')]: 2120 }, { sessionUsageArchiveFullScan: true, legacyPromaRoots: roots }));
+  assert.equal(forkUsage(), 2120);
 });
 
-test('the collector lists fork journals only after a full scan reported Proma usage', async t => {
+test('a scan that finished out of order never retires a newer fork observation', t => {
+  const { transform, roots, legacy, journal, peek } = setup(t);
+  journal('tm-contract', [usageLine()]);
+  // An older process keeps reporting the fork id, and commits LATEST first.
+  transform.transform(scan(LATEST, { [legacy('tm-contract')]: 2120 }, { sessionUsageArchiveFullScan: true }));
+  // The upgraded process's scan started earlier and commits afterwards.
+  transform.transform(scan(LATER, { 'tm-contract': 2120 }, { sessionUsageArchiveFullScan: true, legacyPromaRoots: roots }));
+  const stale = peek(LATEST).sessions[`proma:${legacy('tm-contract')}`];
+  assert.equal(stale.periods.allTime.totalTokens, 2120);
+  assert.equal(stale.periodWindows.allTime.capturedAt, LATEST.toISOString());
+  // The next completed scan of the upgraded process retires it.
+  const visible = transform.transform(scan(NEWEST, { 'tm-contract': 2120 }, { sessionUsageArchiveFullScan: true, legacyPromaRoots: roots }));
+  assert.deepEqual(totals(visible), [2120, 2120, 2120]);
+});
+
+test('the collector reports the scanned Proma roots on full scans only', async t => {
   const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-proma-collector-'));
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
-  const journals = path.join(homeDir, '.proma', 'agent-sessions');
-  fs.mkdirSync(journals, { recursive: true });
-  fs.writeFileSync(path.join(journals, 'tm-contract.jsonl'), '');
   let anchor;
   const options = {
     clients: 'proma', allTimeSince: '2026-01-01', deviceId: 'fixture', now: AT,
@@ -128,16 +192,11 @@ test('the collector lists fork journals only after a full scan reported Proma us
     ] })
   };
   const full = await collectUsageOnce(options);
-  assert.deepEqual(full.legacyPromaSessionKeys, legacyPromaSessionKeys([homeDir], { platform: process.platform }));
-  assert.equal(full.legacyPromaSessionKeys.length, 1);
+  assert.deepEqual(full.legacyPromaRoots, legacyPromaRoots([homeDir], { platform: process.platform }));
   const watch = await collectUsageOnce({ ...options, now: LATER,
     todayOnlyAnchor: { ...anchor.windowsPeriods, dateKey: localTodayKey(LATER), todayPartitions: anchor.todayPartitions }
   });
-  assert.equal(Object.hasOwn(watch, 'legacyPromaSessionKeys'), false);
+  assert.equal(Object.hasOwn(watch, 'legacyPromaRoots'), false);
   const untracked = await collectUsageOnce({ ...options, clients: 'claude' });
-  assert.equal(Object.hasOwn(untracked, 'legacyPromaSessionKeys'), false);
-  // A binary without upstream Proma drops the id and reports nothing for it:
-  // the journals exist, but no replacement usage was reported.
-  const unsupported = await collectUsageOnce({ ...options, runTokscale: async () => ({ entries: [] }) });
-  assert.deepEqual(unsupported.legacyPromaSessionKeys, []);
+  assert.equal(Object.hasOwn(untracked, 'legacyPromaRoots'), false);
 });
