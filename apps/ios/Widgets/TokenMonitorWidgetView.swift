@@ -117,4 +117,3 @@ struct TokenMonitorWidgetView: View {
         URL(string: "tokenmonitor://\(entry.content == "limits" ? "limits" : (entry.content == "activity" ? "insights" : "overview"))")
     }
 }
-

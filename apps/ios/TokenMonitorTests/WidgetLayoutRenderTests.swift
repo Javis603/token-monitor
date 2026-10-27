@@ -176,6 +176,36 @@ struct WidgetLayoutRenderTests {
         }
     }
 
+    @Test func untitledGroupIdentityWrapsWithAccessibilityText() throws {
+        let sessions = try JSONDecoder().decode([String: SessionUsage].self, from: Data(#"{"codex:main":{"client":"codex","sessionId":"main","t3ThreadId":"thread","models":{"gpt-6.1":400},"totalTokens":400,"costUsd":0.01,"reasoningEffort":"xhigh","lastUsedAt":"2026-10-28T00:00:00Z"},"codex:continuation":{"client":"codex","sessionId":"continuation","t3ThreadId":"thread","models":{"gpt-6.1":100},"totalTokens":100,"costUsd":0.01,"reasoningEffort":"low","lastUsedAt":"2026-10-27T23:59:00Z"}}"#.utf8))
+        let now = try #require(Date.hubTimestamp(from: "2026-10-28T00:20:00Z"))
+        let entry = try #require(SessionListEntry.rows(sessions, now: now).first)
+        #expect(entry.isSessionGroup)
+        #expect(entry.subagentCount == 0)
+        #expect(entry.session?.displayTitle == nil)
+        #expect(entry.session?.displayReasoningEffort == "xhigh")
+        let suite = "UntitledGroupRender-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferences(defaults: defaults, snapshotStore: .init(fileURL: nil))
+        var heights: [CGFloat] = []
+        for width in [350.0, 900.0] {
+            let content = SessionGroupRow(entry: entry, maximum: 500, now: now)
+                .padding(20).frame(width: width).background(.background)
+                .environment(preferences)
+                .environment(\.dynamicTypeSize, .accessibility2)
+                .environment(\.locale, Locale(identifier: "en_US"))
+            let renderer = ImageRenderer(content: content)
+            renderer.scale = 3
+            let image = try #require(renderer.uiImage)
+            heights.append(image.size.height)
+            write(image, name: "main-sync-untitled-accessibility-\(Int(width))")
+        }
+        // The identity needs more lines on a phone; all other content fits at
+        // either width. A one-line truncated header incorrectly has equal heights.
+        #expect(heights[0] > heights[1])
+    }
+
     @Test func emptySnapshotAndStaleVariantsRender() {
         for content in ["overview", "limits", "activity"] {
             check(

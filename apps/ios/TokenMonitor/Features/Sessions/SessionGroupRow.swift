@@ -88,7 +88,8 @@ struct SessionGroupRow: View {
                     VStack(alignment: .leading, spacing: DesignTokens.rowLineSpacing) {
                         Text(display?.displayTitle ?? identity)
                             .font(DesignTokens.rowTitle)
-                            .lineLimit(1).truncationMode(.tail)
+                            .lineLimit(dynamicTypeSize.isAccessibilitySize && !titled ? nil : 1)
+                            .truncationMode(.tail)
                         if hasSubtitle {
                             subtitle.font(.caption2).foregroundStyle(.secondary)
                                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
