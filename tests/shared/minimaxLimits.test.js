@@ -1384,10 +1384,11 @@ test('MiniMax Code distinguishes an unreadable store from a missing or empty log
     else fs.writeFileSync(fixture.authPath, contents);
     const deps = codeDeps(fixture, async () => okResponse(membershipBody()));
     const result = await readCode(deps);
-    assert.equal(result.status, status);
-    assert.equal(result.accountLabel, status === 'notConfigured' ? '' : 'MiniMax Code');
-    assert.deepEqual(result.windows, []);
-    assert.deepEqual(deps.requests, []);
+    const label = contents ?? 'missing';
+    assert.equal(result.status, status, label);
+    assert.equal(result.accountLabel, status === 'notConfigured' ? '' : 'MiniMax Code', label);
+    assert.deepEqual(result.windows, [], label);
+    assert.deepEqual(deps.requests, [], label);
   }
 });
 
@@ -1440,8 +1441,9 @@ test('MiniMax Code respects official logout, refresh and generation fences befor
     const fixture = writeCodeAuthFixture({ record, state });
     const deps = codeDeps(fixture, async () => okResponse(membershipBody()));
     const result = await readCode(deps);
-    assert.equal(result.status, status);
-    assert.deepEqual(deps.requests, []);
+    const label = JSON.stringify({ state, record });
+    assert.equal(result.status, status, label);
+    assert.deepEqual(deps.requests, [], label);
   }
 });
 
@@ -1480,9 +1482,10 @@ test('MiniMax Code rejects an uncommitted replacement lease and expired fallback
       if (replacement) writeCodeLease(fixture, codeDesktopRecord({ generation: 8 }), { status: 'refreshing', refresh: { id: 'other-owner' } });
       return false;
     } }));
-    assert.equal(result.status, 'unavailable');
-    assert.equal(resources, 0);
-    assert.equal(exchanges, replacement ? 0 : 1);
+    const label = replacement ? 'replacement lease' : 'expired fallback';
+    assert.equal(result.status, 'unavailable', label);
+    assert.equal(resources, 0, label);
+    assert.equal(exchanges, replacement ? 0 : 1, label);
   }
 });
 
@@ -1865,8 +1868,8 @@ test('MiniMax Code lane never refreshes while the desktop app is running', async
       ? { ok: false, status: 500, json: async () => ({}) }
       : okResponse(membershipBody({ op_group_id: '' })), { clientRunning: () => running });
     const result = await readCode(deps);
-    assert.equal(deps.requests.filter(url => url === MINIMAX_CODE_OAUTH_URL_CN).length, running ? 0 : 1);
-    assert.equal(result.status, 'ok');
+    assert.equal(deps.requests.filter(url => url === MINIMAX_CODE_OAUTH_URL_CN).length, running ? 0 : 1, `running=${running}`);
+    assert.equal(result.status, 'ok', `running=${running}`);
     if (running) {
       const reactive = codeDeps(fixture, async () => ({ ok: false, status: 401 }), { clientRunning: () => true });
       const duringRun = await readCode(reactive);
@@ -1917,9 +1920,9 @@ test('MiniMax Code rejects nonprivate credential stores as the official FileStor
     fs.chmodSync(fixture[entry], entry === 'dir' ? 0o755 : 0o644);
     const deps = codeDeps(fixture, async () => okResponse(membershipBody()));
     const result = await readCode(deps);
-    assert.equal(result.status, 'unavailable');
-    assert.deepEqual(deps.requests, []);
-    assert.equal(fs.readFileSync(fixture.authPath, 'utf8'), before);
+    assert.equal(result.status, 'unavailable', entry);
+    assert.deepEqual(deps.requests, [], entry);
+    assert.equal(fs.readFileSync(fixture.authPath, 'utf8'), before, entry);
   }
 });
 
