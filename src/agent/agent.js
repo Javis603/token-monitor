@@ -142,6 +142,7 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
     });
   }
   delete visibleSummary.sessionUsageArchiveFullScan;
+  delete visibleSummary.legacyPromaSessionKeys;
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 

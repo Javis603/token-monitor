@@ -271,8 +271,29 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
     }
   }
 
+  if (fullScan) retireRescannedLegacyProma(archive, deviceRecord.legacyPromaSessionKeys, liveKeys, captureDate, changedKeys);
   if (options.cursorUsageEvents) linkLegacyCursorEvents(archive, changedKeys, options.cursorUsageEvents);
   return { archive, changedKeys };
+}
+
+// The completed scan reported these fork-keyed Proma journals under upstream
+// ids (see legacyPromaSessions.js), so their fork rows record an explicit zero
+// rather than replaying the same usage a second time. Rows whose journal is
+// gone are not listed and keep replaying as the only record, and a fork id the
+// scan still reports (an older fork binary) stays live.
+function retireRescannedLegacyProma(archive, keys, liveKeys, captureDate, changedKeys) {
+  if (!Array.isArray(keys) || keys.length === 0) return;
+  const capturedAt = captureDate.toISOString();
+  for (const key of keys) {
+    const entry = archive.sessions[key];
+    if (!entry || liveKeys?.has(key)) continue;
+    for (const [periodName, session] of Object.entries(entry.periods || {})) {
+      if (!hasSessionUsage(session)) continue;
+      entry.periods[periodName] = { client: entry.client, sessionId: entry.sessionId, totalTokens: 0, costUsd: 0 };
+      entry.periodWindows[periodName] = { ...entry.periodWindows[periodName], capturedAt };
+      changedKeys.add(key);
+    }
+  }
 }
 
 // Every capture asks the Cursor JSON cache about the legacy rows that still

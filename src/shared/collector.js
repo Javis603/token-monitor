@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const { customPricingPath } = require('./tokscaleConfig');
+const { customPricingPath, tokscaleHomeDir } = require('./tokscaleConfig');
 const { senpiWatchSources } = require('./providers/senpi/paths');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
@@ -38,6 +38,7 @@ const { createSessionActivityScheduler } = require('./sessionActivityScheduler')
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
+const { legacyPromaSessionKeys } = require('./usage/legacyPromaSessions');
 const {
   createSubprocessTermination,
   terminationUnconfirmedError
@@ -1129,6 +1130,7 @@ async function collectUsageOnce(options) {
   const windowsPeriods = { today, month, allTime };
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
+  const scannedWslHomes = [];
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
@@ -1154,7 +1156,10 @@ async function collectUsageOnce(options) {
         signal: options.signal,
         runTokscale: runTokscaleFn,
         logger: options.logger,
-        decoratePeriods: (periods, home) => applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
+        decoratePeriods: (periods, home) => {
+          scannedWslHomes.push(home);
+          applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled });
+        }
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -1282,6 +1287,15 @@ async function collectUsageOnce(options) {
   // The request ledger is this source's archive. A second per-session archive
   // would resurrect its contribution after a native rollout takes precedence.
   if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
+  // Private archive hint, like sessionUsageArchiveFullScan: fork-keyed Proma
+  // journals this full scan has just reported under upstream ids.
+  if (!anchorUsed && trackedClientSet.has('proma')) {
+    const hostHome = tokscaleHomeDir({ env: options.env || process.env, platform: platformValue, homeDir: options.homeDir });
+    summary.legacyPromaSessionKeys = [
+      ...legacyPromaSessionKeys([hostHome], { platform: platformValue }),
+      ...legacyPromaSessionKeys(scannedWslHomes, { platform: 'win32' })
+    ];
+  }
   if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {
     try {
       const nativeCache = options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
