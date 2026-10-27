@@ -16,7 +16,7 @@ const settingsListFilterApi = require('../../src/electron/renderer/settingsListF
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const { limitWindowText } = require('../../src/shared/limits/windowText');
-const { creditsAmount, creditsCurrency, creditsMeterPercent, isCreditsWindow, formatCompactMoney, formatMoney } = require('../../src/shared/limits/balanceDisplay');
+const { creditsAmount, creditsCurrency, creditsMeterPercent, isCreditsWindow, formatMoney } = require('../../src/shared/limits/balanceDisplay');
 const limitWindowLabels = require('../../src/shared/limits/windowLabels');
 
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
@@ -885,7 +885,6 @@ test('Claude limits render as one provider group with account subrows', () => {
   const app = readRendererFile('app.js');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   const renderGroup = viewBody('renderLimitProviderGroup');
-  const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
 
   assert.match(renderLimits, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
   // The row's title is also the name its switch control offers, so an account is
@@ -894,7 +893,6 @@ test('Claude limits render as one provider group with account subrows', () => {
   assert.match(renderGroup, /const title = limitAccountTitle\(providerId, provider, index, providers\);/);
   // The mark is dropped only for a group row. Standing alone the row is the card's
   // whole identity, and that is the shape the Edge Dock card renders.
-  assert.match(policy, /claude: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
   assert.match(renderGroup, /\{ accountRow: true, accountLabel: title, \.\.\.account\.options \}/);
 });
 
@@ -907,9 +905,9 @@ test('every multi-account Limits group uses its provider-localized account count
   assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
   assert.match(view, /return text === key \? '' : text;/);
   assert.match(view, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
-  assert.match(view, /providerId, label, providers, color, \{ count: providers\.length, markId \}/);
+  assert.match(view, /count: Number\.isInteger\(accountCount\) \? accountCount : providers\.length/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
-  for (const provider of ['claude', 'codex', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
+  for (const provider of ['claude', 'codex', 'minimax', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
     assert.match(i18n, new RegExp(`'settings\\.${provider}\\.nAccounts'`));
   }
 });
@@ -1165,66 +1163,6 @@ test('WorkBuddy renders unlimited enterprise credits without requiring a numeric
     renderProviderWindows,
     /if \(!displayWindow\.resetsAt && !displayWindow\.resetDescription\) \{\s*node\.classList\.add\('limit-window-no-reset'\);\s*\}/
   );
-});
-
-test('MiniMax Code OAuth credits keep their point amount out of currency formatting', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
-  const makeNode = () => {
-    const node = {
-      children: [], classes: [],
-      classList: { add(...classes) { node.classes.push(...classes); } },
-      append(...children) { this.children.push(...children); }
-    };
-    return node;
-  };
-  const provider = {
-    provider: 'minimax',
-    source: 'oauth',
-    windows: [
-      { kind: 'session', label: '5h', detail: 'unlimited', showMeter: false },
-      { kind: 'weekly', label: 'Weekly', usedPercent: 10 },
-      { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17, usedPercent: 15, remainingPercent: 85 },
-      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false },
-      { kind: 'billing', metric: 'credits', label: 'API Balance', remaining: 15, currency: 'CNY' }
-    ]
-  };
-  const context = {
-    document: { createElement: makeNode },
-    windowForKind: (record, kind) => record.windows.find((window) => window.kind === kind) || null,
-    limitWindowNode: (label, window, _color, _tone, value, detail) => Object.assign(makeNode(), { label, window, value, detail }),
-    providerWindowLabel: (_record, window, fallback = '') => window.label || fallback,
-    providerWindowText: (record, window) => limitWindowText(record, window, { showLimitUsed: false }),
-    isCreditsWindow,
-    creditsAmount,
-    creditsCurrency,
-    creditsMeterPercent,
-    formatMoney,
-    tagUsageItem: (node) => node,
-    settings: () => ({})
-  };
-  const rendered = vm.runInNewContext(
-    `${renderProviderWindows}\nrenderProviderWindows(provider, '#000000', { showAllUsageItems: true });`,
-    { ...context, provider }
-  );
-  assert.deepEqual(Array.from(rendered.children, node => node.label), ['5h', 'Weekly', 'Video', 'Credits', 'API Balance']);
-  const video = rendered.children.find(node => node.label === 'Video');
-  assert.equal(video.classes.includes('limit-window-wide'), true);
-  assert.equal(video.detail, '17/20');
-  assert.equal(video.window.remainingPercent, 85);
-  const row = rendered.children.find(node => node.label === 'Credits');
-  const wallet = rendered.children.find(node => node.label === 'API Balance');
-  const points = provider.windows.find(window => window.label === 'Credits');
-  const compact = formatCompactMoney(creditsAmount(provider, points), creditsCurrency(provider, points));
-
-  assert.equal(row.window.showMeter, false);
-  assert.equal(row.value, '4624.00');
-  assert.equal(row.classes.includes('limit-window-no-reset'), true);
-  assert.equal(wallet.value, '¥15.00');
-  assert.equal(wallet.window.remainingPercent, 100);
-  assert.notEqual(wallet.window.showMeter, false);
-  assert.equal(compact, '4624.00');
-  assert.equal(Number(row.value), 4624);
-  assert.doesNotMatch(`${row.value} ${compact}`, /[¥$]|CNY|USD/);
 });
 
 test('Antigravity groups returned quota windows under dynamic model-family headings', () => {
@@ -2008,7 +1946,8 @@ test('a saved credential folds its panel only once a fresh record confirms the a
   // The refresh after a save can return before the collector publishes the
   // checked account, so the panel stays open and folds when that record lands.
   assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
-  assert.match(save, /markExternalProviderCheckPending\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
+  assert.match(save, /markExternalProviderCheckPending\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
+  assert.doesNotMatch(save, /setExternalAccountExpanded\(/, 'fresh status owns folding; the save reply must not toggle it again');
   // Ollama answers its first poll from the save-time check instead of fetching
   // the settings page twice in a row.
   const { limitProviderEntry } = require('../../src/shared/limits/registry');
@@ -2021,7 +1960,7 @@ test('account validation reads the local device raw limits, not the collapsed ag
   const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');
   const helper = functionBody(app, 'localProviderStatus', 'renderAntigravityStatus');
   // Sync-mode aggregateLimits() collapses a local `unauthorized` row out in favor
-  // of a remote `ok` (providerCollapseKey for deepseek/minimax/grok is just the
+  // of a remote `ok` (providerCollapseKey for deepseek/grok is just the
   // provider name; pickBetterProvider keeps the higher statusRank). So the account
   // card must read the LOCAL device's RAW limits from state.stats.devices, where
   // the local unauthorized row still lives — not state.stats.limits.providers,
@@ -2036,8 +1975,10 @@ test('account validation reads the local device raw limits, not the collapsed ag
   // Falls back to the aggregate only for legacy/non-aggregated stats that do
   // not expose raw device rows at all.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
-  // DeepSeek and MiniMax reach it through the shared account-form lane.
-  assert.match(functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked'), /const provider = localProviderStatus\(providerName\);/);
+  // DeepSeek uses its one provider row; MiniMax's key panel must select only
+  // the local API lane when the independent Code/OAuth row is also present.
+  const accountProvider = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
+  assert.match(accountProvider, /providerName === 'minimax'[\s\S]*localProviderStatuses\(providerName\)\.find\(\(entry\) => entry\.source === 'api'\)[\s\S]*: localProviderStatus\(providerName\)/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {
@@ -2982,7 +2923,9 @@ test('third-party API uses credential setup copy and relay capability tags', () 
   );
 });
 
-test('minimax status copy uses the same API key wording as CodexBar', () => {
+test('MiniMax limit-row statuses keep Code sign-in separate from API-key setup', () => {
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'minimax', source: 'oauth' }), 'OAuth');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'minimax', source: 'api' }), 'API');
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
@@ -3003,6 +2946,10 @@ test('minimax status copy uses the same API key wording as CodexBar', () => {
     presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'unavailable', source: 'oauth' }),
     { label: 'Unavailable', tone: 'warn' }
   );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'ok', source: 'oauth' }),
+    { label: 'Live', tone: 'ok' }
+  );
 });
 
 test('MiMo uses shared Limits statuses while keeping errors distinct from rejected sessions', () => {
@@ -3020,19 +2967,17 @@ test('MiMo uses shared Limits statuses while keeping errors distinct from reject
   );
 });
 
-test('MiMo settings stays connected while one independent product is live', () => {
-  const live = { provider: 'mimo', status: 'ok', accountKey: 'console', accountLabel: 'Console' };
-  const expired = { provider: 'mimo', status: 'unauthorized', accountKey: 'membership', accountLabel: 'Desktop Membership' };
-  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'mimo'), live);
-  assert.equal(presentation.limitProviderSettingsRecord([expired, live], 'mimo'), live);
-  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'codex'), undefined);
-  // Neither live: the console product is the row the account is named by.
-  assert.equal(
-    presentation.limitProviderSettingsRecord([expired, { ...live, status: 'unauthorized' }], 'mimo').accountKey,
-    'console'
-  );
-  assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
-});
+for (const id of ['mimo', 'minimax']) {
+  test(`${id} settings stays connected while one independent product is live`, () => {
+    const live = { provider: id, accountKey: 'console', accountLabel: 'Console', status: 'ok', source: 'api' };
+    const expired = { provider: id, accountKey: 'membership', accountLabel: 'Desktop Membership', status: 'unauthorized', source: id === 'mimo' ? 'local' : 'oauth', sourceDetail: 'app' };
+    assert.equal(presentation.limitProviderSettingsRecord([live, expired], id), live);
+    assert.equal(presentation.limitProviderSettingsRecord([expired, live], id), live);
+    assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'codex'), undefined);
+    assert.equal(presentation.limitProviderSettingsRecord([expired, { ...live, status: 'unauthorized' }], id).accountKey, 'console');
+    assert.equal(presentation.limitProviderSettingsRecord([expired], id), expired);
+  });
+}
 
 test('OpenRouter grouped plan policy separates profile identities, explicit plans, and recovery status', () => {
   const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });

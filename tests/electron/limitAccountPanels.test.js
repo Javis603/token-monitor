@@ -73,7 +73,7 @@ function renderPanel(form, callbacks = {}) {
   return { group, document };
 }
 
-function minimaxAppStatus({ billingMode = 'code', providerStatus, providerSource = 'oauth' } = {}) {
+function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, providerSource = 'api', providerRows, keyConfigured = false } = {}) {
   const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
   const slice = (from, to) => {
     const start = app.indexOf(from);
@@ -83,17 +83,15 @@ function minimaxAppStatus({ billingMode = 'code', providerStatus, providerSource
   };
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
   const { group, document } = renderPanel(form);
-  // The test observes the visible account controls, so expand the same details
-  // container that the renderer normally opens from the account header.
   group.byId('minimaxSettingsDetails').classList.remove('hidden');
   const state = {
     settings: {
       limitAccountForms: [form],
       minimaxBillingMode: billingMode,
-      minimaxApiKeyConfigured: false,
-      minimaxApiKeySource: ''
+      minimaxApiKeyConfigured: keyConfigured,
+      minimaxApiKeySource: keyConfigured ? 'settings' : ''
     },
-    stats: { limits: { providers: providerStatus ? [{ provider: 'minimax', status: providerStatus, source: providerSource }] : [] } },
+    stats: { limits: { providers: providerRows || (providerStatus ? [{ provider: 'minimax', status: providerStatus, source: providerSource }] : []) } },
     accountPanelMessages: {},
     minimaxPendingCheckSince: 0
   };
@@ -102,6 +100,7 @@ function minimaxAppStatus({ billingMode = 'code', providerStatus, providerSource
     document,
     externalLimitAccountConfig: {},
     localProviderStatus: (name) => state.stats.limits.providers.find((provider) => provider.provider === name) || null,
+    localProviderStatuses: (name) => state.stats.limits.providers.filter((provider) => provider.provider === name),
     limitAccountForm: (name) => state.settings.limitAccountForms.find((entry) => entry.id === name),
     limitProviderEnabled: () => true,
     limitAccountPanelsApi: require('../../src/electron/renderer/limits/accountPanels'),
@@ -118,7 +117,7 @@ function minimaxAppStatus({ billingMode = 'code', providerStatus, providerSource
     context
   );
   context.renderExternalProviderStatus('minimax');
-  return { group, state, linked: context.externalProviderAccountLinked('minimax') };
+  return { group, state, render: () => context.renderExternalProviderStatus('minimax'), linked: context.externalProviderAccountLinked('minimax') };
 }
 
 function isVisible(root, target) {
@@ -368,7 +367,7 @@ test('a confirmed credential is cleared from the draft and re-checked', async ()
   const save = accountFormSave({ result: { saved: true, verdict: 'valid', status: 'ok', settings: { next: true } } });
   assert.equal(await save.run({ deepseekApiKey: 'sk-test' }), true);
   assert.deepEqual(save.calls.map(([name]) => name), [
-    'render', 'saveCredential', 'applyPersistedSettings', 'markPending', 'render', 'refreshStats', 'expanded', 'render'
+    'render', 'saveCredential', 'applyPersistedSettings', 'markPending', 'render', 'refreshStats', 'render'
   ]);
   assert.equal(save.message(), null);
 });
@@ -457,6 +456,8 @@ test('MiniMax billing choice waits for saving before key submission and follows 
   const mode = panel.group.byId('minimaxBillingModeInput');
   assert.equal(mode.value, 'token-plan');
   mode.change('api');
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxBillingMode: 'token-plan', minimaxApiRegion: 'intl' } });
+  assert.equal(mode.value, 'api', 'a status push must not restore the old billing choice while its save is pending');
   assert.equal(resolveOpenUrl(form, { document: panel.document, provider: null }), 'https://platform.minimax.io/user-center/payment/balance');
   panel.group.byId('minimaxApiKeyInput').value = 'sk-api-test';
   const pending = panel.group.byId('minimaxCredentialSubmit').click();
@@ -465,78 +466,101 @@ test('MiniMax billing choice waits for saving before key submission and follows 
   finish();
   await pending;
   assert.deepEqual(drafts, [{ minimaxApiKey: 'sk-api-test' }]);
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxBillingMode: 'token-plan' } });
+  assert.equal(mode.value, 'token-plan', 'settled choices must follow subsequent settings again');
   syncCredentialFields(form, { document: panel.document, settings: { minimaxBillingMode: 'api', minimaxApiRegion: 'auto' } });
   assert.equal(resolveOpenUrl(form, { document: panel.document, provider: { region: 'cn' } }), 'https://platform.minimaxi.com/user-center/payment/balance');
 });
 
-test('MiniMax Code mode hides API-key actions while Token Plan and API keep them available', async () => {
-  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
-  const { syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
-  const drafts = [];
-  const { group, document } = renderPanel(form, {
-    onSave: (_, values) => drafts.push(values)
+test('MiniMax key status reads only the API row and defaults to not configured without a key', () => {
+  // OAuth/Code rows can coexist but do not configure, validate, or link the API key.
+  const { group: noKey, linked: oauthLinked } = minimaxAppStatus({
+    providerRows: [{ provider: 'minimax', status: 'ok', source: 'oauth' }]
   });
-  group.byId('minimaxSettingsDetails').classList.remove('hidden');
-  syncCredentialFields(form, { document, settings: { minimaxBillingMode: 'token-plan' } });
+  assert.equal(oauthLinked, false);
+  assert.equal(noKey.byId('minimaxAccountStatus').textContent, translated('settings.minimax.statusNotSet'));
+  assert.equal(isVisible(noKey, noKey.byId('minimaxManualPanel')), true);
+  assert.equal(isVisible(noKey, noKey.byId('minimaxOpenBrowser')), true);
+  assert.equal(isVisible(noKey, noKey.byId('minimaxLogoutButton')), false);
+  assert.equal(isVisible(noKey, noKey.byId('minimaxRefreshButton')), false);
 
-  const mode = group.byId('minimaxBillingModeInput');
-  const apiKey = group.byId('minimaxApiKeyInput');
-  const submit = group.byId('minimaxCredentialSubmit');
-  const manual = group.byId('minimaxManualPanel');
-  const codeNote = [...group.walk()].find((node) => node.dataset.i18n === 'settings.minimax.codeNote');
-  assert.ok(codeNote, 'Code instructions are present in the form');
-  assert.equal([...manual.walk()].includes(codeNote), false, 'Code instructions stay beside the tier selector');
-  assert.equal(isVisible(group, apiKey), true);
-  assert.equal(isVisible(group, submit), true);
-  assert.equal(isVisible(group, codeNote), false);
+  const { group: keyLinked, linked } = minimaxAppStatus({
+    providerRows: [
+      { provider: 'minimax', status: 'ok', source: 'oauth' },
+      { provider: 'minimax', status: 'ok', source: 'api' }
+    ],
+    keyConfigured: true
+  });
+  assert.equal(linked, true);
+  assert.equal(keyLinked.byId('minimaxAccountStatus').textContent, translated('settings.minimax.statusSet'));
+  assert.equal(isVisible(keyLinked, keyLinked.byId('minimaxManualPanel')), false);
+  assert.equal(isVisible(keyLinked, keyLinked.byId('minimaxOpenBrowser')), false);
+  assert.equal(isVisible(keyLinked, keyLinked.byId('minimaxLogoutButton')), true);
 
-  mode.change('api');
-  assert.equal(isVisible(group, apiKey), true);
-  assert.equal(isVisible(group, submit), true);
-  assert.equal(isVisible(group, codeNote), false);
-  apiKey.value = 'sk-api-test';
-  await submit.click();
-  assert.deepEqual(drafts, [{ minimaxApiKey: 'sk-api-test' }]);
+  const { group: rejected, linked: rejectedLinked } = minimaxAppStatus({
+    providerRows: [
+      { provider: 'minimax', status: 'ok', source: 'oauth' },
+      { provider: 'minimax', status: 'unauthorized', source: 'api' }
+    ],
+    keyConfigured: true
+  });
+  assert.equal(rejectedLinked, false);
+  assert.equal(rejected.byId('minimaxAccountStatus').textContent, translated('settings.minimax.statusInvalid'));
+  assert.equal(isVisible(rejected, rejected.byId('minimaxManualPanel')), true);
+  assert.equal(isVisible(rejected, rejected.byId('minimaxLogoutButton')), true);
 
-  mode.change('code');
-  assert.equal(isVisible(group, codeNote), true);
-  assert.equal(isVisible(group, apiKey), false);
-  assert.equal(isVisible(group, submit), false);
-  await submit.click();
-  assert.deepEqual(drafts, [{ minimaxApiKey: 'sk-api-test' }], 'Code mode does not submit an API-key draft');
+  const { group: stalled } = minimaxAppStatus({
+    providerRows: [
+      { provider: 'minimax', status: 'ok', source: 'oauth' },
+      { provider: 'minimax', status: 'unavailable', source: 'api' }
+    ],
+    keyConfigured: true
+  });
+  assert.equal(isVisible(stalled, stalled.byId('minimaxManualPanel')), true);
+  assert.equal(isVisible(stalled, stalled.byId('minimaxOpenBrowser')), true);
 
-  mode.change('token-plan');
-  assert.equal(isVisible(group, codeNote), false);
-  assert.equal(isVisible(group, apiKey), true);
-  assert.equal(isVisible(group, submit), true);
-  apiKey.value = 'sk-cp-test';
-  await submit.click();
-  assert.deepEqual(drafts, [
-    { minimaxApiKey: 'sk-api-test' },
-    { minimaxApiKey: 'sk-cp-test' }
-  ]);
+  const { group: recheck, state, render } = minimaxAppStatus({
+    providerRows: [
+      { provider: 'minimax', status: 'ok', source: 'oauth' },
+      { provider: 'minimax', status: 'ok', source: 'api', updatedAt: '2026-10-26T00:00:00.000Z' }
+    ],
+    keyConfigured: true
+  });
+  assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), false);
+  state.minimaxPendingCheckSince = Date.parse('2026-10-26T00:00:01.000Z');
+  state.stats.limits.providers = state.stats.limits.providers.filter((row) => row.source !== 'api');
+  render();
+  assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), false, 'a recheck must not reopen the paste form');
+  state.minimaxPendingCheckSince = 0;
+  state.stats.limits.providers.push({ provider: 'minimax', status: 'unauthorized', source: 'api', updatedAt: '2026-10-26T00:00:02.000Z' });
+  render();
+  assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), true);
+
+  const { group: gap, state: gapState, render: renderGap } = minimaxAppStatus({
+    providerRows: [{ provider: 'minimax', status: 'ok', source: 'api' }],
+    keyConfigured: true
+  });
+  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), false);
+  gapState.stats.limits.providers = [{ provider: 'minimax', status: 'ok', source: 'oauth' }];
+  renderGap();
+  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), false);
 });
 
-test('MiniMax Code status reflects the local OAuth session and keeps key actions out of the panel', () => {
-  const cases = [
-    ['ok', 'settings.limits.status.linked'],
-    ['unauthorized', 'settings.limits.status.signInAgain'],
-    ['notConfigured', 'settings.limits.status.signIn'],
-    ['unavailable', 'settings.common.unavailable'],
-    [undefined, 'settings.limits.connection.autoDetect']
-  ];
-  for (const [providerStatus, statusKey] of cases) {
-    const { group, linked } = minimaxAppStatus({ providerStatus });
-    assert.equal(linked, providerStatus === 'ok', `${providerStatus}: OAuth linked state`);
-    assert.equal(group.byId('minimaxAccountStatus').textContent, translated(statusKey), String(providerStatus));
-    assert.equal(isVisible(group, group.byId('minimaxManualPanel')), false, `${providerStatus}: API-key form`);
-    assert.equal(isVisible(group, group.byId('minimaxOpenBrowser')), false, `${providerStatus}: Open action`);
-    assert.equal(isVisible(group, group.byId('minimaxLogoutButton')), false, `${providerStatus}: Clear action`);
-    assert.equal(isVisible(group, group.byId('minimaxRefreshButton')), true, `${providerStatus}: Refresh action`);
-    assert.equal(isVisible(group, group.byId('minimaxApiKeyInput')), false, `${providerStatus}: API-key input`);
-    assert.equal(isVisible(group, [...group.walk()].find((node) => node.dataset.i18n === 'settings.minimax.codeNote')), true,
-      `${providerStatus}: Code instructions`);
-  }
+test('MiniMax API-key rechecks leave the independent Code row in place', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const start = app.indexOf('function clearExternalProviderPendingStatus(');
+  const end = app.indexOf('\nfunction nextCopilotSignInFlowId(', start);
+  assert.ok(start !== -1 && end !== -1);
+  const state = { stats: { limits: { providers: [
+    { provider: 'minimax', source: 'oauth', status: 'ok' },
+    { provider: 'minimax', source: 'api', status: 'unauthorized' },
+    { provider: 'deepseek', source: 'api', status: 'ok' }
+  ] } } };
+  vm.runInNewContext(`${app.slice(start, end)}\nclearExternalProviderPendingStatus('minimax');`, { state });
+  assert.deepEqual(state.stats.limits.providers, [
+    { provider: 'minimax', source: 'oauth', status: 'ok' },
+    { provider: 'deepseek', source: 'api', status: 'ok' }
+  ]);
 });
 
 test('MiniMax key submission waits for a region save without submitting an implicit region', async () => {

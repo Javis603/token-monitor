@@ -106,6 +106,7 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
+  minimax: 'settings.minimax.codeNote',
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
@@ -11878,7 +11879,6 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   }
   renderExternalProviderStatus(id);
   await refreshStats({ force: true });
-  setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
   renderExternalProviderStatus(id);
   return result;
 }
@@ -15613,7 +15613,7 @@ async function refreshCodexAccounts() {
 // local device's RAW limits from state.stats.devices — NOT the collapsed
 // state.stats.limits.providers. In sync mode, aggregateLimits() collapses a
 // local `unauthorized` row out in favor of a remote `ok` (providerCollapseKey
-// for deepseek/minimax/grok is just the provider name; pickBetterProvider keeps
+// for deepseek/grok is just the provider name; pickBetterProvider keeps
 // the higher statusRank). Searching the aggregate would miss the local row and
 // fall back to the remote `ok`, falsely reporting an invalid local key as
 // Linked. Only legacy/non-aggregated stats without a `devices` array may fall
@@ -16172,7 +16172,11 @@ function clearDisabledLimitProviderPendingChecks(enabledProviders) {
 }
 
 function externalProviderForAccount(providerName) {
-  const provider = localProviderStatus(providerName);
+  // MiniMax's settings pill belongs to the API-key lane. Code/OAuth is an
+  // independent source and must never make a key look linked or invalid.
+  const provider = providerName === 'minimax'
+    ? localProviderStatuses(providerName).find((entry) => entry.source === 'api') || null
+    : localProviderStatus(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
@@ -16185,7 +16189,6 @@ function externalProviderForAccount(providerName) {
 function externalProviderAccountLinked(providerName) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const provider = externalProviderForAccount(providerName);
-  if (providerName === 'minimax' && state.settings?.minimaxBillingMode === 'code') return provider?.source === 'oauth' && provider?.status === 'ok';
   return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
 }
 
@@ -16208,7 +16211,8 @@ function clearExternalProviderCheckPending(providerName) {
 
 function clearExternalProviderPendingStatus(providerName) {
   if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
+  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName
+    || (providerName === 'minimax' && provider.source !== 'api'));
 }
 
 function nextCopilotSignInFlowId() {
@@ -16251,14 +16255,6 @@ function copilotAccountStatusText(provider, configured, source, enabled = true) 
 }
 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
-  if (providerName === 'minimax' && state.settings?.minimaxBillingMode === 'code') {
-    if (provider?.source !== 'oauth') provider = null;
-    if (enabled && provider?.status === 'ok') return t('settings.limits.status.linked');
-    if (enabled && provider?.status === 'unauthorized') return t('settings.limits.status.signInAgain');
-    if (enabled && provider?.status === 'notConfigured') return t('settings.limits.status.signIn');
-    if (enabled && !provider) return t('settings.limits.connection.autoDetect');
-    configured = true;
-  }
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
@@ -16338,8 +16334,7 @@ function renderExternalProviderStatus(providerName) {
   errorEl.textContent = message ? t(message.key, message.params) : '';
   errorEl.classList.toggle('hidden', !message);
   errorEl.classList.toggle('error', message?.tone !== 'notice');
-  const codeLogin = providerName === 'minimax' && state.settings?.minimaxBillingMode === 'code';
-  const configured = codeLogin || Boolean(state.settings?.[config.configuredKey]);
+  const configured = Boolean(state.settings?.[config.configuredKey]);
   const enabled = limitProviderEnabled(providerName);
   const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
   const linked = externalProviderAccountLinked(providerName);
@@ -16359,9 +16354,14 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  const credentialEnabled = !form?.credentialWhen || limitAccountPanelsApi.credentialFormEnabled(form, { document });
-  manualPanel.classList.toggle('hidden', linked || !credentialEnabled);
-  openBtn.classList.toggle('hidden', linked || !credentialEnabled);
+  // A cleared row is not an answer yet. Treating it as unlinked opens the
+  // paste form and closes it again when the reading returns. A row that is
+  // present uses the same rule as Copilot: hide only while linked.
+  const readingPending = pending || (configured && !provider);
+  if (!readingPending) {
+    manualPanel.classList.toggle('hidden', linked);
+    openBtn.classList.toggle('hidden', linked);
+  }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin');
   if (discoveredLogin) {
@@ -16371,7 +16371,7 @@ function renderExternalProviderStatus(providerName) {
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
-  const canClearConfiguredCredential = !codeLogin && source === 'settings' && configured;
+  const canClearConfiguredCredential = source === 'settings' && configured;
   logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();

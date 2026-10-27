@@ -46,7 +46,9 @@ function syncCredentialFields(form, { document, settings }) {
   for (const field of form.fields) {
     const control = document.getElementById(controlId(field));
     if (!control) continue;
-    if (field.input === 'select') {
+    // Stats/settings pushes can precede the write; keep the user's choice until
+    // the last queued save settles, just as credential drafts survive pushes.
+    if (field.input === 'select' && !control.dataset.settingPending) {
       const stored = settings?.[field.key];
       control.value = [...(control.options || field.options)].some((option) => option.value === stored) ? stored : field.options[0].value;
     } else if (field.prefill && !control.value && document.activeElement !== control) {
@@ -56,16 +58,7 @@ function syncCredentialFields(form, { document, settings }) {
   refreshFieldDependents(form, { document });
 }
 
-function credentialFormEnabled(form, { document }) {
-  const when = form.credentialWhen;
-  const value = when && (fieldValue(document, when.field) || form.fields.find(field => field.key === when.field)?.options?.[0]?.value);
-  return !when || when.values.includes(value);
-}
-
 function refreshFieldDependents(form, { document }) {
-  const enabled = credentialFormEnabled(form, { document });
-  if (form.credentialWhen) document.getElementById(`${form.id}ManualPanel`)?.classList.toggle('hidden', !enabled);
-
   for (const hint of document.querySelectorAll?.(`[data-credential-form="${form.id}"][data-by-field]`) || []) {
     const spec = JSON.parse(hint.dataset.byField);
     if (hint.dataset.dependent === 'note') {
@@ -141,11 +134,15 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
         refreshFieldDependents(form, { document });
         if (field.submitWithCredential === false) {
           const value = input.value;
+          input.dataset.settingPending = 'true';
           const previous = independentSettingSaves.get(field.key);
           const pending = (previous || Promise.resolve()).catch(() => {}).then(() => onFieldChange?.(form, field, value));
           independentSettingSaves.set(field.key, pending);
           const settled = () => {
-            if (independentSettingSaves.get(field.key) === pending) independentSettingSaves.delete(field.key);
+            if (independentSettingSaves.get(field.key) === pending) {
+              independentSettingSaves.delete(field.key);
+              delete input.dataset.settingPending;
+            }
           };
           pending.then(settled, (error) => {
             settled();
@@ -219,7 +216,7 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
   refresh.addEventListener('click', () => onRefresh(form));
   let saving = false;
   submit.addEventListener('click', async () => {
-    if (saving || !credentialFormEnabled(form, { document })) return;
+    if (saving) return;
     saving = true;
     submit.disabled = true;
     submit.textContent = translate('settings.common.checking');
@@ -233,7 +230,6 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
       } catch (_) {
         return;
       }
-      if (!credentialFormEnabled(form, { document })) return;
       const values = Object.fromEntries([...inputs]
         .filter(([field]) => field.submitWithCredential !== false)
         .map(([field, input]) => [field.key, input.value]));
@@ -249,6 +245,6 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
   return group;
 }
 
-const api = { credentialFormEnabled, createCredentialPanel, refreshFieldDependents, resolveOpenUrl, syncCredentialFields };
+const api = { createCredentialPanel, refreshFieldDependents, resolveOpenUrl, syncCredentialFields };
 if (typeof module !== 'undefined') module.exports = api;
 if (typeof window !== 'undefined') window.TokenMonitorLimitAccountPanels = api;

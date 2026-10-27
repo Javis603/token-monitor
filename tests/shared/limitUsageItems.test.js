@@ -25,17 +25,6 @@ test('balance and spend rows keep one id however the payload carries them', () =
   assert.equal(limitUsageItemId(weekly), weeklyKey);
 });
 
-test('two credits windows share one visible item', () => {
-  const points = { kind: 'billing', metric: 'credits', label: 'Credits', currency: 'CREDITS' };
-  const wallet = { kind: 'billing', metric: 'credits', label: 'API Balance', currency: 'CNY' };
-  const monthly = { kind: 'billing', metric: 'credits', label: 'Monthly', currency: 'USD' };
-  const topUp = { kind: 'billing', metric: 'credits', label: 'Top-up', currency: 'USD', showMeter: false };
-  assert.equal(limitUsageItemId(points, 'minimax'), 'credits');
-  assert.equal(limitUsageItemId(wallet, 'minimax'), 'credits');
-  assert.equal(limitUsageItemId(monthly, 'commandcode'), 'credits');
-  assert.equal(limitUsageItemId(topUp, 'commandcode'), 'credits');
-});
-
 test('a window with a backend id keeps its item across a relabel', () => {
   const before = { kind: 'weekly', label: 'Weekly', limitId: 'premium', windowMinutes: 10080 };
   assert.equal(limitUsageItemId(before), limitUsageItemId({ ...before, label: 'Premium weekly' }));

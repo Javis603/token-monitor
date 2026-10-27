@@ -1656,8 +1656,8 @@
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to
-      // the real one. Credits windows carry money rather than quota percentages;
-      // their display meter is derived without changing the provider reading.
+      // the real one. Credits windows show balance amounts; display-only meters
+      // leave the provider reading unchanged.
       const session = windowForKind(provider, 'session');
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
       for (const weekly of (provider.windows || []).filter(window => window.kind === 'weekly')) {
@@ -1685,6 +1685,8 @@
         if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
         windows.append(balanceNode);
       }
+      const spendNode = provider.balance && providerSpendNode(provider.balance, provider);
+      if (spendNode) windows.append(spendNode);
     }
     if (!options.showAllUsageItems) {
       hideUsageItems(windows, usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, provider?.provider));
@@ -1759,7 +1761,8 @@
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
     volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers),
-    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers)
+    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers),
+    minimax: (provider, index, providers) => minimaxAccountTitle(provider, index, providers)
   };
 
   // Fallback names for `provider.source`, used when the provider has no override
@@ -1810,12 +1813,10 @@
   function limitProviderPlan(provider) {
     if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitProviderFailureLabel(provider);
     const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
-    if (mimoProduct) {
+    if (mimoProduct || (provider?.provider === 'minimax' && provider?.source === 'oauth')) {
       const plan = String(provider?.planLabel || '').trim();
-      // Current MiMo rows keep the product in accountLabel and the plan in
-      // planLabel. Falling back to accountLabel would repeat the product in the
-      // plan cell when the app deliberately has no plan name. Legacy rows take
-      // the generic path below.
+      // Product names in accountLabel are not subscription names. An unknown
+      // plan stays empty; older rows must not turn the product into a plan.
       return plan ? presentationApi.limitProviderPlanDisplayLabel(provider, plan) : '';
     }
     const plan = String(provider?.planLabel || '').trim();
@@ -2177,6 +2178,10 @@
   // Claude row is the card's whole identity and it came back to the page with no
   // mark at all. The same holds for a rule that replaces the plan cell — a group
   // row has a sibling to be told apart from, a solo row's plan cell is its own.
+  function namedAccountRowPolicy(provider, color, { grouped }) {
+    return { options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) } };
+  }
+
   const LIMIT_ACCOUNT_ROW_POLICIES = {
     codex: (provider, color, { grouped }) => ({
       options: {
@@ -2185,18 +2190,13 @@
         ...(grouped ? { showActiveBadge: true, showIcon: false } : {})
       }
     }),
-    claude: (provider, color, { grouped }) => ({
-      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
-    }),
+    claude: namedAccountRowPolicy,
+    minimax: namedAccountRowPolicy,
     workbuddy: (provider, color, { grouped }) => ({
       options: grouped ? { showIcon: false } : {}
     }),
-    mimo: (provider, color, { grouped }) => ({
-      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
-    }),
-    cursor: (provider, color, { grouped }) => ({
-      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
-    }),
+    mimo: namedAccountRowPolicy,
+    cursor: namedAccountRowPolicy,
     opencode: (provider, color, { grouped }) => ({
       options: {
         // A profile name that is neither Go nor Zen predates accountName, and it
@@ -2258,7 +2258,10 @@
     },
     // A Codex group's forecast describes the account set, not one account, so it
     // is appended once below the rows instead of on each of them.
-    codex: () => ({ forecastOnGroup: true })
+    codex: () => ({ forecastOnGroup: true }),
+    // One local Code login beside one API key is two lanes, not two accounts.
+    // Any other mix keeps the ordinary account count.
+    minimax: (providers) => ({ accountCount: minimaxParallelLanes(providers) ? 0 : undefined })
   };
 
   function limitAccountRowPolicy(id, provider, color, context) {
@@ -2304,6 +2307,20 @@
       && Boolean(label)
       && label !== 'Go'
       && label !== 'Zen';
+  }
+
+  // Code and the API key are collected together. Their labels name the lane.
+  // Numbered account titles stay for any set that is not exactly that pair,
+  // because unlike keys are not evidence of one account.
+  function minimaxParallelLanes(providers) {
+    const sources = new Set((providers || []).map((row) => row?.source));
+    return (providers || []).length === 2 && sources.size === 2 && sources.has('oauth') && sources.has('api');
+  }
+
+  function minimaxAccountTitle(provider, index, providers) {
+    if (!minimaxParallelLanes(providers)) return limitAccountDefaultTitle(provider, index, providers);
+    const statusOnly = Boolean(provider?.status) && provider.status !== 'ok' && !provider.stale;
+    return statusOnly ? String(provider?.accountLabel || '').trim() : '';
   }
 
   function limitAccountDefaultTitle(provider, index, providerEntries = [provider]) {
@@ -2472,9 +2489,12 @@
   function renderLimitProviderGroup(providerId, label, providers, color) {
     if (providerId === 'mimo') return renderMimoProviderGroup(label, providers, color);
     const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
-    const { markId, sharedFamily, forecastOnGroup } = policy(providers);
+    const { markId, sharedFamily, forecastOnGroup, accountCount } = policy(providers);
     const { row, list: accountList } = renderLimitProviderGroupFrame(
-      providerId, label, providers, color, { count: providers.length, markId }
+      providerId, label, providers, color, {
+        count: Number.isInteger(accountCount) ? accountCount : providers.length,
+        markId
+      }
     );
     if (providerId === 'workbuddy') {
       // Dock visibility/reporting filters may omit a failed or unlimited

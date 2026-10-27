@@ -1,9 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -21,7 +18,7 @@ function response(status, body = {}) {
 
 // The real DeepSeek fetcher behind a fake transport, so each verdict is taken
 // from the provider's own classification of an HTTP answer.
-function commands({ answer = () => response(200, BALANCE), settings = {}, env = {}, homeDir } = {}) {
+function commands({ answer = () => response(200, BALANCE), settings = {}, env = {} } = {}) {
   const patches = [];
   const writes = [];
   let current = { ...settings };
@@ -34,7 +31,6 @@ function commands({ answer = () => response(200, BALANCE), settings = {}, env = 
     },
     probeDeps: () => ({
       probe: true,
-      homeDir,
       providerRuntimeState: new Map(),
       fetch: async (url, init) => answer(url, init),
       readJson: () => ({}),
@@ -42,28 +38,7 @@ function commands({ answer = () => response(200, BALANCE), settings = {}, env = 
     }),
     env
   });
-  return { api, patches, writes, getSettings: () => current };
-}
-
-function minimaxCodeHome() {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-minimax-code-save-'));
-  const recordDir = path.join(homeDir, '.minimax', 'auth', 'prod', 'cn', 'mcode-public');
-  fs.mkdirSync(recordDir, { recursive: true });
-  fs.writeFileSync(path.join(recordDir, 'auth.json'), JSON.stringify({
-    records: {
-      'com.minimax.mcode.oauth.prod.cn test-record': {
-        clientId: 'mcode-public',
-        accessToken: 'fixture-access-token',
-        refreshToken: 'fixture-refresh-token',
-        expiresAtMs: Date.now() + 60 * 60 * 1000,
-        generation: 1
-      }
-    }
-  }));
-  return {
-    homeDir,
-    cleanup: () => fs.rmSync(homeDir, { recursive: true, force: true })
-  };
+  return { api, patches, writes };
 }
 
 test('the verdict only rejects what the provider itself calls a bad credential', () => {
@@ -441,48 +416,4 @@ test('MiniMax saves a pay-as-you-go key against balance instead of Token Plan qu
   assert.deepEqual(urls, ['https://api.minimaxi.com/account/query_balance']);
   assert.equal(patches[0].minimaxApiKey, 'sk-api-test');
   assert.equal(Object.hasOwn(patches[0], 'minimaxBillingMode'), false);
-});
-
-test('MiniMax Code mode rejects empty API-key saves without probing or clearing a stored key', async (t) => {
-  const fixture = minimaxCodeHome();
-  t.after(fixture.cleanup);
-  let requests = 0;
-  const { api, patches, getSettings } = commands({
-    settings: { minimaxApiKey: 'saved-key', minimaxBillingMode: 'code', limitProviders: 'minimax' },
-    homeDir: fixture.homeDir,
-    answer: () => {
-      requests++;
-      return response(200, { op_credit_summary: { total_remaining_amount: '12.5' }, op_group_id: '' });
-    }
-  });
-
-  for (const values of [{}, { minimaxApiKey: '' }]) {
-    const result = await api.saveCredential('minimax', values);
-    assert.equal(result.saved, false);
-    assert.equal(result.status, 'notConfigured');
-  }
-  assert.equal(requests, 0, 'a Code-mode key form cannot run a local OAuth probe');
-  assert.deepEqual(patches, []);
-  assert.equal(getSettings().minimaxApiKey, 'saved-key', 'an empty Code-mode draft leaves the saved API key intact');
-});
-
-test('MiniMax Code login cannot vouch for or persist an API key draft', async (t) => {
-  const fixture = minimaxCodeHome();
-  t.after(fixture.cleanup);
-  let requests = 0;
-  const { api, patches, getSettings } = commands({
-    settings: { minimaxApiKey: 'saved-key', minimaxBillingMode: 'code', limitProviders: 'minimax' },
-    homeDir: fixture.homeDir,
-    answer: () => {
-      requests++;
-      return response(200, { op_credit_summary: { total_remaining_amount: '12.5' }, op_group_id: '' });
-    }
-  });
-
-  const result = await api.saveCredential('minimax', { minimaxApiKey: 'sk-api-bad' });
-  assert.equal(result.saved, false);
-  assert.equal(result.status, 'notConfigured');
-  assert.equal(requests, 0, 'a healthy local Code login must not be used as the API-key probe');
-  assert.deepEqual(patches, []);
-  assert.equal(getSettings().minimaxApiKey, 'saved-key', 'rejecting the draft preserves the saved key');
 });

@@ -24,7 +24,9 @@ const TITLE_FUNCTIONS = [
   'opencodeAccountTitle',
   'namedApiAccountTitle',
   'volcenginePlanAccountTitle',
-  'mimoAccountTitle'
+  'mimoAccountTitle',
+  'minimaxParallelLanes',
+  'minimaxAccountTitle'
 ];
 
 function readRendererFile(name) {

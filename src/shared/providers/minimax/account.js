@@ -58,8 +58,7 @@ module.exports = {
         labelKey: 'settings.minimax.billingMode',
         options: [
           { value: 'token-plan', labelKey: 'settings.minimax.billingTokenPlan' },
-          { value: 'api', labelKey: 'settings.minimax.billingApi' },
-          { value: 'code', labelKey: 'settings.minimax.billingCode' }
+          { value: 'api', labelKey: 'settings.minimax.billingApi' }
         ],
         saveOnChange: true,
         submitWithCredential: false
@@ -79,10 +78,8 @@ module.exports = {
       { key: 'minimaxApiKey', input: 'password', placeholderKey: 'settings.minimax.apiKeyPlaceholder', required: true }
     ],
     top: [
-      { field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' },
-      { note: 'settings.minimax.codeNote', when: { field: 'minimaxBillingMode', values: ['code'] } }
+      { field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }
     ],
-    credentialWhen: { field: 'minimaxBillingMode', values: ['token-plan', 'api'] },
     manual: [{ note: 'settings.minimax.note' }, { field: 'minimaxApiKey' }],
     // Explicit choices follow the select even before the first probe. Auto
     // follows the last successful probe, with the historical CN fallback.

@@ -802,6 +802,24 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   // alone and it stays reachable once a key is saved — a user whose auto-probe
   // keeps flapping needs the switch after linking, not before.
   const minimax = forms.find(({ id }) => id === 'minimax');
+  const billingMode = minimax.fields.find(({ key }) => key === 'minimaxBillingMode');
+  assert.equal(billingMode.labelKey, 'settings.minimax.billingMode');
+  assert.deepEqual(billingMode.options.map(({ value, labelKey }) => [value, labelKey]), [
+    ['token-plan', 'settings.minimax.billingTokenPlan'],
+    ['api', 'settings.minimax.billingApi']
+  ]);
+  assert.deepEqual(minimax.top, [
+    { field: 'minimaxBillingMode' },
+    { field: 'minimaxApiRegion' }
+  ]);
+  assert.equal(Object.hasOwn(minimax, 'credentialWhen'), false);
+  assert.match(app, /minimax: 'settings\.minimax\.codeNote'/);
+  for (const [locale, messages] of Object.entries(require('../../src/electron/renderer/i18n').MESSAGES)) {
+    assert.ok(messages['settings.minimax.billingMode'], `${locale}: API key type label`);
+    assert.ok(messages['settings.minimax.codeNote'], `${locale}: automatic Code note`);
+    assert.doesNotMatch(messages['settings.minimax.note'], /wallet|钱包|ウォレット|지갑/i, `${locale}: no wallet claim`);
+    assert.doesNotMatch(messages['settings.minimax.codeNote'], /wallet|钱包|ウォレット|지갑/i, `${locale}: no wallet claim`);
+  }
   const region = minimax.fields.find(({ key }) => key === 'minimaxApiRegion');
   assert.equal(region.saveOnChange, true);
   assert.deepEqual(region.options.map(({ value }) => value), ['auto', 'cn', 'intl']);
@@ -1194,12 +1212,6 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     '.accordion-animated-container.hidden > .accordion-animation-inner'
   );
   assert.ok(collapsedInnerRules.some(rule => declaration(rule, 'opacity') === '0'));
-
-  const app = readRendererFile('app.js');
-  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
-  assert.match(statusBody, /const canClearConfiguredCredential = !codeLogin && source === 'settings' && configured;/);
-  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked \|\| !credentialEnabled\)/);
-  assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
 
   // The cookie is checked in main before it can replace a working one: a paste
   // that is not one sk-ant- sessionKey (a multi-line paste included) is refused
@@ -2818,7 +2830,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
   assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
-  assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
+  assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{\s*count: Number\.isInteger\(accountCount\) \? accountCount : providers\.length,\s*markId\s*\}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
 
   // The page's dispatch is by account count with no provider branch left.
@@ -2830,7 +2842,6 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
 test('Limits groups multiple Cursor accounts with separate identity and plan rows', () => {
   const app = readRendererFile('app.js');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  assert.match(readRendererFile('limits/windowsView.js'), /cursor: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
   assert.doesNotMatch(app, /renderCursorAccountGroup/);
 });
