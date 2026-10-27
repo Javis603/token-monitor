@@ -81,7 +81,7 @@
     { id: 'kiro', label: 'Kiro' },
     { id: 'codebuddy', label: 'CodeBuddy' },
     { id: 'workbuddy', label: 'WorkBuddy' },
-    { id: 'proma', label: 'Proma', forkOnly: true },
+    { id: 'proma', label: 'Proma' },
     { id: 'catpaw', label: 'CatPaw', defaultTracked: false, forkOnly: true },
     { id: 'qodercn', label: 'Qoder CN', defaultTracked: false, forkOnly: true },
     { id: 'reasonix', label: 'Reasonix' },
