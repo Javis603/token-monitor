@@ -8014,7 +8014,7 @@ app.whenReady().then(() => {
     applySettingsPatch(patch, (refresh) => { dotsVisibilityApplied = refresh; });
     await latestUsageHost?.transformSettingsApplied?.();
     await dotsVisibilityApplied;
-    finishPluginChange?.();
+    await finishPluginChange?.();
     // Other settings writes may finish while this visibility projection waits.
     // Return the latest saved selection rather than restoring an older one.
     return settingsForRenderer();

@@ -240,6 +240,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     preview,
     previewFile(file) { assertAvailable(); return preview(parsePackage(readBounded(file, MAX_PACKAGE_BYTES))); },
     previewDirectory(dir) { assertAvailable(); return preview(packageDirectory(dir)); },
+    previewId: token => previews.get(token)?.pkg.manifest.id,
     cancel(token) { previews.delete(token); },
     cancelSource(id) { for (const [token, preview] of previews) if (preview.origin.id === id) previews.delete(token); },
     async install(token) {

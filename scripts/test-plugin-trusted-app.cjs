@@ -36,6 +36,7 @@ fs.writeFileSync(path.join(fixtureDir, 'ui.mjs'), `
 import { activate as base } from './basic.mjs';
 export function activate(ctx) {
   const basic = base(ctx);
+  ctx.onDispose(() => { if (globalThis.fixtureCleanupFailure) throw Error('Intentional fixture cleanup failure'); });
   return { ...basic, mount(container, context) {
     if (['section','inline','navigation','navigation-second'].includes(context.viewId)) {
       const label = document.createElement('span');
@@ -106,7 +107,7 @@ app.whenReady().then(async () => {
   const handlers = {
     'settings:get': () => settings,
     'settings:displayPreview': (_event, surface, phase, slots) => require('../src/electron/displayPreview').buildDisplayPreview(settings, surface, phase, process.platform, Date.now(), slots),
-    'settings:update': async (event, patch) => { const after = await runtime.beforeSettingsChange(event, patch); settings = { ...settings, ...patch }; runtime.settingsChanged(); after(); return settings; },
+    'settings:update': async (event, patch) => { const after = await runtime.beforeSettingsChange(event, patch); settings = { ...settings, ...patch }; runtime.settingsChanged(); await after(); return settings; },
     'app:getInfo': () => ({ version: 'fixture', platform: process.platform, systemUiTheme: 'dark', loginItemSupported: false }),
     'appUpdate:get': () => ({}), 'appearance:getNativeMaterial': () => null,
     'stats:get': () => stats, 'stream:status': () => ({ connected: true, mode: 'local' }),
@@ -131,8 +132,9 @@ app.whenReady().then(async () => {
   });
   const demandListener = event => pluginCalls.push({ channel: 'plugins:demand', frameUrl: event.senderFrame?.url });
   ipcMain.on('plugins:demand', demandListener);
+  const toggleDialogs = []; let toggleResponse = 1;
   runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain: pluginIpc, session, utilityProcess,
-    dialog: { showMessageBox: async () => ({ response: 1 }), showOpenDialog: async () => ({ canceled: false, filePaths: [fixtureDir] }) } },
+    dialog: { showMessageBox: async (_owner, options) => { toggleDialogs.push(options); return { response: toggleResponse }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [fixtureDir] }) } },
     userDataDir: scratch, getSettings: () => settings, getAppSettings: () => settings, getContext: () => ({ source: 'fixture' }), getLocale: () => 'zh-TW',
     isMainSender: event => event.sender === win.webContents, persistPluginStates: pluginStates => patch({ pluginStates }), persistManagementSettings: patch,
     applySettingsPatch: patch, env: {}, log: console.log });
@@ -214,6 +216,90 @@ app.whenReady().then(async () => {
   }
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
+  if (process.env.TM_TOGGLE_ONLY === '1') {
+    const baseline = process.env.TM_EXPECT_BASELINE === '1';
+    let mainLoads = 0; win.webContents.on('did-finish-load', () => mainLoads++);
+    const openPlugins = async () => {
+      await js("openSettingsPanel();for(const section of SETTINGS_SECTION_IDS)setSettingsSectionExpanded(section,section==='plugins');pluginSettingsPanel.refresh()");
+      await waitFor("document.querySelector('#pluginSettingsList .plugin-enable')", 'plugin switch');
+      await js("document.querySelector('#pluginSettingsList .plugin-back')?.click();renderSettingsSummaries()");
+      await js("document.querySelector('#pluginSettingsList').scrollIntoView({block:'start',behavior:'instant'})");
+      await pause(200);
+    };
+    await openPlugins();
+    await js("document.querySelector('#pluginSettingsList .plugin-enable').click()");
+    await waitFor("document.querySelector('#pluginSettingsList .plugin-consent')", 'first trust');
+    fs.writeFileSync(path.join(evidence,'first-trust.png'),(await capture()).toPNG());
+    await js("document.querySelector('#pluginSettingsList .plugin-allow').click()");
+    await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'", 'trusted enabled');
+    await js("pluginApi.place('trusted-fixture/panel','home',true).then(applyPluginCatalog);els.settingsPanel.classList.add('hidden');openViewFromTray('home')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'live home');
+    await openPlugins();
+    const previousLoads = mainLoads;
+    const oldReload = baseline ? new Promise(resolve=>win.webContents.once('did-finish-load',resolve)) : null;
+    await js("setTimeout(()=>document.querySelector('#pluginSettingsList .plugin-enable').click(),0);void 0");
+    if(oldReload) await oldReload;
+    await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='disabled'", 'disabled');
+    await pause(300); await openPlugins();
+    const loadsAfterDisable = mainLoads - previousLoads;
+    if (!baseline) { assert.equal(loadsAfterDisable,0);assert.equal(toggleDialogs.length,0); }
+    await js("document.querySelector('#pluginSettingsList .plugin-enable').click()");
+    if (baseline) await waitFor("document.querySelector('#pluginSettingsList .plugin-consent')", 'baseline repeated consent');
+    else await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active' && !document.querySelector('#pluginSettingsList .plugin-consent')", 'one-click resume');
+    await pause(1200);
+    await js("renderSettingsSummaries();(document.querySelector('#pluginSettingsList .plugin-consent') || document.querySelector('#pluginSettingsList .plugin-card-head')).scrollIntoView({block:'center',behavior:'instant'})");
+    await pause(200);
+    fs.writeFileSync(path.join(evidence,'reenable.png'),(await capture()).toPNG());
+    if (!baseline) {
+      await js("els.settingsPanel.classList.add('hidden');openViewFromTray('home')");
+      await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'restored home');
+      await js("tokenMonitor.plugins.openPage('trusted-fixture/panel')");
+      let detached;
+      for(let i=0;i<150;i++) {
+        detached=BrowserWindow.getAllWindows().find(item=>item!==win);
+        if(detached && !detached.webContents.isLoading() && await detached.webContents.executeJavaScript("Boolean(document.querySelector('[aria-label=\"Fixture draft\"]'))"))break;
+        await pause(40);
+      }
+      assert.ok(detached);let detachedLoads=0;detached.webContents.on('did-finish-load',()=>detachedLoads++);
+      await detached.webContents.executeJavaScript("document.querySelector('[aria-label=\"Fixture draft\"]').value='未保存的獨立視窗草稿'");
+      toggleResponse=0;
+      assert.match(await js("pluginApi.setEnabled('trusted-fixture',false).then(()=>'unexpected success',error=>String(error.message||error))"),/cancelled/);
+      console.log('PASS cancelled disable keeps active plugin');
+      assert.equal(runtime.manager.active('trusted-fixture'),true);
+      assert.equal(await detached.webContents.executeJavaScript("document.querySelector('[aria-label=\"Fixture draft\"]').value"),'未保存的獨立視窗草稿');
+      toggleResponse=1;await js("pluginApi.setEnabled('trusted-fixture',false)");console.log('PASS confirmed disable completed');
+      assert.equal(runtime.manager.backendCount(),0);assert.equal(detachedLoads,0);assert.equal(mainLoads,0);
+      assert.equal(await detached.webContents.executeJavaScript("document.querySelector('[aria-label=\"Fixture draft\"]')===null"),true);
+      await waitFor("state.pluginCatalog.plugins[0].status==='disabled'", 'catalog disabled');
+      await openPlugins();fs.writeFileSync(path.join(evidence,'disabled.png'),(await capture()).toPNG());
+      await js("document.querySelector('#pluginSettingsList .plugin-enable').click()");
+      await waitFor("state.pluginCatalog.plugins[0].status==='active'", 'resume again');
+      for(let i=0;i<100&&!await detached.webContents.executeJavaScript("Boolean(document.querySelector('[aria-label=\"Fixture draft\"]'))");i++)await pause(30);
+      assert.equal(await detached.webContents.executeJavaScript("Boolean(document.querySelector('[aria-label=\"Fixture draft\"]'))"),true);
+      assert.equal(detachedLoads,0);assert.equal(mainLoads,0);
+      console.log('PASS actual first trust, one-click unchanged resume, no reload, detached unsaved cancel/continue, backend stop, same-window reactivation');
+      const dialogCount=toggleDialogs.length;
+      await js("tokenMonitor.updateSettings({pluginsEnabled:false})");
+      assert.equal(runtime.manager.backendCount(),0);assert.equal(runtime.manager.hasActive(),false);
+      await js("tokenMonitor.updateSettings({pluginsEnabled:true})");
+      assert.equal(runtime.manager.active('trusted-fixture'),true);assert.equal(toggleDialogs.length,dialogCount);
+      assert.equal(mainLoads,0);assert.equal(detachedLoads,0);
+      console.log('PASS production settings bridge master off/on reuses trust without reload');
+      toggleResponse=0;await js("globalThis.fixtureCleanupFailure=true;pluginApi.setEnabled('trusted-fixture',false)");
+      assert.equal(runtime.manager.active('trusted-fixture'),false);assert.equal(mainLoads,0);
+      assert.match(await js("pluginApi.setEnabled('trusted-fixture',true).then(()=>'unexpected success',error=>String(error.message||error))"),/cancelled/);
+      toggleResponse=1;
+      const recovered = new Promise(resolve=>win.webContents.once('did-finish-load',resolve));
+      await js("pluginApi.setEnabled('trusted-fixture',true)");await recovered;
+      await waitFor("state.stats?.periods?.today?.totalTokens===125000 && state.pluginCatalog?.plugins?.[0]?.status==='active'", 'recovery renderer ready');
+      assert.equal(mainLoads,1);assert.equal(detachedLoads,0);
+      console.log('PASS failed cleanup remains disabled, recovery is explicit and reloads only failed host');
+    }
+    fs.writeFileSync(path.join(evidence,'toggle-results.json'),JSON.stringify({baseline,mainLoads,loadsAfterDisable,dialogs:toggleDialogs,errors,electron:process.versions.electron},null,2));
+    assertConsoleClean(baseline?[]:['Intentional fixture cleanup failure']);
+    for(const host of BrowserWindow.getAllWindows())host.destroy();
+    await runtime.dispose();runtime=null;clearTimeout(deadline);app.exit(0);return;
+  }
   await js("pluginApi.setEnabled('trusted-fixture',true)");
   if (process.env.TM_PLACEMENTS_ONLY === '1') {
     // Exercise the installed-view route through the real existing composers.
@@ -414,18 +500,18 @@ app.whenReady().then(async () => {
   assert.match(await js("document.querySelector('[data-plugin-target=\"main.model.content\"] .plugin-inline-error').textContent"), /Intentional fixture update failure/);
   fs.writeFileSync(path.join(evidence, 'comparison-failed-update.png'), (await capture()).toPNG());
   console.log('PASS real ResizeObserver failure stays contained and native content survives later pushes');
-  const reloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+  let disableReloads = 0; win.webContents.on('did-finish-load', () => disableReloads++);
   await js("pluginApi.setEnabled('trusted-fixture',false)");
-  await reloaded;
-  await waitFor("state.stats?.periods?.today?.totalTokens === 125000 && state.pluginCatalog?.plugins?.[0]?.status === 'disabled'", 'disabled renderer reinitialization');
+  assert.equal(disableReloads, 0);
+  await waitFor("state.stats?.periods?.today?.totalTokens === 125000 && state.pluginCatalog?.plugins?.[0]?.status === 'disabled'", 'disabled catalog update');
   await js("openViewFromTray('model')");
   assert.equal(await js("document.querySelectorAll('.plugin-content').length"), 0);
   await waitFor("state.breakdown === 'model' && els.breakdown.querySelectorAll('.row').length === 2", 'disabled native model rows');
   assert.equal(await js('els.breakdown.hidden'), false);
   assert.equal(runtime.manager.backendCount(), 0);
   fs.writeFileSync(path.join(evidence, 'comparison-disabled.png'), (await capture()).toPNG());
-  fs.writeFileSync(path.join(evidence, 'coverage-results.json'), JSON.stringify({ coveredPages, sessionDetail:true, sectionRows:inlineCount, navigationOrder:true, trayCallback:true, authorSettings:true, disabledReloadRestored:true },null,2));
-  console.log('PASS all native page roots, session detail, section/inline, navigation order, native factory, settings, Tray callback, disable/reload/restoration');
+  fs.writeFileSync(path.join(evidence, 'coverage-results.json'), JSON.stringify({ coveredPages, sessionDetail:true, sectionRows:inlineCount, navigationOrder:true, trayCallback:true, authorSettings:true, disabledWithoutReloadRestored:true },null,2));
+  console.log('PASS all native page roots, session detail, section/inline, navigation order, native factory, settings, Tray callback, disable/cleanup/restoration');
   console.log('PASS Home mount/draft, local backend, explicit original-page replacement and native restoration');
   assert.equal(errors.filter(text => text.includes('Intentional fixture update failure')).length, 1);
   assertConsoleClean(['Intentional fixture update failure']);

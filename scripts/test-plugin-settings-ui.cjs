@@ -29,7 +29,7 @@ async function main() {
     const check = (name, ok, evidence) => { checks.push({name, ok: Boolean(ok), evidence}); };
     const box = document.getElementById('settings'), scroll = document.getElementById('scroll');
     const tick = () => new Promise(r => setTimeout(r, 20));
-    const data = {enabled:true, plugins:[{id:'alpha',types:['widget','page'],name:'Alpha',description:'Plugin description',version:'1.0.0',source:'user',status:'active',enabled:true,views:[{ref:'alpha/view',title:'View',surfaces:['home','page'],placements:{home:false}}],background:{supported:true,enabled:false},logs:[{at:0,level:'info',text:'Fixture ready'}],runtime:{state:'idle',cpuPercent:null,memoryMB:null}},{id:'beta',name:'Beta',source:'user',status:'disabled',enabled:false,views:[]}]};
+    const data = {enabled:true, plugins:[{id:'alpha',trusted:true,types:['widget','page'],name:'Alpha',description:'Plugin description',version:'1.0.0',source:'user',status:'active',enabled:true,views:[{ref:'alpha/view',title:'View',surfaces:['home','page'],placements:{home:false}}],background:{supported:true,enabled:false},logs:[{at:0,level:'info',text:'Fixture ready'}],runtime:{state:'idle',cpuPercent:null,memoryMB:null}},{id:'beta',name:'Beta',source:'user',status:'disabled',enabled:false,views:[]}]};
     let pending, reject, previewPending, catalogCalls = 0, importResult = null, copyFailure = false;
     let catalogMode = 'deferred', previewMode = 'success', globalMode = 'success', savedMasterEnabled = true;
     const catalog = {entries:[{id:'demo',types:['page'],name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'custom-fixture',kind:'community'},versions:[{version:'1.0.0',compatible:true,installable:true},{version:'2.0.0',compatible:true,installable:true}],status:'available'}],sources:[]};
@@ -110,6 +110,12 @@ async function main() {
     check('back-restores-list-position-and-logical-focus',document.activeElement===box.querySelector('.plugin-manage')&&scroll.scrollTop===60&&!box.querySelector('.plugin-detail'));
     const toggle=box.querySelector('.plugin-enable');toggle.focus({preventScroll:true});toggle.click();await tick();
     check('disable-does-not-reorder-plugin-or-lose-focus',[...box.querySelectorAll('[data-plugin-id]')].map(n=>n.dataset.pluginId).join(',')==='alpha,beta'&&document.activeElement===box.querySelector('.plugin-enable'));
+    box.querySelector('.plugin-enable').click();await tick();
+    check('trusted-unchanged-enable-skips-consent',data.plugins[0].enabled&&!box.querySelector('.plugin-consent'));
+    box.querySelector('.plugin-enable').click();await tick();data.plugins[0].trusted=false;await panel.refresh();
+    box.querySelector('.plugin-enable').click();await tick();
+    check('changed-revision-still-requires-consent',Boolean(box.querySelector('.plugin-consent'))&&!data.plugins[0].enabled);
+    click('settings.plugins.cancel');await tick();box.querySelector('.plugin-back').click();await tick();
     tab('discover').click();await tick();
     check('catalog-shares-identity-layout-with-no-inline-version-folds',Boolean(box.querySelector('.plugin-catalog .plugin-identity-art'))&&!box.querySelector('.plugin-catalog details'));
     box.querySelector('.plugin-toolbar > .plugin-inline-action').click();await tick();

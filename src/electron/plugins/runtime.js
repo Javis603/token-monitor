@@ -299,32 +299,80 @@ function createPluginRuntime({
     }
   }
 
-  async function confirmCodeChange(event) {
+  const lifecycleHosts = new Set(), observedLifecycleHosts = new WeakSet(), lifecycleRequests = new Map(), failedCleanup = new Map();
+  let lifecycleSequence = 0;
+  function requestLifecycle(host, action, ids) {
+    if (host.isDestroyed()) return Promise.resolve({});
+    return new Promise((resolve, reject) => {
+      const request = ++lifecycleSequence;
+      const finish = (error, value) => {
+        clearTimeout(timer); lifecycleRequests.delete(request);
+        error ? reject(new Error(error)) : resolve(value || {});
+      };
+      const timer = setTimeout(() => finish('Plugin UI did not respond'), 5000);
+      lifecycleRequests.set(request, { host, finish });
+      host.send('plugins:lifecycle', { request, action, ids });
+    });
+  }
+  async function inspectHosts(ids) {
+    const results = await Promise.all([...lifecycleHosts].map(async host => {
+      try { return { host, ...await requestLifecycle(host, 'inspect', ids) }; }
+      catch (error) { return { host, loaded: true, error: error.message }; }
+    }));
+    return results.filter(item => !item.host.isDestroyed() && item.loaded);
+  }
+  async function confirm(event, note) {
     requireMain(event);
-    if (manager.hasActive()) {
-      const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
-        type: 'warning', title: translate(getLocale(), 'plugins.trusted.reloadTitle'),
-        message: translate(getLocale(), 'plugins.trusted.reloadNote'),
-        buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.trusted.continue')],
-        defaultId: 0, cancelId: 0
-      });
-      if (response.response !== 1) throw new Error('Plugin change cancelled');
-    }
+    const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
+      type: 'warning', title: translate(getLocale(), note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : 'plugins.trusted.reloadTitle'),
+      message: translate(getLocale(), note),
+      buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.trusted.continue')],
+      defaultId: 0, cancelId: 0
+    });
+    if (response.response !== 1) throw new Error('Plugin change cancelled');
   }
-  function reloadHosts() {
-    setTimeout(() => {
-      if (disposed) return;
-      const hosts = new Set([...listListeners, ...[...subscribers.values()].map(item => item.webContents)]);
-      for (const host of hosts) if (!host.isDestroyed()) host.reload();
-      pages.reloadHosts();
-    }, 0);
+  function reloadHosts(hosts) {
+    setTimeout(() => { if (!disposed) for (const host of hosts) if (!host.isDestroyed()) host.reload(); }, 0);
   }
-  async function changeCode(event, change) {
-    const loaded = manager.hasActive();
-    await confirmCodeChange(event);
+  async function prepareDisable(event, ids) {
+    requireMain(event);
+    const affected = await inspectHosts(ids);
+    if (affected.some(item => item.error)) await confirm(event, 'plugins.trusted.reloadNote');
+    else if (affected.some(item => item.unsaved)) await confirm(event, 'plugins.trusted.unsavedNote');
+    return async () => {
+      const reload = affected.filter(item => item.error).map(item => item.host);
+      const results = await Promise.all(affected.filter(item => !item.error).map(async ({ host }) => {
+        try { await requestLifecycle(host, 'release', ids); return null; }
+        catch (error) { log(`[plugins] UI cleanup failed: ${error.message}`); return host; }
+      }));
+      const failed = results.filter(host => host && !host.isDestroyed());
+      for (const host of failed) failedCleanup.set(host, new Set([...(failedCleanup.get(host) || []), ...ids]));
+      if (failed.length) {
+        // The disable already persisted. Declining recovery must not silently
+        // re-enable partially disposed code; another enable will offer it again.
+        const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
+          type: 'warning', title: translate(getLocale(), 'plugins.trusted.reloadTitle'),
+          message: translate(getLocale(), 'plugins.trusted.cleanupNote'),
+          buttons: [translate(getLocale(), 'plugins.trusted.later'), translate(getLocale(), 'plugins.trusted.reloadNow')], defaultId: 1, cancelId: 0
+        });
+        if (response.response === 1) reload.push(...failed);
+      }
+      reloadHosts(reload);
+    };
+  }
+  async function resumeHosts(event, ids) {
+    const failed = [...failedCleanup].filter(([host, values]) => !host.isDestroyed() && ids.some(id => values.has(id))).map(([host]) => host);
+    if (failed.length) await confirm(event, 'plugins.trusted.reloadNote');
+    await Promise.all([...lifecycleHosts].filter(host => !failed.includes(host)).map(host => requestLifecycle(host, 'resume', ids)));
+    return () => reloadHosts(failed);
+  }
+  async function changeCode(event, change, ids = manager.list().plugins.map(plugin => plugin.id)) {
+    requireMain(event);
+    const affected = await inspectHosts(ids);
+    if (affected.length) await confirm(event, 'plugins.trusted.reloadNote');
     await change();
     const result = listWithPlacements();
-    if (loaded) reloadHosts();
+    reloadHosts(affected.map(item => item.host));
     return result;
   }
 
@@ -355,10 +403,11 @@ function createPluginRuntime({
     });
     handle('plugins:getSettings', (event, id) => { requireMain(event); return settingsResult(() => manager.getAuthorSettings(id)); });
     handle('plugins:updateSettings', (event, id, input) => { requireMain(event); return settingsResult(() => manager.updateAuthorSettings(id, input)); });
-    handle('plugins:setEnabled', (event, { id, enabled } = {}) => {
-      requireMain(event);
-      if (!enabled) return changeCode(event, () => manager.setEnabled(String(id), false));
-      manager.setEnabled(String(id), true);
+    handle('plugins:setEnabled', async (event, { id, enabled } = {}) => {
+      requireMain(event); id = String(id);
+      const finish = enabled ? await resumeHosts(event, [id]) : await prepareDisable(event, [id]);
+      manager.setEnabled(id, enabled === true);
+      await finish();
       return listWithPlacements();
     });
     handle('plugins:setBackground', (event, { id, enabled } = {}) => {
@@ -397,10 +446,10 @@ function createPluginRuntime({
       if (selection.canceled || !selection.filePaths.length) return null;
       return kind === 'directory' ? managed.previewDirectory(selection.filePaths[0]) : managed.previewFile(selection.filePaths[0]);
     });
-    handle('plugins:install', (event, token) => changeCode(event, () => managed.install(token)));
+    handle('plugins:install', (event, token) => changeCode(event, () => managed.install(token), [managed.previewId(token)]));
     handle('plugins:cancelInstall', (event, token) => { requireMain(event); managed.cancel(token); });
-    handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id)));
-    handle('plugins:uninstall', (event, id, options) => changeCode(event, () => managed.uninstall(id, options)));
+    handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id), [id]));
+    handle('plugins:uninstall', (event, id, options) => changeCode(event, () => managed.uninstall(id, options), [id]));
     handle('plugins:openPage', (event, ref) => { requireMain(event); pages.open(ref); return { ok: true }; });
     handle('plugins:openFolder', async (event) => {
       requireMain(event);
@@ -423,6 +472,26 @@ function createPluginRuntime({
     const requireHost = event => {
       if (!mainSender(event) && !['notch', 'edgeDock'].some(surface => isSurfaceSender(event, surface)) && !pages.ownsSender(event.sender)) throw new Error('Unknown plugin UI host');
     };
+    on('plugins:lifecycleHost', (event, registered) => {
+      try { requireHost(event); } catch { return; }
+      const host = event.sender;
+      if (!registered) { lifecycleHosts.delete(host); return; }
+      if (lifecycleHosts.has(host)) return;
+      lifecycleHosts.add(host);
+      if (observedLifecycleHosts.has(host)) return;
+      observedLifecycleHosts.add(host);
+      const clear = () => {
+        lifecycleHosts.delete(host); failedCleanup.delete(host);
+        for (const pending of lifecycleRequests.values()) if (pending.host === host) pending.finish(null, {});
+      };
+      const navigate = (_event, _url, _inPlace, mainFrame) => { if (mainFrame !== false) clear(); };
+      host.once('destroyed', clear); host.on('did-start-navigation', navigate);
+      observerCleanup.push(() => { host.removeListener('destroyed', clear); host.removeListener('did-start-navigation', navigate); });
+    });
+    on('plugins:lifecycleReply', (event, reply) => {
+      const pending = lifecycleRequests.get(reply?.request);
+      if (pending?.host === event.sender && (!event.senderFrame || event.senderFrame === event.sender.mainFrame)) pending.finish(reply.error, reply.value);
+    });
     handle('plugins:call', (event, id, method, args) => { requireHost(event); return manager.call(id, method, args); });
     handle('plugins:host', (event, id, method, args) => { requireHost(event); return hostCall(id, method, args); });
     handle('plugins:subscribe', (event, id, query) => {
@@ -477,9 +546,9 @@ function createPluginRuntime({
       return manager.call(id, 'tray', { id: action });
     },
     async beforeSettingsChange(event, patch) {
-      const reload = patch.pluginsEnabled === false && manager.hasActive();
-      if (reload) await confirmCodeChange(event);
-      return () => { if (reload) reloadHosts(); };
+      if (patch.pluginsEnabled === undefined || patch.pluginsEnabled === getSettings().pluginsEnabled) return () => {};
+      const ids = manager.list().plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id);
+      return patch.pluginsEnabled === false ? prepareDisable(event, ids) : resumeHosts(event, ids);
     },
     refreshBusinessData,
     refreshWindowVisibility(win) {
@@ -530,6 +599,8 @@ function createPluginRuntime({
       for (const channel of ipcHandlers) ipcMain.removeHandler(channel);
       for (const [channel, listener] of ipcListeners) ipcMain.removeListener(channel, listener);
       observerCleanup.forEach(cleanup => cleanup());
+      for (const pending of lifecycleRequests.values()) pending.finish('Plugin runtime disposed');
+      lifecycleHosts.clear(); failedCleanup.clear();
       subscribers.clear(); listListeners.clear();
       if (changedTimer) clearTimeout(changedTimer);
       catalog.dispose();

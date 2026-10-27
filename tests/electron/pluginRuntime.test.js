@@ -76,6 +76,7 @@ test('replacement selection requires an active declared replacement; cancelling 
   const selected = f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/content');
   assert.equal(selected.contentSelections['main.limits.content'], 'trusted-fixture/content');
   assert.throws(() => f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/panel'));
+  f.lifecycle(f.main, () => ({ loaded: true, unsaved: true }));
   f.cancel(); await assert.rejects(f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false }), /cancelled/);
   assert.equal(f.runtime.manager.active('trusted-fixture'), true);
 });
@@ -170,4 +171,56 @@ for (const keepPlacements of [false,true]) test(`uninstall compact placements ke
   assert.deepEqual(f.settings.notchPageOrder,keepPlacements?['plugin:'+ref,'home','plugin:'+other]:['home','plugin:'+other]);
   await f.runtime.manager.reload();await f.install();
   assert.equal(f.invoke('plugins:list').plugins[0].enabled,false);assert.equal(f.runtime.manager.backendCount(),0);
+});
+
+
+test('unchanged trust survives off/on and restart; changed bytes require fresh consent metadata', async t => {
+  const f = await runtimeFixture(t); await f.install();
+  assert.equal(f.invoke('plugins:list').plugins[0].trusted, false);
+  await f.invoke('plugins:setEnabled', { id:'trusted-fixture', enabled:true });
+  const revision = f.settings.pluginStates['trusted-fixture'].trustedRevision;
+  f.lifecycle(f.main, () => ({ loaded:true, unsaved:false }));
+  await f.invoke('plugins:setEnabled', { id:'trusted-fixture', enabled:false });
+  assert.equal(f.invoke('plugins:list').plugins[0].trusted, true);
+  await f.invoke('plugins:setEnabled', { id:'trusted-fixture', enabled:true });
+  await f.runtime.manager.reload();
+  assert.equal(f.invoke('plugins:list').plugins[0].trusted, true);
+  assert.equal(f.settings.pluginStates['trusted-fixture'].trustedRevision, revision);
+  assert.equal(f.dialogs.length, 0); assert.equal(f.main.webContents.reloads, 0);
+  fs.appendFileSync(path.join(f.dir,'plugins/trusted-fixture/ui.mjs'),'\n// new code'); await f.runtime.manager.reload();
+  assert.equal(f.invoke('plugins:list').plugins[0].trusted, false);
+});
+test('cooperative disable reaches only loaded hosts and stops backend without reloading', async t => {
+  const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true});
+  const calls = [];
+  f.lifecycle(f.main, request => { calls.push(['main',request.action]); return {loaded:true,unsaved:false}; });
+  f.lifecycle(f.notch, request => { calls.push(['notch',request.action]); return {loaded:false}; });
+  f.send(f.main,'home'); await tick(); assert.equal(f.runtime.manager.backendCount(),1);
+  await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:false}); await tick();
+  assert.equal(f.runtime.manager.backendCount(),0); assert.equal(f.dialogs.length,0);
+  assert.ok(calls.some(([host,action])=>host==='main'&&action==='release'));
+  assert.ok(!calls.some(([host,action])=>host==='notch'&&action==='release'));
+  assert.equal(f.main.webContents.reloads+f.notch.webContents.reloads,0);
+});
+test('failed cleanup stays disabled; cancel recovery preserves other hosts and re-enable asks again', async t => {
+  const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true});
+  f.lifecycle(f.notch, request => { if(request.action==='release')throw Error('dispose failed');return {loaded:true}; });
+  f.cancel(); await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:false});
+  assert.equal(f.runtime.manager.active('trusted-fixture'),false); assert.equal(f.dialogs.length,1);
+  assert.equal(f.notch.webContents.reloads,0);
+  await assert.rejects(f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true}),/cancelled/);
+  f.accept(); await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true});
+  await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(f.notch.webContents.reloads,1); assert.equal(f.main.webContents.reloads,0);
+});
+test('master pause checks drafts before mutation and disposes after persistence; resume reuses trust', async t => {
+  const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true});
+  const actions=[]; f.lifecycle(f.main, request=>{actions.push(request.action);return {loaded:true,unsaved:true};});
+  f.cancel(); await assert.rejects(f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:false}),/cancelled/);
+  assert.equal(f.settings.pluginsEnabled,true); assert.ok(!actions.includes('release'));
+  f.accept(); const finish=await f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:false});
+  f.settings.pluginsEnabled=false;f.runtime.settingsChanged();await finish();assert.ok(actions.includes('release'));
+  const resume=await f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:true});
+  f.settings.pluginsEnabled=true;f.runtime.settingsChanged();await resume();
+  assert.equal(f.runtime.manager.active('trusted-fixture'),true);assert.equal(f.main.webContents.reloads,0);
 });

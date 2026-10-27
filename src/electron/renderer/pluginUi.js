@@ -1,14 +1,14 @@
 'use strict';
 
 // Trusted same-page modules. Disposal is cooperative; a clean renderer reload
-// is required when changing executable revisions or disabling loaded code.
+// remains the recovery path for changed code or failed/unresponsive cleanup.
 (function expose(root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorPluginUi = api;
 })(typeof window !== 'undefined' ? window : null, function createApi() {
   function createHost({ document, window, bridge, services = {}, importModule = url => import(url), onError = () => {}, onLoaded = () => {} }) {
-    const modules = new Map(), mounts = new Map();
+    const modules = new Map(), mounts = new Map(), blocked = new Set(), jobs = new Map(), failures = new Map();
     let disposed = false;
     function report(error, record) {
       if (record && (disposed || mounts.get(record.container) !== record || record.failed)) return;
@@ -22,7 +22,21 @@
         record.container.append(text);
       }
     }
+    function track(id, operation) {
+      const pending = Promise.resolve(operation).catch(error => {
+        failures.set(id, String(error?.message || error)); onError(error);
+      });
+      if (!jobs.has(id)) jobs.set(id, new Set());
+      jobs.get(id).add(pending);
+      void pending.finally(() => { jobs.get(id)?.delete(pending); if (!jobs.get(id)?.size) jobs.delete(id); });
+      return pending;
+    }
+    function cleanup(id, fn) {
+      try { return track(id, fn()); }
+      catch (error) { return track(id, Promise.reject(error)); }
+    }
     function load(descriptor) {
+      if (disposed || blocked.has(descriptor.pluginId)) return Promise.reject(new Error('Plugin UI is disabled'));
       const key = `${descriptor.pluginId}:${descriptor.revision}`;
       if (!modules.has(key)) modules.set(key, (async () => {
         const cleanup = [], listeners = new Set();
@@ -42,7 +56,7 @@
                 const index = cleanup.indexOf(dispose);
                 if (index >= 0) cleanup.splice(index, 1);
                 waiting.length = 0;
-                if (subscription !== undefined) void bridge.unsubscribeData(subscription).catch(error => onError(error, descriptor));
+                if (subscription !== undefined) return track(descriptor.pluginId, bridge.unsubscribeData(subscription));
               };
               const off = bridge.onData(message => {
                 if (subscription === undefined) waiting.push(message);
@@ -79,11 +93,11 @@
           const instance = module.activate ? await module.activate(ctx) : module;
           if (typeof instance?.mount !== 'function' && typeof instance?.renderTray !== 'function') throw new Error('Plugin UI must implement mount or renderTray');
           cleanup.push(() => instance.dispose?.());
-          const loaded = { instance, ctx, cleanup };
+          const loaded = { instance, ctx, cleanup, release() { released = true; } };
           modules.get(key).loaded = loaded;
-          onLoaded(descriptor);
+          if (!disposed && !blocked.has(descriptor.pluginId)) onLoaded(descriptor);
           return loaded;
-        } catch (error) { for (const fn of cleanup.splice(0).reverse()) { try { fn(); } catch {} } throw error; }
+        } catch (error) { for (const fn of cleanup.splice(0).reverse()) { try { await fn(); } catch (cause) { failures.set(descriptor.pluginId, String(cause)); onError(cause); } } throw error; }
       })());
       return modules.get(key);
     }
@@ -91,20 +105,29 @@
       return { ...record.context, viewId: record.descriptor.id, ref: record.descriptor.ref,
         data: record.descriptor.data, container: record.container };
     }
-    async function update(record) {
-      if (record.failed || disposed || mounts.get(record.container) !== record) return;
-      try { await record.instance?.update?.(context(record)); }
-      catch (error) { report(error, record); }
+    function update(record) {
+      if (record.failed || disposed || blocked.has(record.descriptor.pluginId) || mounts.get(record.container) !== record) return;
+      const pending = track(record.descriptor.pluginId, (async () => {
+        try { await record.instance?.update?.(context(record)); }
+        catch (error) { report(error, record); }
+      })());
+      (record.updates ||= new Set()).add(pending);
+      void pending.finally(() => record.updates.delete(pending));
+      return pending;
     }
     function unmount(container) {
       const record = mounts.get(container);
       if (!record) return;
       mounts.delete(container); record.observer?.disconnect();
-      try { record.instance?.dispose?.(); } catch (error) { onError(error, record.descriptor); }
+      record.context.onMountStatus?.(false);
+      if (record.instance) cleanup(record.descriptor.pluginId, async () => {
+        if (record.updates?.size) await Promise.all([...record.updates]);
+        await record.instance.dispose?.();
+      });
       container.replaceChildren();
     }
-    async function mount(container, descriptor, value = {}) {
-      if (disposed) return;
+    async function mountRecord(container, descriptor, value = {}) {
+      if (disposed || blocked.has(descriptor.pluginId)) return;
       const previous = mounts.get(container);
       if (previous && previous.descriptor.ref === descriptor.ref && previous.descriptor.revision === descriptor.revision) {
         previous.descriptor = descriptor; previous.context = { ...previous.context, ...value };
@@ -118,11 +141,12 @@
       mounts.set(container, record);
       try {
         const loaded = await load(descriptor);
-        if (disposed || mounts.get(container) !== record) return;
+        if (disposed || blocked.has(descriptor.pluginId) || mounts.get(container) !== record) return;
         if (typeof loaded.instance.mount !== 'function') throw new Error('This plugin has no content mount');
         const initialContext = record.context;
         record.instance = (await loaded.instance.mount(container, context(record))) || {};
-        if (disposed || mounts.get(container) !== record) { record.instance?.dispose?.(); return; }
+        if (disposed || mounts.get(container) !== record) { await cleanup(descriptor.pluginId, () => record.instance?.dispose?.()); return; }
+        if (blocked.has(descriptor.pluginId)) return;
         if (record.context !== initialContext) await record.instance.update?.(context(record));
         record.context.onMountStatus?.(true);
         if (window.ResizeObserver) {
@@ -136,7 +160,40 @@
         }
       } catch (error) { report(error, record); }
     }
-    return { mount, unmount,
+    function mount(container, descriptor, value) {
+      return track(descriptor.pluginId, mountRecord(container, descriptor, value));
+    }
+    function hasUnsavedChanges(ids) {
+      return [...mounts.values()].some(record => (!ids || ids.includes(record.descriptor.pluginId)) && record.instance?.hasUnsavedChanges?.() === true);
+    }
+    async function release(ids) {
+      for (const id of ids) blocked.add(id);
+      // Let in-flight activation/mount/update settle before disposal, so an
+      // asynchronous update cannot recreate resources after its cleanup ran.
+      // Main bounds this wait; hung author code requires renderer recovery.
+      for (const id of ids) while (jobs.has(id)) await Promise.all([...jobs.get(id)]);
+      for (const [container, record] of mounts) if (ids.includes(record.descriptor.pluginId)) unmount(container);
+      for (const id of ids) while (jobs.has(id)) await Promise.all([...jobs.get(id)]);
+      for (const [key, promise] of modules) {
+        const id = key.slice(0, key.indexOf(':'));
+        if (!ids.includes(id)) continue;
+        try {
+          const loaded = await promise; loaded.release();
+          for (const fn of loaded.cleanup.splice(0).reverse()) await cleanup(id, fn);
+        } catch { /* failed activation already drained its owned resources */ }
+        modules.delete(key);
+      }
+      for (const id of ids) while (jobs.has(id)) await Promise.all([...jobs.get(id)]);
+      const errors = ids.flatMap(id => failures.has(id) ? [`${id}: ${failures.get(id)}`] : []);
+      if (errors.length) throw new Error(errors.join('; '));
+    }
+    const offLifecycle = bridge.onLifecycle?.(async ({ action, ids }) => {
+      if (action === 'inspect') return { loaded: [...modules.keys()].some(key => ids.some(id => key.startsWith(id + ':'))), unsaved: hasUnsavedChanges(ids) };
+      if (action === 'release') { await release(ids); return {}; }
+      if (action === 'resume') { for (const id of ids) if (!failures.has(id)) blocked.delete(id); return {}; }
+      throw new Error('Unknown plugin lifecycle operation');
+    });
+    return { mount, unmount, release,
       setVisibility(container, visible) {
         const record = mounts.get(container);
         if (!record || record.context.visible === visible) return;
@@ -145,6 +202,7 @@
       },
       load,
       renderTray(descriptor, canvas, context) {
+        if (blocked.has(descriptor.pluginId) || disposed) return false;
         const key = `${descriptor.pluginId}:${descriptor.revision}`;
         const loaded = modules.get(key)?.loaded;
         if (!loaded) { void load(descriptor).catch(onError); return false; }
@@ -154,15 +212,12 @@
           return true;
         } catch (error) { loaded.trayFailed = true; onError(error, descriptor); return false; }
       },
-      hasUnsavedChanges() { return [...mounts.values()].some(record => record.instance?.hasUnsavedChanges?.() === true); },
+      hasUnsavedChanges,
       sweep() { for (const container of mounts.keys()) if (!container.isConnected) unmount(container); },
       async dispose() {
-        disposed = true;
-        for (const container of [...mounts.keys()]) unmount(container);
-        for (const promise of modules.values()) {
-          try { const module = await promise; for (const fn of module.cleanup.splice(0).reverse()) await fn(); } catch (error) { onError(error); }
-        }
-        modules.clear();
+        disposed = true; offLifecycle?.();
+        const ids = [...new Set([...modules.keys()].map(key => key.slice(0, key.indexOf(':'))))];
+        try { await release(ids); } catch (error) { onError(error); }
       }
     };
   }

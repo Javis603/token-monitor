@@ -251,3 +251,48 @@ test('selector observation exists only for active targets and can discover initi
   views = [{ ...descriptor, mode: 'append', selector: '.metric' }]; content.render('main.home.content', native);
   content.dispose(); assert.equal(observers[1].active, false);
 });
+
+
+test('per-plugin release drains async mounts, subscriptions, styles and disposal, leaving other modules intact', async () => {
+  const document=dom();let lifecycle,off=0,disposed=0,activated=0,finish;
+  const a=document.createElement('div'),b=document.createElement('div');document.body.append(a,b);
+  const host=createHost({document,window:{},bridge:{onLifecycle(fn){lifecycle=fn;return ()=>{};},subscribe(){return ()=>off++;}},
+    importModule:async()=>({activate(ctx){activated++;ctx.onDispose(async()=>{await new Promise(setImmediate);disposed++;});return {mount(container){container.append(document.createElement('input'));return {dispose:()=>new Promise(resolve=>{finish=resolve;})};}};}})});
+  await host.mount(a,{...descriptor,css:['fixture.css']});
+  await host.load({...descriptor,pluginId:'other',revision:'two'});
+  assert.equal((await lifecycle({action:'inspect',ids:['fixture']})).loaded,true);
+  const release=host.release(['fixture']);await new Promise(setImmediate);
+  assert.equal(disposed,0);finish();await release;
+  assert.equal(disposed,1);assert.equal(off,1);assert.equal(document.head.children.length,0);assert.equal(a.children.length,0);
+  assert.equal((await lifecycle({action:'inspect',ids:['other']})).loaded,true);
+  await lifecycle({action:'resume',ids:['fixture']});await host.load(descriptor);assert.equal(activated,3);
+  await host.dispose();assert.equal(disposed,3);assert.equal(off,3);
+});
+test('pending activation is cleaned on disable without ever mounting; cleanup failures propagate for recovery', async () => {
+  const document=dom(),node=document.createElement('div');document.body.append(node);let resolve,mounted=0,cleaned=0;
+  const host=createHost({document,window:{},bridge:{},importModule:()=>new Promise(r=>{resolve=r;})});
+  const mount=host.mount(node,descriptor);const release=host.release(['fixture']);
+  resolve({mount(){mounted++;},dispose(){cleaned++;}});await mount;await release;
+  assert.equal(mounted,0);assert.equal(cleaned,1);await host.dispose();
+  const bad=createHost({document,window:{},bridge:{},importModule:async()=>({mount(){return {dispose:async()=>{throw Error('async disposal failure');}};}})});
+  await bad.mount(node,descriptor);await assert.rejects(bad.release(['fixture']),/async disposal failure/);await bad.dispose();
+});
+test('unsaved checks are per plugin, before cleanup, including retained hidden drafts', async () => {
+  const document=dom(),node=document.createElement('div');document.body.append(node);let lifecycle;
+  const host=createHost({document,window:{},bridge:{onLifecycle(fn){lifecycle=fn;}},importModule:async()=>({mount(){return {hasUnsavedChanges:()=>true};}})});
+  await host.mount(node,descriptor);
+  assert.equal((await lifecycle({action:'inspect',ids:['fixture']})).unsaved,true);
+  assert.equal((await lifecycle({action:'inspect',ids:['other']})).unsaved,false);await host.dispose();
+});
+
+
+test('disable waits for an asynchronous visibility update before disposing its resources', async () => {
+  const document=dom(),node=document.createElement('div');document.body.append(node);let finish;const order=[];
+  const host=createHost({document,window:{},bridge:{},importModule:async()=>({mount(){return {
+    update:()=>new Promise(resolve=>{finish=()=>{order.push('update finished');resolve();};}),dispose(){order.push('disposed');}
+  };}})});
+  await host.mount(node,descriptor);host.setVisibility(node,false);
+  host.unmount(node); // descriptor removal can arrive before the lifecycle release IPC
+  const release=host.release(['fixture']);await new Promise(setImmediate);assert.deepEqual(order,[]);
+  finish();await release;assert.deepEqual(order,['update finished','disposed']);await host.dispose();
+});

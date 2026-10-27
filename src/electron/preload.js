@@ -299,6 +299,15 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
 
 // Trusted plugin UI shares this renderer. This is routing, not plugin isolation.
 contextBridge.exposeInMainWorld('tokenMonitorTrustedPlugins', {
+  onLifecycle(callback) {
+    const listener = async (_event, request) => {
+      try { ipcRenderer.send('plugins:lifecycleReply', { request: request.request, value: await callback(request) }); }
+      catch (error) { ipcRenderer.send('plugins:lifecycleReply', { request: request.request, error: String(error?.message || error) }); }
+    };
+    ipcRenderer.on('plugins:lifecycle', listener);
+    ipcRenderer.send('plugins:lifecycleHost', true);
+    return () => { ipcRenderer.removeListener('plugins:lifecycle', listener); ipcRenderer.send('plugins:lifecycleHost', false); };
+  },
   contentSelections: () => ipcRenderer.invoke('plugins:contentSelections'),
   orderContent: (target, refs) => ipcRenderer.invoke('plugins:orderContent', target, refs),
   selectContent: (target, ref) => ipcRenderer.invoke('plugins:selectContent', target, ref),

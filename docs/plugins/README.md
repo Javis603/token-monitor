@@ -35,7 +35,7 @@ Bitmap views declaring `tray` can be added from the existing Tray, Floating Bubb
 
 ## UI lifecycle
 
-Export `activate(ctx)` returning `{mount, renderTray?, dispose?}`, or export `mount` directly. `mount(container, context)` may be asynchronous and returns `{update?, dispose?, hasUnsavedChanges?}`. The host retains mounted controls during data updates and ordinary page switching where that surface retains its DOM. Do not assume every native surface retains nodes: dispose timers/listeners and persist important drafts. The same module activates once per plugin revision per renderer, not once globally across windows.
+Export `activate(ctx)` returning `{mount, renderTray?, dispose?}`, or export `mount` directly. `mount(container, context)` may be asynchronous and returns `{update?, dispose?, hasUnsavedChanges?}`. The host retains mounted controls during data updates and ordinary page switching where that surface retains its DOM. Do not assume every native surface retains nodes: dispose timers/listeners and persist important drafts. The same module activates once per enabled lifetime per renderer, not once globally across windows. After disable it is disposed; re-enabling calls `activate` again. Native JavaScript import caching can retain the module namespace, so do not rely on top-level statements rerunning. Put reusable initialization in `activate`.
 
 `context` includes `viewId`, `ref`, `surface`, `container`, current backend `data`, and surface-specific values. Updates can include `visible`, width/height, selected period/source, native data and native content nodes. Do not start a new sampler for every mount. `ctx.onDispose(fn)` registers module cleanup; instance disposal owns mount-specific cleanup. CSS is loaded once per renderer/revision. Author CSS is free to choose its own look; host theme tokens are conveniences.
 
@@ -82,7 +82,7 @@ Subscriptions deliver `{type:'snapshot', value, sequence}` then coalesced invali
 
 ## Installation and recovery
 
-[Installation, revision trust, atomic updates, rollback and catalogs](distribution-design.md) are independent of execution freedom. Install remains disabled; explicitly trust each executable revision. Reload discovers changed package bytes and requires approval before running them. Updates/disable/removal can reload affected host renderers after a native warning, so save drafts first. Rollback restores code, not arbitrary migrations a trusted backend performed on its data.
+[Installation, revision trust, atomic updates, rollback and catalogs](distribution-design.md) are independent of execution freedom. Install remains disabled; explicitly trust each executable revision. Reload discovers changed package bytes and requires approval before running them. Unchanged trusted code re-enables directly. Normal disable awaits mount/module cleanup and stops its backend without reloading. Mounts reporting `hasUnsavedChanges()` prompt before disable; cleanup failure or an unresponsive host offers recovery reload. Updates/removal still warn before reloading affected loaded hosts, so save drafts first. Rollback restores code, not arbitrary migrations a trusted backend performed on its data.
 
 The native tray menu offers **Restart without plugins**. Alternatively launch with `--plugins-safe-mode` or `TOKEN_MONITOR_PLUGINS_SAFE_MODE=1`. Safe mode lists packages and permits management without starting author UI/backends. This recovery route does not depend on a responsive renderer. It cannot undo arbitrary filesystem changes made by trusted code.
 

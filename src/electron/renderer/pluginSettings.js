@@ -538,8 +538,8 @@
         toggle.type = 'checkbox'; toggle.checked = plugin.enabled; toggle.disabled = !list?.enabled;
         toggle.setAttribute('aria-label', t('settings.plugins.enable', { name: plugin.name }));
         toggle.addEventListener('change', () => {
-          if (toggle.checked) { consentFor = plugin.id; openPlugin(plugin.id); }
-          else void run(() => api.setEnabled(plugin.id, false), `plugin:${plugin.id}`);
+          if (toggle.checked && !plugin.trusted) { consentFor = plugin.id; openPlugin(plugin.id); }
+          else void run(() => api.setEnabled(plugin.id, toggle.checked), `plugin:${plugin.id}`);
         });
         const label = el(document, 'label', 'checkbox-label plugin-toggle'); label.append(toggle); head.append(label);
       }

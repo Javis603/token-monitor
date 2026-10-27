@@ -12,7 +12,7 @@ Install records the package but leaves it disabled. Enablement trusts the discov
 
 There is no granular capability consent. UI can change the shared renderer; a Node backend can access local files, credentials, network and subprocesses available to the OS user. Display location and background toggles control lifecycle, not containment. The App continues protecting its ordinary external interfaces and renderer secret projections, but these are not a security barrier against trusted local code.
 
-Executable updates, Reload, disable and removal warn about affected renderer reloads and possible unsaved state. A disabled backend loses demand and is stopped before package files move. The host requests cooperative cleanup, then terminates if needed. Arbitrary external side effects or child processes created by an unrestricted plugin are the author's responsibility; package rollback is not an OS transaction.
+Executable updates, Reload and removal warn before reloading hosts with affected loaded UI. Normal disable preserves revision trust and cooperatively releases only that plugin; re-enabling unchanged code does not ask for trust again. Unsaved mounts prompt before disable. Failed cleanup leaves the plugin disabled and offers affected-window recovery; declining recovery does not re-enable partially disposed code. A disabled backend loses demand and is stopped before package files move. The host requests cooperative cleanup, then terminates if needed. Arbitrary external side effects or child processes created by an unrestricted plugin are the author's responsibility; package rollback is not an OS transaction.
 
 ## Atomic management
 
