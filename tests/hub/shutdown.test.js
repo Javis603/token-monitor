@@ -159,7 +159,10 @@ for (const endpoint of ['/api/stats/stream', '/api/ingest']) {
     const { hub, connect, read } = fixture(t);
     await hub.start();
     hub.ingest({ deviceId: 'accepted', today: { totalTokens: 42 } });
+    const connection = once(hub.server, 'connection');
     const socket = await connect();
+    const [peer] = await connection;
+    const headersReceived = once(peer, 'data');
     let response = '';
     socket.setEncoding('utf8');
     socket.on('data', (chunk) => { response += chunk; });
@@ -167,6 +170,9 @@ for (const endpoint of ['/api/stats/stream', '/api/ingest']) {
     const method = endpoint.endsWith('stream') ? 'GET' : 'POST';
     const body = JSON.stringify({ deviceId: 'late-upload', today: { totalTokens: 100 } });
     socket.write(`${method} ${endpoint} HTTP/1.1\r\nHost: localhost\r\nContent-Length: ${method === 'POST' ? Buffer.byteLength(body) : 0}\r\n`);
+    // A TCP connect/write alone can leave the peer idle when close() runs.
+    // Exercise headers completed during shutdown after the server saw their start.
+    await headersReceived;
     const stopped = hub.stop();
     const requested = once(hub.server, 'request');
     socket.write(`\r\n${method === 'POST' ? body : ''}`);
