@@ -98,7 +98,12 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
   const base = {
     deviceId: 'dev-a',
     updatedAt: initialAt,
-    today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+    today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } },
+    clientHealth: {
+      version: 1,
+      clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
+      observedAt: initialAt
+    }
   };
   await hub.fetch(ingestRequest(base, { 'x-token-monitor-response': 'minimal' }));
 
@@ -123,12 +128,13 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
     modern.length = 0;
     legacy.length = 0;
 
-    await hub.fetch(ingestRequest({ ...base, updatedAt: refreshedAt }, {
+    await hub.fetch(ingestRequest({ ...base, updatedAt: refreshedAt, clientHealth: { ...base.clientHealth, observedAt: refreshedAt } }, {
       'x-token-monitor-response': 'minimal'
     }));
     await waitFor(() => modern.length === 1 && legacy.length === 1);
     assert.equal(modern[0].event, 'freshness');
     assert.equal(modern[0].data.stats.devices[0].updatedAt, refreshedAt);
+    assert.equal(modern[0].data.stats.devices[0].clientHealthObservedAt, refreshedAt);
     assert.equal(legacy[0].event, 'stats');
     assert.equal(legacy[0].data.stats.devices[0].updatedAt, refreshedAt);
     modern.length = 0;
