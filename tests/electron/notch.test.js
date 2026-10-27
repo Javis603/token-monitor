@@ -71,7 +71,7 @@ function fixture(t, settings = {}, options = {}) {
   // Most cases exercise opening on hover; the default grow-only mode has its own cases.
   const preferences = { notchEnabled: true, edgeDockEnabled: false, notchHoverAction: 'open', ...settings };
   const deps = { BrowserWindow: RecordingWindow, ipcMain, screen, rendererDir: '/renderer', preloadPath: '/preload', getSettings: () => preferences, nativeGlass: options.nativeGlass || (() => false), liquidGlass: options.liquidGlass, createGlass: options.createGlass, prefersReducedMotion: () => options.reducedMotion !== false, platform: options.platform || 'darwin' };
-  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, installNonActivatingInput: options.installNonActivatingInput, primaryButtonDown: options.primaryButtonDown || (() => false), naturalScrolling: options.naturalScrolling, monitorScrollGesture: options.monitorScrollGesture, isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits, blurAvailable: options.blurAvailable, applyBlurMask: options.applyBlurMask });
+  const controller = createNotchController({ ...deps, readScreens: options.readScreens || (() => ({ screens: [native], mainDisplayId: 1 })), onWebSurfaceChanged: options.onWebSurfaceChanged, onSwitchCodexAccount: (id) => ({ ok: true, id }), onToggleRateMode: options.onToggleRateMode, onCapabilitiesChanged: options.onCapabilitiesChanged, installNonActivatingInput: options.installNonActivatingInput, primaryButtonDown: options.primaryButtonDown || (() => false), naturalScrolling: options.naturalScrolling, monitorScrollGesture: options.monitorScrollGesture, isFullScreen: options.isFullScreen || (() => false), logger: options.logger, performHaptic: options.performHaptic, canRefreshLimits: options.canRefreshLimits, onRefreshLimits: options.onRefreshLimits, blurAvailable: options.blurAvailable, applyBlurMask: options.applyBlurMask });
   t.after(() => controller.dispose());
   const setData = controller.setData;
   controller.setData = (value) => {
@@ -3252,7 +3252,7 @@ test('attached glass stays dark with a light widget while capsules retain their 
 });
 
 
-test('rich document preparation is allowed only during an explicit opening, never collapse', t => {
+test('plugin panel preparation is allowed only during an explicit opening, never collapse', t => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 10000 });
   const f = fixture(t, {}, { reducedMotion: false });
   const host = notchWindow(f).webContents;
@@ -3303,4 +3303,48 @@ test('horizontal input belongs to the live open window and follows its lifecycle
   assert.equal(win.messages.length, prior);
   f.preferences.notchEnabled = false; f.controller.sync();
   assert.equal(removed, 2);
+});
+
+
+test('visible collapsed Notch summary owns demand independently of the hidden panel', async t => {
+  const { runtimeFixture } = require('../helpers/trustedPlugin');
+  const tick = () => new Promise(setImmediate);
+  let runtime;
+  const n = fixture(t, {}, { onWebSurfaceChanged: () => runtime?.refreshSurfaces() });
+  const win = notchWindow(n);
+  const scope = () => n.controller.webSurface(win.webContents);
+  const summary = { items: [{ type: 'text', id: 'summary', text: 'Visible', available: true }] };
+  n.controller.setData({ cells: [], summary, panel: {} });
+  assert.equal(win.isVisible(), true);
+  assert.equal(last(win).expanded, false);
+  assert.equal(scope().visible, false);
+  assert.equal(scope().summaryVisible, true);
+  const f = await runtimeFixture(t, { surfaceContext: scope }); runtime = f.runtime;
+  await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  await f.invoke('plugins:selectContent', 'notch.summary.content', 'trusted-fixture/content');
+  f.send(f.notch, 'notch', ['trusted-fixture/panel']); await tick();
+  assert.equal(runtime.manager.backendCount(), 0, 'hidden panel alone cannot run');
+  f.send(f.notch, 'notch', ['trusted-fixture/content', 'trusted-fixture/panel']); await tick();
+  assert.equal(runtime.manager.backendCount(), 1, 'visible summary runs without background opt-in');
+  n.controller.setLocked(true); await tick();
+  assert.equal(scope().summaryVisible, false);
+  assert.equal(runtime.manager.backendCount(), 0, 'native lock immediately clears effective demand');
+  f.send(f.notch, 'notch', ['trusted-fixture/content']); await tick();
+  assert.equal(runtime.manager.backendCount(), 0, 'late IPC cannot restore locked summary work');
+  n.controller.setLocked(false); await tick();
+  assert.equal(runtime.manager.backendCount(), 1, 'unlock restores requested summary without new IPC');
+  f.send(f.main, 'home'); await tick();
+  n.controller.setData({ cells: [], summary: null, panel: {} }); await tick();
+  assert.equal(scope().summaryVisible, false);
+  assert.equal(runtime.manager.backendCount(), 1, 'other visible owner remains independent');
+  f.send(f.main, 'home', []); await tick();
+  assert.equal(runtime.manager.backendCount(), 0, 'last visible owner stops backend');
+  f.send(f.notch, 'notch', ['trusted-fixture/panel']);
+  n.screen.point = { x: 735, y: 10 }; n.controller.poll(Date.now()); press(n); await tick();
+  assert.equal(scope().visible, true);
+  assert.equal(runtime.manager.backendCount(), 1, 'expanded panel resumes');
+  n.controller.setData({ cells: [], summary, panel: {} });
+  n.ipcMain.emit('topNotch:dismiss', { sender: win.webContents }); await tick();
+  assert.equal(scope().summaryVisible, true);
+  assert.equal(runtime.manager.backendCount(), 0, 'collapse never retains panel-only demand');
 });

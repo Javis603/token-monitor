@@ -29,7 +29,12 @@ app.whenReady().then(async () => {
     userDataDir: scratch, getSettings: () => settings, getContext: () => ({ source: 'fixture' }), getLocale: () => 'en', env: {},
     isMainSender: event => event.sender === main.webContents,
     isSurfaceSender: (event, surface) => surfaceOf(event.sender) === 'notch' ? surface === 'notch' : Boolean(surfaceOf(event.sender)) && surface === 'edgeDock',
-    surfaceContext: event => ({ visible: BrowserWindow.fromWebContents(event.sender)?.isVisible() }),
+    surfaceContext: event => {
+      const visible = BrowserWindow.fromWebContents(event.sender)?.isVisible() === true;
+      if (surfaceOf(event.sender) !== 'notch') return { visible };
+      const payload = payloads.get('notch');
+      return { visible: visible && payload?.expanded === true, summaryVisible: visible && Boolean(payload?.summary) };
+    },
     persistPluginStates: pluginStates => { settings = { ...settings, pluginStates }; },
     persistManagementSettings: patch => { settings = { ...settings, ...patch }; }, applySettingsPatch: patch => { settings = { ...settings, ...patch }; }, log: console.log });
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_event, callback) => callback({ cancel: true }));
@@ -113,13 +118,19 @@ app.whenReady().then(async () => {
   await wait(windows.get('notch'), "!document.querySelector('[data-plugin-target=\"notch.home.content\"]')", 'Notch native fallback');
   const collapsed = payloads.get('notch'); collapsed.expanded = false;
   collapsed.motion = { ...collapsed.motion, progress: 0, bodyHeight: 0, headerHeight: 32 };
-  push('notch');
+  push('notch'); runtime.refreshSurfaces();
   await js("tokenMonitorTrustedPlugins.selectContent('notch.summary.content','trusted-fixture/content')");
   await wait(windows.get('notch'), "document.querySelector('[data-plugin-target=\"notch.summary.content\"] input')", 'compact summary extension');
+  for (let i = 0; i < 150 && runtime.manager.backendCount() !== 1; i++) await pause(40);
+  assert.equal(runtime.manager.backendCount(), 1, 'collapsed summary alone maintains demand before any explicit call');
+  const summaryPid = await windows.get('notch').webContents.executeJavaScript("tokenMonitorTrustedPlugins.call('trusted-fixture','start')");
+  await wait(windows.get('notch'), "Number(document.querySelector('[data-plugin-target=\"notch.summary.content\"] output').dataset.update) >= 3", 'collapsed summary receives repeated backend publications');
   await js("tokenMonitorTrustedPlugins.selectContent('notch.summary.content',null)");
   await wait(windows.get('notch'), "!document.querySelector('[data-plugin-target=\"notch.summary.content\"]')", 'compact summary restoration');
+  for (let i = 0; i < 150 && runtime.manager.backendCount() !== 0; i++) await pause(40);
+  assert.equal(runtime.manager.backendCount(), 0, 'removing the last summary demand stops its backend');
   assert.deepEqual(errors, []);
-  fs.writeFileSync(path.join(evidence, 'surface-results.json'), JSON.stringify({ pids, notchPages: ['home','limits','sessions','breakdown'], sizeReports, errors, electron: process.versions.electron, scope: 'production secondary renderer/preloads/runtime, synthetic controller payloads; not OS hit-testing acceptance' }, null, 2));
+  fs.writeFileSync(path.join(evidence, 'surface-results.json'), JSON.stringify({ pids, summaryPid, summaryPublications: 3, finalBackendCount: runtime.manager.backendCount(), notchPages: ['home','limits','sessions','breakdown'], sizeReports, errors, electron: process.versions.electron, scope: 'production secondary renderer/preloads/runtime, synthetic controller payloads; not OS hit-testing acceptance' }, null, 2));
   console.log('PASS rail/bubble/Notch native content replacement, shared process, visibility union and restoration');
   await runtime.dispose(); runtime = null;
   for (const win of windows.values()) win.destroy(); main.destroy(); clearTimeout(deadline); app.exit(0);

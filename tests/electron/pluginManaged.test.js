@@ -451,3 +451,26 @@ for (const point of ['old-moved', 'registry-written', 'settings-written', 'reloa
     assert.equal(fs.existsSync(file), false);
   });
 }
+
+
+for (const version of ['01.0.0', '1.01.0', '1.0.01', '1.0.0-01', '1.0.0-a..b', '1.0.0-', '9007199254740992.0.0']) {
+  test(`invalid version ${version} is rejected before registry mutation`, async t => {
+    const f = fixture(t); await f.install('1.0.0');
+    const before = snapshot(f);
+    assert.throws(() => parsePackage(bytes(version)), /version must be semver/);
+    assert.deepEqual(snapshot(f), before);
+    const restarted = createManagedPlugins(f.args); restarted.recover();
+    assert.equal(restarted.status().available, true);
+    assert.equal(restarted.describe('test-plugin').version, '1.0.0');
+    await restarted.uninstall('test-plugin'); restarted.dispose(); f.api.dispose();
+  });
+}
+for (const version of ['0.0.0', '1.2.3', '1.2.3-alpha.1', '1.2.3+build.01']) {
+  test(`valid version ${version} survives install and management restart`, async t => {
+    const f = fixture(t); await f.install(version);
+    const restarted = createManagedPlugins(f.args); restarted.recover();
+    assert.equal(restarted.status().available, true);
+    assert.equal(restarted.describe('test-plugin').version, version);
+    await restarted.uninstall('test-plugin'); restarted.dispose(); f.api.dispose();
+  });
+}

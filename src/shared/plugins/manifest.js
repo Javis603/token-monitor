@@ -1,4 +1,5 @@
 'use strict';
+const semver = require('semver');
 const { normalizeSettings } = require('./settings');
 const { normalizeIdentityIcon } = require('./identityIcon');
 const { normalizeAppearance } = require('./appearance');
@@ -58,7 +59,7 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
   if (!isObject(raw)) return { ok: false, manifest: null, errors: ['manifest must be an object'] };
   if (raw.tmApi !== API_MAJOR) fail('incompatible-plugin-api: this host requires tmApi 2');
   if (typeof raw.id !== 'string' || !ID_RE.test(raw.id)) fail('invalid plugin id');
-  if (typeof raw.version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(raw.version)) fail('version must be semver');
+  if (typeof raw.version !== 'string' || !semver.valid(raw.version)) fail('version must be semver');
   const name = normalizeLocalized(raw.name, 48);
   if (!name) fail('name is required');
   for (const key of ['main', 'permissions', 'network', 'metrics', 'alerts', 'webUi', 'visible']) if (raw[key] !== undefined) fail(`unsupported API 1 field: ${key}`);

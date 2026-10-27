@@ -169,6 +169,15 @@ function createPluginRuntime({
     }
     return !['notch', 'edgeDock'].includes(surface) || nativeDemandVisible(webContents, surface);
   }
+  function effectiveDemand(webContents, surface, refs) {
+    if (!refs.length) return refs;
+    if (demandVisible(webContents, surface)) return refs;
+    // A collapsed Notch still paints its summary, but its panel is hidden.
+    if (surface !== 'notch' || surfaceContext({ sender: webContents }, surface)?.summaryVisible !== true) return [];
+    const summaryRefs = new Set(manager.list().plugins.filter(plugin => plugin.status === 'active')
+      .flatMap(plugin => plugin.views.filter(view => view.targets?.includes('notch.summary.content')).map(view => view.ref)));
+    return refs.filter(ref => summaryRefs.has(ref));
+  }
   function registerSubscriber(webContents) {
     let subscriber = subscribers.get(webContents.id);
     if (!subscriber) {
@@ -195,7 +204,7 @@ function createPluginRuntime({
     const selected = Array.isArray(refs) ? refs.filter(ref => typeof ref === 'string' && allowed.has(ref)).slice(0, 32) : [];
     subscriber.demands.set(surface, selected);
     // Retain the request across native hide/show, but never grant foreground work while hidden.
-    demand.set(webContents.id, surface, demandVisible(webContents, surface) ? selected : []);
+    demand.set(webContents.id, surface, effectiveDemand(webContents, surface, selected));
     // Opening a view is not a streaming update: resolve existing readings now.
     // This neither samples nor bypasses active placement / native visibility.
     if (!webContents.isDestroyed()) webContents.send('plugins:views', manager.payload(surface));
@@ -473,7 +482,7 @@ function createPluginRuntime({
     refreshSurfaces() {
       if (disposed) return;
         for (const subscriber of subscribers.values()) for (const [surface, refs] of subscriber.demands) {
-        if (['notch', 'edgeDock'].includes(surface)) demand.set(subscriber.webContents.id, surface, nativeDemandVisible(subscriber.webContents, surface) ? refs : []);
+        if (['notch', 'edgeDock'].includes(surface)) demand.set(subscriber.webContents.id, surface, effectiveDemand(subscriber.webContents, surface, refs));
       }
     },
     safeMode,

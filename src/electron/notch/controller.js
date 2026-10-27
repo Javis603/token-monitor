@@ -941,7 +941,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return onSwitchCodexAccount?.(String(payload?.accountId || '')) || { ok: false, error: 'Unavailable' };
   });
   return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
-    webSurface: (host) => host === windows.notch?.webContents ? { kind: 'notch', visible: running && expanded && !locked && !motion && progress === 1, preparing: running && expanded && !locked && Boolean(motion) } : null,
+    webSurface: (host) => host === windows.notch?.webContents ? { kind: 'notch', visible: running && expanded && !locked && !motion && progress === 1, preparing: running && expanded && !locked && Boolean(motion),
+      summaryVisible: running && ready.notch && !locked && summaryMeasured && summaryVisible() && !shellHidden() } : null,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),
     previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); refreshLayout(); },
     setAppearance(value, { preview = false } = {}) {
