@@ -8,7 +8,7 @@ The package SHA-256 verifies downloaded bytes. A separate canonical manifest-plu
 
 ## Trust and activation
 
-Install records the package but leaves it disabled. Enablement trusts the discovered content revision. An update or Reload with changed bytes requires a new explicit trust decision; version and id alone are insufficient. Optional `engines.tokenMonitor` and required `tmApi:2` identify compatibility. API 1 is rejected, not adapted.
+Install records the package but leaves it disabled. Enablement trusts the discovered content revision. An update or Reload with changed bytes requires a new explicit trust decision; version and id alone are insufficient. Optional `engines.tokenMonitor` and required `tmApi:1` identify compatibility. Other `tmApi` values are rejected, not adapted.
 
 There is no granular capability consent. UI can change the shared renderer; a Node backend can access local files, credentials, network and subprocesses available to the OS user. Display location and background toggles control lifecycle, not containment. The App continues protecting its ordinary external interfaces and renderer secret projections, but these are not a security barrier against trusted local code.
 
@@ -36,7 +36,7 @@ Build from your plugin source directory in a Token Monitor checkout using Node 2
 node scripts/build-plugin-package.js /path/to/my-panel /path/to/my-panel.tmplugin
 ```
 
-The output must not already exist. The builder validates the package and prints its SHA-256. Host that exact file at a direct HTTPS URL; do not change its bytes after computing the digest. Catalog format **1** is separate from package format **2** and manifest `tmApi: 2`.
+The output must not already exist. The builder validates the package and prints its SHA-256. Host that exact file at a direct HTTPS URL; do not change its bytes after computing the digest. Catalog format **1** is separate from package format **2** and manifest `tmApi: 1`.
 
 Save this template as `catalog-template.json`. Replace the URL and metadata to match your package. The zero digest is a placeholder, replaced by the next script; do not publish it unchanged.
 

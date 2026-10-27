@@ -1,6 +1,6 @@
 # Same-page UI and content composition
 
-API 2 has one UI engine: author ES modules in the existing host renderer. There are no plugin WebContentsView documents, freeze/warm-cache protocol, fixed declarative layout engine or fallback copy of an authored page.
+Plugin UI runs author ES modules in the existing host renderer. There are no plugin WebContentsView documents, freeze/warm-cache protocol, fixed declarative layout engine or fallback copy of an authored page.
 
 ## Content surfaces
 

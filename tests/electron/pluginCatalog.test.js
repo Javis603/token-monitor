@@ -12,7 +12,7 @@ const { digest, packageDirectory } = require('../../src/electron/plugins/package
 const { createPluginManager } = require('../../src/electron/plugins/manager');
 const URL = 'https://catalog.example/index.json';
 function packageBytes(version = '1.0.0') {
-  return Buffer.from(JSON.stringify({ format: 2, manifest: { id: 'community-demo', name: 'Community demo', version, tmApi: 2, ui: 'ui.mjs', files: ['ui.mjs'],
+  return Buffer.from(JSON.stringify({ format: 2, manifest: { id: 'community-demo', name: 'Community demo', version, tmApi: 1, ui: 'ui.mjs', files: ['ui.mjs'],
     views: [{ id: 'overview', title: 'Overview', surfaces: ['page'] }] }, files: { 'ui.mjs': Buffer.from('export function mount() {}').toString('base64') } }));
 }
 function index(bytes = packageBytes()) {

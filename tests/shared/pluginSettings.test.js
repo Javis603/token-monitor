@@ -11,7 +11,7 @@ const raw = () => ({ version: 1, fields: [
 ] });
 
 test('settings schema validates defaults and manifest fails closed on invalid declarations', () => {
-  const manifest = { id: 'demo', name: 'Demo', version: '1.0.0', tmApi: 2, backend: 'main.js', files: ['main.js'], settings: raw() };
+  const manifest = { id: 'demo', name: 'Demo', version: '1.0.0', tmApi: 1, backend: 'main.js', files: ['main.js'], settings: raw() };
   assert.equal(normalizeManifest(manifest).manifest.settings.version, 1);
   for (const patch of [{ default: 'true' }, { id: 'constructor' }, { id: 'toString' }, { id: undefined }, { type: 'secret' }]) {
     const schema = raw(); Object.assign(schema.fields[0], patch);

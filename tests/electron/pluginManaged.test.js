@@ -9,7 +9,7 @@ const { parsePackage, packageDirectory } = require('../../src/electron/plugins/p
 const { createManagedPlugins, MAX_REGISTRY_BYTES, MAX_JOURNAL_BYTES } = require('../../src/electron/plugins/managed');
 const { MAX_PACKAGE_BYTES } = require('../../src/electron/plugins/package');
 function bytes(version = '1.0.0', extra = {}) {
-  return Buffer.from(JSON.stringify({ format: 2, manifest: { id: 'test-plugin', name: 'Test', version, tmApi: 2, ui: 'main.js', backend: 'main.js', files: ['main.js'],
+  return Buffer.from(JSON.stringify({ format: 2, manifest: { id: 'test-plugin', name: 'Test', version, tmApi: 1, ui: 'main.js', backend: 'main.js', files: ['main.js'],
     views: [{ id: 'page', title: 'Page', surfaces: ['page'] }], ...extra }, files: { 'main.js': Buffer.from('exports.activate = () => ({});').toString('base64') } }));
 }
 function fixture(t, fault) {
@@ -322,7 +322,7 @@ for (const corruption of ['id', 'version', 'hash', 'compatibility']) {
 test('package preview is data-only and rejects traversal, large archives and incompatible manifests', () => {
   assert.equal(parsePackage(bytes()).manifest.id, 'test-plugin');
   for (const backend of ['../escape.js', '/escape.js', 'CON.js', 'dir/../escape.js', 'dir//escape.js']) assert.throws(() => parsePackage(bytes('1.0.0', { backend })));
-  assert.throws(() => parsePackage(bytes('1.0.0', { tmApi: 1 })), /incompatible-plugin-api/);
+  assert.throws(() => parsePackage(bytes('1.0.0', { tmApi: 2 })), /incompatible-plugin-api/);
   assert.throws(() => parsePackage(bytes('1.0.0', { engines: { tokenMonitor: '>=999' } })), /incompatible/);
   assert.throws(() => parsePackage(Buffer.alloc(MAX_PACKAGE_BYTES + 1)), /large|size|MiB/);
 });

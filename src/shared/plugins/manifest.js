@@ -4,7 +4,7 @@ const { normalizeSettings } = require('./settings');
 const { normalizeIdentityIcon } = require('./identityIcon');
 const { normalizeAppearance } = require('./appearance');
 const { normalizeLocalized, cleanText } = require('./localized');
-const API_MAJOR = 2;
+const API_MAJOR = 1;
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
 const SURFACES = Object.freeze(['home', 'page', 'notch', 'edgeDock', 'tray', 'settings']);
 const SKIN_COLOR_KEYS = Object.freeze(['accent', 'chart', 'bg', 'text', 'muted']);
@@ -52,17 +52,17 @@ function normalizeSkins(raw, errors) {
 }
 
 
-// API 2 is trusted code. Old sandbox manifests are intentionally incompatible.
+// Experimental plugin API. Only the current manifest contract is accepted.
 function normalizeManifest(raw, { source = 'user' } = {}) {
   const errors = [];
   const fail = message => errors.push(message);
   if (!isObject(raw)) return { ok: false, manifest: null, errors: ['manifest must be an object'] };
-  if (raw.tmApi !== API_MAJOR) fail('incompatible-plugin-api: this host requires tmApi 2');
+  if (raw.tmApi !== API_MAJOR) fail(`incompatible-plugin-api: this host requires tmApi ${API_MAJOR}`);
   if (typeof raw.id !== 'string' || !ID_RE.test(raw.id)) fail('invalid plugin id');
   if (typeof raw.version !== 'string' || !semver.valid(raw.version)) fail('version must be semver');
   const name = normalizeLocalized(raw.name, 48);
   if (!name) fail('name is required');
-  for (const key of ['main', 'permissions', 'network', 'metrics', 'alerts', 'webUi', 'visible']) if (raw[key] !== undefined) fail(`unsupported API 1 field: ${key}`);
+  for (const key of ['main', 'permissions', 'network', 'metrics', 'alerts', 'webUi', 'visible']) if (raw[key] !== undefined) fail(`unsupported manifest field: ${key}`);
   const ui = raw.ui ?? null, backend = raw.backend ?? null;
   for (const [key, value] of [['ui', ui], ['backend', backend]]) if (value !== null && (!filePath(value) || !/\.(?:mjs|cjs|js)$/.test(value))) fail(`${key} must be a package-local JS file`);
   const files = Array.isArray(raw.files) ? raw.files : [];

@@ -1,6 +1,6 @@
-# Trusted plugin API
+# Plugin API
 
-Desktop plugins are experimental trusted code (`tmApi: 2`). Enable only code you trust. The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review. No official plugins ship with the platform; the repository's minimal fixtures are tests, not a store.
+Token Monitor plugins run code you choose to trust (`tmApi: 1`). Enable only code you trust. The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review. No official plugins ship with the platform; the repository's minimal fixtures are tests, not a store.
 
 ## Execution and trust
 
@@ -12,7 +12,7 @@ Module-private variables and another process's memory are not automatically avai
 
 ```json
 {
-  "tmApi": 2,
+  "tmApi": 1,
   "id": "my-panel",
   "name": "My panel",
   "version": "1.0.0",
@@ -29,7 +29,7 @@ Module-private variables and another process's memory are not automatically avai
 
 `ui`, `backend`, `css`, `views`, `trayMenu`, `settings`, `skins` and `background` are optional; at least UI, backend or skins is required. UI views require `ui`. List every distributed file explicitly. Paths are package-relative, portable and cannot traverse parents or symlinks. Dependencies must be bundled beforehand; installation never runs npm or lifecycle scripts. Native addons require compatible OS/architecture/Electron ABI, and utility-process loading must be tested in a packaged build; arbitrary addons are not universally supported.
 
-`name`, `description` and view titles support localized strings. Optional `author`, HTTPS `homepage` and validated `identityIcon` provide attribution, not trust. `engines.tokenMonitor` can constrain the App version. API 1 manifests fail with `incompatible-plugin-api`; there is no prerelease compatibility layer. This experimental API can break; authors must follow release changes.
+`name`, `description` and view titles support localized strings. Optional `author`, HTTPS `homepage` and validated `identityIcon` provide attribution, not trust. `engines.tokenMonitor` can constrain the App version. `tmApi` identifies the plugin API contract, not the plugin release or package format. Only `tmApi: 1` is accepted; other values fail with `incompatible-plugin-api` and are not converted. This experimental API can break; authors must follow release changes.
 
 Bitmap views declaring `tray` can be added from the existing Tray, Floating Bubble and custom Notch-summary composers after the plugin is enabled. They use the same reorder, duplicate, remove and save controls as native items. Notch “Same as tray” follows the active Tray layout; its custom layout stays independent. Uninstall with placement removal also clears bubble/summary entries and mixed Notch page-order entries. Keeping placements retains them for a later reinstall and explicit enable.
 

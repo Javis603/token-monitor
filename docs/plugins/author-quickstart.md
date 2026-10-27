@@ -1,13 +1,13 @@
-# Build a trusted Desktop plugin
+# Plugin development guide
 
-Read the [API and trust contract](README.md) first. This experimental API runs author UI in the App document and optional Node code with the user's local authority. Only install code you trust. API 1 plugins are incompatible.
+Read the [API and trust contract](README.md) first. This experimental API runs author UI in the App document and optional Node code with the user's local authority. Only install code you trust. The manifest declares `tmApi: 1`.
 
 ## First UI
 
 Create `manifest.json`:
 
 ```json
-{"tmApi":2,"id":"my-panel","name":"My panel","version":"1.0.0","ui":"ui.mjs","files":["ui.mjs"],"views":[{"id":"panel","title":"My panel","surfaces":["home","page"]}]}
+{"tmApi":1,"id":"my-panel","name":"My panel","version":"1.0.0","ui":"ui.mjs","files":["ui.mjs"],"views":[{"id":"panel","title":"My panel","surfaces":["home","page"]}]}
 ```
 
 Create `ui.mjs`:

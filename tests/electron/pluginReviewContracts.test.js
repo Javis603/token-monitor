@@ -8,7 +8,7 @@ const { parsePackage } = require('../../src/electron/plugins/package');
 const { normalizePluginStates } = require('../../src/electron/plugins/manager');
 
 function webPackage(main, asset) {
-  const manifest = { id: 'portable-demo', name: 'Demo', version: '1.0.0', tmApi: 2, backend: main, files: [main, asset] };
+  const manifest = { id: 'portable-demo', name: 'Demo', version: '1.0.0', tmApi: 1, backend: main, files: [main, asset] };
   return JSON.stringify({ format: 2, manifest, files: { [main]: '', [asset]: '' } });
 }
 for (const [main, asset] of [['lib/main.js', 'lib/Main.js'], ['lib/main.js', 'LIB/MAIN.js'], ['lib/main.js', 'lib/main.js/child.js'], ['lib/main.js/child.js', 'LIB/main.js'], ['manifest.json/entry.js', 'lib/app.js']]) {

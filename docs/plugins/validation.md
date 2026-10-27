@@ -22,4 +22,4 @@ For compact surfaces, exercise actual Notch and Dock renderers and their host-ow
 
 For packaging, exercise the utility-process entry from an ASAR and package-local modules outside it. Native addons depend on OS, architecture, Electron ABI and signing/library restrictions. Test a known local fixture where feasible; never infer universal native-addon support. Do not disable OS protection to force a result.
 
-Retired Rich/Worker tests and their previous green results are not evidence for API 2. Record the exact tested revision, failures, environment limitations and before/after captures. Keep logs and screenshots in local/CI artifacts rather than embedding changing counts in this contract.
+Validate the current same-page UI and local backend through their production paths. Record the exact tested revision, failures, environment limitations and before/after captures. Keep logs and screenshots in local/CI artifacts rather than embedding changing counts in this contract.

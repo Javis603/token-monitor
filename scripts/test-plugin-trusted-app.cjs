@@ -299,7 +299,7 @@ app.whenReady().then(async () => {
       console.log('PASS production settings bridge master off/on reuses trust without reload');
       // A different plugin in its own busy renderer must not join A's lifecycle.
       const otherDir=path.join(scratch,'other-author');fs.mkdirSync(otherDir);
-      fs.writeFileSync(path.join(otherDir,'manifest.json'),JSON.stringify({tmApi:2,id:'other-fixture',name:'Other fixture',version:'1.0.0',ui:'ui.mjs',files:['ui.mjs'],views:[{id:'panel',surfaces:['page']}]}));
+      fs.writeFileSync(path.join(otherDir,'manifest.json'),JSON.stringify({tmApi:1,id:'other-fixture',name:'Other fixture',version:'1.0.0',ui:'ui.mjs',files:['ui.mjs'],views:[{id:'panel',surfaces:['page']}]}));
       fs.writeFileSync(path.join(otherDir,'ui.mjs'),"export function mount(container){const p=document.createElement('p');p.textContent='Unrelated plugin B';container.append(p);return {dispose(){p.remove();}};}");
       selectedDirectory=otherDir;
       await js("pluginApi.importPackage('directory').then(p=>pluginApi.install(p.token))");

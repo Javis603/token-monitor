@@ -33,7 +33,7 @@ test('identity rejects corrupted checksums, trailing bytes and truncated images'
 });
 test('package preview and installed roundtrip retain identity without any external asset path', () => {
   const icon = uri(png());
-  const manifest = {id:'icon-demo',version:'1.0.0',tmApi:2,name:'Icon demo',identityIcon:icon,skins:[{id:'plain',name:'Plain',colors:{accent:'#123456'}}]};
+  const manifest = {id:'icon-demo',version:'1.0.0',tmApi:1,name:'Icon demo',identityIcon:icon,skins:[{id:'plain',name:'Plain',colors:{accent:'#123456'}}]};
   const pkg = parsePackage(Buffer.from(JSON.stringify({format:2,files:{},manifest})));
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tm-icon-'));
   try {

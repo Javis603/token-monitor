@@ -17,12 +17,12 @@ test('content fingerprints are invariant across process locale and file insertio
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-package-v2-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const manifest = { tmApi: 2, id: 'package-fixture', name: 'Fixture', version: '1.0.0', backend: 'backend.cjs', files: ['backend.cjs'] };
+  const manifest = { tmApi: 1, id: 'package-fixture', name: 'Fixture', version: '1.0.0', backend: 'backend.cjs', files: ['backend.cjs'] };
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
   fs.writeFileSync(path.join(dir, 'backend.cjs'), '\ufeffexports.activate=()=>({});');
   return { dir, manifest };
 }
-test('API 2 packaging preserves BOM/native bytes and canonical installed fingerprints', t => {
+test('plugin packaging preserves BOM/native bytes and canonical installed fingerprints', t => {
   const { dir, manifest } = fixture(t);
   manifest.files.push('binding.node');
   fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));

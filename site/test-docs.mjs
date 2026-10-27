@@ -271,3 +271,26 @@ test("catalog tutorial scripts produce packages and signatures accepted by produ
     await assert.rejects(catalog.preview(source.id, manifest.id, manifest.version), /SHA-256/);
   }
 });
+
+test("six-language plugin guides use the first API and packageable manifest examples", async () => {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const { parsePackage } = require('../src/electron/plugins/package');
+  for (const page of ['index', 'plugins', 'plugin-quickstart']) {
+    const html = await readFile(new URL(`_site/docs/${page}.html`, root), 'utf8');
+    assert.ok(!/API 2|API 1 is incompatible|Trusted Desktop|可信 Desktop|Token Monitor Desktop/.test(html), page);
+    const articles = [...html.matchAll(/<article\b[^>]*lang="([^"]+)"[^>]*>([\s\S]*?)<\/article>/g)];
+    assert.equal(articles.length, 6);
+    if (page !== 'plugin-quickstart') continue;
+    for (const [, language, article] of articles) {
+      const encoded = article.match(/<code>({&quot;tmApi&quot;[\s\S]*?)<\/code>/)?.[1];
+      assert.ok(encoded, language);
+      const manifest = JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&amp;', '&'));
+      assert.equal(manifest.tmApi, 1);
+      const files = Object.fromEntries(manifest.files.map(name => [name, Buffer.from('// author fixture').toString('base64')]));
+      const bytes = Buffer.from(JSON.stringify({ format: 2, manifest, files }));
+      assert.equal(parsePackage(bytes).manifest.apiMajor, 1);
+      assert.throws(() => parsePackage(Buffer.from(JSON.stringify({ format: 2, manifest: { ...manifest, tmApi: 2 }, files }))), /incompatible-plugin-api/);
+    }
+  }
+});
