@@ -282,25 +282,25 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 
 | 功能 | 支持的工具／来源 | 条件 |
 |---------|-------------------------|------------|
-| 会话标题 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | 来源必须提供可读取的对话标题；部分工具只在特定转录文件或数据库格式中提供标题。 |
-| 每次提示／回复的用量与工具调用 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 需要本地详细记录。工具名称与每轮用量取决于记录字段；只有汇总用量并不代表有完整明细。 |
-| 上下文用量／剩余空间 | Claude Code, Codex, DeepSeek Harness | 使用近期的上下文观测值，而非累计 Token 用量。Claude Code 的窗口大小根据模型推断，因此自定义配置可能只能估算。 |
-| 缓存用量／会话缓存命中率 | 提供缓存字段的来源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 这些只是示例，并非完整清单。缓存读取与写入数据不一定同时提供；未报告缓存用量不代表命中率为 0%。 |
-| 缓存剩余时间估算 | Claude Code, Codex | Claude Code 使用记录中的 5 分钟或 1 小时缓存层级。Codex 使用产品定义的 30 分钟估算，不保证服务端缓存在此期间有效。 |
-| 输出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 表示输出速度；`tok/min` 表示总 Token 消耗速率。需要相互对应的 Token 数与有效时长，仅部分来源格式提供。计时可能包含等待时间，而非纯解码时间。 |
-| 推理 Token 数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 需要来源报告推理用量。这是 Token 数，不是 high 或 medium 等推理强度设置。 |
+| 会话标题 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | 需要可读取的对话标题；能否取得取决于转录文件或数据库格式。 |
+| 每次提示／回复的用量与工具调用 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 需要本地详细记录；工具名称与每轮用量取决于记录字段。只有汇总用量不代表有完整明细。 |
+| 上下文用量／剩余空间 | Claude Code, Codex, DeepSeek Harness | 使用近期上下文，而非累计用量。Claude Code 根据模型推断窗口大小；自定义配置可能只能估算。 |
+| 缓存用量／会话缓存命中率 | 提供缓存字段的来源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 示例并非完整清单。缓存读写数据可能不完整；未报告缓存用量不代表命中率为 0%。 |
+| 缓存剩余时间估算 | Claude Code, Codex | Claude Code 使用记录中的 5 分钟／1 小时层级。Codex 的 30 分钟产品估算不保证服务端缓存有效。 |
+| 输出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 表示输出速度；`tok/min` 表示总消耗速率。需要来源提供对应的 Token 数与有效时长；计时可能包含等待。 |
+| 推理 Token 数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 需要来源报告的推理 Token 数，并非 high 或 medium 等强度设置。 |
 | 原生运行中／等待输入状态 | Claude Code, Codex | 使用专用的原生活动读取器。其他工具的近期活动指示不代表同等状态。 |
-| 父会话／子代理分组 | Codex, Antigravity, Oh My Pi, ZCode；具有可验证父会话链接的 T3 Code 会话 | 需要明确的父会话 ID 或已验证的 T3 Code 关联；计入子代理 Token 不代表支持分组。Claude Code 只通过 T3 Code 关联分组，不使用原始 Claude 父会话元数据。 |
-| 同一对话的续接记录分组 | Codex；具有已验证线程链接的 T3 Code 会话 | 只将记录分组显示，仍保留各条用量统计记录。相似标题不足以判定为同一对话。 |
-| 多账号额度／余额监控 | Claude Code, Codex, OpenCode, Cursor, Antigravity, MiMo, WorkBuddy, OpenRouter, 第三方 API | 每个账号／配置方案都需要可用凭证或受支持的本地登录；OpenCode 配置方案使用 API／Web 额度数据。监控多个账号不会切换工具当前的登录。 |
-| 切换本地账号 | Codex | 切换至具有可用凭证的已注册账号，并更新本地 Codex 登录；这不是图表筛选。 |
-| 额度重置时间／倒计时 | 提供重置时间的来源，例如 Claude Code, Codex, OpenCode, Cursor, Antigravity | 在有数据时使用报告的重置时间戳或描述。点数到期会标示为到期，而非额度重置。 |
-| 可用额度重置券 | Claude Code, Codex | 显示账号报告的可用重置次数及到期时间。Claude Code 还显示重置券覆盖范围与使用限制。仅供查看，无法在 App 内使用重置券。 |
+| 父会话／子代理分组 | Codex, Antigravity, Oh My Pi, ZCode；具有可验证父会话链接的 T3 Code 会话 | 需要明确的父会话 ID 或已验证的 T3 Code 链接。计入子代理 Token 不代表支持分组；Claude Code 只通过 T3 Code 分组。 |
+| 同一对话的续接记录分组 | Codex；具有已验证线程链接的 T3 Code 会话 | 只分组显示，保留所有用量统计记录。相似标题不足以判定为同一对话。 |
+| 多账号额度／余额监控 | Claude Code, Codex, OpenCode, Cursor, Antigravity, MiMo, WorkBuddy, OpenRouter, 第三方 API | 各账号／配置方案需要可用凭证或受支持的本地登录；OpenCode 配置方案使用 API／Web 额度数据。监控不会切换当前登录。 |
+| 切换本地账号 | Codex | 用具有可用凭证的已注册账号更新本地 Codex 登录，并非图表筛选。 |
+| 额度重置时间／倒计时 | 提供重置时间的来源，例如 Claude Code, Codex, OpenCode, Cursor, Antigravity | 有数据时使用报告的重置时间或描述；点数到期与额度重置分开显示。 |
+| 可用额度重置券 | Claude Code, Codex | 显示账号报告的重置次数与到期时间；Claude Code 另有覆盖范围及限制。仅供查看，无法在 App 内使用重置券。 |
 | 额度重置预测 | Codex | 可选的 codex-resets.com 第三方预测，不能替代官方额度或重置时间。 |
-| 额外／模型专属额度池 | 提供独立额度池的来源，例如 Claude Code, Codex, Cursor, Antigravity | 可用额度池取决于来源、套餐与账号。共享额度池不代表每个模型都有独立额度。 |
-| 预付余额与额外用量点数 | 提供余额数据的来源，例如 Claude Code, OpenCode, Cursor, Cline, Factory Droid, MiMo, WorkBuddy, DeepSeek, TypeSafe, OpenRouter, 第三方 API | 需要相关账号／产品的余额访问权限；Claude Code 的预付余额使用 Claude Web。单位因提供商而异。Claude Code 与 TypeSafe 还会在有数据时显示各笔点数的到期详情。 |
-| 账号支出摘要 | 提供支出数据的来源，例如 Claude Code, Cursor, Cline, DeepSeek, TypeSafe, OpenRouter, 第三方 API | 覆盖范围与期间因来源而异。DeepSeek 根据本地观察到的付费余额变化计算支出；TypeSafe 使用基于用量的估算值。这些数值与 Tokscale 的 Token 成本估算分开。 |
-| 余额耗尽时间估算 | 已手动记录充值明细的余额账号 | 需要当前余额与足够的历史记录，以估算正值的平均支出。只估算余额可能何时耗尽，并非提供商保证。 |
+| 额外／模型专属额度池 | 提供独立额度池的来源，例如 Claude Code, Codex, Cursor, Antigravity | 额度池取决于来源、套餐与账号；共享池不代表每个模型都有独立额度。 |
+| 预付余额与额外用量点数 | 提供余额数据的来源，例如 Claude Code, OpenCode, Cursor, Cline, Factory Droid, MiMo, WorkBuddy, DeepSeek, TypeSafe, OpenRouter, 第三方 API | 需要账号／产品的余额访问权限；Claude Code 使用 Claude Web。单位因提供商而异；Claude Code 与 TypeSafe 可显示来源提供的点数到期详情。 |
+| 账号支出摘要 | 提供支出数据的来源，例如 Claude Code, Cursor, Cline, DeepSeek, TypeSafe, OpenRouter, 第三方 API | 范围与期间因来源而异。DeepSeek 使用本地观察到的付费余额变化；TypeSafe 根据用量估算。与 Tokscale 的 Token 成本估算分开。 |
+| 余额耗尽时间估算 | 已手动记录充值明细的余额账号 | 当前余额与历史记录须能得出正值的平均支出；耗尽日期仅为估算，并非提供商保证。 |
 
 ## 安装
 
