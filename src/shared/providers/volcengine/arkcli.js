@@ -198,7 +198,8 @@ async function fetchPersonalPlanKeys(run, profile) {
     if (!plan || typeof plan.key !== 'string') throw probeError();
     if (!Object.hasOwn(PERSONAL_PLANS, plan.key)) continue;
     if (plan.scope !== 'personal' || Object.hasOwn(plan, 'error') || typeof plan.status !== 'string' || !plan.status) unknown.add(plan.key);
-    else subscribed.add(plan.key);
+    else if (['Effective', 'Running'].includes(plan.status)) subscribed.add(plan.key);
+    else if (!['Pending', 'Expired'].includes(plan.status)) unknown.add(plan.key);
   }
   for (const product of unknown) subscribed.delete(product);
   return { subscribed, unknown };
@@ -232,6 +233,11 @@ async function fetchArkcliLimits(deps, updatedAt, previousLimits) {
     if (deps.signal?.aborted) throw abortError(deps.signal);
     const fulfilled = results.filter(result => result.status === 'fulfilled').map(result => result.value);
     const rows = fulfilled.filter(result => result.row).map(result => result.row);
+    const failedProducts = new Set(unknown);
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') failedProducts.add(products[index]);
+    });
+    let viewer = fulfilled[0]?.viewer;
     const removals = new Map();
     const remove = (viewer, product) => {
       const accountKey = arkcliAccountKey(viewer, product);
@@ -247,11 +253,19 @@ async function fetchArkcliLimits(deps, updatedAt, previousLimits) {
     if (!fulfilled.length && absent.length && previousCliKeys.size) {
       const body = await query(absent[0]);
       if (!body?.viewer?.account_id || !Array.isArray(body.items)) throw probeError();
+      viewer = body.viewer;
       for (const product of absent) remove(body.viewer, product);
     }
     if (deps.signal?.aborted) throw abortError(deps.signal);
-    // A failed sibling is omitted so the runtime retains its last-good identity
-    // as unavailable, without marking a successfully queried plan as failed.
+    // Explicit per-product failures preserve both last-good retention and the
+    // runtime's retry signal, without marking a successful sibling as failed.
+    if (viewer) {
+      for (const product of failedProducts) rows.push(normalizeLimitProvider({
+        provider: 'volcengine', source: 'cli', status: 'unavailable', updatedAt,
+        accountKey: arkcliAccountKey(viewer, product), accountLabel: PERSONAL_PLANS[product],
+        region: viewer.region, windows: []
+      }));
+    }
     if (rows.length || removals.size) return [...rows, ...removals.values()];
     const failed = results.find((result) => result.status === 'rejected');
     if (failed) throw failed.reason;

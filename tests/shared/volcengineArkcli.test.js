@@ -249,9 +249,13 @@ test('errored subscription entries are unknown rather than owned or absent', asy
       assert.equal(args[3], 'coding-plan');
       return codingResponse();
     } });
-    assert.equal(rows.length, 1);
+    assert.equal(rows.length, healthySibling ? 2 : 1);
     assert.equal(rows[0].status, healthySibling ? 'ok' : 'unavailable');
-    if (healthySibling) assert.equal(rows[0].accountLabel, 'Coding Plan');
+    if (healthySibling) {
+      assert.equal(rows[0].accountLabel, 'Coding Plan');
+      assert.equal(rows[1].accountLabel, 'Agent Plan');
+      assert.equal(rows[1].status, 'unavailable');
+    }
     assert.equal(calls.filter(args => args[0] === 'usage').length, healthySibling ? 1 : 0);
     assert.ok(!JSON.stringify(rows).includes('private'));
   }
@@ -346,9 +350,11 @@ test('a failed sibling query does not hide a healthy personal plan', async () =>
       if (args[3] !== product) throw new Error('private upstream error');
       return product === 'coding-plan' ? codingResponse() : response();
     }) });
-    assert.equal(rows.length, 1);
+    assert.equal(rows.length, 2);
     assert.equal(rows[0].status, 'ok');
     assert.equal(rows[0].accountLabel, product === 'coding-plan' ? 'Coding Plan' : 'Agent Plan');
+    assert.equal(rows[1].status, 'unavailable');
+    assert.equal(rows[1].accountLabel, product === 'coding-plan' ? 'Agent Plan' : 'Coding Plan');
     assert.ok(!JSON.stringify(rows).includes('private'));
   }
 });
@@ -527,6 +533,127 @@ test('a failed Coding Plan retains stale quota without staling a healthy Agent P
   assert.equal(recovered.accountKey, first.accountKey);
   assert.equal(recovered.updatedAt, new Date(time).toISOString());
   assert.equal(recovered.windows[2].usedPercent, 30);
+});
+test('partial plan failures schedule and complete the existing backoff retry', { timeout: 3000 }, async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  for (const failure of ['usage', 'discovery']) {
+    await t.test(failure, async () => {
+      let time = Date.parse(now);
+      let stage = 'healthy';
+      let id = 0;
+      const timers = new Map();
+      const events = [];
+      const retried = Promise.withResolvers();
+      const runtime = createLimitsRuntime({ limitProviders: ['volcengine'], limitsRefreshMs: 1_800_000 }, {
+        autoStart: false, now: () => time, random: () => 0,
+        setTimeout: (fn, delay) => { timers.set(++id, { fn, delay }); return id; },
+        clearTimeout: timer => timers.delete(timer),
+        onEvent: event => {
+          events.push(event);
+          if (event.type === 'probe-finish' && event.reason === 'retry') retried.resolve();
+        },
+        probeProvider: (_provider, options) => fetchVolcengineLimits(options, {
+          env: {}, now: () => time, runArkcli: async args => {
+            if (args[0] === 'auth') return auth;
+            if (args[0] === 'plans') return stage === 'failed' && failure === 'discovery'
+              ? { plans: [...subscriptions('agent-plan').plans, { key: 'coding-plan', scope: 'personal', error: 'timeout' }] }
+              : subscriptions('agent-plan', 'coding-plan');
+            if (args[3] === 'agent-plan') return response();
+            if (stage === 'failed' && failure === 'usage') throw new Error('timeout');
+            const body = codingResponse();
+            if (stage === 'recovered') body.items[0].periods[2].percent = 30;
+            return body;
+          }
+        })
+      });
+      try {
+        await runtime.refresh({}, 'manual');
+        const first = runtime.getSnapshot().providers.find(row => row.accountLabel === 'Coding Plan');
+        time += 300_000;
+        stage = 'failed';
+        await runtime.refresh({}, 'manual');
+        const partial = runtime.getSnapshot().providers;
+        assert.equal(partial.find(row => row.accountLabel === 'Agent Plan').status, 'ok');
+        const stale = partial.find(row => row.accountKey === first.accountKey);
+        assert.equal(stale.status, 'unavailable');
+        assert.equal(stale.updatedAt, first.updatedAt);
+        assert.deepEqual(stale.windows, first.windows);
+        const event = events.find(entry => entry.type === 'retry-scheduled');
+        assert.ok(event, 'partial failure must arm backoff before the 30-minute interval');
+        assert.equal(event.delayMs, 2500);
+        const timer = [...timers.values()].find(entry => entry.delay === event.delayMs);
+        assert.ok(timer);
+        time += event.delayMs;
+        stage = 'recovered';
+        timer.fn();
+        await retried.promise;
+        const recovered = runtime.getSnapshot().providers.find(row => row.accountKey === first.accountKey);
+        assert.equal(recovered.status, 'ok');
+        assert.equal(recovered.windows[2].usedPercent, 30);
+        assert.equal(recovered.updatedAt, new Date(time).toISOString());
+        assert.equal(runtime.getDiagnostics().providers[0].retryAttempt, 0);
+      } finally { runtime.stop(); }
+    });
+  }
+});
+test('only active subscription states establish ownership', async () => {
+  for (const state of ['Effective', 'Running', 'Pending', 'Expired', 'FutureState']) {
+    const queries = [];
+    const rows = await fetchVolcengineLimits({}, { env: {}, runArkcli: async args => {
+      if (args[0] === 'auth') return auth;
+      if (args[0] === 'plans') return { plans: subscriptions('agent-plan', 'coding-plan').plans.map(plan =>
+        plan.key === 'coding-plan' ? { ...plan, status: state } : plan) };
+      queries.push(args[3]);
+      if (args[3] === 'agent-plan') return response();
+      const body = codingResponse();
+      body.items[0].periods = [{ label: 'session', percent: 0 }];
+      return body;
+    } });
+    const coding = rows.find(row => row.accountLabel === 'Coding Plan');
+    const active = ['Effective', 'Running'].includes(state);
+    assert.equal(queries.includes('coding-plan'), active, state);
+    if (active) assert.equal(coding.status, 'ok');
+    else if (state === 'FutureState') assert.equal(coding.status, 'unavailable');
+    else assert.equal(coding, undefined);
+    assert.equal(rows.find(row => row.accountLabel === 'Agent Plan').status, 'ok');
+  }
+});
+test('inactive subscriptions retire only the matching cached CLI identity', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  for (const state of ['Pending', 'Expired', 'FutureState']) {
+    for (const otherViewer of [false, true]) {
+      await t.test(`${state}: ${otherViewer ? 'other viewer' : 'same viewer'}`, async () => {
+        let time = Date.parse(now);
+        let refreshed = false;
+        const runtime = createLimitsRuntime({ limitProviders: ['volcengine'] }, {
+          autoStart: false, now: () => time,
+          probeProvider: (_provider, options) => fetchVolcengineLimits(options, {
+            env: {}, now: () => time, runArkcli: async args => {
+              if (args[0] === 'auth') return auth;
+              if (args[0] === 'plans') return { plans: subscriptions('agent-plan', 'coding-plan').plans.map(plan =>
+                refreshed && plan.key === 'coding-plan' ? { ...plan, status: state } : plan) };
+              const body = args[3] === 'agent-plan' ? response() : codingResponse();
+              if (refreshed && otherViewer) body.viewer.user_id = 'different';
+              return body;
+            }
+          })
+        });
+        try {
+          await runtime.refresh({}, 'manual');
+          const first = runtime.getSnapshot().providers.find(row => row.accountLabel === 'Coding Plan');
+          refreshed = true;
+          time += 300_000;
+          await runtime.refresh({}, 'manual');
+          const retained = runtime.getSnapshot().providers.find(row => row.accountKey === first.accountKey);
+          if (!otherViewer && state !== 'FutureState') assert.equal(retained, undefined);
+          else {
+            assert.equal(retained.status, 'unavailable');
+            assert.deepEqual(retained.windows, first.windows);
+          }
+        } finally { runtime.stop(); }
+      });
+    }
+  }
 });
 function mockChild() {
   const child = new EventEmitter(); child.stdout = new PassThrough();
