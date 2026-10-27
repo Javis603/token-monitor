@@ -28,7 +28,7 @@ Uninstall can retain plugin data/preferences and display locations independently
 
 Discover combines the App-distributed offline official catalog with user-configured HTTPS catalogs. The official catalog is currently empty: no production example plugin ships. Only packages distributed with the App receive official attribution; this is provenance, not a safety guarantee. Official package updates arrive with an App update and use the same explicit preview, disabled installation, revision trust and rollback workflow. Install from file and folder remain available for private unpublished plugins. Catalog refresh and update preview do not execute code; installation is always explicit.
 
-The existing catalog index schema, bounded downloads, source pins, package hashes and optional Ed25519 signatures remain. A source is a configured catalog URL, not a GitHub repository crawler. Source changes cannot silently replace another installation's origin. Community labels and author descriptions are publisher claims, never an audit badge. Experimental API compatibility is checked against the downloaded package before installation.
+Catalogs use bounded downloads, source pins, package hashes and optional Ed25519 signatures. A source is a configured catalog URL, not a GitHub repository crawler. Source changes cannot silently replace another installation's origin. Community labels and author descriptions are publisher claims, never an audit badge. Experimental API compatibility is checked against the downloaded package before installation.
 
 ## Create a community catalog
 

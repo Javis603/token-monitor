@@ -1,6 +1,6 @@
 # Plugin API
 
-Token Monitor plugins run code you choose to trust (`tmApi: 1`). Enable only code you trust. The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review. No official plugins ship with the platform; the repository's minimal fixtures are tests, not a store.
+Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review. No official plugins ship with the platform; the repository's minimal fixtures are tests, not a store.
 
 ## Execution and trust
 

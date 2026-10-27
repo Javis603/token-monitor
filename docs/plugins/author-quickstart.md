@@ -28,7 +28,7 @@ export function activate(ctx) {
 }
 ```
 
-In Settings → Plugins → Installed → More actions, import the folder. Installation copies the declared files into managed storage without executing them. Review the trusted-code warning, enable it, and choose Home or Main app page. There is no bundled system-monitor plugin or automatic marketplace.
+In Settings → Plugins → Installed → More actions, import the folder. Installation copies the declared files into managed storage without executing them. Review the trusted-code warning, enable it, and choose Home or Main app page.
 
 ## Interface
 
