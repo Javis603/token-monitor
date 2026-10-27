@@ -389,13 +389,24 @@ function setupDocsMenu() {
 
 function redirectLegacyGuide() {
   var legacy = document.body.getAttribute('data-docs-legacy');
-  if (!legacy) return false;
   var chapters = { ui: 'interface', data: 'data-settings', share: 'test-distribute' };
   var id;
   try { id = decodeURIComponent(window.location.hash.slice(1)); } catch (e) { id = ''; }
-  var target = id ? legacy + '-' + id : chapters[legacy];
-  if (legacy === 'data' && id === 'settings') target = 'data-plugin-settings';
-  var url = new URL('plugin-quickstart.html', window.location.href);
+  if (!legacy) {
+    var previous = /^(ui|data|share)-(.*)$/.exec(id);
+    if (!/\/plugin-quickstart\.html$/.test(window.location.pathname) || !previous) return false;
+    legacy = previous[1];
+    id = previous[2];
+  }
+  var sections = {
+    ui: { choose: 'content-surfaces', example: 'original-content-targets', lifecycle: 'lifecycle-and-appearance', reference: 'content-surfaces', 'render-choice': 'content-surfaces', 'rich-failures': 'lifecycle-and-appearance' },
+    data: { permissions: 'execution-and-trust', 'data-decision': 'host-data-and-settings', paging: 'host-data-and-settings', relations: 'host-data-and-settings', settings: 'host-data-and-settings', 'plugin-settings': 'host-data-and-settings', 'settings-conflicts': 'host-data-and-settings' },
+    share: { catalog: 'create-a-community-catalog', 'catalog-trust': 'optional-ed25519-signing', package: 'package-format', reference: 'catalogs', 'release-check': 'test-before-sharing', test: 'test-before-sharing' }
+  };
+  var references = { ui: 'plugin-ui-reference.html', data: 'plugin-reference.html', share: 'plugin-distribution-reference.html' };
+  var section = sections[legacy] && Object.prototype.hasOwnProperty.call(sections[legacy], id) ? sections[legacy][id] : null;
+  var url = new URL(section ? references[legacy] : 'plugin-quickstart.html', window.location.href);
+  var target = section || chapters[legacy];
   url.search = window.location.search;
   url.hash = target;
   window.location.replace(url.href);

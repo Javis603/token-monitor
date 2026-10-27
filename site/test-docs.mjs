@@ -1,4 +1,5 @@
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { renderReference, referenceHref, references } from "./build-docs.mjs";
@@ -13,8 +14,8 @@ test("reference rendering keeps code literal, escapes raw HTML and rejects execu
 });
 
 test("canonical document links stay local while implementation links keep repository context", () => {
-  assert.equal(referenceHref('README.md#code-api', references[1].source), 'plugin-reference.html#code-api');
-  assert.equal(referenceHref('author-ui-options.md#fixed-bridge', references[0].source), 'plugin-ui-reference.html#fixed-bridge');
+  assert.equal(referenceHref('README.md#ui-lifecycle', references[1].source), 'plugin-reference.html#ui-lifecycle');
+  assert.equal(referenceHref('author-ui-options.md#original-content-targets', references[0].source), 'plugin-ui-reference.html#original-content-targets');
   assert.equal(referenceHref('../../src/shared/plugins/manifest.js', references[0].source), 'https://github.com/Javis603/token-monitor/blob/main/src/shared/plugins/manifest.js');
   assert.equal(referenceHref('//external.test', references[0].source), null);
   assert.equal(referenceHref('data:text/html,example', references[0].source), null);
@@ -172,4 +173,101 @@ test("topic navigation encodes fragment text and highlights the final Unicode se
   assert.equal(links[1].getAttribute('aria-current'), 'location');
   assert.equal(links[0].getAttribute('aria-current'), undefined);
   assert.equal(links[1].textContent, headings[1].textContent);
+});
+
+test("legacy tutorial redirects reach real sections for every supported language", async () => {
+  const { runInNewContext } = await import('node:vm');
+  const source = await readFile(new URL('site/scripts/docs.js', root), 'utf8');
+  const fn = source.slice(source.indexOf('function redirectLegacyGuide('), source.indexOf('function scrollToHash('));
+  const sections = {
+    ui: ['choose', 'example', 'lifecycle', 'reference', 'render-choice', 'rich-failures'],
+    data: ['permissions', 'data-decision', 'paging', 'relations', 'settings', 'plugin-settings', 'settings-conflicts'],
+    share: ['catalog', 'catalog-trust', 'package', 'reference', 'release-check', 'test']
+  };
+  for (const lang of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
+    for (const [route, anchors] of Object.entries(sections)) {
+      for (const anchor of ['', ...anchors, 'unknown-bookmark', '__proto__', '%invalid']) {
+        for (const unified of [false, true]) {
+          let target;
+          const context = { URL, document: { body: { getAttribute: () => unified ? null : route } }, window: { location: {
+            href: `https://docs.test/docs/plugin-${unified ? 'quickstart' : route}.html?lang=${lang}`,
+            pathname: `/docs/plugin-${unified ? 'quickstart' : route}.html`,
+            search: `?lang=${lang}`, hash: '#' + (unified ? route + '-' : '') + anchor, replace(value) { target = new URL(value); }
+          } } };
+          runInNewContext(fn, context);
+          if (unified && anchor === '%invalid') {
+            assert.equal(context.redirectLegacyGuide(), false);
+            continue;
+          }
+          assert.equal(context.redirectLegacyGuide(), true);
+          assert.equal(target.searchParams.get('lang'), lang);
+          const html = await readFile(new URL('_site' + target.pathname, root), 'utf8');
+          assert.ok(html.includes(`id="${target.hash.slice(1)}"`), target.href);
+          if (!target.pathname.includes('reference')) {
+            const article = html.match(new RegExp(`<article[^>]*lang="${lang}"[^>]*>([\\s\\S]*?)</article>`))[1];
+            assert.ok(article.includes(`data-anchor="${target.hash.slice(1)}"`));
+          }
+        }
+      }
+    }
+    for (const page of ['plugins', 'plugin-quickstart']) {
+      const html = await readFile(new URL(`site/docs/${page}.html`, root), 'utf8');
+      const article = html.match(new RegExp(`<article[^>]*lang="${lang}"[^>]*>([\\s\\S]*?)</article>`))[1];
+      assert.ok(article.includes('plugin-distribution-reference.html#create-a-community-catalog'));
+    }
+  }
+});
+
+test("catalog tutorial scripts produce packages and signatures accepted by production", async t => {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+  const { execFileSync } = require('node:child_process');
+  const { parseIndex, signingKey } = require('../src/electron/plugins/catalogSources');
+  const { parsePackage } = require('../src/electron/plugins/package');
+  const { createPluginCatalog } = require('../src/electron/plugins/catalog');
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-doc-catalog-'));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const docs = await readFile(new URL('docs/plugins/distribution-design.md', root), 'utf8');
+  const scripts = [...docs.matchAll(/```js\n([\s\S]*?)```/g)].map(m => m[1]);
+  assert.equal(scripts.length, 3);
+  const quickstart = await readFile(new URL('docs/plugins/author-quickstart.md', root), 'utf8');
+  const manifest = JSON.parse(quickstart.match(/```json\n([\s\S]*?)```/)[1]);
+  fs.mkdirSync(path.join(scratch, 'plugin'));
+  fs.writeFileSync(path.join(scratch, 'plugin/manifest.json'), JSON.stringify(manifest));
+  fs.writeFileSync(path.join(scratch, 'plugin/ui.mjs'), quickstart.match(/```js\n([\s\S]*?)```/)[1]);
+  execFileSync(process.execPath, [fileURLToPath(new URL('scripts/build-plugin-package.js', root)), 'plugin', 'my-panel.tmplugin'], { cwd: scratch });
+  fs.writeFileSync(path.join(scratch, 'catalog-template.json'), docs.match(/```json\n([\s\S]*?)```/)[1]);
+  for (let i = 0; i < scripts.length; i++) fs.writeFileSync(path.join(scratch, `${i}.cjs`), scripts[i]);
+  const run = (i, ...args) => execFileSync(process.execPath, [`${i}.cjs`, ...args], { cwd: scratch });
+  run(0, 'my-panel.tmplugin', 'catalog-template.json', 'catalog.json');
+  run(1, 'private.pem', 'public.pem');
+  run(2, 'catalog.json', 'private.pem', 'catalog-signed.json');
+  const bytes = fs.readFileSync(path.join(scratch, 'my-panel.tmplugin'));
+  const plain = fs.readFileSync(path.join(scratch, 'catalog.json'));
+  const signed = fs.readFileSync(path.join(scratch, 'catalog-signed.json'));
+  const key = signingKey(fs.readFileSync(path.join(scratch, 'public.pem'), 'utf8')).pem;
+  assert.deepEqual(parseIndex(signed, key), parseIndex(plain));
+  assert.equal(parsePackage(bytes).manifest.id, manifest.id);
+  assert.throws(() => parseIndex(signed), /format 1/);
+  const tampered = JSON.parse(signed);
+  tampered.payload = Buffer.from(plain.toString().replace('My plugins', 'Changed')).toString('base64');
+  assert.throws(() => parseIndex(Buffer.from(JSON.stringify(tampered)), key), /signature is invalid/);
+  for (const pinned of [false, true]) {
+    let packageResponse = bytes;
+    const catalog = createPluginCatalog({ root: path.join(scratch, String(pinned)), catalogDirectory: path.join(scratch, 'plugin'),
+      manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {}, preview(pkg) { return pkg.manifest.id; } },
+      fetchImpl: async url => new Response(url.endsWith('.tmplugin') ? packageResponse : pinned ? signed : plain)
+    });
+    t.after(() => catalog.dispose());
+    const state = await catalog.addSource({ url: 'https://example.com/catalog.json', publicKey: pinned ? key : '' });
+    const source = state.sources.find(s => s.kind === 'community');
+    assert.equal(source.error, '');
+    assert.equal(source.signed, pinned);
+    assert.equal(await catalog.preview(source.id, manifest.id, manifest.version), manifest.id);
+    packageResponse = Buffer.from('tampered');
+    await assert.rejects(catalog.preview(source.id, manifest.id, manifest.version), /SHA-256/);
+  }
 });
