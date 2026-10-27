@@ -60,7 +60,7 @@ const {
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { sessionActivityProvidersFor, refreshSessionActivity } = require('./sessionActivityRegistry');
 const { isSessionActivityClient } = require('./sessionActivityProviders');
-const { normalizeReasoningEffort } = require('./sessionLive');
+const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const { readT3Activities } = require('./t3SessionActivity');
 const { createProcessStartBatch } = require('./processStarts');
 const { catpawDatabaseName, catpawSourcesFingerprint } = require('./providers/catpaw/paths');
@@ -738,7 +738,7 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (Object.prototype.hasOwnProperty.call(session, 'promptCache')) {
         target.promptCache = session.promptCache;
       }
-      if (session.client === 'codex') {
+      if (isSessionReasoningEffortClient(session.client)) {
         const freshAt = Date.parse(session.lastUsedAt) || 0;
         const retainedAt = Date.parse(target.lastUsedAt) || 0;
         if (freshAt >= retainedAt && Object.prototype.hasOwnProperty.call(session, 'reasoningEffort')) {

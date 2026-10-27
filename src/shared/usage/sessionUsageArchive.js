@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('../usage');
+const { isSessionReasoningEffortClient } = require('../sessionLive');
 const {
   cloneJson,
   hasSummaryPeriod,
@@ -72,7 +73,7 @@ function hasSessionUsage(session) {
 // A title/catalog miss on an unchanged observation is not a new turn. Keep
 // its saved setting, but never fill an explicit clear or a newer observation.
 function sessionWithRetainedEffort(session, previous) {
-  if (session.client !== 'codex' || Object.hasOwn(session, 'reasoningEffort')
+  if (!isSessionReasoningEffortClient(session.client) || Object.hasOwn(session, 'reasoningEffort')
     || !previous || !Object.hasOwn(previous, 'reasoningEffort')) return session;
   const timestamp = Date.parse(session.lastUsedAt);
   if (!Number.isFinite(timestamp) || timestamp !== Date.parse(previous.lastUsedAt)) return session;

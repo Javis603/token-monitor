@@ -41,6 +41,10 @@
   const RUNNING_WINDOW_MS = 10 * 60 * 1000;
   const LIVE_ACTIVITY_TTL_MS = 30_000;
 
+  function isSessionReasoningEffortClient(client) {
+    return client === 'codex' || client === 'claude';
+  }
+
   function normalizeReasoningEffort(value) {
     if (typeof value !== 'string') return null;
     const effort = value.trim();
@@ -268,6 +272,7 @@
     LIVE_ACTIVITY_TTL_MS,
     normalizeLiveActivity,
     normalizeReasoningEffort,
+    isSessionReasoningEffortClient,
     canReplaceLiveActivity,
     sessionWithActivity,
     liveActivityExpiryAt,

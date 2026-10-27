@@ -6,6 +6,7 @@ const { claudeSessionRoots } = require('./paths');
 const { findSessionFiles } = require('../../sessionFiles');
 const { readT3SessionMeta } = require('../../t3SessionMetadata');
 const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
+const { normalizeReasoningEffort } = require('../../sessionLive');
 
 const TITLE_MAX_CODE_POINTS = 96;
 const TITLE_READ_CHUNK_BYTES = 256 * 1024;
@@ -219,6 +220,23 @@ function isUserPrompt(entry) {
   return asked;
 }
 
+function applyReasoningEffort(state, entry) {
+  if (entry.isSidechain === true || entry.isApiErrorMessage === true) return;
+  // A non-null per-turn override describes this response more specifically
+  // than the session setting. Older clients may record neither field.
+  state.reasoningEffort = normalizeReasoningEffort(entry.perTurnEffort ?? entry.effort);
+}
+
+function assistantMetadataFromTail(tail) {
+  // Prove a candidate belongs to the root by parsing its complete suffix.
+  // Nested tool inputs leave unmatched enclosing braces and are rejected.
+  // This uses the existing 8 KiB fragment, never the unbounded message body.
+  for (const match of tail.matchAll(/"(?:effort|perTurnEffort|isSidechain|isApiErrorMessage|uuid|timestamp|sessionId)"\s*:/g)) {
+    try { return JSON.parse('{' + tail.slice(match.index)); } catch (_) { /* Nested or incomplete suffix. */ }
+  }
+  return null;
+}
+
 function applyMetadataLine(state, line) {
   if (!line.length) return;
   try {
@@ -231,6 +249,7 @@ function applyMetadataLine(state, line) {
       const candidate = cleanTitle(entry.aiTitle);
       if (candidate) state.aiTitle = candidate;
     } else if (entry?.type === 'assistant') {
+      applyReasoningEffort(state, entry);
       // Claude stamps every assistant record with why it stopped. `tool_use`
       // means it paused to run tools and is still mid-turn; anything else
       // (`end_turn`, `stop_sequence`, `max_tokens`) means nothing further is
@@ -258,6 +277,7 @@ function applyMetadataLine(state, line) {
       // latch, and the session would read as finished while the new turn is
       // still being generated. The next assistant record restores the reading.
       state.userSinceStop = true;
+      if (entry.type === 'user' && entry.isSidechain !== true) state.reasoningEffort = null;
     }
   } catch (_) { /* skip partial or unrelated lines */ }
 }
@@ -399,6 +419,17 @@ function applyLongLineFragments(state) {
   state.longLineTail = Buffer.alloc(0);
   const kind = oversizedRecordKind(head, tail);
   if (kind === 'assistant') {
+    const metadata = assistantMetadataFromTail(tail);
+    // The flags can precede message content in the head or follow it in the
+    // root suffix. Never let a sidechain or synthetic error replace main effort.
+    const messageAt = head.indexOf('"message"');
+    let prefix = {};
+    if (messageAt >= 0) {
+      try { prefix = JSON.parse(head.slice(0, messageAt).replace(/,\s*$/, '') + '}'); } catch (_) { /* Incomplete prefix. */ }
+    }
+    if (metadata) {
+      applyReasoningEffort(state, { ...prefix, ...metadata });
+    }
     // The usage reading is taken before the stop_reason guard below, matching
     // the ordinary path, which applies usage whether or not stop_reason states
     // anything. Claude persists `stop_reason: null` on some assistant records
@@ -462,11 +493,17 @@ function applyLongLineFragments(state) {
   // written is matched on the bytes that have arrived.
   const asString = /^"content"\s*:\s*"([^"]*)/.exec(after);
   if (asString) {
-    if (asString[1].trim().length > 0) state.userSinceStop = true;
+    if (asString[1].trim().length > 0) {
+      state.userSinceStop = true;
+      if (!/"isSidechain"\s*:\s*true/.test(flags)) state.reasoningEffort = null;
+    }
     return;
   }
   if (/"type"\s*:\s*"tool_result"/.test(after.slice(0, 400))) return;
-  if (/"type"\s*:\s*"(text|image)"/.test(after.slice(0, 400))) state.userSinceStop = true;
+  if (/"type"\s*:\s*"(text|image)"/.test(after.slice(0, 400))) {
+    state.userSinceStop = true;
+    if (!/"isSidechain"\s*:\s*true/.test(flags)) state.reasoningEffort = null;
+  }
 }
 
 function readSessionTitle(filePath, deps = {}) {
@@ -496,6 +533,7 @@ function readSessionTitle(filePath, deps = {}) {
         aiTitle: cached.aiTitle || '',
         stopReason: cached.stopReason || '',
         userSinceStop: cached.userSinceStop === true,
+        ...(Object.hasOwn(cached, 'reasoningEffort') ? { reasoningEffort: cached.reasoningEffort } : {}),
         trailing: Buffer.isBuffer(cached.trailing) ? Buffer.from(cached.trailing) : Buffer.alloc(0),
         droppingLongLine: cached.droppingLongLine === true,
         // Carried across the append resume: a scan that stopped mid-record has
@@ -641,6 +679,7 @@ function resolveSessionMetadata(sessionIds, context) {
       ? normalizeSessionContext(index) || { contextTokens: 0, contextWindow: 0 } : undefined;
     result.set(sessionId, {
       ...meta,
+      ...(index && Object.hasOwn(index, 'reasoningEffort') ? { reasoningEffort: index.reasoningEffort } : {}),
       ...(index?.promptCacheState?.observation === undefined ? {}
         : { promptCache: index.promptCacheState.observation }),
       ...(title ? { title } : {}),

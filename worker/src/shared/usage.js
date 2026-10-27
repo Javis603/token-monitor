@@ -6,7 +6,7 @@
 const { isSessionActivityClient } = require('./sessionActivityProviders');
 
 const PERIODS = ['today', 'month', 'allTime'];
-const { normalizeLiveActivity, normalizeReasoningEffort, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
+const { normalizeLiveActivity, normalizeReasoningEffort, isSessionReasoningEffortClient, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -691,7 +691,7 @@ function mergeSession(target, source) {
   if (hasOwn(source, 'promptCache') && sourceLastUsed >= targetLastUsed) {
     target.promptCache = normalizePromptCache(source.promptCache);
   }
-  if (source.client === 'codex' && sourceLastUsed >= targetLastUsed) {
+  if (isSessionReasoningEffortClient(source.client) && sourceLastUsed >= targetLastUsed) {
     if (sourceLastUsed > targetLastUsed || !hasOwn(target, 'reasoningEffort')) {
       if (hasOwn(source, 'reasoningEffort') || hasOwn(target, 'reasoningEffort')) {
         target.reasoningEffort = normalizeReasoningEffort(source.reasoningEffort);
@@ -856,7 +856,7 @@ function normalizeSession(input, fallbackKey) {
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
   if (hasOwn(input, 'promptCache')) session.promptCache = normalizePromptCache(input.promptCache);
-  if (client === 'codex' && hasOwn(input, 'reasoningEffort')) session.reasoningEffort = normalizeReasoningEffort(input.reasoningEffort);
+  if (isSessionReasoningEffortClient(client) && hasOwn(input, 'reasoningEffort')) session.reasoningEffort = normalizeReasoningEffort(input.reasoningEffort);
   session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
   session.contextWindow = Math.max(0, Math.round(asNumber(input.contextWindow ?? input.context_window ?? 0)));
   // Carried rather than summed, and only when the source actually states it:
@@ -2014,7 +2014,7 @@ function deltaValue(base, fresh, anchor, key) {
       applyParentLink(result, base?.parentSessionId ? base : fresh || {});
       // Compare before lastUsedAt is projected to the maximum: a missing
       // setting preserves only the same observation, never a newer turn.
-      if (sample.client === 'codex') {
+      if (isSessionReasoningEffortClient(sample.client)) {
         const freshAt = timestampMs(fresh?.lastUsedAt);
         const retainedAt = timestampMs(base?.lastUsedAt);
         if (freshAt < retainedAt) {

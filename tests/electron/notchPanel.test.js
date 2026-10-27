@@ -277,10 +277,10 @@ test('session context retains shared eligibility, tooltips and small meters with
   assert.equal(remaining.querySelector('.notch-session-context').attributes['aria-valuenow'], '63');
 });
 
-test('Notch Home, active and recent rows share persistent main-session effort without tooltips', t => {
+for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and recent rows share persistent main-session effort without tooltips`, t => {
   const f = panelFixture(t), data = payload();
   const now = Date.now(), ago = minutes => new Date(now - minutes * 60000).toISOString();
-  const row = (id, extra) => ({ key: `codex:${id}`, client: 'codex', sessionId: id, title: id,
+  const row = (id, extra) => ({ key: `${client}:${id}`, client, sessionId: id, title: id,
     totalTokens: 100, models: { 'gpt-test': 100 }, startedAt: ago(20), lastUsedAt: ago(1), ...extra });
   const main = row('running', { reasoningEffort: 'high', liveActivity: { state: 'running', observedAt: ago(0) } });
   data.cells[1].sessions = [
@@ -292,7 +292,7 @@ test('Notch Home, active and recent rows share persistent main-session effort wi
   ];
   f.panel.render(data);
   const home = f.find('notch-now-meta');
-  assert.match(home.textContent, /Codex · 2 models · high/);
+  assert.ok(home.textContent.includes(`${client === 'codex' ? 'Codex' : 'Claude Code'} · 2 models · high`));
   assert.equal(home.querySelector('.session-models').tooltipEntries.length, 2, 'model breakdown retains its tooltip');
   f.panel.selectPage('sessions');
   const page = f.find('notch-page-sessions');

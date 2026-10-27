@@ -20,8 +20,8 @@ function render(row, now = at, locale = 'en') {
 }
 function text(node) { return node ? [node.textContent || '', ...node.children.map(text)].join('') : ''; }
 
-test('effort stays visible after context/cache expiry and archive retention', () => {
-  const row = session();
+for (const client of ['codex', 'claude']) test(`${client} effort stays visible after context/cache expiry and archive retention`, () => {
+  const row = session({ client });
   const context = render(row);
   assert.equal(text(context), '60%');
   assert.equal(sessionReasoningEffortForRow(row, at), 'high');
@@ -32,7 +32,7 @@ test('effort stays visible after context/cache expiry and archive retention', ()
   assert.equal(sessionReasoningEffortForRow(row, at + 600_001), 'high');
   assert.equal(sessionReasoningEffortForRow(row, at + 1800_000), 'high');
   assert.equal(render(row, at + 1800_000), null, 'only live metrics expire');
-  assert.equal(sessionReasoningEffortForRow(session({ archived: true }), at + 86400_000), 'high');
+  assert.equal(sessionReasoningEffortForRow(session({ client, archived: true }), at + 86400_000), 'high');
   assert.equal(render(session({ promptCache: null }), at + 600_001), null);
   assert.equal(render(session({ archived: true })), null);
   for (const effort of [null, undefined, {}, ' ', '<script>', 'x'.repeat(33)]) {
@@ -63,7 +63,25 @@ test('Dock carries latest main effort independently of cumulative models and chi
   }
 });
 
-test('shared model metadata renders the same persistent setting in plain and grouped rows', () => {
+for (const client of ['codex', 'claude']) test(`${client} resumed native metadata replaces archived effort consistently`, t => {
+  t.mock.timers.enable({ apis: ['Date'], now: at });
+  const key = `${client}:s`;
+  const raw = session({ client, archived: true, costUsd: 1, lastUsedAt: iso(-1000) });
+  for (const effort of ['low', null, undefined]) {
+    const native = session({ client, native: true, reasoningEffort: effort,
+      liveActivity: { state: 'running', observedAt: iso(0) } });
+    const period = { sessions: { [key]: raw } };
+    const nativeSessions = { [key]: native };
+    const [row] = sessionRowsForPeriod(period, { nativeSessions, now: new Date(at) });
+    const [dock] = recentSessionRows({ periods: { month: period }, nativeSessions: { month: nativeSessions } });
+    assert.equal(sessionReasoningEffortForRow(row), effort ?? null);
+    assert.equal(sessionReasoningEffortForRow(dock), effort ?? null);
+    assert.equal(row.value, 10); assert.equal(row.cost, 1);
+    assert.equal(dock.totalTokens, 10); assert.equal(dock.costUsd, 1);
+  }
+});
+
+for (const client of ['codex', 'claude']) test(`${client} shared model metadata renders the same persistent setting in plain and grouped rows`, () => {
   const document = {
     createTextNode: textContent => ({ textContent, children: [] }),
     createElement: () => ({ children: [], attributes: {},
@@ -72,13 +90,15 @@ test('shared model metadata renders the same persistent setting in plain and gro
   };
   const options = { translate: (key, values) => translate('en', key, values),
     view: { setDetailTooltip(node, entries) { node.entries = entries; } } };
-  const raw = session({ archived: true, title: 'Saved conversation', models: { 'gpt-test': 10 } });
-  const [row] = sessionRowsForPeriod({ sessions: { 'codex:s': raw } }, { now: new Date(at + 86400_000) });
-  assert.equal(row.subtitle, 'codex · gpt-test · high');
+  const raw = session({ client, archived: true, title: 'Saved conversation', models: { 'gpt-test': 10 } });
+  const [row] = sessionRowsForPeriod({ sessions: { [`${client}:s`]: raw } }, { now: new Date(at + 86400_000) });
+  assert.equal(row.subtitle, `${client} · gpt-test · high`);
   assert.equal(text(sessionModelMetadataNode(document, row, options)), 'gpt-test · high');
   assert.equal(text(sessionModelMetadataNode(document, raw, options)), 'gpt-test · high');
-  const child = session({ sessionId: 'child', parentSessionId: 's', reasoningEffort: 'low', models: { child: 10 } });
-  const [group] = groupSessionRows(sessionRowsForPeriod({ sessions: { 'codex:s': raw, 'codex:child': child } }, {
+  const [dock] = recentSessionRows({ periods: { month: { sessions: { [`${client}:s`]: raw } } } });
+  assert.equal(sessionReasoningEffortForRow(dock), 'high');
+  const child = session({ client, sessionId: 'child', parentSessionId: 's', reasoningEffort: 'low', models: { child: 10 } });
+  const [group] = groupSessionRows(sessionRowsForPeriod({ sessions: { [`${client}:s`]: raw, [`${client}:child`]: child } }, {
     now: new Date(at + 86400_000)
   }));
   assert.equal(sessionModelMetadataLabel(group), '2 models · high');
@@ -88,6 +108,6 @@ test('shared model metadata renders the same persistent setting in plain and gro
   assert.match(node.children.at(-1).attributes['aria-label'], /high/);
   assert.equal(node.children.at(-1).entries, undefined, 'effort is plain text without a tooltip');
   assert.equal(node.children.at(-1).attributes.tabindex, undefined);
-  assert.equal(sessionModelMetadataLabel({ ...raw, client: 'claude' }), 'gpt-test');
+  assert.equal(sessionModelMetadataLabel({ ...raw, client: 'gemini' }), 'gpt-test');
   assert.equal(sessionModelMetadataLabel({ ...raw, reasoningEffort: null }), 'gpt-test');
 });

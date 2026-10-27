@@ -42,7 +42,7 @@
 
   function sessionReasoningEffortForRow(row) {
     const main = row?.groupRows?.[0] || row;
-    return main?.client === 'codex' ? sessionLive.normalizeReasoningEffort(main.reasoningEffort) : null;
+    return sessionLive.isSessionReasoningEffortClient(main?.client) ? sessionLive.normalizeReasoningEffort(main.reasoningEffort) : null;
   }
 
   function sessionModelMetadataLabel(row) {
@@ -553,7 +553,7 @@
           session = { ...session, archived: false, deleted: false, sourceDeleted: false,
             lastUsedAt: native.lastUsedAt, liveActivity: native.liveActivity,
             turnEnded: native.turnEnded, waitingForInput: native.waitingForInput,
-            ...(session.client === 'codex' ? { reasoningEffort: native.reasoningEffort ?? null } : {}) };
+            ...(sessionLive.isSessionReasoningEffortClient(session.client) ? { reasoningEffort: native.reasoningEffort ?? null } : {}) };
         }
         if (isReasonixSyntheticSession(session, key)) return null;
         const value = finiteNumber(session?.totalTokens);

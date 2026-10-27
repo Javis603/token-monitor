@@ -159,8 +159,8 @@ test('normalization, merge and deltas replace effort snapshots including unknown
   delete missing.sessions['codex:s'].reasoningEffort;
   assert.equal(mergePeriods(old, missing).sessions['codex:s'].reasoningEffort, null);
   assert.equal(mergePeriods(period('high'), period('low')).sessions['codex:s'].reasoningEffort, null);
-  assert.equal(normalizePeriod({ sessions: { s: { client: 'claude', sessionId: 's', totalTokens: 1,
-    reasoningEffort: 'high' } } }).sessions['claude:s'].reasoningEffort, undefined);
+  assert.equal(normalizePeriod({ sessions: { s: { client: 'gemini', sessionId: 's', totalTokens: 1,
+    reasoningEffort: 'high' } } }).sessions['gemini:s'].reasoningEffort, undefined);
 });
 
 test('session archives retain effort independently of expiring activity', () => {
@@ -172,16 +172,16 @@ test('session archives retain effort independently of expiring activity', () => 
   assert.equal(normalizeSessionUsageArchive(archive).sessions['codex:s'].periods.today.reasoningEffort, null);
 });
 
-test('a later collection preserves effort only for the same unchanged observation', () => {
-  const snapshot = extra => ({ today: normalizePeriod({ sessions: { 'codex:s': {
-    client: 'codex', sessionId: 's', totalTokens: 10, lastUsedAt: at, ...extra
+for (const client of ['codex', 'claude']) test(`${client} later collection preserves effort only for the same unchanged observation`, () => {
+  const snapshot = extra => ({ today: normalizePeriod({ sessions: { [`${client}:s`]: {
+    client, sessionId: 's', totalTokens: 10, lastUsedAt: at, ...extra
   } } }) });
   for (const [extra, expected] of [[{}, 'high'], [{ reasoningEffort: null }, null], [{ lastUsedAt: next }, undefined]]) {
     const saved = updateSessionUsageArchive(null, snapshot({ reasoningEffort: 'high' }), new Date(at)).archive;
     const current = snapshot(extra);
     updateSessionUsageArchive(saved, current, new Date(next));
     const restored = applySessionUsageArchive(current, normalizeSessionUsageArchive(saved), { now: new Date(next) });
-    assert.equal(restored.today.sessions['codex:s'].reasoningEffort, expected);
-    assert.equal(current.today.sessions['codex:s'].reasoningEffort, extra.reasoningEffort, 'capture does not mutate the scanner row');
+    assert.equal(restored.today.sessions[`${client}:s`].reasoningEffort, expected);
+    assert.equal(current.today.sessions[`${client}:s`].reasoningEffort, extra.reasoningEffort, 'capture does not mutate the scanner row');
   }
 });
