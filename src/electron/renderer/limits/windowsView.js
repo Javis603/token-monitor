@@ -1700,10 +1700,6 @@
         if (node) windows.append(node);
       }
     } else {
-      // Default: render only the windows the provider actually has. Providers
-      // that only expose a single window shouldn't leave a half-empty bar next to
-      // the real one. Credits windows show balance amounts; display-only meters
-      // leave the provider reading unchanged.
       const session = windowForKind(provider, 'session');
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
       for (const weekly of (provider.windows || []).filter(window => window.kind === 'weekly')) {
@@ -1716,7 +1712,7 @@
           providerWindowText(provider, weekly).detail
         ));
       }
-      if (windows.children.length % 2 === 1) windows.children[windows.children.length - 1].classList.add('limit-window-wide');
+      repairWindowPairs(windows);
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
         const amount = creditsAmount(provider, creditsWindow);
         if (amount === null) continue;
@@ -2308,8 +2304,6 @@
     // A Codex group's forecast describes the account set, not one account, so it
     // is appended once below the rows instead of on each of them.
     codex: () => ({ forecastOnGroup: true }),
-    // One local Code login beside one API key is two lanes, not two accounts.
-    // Any other mix keeps the ordinary account count.
     minimax: (providers) => ({ accountCount: minimaxParallelLanes(providers) ? 0 : undefined })
   };
 
@@ -2358,9 +2352,7 @@
       && label !== 'Zen';
   }
 
-  // Code and the API key are collected together. Their labels name the lane.
-  // Numbered account titles stay for any set that is not exactly that pair,
-  // because unlike keys are not evidence of one account.
+  // An OAuth/API pair is a display classification, not proof of shared ownership.
   function minimaxParallelLanes(providers) {
     const sources = new Set((providers || []).map((row) => row?.source));
     return (providers || []).length === 2 && sources.size === 2 && sources.has('oauth') && sources.has('api');

@@ -684,38 +684,30 @@ test('every preference the shared view reads reaches the dock through the appear
 
 test('cash-balance cards share the Spend tooltip and its hide/show identity', () => {
   for (const id of ['deepseek', 'minimax']) {
-    const provider = {
-      provider: id,
-      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
-      balance: { amount: 4.2, currency: 'USD', todaySpend: 0, weekSpend: 2, monthSpend: 1.4, allTimeSpend: 8.9 }
-    };
-    const view = dockView();
-    const card = view.renderProviderWindows(provider, '#4D6BFE');
-    assert.ok(card.find('limit-spend'), 'the card should carry the shared spend row');
-    assert.match(card.text, /Spend Today \$0\.00 · Month \$1\.40/);
-    assert.match(card.text, /Week/);
-    assert.match(card.text, /All time/);
-    assert.match(card.text, /\$8\.90/);
-    assert.match(card.text, /\$4\.20/);
-    assert.ok(view.limitProviderUsageItems([provider]).some(item => item.id === 'spend'));
-    const hidden = dockView({ limitProviderHiddenItems: { [id]: ['spend'] } }).renderProviderWindows(provider, '#4D6BFE');
-    assert.equal(hidden.find('limit-spend'), null);
-    assert.match(hidden.text, /\$4\.20/);
+    for (const spend of [
+      { todaySpend: 0, weekSpend: 2, monthSpend: 1.4, allTimeSpend: 8.9 },
+      { todaySpend: 0.12, weekSpend: 0.5, monthSpend: 1.4 }
+    ]) {
+      const provider = {
+        provider: id,
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
+        balance: { amount: 4.2, currency: 'USD', ...spend }
+      };
+      const view = dockView();
+      const card = view.renderProviderWindows(provider, '#4D6BFE');
+      assert.ok(card.find('limit-spend'), 'the card should carry the shared spend row');
+      assert.ok(card.text.includes(`Spend Today $${spend.todaySpend.toFixed(2)} · Month $1.40`));
+      assert.match(card.text, /Week/);
+      assert.equal(card.text.includes('All time'), spend.allTimeSpend !== undefined);
+      if (spend.allTimeSpend !== undefined) assert.match(card.text, /\$8\.90/);
+      assert.match(card.text, /\$4\.20/);
+      assert.match(card.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), /Month: \$1\.40/);
+      assert.ok(view.limitProviderUsageItems([provider]).some(item => item.id === 'spend'));
+      const hidden = dockView({ limitProviderHiddenItems: { [id]: ['spend'] } }).renderProviderWindows(provider, '#4D6BFE');
+      assert.equal(hidden.find('limit-spend'), null);
+      assert.match(hidden.text, /\$4\.20/);
+    }
   }
-});
-
-test('a DeepSeek card shows the spend row the projection used to drop', () => {
-  const card = dockView().renderProviderWindows({
-    provider: 'deepseek',
-    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
-    balance: { amount: 4.2, currency: 'USD', todaySpend: 0.12, weekSpend: 0.5, monthSpend: 1.4 }
-  }, '#4D6BFE');
-
-  assert.ok(card.find('limit-spend'), 'the card should carry the spend row');
-  assert.match(card.text, /Today/);
-  assert.match(card.text, /Month/);
-  assert.match(card.text, /\$4\.20/);
-  assert.match(card.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), /Month: \$1\.40/);
 });
 
 test('a TypeSafe card shows the next credit expiry without calling it a reset', () => {

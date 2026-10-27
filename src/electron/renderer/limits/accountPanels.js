@@ -56,8 +56,7 @@ function syncCredentialFields(form, { document, settings }) {
   for (const field of form.fields) {
     const control = document.getElementById(controlId(field));
     if (!control) continue;
-    // Stats/settings pushes can precede the write; keep the user's choice until
-    // the last queued save settles, just as credential drafts survive pushes.
+    // Concurrent settings pushes must not overwrite an unsaved choice.
     if (field.input === 'select' && !control.dataset.settingPending) {
       if (form.multipleAccounts && field.key === 'claudeWebOrganizationId') continue;
       const stored = settings?.[field.key];

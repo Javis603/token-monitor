@@ -1944,13 +1944,11 @@ test('a saved credential folds its panel only once a fresh record confirms the a
   const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
   const save = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
   assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
-  // The refresh after a save can return before the collector publishes the
-  // checked account, so the panel stays open and folds when that record lands.
+  // A save reply alone does not establish a fresh quota reading.
   assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
   assert.match(save, /markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*await refreshStats\(\);/);
   assert.doesNotMatch(save, /setExternalAccountExpanded\(/, 'fresh status owns folding; the save reply must not toggle it again');
-  // Ollama answers its first poll from the save-time check instead of fetching
-  // the settings page twice in a row.
+  // Save-time validation must not cause a duplicate quota request.
   const { limitProviderEntry } = require('../../src/shared/limits/registry');
   assert.deepEqual({ ...limitProviderEntry('ollama').form.rememberProbe }, { fn: 'rememberOllamaValidation', field: 'ollamaCookie' });
   assert.equal(typeof limitProviderEntry('ollama').limits.rememberOllamaValidation, 'function');
@@ -1960,21 +1958,13 @@ test('account validation reads the local device raw limits, not the collapsed ag
   const app = readRendererFile('app.js');
   const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');
   const helper = functionBody(app, 'localProviderStatus', 'renderAntigravityStatus');
-  // Sync-mode aggregateLimits() collapses a local `unauthorized` row out in favor
-  // of a remote `ok` (providerCollapseKey for deepseek/grok is just the
-  // provider name; pickBetterProvider keeps the higher statusRank). So the account
-  // card must read the LOCAL device's RAW limits from state.stats.devices, where
-  // the local unauthorized row still lives — not state.stats.limits.providers,
-  // where it has already been dropped. Searching the aggregate would miss the
-  // local row and fall back to the remote `ok`, falsely reporting an invalid
-  // local key as Linked.
+  // A healthy remote reading cannot validate the local credential.
   assert.match(rawHelper, /accountIdentityApi\.localDeviceLimitsProviders/);
   assert.match(rawHelper, /state\.stats/);
   assert.match(rawHelper, /state\.settings\?\.deviceId/);
   assert.match(helper, /localDeviceLimitsProviders\(\)/);
   assert.match(helper, /localProviders !== null/);
-  // Falls back to the aggregate only for legacy/non-aggregated stats that do
-  // not expose raw device rows at all.
+  // Legacy stats without raw device rows retain aggregate fallback.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
   // DeepSeek uses its one provider row; MiniMax's key panel must select only
   // the local API lane when the independent Code/OAuth row is also present.

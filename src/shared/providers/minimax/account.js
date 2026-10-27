@@ -1,6 +1,6 @@
 'use strict';
 
-// Minimax limits account wiring. Leaf module: no requires.
+// Account declarations must remain require-free for renderer-safe projection.
 module.exports = {
   id: 'minimax',
   fetch: 'fetchMinimaxLimits',
@@ -19,8 +19,7 @@ module.exports = {
       normalize: { fn: 'normalizeMinimaxRegionSetting', style: 'value' },
       envFallback: ['TOKEN_MONITOR_MINIMAX_API_REGION', 'MINIMAX_API_REGION', 'MINIMAX_API_HOST'],
       configDefault: 'auto',
-      // Resolve an implicit choice at use time. Saving another setting must not
-      // turn the default or env value into a permanent region override.
+      // An unrelated save must not turn an implicit region into a stored pin.
       initial: '',
       persist: 'renormalize',
       persistFallback: '',

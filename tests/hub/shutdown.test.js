@@ -170,8 +170,7 @@ for (const endpoint of ['/api/stats/stream', '/api/ingest']) {
     const method = endpoint.endsWith('stream') ? 'GET' : 'POST';
     const body = JSON.stringify({ deviceId: 'late-upload', today: { totalTokens: 100 } });
     socket.write(`${method} ${endpoint} HTTP/1.1\r\nHost: localhost\r\nContent-Length: ${method === 'POST' ? Buffer.byteLength(body) : 0}\r\n`);
-    // A TCP connect/write alone can leave the peer idle when close() runs.
-    // Exercise headers completed during shutdown after the server saw their start.
+    // Shutdown must see partial headers, not merely an idle TCP connection.
     await headersReceived;
     const stopped = hub.stop();
     const requested = once(hub.server, 'request');

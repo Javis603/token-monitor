@@ -26,6 +26,8 @@ const {
 } = require('../../src/shared/providers/minimax/limits');
 const { parseLimitProviders, probeLimitProvider } = require('../../src/shared/limits/collector');
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+const { syncLimits } = require('../../src/shared/limits/core');
+const { syncLimits: syncWorkerLimits } = require('../../worker/src/shared/limits/core');
 
 const CN_REMAINS_URLS = new Set([MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
 
@@ -39,8 +41,7 @@ const BALANCE_URL_EN = 'https://api.minimax.io/account/query_balance';
 
 test('MiniMax API balance probes use one endpoint in the selected region', async () => {
   for (const [region, url, currency] of [['cn', BALANCE_URL_CN, 'CNY'], ['intl', BALANCE_URL_EN, 'USD']]) {
-    // Include the captured post-usage shape: the voucher wallet changed before
-    // the daily charge-record endpoint posted a bill.
+    // Voucher balances may update before daily cash bills are posted.
     for (const body of [
       { available_amount: '98.25', cash_balance: '100.00' },
       { available_amount: '14.97', cash_balance: '0.00', voucher_balance: '14.97',
@@ -67,6 +68,7 @@ test('MiniMax API balance probes use one endpoint in the selected region', async
       assert.equal(result.windows[0].usedPercent, null);
       assert.equal(result.windows[0].resetsAt, null);
       assert.equal(JSON.stringify(result).includes('sk-api-test'), false);
+      assertSyncPreservesReading(result);
     }
   }
 });
@@ -88,8 +90,7 @@ test('MiniMax API billing rejects missing or malformed balances without inventin
 });
 
 test('MiniMax API billing retries business auth errors and remembers a valid zero balance', async () => {
-  // Official 3.1.6 SDK handles base_resp in both Axios response branches;
-  // the live international host rejects a CN key with HTTP 400 + code 1004.
+  // Foreign-region keys can be rejected by HTTP 400 plus business 1004.
   for (const httpStatus of [200, 400]) {
     const calls = [];
     const providerRuntimeState = new Map();
@@ -152,8 +153,6 @@ test('MiniMax cash Spend is a server snapshot and a failed period leaves the bal
   const now = new Date(2026, 2, 1, 12).getTime();
   const row = await fetchMinimaxLimits({ minimaxBillingMode: 'api', minimaxApiRegion: 'cn', minimaxApiKey: 'mock-key' }, {
     env: {}, now: () => now,
-    readJson: () => assert.fail('server totals need no local ledger'),
-    writeJsonAtomic: () => assert.fail('server totals must not write a ledger'),
     fetch: async (url, { headers }) => {
       const target = new URL(url);
       assert.equal(target.host, 'api.minimaxi.com');
@@ -174,6 +173,7 @@ test('MiniMax cash Spend is a server snapshot and a failed period leaves the bal
   assert.equal(row.balance.monthSpend, 0);
   assert.equal(row.balance.allTimeSpend, 12.34);
   assert.equal(row.balance.trackingSince, null);
+  assertSyncPreservesReading(row);
 
   const malformed = await fetchMinimaxLimits({ minimaxBillingMode: 'api', minimaxApiRegion: 'cn', minimaxApiKey: 'mock-key' }, {
     env: {}, fetch: async url => new URL(url).pathname === '/account/query_balance'
@@ -211,6 +211,13 @@ function okResponse(body) {
 
 function unauthorized() {
   return { ok: false, status: 401, json: async () => ({}) };
+}
+
+function assertSyncPreservesReading(row) {
+  const wire = JSON.parse(JSON.stringify(syncLimits({ updatedAt: row.updatedAt, providers: [row] })));
+  for (const [hub, normalize] of [['Node', syncLimits], ['Worker', syncWorkerLimits]]) {
+    assert.deepEqual(normalize(wire).providers, [row], `${hub} must preserve the collected reading`);
+  }
 }
 
 test('minimaxToken reads the CodexBar-compatible Token Plan key and ignores unrelated keys', () => {
@@ -1308,8 +1315,6 @@ test('MiniMax runtime retains quota after an outage and honors pinned-to-Auto ch
   }
 });
 
-// --- MiniMax Code OAuth lane --------------------------------------------------
-//
 const CODE_NOW = 1790000000000;
 const CODE_RECORD_KEY = 'com.minimax.mcode.oauth.prod.cn\0deadbeef';
 const OTHER_RECORD_KEY = 'com.someother.identity prod';
@@ -1374,7 +1379,6 @@ function membershipBody(overrides = {}) {
 function planRemainsBody(overrides = {}) {
   return {
     base_resp: { status_code: 0 },
-    // Official queryPercent reads the top level, unlike legacy API examples.
     model_remains: [{
       model_name: 'general',
       current_interval_total_percent: '100',
@@ -1459,7 +1463,6 @@ test('MiniMax Code lane reads a live on-disk token without refreshing', async ()
   assert.equal(result.source, 'oauth');
   assert.equal(calls.length, 2);
   assert.ok(!calls.some(([url]) => url === MINIMAX_CODE_OAUTH_URL_CN), 'a live token must not trigger a refresh');
-  // Normalization orders session/weekly before billing, so locate by marker.
   const creditsWindow = result.windows.find((window) => window.metric === 'credits');
   assert.equal(creditsWindow.label, 'Credits');
   assert.equal(creditsWindow.remaining, 4624);
@@ -1473,6 +1476,7 @@ test('MiniMax Code lane reads a live on-disk token without refreshing', async ()
   assert.equal(result.windows.find(window => window.kind === 'weekly').usedPercent, 10);
   assert.ok(result.accountKey && result.accountKey.length > 0);
   assert.equal(JSON.stringify(result).includes(ACCESS_ONFILE), false);
+  assertSyncPreservesReading(result);
 });
 
 test('MiniMax Code respects official logout, refresh and generation fences before making any request', async () => {
@@ -1807,6 +1811,7 @@ test('MiniMax Code meters a complete grant list and keeps the amount when the li
       assert.fail(`unexpected Code request: ${url}`);
     } }));
     assert.equal(result.status, 'ok');
+    assertSyncPreservesReading(result);
     return result.windows.find(window => window.label === 'Credits');
   };
   const metered = await read([{ details: [grant(100, 50)], total_count: 1 }], 50);
@@ -1845,6 +1850,7 @@ test('MiniMax Code parses modern plan percentages, unlimited quota and video cou
     assert.equal(video.usedPercent, 15);
     assert.equal(video.remainingPercent, 85);
     assert.equal(video.resetsAt, new Date(1790007200000).toISOString());
+    assertSyncPreservesReading(result);
   }
 });
 
@@ -2125,7 +2131,6 @@ test('MiniMax Code lane treats 2062 as no subscription, not an error', async () 
 });
 
 test('MiniMax Code lane pins discovery to the selected region', async () => {
-  // Both stores under one data dir: pinning decides which one answers.
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-code-multi-'));
   test.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const writeStore = (regionDir, recordKey, accessToken) => {

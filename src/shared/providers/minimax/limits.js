@@ -1,13 +1,5 @@
 'use strict';
 
-// MiniMax (a.k.a. Minimax / Hailuo AI) Token Plan quota or API balance lookup.
-//
-// Field shape verified against live Token Plan responses (see PR #32 review):
-// the array is nested under data.model_remains, and the live response does
-// not always carry current_interval_status / current_weekly_status. We
-// therefore read whatever percent is present, and only suppress the
-// status==3 placeholder lane that cc-switch / CodexBar both guard against.
-
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -29,7 +21,6 @@ const MINIMAX_TOKEN_PLAN_REMAINS_URL_EN = 'https://api.minimax.io/v1/token_plan/
 const MINIMAX_BALANCE_URL_CN = 'https://api.minimaxi.com/account/query_balance';
 const MINIMAX_BALANCE_URL_EN = 'https://api.minimax.io/account/query_balance';
 
-// MiniMax Code OAuth origins verified against the official 3.1.6 app.
 const MINIMAX_CODE_OAUTH_URL_CN = 'https://account.minimax.cn/oauth2/token';
 const MINIMAX_CODE_OAUTH_URL_INTL = 'https://account.minimax.io/oauth2/token';
 const MINIMAX_CODE_MEMBERSHIP_URL_CN = 'https://agent.minimax.cn/matrix/api/v1/commerce/get_membership_info';
@@ -45,14 +36,7 @@ const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
 
 const MINIMAX_REGIONS = ['en', 'cn'];
 
-// Region of the last successful probe, kept in the runtime's persistent
-// provider state (the same channel the Claude identity cache uses). The
-// default order probes the global (en) endpoints first, which only suits
-// global keys: a CN key pays two doomed requests per probe, and while those
-// endpoints are unreachable from CN networks the whole probe used to fail
-// before the CN endpoint was ever asked. Remembering the winner puts the
-// key's own region first from the second probe on, so the flaky leg drops
-// out of the steady state entirely.
+// Only a successful quota reading establishes region affinity.
 const MINIMAX_REGION_MEMORY_STATE_KEY = 'minimax.last-good-region';
 
 function rememberedMinimaxRegion(deps = {}) {
@@ -66,21 +50,8 @@ function storeMinimaxRegionMemory(deps = {}, region) {
   deps.providerRuntimeState.set(MINIMAX_REGION_MEMORY_STATE_KEY, region);
 }
 
-// A failure on the way to the host: connect timeout, DNS, TLS, reset, and the
-// per-request abort. What marks those apart is an error that carries no
-// HTTP-layer answer at all — the fetcher's rejection shapes always carry either
-// a status or a statusCode — which says nothing about the key, and makes
-// re-asking the same host's other endpoint pointless since it shares the
-// network path that just failed.
-//
-// A response that arrived but did not parse is deliberately NOT one of those:
-// it reached a server (an interception page, a reverse proxy, an HTML error
-// page), so the request count and the region order stay worth honouring. Node
-// reports that as a SyntaxError; Chromium's net.fetch rejects with a message
-// rather than a cause code, which is why the rule reads "no HTTP answer"
-// instead of a transport whitelist. A body cut off mid-stream still has no
-// answer to point at and stays a transport failure, as it should: the region
-// jump is what rescues that case.
+// JSON syntax errors establish a response; they must not trigger regional
+// transport recovery. A disconnected body still permits that recovery.
 function isMinimaxTransportError(error) {
   if (!error) return false;
   if (typeof error.statusCode === 'number' && Number.isFinite(error.statusCode)) return false;
@@ -106,7 +77,7 @@ function minimaxToken(env = process.env, explicitKey = '') {
 function millisToIso8601(value) {
   const ms = parseNumberOrNull(value);
   if (ms === null) return null;
-  // Treat <1e12 as seconds (matches cc-switch's `millis_to_iso8601`).
+  // Compatibility cutoff: numeric epochs below 1e12 are interpreted as seconds.
   const normalized = ms < 1_000_000_000_000 ? ms * 1000 : ms;
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
@@ -125,9 +96,7 @@ function readMinimaxRows(body) {
   return null;
 }
 
-// Pull the `general` bucket out of `model_remains`. cc-switch treats
-// model_name === 'general' as the coding-plan row; video / voice / other
-// models live in the same array and must be ignored.
+// Token Plan's coding quota is the general bucket; video and voice are separate pools.
 function selectMinimaxGeneralBucket(body) {
   const rows = readMinimaxRows(body);
   if (!rows) return null;
@@ -136,6 +105,7 @@ function selectMinimaxGeneralBucket(body) {
 
 // Preserve the API-key placeholder rule for status 3 with missing/100%
 // remaining. Code's different endpoint uses status 3 for unlimited quota.
+// Missing status fields do not invalidate a usable Token Plan percentage.
 function parseMinimaxTiers(body) {
   const item = selectMinimaxGeneralBucket(body);
   if (!item) return [];
@@ -205,19 +175,8 @@ function parseMinimaxCodePlan(body) {
   return windows;
 }
 
-// 'auto' probes the last successful region first, initially international,
-// and tries the other region on auth rejection or transport failure. 'cn' /
-// 'intl' pin the probe to one host regardless of that memory. The token-plan
-// -> legacy fallback still applies inside a pinned region on endpoint or
-// response migration signals; an unreachable host stops that region's probe.
-//
-// `env` defaults to {} rather than process.env on purpose: the registry calls
-// this as the write-time normalizer with an empty env, and a stored setting must
-// never be derived from the machine running the widget. The env lane is
-// consulted by the probe itself, where deps.env carries the real environment.
-//
-// minimaxApiHost is the pre-setting option name. It stays honoured so existing
-// callers and the host spellings it accepted keep working.
+// Persistence must not turn an implicit environment choice into a stored pin.
+// minimaxApiHost remains a supported legacy region setting.
 function minimaxRegion(options = {}, env = {}) {
   const raw = String(
     options.minimaxApiRegion
@@ -287,9 +246,6 @@ function minimaxRegionOrder(options = {}, env = {}) {
   const remembered = MINIMAX_REGIONS.includes(options.minimaxRememberedRegion)
     ? options.minimaxRememberedRegion
     : '';
-  // The remembered region goes first; the other one stays behind it as the
-  // fallback, so a key swapped between regions still resolves on its first
-  // probe after the swap.
   if (remembered) return [remembered, ...MINIMAX_REGIONS.filter((region) => region !== remembered)];
   return ['en', 'cn'];
 }
@@ -313,8 +269,6 @@ function minimaxAttemptSpecs(options = {}, env = {}) {
   return minimaxRegionOrder(options, env).flatMap((region) => minimaxUrlsForRegion(region, options.minimaxBillingMode));
 }
 
-// Candidate URLs in region order, token-plan before legacy. A transport
-// failure skips the remaining candidates on the same host.
 function minimaxAttemptOrder(options = {}, env = {}) {
   return minimaxAttemptSpecs(options, env).map((attempt) => attempt.url);
 }
@@ -325,8 +279,7 @@ function minimaxRegionForUrl(url) {
   return '';
 }
 
-// Pick a single URL for callers that want a forced region without retry
-// behavior (legacy `minimaxBaseUrl` shape). Default is the global endpoint.
+// Legacy callers use a single coding-plan URL without region retry.
 function minimaxBaseUrl(options = {}, env = {}) {
   return minimaxRegion(options, env) === 'cn' ? MINIMAX_REMAINS_URL_CN : MINIMAX_REMAINS_URL_EN;
 }
@@ -344,11 +297,34 @@ function shouldTryNextMinimaxRegion(error) {
   return isMinimaxAuthError(error);
 }
 
-// --- MiniMax Code OAuth lane -------------------------------------------------
-//
-// Official OAuth namespaces are auth/prod/{cn,en}/mcode-public, with one
-// current login per namespace. Other records are not additional user accounts.
-// docs/providers/minimax.md holds the rotation and recovery contract.
+async function minimaxJsonFetch(fetchFn, url, init, deps = {}) {
+  if (deps.signal?.aborted) throw errorWithStatus('unavailable', 'Request cancelled');
+  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetchFn(url, { ...init, ...(controller ? { signal: deps.signal ? AbortSignal.any([controller.signal, deps.signal]) : controller.signal } : {}) });
+    if (!response.ok) {
+      const status = (response.status === 401 || response.status === 403) ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+      const error = new Error(`${url} returned ${response.status}`);
+      error.status = status;
+      error.statusCode = response.status;
+      let body;
+      try { body = await response.json(); } catch (_) { /* HTTP status still carries the verdict */ }
+      // The API host rejects foreign-region keys as HTTP 400 + business 1004.
+      // Keep OAuth invalid_grant and other HTTP failures on their own paths.
+      if (response.status === 400 && parseNumberOrNull(body?.base_resp?.status_code) === 1004) error.status = 'unauthorized';
+      error.oauthError = body?.error;
+      throw error;
+    }
+    return await response.json();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Official namespaces hold one current login; record keys identify storage.
+// Other records in the namespace are not managed user accounts.
 function isMinimaxCodeRecord(record) {
   return record?.schemaVersion === 1 && record.clientId === 'mcode-public' && record.audience === 'agent-backend'
     && record.tokenType === 'Bearer' && typeof record.accessToken === 'string' && record.accessToken.length > 0
@@ -368,8 +344,6 @@ function readMinimaxCodeAuth(authPath, deps = {}) {
   return auth;
 }
 
-// Sync fs entry points, injectable as a set so tests drive discovery and the
-// write-back with one object.
 function minimaxCodeFs(deps = {}) {
   return {
     readFileSync: deps.readFileSync || fs.readFileSync,
@@ -405,8 +379,7 @@ function minimaxCodeAuthFiles(options = {}, deps = {}) {
   return null;
 }
 
-// Detection failure is not evidence that the app is quit. The official lock
-// below also coordinates collectors and a client that starts after this check.
+// Failed process detection is not evidence that the official client has stopped.
 function minimaxCodeClientRunning(deps = {}) {
   if (typeof deps.clientRunning === 'function') return Promise.resolve().then(() => deps.clientRunning()).then(Boolean);
   const platform = deps.platform || process.platform;
@@ -457,8 +430,7 @@ function minimaxCodeAuthState(session, deps = {}, pending) {
     }
     throw Object.assign(errorWithStatus('unavailable', 'MiniMax Code login changed'), { pendingStale: true });
   }
-  // Core can finish a credential rename whose authenticated-state write failed.
-  // Matching the fenced generation is required; merely newer is not enough.
+  // Recovery after a partial commit requires the exact fenced generation.
   if (state.status === 'refreshing' && typeof state.refresh?.id === 'string' && state.refresh.id
     && state.generation === record.generation) return state;
   if (!['authenticated', 'expired'].includes(state.status) || state.generation !== session.record.generation) {
@@ -471,8 +443,7 @@ function minimaxCodeRefreshCurrent(session, state, generation) {
   return state?.status === 'refreshing' && state.refresh?.id === session.refreshId && state.generation === generation;
 }
 
-// Compare against the lease we actually refreshed, so logout/re-login cannot
-// be undone by a late response. Reuse the credential store's private atomic writer.
+// A late refresh must not restore a login that was replaced or logged out.
 function writeMinimaxCodeAuth(session, updated, deps = {}, status = 'authenticated') {
   const fsApi = { ...fs, ...minimaxCodeFs(deps) };
   try {
@@ -506,8 +477,7 @@ function commitMinimaxCodeRefresh(session, updated, deps, state, pendingKey, sta
 
 async function refreshMinimaxCodeSession(session, deps = {}) {
   if (deps.probe || deps.signal?.aborted) throw errorWithStatus('unavailable', 'Refresh skipped');
-  // @mavis/oauth-core uses proper-lockfile on auth.lock, whose mutex is this
-  // directory. Fail closed on busy/abandoned locks; never steal another lease.
+  // The official proper-lockfile mutex is auth.lock.lock. Never steal it.
   const lockPath = path.join(path.dirname(session.authPath), 'auth.lock.lock');
   try { fs.mkdirSync(lockPath, { mode: 0o700 }); }
   catch (_) { throw errorWithStatus('unavailable', 'MiniMax Code auth is locked'); }
@@ -518,7 +488,7 @@ async function refreshMinimaxCodeSession(session, deps = {}) {
   };
   const heartbeat = setInterval(() => {
     if (ownsLock()) {
-      try { const time = new Date(); fs.utimesSync(lockPath, time, time); } catch (_) { /* fail closed */ }
+      try { const time = new Date(); fs.utimesSync(lockPath, time, time); } catch (_) {}
     }
   }, 10000);
   try {
@@ -534,7 +504,6 @@ async function refreshMinimaxCodeSession(session, deps = {}) {
     const auth = readMinimaxCodeAuth(session.authPath, deps);
     const record = auth?.records?.[session.recordKey];
     if (!record) throw errorWithStatus('unavailable', 'MiniMax Code login changed');
-    // Another collector or a fresh login already replaced the failed token.
     const authState = minimaxCodeAuthState({ ...session, record }, deps);
     if (!sameMinimaxCodeLease(record, session.record)) {
       if (authState.status === 'authenticated' && record.expiresAtMs > (deps.now || Date.now)()) return { ...session, record };
@@ -579,8 +548,7 @@ async function refreshMinimaxCodeSession(session, deps = {}) {
         throw errorWithStatus('unavailable', 'OAuth response missing tokens');
       }
     } catch (error) {
-      // Match the official Core: protocol/transport failures do not revoke a
-      // shared login. Only this precise response confirms a rejected lease.
+      // Only HTTP 400 invalid_grant revokes the shared login.
       const grantRejected = error.statusCode === 400 && error.oauthError === 'invalid_grant';
       if (grantRejected) {
         const updated = { generation };
@@ -602,8 +570,7 @@ async function refreshMinimaxCodeSession(session, deps = {}) {
       expiresAtMs: (deps.now || Date.now)() + json.expires_in * 1000,
       generation
     };
-    // Keep an uncommitted rotation for write retry; never consume the old token
-    // again. This state stays in main and is discarded if the login changes.
+    // A consumed predecessor cannot be replayed while successor persistence is pending.
     state?.set(pendingKey, { session, updated });
     if (!ownsLock()) throw errorWithStatus('unavailable', 'MiniMax Code auth lock changed');
     return commitMinimaxCodeRefresh(session, updated, deps, state, pendingKey);
@@ -612,37 +579,6 @@ async function refreshMinimaxCodeSession(session, deps = {}) {
     if (ownsLock()) {
       try { fs.rmdirSync(lockPath); } catch (_) { /* a leftover lock blocks further rotations */ }
     }
-  }
-}
-
-// One fetch-JSON core for all data sources: a per-request timeout and the
-// shared classification (401/403 → unauthorized, 429 → sourceRateLimited,
-// else unavailable). An abort propagates untouched — the API lanes read it as
-// a transport failure to jump regions with, the code lane maps it at its own
-// catch sites.
-async function minimaxJsonFetch(fetchFn, url, init, deps = {}) {
-  if (deps.signal?.aborted) throw errorWithStatus('unavailable', 'Request cancelled');
-  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-  try {
-    const response = await fetchFn(url, { ...init, ...(controller ? { signal: deps.signal ? AbortSignal.any([controller.signal, deps.signal]) : controller.signal } : {}) });
-    if (!response.ok) {
-      const status = (response.status === 401 || response.status === 403) ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
-      const error = new Error(`${url} returned ${response.status}`);
-      error.status = status;
-      error.statusCode = response.status;
-      let body;
-      try { body = await response.json(); } catch (_) { /* HTTP status still carries the verdict */ }
-      // The API host rejects foreign-region keys as HTTP 400 + business 1004.
-      // Keep OAuth invalid_grant and other HTTP failures on their own paths.
-      if (response.status === 400 && parseNumberOrNull(body?.base_resp?.status_code) === 1004) error.status = 'unauthorized';
-      error.oauthError = body?.error;
-      throw error;
-    }
-    return await response.json();
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }
 
@@ -658,13 +594,11 @@ async function minimaxCodeRequest(url, init, deps = {}) {
   return body;
 }
 
-// Like WorkBuddy's active packages: expired grants cannot supply the denominator.
-// Reconcile complete details with membership so a concurrent spend/check-in does
-// not turn a partial or stale grant list into a plausible percentage.
+// Only complete active grants reconciled with membership establish a denominator.
 async function minimaxCodeCreditMeter(membershipUrl, headers, credits, deps) {
   const grants = [];
   let total = null;
-  // Stop after 1,000 grants. A longer list cannot supply the denominator, so the caller keeps the amount.
+  // More than 1,000 grants leaves the denominator unknown.
   for (let page = 1; page <= 10; page++) {
     const url = new URL('/minimax-cloud/api/v1/credit/details', membershipUrl);
     url.search = new URLSearchParams({ page_number: page, page_size: 100, include_expired: false }).toString();
@@ -762,7 +696,6 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
       const credits = minimaxCodeCredits(membership?.op_credit_summary?.total_remaining_amount)
         ?? minimaxCodeCredits(workspace.opcredit_balance ?? membership?.opcredit_balance);
       if (credits === null) return row('unavailable');
-      // Membership remains authoritative even if optional grant details fail.
       const windows = [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: credits,
         currency: 'CREDITS', showMeter: false }];
       const platformUrl = region === 'cn' ? MINIMAX_CODE_PLAN_REMAINS_URL_CN : MINIMAX_CODE_PLAN_REMAINS_URL_INTL;
@@ -803,8 +736,7 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
           }
         } catch (error) {
           if (deps.signal?.aborted || isMinimaxAuthError(error)) throw error;
-          // Reuse the runtime's partial-window merge: replace the current
-          // credits but retain any prior plan windows with stale freshness.
+          // Fresh points do not make retained plan quota fresh.
           return { ...row('ok', windows), invalidateCachedWindowLabels: windows.map(window => window.label) };
         }
       }
@@ -836,8 +768,7 @@ async function fetchMinimaxCodeRows(options, deps, { now, updatedAt }) {
   const previous = (options.previousLimits?.providers || [])
     .filter(row => row.provider === 'minimax' && row.source === 'oauth');
   const identified = previous.filter(row => row.accountKey);
-  // Labels also identify runtime rows. An early failure must update known
-  // accounts rather than create a separate "MiniMax Code" status identity.
+  // Failed or unidentified reads cannot establish a replacement login.
   if ((current.status !== 'ok' || !current.accountKey) && identified.length) {
     return identified.map(row => ({ ...current, accountKey: row.accountKey,
       status: current.status === 'ok' ? 'unavailable' : current.status, windows: [] }));
@@ -862,6 +793,12 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
       windows: []
     });
   }
+  const apiBilling = normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api';
+  const account = {
+    provider: 'minimax', accountKey, source: 'api', updatedAt,
+    accountLabel: apiBilling ? 'Pay-as-you-go' : 'Token Plan',
+    planLabel: apiBilling ? '' : 'Subscription'
+  };
   const fetchJson = deps.fetchJson
     || ((u, headers) => minimaxJsonFetch(deps.fetch || fetch, u, { headers }, deps));
   const headers = {
@@ -869,9 +806,7 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
     Accept: 'application/json',
     'Content-Type': 'application/json'
   };
-  // An explicit `minimaxRememberedRegion` option wins over the runtime state
-  // (tests drive both layers through it); the hydrated value only fills the
-  // gap when the option is absent.
+  // An explicit region-affinity hint takes precedence over runtime memory.
   const rememberedRegion = MINIMAX_REGIONS.includes(options.minimaxRememberedRegion)
     ? options.minimaxRememberedRegion
     : rememberedMinimaxRegion(deps);
@@ -883,23 +818,19 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
     try {
       const data = await fetchJson(attempt.url, headers, deps);
       if (!data || typeof data !== 'object') {
-        throw Object.assign(new Error('unexpected remains response shape'), { status: 'unavailable' });
+        throw errorWithStatus('unavailable', 'unexpected remains response shape');
       }
       const baseResp = data.base_resp;
       if (baseResp && typeof baseResp === 'object') {
         const statusCode = parseNumberOrNull(baseResp.status_code);
         if (statusCode !== null && statusCode !== 0) {
           const statusMsg = typeof baseResp.status_msg === 'string' ? baseResp.status_msg : 'unknown error';
-          // The official SDK classifies 1004 by code, independent of message
-          // language. Retain the message fallback for legacy auth responses.
+          // Business 1004 is an auth rejection regardless of message language.
+          // Legacy auth messages remain supported.
           const lower = statusMsg.toLowerCase();
           const looksLikeAuth = statusCode === 1004 || /\b(log\s*in|cookie|token|auth|key|expired|invalid)\b/.test(lower);
           const status = looksLikeAuth ? 'unauthorized' : 'unavailable';
-          // Auth-shaped base_resp errors also drive the region retry. The
-          // endpoint returns 200 OK with status_code: 1004 ("cookie is missing,
-          // log in again") when the token belongs to the OTHER region — that's
-          // the same signal a 401 carries, just hidden in the body. Set
-          // statusCode: 401 so the retry loop in the caller picks it up.
+          // A foreign-region key can fail with HTTP 200 plus business 1004.
           const retrySignal = looksLikeAuth ? 401 : null;
           throw Object.assign(new Error(`MiniMax error (code ${statusCode}): ${statusMsg}`), {
             status,
@@ -910,23 +841,16 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
       const windows = attempt.kind === 'balance' ? parseMinimaxBalance(data, attempt.region) : parseMinimaxTiers(data);
       const next = attempts[index + 1];
       if (!windows.length && attempt.kind === 'tokenPlan' && next?.region === attempt.region) {
-        throw Object.assign(new Error('MiniMax token-plan response has no quota windows'), { status: 'unavailable' });
+        throw errorWithStatus('unavailable', 'MiniMax token-plan response has no quota windows');
       }
       const spend = attempt.kind === 'balance' && windows.length && !deps.probe
         ? await minimaxCashSpend(attempt.url, headers, fetchJson, deps, now)
         : {};
-      // Only a parseable quota counts as "this region works": a response that
-      // answered but parsed to nothing is not evidence either way, and
-      // remembering it would send the next probe down the same blind alley.
+      // A response without quota cannot establish region affinity.
       if (windows.length) storeMinimaxRegionMemory(deps, attempt.region);
       return normalizeLimitProvider({
-        provider: 'minimax',
-        accountKey,
-        accountLabel: attempt.kind === 'balance' ? 'Pay-as-you-go' : 'Token Plan',
-        planLabel: attempt.kind === 'balance' ? '' : 'Subscription',
-        source: 'api',
+        ...account,
         status: windows.length ? 'ok' : 'unavailable',
-        updatedAt,
         windows,
         ...(Object.keys(spend).length ? { balance: {
           amount: windows[0].remaining, currency: windows[0].currency, ...spend
@@ -936,11 +860,6 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
     } catch (error) {
       lastError = error;
       const next = attempts[index + 1];
-      // A transport failure never reached an HTTP server, so the rest of this
-      // region would only repeat the same wait on the same host. Jump
-      // straight to the next region — that cross-region fallback is why two
-      // regions are probed at all, and it is what keeps a CN key off
-      // 'unavailable' while the global host is unreachable from CN networks.
       if (isMinimaxTransportError(error)) {
         // A canceled runtime must not issue another request with stale config.
         if (deps.signal?.aborted) break;
@@ -959,22 +878,14 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
       break;
     }
   }
-  // The fallback region rejects a foreign key with an auth-shaped error by
-  // design (2049 / 1004 / 401). When that rejection trails a transport
-  // failure on the key's own region, publishing it would wipe the retained
-  // quota and show "Update API key" for what is a network outage — publish
-  // the transport failure instead.
+  // A foreign-region rejection cannot invalidate a key whose own region was
+  // unreachable; preserve the transient failure and its last-good quota.
   const publishedStatus = sawTransportFailure && isMinimaxAuthError(lastError)
     ? 'unavailable'
     : mapMinimaxErrorStatus(lastError);
   return normalizeLimitProvider({
-    provider: 'minimax',
-    accountKey,
-    accountLabel: normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api' ? 'Pay-as-you-go' : 'Token Plan',
-    planLabel: normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api' ? '' : 'Subscription',
-    source: 'api',
+    ...account,
     status: publishedStatus,
-    updatedAt,
     windows: []
   });
 }
@@ -1006,8 +917,7 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
       && row.accountKey && row.accountKey !== apiAccountKey)
       .map(row => ({ provider: 'minimax', accountKey: row.accountKey, removed: true })));
   }
-  // An absent optional source needs no duplicate unconfigured card. Retain an
-  // identified failure so the runtime can update that lane's last-good reading.
+  // A missing optional lane must not add an unconfigured card beside a live lane.
   const present = rows.filter(row => row.status !== 'notConfigured' || row.accountKey);
   const result = present.length ? present : rows.slice(0, 1);
   return result.length === 1 ? result[0] : result;

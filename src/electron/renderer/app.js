@@ -15677,15 +15677,8 @@ async function refreshCodexAccounts() {
   renderCodexAccounts();
 }
 
-// Account cards reflect THIS machine's configured credential, so read the
-// local device's RAW limits from state.stats.devices — NOT the collapsed
-// state.stats.limits.providers. In sync mode, aggregateLimits() collapses a
-// local `unauthorized` row out in favor of a remote `ok` (providerCollapseKey
-// for deepseek/grok is just the provider name; pickBetterProvider keeps
-// the higher statusRank). Searching the aggregate would miss the local row and
-// fall back to the remote `ok`, falsely reporting an invalid local key as
-// Linked. Only legacy/non-aggregated stats without a `devices` array may fall
-// back to the aggregate; once raw device rows are present they are authoritative.
+// A remote account's health cannot validate this device's credential.
+// Raw device rows are authoritative; only legacy stats without them use aggregation.
 function localDeviceLimitsProviders() {
   return accountIdentityApi.localDeviceLimitsProviders(
     state.stats,
@@ -16644,9 +16637,7 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  // A cleared row is not an answer yet. Treating it as unlinked opens the
-  // paste form and closes it again when the reading returns. A row that is
-  // present uses the same rule as Copilot: hide only while linked.
+  // Pending refreshes must not reopen an already linked credential form.
   const readingPending = pending || (configured && !provider);
   if (!readingPending) {
     manualPanel.classList.toggle('hidden', linked);
