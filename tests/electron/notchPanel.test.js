@@ -249,6 +249,41 @@ const pluginPageFixture = (t, refs) => {
   return { f, data, leadRail, trailRail, leadTrack, trailTrack, leadPill, trailPill, visibleIn };
 };
 
+test('legal plugin refs keep unique tab and panel ARIA identities', t => {
+  const refs = ['ab-c/d', 'ab/c-d'];
+  const { normalizeManifest } = require('../../src/shared/plugins/manifest');
+  for (const ref of refs) {
+    const [id, view] = ref.split('/');
+    const result = normalizeManifest({ tmApi: 1, id, name: id, version: '1.0.0', ui: 'ui.js', files: ['ui.js'], views: [{ id: view, surfaces: ['notch'] }] });
+    assert.equal(result.ok, true, result.errors.join(', '));
+  }
+  const { f, leadRail, trailRail, leadTrack } = pluginPageFixture(t, refs);
+  const tabs = f.all('notch-tab'), panels = f.all('notch-page');
+  assert.equal(new Set(tabs.map(node => node.id)).size, tabs.length);
+  assert.equal(new Set(panels.map(node => node.id)).size, panels.length);
+  for (const tab of tabs) {
+    const panel = panels.find(node => node.id === tab.attributes['aria-controls']);
+    assert.equal(panel.dataset.page, tab.dataset.page);
+    assert.equal(panel.attributes['aria-labelledby'], tab.id);
+    if (!tab.dataset.page.startsWith('plugin:')) {
+      assert.equal(tab.id, `notch-tab-${tab.dataset.page}`);
+      assert.equal(panel.id, `notch-page-${tab.dataset.page}`);
+    }
+  }
+  leadRail.clientWidth = 147; trailRail.clientWidth = 112;
+  f.resize();
+  const pluginTabs = tabs.filter(node => node.dataset.page.startsWith('plugin:'));
+  assert.deepEqual(leadTrack.attributes['aria-owns'].split(' '), pluginTabs.map(node => node.id));
+  for (const tab of pluginTabs) {
+    tab.fire('click', { detail: 0 });
+    assert.equal(f.panel.view.page, tab.dataset.page);
+  }
+  leadTrack.fire('keydown', { key: 'ArrowLeft', preventDefault() {} });
+  assert.equal(f.panel.view.page, `plugin:${refs[0]}`);
+  leadTrack.fire('keydown', { key: 'ArrowRight', preventDefault() {} });
+  assert.equal(f.panel.view.page, `plugin:${refs[1]}`);
+});
+
 test('an unmeasured rail shows every page in the leading track with no step buttons', t => {
   const { f, leadTrack, trailTrack, visibleIn } = pluginPageFixture(t, ['demo/a', 'demo/b', 'demo/c']);
   assert.deepEqual(visibleIn(leadTrack), ['home', 'limits', 'sessions', 'breakdown', 'plugin:demo/a', 'plugin:demo/b', 'plugin:demo/c']);
@@ -263,7 +298,7 @@ test('overflow pages continue in the trailing track bridged by aria-owns', t => 
   assert.deepEqual(visibleIn(leadTrack), ['home', 'limits', 'sessions', 'breakdown', 'plugin:demo/a']);
   assert.deepEqual(visibleIn(trailTrack), ['plugin:demo/b', 'plugin:demo/c']);
   assert.equal(f.all('notch-tab-step').filter(step => !step.hidden).length, 0, 'both lanes fit, so no pager');
-  assert.equal(leadTrack.attributes['aria-owns'], 'notch-tab-plugin-demo-b notch-tab-plugin-demo-c');
+  assert.equal(leadTrack.attributes['aria-owns'], 'notch-tab-plugin%3Ademo%2Fb notch-tab-plugin%3Ademo%2Fc');
   // Selecting a trailing page activates its local indicator across the camera.
   f.panel.selectPage('plugin:demo/c');
   assert.equal(leadPill.classList.contains('is-off'), true);

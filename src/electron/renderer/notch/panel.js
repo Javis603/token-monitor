@@ -192,7 +192,7 @@
     const TAB_ICONS = {
       home: 'home', limits: 'limits', sessions: 'session', breakdown: 'model'
     };
-    const domId = (page) => page.replace(/[^a-z0-9-]/g, '-');
+    const domId = (page) => encodeURIComponent(page);
     function pluginPageState(page) {
       return pluginHost?.state('notch', page.slice(PLUGIN_PAGE_PREFIX.length));
     }
