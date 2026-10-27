@@ -1894,14 +1894,20 @@ test('MiniMax Code lane treats 2062 as no subscription, not an error', async () 
   assert.equal(result.windows[0].label, 'Credits');
 });
 
-test('MiniMax credential probes ignore the local Code lease', async () => {
+test('MiniMax Code key probes and custom OAuth endpoints never touch the lease', async () => {
   const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW - 1000 } });
   const before = [fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8'));
-  const deps = codeDeps(fixture, async () => okResponse(membershipBody()), { probe: true });
-  const result = await readCode(deps);
-  assert.equal(result.status, 'notConfigured', 'a missing key is not vouched for by a local login');
-  assert.deepEqual(deps.requests, []);
-  assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before);
+  for (const [name, extra, status, why] of [
+    ['key probe', { probe: true }, 'notConfigured', 'a missing key is not vouched for by a local login'],
+    ...['MCODE_OAUTH_DEVICE_AUTHORIZATION_ENDPOINT', 'MCODE_OAUTH_TOKEN_ENDPOINT', 'MCODE_OAUTH_REVOCATION_ENDPOINT']
+      .map(key => [key, { env: { MINIMAX_DATA_DIR: fixture.base, [key]: 'https://custom.example.test/oauth' } }, 'unavailable',
+        'custom domains must not send credentials to the public defaults'])
+  ]) {
+    const deps = codeDeps(fixture, async () => okResponse(membershipBody()), extra);
+    assert.equal((await readCode(deps)).status, status, `${name}: ${why}`);
+    assert.deepEqual(deps.requests, [], `${name}: ${why}`);
+    assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before, name);
+  }
 });
 
 test('MiniMax Code rejects nonprivate credential stores as the official FileStore does', { skip: process.platform === 'win32' }, async () => {
@@ -1968,18 +1974,6 @@ test('MiniMax Code retries a failed write on the next tick without consuming the
       assert.equal(storedLease(fixture).refreshToken, REFRESH_ROTATED);
       assert.equal(storedState(fixture).generation, 8);
     }
-  }
-});
-
-test('MiniMax Code refuses custom OAuth endpoints without sending credentials or changing the lease', async () => {
-  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
-  const before = [fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8'));
-  for (const name of ['MCODE_OAUTH_DEVICE_AUTHORIZATION_ENDPOINT', 'MCODE_OAUTH_TOKEN_ENDPOINT', 'MCODE_OAUTH_REVOCATION_ENDPOINT']) {
-    const deps = codeDeps(fixture, async () => okResponse({}), { env: { MINIMAX_DATA_DIR: fixture.base, [name]: 'https://custom.example.test/oauth' } });
-    const result = await readCode(deps);
-    assert.equal(result.status, 'unavailable');
-    assert.deepEqual(deps.requests, [], 'custom domains must not send credentials to the public defaults');
-    assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before);
   }
 });
 
