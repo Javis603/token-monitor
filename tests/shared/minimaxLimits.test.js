@@ -1290,7 +1290,7 @@ function codeDesktopState(record = codeDesktopRecord(), overrides = {}) {
   };
 }
 
-function writeCodeAuthFixture({ records, state } = {}) {
+function writeCodeAuthFixture({ record, records = { [CODE_RECORD_KEY]: codeDesktopRecord(record) }, state } = {}) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-code-auth-'));
   test.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const dir = path.join(base, 'auth', 'prod', 'cn', 'mcode-public');
@@ -1298,9 +1298,7 @@ function writeCodeAuthFixture({ records, state } = {}) {
   const authPath = path.join(dir, 'auth.json');
   fs.writeFileSync(authPath, JSON.stringify({ schemaVersion: 1, records }, null, 2), { mode: 0o600 });
   const statePath = path.join(dir, 'auth-state.json');
-  if (state !== false) {
-    fs.writeFileSync(statePath, JSON.stringify(codeDesktopState(records?.[CODE_RECORD_KEY], state), null, 2));
-  }
+  if (state !== false) { fs.writeFileSync(statePath, JSON.stringify(codeDesktopState(records?.[CODE_RECORD_KEY], state), null, 2)); }
   return { base, dir, authPath, statePath };
 }
 
@@ -1333,6 +1331,27 @@ function oauthOkBody(accessToken, refreshToken) {
   return { access_token: accessToken, expires_in: 3600, refresh_token: refreshToken, scope: 'agent.default', token_type: 'Bearer' };
 }
 
+const readCode = deps => fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+
+function assertFields(actual, expected) {
+  assert.deepEqual(Object.fromEntries(Object.keys(expected).map(key => [key, actual[key]])), expected);
+}
+
+function storedLease(fixture) {
+  return JSON.parse(fs.readFileSync(fixture.authPath, 'utf8')).records[CODE_RECORD_KEY];
+}
+
+function storedState(fixture) {
+  return JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
+}
+
+function writeCodeLease(fixture, record, state = {}) {
+  fs.writeFileSync(fixture.authPath, JSON.stringify({ schemaVersion: 1, records: { [CODE_RECORD_KEY]: record } }));
+  fs.writeFileSync(fixture.statePath, JSON.stringify(codeDesktopState(record, state)));
+}
+
+const rotatedGrant = () => okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED));
+
 function codeDeps(fixture, fetchImpl, extra = {}) {
   const requests = [];
   const transport = extra.fetch || (async (url, init) => {
@@ -1364,7 +1383,7 @@ test('MiniMax Code distinguishes an unreadable store from a missing or empty log
     } else if (contents === null) fs.unlinkSync(fixture.authPath);
     else fs.writeFileSync(fixture.authPath, contents);
     const deps = codeDeps(fixture, async () => okResponse(membershipBody()));
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+    const result = await readCode(deps);
     assert.equal(result.status, status);
     assert.equal(result.accountLabel, status === 'notConfigured' ? '' : 'MiniMax Code');
     assert.deepEqual(result.windows, []);
@@ -1373,25 +1392,22 @@ test('MiniMax Code distinguishes an unreadable store from a missing or empty log
 });
 
 test('MiniMax Code lane reads a live on-disk token without refreshing', async () => {
-  const fixture = writeCodeAuthFixture({
-    records: { [CODE_RECORD_KEY]: codeDesktopRecord() },
-    state: { generation: 7, expiresAtMs: CODE_NOW + 55 * 60 * 1000 }
-  });
+  const fixture = writeCodeAuthFixture();
   const calls = [];
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async (url, init) => {
+  const result = await readCode(codeDeps(fixture, async (url, init) => {
     calls.push([url, init]);
     if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
       assert.equal(init.method, 'POST');
       assert.deepEqual(JSON.parse(init.body), { workspace_id: 'personal-test' });
       assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
-      return { ok: true, json: async () => membershipBody() };
+      return okResponse(membershipBody());
     }
     if (url.startsWith(MINIMAX_CODE_PLAN_REMAINS_URL_CN)) {
       assert.equal(init.method, 'GET');
       assert.equal(url, 'https://www.minimaxi.com/backend/account/token_plan/remains_percent');
       assert.equal(init.headers['X-Group-Id'], 'grp-123');
       assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
-      return { ok: true, json: async () => planRemainsBody() };
+      return okResponse(planRemainsBody());
     }
     throw new Error(`unexpected url ${url}`);
   }));
@@ -1400,13 +1416,9 @@ test('MiniMax Code lane reads a live on-disk token without refreshing', async ()
   assert.equal(result.source, 'oauth');
   assert.equal(calls.length, 2);
   assert.ok(!calls.some(([url]) => url === MINIMAX_CODE_OAUTH_URL_CN), 'a live token must not trigger a refresh');
-  const creditsWindow = result.windows.find((window) => window.metric === 'credits');
-  assert.equal(creditsWindow.label, 'Credits');
-  assert.equal(creditsWindow.remaining, 4624);
-  assert.equal(creditsWindow.currency, 'CREDITS');
-  assert.equal(creditsWindow.showMeter, false, 'membership reports no allowance, so the summary has no quota meter');
-  assert.equal(creditsWindow.usedPercent, null, 'the server reports no percentage');
-  assert.equal(creditsWindow.limit, null, 'the server reports no total allowance');
+  // Membership reports no allowance or percentage, so the summary has no quota meter.
+  assertFields(result.windows.find((window) => window.metric === 'credits'),
+    { label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false, usedPercent: null, limit: null });
   assert.equal(result.windows.length, 3, 'credits + 5h + weekly');
   assert.equal(result.windows.filter((window) => window.kind === 'session' || window.kind === 'weekly').length, 2);
   assert.equal(result.windows.find(window => window.kind === 'session').usedPercent, 30);
@@ -1425,50 +1437,47 @@ test('MiniMax Code respects official logout, refresh and generation fences befor
     [{ status: 'anonymous', schemaVersion: 999 }, 'unavailable'],
     [{}, 'unavailable', { audience: 'other-service' }]
   ]) {
-    const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord(record) }, state });
+    const fixture = writeCodeAuthFixture({ record, state });
     const deps = codeDeps(fixture, async () => okResponse(membershipBody()));
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+    const result = await readCode(deps);
     assert.equal(result.status, status);
     assert.deepEqual(deps.requests, []);
   }
 });
 
 test('MiniMax Code pending writes cannot roll back an official logout state', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
+  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
   let exchanges = 0;
   const deps = codeDeps(fixture, async url => {
-    if (url === MINIMAX_CODE_OAUTH_URL_CN) { exchanges++; return okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED)); }
+    if (url === MINIMAX_CODE_OAUTH_URL_CN) { exchanges++; return rotatedGrant(); }
     return okResponse(membershipBody({ op_group_id: '' }));
   }, { renameSync: (source, destination) => {
     const value = JSON.parse(fs.readFileSync(source));
     if (destination === fixture.statePath && value.status === 'authenticated') throw new Error('state write failed');
     return fs.renameSync(source, destination);
   } });
-  await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
-  assert.equal(JSON.parse(fs.readFileSync(fixture.authPath)).records[CODE_RECORD_KEY].generation, 8);
+  await readCode(deps);
+  assert.equal(storedLease(fixture).generation, 8);
   const logout = codeDesktopState(undefined, { status: 'logout_pending', generation: 9 });
   fs.writeFileSync(fixture.statePath, JSON.stringify(logout));
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+  const result = await readCode(deps);
   assert.equal(result.status, 'unauthorized');
-  assert.deepEqual(JSON.parse(fs.readFileSync(fixture.statePath)), logout);
+  assert.deepEqual(storedState(fixture), logout);
   assert.equal(deps.providerRuntimeState.size, 0);
   assert.equal(exchanges, 1);
 });
 
 test('MiniMax Code rejects an uncommitted replacement lease and expired fallback tokens', async () => {
   for (const replacement of [false, true]) {
-    const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW - 1000 }) } });
+    const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW - 1000 } });
     let resources = 0;
     let exchanges = 0;
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async url => {
+    const result = await readCode(codeDeps(fixture, async url => {
       if (url === MINIMAX_CODE_OAUTH_URL_CN) { exchanges++; return { ok: false, status: 503 }; }
       resources++;
       return okResponse(membershipBody());
     }, { clientRunning: () => {
-      if (replacement) {
-        fs.writeFileSync(fixture.authPath, JSON.stringify({ schemaVersion: 1, records: { [CODE_RECORD_KEY]: codeDesktopRecord({ generation: 8 }) } }));
-        fs.writeFileSync(fixture.statePath, JSON.stringify(codeDesktopState(undefined, { status: 'refreshing', generation: 8, refresh: { id: 'other-owner' } })));
-      }
+      if (replacement) writeCodeLease(fixture, codeDesktopRecord({ generation: 8 }), { status: 'refreshing', refresh: { id: 'other-owner' } });
       return false;
     } }));
     assert.equal(result.status, 'unavailable');
@@ -1478,41 +1487,41 @@ test('MiniMax Code rejects an uncommitted replacement lease and expired fallback
 });
 
 test('MiniMax Code does not publish a rotated token after logout', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
+  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
   let resources = 0;
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async url => {
+  const result = await readCode(codeDeps(fixture, async url => {
     if (url === MINIMAX_CODE_OAUTH_URL_CN) {
       fs.writeFileSync(fixture.statePath, JSON.stringify(codeDesktopState(undefined, { status: 'logout_pending', generation: 9 })));
-      return okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED));
+      return rotatedGrant();
     }
     resources++;
     return okResponse(membershipBody());
   }));
   assert.equal(resources, 0);
   assert.equal(result.status, 'unauthorized');
-  const state = JSON.parse(fs.readFileSync(fixture.statePath));
+  const state = storedState(fixture);
   assert.equal(state.status, 'logout_pending');
   assert.equal(state.generation, 9);
-  assert.equal(JSON.parse(fs.readFileSync(fixture.authPath)).records[CODE_RECORD_KEY].refreshToken, REFRESH_ONFILE);
+  assert.equal(storedLease(fixture).refreshToken, REFRESH_ONFILE);
 });
 
 test('MiniMax Code accepts the official grant scope fallback and omitted refresh token', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW, scopes: ['agent.default', 'openid'] }) } });
+  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW, scopes: ['agent.default', 'openid'] } });
   const token = ['test-header', Buffer.from(JSON.stringify({ scp: ['agent.default'] })).toString('base64url'), 'test-signature'].join('.');
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async url => {
+  const result = await readCode(codeDeps(fixture, async url => {
     if (url === MINIMAX_CODE_OAUTH_URL_CN) return okResponse({ access_token: token, token_type: 'Bearer', expires_in: '1' });
     return okResponse(membershipBody({ op_group_id: '' }));
   }));
   assert.equal(result.status, 'ok');
-  const stored = JSON.parse(fs.readFileSync(fixture.authPath)).records[CODE_RECORD_KEY];
+  const stored = storedLease(fixture);
   assert.equal(stored.refreshToken, REFRESH_ONFILE);
   assert.equal(stored.expiresAtMs, CODE_NOW + 1000, 'short server expiry is not extended locally');
   assert.deepEqual(stored.scopes, ['agent.default'], 'the new grant replaces the stored scope set');
-  assert.deepEqual(JSON.parse(fs.readFileSync(fixture.statePath)).scopes, stored.scopes);
+  assert.deepEqual(storedState(fixture).scopes, stored.scopes);
 });
 
 test('MiniMax display affiliation recognizes group responses without affecting either lane', async (t) => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+  const fixture = writeCodeAuthFixture();
   const options = { minimaxApiRegion: 'cn', minimaxBillingMode: 'api', minimaxApiKey: 'key-A' };
   const cases = [
     ['no subscription', { base_resp: { status_code: 2062 }, model_remains: null }, true],
@@ -1555,7 +1564,7 @@ test('MiniMax display affiliation recognizes group responses without affecting e
 });
 
 test('MiniMax display links survive refreshes and follow the current key and Code group', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+  const fixture = writeCodeAuthFixture();
   let group = 'group-A';
   let confirmations = 0;
   let apiDenied = false;
@@ -1586,9 +1595,7 @@ test('MiniMax display links survive refreshes and follow the current key and Cod
     const apiA = first.find(row => row.source === 'api');
     assert.equal(apiA.relatedAccountKey, codeA.accountKey);
     assert.equal(confirmations, 1);
-    const rotated = codeDesktopRecord({ accessToken: ACCESS_RENEWED, generation: 8 });
-    fs.writeFileSync(fixture.authPath, JSON.stringify({ schemaVersion: 1, records: { [CODE_RECORD_KEY]: rotated } }));
-    fs.writeFileSync(fixture.statePath, JSON.stringify(codeDesktopState(rotated)));
+    writeCodeLease(fixture, codeDesktopRecord({ accessToken: ACCESS_RENEWED, generation: 8 }));
     await runtime.refresh({ provider: 'minimax', accountKey: codeA.accountKey }, 'manual');
     await runtime.refresh({ provider: 'minimax', accountKey: apiA.accountKey }, 'manual');
     assert.equal(confirmations, 1, 'normal rotation and account refresh reuse confirmation');
@@ -1635,7 +1642,7 @@ test('MiniMax display links survive refreshes and follow the current key and Cod
 });
 
 test('MiniMax Code follows workspace, membership and matched current-subscription name precedence', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+  const fixture = writeCodeAuthFixture();
   const subscription = {
     current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Current subscription' },
     current_combo_card: { combo_id: 12345, title: 'Build' }
@@ -1662,7 +1669,7 @@ test('MiniMax Code follows workspace, membership and matched current-subscriptio
   ]) {
     const calls = [];
     const groups = [];
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, null, { fetch: async (url, init) => {
+    const result = await readCode(codeDeps(fixture, null, { fetch: async (url, init) => {
       calls.push(url);
       if (url.endsWith('/user/get_user_extra_info')) return okResponse({ workspaces: [{ workspace_type: 0, workspace_id: 0, ...workspace }] });
       if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membership);
@@ -1686,13 +1693,13 @@ test('MiniMax Code follows workspace, membership and matched current-subscriptio
 });
 
 test('MiniMax Code meters a complete grant list and keeps the amount when the list is incomplete', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+  const fixture = writeCodeAuthFixture();
   const grant = (amount, remaining) => ({ credit_type: 2, granted_amount: String(amount),
     remaining_amount: String(remaining), consumed_amount: String(amount - remaining),
     granted_at_ms: CODE_NOW - 1000, expire_at_ms: CODE_NOW + 86400000 });
   const read = async (pages, credits) => {
     let detailPages = 0;
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, null, { fetch: async (url) => {
+    const result = await readCode(codeDeps(fixture, null, { fetch: async (url) => {
       const parsed = new URL(url);
       if (url.endsWith('/user/get_user_extra_info')) return okResponse({ workspaces: [{ workspace_type: 0, workspace_id: 0 }] });
       if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ has_token_plan: false,
@@ -1710,24 +1717,16 @@ test('MiniMax Code meters a complete grant list and keeps the amount when the li
     assertSyncPreservesReading(result);
     return result.windows.find(window => window.label === 'Credits');
   };
-  const metered = await read([{ details: [grant(100, 50)], total_count: 1 }], 50);
-  assert.equal(metered.remaining, 50);
-  assert.equal(metered.currency, 'CREDITS');
-  assert.equal(metered.limit, 100);
-  assert.equal(metered.showMeter, true);
-  const open = await read([
-    { details: [grant(100, 50)], total_count: 2 },
-    { details: [], total_count: 2 }
-  ], 50);
-  assert.equal(open.remaining, 50);
-  assert.equal(open.limit, null);
-  assert.equal(open.showMeter, false);
+  assertFields(await read([{ details: [grant(100, 50)], total_count: 1 }], 50),
+    { remaining: 50, currency: 'CREDITS', limit: 100, showMeter: true });
+  assertFields(await read([{ details: [grant(100, 50)], total_count: 2 }, { details: [], total_count: 2 }], 50),
+    { remaining: 50, limit: null, showMeter: false });
 });
 
 test('MiniMax Code parses modern plan percentages, unlimited quota and video counts', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+  const fixture = writeCodeAuthFixture();
   for (const [reportedTotal, expectedPercent] of [[undefined, 15], ['50%', 30]]) {
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async url => {
+    const result = await readCode(codeDeps(fixture, async url => {
       if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody());
       return okResponse({ base_resp: { status_code: 0 }, model_remains: [
         { model_name: 'general', current_interval_status: 3, current_weekly_total_percent: reportedTotal, current_weekly_used_percent: '15% ', weekly_end_time: 1790003600000 },
@@ -1739,19 +1738,14 @@ test('MiniMax Code parses modern plan percentages, unlimited quota and video cou
     assert.equal(session.showMeter, false);
     assert.equal(session.usedPercent, null);
     assert.equal(result.windows.find(window => window.label === 'Weekly').usedPercent, expectedPercent);
-    const video = result.windows.find(window => window.label === 'Video');
-    assert.equal(video.used, 3);
-    assert.equal(video.limit, 20);
-    assert.equal(video.remaining, 17);
-    assert.equal(video.usedPercent, 15);
-    assert.equal(video.remainingPercent, 85);
-    assert.equal(video.resetsAt, new Date(1790007200000).toISOString());
+    assertFields(result.windows.find(window => window.label === 'Video'),
+      { used: 3, limit: 20, remaining: 17, usedPercent: 15, remainingPercent: 85, resetsAt: new Date(1790007200000).toISOString() });
     assertSyncPreservesReading(result);
   }
 });
 
 test('MiniMax Code partial refresh updates credits and retains visibly stale plan windows', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+  const fixture = writeCodeAuthFixture();
   let outage = false;
   let timestamp = CODE_NOW;
   let nameRequests = 0;
@@ -1789,7 +1783,7 @@ test('MiniMax Code partial refresh updates credits and retains visibly stale pla
 });
 
 test('MiniMax Code commits an in-flight rotation when its probe is cancelled', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
+  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
   const controller = new AbortController();
   let exchanges = 0;
   let resources = 0;
@@ -1799,7 +1793,7 @@ test('MiniMax Code commits an in-flight rotation when its probe is cancelled', a
       exchanges++;
       const response = new Promise((resolve, reject) => {
         init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true });
-        queueMicrotask(() => resolve(okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED))));
+        queueMicrotask(() => resolve(rotatedGrant()));
       });
       // The server consumed the predecessor before the caller lost interest.
       controller.abort();
@@ -1808,8 +1802,8 @@ test('MiniMax Code commits an in-flight rotation when its probe is cancelled', a
   assert.equal(result[0].status, 'unavailable');
   assert.equal(exchanges, 1);
   assert.equal(resources, 0);
-  assert.equal(JSON.parse(fs.readFileSync(fixture.authPath)).records[CODE_RECORD_KEY].refreshToken, REFRESH_ROTATED);
-  assert.equal(JSON.parse(fs.readFileSync(fixture.statePath)).status, 'authenticated');
+  assert.equal(storedLease(fixture).refreshToken, REFRESH_ROTATED);
+  assert.equal(storedState(fixture).status, 'authenticated');
 });
 
 test('MiniMax Code lane picks the desktop record among several records', async () => {
@@ -1820,11 +1814,8 @@ test('MiniMax Code lane picks the desktop record among several records', async (
     }
   });
   const seen = [];
-  await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async (url, init) => {
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
-      seen.push(init.headers.authorization);
-      return { ok: true, json: async () => membershipBody({ op_group_id: '' }) };
-    }
+  await readCode(codeDeps(fixture, async (url, init) => {
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) { seen.push(init.headers.authorization); return okResponse(membershipBody({ op_group_id: '' })); }
     throw new Error(`unexpected url ${url}`);
   }));
   assert.deepEqual(seen, [`Bearer ${ACCESS_ONFILE}`]);
@@ -1838,11 +1829,9 @@ test('MiniMax Code only invalidates the login for an explicit HTTP 400 invalid_g
     [200, { ...oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED), expires_in: true }, 'unavailable']
   ];
   for (const [httpStatus, body, expected] of cases) {
-    const fixture = writeCodeAuthFixture({
-      records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW - 1000 }) }
-    });
+    const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW - 1000 } });
     let attempts = 0;
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async (url) => {
+    const result = await readCode(codeDeps(fixture, async (url) => {
       assert.equal(url, MINIMAX_CODE_OAUTH_URL_CN, 'an expired lease cannot reach resource endpoints');
       attempts++;
       return { ok: httpStatus === 200, status: httpStatus,
@@ -1851,20 +1840,18 @@ test('MiniMax Code only invalidates the login for an explicit HTTP 400 invalid_g
     const label = `${httpStatus} ${body?.error || (body === null ? 'unreadable' : 'malformed')}`;
     assert.equal(result.status, expected, label);
     assert.equal(attempts, 1, label);
-    const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
+    const state = storedState(fixture);
     assert.equal(state.status, expected === 'unauthorized' ? 'anonymous' : 'authenticated', label);
     assert.equal(state.generation, expected === 'unauthorized' ? 8 : 7, label);
-    assert.equal(JSON.parse(fs.readFileSync(fixture.authPath, 'utf8')).records[CODE_RECORD_KEY].refreshToken, REFRESH_ONFILE);
+    assert.equal(storedLease(fixture).refreshToken, REFRESH_ONFILE);
   }
 });
 
 test('MiniMax Code lane consults the process detector only when a refresh is due', async () => {
-  const fixture = writeCodeAuthFixture({
-    records: { [CODE_RECORD_KEY]: codeDesktopRecord() }
-  });
+  const fixture = writeCodeAuthFixture();
   let detections = 0;
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async (url) => {
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return { ok: true, json: async () => membershipBody({ op_group_id: '' }) };
+  const result = await readCode(codeDeps(fixture, async (url) => {
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ op_group_id: '' }));
     throw new Error(`unexpected url ${url}`);
   }, { clientRunning: () => { detections += 1; return true; } }));
   assert.equal(result.status, 'ok');
@@ -1873,16 +1860,16 @@ test('MiniMax Code lane consults the process detector only when a refresh is due
 
 test('MiniMax Code lane never refreshes while the desktop app is running', async () => {
   for (const running of [true, false]) {
-    const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW + 1000 }) } });
+    const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW + 1000 } });
     const deps = codeDeps(fixture, async url => url === MINIMAX_CODE_OAUTH_URL_CN
       ? { ok: false, status: 500, json: async () => ({}) }
       : okResponse(membershipBody({ op_group_id: '' })), { clientRunning: () => running });
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+    const result = await readCode(deps);
     assert.equal(deps.requests.filter(url => url === MINIMAX_CODE_OAUTH_URL_CN).length, running ? 0 : 1);
     assert.equal(result.status, 'ok');
     if (running) {
       const reactive = codeDeps(fixture, async () => ({ ok: false, status: 401 }), { clientRunning: () => true });
-      const duringRun = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, reactive);
+      const duringRun = await readCode(reactive);
       assert.equal(duringRun.status, 'unavailable');
       assert.deepEqual(reactive.requests, [
         'https://agent.minimax.cn/matrix/api/v1/user/get_user_extra_info', MINIMAX_CODE_MEMBERSHIP_URL_CN
@@ -1892,17 +1879,15 @@ test('MiniMax Code lane never refreshes while the desktop app is running', async
 });
 
 test('MiniMax Code lane treats 2062 as no subscription, not an error', async () => {
-  const fixture = writeCodeAuthFixture({
-    records: { [CODE_RECORD_KEY]: codeDesktopRecord() }
-  });
+  const fixture = writeCodeAuthFixture();
   const deps = codeDeps(fixture, async (url) => {
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return { ok: true, json: async () => membershipBody() };
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody());
     if (url.startsWith(MINIMAX_CODE_PLAN_REMAINS_URL_CN)) {
-      return { ok: true, json: async () => planRemainsBody({ base_resp: { status_code: 2062, status_msg: 'no active token plan subscription' } }) };
+      return okResponse(planRemainsBody({ base_resp: { status_code: 2062, status_msg: 'no active token plan subscription' } }));
     }
     throw new Error(`unexpected url ${url}`);
   });
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+  const result = await readCode(deps);
   assert.equal(deps.requests.filter(url => url === MINIMAX_CODE_PLAN_REMAINS_URL_CN).length, 1);
   assert.equal(result.status, 'ok');
   assert.equal(result.windows.length, 1, 'the credits window stands alone without a subscription');
@@ -1910,12 +1895,10 @@ test('MiniMax Code lane treats 2062 as no subscription, not an error', async () 
 });
 
 test('MiniMax credential probes ignore the local Code lease', async () => {
-  const fixture = writeCodeAuthFixture({
-    records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW - 1000 }) }
-  });
+  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW - 1000 } });
   const before = [fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8'));
   const deps = codeDeps(fixture, async () => okResponse(membershipBody()), { probe: true });
-  const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+  const result = await readCode(deps);
   assert.equal(result.status, 'notConfigured', 'a missing key is not vouched for by a local login');
   assert.deepEqual(deps.requests, []);
   assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before);
@@ -1923,11 +1906,11 @@ test('MiniMax credential probes ignore the local Code lease', async () => {
 
 test('MiniMax Code rejects nonprivate credential stores as the official FileStore does', { skip: process.platform === 'win32' }, async () => {
   for (const entry of ['dir', 'authPath']) {
-    const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+    const fixture = writeCodeAuthFixture();
     const before = fs.readFileSync(fixture.authPath, 'utf8');
     fs.chmodSync(fixture[entry], entry === 'dir' ? 0o755 : 0o644);
     const deps = codeDeps(fixture, async () => okResponse(membershipBody()));
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+    const result = await readCode(deps);
     assert.equal(result.status, 'unavailable');
     assert.deepEqual(deps.requests, []);
     assert.equal(fs.readFileSync(fixture.authPath, 'utf8'), before);
@@ -1937,7 +1920,7 @@ test('MiniMax Code rejects nonprivate credential stores as the official FileStor
 test('MiniMax Code retries a failed write on the next tick without consuming the old refresh token again', async () => {
   for (const destination of ['authPath', 'statePath']) {
     for (const failedRead of [1, 2]) {
-      const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW + 1000 }) } });
+      const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW + 1000 } });
       let rotations = 0;
       let failWrite = true;
       let failRead = 0;
@@ -1947,7 +1930,7 @@ test('MiniMax Code retries a failed write on the next tick without consuming the
         if (url === MINIMAX_CODE_OAUTH_URL_CN) {
           rotations++;
           assert.equal(rotations, 1, 'never replay the predecessor refresh token');
-          return okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED));
+          return rotatedGrant();
         }
         assert.equal(url, MINIMAX_CODE_MEMBERSHIP_URL_CN);
         bearers.push(init.headers.authorization);
@@ -1964,36 +1947,36 @@ test('MiniMax Code retries a failed write on the next tick without consuming the
           return fs.renameSync(...args);
         }
       });
-      assert.equal((await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps)).status, 'ok');
+      assert.equal((await readCode(deps)).status, 'ok');
       assert.equal(deps.providerRuntimeState.size, 1);
       bearers.length = 0;
       failRead = failedRead;
-      assert.equal((await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps)).status, 'unavailable');
+      assert.equal((await readCode(deps)).status, 'unavailable');
       assert.equal(deps.providerRuntimeState.size, 1, 'temporary reads must retain the uncommitted grant');
       assert.deepEqual(bearers, [], 'a refreshing fence cannot expose the predecessor access token');
       running = true;
       const lock = path.join(fixture.dir, 'auth.lock.lock');
       fs.mkdirSync(lock);
-      assert.equal((await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps)).status, 'unavailable');
+      assert.equal((await readCode(deps)).status, 'unavailable');
       assert.deepEqual(bearers, []);
       fs.rmdirSync(lock);
       failWrite = false;
-      assert.equal((await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps)).status, 'ok', 'an already-issued grant can commit while Code runs');
+      assert.equal((await readCode(deps)).status, 'ok', 'an already-issued grant can commit while Code runs');
       assert.deepEqual(bearers, [`Bearer ${ACCESS_ROTATED}`]);
       assert.equal(deps.providerRuntimeState.size, 0);
       assert.equal(rotations, 1);
-      assert.equal(JSON.parse(fs.readFileSync(fixture.authPath)).records[CODE_RECORD_KEY].refreshToken, REFRESH_ROTATED);
-      assert.equal(JSON.parse(fs.readFileSync(fixture.statePath)).generation, 8);
+      assert.equal(storedLease(fixture).refreshToken, REFRESH_ROTATED);
+      assert.equal(storedState(fixture).generation, 8);
     }
   }
 });
 
 test('MiniMax Code refuses custom OAuth endpoints without sending credentials or changing the lease', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
+  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
   const before = [fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8'));
   for (const name of ['MCODE_OAUTH_DEVICE_AUTHORIZATION_ENDPOINT', 'MCODE_OAUTH_TOKEN_ENDPOINT', 'MCODE_OAUTH_REVOCATION_ENDPOINT']) {
     const deps = codeDeps(fixture, async () => okResponse({}), { env: { MINIMAX_DATA_DIR: fixture.base, [name]: 'https://custom.example.test/oauth' } });
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps);
+    const result = await readCode(deps);
     assert.equal(result.status, 'unavailable');
     assert.deepEqual(deps.requests, [], 'custom domains must not send credentials to the public defaults');
     assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before);
@@ -2001,45 +1984,38 @@ test('MiniMax Code refuses custom OAuth endpoints without sending credentials or
 });
 
 test('MiniMax Code never writes or releases a lock replaced by another client', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
+  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
   const lock = path.join(fixture.dir, 'auth.lock.lock');
   const deps = codeDeps(fixture, async url => {
-    if (url === MINIMAX_CODE_OAUTH_URL_CN) {
-      fs.renameSync(lock, `${lock}-old`);
-      fs.mkdirSync(lock);
-      return okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED));
-    }
+    if (url === MINIMAX_CODE_OAUTH_URL_CN) { fs.renameSync(lock, `${lock}-old`); fs.mkdirSync(lock); return rotatedGrant(); }
     return okResponse(membershipBody({ op_group_id: '' }));
   });
-  assert.equal((await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps)).status, 'unavailable');
+  assert.equal((await readCode(deps)).status, 'unavailable');
   assert.equal(fs.existsSync(lock), true, 'the replacement lock belongs to another process');
-  assert.equal(JSON.parse(fs.readFileSync(fixture.authPath)).records[CODE_RECORD_KEY].refreshToken, REFRESH_ONFILE);
+  assert.equal(storedLease(fixture).refreshToken, REFRESH_ONFILE);
   assert.equal(deps.providerRuntimeState.size, 1, 'the uncommitted rotation is retained for a later safe write');
 });
 
 test('MiniMax Code does not overwrite a new login that appears during a rotation', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
+  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
   const replacement = codeDesktopRecord({ loginEpoch: 'new-login', generation: 20 });
-  await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async url => {
+  await readCode(codeDeps(fixture, async url => {
     if (url === MINIMAX_CODE_OAUTH_URL_CN) {
       fs.writeFileSync(fixture.authPath, JSON.stringify({ schemaVersion: 1, records: { [CODE_RECORD_KEY]: replacement } }));
-      return okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED));
+      return rotatedGrant();
     }
     return okResponse(membershipBody({ op_group_id: '' }));
   }));
-  assert.deepEqual(JSON.parse(fs.readFileSync(fixture.authPath)).records[CODE_RECORD_KEY], replacement);
+  assert.deepEqual(storedLease(fixture), replacement);
 });
 
 test('MiniMax Code handles body auth failures in membership and plan requests', async () => {
   for (const lane of ['membership', 'plan']) {
-    const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+    const fixture = writeCodeAuthFixture();
     let rotations = 0;
     let failures = 0;
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, codeDeps(fixture, async url => {
-      if (url === MINIMAX_CODE_OAUTH_URL_CN) {
-        rotations++;
-        return okResponse(oauthOkBody(ACCESS_ROTATED, REFRESH_ROTATED));
-      }
+    const result = await readCode(codeDeps(fixture, async url => {
+      if (url === MINIMAX_CODE_OAUTH_URL_CN) { rotations++; return rotatedGrant(); }
       const target = lane === 'membership' ? url === MINIMAX_CODE_MEMBERSHIP_URL_CN : url.startsWith(MINIMAX_CODE_PLAN_REMAINS_URL_CN);
       if (target && failures++ === 0) return okResponse({ base_resp: { status_code: 1004 } });
       return okResponse(url === MINIMAX_CODE_MEMBERSHIP_URL_CN ? membershipBody() : planRemainsBody());
@@ -2052,31 +2028,31 @@ test('MiniMax Code handles body auth failures in membership and plan requests', 
 });
 
 test('MiniMax Code fails closed if the process detector is unavailable and honors cancellation', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW }) } });
+  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
   let rotations = 0;
   const deps = codeDeps(fixture, async url => {
     if (url === MINIMAX_CODE_OAUTH_URL_CN) rotations++;
     return okResponse(membershipBody({ op_group_id: '' }));
   }, { clientRunning: undefined, execFile: (_cmd, _args, _opts, cb) => cb(Object.assign(new Error('missing detector'), { code: 'ENOENT' })) });
-  assert.equal((await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, deps)).status, 'unavailable');
+  assert.equal((await readCode(deps)).status, 'unavailable');
   assert.deepEqual(deps.requests, []);
   assert.equal(rotations, 0);
   for (const duringDetection of [false, true]) {
     const controller = new AbortController();
     if (!duringDetection) controller.abort();
     let calls = 0;
-    await fetchMinimaxLimits({ minimaxBillingMode: 'api' }, {
+    await readCode({
       ...deps, signal: controller.signal,
       clientRunning: () => { controller.abort(); return false; },
       fetch: async () => { calls++; assert.fail('must not send'); }
     });
     assert.equal(calls, 0);
-    assert.equal(JSON.parse(fs.readFileSync(fixture.statePath)).status, 'authenticated');
+    assert.equal(storedState(fixture).status, 'authenticated');
   }
 });
 
 test('MiniMax Code keeps a known account until a different group id is confirmed', async () => {
-  const fixture = writeCodeAuthFixture({ records: { [CODE_RECORD_KEY]: codeDesktopRecord() } });
+  const fixture = writeCodeAuthFixture();
   let group = 'known-account';
   let amount = '10';
   let now = CODE_NOW;
