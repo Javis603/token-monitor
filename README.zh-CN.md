@@ -288,7 +288,7 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 | 缓存用量／会话缓存命中率 | 提供缓存字段的来源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 有缓存用量数据时才显示命中率。 |
 | 缓存剩余时间估算 | Claude Code, Codex | Claude Code：5 分钟或 1 小时；Codex：约 30 分钟（估算）。 |
 | 输出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 为输出速度，`tok/min` 为总 Token 消耗速率；计时可能包含等待。 |
-| 推理强度设置 | Claude Code, Codex | 已记录的强度显示在首页、会话、Edge Dock 与 Notch 的模型名称旁，包括已归档会话；没有设置记录时不显示。 |
+| 推理强度设置 | Claude Code, Codex | 仅显示会话中明确记录的设置值。 |
 | 推理 Token 数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
 | 原生运行中／等待输入状态 | Claude Code, Codex | — |
 | 父会话／子代理分组 | Codex, Antigravity, Oh My Pi, ZCode；具有可验证父会话链接的 T3 Code 会话 | Claude Code 的分组通过 T3 Code 提供。 |
