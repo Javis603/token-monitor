@@ -8,6 +8,14 @@
   const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,model,session,device,trends';
 
   const HOME_MODULE_COUNT_MAX = 50;
+  // Plugin views placed on Home (`plugin:<pluginId>/<viewId>`). They are kept
+  // in the stored order even when the plugin is missing, so disabling or
+  // reinstalling a plugin does not lose where the user put it.
+  const PLUGIN_MODULE_RE = /^plugin:[a-z0-9][a-z0-9-]{1,39}\/[a-z][a-z0-9-]{0,31}$/;
+
+  function isPluginModuleId(id) {
+    return PLUGIN_MODULE_RE.test(String(id || ''));
+  }
   const HOME_MODULE_COUNT_DEFAULTS = Object.freeze({ tool: 5, model: 5, session: 5, device: 4 });
 
   function normalizeHomeModuleCounts(value, previous) {
@@ -42,7 +50,7 @@
     const order = [];
     for (const item of raw) {
       const id = String(item || '').trim().toLowerCase();
-      if (!knownSet.has(id) || seen.has(id)) continue;
+      if ((!knownSet.has(id) && !isPluginModuleId(id)) || seen.has(id)) continue;
       seen.add(id);
       order.push(id);
     }
@@ -62,11 +70,14 @@
     const seen = new Set();
     for (const item of raw) {
       const id = String(item || '').trim().toLowerCase();
-      if (!knownSet.has(id) || seen.has(id)) continue;
+      if ((!knownSet.has(id) && !isPluginModuleId(id)) || seen.has(id)) continue;
       seen.add(id);
       hidden.push(id);
     }
-    return hidden.length >= known.length ? '' : hidden.join(',');
+    // Hiding every known module is not a layout; plugin entries the caller
+    // does not know about are carried through untouched.
+    const knownHidden = hidden.filter((id) => knownSet.has(id));
+    return knownHidden.length >= known.length ? hidden.filter((id) => !knownSet.has(id)).join(',') : hidden.join(',');
   }
 
   function orderedHomeModules(options, value) {
@@ -109,6 +120,7 @@
     homeModuleCount,
     normalizeHomeModuleCounts,
     defaultHomeModulePreferences,
+    isPluginModuleId,
     moveHomeModuleOrder,
     normalizeHiddenHomeModules,
     normalizeHomeLimitDisplayMode,

@@ -34,6 +34,7 @@ const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const tokenNumberAnimationApi = window.TokenMonitorTokenNumberAnimation;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
+const windowsBackdropApi = window.TokenMonitorWindowsBackdropMode;
 const macBackdropApi = window.TokenMonitorMacBackdropMode;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const fontSettingsApi = window.TokenMonitorFontSettings;
@@ -108,6 +109,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
+  muse: 'settings.limits.connection.muse',
   kiro: 'settings.limits.connection.kiro',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
@@ -238,6 +240,8 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Sign in again': 'settings.limits.status.signInAgain',
   'Run grok login': 'settings.limits.status.runGrokLogin',
   'Run kiro-cli login': 'settings.limits.status.runKiroLogin',
+  'Install Muse Code': 'settings.limits.status.installMuseCode',
+  'Run muse login': 'settings.limits.status.runMuseLogin',
   'Open Cline': 'settings.limits.status.openCline',
   'Re-login': 'settings.limits.status.relogin',
   Limited: 'settings.limits.status.limited',
@@ -270,6 +274,15 @@ const HOME_MODULE_OPTIONS = [
   { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'trends', labelKey: 'home.activity', viewId: 'trends' }
 ];
+const pluginViewsApi = window.TokenMonitorPluginViews;
+const pluginPlacementsApi = window.TokenMonitorPluginPlacements;
+// Assigned in the Plugins block below; read lazily by Home, tray and settings.
+let pluginViewHost = null;
+let pluginContent = null;
+let pluginMainPages = null;
+function pluginPageOptions() { return window.TokenMonitorPluginMainPages?.entries(state.pluginCatalog) || []; }
+let pluginApi = null;
+let pluginSettingsPanel = null;
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;
 const VIEW_SWITCHER_HOVER_CLOSE_MS = 160;
 const VIEW_ICON_CLASSES = {
@@ -295,7 +308,7 @@ const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/cho
 const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/token-monitor/';
 const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
-const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
+const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync', 'plugins'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;
 const LIVE_TOKEN_RATE_CLEAR_MS = 3 * 60 * 1000;
@@ -306,7 +319,7 @@ let initialBreakdownPreferenceApplied = typeof initialViewState.breakdown === 's
 
 function normalizeInitialViewValue(value, allowed, fallback) {
   const raw = String(value || '').trim();
-  return allowed.has(raw) ? raw : fallback;
+  return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
@@ -400,7 +413,6 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
-  experimentalFeaturesGroup: document.getElementById('experimentalFeaturesGroup'),
   notchFeature: document.getElementById('notchFeature'),
   notchInput: document.getElementById('notchInput'),
   notchOptions: document.getElementById('notchOptions'),
@@ -447,6 +459,8 @@ Object.assign(els, {
   edgeDockRunningIndicatorInput: document.getElementById('edgeDockRunningIndicatorInput'),
   edgeDockMacBackdropRow: document.getElementById('edgeDockMacBackdropRow'),
   edgeDockMacBackdropInput: document.getElementById('edgeDockMacBackdropInput'),
+  edgeDockWindowsBackdropRow: document.getElementById('edgeDockWindowsBackdropRow'),
+  edgeDockWindowsBackdropInput: document.getElementById('edgeDockWindowsBackdropInput'),
   edgeDockComposer: document.getElementById('edgeDockComposer'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
@@ -562,6 +576,7 @@ Object.assign(els, {
   mainSettingsSummary: document.getElementById('mainSettingsSummary'),
   windowSettingsSummary: document.getElementById('windowSettingsSummary'),
   appearanceSettingsSummary: document.getElementById('appearanceSettingsSummary'),
+  pluginsSettingsSummary: document.getElementById('pluginsSettingsSummary'),
   backgroundImageStatus: document.getElementById('backgroundImageStatus'),
   chooseBackgroundImageButton: document.getElementById('chooseBackgroundImageButton'),
   clearBackgroundImageButton: document.getElementById('clearBackgroundImageButton'),
@@ -757,6 +772,8 @@ function applySettingsTranslations() {
   diagnosticsPanel?.render();
 }
 
+let displaySettings = null;
+
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
@@ -781,6 +798,7 @@ function setSettingsSectionExpanded(section, expanded) {
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
   if (id === 'sync' && next) void syncContentForm?.refresh();
+  if (id === 'plugins' && next) void pluginSettingsPanel?.refresh().then(renderSettingsSummaries);
 }
 
 // Expanding a section auto-collapses the previously open one. When that one
@@ -875,6 +893,12 @@ function viewsSummary() {
 
 function settingsSectionSummary(section) {
   if (!state.settings) return '';
+  if (section === 'plugins') {
+    if (state.settings.pluginsEnabled === false) return t('settings.summary.off');
+    const plugins = state.pluginCatalog?.plugins || [];
+    if (!plugins.length) return '';
+    return t('settings.summary.plugins', { active: plugins.filter((plugin) => plugin.status === 'active').length, total: plugins.length });
+  }
   if (section === 'sync') {
     const modeKeys = { host: 'settings.sync.hostHub', client: 'settings.sync.connectHub', icloud: 'settings.sync.icloud' };
     const label = t(modeKeys[state.settings.hubMode] || 'settings.sync.localOnly');
@@ -1936,6 +1960,7 @@ function settleRowNumberAnimations() {
 function applyReduceMotionPreference(value) {
   const preference = motionPreferenceApi.normalize(value);
   document.documentElement.dataset.reduceMotion = preference;
+  pluginViewHost?.refreshMotion();
   if (motionPreferenceApi.shouldReduceMotion(preference, reducedMotionMedia?.matches)) settleMotionAnimations();
   return preference;
 }
@@ -2657,7 +2682,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2718,39 +2743,35 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   // A multi-model session abbreviates to "N models"; that label opens the same
   // tooltip the context gauge carries, one row per model with its tokens and
   // share of the session. A titled row prints the label inside the
-  // client · model line, so the trigger is just the "N models" span; an
-  // untitled row folds it into the title instead, whose whole text then opens
-  // the tooltip. The trigger mirrors the row's own wording rather than adding
-  // chrome, so there is nothing extra on a single-model row. A review heading
-  // explicitly identifies its model span before the trailing time.
+  // client · model line; untitled rows fold it into the title instead. Both
+  // use the shared model/effort node so each label keeps its own tooltip.
+  // A review heading explicitly identifies its model span before the time.
   const modelEntries = Array.isArray(modelTooltipEntries) && modelTooltipEntries.length > 1
     ? modelTooltipEntries : null;
-  const subtitleShowsModel = Boolean(!titleModelLabel && modelEntries && modelLabel && String(subtitleText || '').endsWith(modelLabel));
+  const metadataRow = { client, modelLabel: modelLabel || '', modelTooltipEntries: modelTooltipEntries || [], reasoningEffort };
+  const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(metadataRow);
+  const hasMetadata = Boolean(modelEntries || sessionRowsApi.sessionReasoningEffortForRow(metadataRow));
+  const replaceMetadata = (element, text, start) => {
+    const content = element.querySelector('.overflow-text-content') || element;
+    content.replaceChildren(document.createTextNode(text.slice(0, start)),
+      sessionRowsApi.sessionModelMetadataNode(document, metadataRow, { translate: t, view: limitWindowsView }),
+      document.createTextNode(text.slice(start + metadataLabel.length)));
+    overflowText.update(element);
+  };
+  const subtitleShowsModel = Boolean(!titleModelLabel && hasMetadata && metadataLabel && String(subtitleText || '').endsWith(metadataLabel));
   if (subtitleShowsModel) {
-    const models = document.createElement('span');
-    models.className = 'session-models';
-    models.textContent = modelLabel;
-    // Inside the marquee's own wrapper, so a long line still scrolls on hover.
-    const subtitleContent = subtitleTextEl.querySelector('.overflow-text-content') || subtitleTextEl;
-    subtitleContent.replaceChildren(document.createTextNode(subtitleText.slice(0, -modelLabel.length)), models);
-    overflowText.update(subtitleTextEl);
-    limitWindowsView.setDetailTooltip(models, modelEntries);
+    replaceMetadata(subtitleTextEl, subtitleText, subtitleText.length - metadataLabel.length);
   } else {
     setHoverMarqueeText(subtitleTextEl, subtitleText);
   }
-  if (modelEntries && titleModelLabel && String(name || '').startsWith(titleModelLabel)) {
-    const models = document.createElement('span');
-    models.className = 'session-models';
-    models.textContent = titleModelLabel;
-    const titleContent = titleEl.querySelector('.overflow-text-content') || titleEl;
-    titleContent.replaceChildren(models, document.createTextNode(name.slice(titleModelLabel.length)));
-    overflowText.update(titleEl);
-    limitWindowsView.setDetailTooltip(models, modelEntries);
+  if (hasMetadata && titleModelLabel && metadataLabel && String(name || '').startsWith(metadataLabel)) {
+    replaceMetadata(titleEl, name, 0);
   }
-  if (!subtitleShowsModel && !titleModelLabel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
-    limitWindowsView.setDetailTooltip(titleEl, modelEntries);
-  } else if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
+  if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
     limitWindowsView.setDetailTooltip(titleEl, null);
+  }
+  if (!subtitleShowsModel && !titleModelLabel && hasMetadata && metadataLabel && String(name || '').endsWith(metadataLabel)) {
+    replaceMetadata(titleEl, name, name.length - metadataLabel.length);
   }
   subtitleEl.classList.toggle('hidden', !subtitle);
   // The activity line carries time, calls, cache hit and tok/s; a narrow window
@@ -3265,20 +3286,22 @@ function availableBreakdownIds() {
   const order = ['home', baseBreakdownOrder[0], 'status', 'trends', ...baseBreakdownOrder.slice(1)];
   let available = state.settings?.historyEnabled === false ? order.filter((id) => id !== 'trends') : order;
   if (state.settings?.projectsEnabled === false) available = available.filter((id) => id !== 'project');
-  return limitViewAvailable() ? [...available, 'limits'] : available;
+  return [...(limitViewAvailable() ? [...available, 'limits'] : available), ...pluginPageOptions().map(page => page.id)];
 }
 
 function visibleBreakdownOrder() {
-  return viewDisplayPreferencesApi.visibleViewOrder({
+  return [...viewDisplayPreferencesApi.visibleViewOrder({
     views: VIEW_DISPLAY_OPTIONS,
     orderValue: effectiveViewDisplayOrderValue(),
     hiddenValue: state.settings?.hiddenViews,
     availableIds: availableBreakdownIds(),
     includeIds: directBreakdownOverride ? [directBreakdownOverride] : []
-  });
+  }), ...pluginPageOptions().map(page => page.id)];
 }
 
 function ensureBreakdownVisible() {
+  if (pluginPageOptions().some(page => page.id === state.breakdown)) return;
+  if (!state.pluginCatalog && pluginPlacementsApi.isHomeToken(state.breakdown)) return;
   const availableIds = availableBreakdownIds();
   if (directBreakdownOverride === state.breakdown && availableIds.includes(state.breakdown)) return;
   directBreakdownOverride = null;
@@ -5349,13 +5372,13 @@ function sessionGroupRunNode(row, max, parent) {
   const subagentGroup = parent.summary?.subagentGroup === true;
   const namedGroup = subagentGroup || parent.summary?.sessionGroup === 'cursor-grok-bot';
   const title = namedGroup ? row.name
-    : [row.modelLabel, sessionRowsApi.compactSessionTime(row.sortTime)].filter(Boolean).join(' · ')
+    : [sessionRowsApi.sessionModelMetadataLabel(row), sessionRowsApi.compactSessionTime(row.sortTime)].filter(Boolean).join(' · ')
       || t('sessions.backgroundReviews');
   // Group members are still session rows. Share the template, metrics, tooltip
   // and activity rendering; exchange rows belong only to the actual transcript.
   const member = { ...row, name: title, titleModelLabel: namedGroup ? undefined : row.modelLabel };
   if (subagentGroup) {
-    member.subtitle = [row.clientLabel, row.modelLabel].filter(Boolean).join(' · ');
+    member.subtitle = [row.clientLabel, sessionRowsApi.sessionModelMetadataLabel(row)].filter(Boolean).join(' · ');
     member.activity = row.activitySummary;
   }
   const wrap = rowTemplate(member);
@@ -5705,6 +5728,8 @@ function renderTrends() {
 }
 
 function viewLabelById(id) {
+  const page = pluginPageOptions().find(page => page.id === id);
+  if (page) return page.title;
   const view = VIEW_DISPLAY_OPTIONS.find((option) => option.id === id);
   return view ? viewLabel(view) : id;
 }
@@ -5773,13 +5798,17 @@ function resetSettingsListSearch() {
   if (els.limitProviderSearchInput) els.limitProviderSearchInput.value = '';
 }
 
-function openSettingsPanel() {
+function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncSettingsForm();
   ensureServiceStatusTicker();
+  if (section === 'notch') {
+    setSettingsSectionExpanded('window', true);
+    displaySettings?.open('notch');
+  }
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
 }
@@ -6098,10 +6127,27 @@ function syncPeriodMenu() {
   }
 }
 
+// Built-in Home modules plus the plugin views the user has placed on Home.
+// Only placed views count as known: an active plugin's other views must not be
+// appended to the order the way a newly shipped built-in module would be.
+function homeModuleOptions() {
+  const placed = new Set(String(state.settings?.homeModuleOrder || '').split(',').map((id) => id.trim().toLowerCase()));
+  const extra = [];
+  for (const plugin of state.pluginCatalog?.plugins || []) {
+    if (plugin.status !== 'active') continue;
+    for (const view of plugin.views || []) {
+      const id = pluginPlacementsApi.homeToken(view.ref);
+      if (!view.surfaces.includes('home') || !placed.has(id)) continue;
+      extra.push({ id, label: view.title, ref: view.ref, pluginName: plugin.name, icon: view.icon });
+    }
+  }
+  return [...HOME_MODULE_OPTIONS, ...extra];
+}
+
 function homeModuleIds() {
   const hidden = hiddenHomeModuleSet();
   return homeModulePreferencesApi
-    .orderedHomeModules(HOME_MODULE_OPTIONS, state.settings?.homeModuleOrder)
+    .orderedHomeModules(homeModuleOptions(), state.settings?.homeModuleOrder)
     .map((module) => module.id)
     .filter((id) => !hidden.has(id));
 }
@@ -6115,7 +6161,7 @@ function nextBreakdown(value) {
 
 function viewSwitcherIcon(id) {
   const icon = document.createElement('span');
-  icon.className = `view-switcher-icon ${VIEW_ICON_CLASSES[id] || 'view-icon-home'}`;
+  icon.className = `view-switcher-icon ${VIEW_ICON_CLASSES[id] || (pluginPlacementsApi.isHomeToken(id) ? 'view-icon-plugin' : 'view-icon-home')}`;
   icon.setAttribute('aria-hidden', 'true');
   return icon;
 }
@@ -6152,8 +6198,12 @@ function updateViewSwitcherOpenState({ focusMenu = false, focusDisclosure = fals
   for (const item of menu.querySelectorAll('.view-switcher-menu-item')) {
     item.tabIndex = state.viewSwitcherOpen && item.classList.contains('is-current') ? 0 : -1;
   }
+  if (state.viewSwitcherOpen) requestAnimationFrame(() => menu.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' }));
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
   if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
+  if (visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed) {
+    pluginContent?.render('main.navigation.content', els.viewSwitcher, { surface: 'page', navigate: openViewFromTray });
+  }
   return true;
 }
 
@@ -6278,26 +6328,33 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   els.viewSwitcher.classList.toggle('is-open', state.viewSwitcherOpen);
   els.viewSwitcher.classList.toggle('has-opened', state.viewSwitcherHasOpened);
   els.viewSwitcher.replaceChildren(current, disclosure, menu);
+  if (state.viewSwitcherOpen) requestAnimationFrame(() => menu.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' }));
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
   if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
+  if (visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed) {
+    pluginContent?.render('main.navigation.content', els.viewSwitcher, { surface: 'page', navigate: openViewFromTray });
+  }
 }
 
 function homeModuleShell(kind, title, viewId, meta = '') {
   const module = document.createElement('section');
   module.className = `home-module home-module-${kind}`;
-  module.tabIndex = 0;
-  module.setAttribute('role', 'button');
   module.setAttribute('aria-label', title);
-  module.addEventListener('click', (event) => {
-    if (event.target.closest('.home-activity-scroll')) return;
-    renderBreakdownChange(viewId, { fromHome: true });
-  });
-  module.addEventListener('keydown', (event) => {
-    if (event.target !== module) return;
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    renderBreakdownChange(viewId, { fromHome: true });
-  });
+  // Plugin modules have no detail view to jump to.
+  if (viewId) {
+    module.tabIndex = 0;
+    module.setAttribute('role', 'button');
+    module.addEventListener('click', (event) => {
+      if (event.target.closest('.home-activity-scroll')) return;
+      renderBreakdownChange(viewId, { fromHome: true });
+    });
+    module.addEventListener('keydown', (event) => {
+      if (event.target !== module) return;
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      renderBreakdownChange(viewId, { fromHome: true });
+    });
+  }
   const head = document.createElement('div');
   head.className = 'home-module-head';
   const titleWrap = document.createElement('div');
@@ -6314,10 +6371,12 @@ function homeModuleShell(kind, title, viewId, meta = '') {
     metaText.textContent = meta;
     end.append(metaText);
   }
-  const icon = document.createElement('span');
-  icon.className = `home-module-jump ${VIEW_ICON_CLASSES[viewId] || ''}`;
-  icon.setAttribute('aria-hidden', 'true');
-  end.append(icon);
+  if (viewId) {
+    const icon = document.createElement('span');
+    icon.className = `home-module-jump ${VIEW_ICON_CLASSES[viewId] || ''}`;
+    icon.setAttribute('aria-hidden', 'true');
+    end.append(icon);
+  }
   head.append(titleWrap, end);
   const body = document.createElement('div');
   body.className = 'home-module-body';
@@ -6448,6 +6507,7 @@ function renderHomeLimitModule() {
     for (const window of row.windows) {
       const metric = document.createElement('div');
       metric.className = 'home-limit-window';
+      if (window.fullWidth) metric.classList.add('home-limit-window-wide');
       const line = document.createElement('div');
       line.className = 'home-limit-window-line';
       const label = document.createElement('span');
@@ -6466,7 +6526,15 @@ function renderHomeLimitModule() {
           value.style.setProperty('--home-limit-accent', row.color);
         }
       }
-      line.append(label, value);
+      const info = limitWindowsView.limitDetailInfoNode(window.detailEntries);
+      if (info) {
+        const right = document.createElement('span');
+        right.className = 'home-limit-window-value';
+        right.append(value, info);
+        line.append(label, right);
+      } else {
+        line.append(label, value);
+      }
       metric.append(line);
       // Money and fixed labels retain a remaining meter; only percentage
       // labels follow the global used/remaining display preference.
@@ -6696,27 +6764,20 @@ function renderHomeSessionModule(rows) {
     // The same "N models" hover the Sessions list draws: the label stays the
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
-    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(row, {
+    const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(row);
+    description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
+      translate: t, view: limitWindowsView,
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
-    });
-    if (modelLabel) {
-      if (modelEntries.length > 1) {
-        const models = document.createElement('span');
-        models.className = 'session-models';
-        models.textContent = modelLabel;
-        limitWindowsView.setDetailTooltip(models, modelEntries);
-        description.append(models);
-      } else description.append(document.createTextNode(modelLabel));
-    }
+    }));
     if (memberLabel) {
-      if (modelLabel) description.append(document.createTextNode(' · '));
+      if (metadataLabel) description.append(document.createTextNode(' · '));
       const count = document.createElement('span');
       count.className = 'home-session-member-count';
       count.textContent = memberLabel;
       description.append(count);
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
+    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
     meta.append(description);
     const status = sessionRowsApi.sessionStatusNode(document, row, { prefix: 'home-session', translate: t,
       view: limitWindowsView, showUsed: state.settings?.sessionContextMetric !== 'remaining' });
@@ -7185,6 +7246,27 @@ function renderHomeTrendsModule() {
   return module;
 }
 
+// A plugin view on Home: the shell is ours, the body is the plugin's resolved
+// view, repainted in place by plugin pushes without re-rendering Home.
+function renderHomePluginModule(id) {
+  const option = homeModuleOptions().find((entry) => entry.id === id);
+  const ref = pluginPlacementsApi.refFromHomeToken(id);
+  const existing = [...els.homePanel.children].find(node => node.dataset.pluginRef === ref);
+  if (existing) {
+    existing.setAttribute('aria-label', option?.label || ref);
+    const label = existing.querySelector('.home-module-label'); if (label) label.textContent = option?.label || ref;
+    const meta = existing.querySelector('.home-module-meta'); if (meta) meta.textContent = option?.pluginName || '';
+    return existing;
+  }
+  const { module, body } = homeModuleShell('plugin', option?.label || ref, null, option?.pluginName || '');
+  module.dataset.pluginRef = ref;
+  const mount = document.createElement('div');
+  mount.className = 'home-plugin-body';
+  body.append(mount);
+  pluginViewHost?.mount(mount, ref, 'home');
+  return module;
+}
+
 function renderHome() {
   if (!els.homePanel) return;
   if (sessionTooltipShouldHoldRender()) {
@@ -7230,9 +7312,18 @@ function renderHome() {
       sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
       return renderHomeSessionModule(sessionRows);
     }
+    if (homeModulePreferencesApi.isPluginModuleId(id)) return renderHomePluginModule(id);
     return renderHomeTrendsModule();
   });
-  els.homePanel.replaceChildren(...nodes);
+  // Reconcile siblings without detaching retained plugin controls. Collector
+  // pushes must not discard focused drafts or cancel captured drawing gestures.
+  for (const child of [...els.homePanel.children]) if (!nodes.includes(child)) child.remove();
+  nodes.forEach((node, index) => {
+    const current = els.homePanel.children[index];
+    if (node === current) return;
+    if (node.parentNode === els.homePanel && els.homePanel.moveBefore) els.homePanel.moveBefore(node, current || null);
+    else els.homePanel.insertBefore(node, current || null);
+  });
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
@@ -7267,6 +7358,7 @@ function setRendererSettings(next) {
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
   state.settings = next;
   if (animationChanged) {
+    pluginViewHost?.refreshMotion();
     cancelNumberAnimation();
     settleRowNumberAnimations();
     numberAnimValue = state.currentTotal;
@@ -7283,10 +7375,49 @@ function setRendererSettings(next) {
   if (titlesChanged) refreshSessionDetailHeading();
 }
 
+function periodContentAvailability() {
+  const derived = fixedPeriodRangesApi.isDerived(state.period);
+  return {
+    fixedUnavailable: derived && state.fixedPeriodSnapshot?.status !== 'ready',
+    detailUnavailable: derived && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
+      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+    })
+  };
+}
+
 function render() {
+  renderAppContent();
+  pluginViewHost?.refreshContext();
+  if (pluginContent) {
+    const target = `main.${state.breakdown}.content`;
+    const roots = { home: els.homePanel, limits: els.limitsPanel, trends: els.trendsPanel, status: els.serviceStatusPanel };
+    const native = state.breakdown === 'session' && state.openSession ? els.sessionDetail : roots[state.breakdown] || els.breakdown;
+    const visible = visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed;
+    pluginContent.retain(visible ? [target, 'main.navigation.content'] : []);
+    if (visible && !state.breakdown.startsWith('plugin:')) pluginContent.render(target, native, {
+      surface: 'page', period: state.period, source: state.settings?.hubMode, stats: state.stats,
+      navigate: openViewFromTray, session: state.openSession
+    });
+  }
+
+}
+function renderAppContent() {
   const surface = visibleStatsSurface();
   if (surface !== 'main') {
     if (!surface) statsRenderScheduler.request();
+    return;
+  }
+  ensureBreakdownVisible();
+  const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
+  els.shell.classList.toggle('plugin-page-mode', pluginPage);
+  if (pluginPage) {
+    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip();
+    cancelNumberAnimation();
+    state.openSession = null;
+    for (const panel of [els.homePanel, els.breakdown, els.limitsPanel, els.trendsPanel, els.serviceStatusPanel,
+      els.sessionDetail, els.sessionDetailHead, els.sessionPagerHost, els.toolDetailFooter, els.projectBreakdownFooter, els.fixedPeriodMessage, els.viewBackRow]) panel?.classList.add('hidden');
+    els.shell.classList.remove('home-mode', 'session-mode');
+    renderViewSwitcher(); signalContentReady();
     return;
   }
   if (!state.stats) return;
@@ -7319,11 +7450,7 @@ function render() {
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
-  const fixedUnavailable = derivedPeriod && state.fixedPeriodSnapshot?.status !== 'ready';
-  const detailUnavailable = derivedPeriod
-    && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
-      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
-    });
+  const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
@@ -7707,6 +7834,32 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value)));
 }
 
+function initFooterActionDisclosure() {
+  const actions = els.utilityActions?.closest('.footer-update-actions');
+  if (!actions) return;
+  // The footer group's width changes on every frame of the update's margin
+  // transition. Observe it so an open card follows both motion and instant
+  // reduced-motion changes without a permanent animation-frame loop.
+  const anchorObserver = new ResizeObserver(() => {
+    if (els.appUpdatePopover.matches(':popover-open')) positionAppUpdatePopover();
+  });
+  anchorObserver.observe(actions);
+  window.addEventListener('unload', () => anchorObserver.disconnect(), { once: true });
+  const reveal = () => actions.classList.add('is-disclosed');
+  const hide = () => actions.classList.remove('is-disclosed');
+  els.utilityActions.addEventListener('pointerenter', reveal);
+  actions.addEventListener('pointerleave', () => {
+    if (!actions.querySelector(':focus-visible')) hide();
+  });
+  actions.addEventListener('focusin', (event) => {
+    if (event.target.matches(':focus-visible') && els.utilityActions.contains(event.target)) reveal();
+  });
+  actions.addEventListener('focusout', (event) => {
+    if (!actions.contains(event.relatedTarget) && !actions.matches(':hover')) hide();
+  });
+  window.addEventListener('blur', () => hide());
+}
+
 function applyControlLayout(swapSettingsAndRefresh) {
   const footerSlot = document.getElementById('footerActionSlot');
   if (!footerSlot || !els.utilityActions) return;
@@ -7738,6 +7891,7 @@ function applyAppearanceSettings(settings) {
   const depth = (glassRenderingApi.usesNativeMaterial(nativeMaterialState) ? 32 : clamp(settings?.glassBlur ?? 32, 0, 100)) / 100;
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
+  const isMac = navigator.userAgent.includes('Macintosh');
   const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
   const macGlass = macBackdropApi.appearanceState(settings, {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
@@ -7779,9 +7933,12 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
   }
   els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
-  // Same terms as the widget's own selector; material pushes land here too.
-  els.edgeDockMacBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  // The dock's own style overrides System Glass either way, so its selectors
+  // stay available on every macOS and Windows; material pushes land here too.
+  els.edgeDockMacBackdropRow?.classList.toggle('hidden', !isMac);
+  syncEdgeDockMacBackdropInput(settings);
   syncNotchStyleInput(settings);
+  els.edgeDockWindowsBackdropRow?.classList.toggle('hidden', !isWindows);
   if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
@@ -7969,7 +8126,7 @@ function renderThemePresetChips() {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'theme-preset-chip';
-    chip.classList.toggle('active', preset.id === activeId);
+    chip.classList.toggle('active', !state.settings?.pluginAuthorSkin && preset.id === activeId);
     chip.dataset.presetId = preset.id;
     const dot = document.createElement('span');
     dot.className = 'theme-preset-dot';
@@ -7979,6 +8136,28 @@ function renderThemePresetChips() {
     chip.append(dot, label);
     chip.addEventListener('click', () => selectThemePreset(preset.id));
     els.themePresetChips.appendChild(chip);
+  }
+  // Skins from active plugins sit beside the built-in presets; applying one
+  // writes ordinary theme colours, so it survives the plugin being removed.
+  for (const plugin of state.pluginCatalog?.plugins || []) {
+    if (plugin.status !== 'active') continue;
+    for (const skin of plugin.skins || []) {
+      const colors = themePresetsApi.mergeThemeColors({ ...state.settings?.themeColors, ...skin.colors });
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'theme-preset-chip theme-preset-chip-plugin';
+      chip.dataset.pluginSkin = JSON.stringify(skin);
+      chip.classList.toggle('active', state.settings?.pluginAuthorSkin?.ref === skin.ref);
+      chip.setAttribute('aria-description', t('settings.plugins.skinFrom', { name: plugin.name }));
+      const dot = document.createElement('span');
+      dot.className = 'theme-preset-dot';
+      dot.style.background = colors.accent;
+      const label = document.createElement('span');
+      label.textContent = skin.name;
+      chip.append(dot, label);
+      chip.addEventListener('click', () => void applyAppearancePluginSkin(skin, chip));
+      els.themePresetChips.appendChild(chip);
+    }
   }
 }
 
@@ -8074,15 +8253,15 @@ async function selectThemePreset(presetId) {
   for (const key of themePresetsApi.INTERFACE_COLOR_KEYS) {
     if (preset.colors[key] !== themePresetsApi.DEFAULT_THEME[key]) next[key] = preset.colors[key];
   }
-  await commitThemeColors(next);
+  await commitThemeColors(next, true);
 }
 
-async function commitThemeColors(overrides) {
+async function commitThemeColors(overrides, resetPluginStyle = false) {
   state.settings.themeColors = overrides;
   applyThemeColors(overrides);
   buildAppearanceColorControls();
   renderSettingsSummaries();
-  await saveSettings({ themeColors: overrides });
+  await saveSettings({ themeColors: overrides, ...(resetPluginStyle ? { pluginSkinRef: null } : {}) });
 }
 
 function showThemeCodeStatus(key, type = '') {
@@ -8284,6 +8463,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   const wasCollapsed = state.floatingBubble.collapsed;
   const side = payload?.collapsed && ['left', 'right'].includes(payload.side) ? payload.side : null;
   state.floatingBubble = { collapsed: Boolean(side), side };
+  syncPluginTrayDemand();
   if (isRendererWindowHidden()) {
     statsRenderScheduler.request();
     return;
@@ -9505,9 +9685,9 @@ function syncSettingsForm() {
   els.trayModeInput.checked = showTrayIcon && Boolean(state.settings.trayMode);
   syncHideAppIconControl(showTrayIcon, els.trayModeInput.checked);
   els.trayContentInput.value = ['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom'].includes(state.settings.trayContent) ? state.settings.trayContent : 'tokens';
-  els.trayContentInput.disabled = !showTrayIcon;
+  els.trayContentInput.disabled = false;
   els.showTrayProviderBadgeInput.checked = state.settings.showTrayProviderBadge === true;
-  els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
+  els.showTrayProviderBadgeInput.disabled = false;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !state.settings.trayMode);
   refreshTrayComposers();
@@ -9558,6 +9738,7 @@ function syncSettingsForm() {
   }
   modelAliasForm?.syncSettings();
   renderCursorStatus();
+  displaySettings?.sync();
 }
 
 function enabledClientSet() {
@@ -9583,7 +9764,7 @@ function disabledViewIds() {
 }
 
 function hiddenHomeModuleSet() {
-  return new Set(homeModulePreferencesApi.normalizeHiddenHomeModules(state.settings?.hiddenHomeModules, HOME_MODULE_OPTIONS).split(',').filter(Boolean));
+  return new Set(homeModulePreferencesApi.normalizeHiddenHomeModules(state.settings?.hiddenHomeModules, homeModuleOptions()).split(',').filter(Boolean));
 }
 
 function hiddenHomeLimitProviderSet() {
@@ -9779,7 +9960,16 @@ function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, get
     applyOrder: (order) => applyPreferenceOrder(kind, order),
     preserveScroll: preserveSettingsPanelScroll,
     mirrorOrder: (order) => {
-      const value = order.join(',');
+      // Inactive plugin placements are absent from the rendered Home rows.
+      // Refill only visible slots so a drag cannot silently remove a placement.
+      let merged = order;
+      if (kind === 'homeModule') {
+        const visible = new Set(order);
+        let index = 0;
+        merged = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS)
+          .map((id) => visible.has(id) ? order[index++] : id);
+      }
+      const value = merged.join(',');
       state.settings = { ...state.settings, [settingKey]: value };
       return value;
     },
@@ -10211,8 +10401,9 @@ function renderHomeSettingsList() {
   wrap.id = 'homeSettingsList';
   wrap.className = 'settings-nested-list home-settings-list';
   const hidden = hiddenHomeModuleSet();
-  const modules = homeModulePreferencesApi.orderedHomeModules(HOME_MODULE_OPTIONS, state.settings?.homeModuleOrder);
-  const hasCustomOrder = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS).join(',') !== homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER;
+  const modules = homeModulePreferencesApi.orderedHomeModules(homeModuleOptions(), state.settings?.homeModuleOrder);
+  const hasCustomOrder = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS)
+    .filter((id) => !homeModulePreferencesApi.isPluginModuleId(id)).join(',') !== homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER;
   const header = document.createElement('div');
   header.className = 'settings-note-row home-settings-header';
   const note = document.createElement('p');
@@ -10242,7 +10433,7 @@ function renderHomeSettingsList() {
   wrap.append(header);
   for (const moduleOption of modules) {
     const id = moduleOption.id;
-    const label = t(moduleOption.labelKey);
+    const label = moduleOption.label || t(moduleOption.labelKey);
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
     row.className = 'home-module-preference-row';
@@ -11816,6 +12007,11 @@ function moveOpenCodeLocalFallbackSetting() {
 // generated and hand-built panels share this, including which messages they
 // may override (`messages.required` / `rejected` / `invalidFormat`).
 let claudeOrganizationChoicesRevision = 0;
+let claudeWebAccountId = 'new';
+// null opens the initial empty-account form; an explicit cancel stays closed.
+let claudeWebFormOpen = null;
+const claudeAccountActions = accountShellApi.createBusyGuard();
+
 async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
@@ -11824,12 +12020,15 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   renderExternalProviderStatus(id);
   let result;
   try {
-    result = await commitAccountCredential(() => window.tokenMonitor.limits.saveCredential(id, values));
+    result = await commitAccountCredential(() => id === 'claude' && values.claudeWebAccountId
+      ? claudeAccountActions.run('claude', null, () => window.tokenMonitor.claude.saveWebAccount(values))
+      : window.tokenMonitor.limits.saveCredential(id, values));
   } catch (error) {
     setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
     renderExternalProviderStatus(id);
     return result;
   }
+  if (id === 'claude' && values.claudeWebAccountId && result === undefined) return result;
   if (result?.verdict === 'superseded') return result;
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
@@ -11839,6 +12038,11 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     return result;
   }
   if (!result?.saved) {
+    if (id === 'claude' && result?.errorCode === 'credentialStorageUnavailable') {
+      setAccountPanelMessage(id, { key: failedKey, params: { message: t('settings.common.error') } });
+      renderExternalProviderStatus(id);
+      return result;
+    }
     const rejection = {
       required: { key: messages.required || 'settings.common.credentialRequired' },
       invalidFormat: { key: messages.invalidFormat || 'settings.common.credentialInvalidFormat' }
@@ -11850,7 +12054,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   clearInput();
   // Marked only once the credential is stored: marking drops the provider's
   // current record, and a rejected key must leave the linked status on screen.
-  markExternalProviderCheckPending(id);
+  markExternalProviderCheckPending(id, result.checkedSince);
   if (result.verdict === 'indeterminate') {
     const throttled = result.status === 'rateLimited' || result.status === 'sourceRateLimited';
     setAccountPanelMessage(id, {
@@ -11861,7 +12065,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     });
   }
   renderExternalProviderStatus(id);
-  await refreshStats({ force: true });
+  await refreshStats();
   setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
   renderExternalProviderStatus(id);
   return result;
@@ -11882,6 +12086,14 @@ async function submitAccountCredential(button, id, values, options) {
   }
 }
 
+async function refreshLimitProviderQuota(providerName) {
+  try {
+    await window.tokenMonitor.limits?.refresh?.(providerName);
+  } catch (_) {
+    // The next scheduled poll still settles the record.
+  }
+}
+
 async function clearAccountCredential(id) {
   if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   setAccountPanelMessage(id, null);
@@ -11893,7 +12105,7 @@ async function clearAccountCredential(id) {
   clearExternalProviderCheckPending(id);
   clearExternalProviderPendingStatus(id);
   renderExternalProviderStatus(id);
-  await refreshStats({ force: true });
+  await refreshStats();
 }
 
 async function commitAccountCredential(request) {
@@ -11953,6 +12165,7 @@ async function loadClaudeOrganizationChoices() {
 // one, so switching drops it instead of leaving a key that can only fail.
 async function saveAccountFormSetting({ id }, field, value) {
   if (id === 'claude' && field.key === 'claudeWebOrganizationId') {
+    if (claudeWebAccountId !== 'legacy') return;
     if (!value || !state.settings?.claudeWebCookieConfigured || document.getElementById('claudeWebCookieInput')?.value) return;
     claudeOrganizationChoicesRevision += 1;
     await saveSettings({ claudeWebOrganizationId: value });
@@ -11984,11 +12197,22 @@ function setupLimitAccountPanels() {
         provider: externalProviderForAccount(form.id)
       })),
       onRefresh: async () => {
-        if (form.id === 'claude') await loadClaudeOrganizationChoices();
-        await refreshStats({ force: true });
+        if (form.id === 'claude' && claudeWebAccountId === 'legacy') await loadClaudeOrganizationChoices();
+        await refreshLimitProviderQuota(form.id);
+        await refreshStats();
       },
       onClear: ({ id }) => clearAccountCredential(id),
-      onSave: ({ id, messages, failedKey }, values, clearInput) => saveAccountCredential(id, values, { messages, failedKey, clearInput }),
+      onSave: async ({ id, messages, failedKey }, values, clearInput) => {
+        if (id === 'claude' && claudeWebAccountId !== 'legacy') values.claudeWebAccountId = claudeWebAccountId;
+        const result = await saveAccountCredential(id, values, { messages, failedKey, clearInput });
+        if (id === 'claude' && result?.saved) {
+          claudeWebFormOpen = false;
+          claudeWebAccountId = 'new';
+          renderClaudeOrganizationChoices([]);
+          renderExternalProviderStatus(id);
+        }
+        return result;
+      },
       onFieldChange: (form, field, value) => saveAccountFormSetting(form, field, value),
       onFieldError: ({ id, failedKey }, error) => {
         setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
@@ -12003,7 +12227,6 @@ function setupLimitAccountPanels() {
     added = true;
     setExternalAccountExpanded(form.id, false);
     limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
-    if (form.id === 'claude' && state.settings?.claudeWebCookieConfigured) void loadClaudeOrganizationChoices();
     renderExternalProviderStatus(form.id);
   }
   if (added) initSettingsAnimationWrappers();
@@ -12420,21 +12643,24 @@ async function onHomeModuleVisibilityToggle(moduleId) {
 }
 
 async function onHomeModuleMove(moduleId, direction) {
-  const next = homeModulePreferencesApi.moveHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS, moduleId, direction);
+  const next = homeModulePreferencesApi.moveHomeModuleOrder(state.settings?.homeModuleOrder, homeModuleOptions(), moduleId, direction);
   await saveSettings({ homeModuleOrder: next });
   renderHomeIfVisible();
 }
 
 async function onHomeModuleReorder(moduleId, targetIndex) {
-  const current = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS).join(',');
-  const next = homeModulePreferencesApi.reorderHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS, moduleId, targetIndex);
+  const current = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, homeModuleOptions()).join(',');
+  const next = homeModulePreferencesApi.reorderHomeModuleOrder(state.settings?.homeModuleOrder, homeModuleOptions(), moduleId, targetIndex);
   if (next === current) return;
   await saveSettings({ homeModuleOrder: next });
   renderHomeIfVisible();
 }
 
 async function resetHomeModuleOrder() {
-  await saveSettings({ homeModuleOrder: homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER });
+  // Resetting the built-in order keeps placed plugin views, after the built-ins.
+  const pluginModules = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS)
+    .filter((id) => homeModulePreferencesApi.isPluginModuleId(id));
+  await saveSettings({ homeModuleOrder: [homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER, ...pluginModules].join(',') });
   renderHomeIfVisible();
 }
 
@@ -12672,6 +12898,212 @@ window.addEventListener('blur', () => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
 });
 
+function renderNotchPageChoices() {
+  window.TokenMonitorNotchPageSettings?.render({ document, container: document.getElementById('notchPageChoices'),
+    settings: state.settings, catalog: state.pluginCatalog, t,
+    resetButton: document.getElementById('resetNotchPageOrderButton'),
+    save: async patch => { await saveSettings(patch); },
+    place: async (ref, placed) => { await pluginApi.place(ref, 'notch', placed); },
+    pluginIcon: name => window.TokenMonitorPluginViews?.iconNode(document, name, null, 14),
+    createRowDrag: config => rowDragControllerApi.createRowDragController({
+      dragSort: verticalDragSortApi, getScrollPanel: () => els.settingsPanel,
+      preserveScroll: preserveSettingsPanelScroll, ...config
+    }),
+    formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
+  });
+}
+
+// ---- Plugins -------------------------------------------------------------
+// The catalog (from main) decides which plugin views exist; the view host
+// paints resolved views into Home and reports what is visible, so main only
+// samples sources something on screen, or a background rule, needs.
+const pluginBridge = window.tokenMonitor.plugins || null;
+pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginViewHost({
+  document,
+  window,
+  t,
+  services: {
+    app: window.tokenMonitor,
+    native: {
+      quota: limitWindowsView,
+      usageRow: data => { const node = rowTemplate(data); updateRow(node, { ...data, barValue: data.barValue ?? data.value, max: data.max ?? data.value, color: data.color || 'var(--accent)' }); return node; },
+      updateUsageRow: updateRow,
+      quotaProvider: (id, label, record, color) => renderLimitProviderSolo(id, label, record, color),
+      quotaGroup: (id, label, records, color) => renderLimitProviderGroup(id, label, records, color)
+    },
+    navigate: openViewFromTray
+  },
+  getContext: () => ({ period: state.period, source: state.settings?.hubMode, stats: state.stats }),
+  onLoaded: () => { void maybeUpdateBarsIcon(); renderFloatingBubbleContent(); },
+  onDemand: (surface, refs) => pluginBridge.setDemand(surface, refs),
+  motionAllowed: () => !prefersReducedMotion(),
+  motionMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
+  isSurfaceActive: surface => !isRendererWindowHidden() && !state.floatingBubble.collapsed && (surface === 'settings' ? isSettingsPanelOpen() : !isSettingsPanelOpen())
+}) : null;
+pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ document,
+  host: { mount: (container, view, context) => pluginViewHost.mount(container, view.ref, 'page', context), unmount: container => pluginViewHost.unmount(container) },
+  getViews: () => (state.pluginCatalog?.plugins || []).filter(plugin => plugin.status === 'active').flatMap(plugin => plugin.views || []),
+  selection: target => state.pluginCatalog?.contentSelections?.[target]
+}) : null;
+pluginMainPages = pluginViewHost ? window.TokenMonitorPluginMainPages.create({
+  document, container: document.getElementById('pluginMainPanel'), host: pluginViewHost, t,
+  openWindow: ref => pluginBridge.openPage(ref),
+  formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
+}) : null;
+if (pluginViewHost) new MutationObserver(() => pluginViewHost.refreshDemand()).observe(els.shell, { attributes: true, attributeFilter: ['class'] });
+let pluginCatalogKey = '';
+
+function applyPluginCatalog(list) {
+  if (!list) return list;
+  state.pluginCatalog = list;
+  // Home and the theme chips depend only on which plugins and views are
+  // active; process metrics refresh every few seconds and must not re-render.
+  const key = JSON.stringify([list.contentSelections, list.contentOrder, (list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.revision,
+    (plugin.views || []).map((view) => [view.ref, view.title, view.surfaces, view.placements?.page, view.placements?.notch]), plugin.skins, plugin.revision])]);
+  if (key !== pluginCatalogKey) {
+    pluginCatalogKey = key;
+    render();
+    renderViewSwitcher();
+    renderThemePresetChips();
+    renderNotchPageChoices();
+    if (isSettingsSurfaceVisible()) preserveSettingsPanelScroll(renderViewPreferences);
+  }
+  return list;
+}
+
+async function loadPluginCatalog() {
+  try { return applyPluginCatalog(await pluginBridge.list()); }
+  catch (error) {
+    // Initial failure must resolve the pending restored page. Later transient
+    // failures retain the last known catalog until a successful refresh.
+    if (!state.pluginCatalog) applyPluginCatalog({ enabled: false, plugins: [] });
+    throw error;
+  }
+}
+
+pluginApi = pluginBridge ? {
+  list: loadPluginCatalog,
+  orderContent: async (target, refs) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.orderContent(target, refs)),
+  selectContent: async (target, ref) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.selectContent(target, ref)),
+  setEnabled: async (id, enabled) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled)),
+  setBackground: async (id, enabled) => applyPluginCatalog(await pluginBridge.setBackground(id, enabled)),
+  restart: async (id) => applyPluginCatalog(await pluginBridge.restart(id)),
+  reload: async () => applyPluginCatalog(await pluginBridge.reload()),
+  place: async (ref, surface, placed) => applyPluginCatalog(await pluginBridge.place(ref, surface, placed)),
+  openPage: async ref => {
+    const page = pluginPageOptions().find(page => page.ref === ref);
+    if (!page) throw new Error(t('plugins.page.enableFirst'));
+    openViewFromTray(page.id);
+    document.querySelector('#pluginMainPanel .plugin-main-page:not(.hidden) h2')?.focus({ preventScroll: true });
+  },
+  getSettings: id => pluginBridge.getSettings(id),
+  updateSettings: (id, input) => pluginBridge.updateSettings(id, input),
+  catalog: () => pluginBridge.catalog(),
+  catalogPreview: (source, id, version) => pluginBridge.catalogPreview(source, id, version),
+  addSource: input => pluginBridge.addSource(input),
+  refreshSource: id => pluginBridge.refreshSource(id),
+  removeSource: id => pluginBridge.removeSource(id),
+  importPackage: kind => pluginBridge.importPackage(kind),
+  install: async token => applyPluginCatalog(await pluginBridge.install(token)),
+  cancelInstall: token => pluginBridge.cancelInstall(token),
+  rollback: async id => applyPluginCatalog(await pluginBridge.rollback(id)),
+  uninstall: async (id, options) => applyPluginCatalog(await pluginBridge.uninstall(id, options)),
+  openFolder: () => pluginBridge.openFolder()
+} : null;
+
+pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
+  ? window.TokenMonitorPluginSettings.createPluginSettingsPanel({
+    mountSettings: (container, view) => pluginViewHost.mount(container, view.ref, 'settings', { descriptor: view }),
+    unmountSettings: container => pluginViewHost.unmount(container),
+    document,
+    container: document.getElementById('pluginSettingsList'),
+    t,
+    api: pluginApi,
+    getLocale: currentLocale,
+    onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
+    onCopyText: (text) => window.tokenMonitor.copyText(text),
+    setDetailTooltip: limitWindowsView.setDetailTooltip,
+    onApplySkin: (skin) => applyPluginSkin(skin),
+    onPlaced: () => renderSettingsSummaries(),
+    getEnabled: () => state.settings.pluginsEnabled !== false,
+    onSetEnabled: async (enabled) => {
+      await saveSettings({ pluginsEnabled: enabled });
+      renderSettingsSummaries();
+      return pluginApi.list();
+    }
+  }) : null;
+
+async function refreshPluginCatalog() {
+  if (!pluginApi) return;
+  if (state.settingsSections?.plugins && pluginSettingsPanel && !pluginSettingsPanel.isInteracting()) {
+    await pluginSettingsPanel.refresh();
+    renderSettingsSummaries();
+    return;
+  }
+  try { await pluginApi.list(); } catch (_) {}
+}
+
+// The tray bitmap has no DOM to observe, so its demand is the plugin items in
+// the custom layout whenever that layout is the one being drawn.
+function syncPluginTrayDemand() {
+  if (!pluginViewHost) return;
+  const refs = state.settings?.showTrayIcon !== false && state.settings?.trayContent === 'custom'
+    ? trayLayoutApi.trayLayoutPluginRefs(state.settings?.trayCustomLayout) : [];
+  if (!isRendererWindowHidden() && state.floatingBubble.collapsed && state.settings?.floatingBubbleContent === 'custom') {
+    refs.push(...trayLayoutApi.trayLayoutPluginRefs(state.settings.floatingBubbleCustomLayout));
+  }
+  pluginViewHost.setExplicitDemand('tray', [...new Set(refs)]);
+}
+
+function pluginTrayViews(layout) {
+  const views = {};
+  for (const ref of trayLayoutApi.trayLayoutPluginRefs(layout)) {
+    views[ref] = pluginViewHost?.state('tray', ref) || null;
+  }
+  return views;
+}
+
+async function applyPluginSkin(skin) {
+  // Main resolves the active author manifest and commits palette + tokens
+  // together. Never send the renderer's copy of the skin as trusted settings.
+  await saveSettings({ pluginSkinRef: skin.ref });
+  buildAppearanceColorControls();
+  renderSettingsSummaries();
+}
+
+async function applyAppearancePluginSkin(skin, chip) {
+  const container = els.themePresetChips;
+  if (container.getAttribute('aria-busy') === 'true') return;
+  container.querySelector('.plugin-action-error')?.remove();
+  for (const control of container.querySelectorAll('button')) control.removeAttribute('aria-describedby');
+  const skinKey = JSON.stringify(skin), settingsRevision = state.settingsPushRevision;
+  const restoreFocus = document.activeElement === chip;
+  container.setAttribute('aria-busy', 'true');
+  try { await applyPluginSkin(skin); }
+  catch (error) {
+    // saveSettings refreshes the form before rethrowing. Reattach to the same
+    // skin after that refresh, but discard failures from superseded settings.
+    if (state.settingsPushRevision !== settingsRevision) return;
+    const target = container.contains(chip) ? chip
+      : [...container.querySelectorAll('button')].find(control => control.dataset.pluginSkin === skinKey);
+    if (!target) return;
+    const notice = document.createElement('p'); notice.className = 'plugin-action-error';
+    notice.id = 'theme-plugin-skin-error';
+    notice.setAttribute('role', 'alert'); notice.setAttribute('aria-atomic', 'true');
+    notice.textContent = window.TokenMonitorPluginSettings.actionErrorMessage(error, t);
+    target.setAttribute('aria-describedby', notice.id); container.append(notice);
+    if (restoreFocus && (document.activeElement === document.body || document.activeElement === chip)) target.focus({ preventScroll: true });
+  } finally { container.setAttribute('aria-busy', 'false'); }
+}
+
+if (pluginBridge) {
+  pluginBridge.onViews((payload) => {
+    pluginViewHost?.update(payload);
+    if (payload?.surface === 'tray') { void maybeUpdateBarsIcon(); renderFloatingBubbleContent(); }
+  });
+  pluginBridge.onChanged(() => void refreshPluginCatalog());
+}
+
 async function init() {
   // Subscribe before querying: a native appearance/accessibility change can
   // arrive while the initial state round trip is in flight.
@@ -12722,6 +13154,8 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  try { await pluginApi?.list(); } catch (_) {}
+  syncPluginTrayDemand();
   syncContentForm?.syncSettings();
   await syncContentForm?.refresh(false);
   applyEffectiveCurrencyRates();
@@ -12881,7 +13315,7 @@ els.breakdown.addEventListener('click', (event) => {
   }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
-  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp') return;
+  if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy' && client !== 'pi' && client !== 'omp' && client !== 'senpi') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
   const match = key.match(/^session:([^:]+):(.+)$/);
   if (!match) return;
@@ -12909,6 +13343,7 @@ els.pinButton.addEventListener('click', (event) => {
   if (event.detail > 0) els.pinButton.blur();
   saveSettings({ windowBehavior: nextWindowBehavior(currentWindowBehavior()) });
 });
+initFooterActionDisclosure();
 els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
@@ -13276,7 +13711,7 @@ els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
 els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
 void loadBackgroundImage();
-els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
+els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}, true));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
 els.textSizeInput?.addEventListener('change', async () => {
   await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
@@ -13331,6 +13766,7 @@ for (const input of els.reduceMotionInputs || []) {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
     state.settings.reduceMotion = applyReduceMotionPreference(input.value);
+    pluginViewHost?.refreshMotion();
     await saveAppearanceFromControls();
   });
 }
@@ -13408,17 +13844,11 @@ function syncDockSizeControls(surface) {
 // read from the saved settings underneath them.
 const NOTCH_HOVER_DELAY_DEFAULT_MS = 0;
 
-// Hover either grows the resting entry (a click opens it) or opens it after
-// the chosen duration; the duration only applies to the second, scroll
-// gestures only to the first.
+// Hover duration applies only to hover-to-open.
 function syncNotchHoverControls() {
   const action = state.settings?.notchHoverAction === 'open' ? 'open' : 'peek';
   for (const input of els.notchHoverActionInputs) input.checked = input.value === action;
   els.notchHoverDelayRow?.classList.toggle('hidden', action !== 'open');
-  if (els.notchSwipeGesturesInput) {
-    els.notchSwipeGesturesInput.closest('.settings-item')?.classList.toggle('hidden', action !== 'peek');
-    els.notchSwipeGesturesInput.checked = state.settings?.notchSwipeGestures !== false;
-  }
   if (els.notchHoverDelayInput && document.activeElement !== els.notchHoverDelayInput) {
     const delay = Number(state.settings?.notchHoverDelay);
     els.notchHoverDelayInput.value = String(Number.isFinite(delay) ? delay : NOTCH_HOVER_DELAY_DEFAULT_MS);
@@ -13434,15 +13864,25 @@ function syncNotchHoverDelayValue() {
 function syncNotchStyleInput(preview) {
   if (!els.notchStyleInput) return;
   const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
-  const { showBackdropControl } = macBackdropApi.appearanceState(settings, {
-    liquidGlassSupported: nativeMaterialState.liquidGlassSupported
-  });
+  syncMacStyleSelect(els.notchStyleInput, settings?.notchStyle || 'inherit', nativeMaterialState.liquidGlassSupported === true);
+}
+
+// Liquid Glass options hide where it cannot be drawn, and a saved Liquid Glass
+// choice shows the Frosted Glass the surface falls back to.
+function syncMacStyleSelect(select, style, liquidGlassAvailable) {
   for (const value of ['liquid-glass', 'liquid-glass-clear']) {
-    const option = els.notchStyleInput.querySelector(`option[value="${value}"]`);
-    if (option) option.hidden = option.disabled = !showBackdropControl;
+    const option = select.querySelector(`option[value="${value}"]`);
+    if (option) option.hidden = option.disabled = !liquidGlassAvailable;
   }
-  const style = settings?.notchStyle || 'inherit';
-  els.notchStyleInput.value = macBackdropApi.isLiquidGlassBackdrop(style) && !showBackdropControl ? 'vibrancy' : style;
+  select.value = macBackdropApi.isLiquidGlassBackdrop(style) && !liquidGlassAvailable ? 'vibrancy' : style;
+}
+
+function syncEdgeDockMacBackdropInput(preview) {
+  if (!els.edgeDockMacBackdropInput) return;
+  const settings = Object.assign({}, state.settings, ...pendingSettingsPatches, preview);
+  syncMacStyleSelect(els.edgeDockMacBackdropInput,
+    macBackdropApi.normalizeEdgeDockBackdropMode(settings?.edgeDockMacBackdrop),
+    nativeMaterialState.liquidGlassSupported === true);
 }
 
 function syncNotchCapabilities() {
@@ -13467,15 +13907,16 @@ function syncDockControls() {
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
   if (els.edgeDockRunningIndicatorInput) els.edgeDockRunningIndicatorInput.checked = state.settings?.edgeDockRunningIndicatorEnabled !== false;
-  if (els.edgeDockMacBackdropInput) {
-    els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
+  syncEdgeDockMacBackdropInput();
+  if (els.edgeDockWindowsBackdropInput) {
+    els.edgeDockWindowsBackdropInput.value = windowsBackdropApi.normalizeWindowsDockBackdropMode(state.settings?.edgeDockWindowsBackdrop);
   }
   const notchAvailable = state.appInfo?.platform === 'darwin';
   const notchEnabled = notchAvailable && state.settings?.notchEnabled === true;
-  els.experimentalFeaturesGroup?.classList.toggle('hidden', !notchAvailable);
   els.notchFeature?.classList.toggle('hidden', !notchAvailable);
   if (els.notchInput) els.notchInput.checked = notchEnabled;
   els.notchOptions?.classList.toggle('hidden', !notchEnabled);
+  renderNotchPageChoices();
   syncNotchStyleInput();
   for (const input of els.notchShapeInputs) input.checked = input.value === (state.settings?.notchShape || 'auto');
   syncNotchSummaryMode();
@@ -13485,11 +13926,12 @@ function syncDockControls() {
   syncNotchCapabilities();
   if (els.notchProgressiveBlurInput) els.notchProgressiveBlurInput.checked = state.settings?.notchProgressiveBlur !== false;
   if (els.notchHapticInput) els.notchHapticInput.checked = state.settings?.notchHaptic !== false;
+  if (els.notchSwipeGesturesInput) els.notchSwipeGesturesInput.checked = state.settings?.notchSwipeGestures !== false;
   syncNotchHoverControls();
   if (els.notchHideSummaryInFullScreenInput) els.notchHideSummaryInFullScreenInput.checked = state.settings?.notchHideSummaryInFullScreen !== false;
   els.edgeDockComposerRow?.classList.toggle('hidden', !enabled);
-  if (enabled) edgeDockComposer?.render();
-  if (notchEnabled) notchItemsComposer?.render();
+  if (available) edgeDockComposer?.render();
+  if (notchAvailable) notchItemsComposer?.render();
 }
 
 function syncNotchSummaryMode() {
@@ -13511,6 +13953,8 @@ function createDockItemsComposer(root, itemsKey) {
       presentationApi: window.TokenMonitorEdgeDockPresentation,
       getSettings: () => state.settings,
       getStats: () => state.stats,
+      pluginLabel: (ref) => (state.pluginCatalog?.plugins || [])
+        .flatMap((plugin) => plugin.views || []).find((view) => view.ref === ref)?.title || ref,
       save: (patch) => saveSettings(patch),
       providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
       providerColor: (id) => limitProviderColor(id),
@@ -13623,6 +14067,9 @@ els.edgeDockRunningIndicatorInput?.addEventListener('change', () => {
 els.edgeDockMacBackdropInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });
 });
+els.edgeDockWindowsBackdropInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockWindowsBackdrop: windowsBackdropApi.normalizeWindowsDockBackdropMode(els.edgeDockWindowsBackdropInput.value) });
+});
 els.notchHapticInput?.addEventListener('change', () => {
   void saveSettings({ notchHaptic: els.notchHapticInput.checked });
 });
@@ -13670,8 +14117,8 @@ els.showTrayIconInput?.addEventListener('change', () => {
   state.settings.showTrayIcon = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
   if (!showTrayIcon) els.trayModeInput.checked = false;
-  els.trayContentInput.disabled = !showTrayIcon;
-  els.showTrayProviderBadgeInput.disabled = !showTrayIcon;
+  els.trayContentInput.disabled = false;
+  els.showTrayProviderBadgeInput.disabled = false;
   els.trayIconOptions?.classList.toggle('hidden', !showTrayIcon);
   els.trayOptions?.classList.toggle('hidden', !showTrayIcon || !els.trayModeInput.checked);
   if (!showTrayIcon) state.settings.hideAppIcon = false;
@@ -13890,6 +14337,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     if (JSON.stringify(next[key]) !== JSON.stringify(state.settings?.[key])) delete appearancePreview[key];
   }
   setRendererSettings(next);
+  syncPluginTrayDemand();
   applyEffectiveCurrencyRates();
   observeDisplayLiveTokenRates(state.stats);
   preserveSettingsPanelScroll(syncSettingsForm);
@@ -13997,6 +14445,8 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
 function handleWindowVisibilityChange() {
+  syncPluginTrayDemand();
+  pluginViewHost?.refreshDemand();
   if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
   if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();
@@ -14586,6 +15036,8 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
   const textColor = colors.text || fillColor;
   const h = Math.max(16, Math.round(height));
 
+  if (item.type === 'plugin') return renderPluginTrayItemCanvas(item, h, { trackColor, textColor });
+
   if (item.type === 'spacer') {
     const isDot = item.variant === 'dot';
 
@@ -14764,6 +15216,18 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
   return canvas;
 }
 
+// Author drawing uses the App's bitmap composition; the OS still owns the menu.
+function renderPluginTrayItemCanvas(item, h, { trackColor, textColor }) {
+  const view = item.plugin;
+  const canvas = document.createElement('canvas'); canvas.width = h; canvas.height = h;
+  if (view?.entry && pluginViewHost?.renderTray(view, canvas, { height: h, textColor, trackColor })) return canvas;
+  const size = Math.round(h * 0.7);
+  pluginViewsApi.drawIcon(canvas.getContext('2d'), view?.icon || 'dot', {
+    x: (h - size) / 2, y: (h - size) / 2, size, color: textColor
+  });
+  return canvas;
+}
+
 function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options = {}) {
   const codexProviders = (stats?.limits?.providers || []).filter((provider) => provider?.provider === 'codex');
   const selectedCodexKey = String(state.codexActiveAccount?.accountKey || '').trim();
@@ -14778,9 +15242,10 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {},
     availableProviderIds: Object.keys(trayProviderImages),
     liveTokenRates: options.liveTokenRates || displayLiveTokenRateSamples(),
-    liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value))
+    liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value)),
+    pluginViews: pluginTrayViews(layout)
   });
-  const items = resolved.items.map((item) => (
+  const items = resolved.items.filter(item => item.type !== 'plugin' || item.available).map((item) => (
     item.type === 'text'
       && item.metric === 'account'
       && state.settings?.maskLimitAccountEmails === true
@@ -15131,6 +15596,8 @@ function createTrayComposer(surface) {
     getPreview: () => trayComposerPreview(surface),
     isEditable: () => isNotch || state.settings?.[contentKey] === 'custom',
     onCustomize: () => activateTrayComposer(surface),
+    pluginChoices: () => (state.pluginCatalog?.plugins || []).filter(plugin => plugin.status === 'active')
+      .flatMap(plugin => (plugin.views || []).filter(view => view.surfaces.includes('tray')).map(view => ({ ref: view.ref, title: `${plugin.name} · ${view.title || view.ref}` }))),
     providerChoices: trayComposerProviderChoices,
     accountChoices: trayComposerAccountChoices,
     windowChoices: trayComposerWindowChoices,
@@ -15171,9 +15638,9 @@ function syncCustomTrayClockTimer() {
 
 function refreshTrayComposers() {
   const surfaces = [
-    { id: 'tray', root: els.trayComposer, visible: state.settings?.showTrayIcon !== false },
-    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: state.settings?.floatingBubbleEnabled === true },
-    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchEnabled === true && state.settings?.notchSummaryMode === 'custom' }
+    { id: 'tray', root: els.trayComposer, visible: true },
+    { id: 'floatingBubble', root: els.floatingBubbleComposer, visible: true },
+    { id: 'notch', root: els.notchComposer, visibilityRoot: els.notchComposerDetails, visible: state.appInfo?.platform === 'darwin' && state.settings?.notchSummaryMode === 'custom' }
   ];
   window.TokenMonitorTrayComposer.syncTrayComposerSurfaces(
     surfaces,
@@ -15181,6 +15648,7 @@ function refreshTrayComposers() {
     createTrayComposer
   );
   Object.values(trayComposers).forEach((composer) => composer?.refresh());
+  displaySettings?.refreshLivePreview();
   syncCustomTrayClockTimer();
 }
 
@@ -16154,6 +16622,8 @@ function externalProviderForAccount(providerName) {
   const updatedAt = Date.parse(provider.updatedAt || '');
   if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
   state[config.pendingKey] = 0;
+  cancelExternalProviderCheckSettle(providerName);
+  externalProviderCheckSettled.delete(providerName);
   return provider;
 }
 
@@ -16168,14 +16638,43 @@ function setAccountPanelMessage(providerName, message) {
   else delete state.accountPanelMessages[providerName];
 }
 
-function markExternalProviderCheckPending(providerName) {
+const externalProviderCheckSettleTimers = new Map();
+const externalProviderCheckSettled = new Set();
+const EXTERNAL_PROVIDER_CHECK_SETTLE_MS = 15_000;
+
+function cancelExternalProviderCheckSettle(providerName) {
+  const timer = externalProviderCheckSettleTimers.get(providerName);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  externalProviderCheckSettleTimers.delete(providerName);
+}
+
+function scheduleExternalProviderCheckSettle(providerName) {
+  cancelExternalProviderCheckSettle(providerName);
+  const timer = setTimeout(() => {
+    externalProviderCheckSettleTimers.delete(providerName);
+    const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+    if (!config || Number(state[config.pendingKey] || 0) <= 0) return;
+    // Stop the spinner, but keep the save-time cutoff: a record dated before
+    // this save must never be able to confirm the new credential.
+    externalProviderCheckSettled.add(providerName);
+    renderExternalProviderStatus(providerName);
+  }, EXTERNAL_PROVIDER_CHECK_SETTLE_MS);
+  externalProviderCheckSettleTimers.set(providerName, timer);
+}
+
+function markExternalProviderCheckPending(providerName, checkedSince = Date.now()) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (!config) return;
-  state[config.pendingKey] = Date.now();
+  state[config.pendingKey] = checkedSince;
+  externalProviderCheckSettled.delete(providerName);
   clearExternalProviderPendingStatus(providerName);
+  scheduleExternalProviderCheckSettle(providerName);
 }
 
 function clearExternalProviderCheckPending(providerName) {
+  cancelExternalProviderCheckSettle(providerName);
+  externalProviderCheckSettled.delete(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (config) state[config.pendingKey] = 0;
 }
@@ -16280,6 +16779,191 @@ function kimiPlatformUrl() {
   return 'https://www.kimi.com/code/console';
 }
 
+function editClaudeWebAccount(account = null) {
+  claudeOrganizationChoicesRevision += 1;
+  claudeWebAccountId = account?.id || 'new';
+  claudeWebFormOpen = true;
+  const input = document.getElementById('claudeWebCookieInput');
+  if (input) input.value = '';
+  renderClaudeOrganizationChoices(account?.organizationId
+    ? [{ id: account.organizationId, name: account.accountName || account.organizationId }]
+    : [], account?.organizationId || '');
+  setAccountPanelMessage('claude', null);
+  renderExternalProviderStatus('claude');
+  input?.focus();
+  if (account?.id === 'legacy') void loadClaudeOrganizationChoices();
+}
+
+function cancelClaudeWebAccountEdit(restoreFocus = document.activeElement?.id === 'claudeCancelWebAccountButton') {
+  claudeOrganizationChoicesRevision += 1;
+  claudeWebAccountId = 'new';
+  claudeWebFormOpen = false;
+  const input = document.getElementById('claudeWebCookieInput');
+  if (input) input.value = '';
+  renderClaudeOrganizationChoices([]);
+  setAccountPanelMessage('claude', null);
+  renderExternalProviderStatus('claude');
+  if (restoreFocus) document.getElementById('claudeAddWebAccountButton')?.focus({ preventScroll: true });
+}
+
+async function runClaudeAccountAction(button, operation) {
+  return claudeAccountActions.run('claude', button, async () => {
+    setAccountPanelMessage('claude', null);
+    try {
+      const result = await commitAccountCredential(operation);
+      if (!result?.ok) throw new Error(t('settings.common.error'));
+      await refreshStats();
+      renderExternalProviderStatus('claude');
+      return result;
+    } catch (error) {
+      setAccountPanelMessage('claude', { key: 'settings.claude.saveFailed', params: { message: error.message } });
+      renderExternalProviderStatus('claude');
+      return null;
+    }
+  });
+}
+
+function claudeWebSettingsAccounts(providers) {
+  const accounts = [...(state.settings?.claudeManagedAccounts || [])];
+  if (state.settings?.claudeWebLegacyCookieConfigured) {
+    const legacy = state.settings.claudeWebLegacyAccount || providers.find((provider) => provider.source === 'web'
+      && !accounts.some((account) => account.accountKey === provider.accountKey));
+    accounts.unshift({ ...legacy, id: 'legacy', enabled: true, organizationId: state.settings.claudeWebOrganizationId || '' });
+  }
+  return accounts;
+}
+
+function claudeAccountStatusText(fallback, enabled) {
+  const providers = localProviderStatuses('claude');
+  const accounts = claudeWebSettingsAccounts(providers);
+  // Count configured Web logins even before their first result, and include
+  // discovered local identities without double-counting the same subscription.
+  const identities = new Map();
+  for (const account of accounts) {
+    const key = account.accountKey || `managed:${account.id}`;
+    const linked = enabled && account.enabled !== false
+      && providers.some((provider) => provider.accountKey && provider.accountKey === account.accountKey && provider.status === 'ok');
+    identities.set(key, identities.get(key) === true || linked);
+  }
+  for (const provider of providers) {
+    if (!provider.accountKey || provider.source === 'web' || provider.status === 'notConfigured') continue;
+    identities.set(provider.accountKey, identities.get(provider.accountKey) === true || (enabled && provider.status === 'ok'));
+  }
+  return identities.size ? t('settings.opencode.connected', {
+    linked: [...identities.values()].filter(Boolean).length, total: identities.size
+  }) : fallback;
+}
+
+function renderClaudeWebAccounts() {
+  const list = document.getElementById('claudeWebAccountList');
+  if (!list) return;
+  const providers = localProviderStatuses('claude');
+  const accounts = claudeWebSettingsAccounts(providers);
+  const statusTexts = accounts.map((account) => [account.id === 'legacy' ? t('settings.claude.legacyLogin') : '', account.accountName, account.accountLabel,
+    account.enabled === false ? t('settings.codex.disabled')
+      : apiKeyAccountStatusText('claude', { status: state.settings?.claudeWebLoginStatuses?.[account.id] || 'notChecked' },
+        true, 'settings', limitProviderEnabled('claude'))].filter(Boolean).join(' · '));
+  const signature = JSON.stringify([accounts.map((account) => [account.id, account.accountKey, account.accountEmail,
+    account.accountName, account.accountLabel, account.organizationId, account.enabled]),
+  claudeWebAccountId, claudeWebFormOpen, state.settings?.claudeWebLegacyCookieSource, currentLocale()]);
+  if (list.dataset.signature === signature) {
+    list.querySelectorAll('.managed-account-info').forEach((info, index) => {
+      info.textContent = statusTexts[index];
+      info.setAttribute('aria-label', info.textContent);
+    });
+    return;
+  }
+  list.dataset.signature = signature;
+  list.replaceChildren();
+  for (const [index, account] of accounts.entries()) {
+    const row = document.createElement('div');
+    row.className = 'managed-account-row claude-web-account-row';
+    row.classList.toggle('disabled', account.enabled === false);
+    const labelText = account.accountEmail || account.accountName || t('settings.codex.unnamedAccount');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'managed-account-checkbox';
+    input.checked = account.enabled !== false;
+    input.disabled = account.id === 'legacy';
+    input.setAttribute('aria-label', t('settings.codex.toggleAccount', { account: labelText }));
+    input.addEventListener('change', async () => {
+      await runClaudeAccountAction(input, () => window.tokenMonitor.claude.setAccountEnabled(account.id, input.checked));
+      input.checked = (state.settings?.claudeManagedAccounts || []).find((entry) => entry.id === account.id)?.enabled !== false;
+    });
+    const main = document.createElement('div');
+    main.className = 'managed-account-main';
+    const label = document.createElement('div');
+    label.className = 'managed-account-email';
+    label.textContent = labelText;
+    const info = document.createElement('div');
+    info.className = 'managed-account-info';
+    info.textContent = statusTexts[index];
+    info.setAttribute('aria-label', info.textContent);
+    main.append(label, info);
+    const actions = document.createElement('span');
+    actions.className = 'managed-account-right';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.textContent = t('settings.claude.updateAccount');
+    edit.addEventListener('click', () => claudeAccountActions.run('claude', edit, () => editClaudeWebAccount(account)));
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'managed-account-remove';
+    remove.textContent = '✕';
+    remove.setAttribute('aria-label', t('settings.codex.remove'));
+    let confirmingRemove = false;
+    remove.addEventListener('click', () => {
+      if (!confirmingRemove) {
+        confirmingRemove = true;
+        remove.classList.add('confirming');
+        remove.textContent = '✓';
+        remove.setAttribute('aria-label', t('settings.codex.removeConfirm', { account: labelText }));
+        return;
+      }
+      return runClaudeAccountAction(remove, async () => {
+        const result = account.id === 'legacy'
+          ? { ...(await window.tokenMonitor.limits.clearCredential('claude')), ok: true }
+          : await window.tokenMonitor.claude.removeWebAccount(account.id);
+        if (result?.ok && claudeWebAccountId === account.id) {
+          claudeWebAccountId = 'new';
+          claudeWebFormOpen = false;
+          renderClaudeOrganizationChoices([]);
+        }
+        return result;
+      });
+    });
+    remove.classList.toggle('hidden', account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env');
+    const controls = document.createElement('span');
+    controls.className = 'settings-actions';
+    controls.append(edit);
+    actions.append(controls, remove);
+    row.append(input, main, actions);
+    list.append(row);
+  }
+  const add = document.createElement('button');
+  add.id = 'claudeAddWebAccountButton';
+  add.type = 'button';
+  add.textContent = t('settings.codex.addAccount');
+  add.setAttribute('aria-expanded', String(claudeWebFormOpen ?? accounts.length === 0));
+  add.addEventListener('click', () => claudeAccountActions.run('claude', add, () => editClaudeWebAccount()));
+  const actions = document.createElement('div');
+  actions.className = 'settings-actions';
+  actions.append(add);
+  if (claudeWebFormOpen ?? accounts.length === 0) {
+    const cancel = document.createElement('button');
+    cancel.id = 'claudeCancelWebAccountButton';
+    cancel.type = 'button';
+    cancel.textContent = t('settings.common.cancel');
+    cancel.addEventListener('click', () => {
+      // Capture before the busy guard disables Cancel and blurs it.
+      const restoreFocus = document.activeElement === cancel;
+      return claudeAccountActions.run('claude', cancel, () => cancelClaudeWebAccountEdit(restoreFocus));
+    });
+    actions.append(cancel);
+  }
+  list.append(actions);
+}
+
 function renderExternalProviderStatus(providerName) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
@@ -16306,7 +16990,8 @@ function renderExternalProviderStatus(providerName) {
   errorEl.classList.toggle('error', message?.tone !== 'notice');
   const configured = Boolean(state.settings?.[config.configuredKey]);
   const enabled = limitProviderEnabled(providerName);
-  const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
+  const settled = externalProviderCheckSettled.has(providerName);
+  const pending = enabled && Number(state[config.pendingKey] || 0) > 0 && !settled;
   const linked = externalProviderAccountLinked(providerName);
   // A pending check that comes back linked folds the panel: the refresh that
   // followed the save may have returned before the new record did.
@@ -16314,10 +16999,15 @@ function renderExternalProviderStatus(providerName) {
   const form = limitAccountForm(providerName);
   if (form) limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
   if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
-  setCursorStatusText(
-    statusEl,
-    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
-  );
+  if (providerName === 'claude') renderClaudeWebAccounts();
+  // Once the settle window lapses without a fresh record, show "not checked"
+  // instead of a permanent spinner; the cutoff above still blocks the old
+  // record from being read as a confirmed link.
+  const statusProvider = provider || (settled && configured && enabled ? { status: 'noSyncedData' } : null);
+  const statusText = pending ? t('settings.common.checking')
+    : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
+  setCursorStatusText(statusEl, providerName === 'claude' && !pending
+    ? claudeAccountStatusText(statusText, enabled) : statusText);
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
   // auto-discovered plans still exist, so the pill shows auto-detect instead
   // of the final "disabled" state the generic seven-state map lands on.
@@ -16326,6 +17016,12 @@ function renderExternalProviderStatus(providerName) {
   }
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
+  if (providerName === 'claude') {
+    const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
+    manualPanel.classList.toggle('hidden', !showForm);
+    document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || !document.getElementById('claudeWebOrganizationIdInput')?.options.length);
+    openBtn.classList.remove('hidden');
+  }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin');
   if (discoveredLogin) {
@@ -16337,6 +17033,7 @@ function renderExternalProviderStatus(providerName) {
   }
   const canClearConfiguredCredential = source === 'settings' && configured;
   logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
+  if (providerName === 'claude') logoutBtn.classList.add('hidden');
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
@@ -17946,7 +18643,7 @@ function setupCursorAccountUI() {
     addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
 
     document.getElementById('opencodeOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://opencode.ai/auth');
+      window.tokenMonitor.openExternal('https://opencode.ai/console');
     });
 
     // API key is the default: it needs no browser round trip. The cookie stays
@@ -18603,6 +19300,15 @@ setupSettingsAccordion(
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
 );
 setupSettingsSections();
+const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create({
+  window, document, bridge: window.tokenMonitor, settings: () => state.settings,
+  bitmap: trayComposerPreview, stats: () => state.stats, t
+});
+displaySettings = window.TokenMonitorDisplaySettings.create({
+  document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
+  scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
+  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction
+});
 setupCursorAccountUI();
 setupCustomPricingUI();
 setupModelAliasesUI();

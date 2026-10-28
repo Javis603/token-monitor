@@ -1,0 +1,269 @@
+{
+ "normal": {
+  "fork": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "tm-contract@9b1a0b62bf2f",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 1200,
+    "output": 340,
+    "cacheRead": 500,
+    "cacheWrite": 80,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00915
+   }
+  ],
+  "upstream": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "tm-contract",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 1200,
+    "output": 340,
+    "cacheRead": 500,
+    "cacheWrite": 80,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00915
+   }
+  ]
+ },
+ "sdkDedup": {
+  "fork": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "display@4629404a1072",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 1200,
+    "output": 340,
+    "cacheRead": 500,
+    "cacheWrite": 80,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00915
+   }
+  ],
+  "upstream": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "native",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 1200,
+    "output": 340,
+    "cacheRead": 500,
+    "cacheWrite": 80,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00915
+   }
+  ]
+ },
+ "piHeader": {
+  "fork": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "pijournal@4188403b16ad",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 1200,
+    "output": 340,
+    "cacheRead": 500,
+    "cacheWrite": 80,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00915
+   }
+  ],
+  "upstream": [
+   {
+    "client": "proma",
+    "workspaceKey": "/tmp/x",
+    "workspaceLabel": "x",
+    "sessionId": "pi-1",
+    "model": "gpt-5",
+    "provider": "openai",
+    "input": 10,
+    "output": 5,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.0000625
+   }
+  ]
+ },
+ "corrupt": {
+  "fork": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "A@ee062e9ed226",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 1200,
+    "output": 340,
+    "cacheRead": 500,
+    "cacheWrite": 80,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00915
+   },
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "B@ee062e9ed226",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 500,
+    "output": 300,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.006
+   }
+  ],
+  "upstream": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "A",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 1200,
+    "output": 340,
+    "cacheRead": 500,
+    "cacheWrite": 80,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00915
+   }
+  ]
+ },
+ "appendedAfterCamelCase": {
+  "fork": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "s@c7f393e1a085",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 100,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00030000000000000003
+   }
+  ],
+  "upstream": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "s",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 100,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00030000000000000003
+   }
+  ]
+ },
+ "partialOverlap": {
+  "fork": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "s@e10a0060701b",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 200,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "messageCount": 2,
+    "cost": 0.0006000000000000001
+   }
+  ],
+  "upstream": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "s",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 100,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00030000000000000003
+   }
+  ]
+ },
+ "continuedSession": {
+  "fork": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "s@9096b8089b99",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 100,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "messageCount": 1,
+    "cost": 0.00030000000000000003
+   }
+  ],
+  "upstream": [
+   {
+    "client": "proma",
+    "workspaceKey": null,
+    "workspaceLabel": "Unknown workspace",
+    "sessionId": "s",
+    "model": "claude-sonnet-4-5",
+    "provider": "anthropic",
+    "input": 150,
+    "output": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "reasoning": 0,
+    "messageCount": 2,
+    "cost": 0.00045000000000000004
+   }
+  ]
+ }
+}

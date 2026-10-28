@@ -4,7 +4,8 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, screen, session, shell, systemPreferences } = require('electron');
+const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
@@ -141,6 +142,7 @@ const { normalizeLimitProviderHiddenItems } = require('../shared/limits/usageIte
 const {
   accountFieldProjection,
   accountStatusProjection,
+  currentAccountField,
   finalAccountSettings,
   initialAccountSettings,
   limitAccountFormsForRenderer,
@@ -151,6 +153,7 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
   codexAuthIdentity,
@@ -253,7 +256,7 @@ async function probeOpenCodeApiKey(apiKey) {
 const openrouterLimits = require('../shared/providers/openrouter/limits');
 const thirdPartyLimits = require('../shared/providers/thirdparty/limits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
-const { normalizeCurrency, resolveEffectiveRates, configureRates, convertUsd } = require('../shared/currency');
+const { CURRENCY_CODES, normalizeCurrency, resolveEffectiveRates, configureRates, convertUsd } = require('../shared/currency');
 const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 const {
@@ -420,6 +423,7 @@ const {
 const { applyWindowsChrome } = require('./windowsChrome');
 const { installWindowsNonActivatingInput } = require('./windowsNonActivatingInput');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
+const { createWindowsDockBackdrop } = require('./edgeDock/windowsBackdrop');
 const { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchHoverAction, normalizeNotchHoverDelay } = require('./notch/controller');
 const { buildNotchData, notchSummaryMode, summaryLayout: notchSummaryLayout } = require('./notch/data');
 const { NOTCH_PANEL_STAT_ITEMS, notchLimitItems, notchPanelItems, notchWeek } = require('./notch/panel');
@@ -435,6 +439,14 @@ const {
   normalizeEdgeDockSize
 } = require('./edgeDock/geometry');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
+const edgeDockPresentationApi = require('./renderer/edgeDock/presentation');
+const { createPluginRuntime, registerPluginScheme, normalizePluginAuthorSkin } = require('./plugins/runtime');
+const { normalizePluginStates } = require('./plugins/manager');
+const pluginPlacements = require('../shared/plugins/placements');
+// Created after 'ready' by startPluginRuntime(); null in safe paths and tests.
+let pluginRuntime = null;
+const { createWindowVisibilityActions } = require('./plugins/windowVisibility');
+const pluginWindowActions = createWindowVisibilityActions(syncPluginWindowVisibility);
 const { DERIVED_PERIODS: EDGE_DOCK_DERIVED_PERIODS, normalizeEdgeDockItems } = require('./renderer/edgeDock/items');
 const fixedPeriodRangesApi = require('./renderer/fixedPeriodRanges');
 const { normalizeBackgroundImageOpacity } = require('./renderer/glassRendering');
@@ -443,13 +455,15 @@ const { toPolygons } = require('./renderer/edgeDock/shapes');
 const { rasterizeMask } = require('./edgeDock/mask');
 const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_RADIUS, NOTCH_BLUR_STRENGTH, notchBlurMask } = require('./notch/blur');
 const { applyProgressiveBlur } = require('./notch/macProgressiveBlur');
+const { monitorMacScrollGesture } = require('./notch/macScrollGesture');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
 const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
 const { preventAppActivation, setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
   WINDOWS_BACKDROP_ACCENT,
-  normalizeWindowsBackdropMode
+  normalizeWindowsBackdropMode,
+  normalizeWindowsDockBackdropMode
 } = require('./windowsBackdropMode');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
 const {
@@ -493,18 +507,6 @@ function appWindowIcon() {
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
-const CSP_HEADER = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "object-src 'none'",
-  "base-uri 'none'",
-  "form-action 'none'",
-  "frame-ancestors 'none'"
-].join('; ');
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
@@ -654,12 +656,22 @@ function defaultSettings() {
     edgeDockHaptic: true,
     edgeDockWarnColors: false,
     edgeDockMacBackdrop: 'inherit',
+    edgeDockWindowsBackdrop: 'inherit',
     edgeDockSize: 'medium',
     edgeDockCustomScale: 1,
     edgeDockSide: 'right',
     edgeDockOffset: null,
     edgeDockDisplayId: null,
     edgeDockItems: null,
+    pluginsEnabled: true,
+    pluginStates: {},
+    pluginAuthorSkin: null,
+    notchPluginPages: [],
+    notchPageOrder: [],
+    notchBuiltinPages: [...pluginPlacements.NOTCH_BUILTIN_PAGES],
+    pluginMainPages: [],
+    pluginContentSelections: {},
+    pluginContentOrder: {},
     lastViewState: { period: 'today', breakdown: 'home' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
@@ -897,16 +909,39 @@ function defaultLimitProviderOrder() {
   return parseLimitProviders().join(',');
 }
 
-function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
+let claudeManagedAccountService = null;
+
+function claudeAccountService() {
+  if (!claudeManagedAccountService) {
+    claudeManagedAccountService = createClaudeManagedAccounts({
+      getSettings: () => settings,
+      setSettings: (next) => { settings = next; },
+      saveSettings: () => saveSettings({ throwOnError: true }),
+      credentialStore: ensureCredentialStore(),
+      getLegacyCredential: () => currentAccountField('claudeWebCookie', settings, process.env),
+      probeDeps: credentialProbeDeps,
+      projectSettings: settingsForRenderer,
+      onChanged: (account, reason, options) => {
+        pushSettingsToRenderer();
+        if (reason === 'login-status') return;
+        deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+        const scope = claudeAccountChangeScope(account, options);
+        return queueLimitInvalidation(scope, reason, options);
+      }
+    });
+  }
+  return claudeManagedAccountService;
+}
+
+function persistClaudeWebCookieRenewal({ accountId, previousCookie, cookie } = {}) {
+  if (accountId) return claudeAccountService().renew({ accountId, previousCookie, cookie });
   if (!settings?.claudeWebCookie) return false;
   let expected;
   let renewed;
   try {
     expected = normalizeAccountField('claudeWebCookie', previousCookie);
     renewed = normalizeAccountField('claudeWebCookie', cookie);
-  } catch (_) {
-    return false;
-  }
+  } catch (_) { return false; }
   if (!renewed || normalizeAccountField('claudeWebCookie', settings.claudeWebCookie) !== expected) return false;
   if (settings.claudeWebCookie === renewed) return true;
   settings.claudeWebCookie = renewed;
@@ -972,6 +1007,8 @@ function electronLimitsDeps() {
     },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onClaudeWebAccountResolved: (observation) => claudeAccountService().resolved(observation),
+    resolveClaudeWebCredential: (account) => claudeAccountService().resolveCredential(account),
     onStepfunTokenRenewed: persistStepfunTokenRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
     resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
@@ -2235,6 +2272,11 @@ function sendFloatingBubbleState() {
   try { mainWindow.webContents.send('floatingBubble:state', floatingBubblePayload()); } catch (_) {}
 }
 
+function syncPluginWindowVisibility(win) {
+  pluginRuntime?.refreshWindowVisibility(win);
+  sendMainWindowVisibility(win);
+}
+
 function sendMainWindowVisibility(win = mainWindow) {
   if (!win || win !== mainWindow || win.isDestroyed() || win.webContents.isDestroyed()) return;
   win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized());
@@ -2771,9 +2813,20 @@ function readSettings() {
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
+    merged.edgeDockWindowsBackdrop = normalizeWindowsDockBackdropMode(merged.edgeDockWindowsBackdrop);
     merged.edgeDockSize = normalizeEdgeDockSize(merged.edgeDockSize);
     merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
+    merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
+    merged.pluginStates = normalizePluginStates(merged.pluginStates);
+    merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
+    merged.pluginContentSelections = pluginPlacements.normalizeContentSelections(merged.pluginContentSelections);
+    merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
+    delete merged.pluginSkinRef;
+    merged.pluginMainPages = pluginPlacements.normalizeRefList(merged.pluginMainPages, 32);
+    merged.notchPageOrder = pluginPlacements.normalizeNotchPageOrder(merged.notchPageOrder);
+    merged.notchBuiltinPages = pluginPlacements.normalizeNotchBuiltinPages(merged.notchBuiltinPages);
+    merged.notchPluginPages = pluginPlacements.normalizeNotchPluginPages(merged.notchPluginPages);
     merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
     merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
     merged.windowToggleShortcut = normalizeWindowToggleShortcut(merged.windowToggleShortcut);
@@ -3780,6 +3833,9 @@ function cacheSharedSubscriptions(doc, hub) {
     settings.subscriptionsCacheHub = hub;
     persistSubscriptionState();
   }
+  // Cache ownership commits in memory even when disk persistence fails. Only
+  // the currently selected backend may invalidate its captured business data.
+  if (hub === currentHubIdentity()) pluginRuntime?.refreshBusinessData();
   return changed;
 }
 
@@ -4262,6 +4318,7 @@ async function saveSubscriptions(list, base) {
       error.code = 'write_failed';
       throw error;
     }
+    pluginRuntime?.refreshBusinessData();
     return settingsForRenderer();
   }
   // The hub is checked at all — rather than left to the version — because a
@@ -4918,7 +4975,9 @@ function publishLocalSessionActivity(patch) {
         .map(([name, sessions]) => [name, withoutSessionTitles(sessions)])) }
     : displayPatch;
   presentationCache.updateActivity(previous, latestStats, (stats) => applyActivityPatch(stats, visiblePatch));
-  updateEdgeDockCells(electronPresentationStats(latestStats));
+  const activityStats = electronPresentationStats(latestStats);
+  pluginRuntime?.publishStats(activityStats, latestStats);
+  updateEdgeDockCells(activityStats);
   sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
 }
 
@@ -4950,6 +5009,7 @@ function sendPush(payload, options = {}) {
       data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
     };
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
+    pluginRuntime?.publishStats(visibleStats, latestStats);
     updateEdgeDockCells(visibleStats);
     syncCodexPresentationActiveAccount();
     updateTrayDisplay();
@@ -5004,7 +5064,9 @@ function writeRateCache(data) {
 
 function applyEffectiveRates() {
   const previousCnyRate = effectiveRates?.CNY;
-  effectiveRates = resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {});
+  const next = resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {});
+  const changed = CURRENCY_CODES.some(code => effectiveRates?.[code] !== next[code]);
+  effectiveRates = next;
   configureRates(effectiveRates);          // main process's own currency module
   // Collection normally runs on a worker, with its own currency module.
   // Send the effective scalar through the existing runtime config/reconciler.
@@ -5012,6 +5074,7 @@ function applyEffectiveRates() {
     && trackedClientSet(settings?.clients).has('qodercn')) {
     reconfigureUsageRuntimeForMode();
   }
+  if (changed) pluginRuntime?.refreshBusinessData();
   return effectiveRates;
 }
 
@@ -5315,7 +5378,7 @@ function showPopover(clickPoint = null) {
 function hidePopover() {
   recentPopoverBlur = null;
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isVisible()) mainWindow.hide();
+  if (mainWindow.isVisible()) pluginWindowActions.hide(mainWindow);
 }
 
 function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
@@ -5444,6 +5507,37 @@ function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
   });
 }
 
+// The command carries identity only. Resolve at commit time, after any IPC
+// awaits, and persist the host-declared palette and finite tokens together.
+function preparePluginSkinSettings(patch, current, runtime) {
+  if (Object.hasOwn(patch, 'pluginAuthorSkin')) throw new Error('author skin snapshots are host-owned');
+  if (!Object.hasOwn(patch, 'pluginSkinRef')) return { patch, authorSkin: normalizePluginAuthorSkin(current.pluginAuthorSkin) };
+  if (patch.pluginSkinRef === null && Object.keys(patch).every(key => ['pluginSkinRef', 'themeColors'].includes(key))) {
+    const { pluginSkinRef: _reset, ...colors } = patch;
+    return { patch: colors, authorSkin: null };
+  }
+  if (Object.keys(patch).length !== 1) throw new Error('plugin skin selection must be a standalone command');
+  const skin = runtime?.resolveSkin(patch.pluginSkinRef);
+  if (!skin) throw new Error('plugin skin is unavailable');
+  const authorSkin = normalizePluginAuthorSkin({ ref: skin.ref, appearance: skin.appearance || {} });
+  if (!authorSkin) throw new Error('invalid author skin');
+  return {
+    authorSkin,
+    patch: {
+      themeColors: { ...current.themeColors, ...skin.colors },
+      vendorColors: { ...current.vendorColors, ...skin.vendorColors }
+    }
+  };
+}
+
+function assertPluginSkinRequest(event, patch) {
+  if (Object.hasOwn(patch, 'pluginAuthorSkin')) throw new Error('author skin snapshots are host-owned');
+  if (!Object.hasOwn(patch, 'pluginSkinRef')) return;
+  if (Object.keys(patch).length !== 1 && !(patch.pluginSkinRef === null && Object.keys(patch).every(key => ['pluginSkinRef', 'themeColors'].includes(key)))) throw new Error('plugin skin selection must be a standalone command');
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
+    || !event.senderFrame || event.senderFrame !== event.sender.mainFrame) throw new Error('plugin skin selection requires the main window');
+}
+
 function settingsForRenderer() {
   // Default-deny every credential field added to the canonical store. The two
   // hub secrets remain explicit exceptions because the existing sync UI must
@@ -5455,6 +5549,8 @@ function settingsForRenderer() {
   delete rendererSettings.icloudRetiredDeviceIds;
   delete rendererSettings.icloudWriterId;
   delete rendererSettings.syncContentState;
+  delete rendererSettings.pluginSkinRef;
+  rendererSettings.pluginAuthorSkin = normalizePluginAuthorSkin(settings.pluginAuthorSkin);
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
@@ -5478,6 +5574,8 @@ function settingsForRenderer() {
     workbuddyManagedAccounts: workbuddyAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
     ...accountStatusProjection(settings, process.env),
+    claudeWebLegacyAccount: claudeAccountService().legacyAccount(),
+    claudeWebLoginStatuses: claudeAccountService().loginStatuses(),
     limitAccountForms: limitAccountFormsForRenderer(),
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
@@ -5661,7 +5759,7 @@ function ensureNotchController() {
     nativeGlass: () => nativeBlurEnabled(),
     liquidGlass: () => {
       const options = nativeMaterialOptions();
-      return options.enabled && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25
+      return !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25
         ? { dark: options.dark } : null;
     },
     createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
@@ -5673,6 +5771,7 @@ function ensureNotchController() {
     onToggleRateMode: toggleDockRateMode,
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
+    onWebSurfaceChanged: () => pluginRuntime?.refreshSurfaces(),
     installNonActivatingInput: (win) => preventAppActivation(win),
     blurAvailable: () => nativeTheme.prefersReducedTransparency !== true,
     applyBlurMask: (win, mask, display) => {
@@ -5690,6 +5789,7 @@ function ensureNotchController() {
         width: mask.width, height: mask.height, radius: NOTCH_BLUR_RADIUS });
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
+    monitorScrollGesture: (onEvent, options) => monitorMacScrollGesture(onEvent, { ...options, logger: (message) => console.log(message) }),
     // An absent key is the system default, natural scrolling on.
     naturalScrolling: () => systemPreferences.getUserDefault?.('com.apple.swipescrolldirection', 'string') !== '0',
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
@@ -5944,6 +6044,7 @@ function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options
   syncCodexPresentationActiveAccount();
   return buildEdgeDockCells(visibleStats, {
     includeUnavailableAccounts: options.includeUnavailableAccounts === true,
+    availablePluginRefs: (pluginRuntime?.manager.surfaceCatalog('edgeDock') || []).map(view => view.ref),
     derivedPeriods: edgeDockDerivedPeriods,
     codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
     localDeviceId: settings?.deviceId,
@@ -6007,6 +6108,10 @@ const notchHistory = createNotchHistory({
 function pushNotchCells(visibleStats) {
   notchLastCells = edgeDockCellsFor(visibleStats, notchPanelItems(visibleStats, settings), { includeUnavailableAccounts: true });
   const data = notchDataFor(visibleStats, notchLastCells);
+  // Tab names and icons are metadata; opening a page alone requests its data.
+  if (pluginRuntime) data.panel.pluginCatalog = Object.fromEntries(pluginRuntime.manager.surfaceCatalog('notch')
+    .map(view => [view.ref, { title: view.title, icon: view.icon }]));
+  data.panel.pluginPages = data.panel.pluginPages.filter(ref => Object.hasOwn(data.panel.pluginCatalog || {}, ref));
   const history = notchHistory.read(visibleStats, { enabled: settings.historyEnabled !== false, generation: hubModeGeneration });
   if (history) data.panel.week = notchWeek(visibleStats, new Date(), history);
   notchController.setData(data);
@@ -6048,6 +6153,8 @@ function scheduleSessionExpiry() {
 function ensureEdgeDockController() {
   if (edgeDockController) return edgeDockController;
   edgeDockController = createEdgeDockController({
+    windowsBackdrop: process.platform === 'win32'
+      ? createWindowsDockBackdrop({ app, screen, logger: (message) => console.log(message) }) : null,
     BrowserWindow,
     ipcMain,
     powerMonitor,
@@ -6057,13 +6164,13 @@ function ensureEdgeDockController() {
     preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
     getSettings: () => settings,
     nativeGlass: () => nativeBlurEnabled(),
-    // The dock follows the widget's glass style unless it has its own, on the
-    // same terms as the main window: Reduce Transparency hands the surface back
-    // to the HUD material.
+    // The dock follows the widget's glass style unless it has its own; the
+    // controller decides whether there is material at all. Reduce Transparency
+    // still hands the surface back to the HUD material.
     liquidGlass: () => {
       const source = dockAppearanceSettings();
       const options = nativeMaterialOptions(source);
-      const wanted = process.platform === 'darwin' && options.enabled
+      const wanted = process.platform === 'darwin'
         && isLiquidGlassBackdrop(edgeDockBackdropMode(source))
         && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25;
       const mode = edgeDockBackdropMode(source);
@@ -6084,6 +6191,7 @@ function ensureEdgeDockController() {
       return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
+    onWebSurfaceChanged: () => pluginRuntime?.refreshSurfaces(),
     installNonActivatingInput: (win) => process.platform === 'darwin' ? preventAppActivation(win)
       : installWindowsNonActivatingInput(win, { logger: (message) => console.log(message) }),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
@@ -6183,7 +6291,7 @@ function handleWindowToggleShortcut() {
   });
   if (action === 'togglePopover') togglePopover();
   else if (action === 'expandFloatingBubble') expandFloatingBubble();
-  else if (action === 'hideWindow') mainWindow.hide();
+  else if (action === 'hideWindow') pluginWindowActions.hide(mainWindow);
   else focusExistingWindow();
 }
 
@@ -6240,12 +6348,25 @@ function setTrayContentFromMenu(value) {
 }
 
 function setEdgeDockFromMenu(patch = {}) {
-  if (patch.notchEnabled !== undefined) settings.notchEnabled = parseBoolean(patch.notchEnabled, false);
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
   if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
   if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
+  pushSettingsToRenderer();
+}
+
+function setNotchFromMenu(patch = {}) {
+  const normalizers = {
+    notchEnabled: value => parseBoolean(value, false),
+    notchHoverAction: normalizeNotchHoverAction,
+    notchSummaryEnabled: value => parseBoolean(value, true),
+    notchHideSummaryInFullScreen: value => parseBoolean(value, true),
+  };
+  for (const [key, normalize] of Object.entries(normalizers)) {
+    if (patch[key] !== undefined) settings[key] = normalize(patch[key]);
+  }
+  saveSettings();
   pushSettingsToRenderer();
 }
 
@@ -6274,9 +6395,9 @@ function setWindowPresentationFromMenu(value) {
   pushSettingsToRenderer();
 }
 
-function openSettingsFromTray() {
+function openSettingsFromTray(section) {
   focusExistingWindow();
-  sendMainWindowEvent('settings:open');
+  sendMainWindowEvent('settings:open', section === 'notch' ? 'notch' : undefined);
 }
 
 function openViewFromTray(viewId) {
@@ -6383,10 +6504,16 @@ function ensureTray() {
   if (!shouldCreateTray(settings)) return false;
   if (tray && !tray.isDestroyed()) return;
   tray = createTray({
+    onPluginMenu: (id, action) => { void pluginRuntime?.trayAction(id, action).catch(error => console.warn(`[plugins] Tray action: ${error.message}`)); },
+    onRestartPluginsSafe: () => {
+      app.relaunch({ args: [...process.argv.slice(1).filter(arg => arg !== '--plugins-safe-mode'), '--plugins-safe-mode'] });
+      requestAppQuit();
+    },
     getMenuState: () => {
       const codex = trayCodexMenuState();
       return {
         appVersion: appVersion(),
+        pluginMenu: pluginRuntime?.trayMenu() || [],
         locale: trayMenuLocale(),
         refreshing: trayRefreshInFlight,
         trayContent: settings?.trayContent || 'tokens',
@@ -6399,6 +6526,9 @@ function ensureTray() {
         edgeDockSupported: edgeDockSupported(process.platform),
         notchSupported: process.platform === 'darwin',
         notchEnabled: settings?.notchEnabled === true,
+        notchHoverAction: settings?.notchHoverAction,
+        notchSummaryEnabled: settings?.notchSummaryEnabled,
+        notchHideSummaryInFullScreen: settings?.notchHideSummaryInFullScreen,
         edgeDockEnabled: settings?.edgeDockEnabled === true,
         edgeDockMode: settings?.edgeDockMode,
         edgeDockSide: settings?.edgeDockSide,
@@ -6425,6 +6555,7 @@ function ensureTray() {
     onSetTrayContent: setTrayContentFromMenu,
     onSetWindowPresentation: setWindowPresentationFromMenu,
     onSetEdgeDock: setEdgeDockFromMenu,
+    onSetNotch: setNotchFromMenu,
     onSwitchCodexAccount: (accountId) => { void switchCodexAccountFromTray(accountId); },
     onOpenSettings: openSettingsFromTray,
     onQuit: requestAppQuit,
@@ -6453,7 +6584,7 @@ function enterTrayMode() {
     suspendWindowMaximized(mainWindow);
     setWindowMaximizable(mainWindow, false);
     applyMacSpaceBehavior(true);
-    mainWindow.hide();
+    pluginWindowActions.hide(mainWindow);
   }
 }
 
@@ -6618,6 +6749,7 @@ function reconfigureUsageRuntimeForMode() {
 // stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
 // really gone before a new one starts on the same paths.
 function stopAll() {
+  disposePluginRuntime();
   stopPersistBoundsTimer();
   stopLocalCollector({ skipCloseWatchers: true });
   stopStatsStream();
@@ -6645,6 +6777,14 @@ function stopAll() {
   }
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
+}
+
+// Plugin teardown must never skip the host's own collector and stream shutdown.
+function disposePluginRuntime() {
+  try {
+    const pending = pluginRuntime?.dispose();
+    pending?.catch(error => console.warn(`[plugins] dispose failed: ${error.message}`));
+  } catch (error) { console.warn(`[plugins] dispose failed: ${error.message}`); }
 }
 
 let quitRequested = false;
@@ -7483,7 +7623,7 @@ function createWindow(boundsOverride, options = {}) {
       hidePopover();
     } else if (action === 'hideWindow') {
       event.preventDefault();
-      win.hide();
+      pluginWindowActions.hide(win);
       applyMacActivationPolicy({ mainWindowVisible: false });
     }
   });
@@ -7494,10 +7634,10 @@ function createWindow(boundsOverride, options = {}) {
     if (quitRequested || process.platform === 'darwin') return;
     if (BrowserWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other)))) app.quit();
   });
-  win.on('show', () => sendMainWindowVisibility(win));
-  win.on('hide', () => sendMainWindowVisibility(win));
-  win.on('minimize', () => sendMainWindowVisibility(win));
-  win.on('restore', () => sendMainWindowVisibility(win));
+  win.on('show', () => syncPluginWindowVisibility(win));
+  win.on('hide', () => syncPluginWindowVisibility(win));
+  win.on('minimize', () => syncPluginWindowVisibility(win));
+  win.on('restore', () => syncPluginWindowVisibility(win));
   win.webContents.on('did-finish-load', () => {
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
@@ -7704,6 +7844,10 @@ function rebuildWindow() {
   });
 }
 
+// Plugin hosts load from their own privileged scheme, which Chromium only
+// accepts before 'ready'.
+registerPluginScheme(protocol);
+
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
@@ -7742,7 +7886,7 @@ app.whenReady().then(() => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [CSP_HEADER]
+        'Content-Security-Policy': [contentSecurityPolicyForRequest(details)]
       }
     });
   });
@@ -7858,30 +8002,50 @@ app.whenReady().then(() => {
   ipcMain.handle('syncContent:retryCleanup', () => getSyncContentRuntime().retryCleanup());
   const credentialCommands = createCredentialCommands({
     getSettings: () => settings,
-    applySettingsPatch,
+    applySettingsPatch: applyCredentialSettingsPatch,
     probeDeps: credentialProbeDeps
   });
   // Resolves only once a worker-hosted transform runs with the saved settings:
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.
-  ipcMain.handle('settings:update', async (_event, patch) => {
+  ipcMain.handle('settings:update', async (event, patch) => {
+    const finishPluginChange = await pluginRuntime?.beforeSettingsChange(event, patch);
+    assertPluginSkinRequest(event, patch);
     const contentRuntime = getSyncContentRuntime();
     const sharedEdit = patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined
       || patch.customModelPricing !== undefined;
     const settingsIdentity = contentRuntime.status().identity;
     await contentRuntime.publishPatch(patch, patch?.syncContentBase);
     if (sharedEdit && settingsIdentity !== contentRuntime.status().identity) throw new Error('hub_changed');
+    assertPluginSkinRequest(event, patch);
     let dotsVisibilityApplied = Promise.resolve();
     applySettingsPatch(patch, (refresh) => { dotsVisibilityApplied = refresh; });
     await latestUsageHost?.transformSettingsApplied?.();
     await dotsVisibilityApplied;
+    await finishPluginChange?.();
     // Other settings writes may finish while this visibility projection waits.
     // Return the latest saved selection rather than restoring an older one.
     return settingsForRenderer();
   });
+  async function applyCredentialSettingsPatch(patch, { provider }) {
+    const refreshes = [];
+    applySettingsPatch(patch, undefined, {
+      ensureLimitProvider: provider,
+      onLimitsRefresh: (_scope, refresh) => refreshes.push(refresh)
+    });
+    // The write is already durable; a refresh failure must not report it as an
+    // unsuccessful save or launch a second check from the renderer.
+    await Promise.all(refreshes).catch((error) => {
+      console.log(`[limits-runtime] credential refresh failed: ${error.message}`);
+    });
+    return settingsForRenderer();
+  }
+
   // The settings:update body, named so a credential save persists through the
   // exact same normalization, runtime reconfigure and limit invalidation.
-  function applySettingsPatch(patch, onDotsVisibilityRefresh = () => {}) {
+  function applySettingsPatch(patch, onDotsVisibilityRefresh = () => {}, limitContext = {}) {
+    const skinSelection = preparePluginSkinSettings(patch, settings, pluginRuntime);
+    patch = skinSelection.patch;
     const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
     const previousSettingsState = settings;
@@ -7913,6 +8077,9 @@ app.whenReady().then(() => {
     delete normalizedPatch.syncContentState;
     delete normalizedPatch.syncContentStatus;
     delete normalizedPatch.syncContentBase;
+    delete normalizedPatch.pluginStates;
+    delete normalizedPatch.pluginContentSelections;
+    delete normalizedPatch.pluginContentOrder;
     // Account fields declared persist:'never' (managed account lists, profile
     // maps, workbuddy session fields) are stripped by the registry walk below.
     normalizeAccountPatch(patch, normalizedPatch);
@@ -7994,6 +8161,15 @@ app.whenReady().then(() => {
       notchSize: normalizeEdgeDockSize(patch.notchSize ?? settings.notchSize),
       notchCustomScale: normalizeEdgeDockCustomScale(patch.notchCustomScale ?? settings.notchCustomScale),
       notchItems: normalizeEdgeDockItems('notchItems' in (patch || {}) ? patch.notchItems : settings.notchItems),
+      notchPageOrder: pluginPlacements.normalizeNotchPageOrder(patch.notchPageOrder ?? settings.notchPageOrder),
+      notchBuiltinPages: pluginPlacements.normalizeNotchBuiltinPages(patch.notchBuiltinPages ?? settings.notchBuiltinPages),
+      notchPluginPages: pluginPlacements.normalizeNotchPluginPages('notchPluginPages' in (patch || {}) ? patch.notchPluginPages : settings.notchPluginPages),
+      pluginMainPages: pluginPlacements.normalizeRefList('pluginMainPages' in (patch || {}) ? patch.pluginMainPages : settings.pluginMainPages, 32),
+      pluginsEnabled: parseBoolean(patch.pluginsEnabled ?? settings.pluginsEnabled, true),
+      // Consent is written only by the plugin manager (plugins:setEnabled),
+      // never by a generic settings patch from a renderer.
+      pluginStates: normalizePluginStates(settings.pluginStates),
+      pluginAuthorSkin: skinSelection.authorSkin,
       notchRunningIndicatorEnabled: parseBoolean(patch.notchRunningIndicatorEnabled ?? settings.notchRunningIndicatorEnabled, false),
       notchWarnColors: parseBoolean(patch.notchWarnColors ?? settings.notchWarnColors, false),
       notchHoverAction: normalizeNotchHoverAction(patch.notchHoverAction ?? settings.notchHoverAction),
@@ -8017,6 +8193,7 @@ app.whenReady().then(() => {
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
+      edgeDockWindowsBackdrop: normalizeWindowsDockBackdropMode(patch.edgeDockWindowsBackdrop ?? settings.edgeDockWindowsBackdrop),
       edgeDockSize: normalizeEdgeDockSize(patch.edgeDockSize ?? settings.edgeDockSize),
       edgeDockCustomScale: normalizeEdgeDockCustomScale(patch.edgeDockCustomScale ?? settings.edgeDockCustomScale),
       // `null` is a real value here (back to the automatic default), so the
@@ -8176,15 +8353,17 @@ app.whenReady().then(() => {
     if (widgetHistorySourceChanged && !runtimeChange.modeStructural) {
       refreshMacWidgetHistorySource();
     }
-    const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
+    const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange, limitContext.ensureLimitProvider);
     if (runtimeChange.modeStructural || (receiverPermissionChanged && settings.hubMode === 'host')) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
+        limitContext.onLimitsRefresh?.(scope, Promise.resolve({ queued: true }));
       }
       startMode();
     } else if (runtimeChange.sinkStructural) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
+        limitContext.onLimitsRefresh?.(scope, Promise.resolve({ queued: true }));
       }
       restartDeviceRuntimeForMode();
     } else {
@@ -8203,7 +8382,9 @@ app.whenReady().then(() => {
         deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
       }
       for (const { scope, reason, options } of limitInvalidations) {
-        void queueLimitInvalidation(scope, reason, options).catch((error) => {
+        const refresh = queueLimitInvalidation(scope, reason, options);
+        limitContext.onLimitsRefresh?.(scope, refresh);
+        void refresh.catch((error) => {
           console.log(`[limits-runtime] settings refresh failed: ${error.message}`);
         });
       }
@@ -8256,6 +8437,7 @@ app.whenReady().then(() => {
     if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
       refreshLimitStatsPresentation();
     }
+    pluginRuntime?.settingsChanged();
     return settingsForRenderer();
   }
   ipcMain.handle('appearance:preview', (event, patch) => {
@@ -8274,6 +8456,10 @@ app.whenReady().then(() => {
       notchController.previewScale(patch.notchCustomScale);
     }
     return true;
+  });
+  ipcMain.handle('settings:displayPreview', (event, surface, phase, slots) => {
+    if (event.sender !== mainWindow?.webContents) return null;
+    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots);
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
@@ -8599,11 +8785,29 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
+  ipcMain.handle('claude:accounts', () => claudeAccountService().accounts());
+  ipcMain.handle('claude:saveWebAccount', (_event, values) => claudeAccountService().saveAccount(values));
+  ipcMain.handle('claude:removeWebAccount', (_event, id) => claudeAccountService().removeAccount(String(id || '')));
+  ipcMain.handle('claude:setAccountEnabled', (_event, id, enabled) => claudeAccountService().setAccountEnabled(String(id || ''), enabled));
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
+  // Explicit panel refreshes collect only their provider. Save and clear reuse
+  // the refresh scheduled by the credential settings write above.
+  ipcMain.handle('limits:refresh', async (_event, providerId) => {
+    const provider = String(providerId || '').trim();
+    const parsed = parseLimitProviders(provider);
+    if (parsed.length !== 1 || parsed[0] !== provider) return { ok: false, error: 'unknown provider' };
+    if (!deviceRuntimeHandle) return { ok: false, error: 'limits runtime is not ready' };
+    try {
+      await runLimitInvalidation(deviceRuntimeHandle, { provider }, 'account-panel', { clear: false });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) };
+    }
+  });
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
-    const cookie = opencodeWeb.sanitizeCookieHeader(raw);
+    const cookie = opencodeWeb.sanitizeCookieHeader(raw, '__Host-console_session');
     if (!cookie) {
       settings.opencodeProfiles = {};
       settings.opencodeCookie = '';
@@ -8617,10 +8821,7 @@ app.whenReady().then(() => {
       return { ok: true, cleared: true };
     }
     try {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
-        opencodeWeb.fetchZen(cookie, electronProviderDeps())
-      ]);
+      const [go, zen] = await opencodeWeb.fetchWeb(cookie, electronProviderDeps());
       if (opencodeWeb.summarizeLink(go, zen).expired) {
         return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
       }
@@ -8765,9 +8966,8 @@ app.whenReady().then(() => {
             error: probe.status
           }];
         }
-        const [go, zen, apiProbe] = await Promise.all([
-          opencodeWeb.fetchGoWeb(profile.cookie, electronProviderDeps()),
-          opencodeWeb.fetchZen(profile.cookie, electronProviderDeps()),
+        const [[go, zen], apiProbe] = await Promise.all([
+          opencodeWeb.fetchWeb(profile.cookie, electronProviderDeps(), { isolateErrors: true }),
           apiKey ? probeOpenCodeApiKey(apiKey) : null
         ]);
         const summary = { ...opencodeWeb.summarizeLink(go, zen), balanceUsd: zen.balanceUsd };
@@ -8791,10 +8991,7 @@ app.whenReady().then(() => {
     // dedupes away (otherwise it shows 2/2 while only one account is tracked).
     const envCookie = process.env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
     if (envCookie && !entries.some(([, p]) => p.cookie === envCookie)) {
-      const [go, zen] = await Promise.all([
-        opencodeWeb.fetchGoWeb(envCookie, electronProviderDeps()),
-        opencodeWeb.fetchZen(envCookie, electronProviderDeps())
-      ]);
+      const [go, zen] = await opencodeWeb.fetchWeb(envCookie, electronProviderDeps(), { isolateErrors: true });
       let envKey = 'env';
       for (let i = 1; Object.prototype.hasOwnProperty.call(profiles, envKey); i += 1) {
         envKey = `env:${i}`;
@@ -8919,12 +9116,9 @@ app.whenReady().then(() => {
         }
         credential = { apiKey };
       } else {
-        const cookie = opencodeWeb.sanitizeCookieHeader(raw);
+        const cookie = opencodeWeb.sanitizeCookieHeader(raw, '__Host-console_session');
         if (!cookie) return { ok: false, error: 'Empty cookie' };
-        const [go, zen] = await Promise.all([
-          opencodeWeb.fetchGoWeb(cookie, electronProviderDeps()),
-          opencodeWeb.fetchZen(cookie, electronProviderDeps())
-        ]);
+        const [go, zen] = await opencodeWeb.fetchWeb(cookie, electronProviderDeps());
         if (opencodeWeb.summarizeLink(go, zen).expired) {
           return { ok: false, error: 'OpenCode rejected the cookie (it may be expired)' };
         }
@@ -9481,7 +9675,7 @@ app.whenReady().then(() => {
       hidePopover();
       return;
     }
-    actionWindowForEvent(BrowserWindow, event, mainWindow)?.minimize();
+    pluginWindowActions.minimize(actionWindowForEvent(BrowserWindow, event, mainWindow));
   });
   ipcMain.on('window:close', (event) => {
     if (settings?.trayMode) {
@@ -9517,6 +9711,83 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+  startPluginRuntime();
+  function startPluginRuntime() {
+    try {
+      pluginRuntime = createPluginRuntime({
+        getAppSettings: settingsForRenderer,
+        electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, session, shell, dialog },
+        userDataDir: app.getPath('userData'),
+        getSettings: () => settings,
+        applySettingsPatch,
+        persistPluginStates: (states) => {
+          settings = { ...settings, pluginStates: normalizePluginStates(states) };
+          saveSettings({ throwOnError: true });
+          pushSettingsToRenderer();
+        },
+        persistManagementSettings: (patch) => {
+          // Main-owned transaction state only; never exposed as generic renderer settings.
+          const allowed = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
+          settings = { ...settings, ...Object.fromEntries(allowed.filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]])) };
+          settings.pluginStates = normalizePluginStates(settings.pluginStates);
+          saveSettings({ throwOnError: true });
+          pushSettingsToRenderer();
+        },
+        getLocale: () => trayMenuLocale(),
+        getContext: () => ({ mode, hubMode: settings.hubMode, hubUrl: settings.hubUrl, deviceId: settings.deviceId }),
+        // Business reads use captured host records, not renderer DTOs or provider
+        // credentials. These adapters never refresh the collector or limits.
+        businessAdapters: {
+          sourceId: () => `${hubModeGeneration}:${mode}:${settings.hubMode}`,
+          extras: stats => ({
+            historyRevision: JSON.stringify([settings.historyEnabled !== false, stats?.deviceHistoryRevision || statsHistoryRevision(stats)]),
+            subscriptions: effectiveSubscriptions(),
+            subscriptionContext: { date: subscriptionDisplay.todayString(), rates: { ...(effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {})) } },
+            preferences: { currency: settings.currency, locale: trayMenuLocale(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, sessionTitlesEnabled: settings.sessionTitlesEnabled !== false, historyEnabled: settings.historyEnabled !== false, projectsEnabled: settings.projectsEnabled !== false }
+          }),
+          loadAllTime: ({ stats }) => {
+            const complete = completeLocalSyncStats(stats);
+            if (!complete?.periods?.allTime) return null;
+            const captured = snapshotLocalDevices.get(stats);
+            // Wire records omit lifetime detail by design. The native Month
+            // fallback is display-only and must not enter this accounting API.
+            return {
+              ...complete?.periods?.allTime,
+              sessionSources: (complete?.devices || []).map(device => ({
+                ...device,
+                sessionDetailAvailable: !captured || device.deviceId === captured.localDevice?.deviceId
+              }))
+            };
+          },
+          loadHistory: () => getCompleteHistory(),
+          loadSubscriptions: () => effectiveSubscriptions()
+        },
+        isMainSender: (event) => Boolean(mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents),
+        surfaceContext: (event, surface) => surface === 'edgeDock' ? edgeDockController?.webSurface(event.sender) : surface === 'notch' ? notchController?.webSurface(event.sender) : null,
+        isSurfaceSender: (event, surface) => {
+          const win = BrowserWindow.fromWebContents(event.sender);
+          return Boolean(win && (surface === 'edgeDock' ? edgeDockController?.owns(win) : notchController?.owns(win)));
+        },
+        placementContext: () => {
+          const stats = latestStats ? electronPresentationStats(latestStats) : null;
+          return {
+            defaultEdgeDockProviders: edgeDockPresentationApi.connectedLimitProviders(stats, {
+              limitsEnabled: settings.limitsEnabled !== false,
+              limitProviders: settings.limitProviders,
+              limitProviderOrder: settings.limitProviderOrder
+            }),
+            trayPresetLayout: notchSummaryLayout({ ...settings, notchSummaryMode: 'tray' }, stats)
+          };
+        },
+      });
+      void pluginRuntime.start().catch(error => console.warn(`[plugins] startup: ${error.message}`));
+      pluginRuntime.manager.onChanged(() => { repaintDockSurfaces(); refreshTrayContextMenu(); });
+      if (latestStats) pluginRuntime.publishStats(electronPresentationStats(latestStats), latestStats);
+    } catch (error) {
+      pluginRuntime = null;
+      console.warn(`[plugins] runtime failed to start: ${error.message}`);
+    }
+  }
   scheduleStartupAppUpdateCheck();
   startAppUpdateBackgroundChecks();
 });
@@ -9540,7 +9811,7 @@ app.on('before-quit', () => {
   notchController?.dispose();
   clearTimeout(notchRateTimer);
   electronWorkbuddyLocalAuth.dispose();
-  if (skipForcedQuit) return;
+  if (skipForcedQuit) { disposePluginRuntime(); return; }
   performQuit();
 });
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {

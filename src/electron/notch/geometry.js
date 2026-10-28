@@ -13,6 +13,7 @@ const NOTCH_METRICS = Object.freeze({
   openFlare: 18,
   restingRadius: 12,
   restingFlare: 8,
+  cameraClearance: 4,
   // Hover feedback without opening: the resting outline grows a little.
   peekGrow: 10,
   peekDrop: 5,
@@ -70,7 +71,7 @@ function notchMaxHeight(display, geometry) {
 
 function notchBounds(display, geometry, expanded, contentHeight = 180, slots = { left: 17, right: 42 }, zoom = 1, maxWidth = display.bounds.width) {
   // Equal ears reserve the wider reading on both sides of the camera gap.
-  const ear = slots ? Math.ceil(Math.max(0, slots.left, slots.right) + 16) : 0;
+  const ear = slots ? Math.ceil(Math.max(0, slots.left, slots.right) + 8 + NOTCH_METRICS.cameraClearance) : 0;
   const closedShoulder = geometry.notched ? NOTCH_METRICS.restingFlare : 0;
   const baseWidth = (NOTCH_METRICS.openWidth + (geometry.notched ? 2 * NOTCH_METRICS.openFlare : 0)) * zoom;
   // Hardware-free entries hold one compact summary group, without a fake

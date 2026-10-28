@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This is the entry point for project guidance shared by every coding agent (Claude Code, Codex, Cursor, …). It is loaded automatically; the documents it routes to are not, so anything an unrelated change can break is listed under [Tripwires](#tripwires) here, with the full reasoning in the linked document.
+This file provides shared project guidance for coding agents that load it. Read linked documents as needed. [Tripwires](#tripwires) below highlight constraints that unrelated changes could violate; the linked documents explain the reasoning.
 
 ## Commands
 
@@ -29,9 +29,9 @@ To dry-run the agent without posting: `npm run agent:once -- --dry-run`.
 | watch roots, event handling or targeted refreshes | [Watching](docs/architecture.md#watching), [partition invariants](docs/providers/README.md#partition-invariants), and the matching provider note's source rules |
 | the device wire shape or Hub endpoints | `docs/API.md` |
 
-Before editing, verify the actual runtime entry point, authoritative implementation and callers; resolve any mismatch with the guidance first.
+Before changing runtime behavior, identify the relevant entry point, authoritative implementation, and affected callers. Scale investigation to the task; resolve any mismatch with documented contracts before editing.
 
-Update the matching document in the same change when its contract moves, and delete stale claims rather than preserving history.
+Reading guidance does not require editing it. Update the narrowest relevant document in the same change when existing guidance becomes inaccurate or a necessary, non-obvious contract is introduced. Fixes that restore an already documented invariant and behavior-preserving refactors normally need no documentation change. Correct or remove stale claims rather than appending history.
 
 ## Tripwires
 
@@ -53,8 +53,11 @@ Each line is a constraint that a change elsewhere has broken before, or would br
 ## Conventions
 
 - **Consider best practices first.** When picking an approach — library vs hand-roll, pattern vs custom, framework default vs override — start by checking the ecosystem convention, not by optimizing for "fewer deps" or "less code". If a hand-rolled solution is genuinely better, argue that *after* weighing the convention.
+- **Keep changes grounded in evidence.** Fix demonstrated bugs, uphold documented contracts and Tripwires, and handle expected failures within the task's scope without asking for routine confirmation. Do not add defensive machinery solely for hypothetical scenarios with no concrete basis in the code, supported runtime behavior, or requirements. Low likelihood alone is not a reason to ignore a correctness or security issue. If an unresolved concern materially affects the result, briefly state the failure mode and evidence in the final summary or PR description; otherwise, omit speculative warnings.
+- **Validate at boundaries; trust established internal contracts.** Validate and normalize external or persisted data at the boundary that owns it. Internal functions should rely on those established guarantees rather than repeat the same checks or silently replace invalid internal values with empty defaults. Add further checks when a function crosses another trust boundary or needs an invariant not already guaranteed. Preserve validation required for supported compatibility.
+- **Make abstractions earn their place.** Prefer straightforward code over helpers, wrappers, or configuration added for possible future reuse. Extract an abstraction when it removes meaningful duplication, clarifies a complex operation, or establishes a useful responsibility boundary. A single-use helper is fine when its name and structure make the caller easier to understand; reuse count alone is not the deciding factor.
 - **Don't add dependencies or new tooling without discussing it first** (in the issue or PR description).
-- **Keep documentation close to its scope and current.** This file holds cross-cutting commands, tripwires and conventions; subsystem reasoning belongs in `docs/architecture.md` and provider knowledge in `docs/providers/`. Document non-obvious constraints and gotchas, not descriptions the code already makes obvious. Avoid hardcoded counts and exhaustive lists (prefer a command like `ls src/shared/` over a hand-maintained one); verify claims against the code before writing them; delete anything that has gone stale — an outdated note is worse than none.
+- **Keep documentation close to its scope and current.** This file holds cross-cutting commands, tripwires and conventions; `docs/architecture.md` holds cross-subsystem owners, invariants and their reasons. Subsystem-specific guidance belongs with that subsystem, and provider knowledge in `docs/providers/`. Keep implementation mechanics beside the code and change summaries in the PR. Document non-obvious constraints and gotchas, not descriptions the code already makes obvious. Avoid hardcoded counts and exhaustive lists (prefer a command like `ls src/shared/` over a hand-maintained one); verify claims against the code before writing them; delete anything that has gone stale — an outdated note is worse than none.
 
 ### Commit messages
 

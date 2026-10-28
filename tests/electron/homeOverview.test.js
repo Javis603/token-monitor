@@ -34,6 +34,42 @@ const limitProviderOrderApi = require('../../src/electron/renderer/limits/provid
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
 const emptyHistory = { daily: [], monthly: [], summary: {} };
 
+test('Home carries Ollama wallet and spending amounts without inferred quota percentages', () => {
+  const { parseOllamaUsageHtml } = require('../../src/shared/providers/ollama/limits');
+  const { wallet } = require('../fixtures/ollamaCookieUsage.cjs');
+  for (const html of [wallet, wallet.replace('<span>$18.25</span>', '')]) {
+    const parsed = parseOllamaUsageHtml(html);
+    const [row] = homeLimitAccounts([{ providerId: 'ollama', windows: parsed.windows }]);
+    assert.ok(row);
+    for (const window of row.windows) {
+      assert.equal(window.remainingPercent, null);
+      assert.equal(window.showMeter, false);
+    }
+    if (html === wallet) {
+      assert.equal(row.windows.length, 1);
+      assert.equal(row.windows[0].remaining, 18.25);
+      assert.deepEqual(row.windows[0].detailEntries, [['Monthly credits used', '$4.50'], { full: 'Refills to $30 in 3 weeks.' }]);
+      assert.equal(row.windows[0].resetDescription, '');
+    } else {
+      assert.equal(row.windows.find((w) => w.metric === 'spend').value, '$4.50');
+    }
+  }
+});
+
+test('Home keeps Ollama included quota before balance and folds monthly spend into the balance tooltip', () => {
+  const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
+  const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 } });
+  const [row] = homeLimitAccounts([{ providerId: 'ollama', windows: parsed.windows }]);
+  assert.deepEqual(row.windows.map((w) => w.label), ['Included credits', 'Credit balance']);
+  assert.deepEqual(row.windows[1].detailEntries, [['Monthly credits used', '$7.50']]);
+  assert.equal(row.windows[1].remainingPercent, null);
+  assert.ok(row.windows.every((w) => w.fullWidth));
+  assert.equal(homeLimitAccounts([{ providerId: 'thirdparty', windows: parsed.windows }])[0].windows.length, 2);
+  const [hiddenSpend] = homeLimitAccounts([{ providerId: 'ollama', windows: parsed.windows }], 3, { isWindowHidden: (_, w) => w.metric === 'spend' });
+  assert.equal(hiddenSpend.windows.length, 2);
+  assert.deepEqual(hiddenSpend.windows[1].detailEntries, []);
+});
+
 test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   assert.deepEqual(homeActivityHeatmapLayout(), { cell: 9, gap: 3, radius: 2 });
 
@@ -118,7 +154,7 @@ test('Home activity tooltip survives Home rerenders and is dismissed when the vi
   assert.match(renderHome[1], /hideHomeActivityTooltip\(\{\s*preserveHover:\s*true\s*\}\)/);
   assert.match(
     renderHome[1],
-    /replaceChildren\(\.\.\.nodes\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
+    /els\.homePanel\.insertBefore\(node, current \|\| null\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
   );
   const trendsModule = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(trendsModule, 'renderHomeTrendsModule exists');
@@ -592,7 +628,7 @@ test('Home retains each account plan through quota sorting without borrowing ano
   const presentation = require('../../src/electron/renderer/limits/providerPresentation');
   const rows = homeLimitAccountsForProviders({
     providers: [
-      { provider: 'codex', accountEmail: 'pro@example.com', planLabel: 'Pro More', windows: [{ kind: 'weekly', remainingPercent: 93 }] },
+      { provider: 'codex', accountEmail: 'pro@example.com', planLabel: 'Pro 200', windows: [{ kind: 'weekly', remainingPercent: 93 }] },
       { provider: 'codex', accountEmail: 'plus@example.com', planLabel: 'Plus', windows: [{ kind: 'weekly', remainingPercent: 30 }] },
       { provider: 'zed', planLabel: 'Zed Student', windows: [{ kind: 'monthly', remainingPercent: 60 }] },
       { provider: 'claude', windows: [{ kind: 'session', remainingPercent: 70 }] }
@@ -604,7 +640,7 @@ test('Home retains each account plan through quota sorting without borrowing ano
     accountPlan: (provider) => presentation.limitProviderPlanDisplayLabel(provider, provider.planLabel)
   });
   assert.deepEqual(rows.map((row) => [row.name, row.plan]), [
-    ['plus@example.com', 'Plus'], ['zed', 'Student'], ['claude', ''], ['pro@example.com', 'Pro More']
+    ['plus@example.com', 'Plus'], ['zed', 'Student'], ['claude', ''], ['pro@example.com', 'Pro 200']
   ]);
 });
 

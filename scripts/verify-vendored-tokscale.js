@@ -254,13 +254,13 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
     }
   },
   {
-    // Fork-only client (crates/tokscale-core/src/token_monitor/proma.rs):
-    // Anthropic-shaped usage, so input excludes the cache buckets.
+    // Upstream legacy Claude SDK-shaped Agent journal: Anthropic usage, so
+    // input excludes the cache buckets. The session id is the file stem.
     client: 'proma',
     expectedRow: { model: 'claude-sonnet-4-5', input: 1200, output: 340, cacheRead: 500, cacheWrite: 80, reasoning: 0 },
     hasExplicitTotal: false,
     expectedPeriod: { totalTokens: 2120, clientTokens: 2120, clientOutputTokens: 340 },
-    expectedSession: { id: PROMA_SESSION_ID, totalTokens: 2120, outputTokens: 340, reasoningTokens: 0 },
+    expectedSession: { id: 'tm-contract', totalTokens: 2120, outputTokens: 340, reasoningTokens: 0 },
     writeFixture(home) {
       const dir = path.join(home, '.proma', 'agent-sessions');
       fs.mkdirSync(dir, { recursive: true });
@@ -385,6 +385,41 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
         }
       })}\n`);
     }
+  },
+  {
+    // Senpi (OmO Native) reuses the Pi JSONL parser. usage.reasoning is a
+    // subset of output, and tokscale leaves the additive reasoning bucket at 0.
+    client: 'senpi',
+    expectedRow: { model: 'claude-sonnet-4', input: 100, output: 40, cacheRead: 20, cacheWrite: 5, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 165, clientTokens: 165, clientOutputTokens: 40 },
+    expectedSession: { id: 'senpi-contract', totalTokens: 165, outputTokens: 40, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.omo', 'agent', 'sessions', '-tmp-workspace');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, '2026-07-29T15-19-53-436Z_senpi-contract.jsonl'), [
+        JSON.stringify({
+          type: 'session', version: 3, id: 'senpi-contract',
+          timestamp: '2026-07-29T15:19:53.436Z', cwd: '/tmp/workspace'
+        }),
+        JSON.stringify({
+          type: 'model_change', id: 'a1', parentId: null,
+          timestamp: '2026-07-29T15:19:53.500Z', provider: 'anthropic', modelId: 'claude-sonnet-4'
+        }),
+        JSON.stringify({
+          type: 'message', id: 'b2', parentId: 'a1', timestamp: '2026-07-29T15:20:01.000Z',
+          message: {
+            role: 'assistant', model: 'claude-sonnet-4', provider: 'anthropic',
+            api: 'anthropic-messages', stopReason: 'stop',
+            usage: {
+              input: 100, output: 40, cacheRead: 20, cacheWrite: 5,
+              totalTokens: 165, reasoning: 10,
+              cost: { input: 0.001, output: 0.002, cacheRead: 0.0001, cacheWrite: 0.0001, total: 0.0032 }
+            }
+          }
+        })
+      ].join('\n') + '\n');
+    }
   }
 ]);
 
@@ -485,7 +520,8 @@ function hermeticEnv(home) {
   for (const key of [
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
-    'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR'
+    'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
+    'SENPI_CODING_AGENT_DIR', 'SENPI_CODING_AGENT_SESSION_DIR'
   ]) {
     delete env[key];
   }

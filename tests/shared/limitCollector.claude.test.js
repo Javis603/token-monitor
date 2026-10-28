@@ -10,11 +10,17 @@ const test = require('node:test');
 const { aggregateLimits } = require('../../src/shared/limits/core');
 const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limits/collector');
 const { listClaudeWebOrganizations, runClaudeAuthStatus, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
+const { claudeProbeDir } = require('../../src/shared/providers/claude/probe');
+const probeTempRoot = process.platform === 'win32' ? os.homedir() : os.tmpdir();
 
 function fakeSpawnForClaudeUsage(expectedCommand = 'cmd.exe') {
   return (command, args, options) => {
     assert.equal(command, expectedCommand);
-    assert.deepEqual(args, ['/d', '/s', '/c', '""claude.cmd" /usage"']);
+    assert.equal(args[0], '/d');
+    assert.match(args[3], /--setting-sources user/);
+    assert.match(args[3], /--settings "\{\\"disableAllHooks\\":true,/);
+    assert.match(args[3], /--allowed-tools ""/);
+    assert.match(args[3], /--strict-mcp-config -- \/usage"$/);
     assert.equal(options.shell, false);
     assert.equal(options.windowsVerbatimArguments, true);
     assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
@@ -821,14 +827,17 @@ test('Claude Web authentication failure does not silently fall back to another l
 });
 
 test('Claude limits fall back to direct CLI usage in the probe directory on Windows', async t => {
-  const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-direct-probe-'));
+  const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'claude-direct-probe-'));
   t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
-  const probeDir = path.join(fixtureDir, 'probe');
+  t.mock.method(os, 'userInfo', () => ({ homedir: fixtureDir }));
+  const probeDir = claudeProbeDir({ platform: 'win32' });
   const spawnUsage = fakeSpawnForClaudeUsage();
   let spawnedCwd;
-  const provider = await fetchClaudeLimits({}, {
+  let starts = 0;
+  const deps = {
     platform: 'win32',
-    env: { CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0' },
+    env: { CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0', TOKEN_MONITOR_SHARED_DIR: path.join(fixtureDir, 'shared'),
+      APPDATA: path.join(fixtureDir, 'redirected'), LOCALAPPDATA: path.join(fixtureDir, 'redirected-local') },
     now: () => Date.parse('2026-06-11T00:00:00Z'),
     claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
     stat: async () => ({ mtimeMs: 1 }),
@@ -845,14 +854,17 @@ test('Claude limits fall back to direct CLI usage in the probe directory on Wind
     }),
     existsSync: () => false,
     isClaudeCliAuthenticated: async () => true,
-    claudeProbeDir: probeDir,
+    runClaudeVersion: async () => '',
+    claudeProbeDir: path.join(fixtureDir, 'ignored-probe'),
     spawn: (command, args, options) => {
+      starts++;
       spawnedCwd = options.cwd;
       return spawnUsage(command, args, options);
     }
-  });
+  };
+  const provider = await fetchClaudeLimits({}, deps);
 
-  assert.equal(spawnedCwd, probeDir);
+  assert.equal(spawnedCwd, await fs.realpath(probeDir));
   assert.equal((await fs.stat(probeDir)).isDirectory(), true);
   assert.equal(provider.provider, 'claude');
   assert.equal(provider.status, 'ok');
@@ -861,6 +873,13 @@ test('Claude limits fall back to direct CLI usage in the probe directory on Wind
   assert.equal(provider.windows[0].usedPercent, 5);
   assert.equal(provider.windows[1].kind, 'weekly');
   assert.equal(provider.windows[1].usedPercent, 20);
+  assert.equal(await fs.stat(path.join(fixtureDir, 'shared')).catch(() => null), null);
+  assert.equal(await fs.stat(deps.claudeProbeDir).catch(() => null), null);
+
+  await fs.rename(probeDir, probeDir + '-saved');
+  await fs.symlink(probeDir + '-saved', probeDir, 'junction');
+  await assert.rejects(fetchClaudeLimits({}, deps));
+  assert.equal(starts, 1, 'a linked fixed leaf must fail before the direct CLI starts');
 });
 
 test('Claude limits fall back to CLI usage when OAuth credentials are not discoverable', async () => {
@@ -984,8 +1003,9 @@ test('Claude auth status uses cmd.exe without shell mode on Windows', async () =
 });
 
 test('Claude PTY probing preserves the first executable Python failure', async (t) => {
-  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-claude-python-'));
-  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'token-monitor-claude-python-'));
+  t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
+  const probeDir = path.join(fixtureDir, 'probe');
   const calls = [];
 
   await assert.rejects(
@@ -999,7 +1019,8 @@ test('Claude PTY probing preserves the first executable Python failure', async (
         assert.equal(options.env.TERM, 'xterm-256color');
         assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
         assert.equal(options.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
-        const script = args[1];
+        assert.deepEqual(args.slice(0, 2), ['-I', '-c']);
+        const script = args[2];
         assert.match(script, /matched_at = None/);
         assert.match(script, /matched_at is not None and now - matched_at >= 2/);
         assert.doesNotMatch(script, /time\.sleep\(2\)/);
@@ -1024,8 +1045,9 @@ test('Claude PTY probing preserves the first executable Python failure', async (
 });
 
 test('Claude PTY prompt matching handles overlapping tokens with one carriage return', async (t) => {
-  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-claude-prompt-'));
-  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'token-monitor-claude-prompt-'));
+  t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
+  const probeDir = path.join(fixtureDir, 'probe');
   let script = '';
 
   await assert.rejects(
@@ -1036,7 +1058,8 @@ test('Claude PTY prompt matching handles overlapping tokens with one carriage re
       existsSync: () => false,
       spawn: (_command, args, options) => {
         assert.equal(options.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
-        script = args[1];
+        assert.deepEqual(args.slice(0, 2), ['-I', '-c']);
+        script = args[2];
         const child = new EventEmitter();
         child.stdout = new EventEmitter();
         child.stderr = new EventEmitter();
@@ -1059,8 +1082,9 @@ test('Claude PTY prompt matching handles overlapping tokens with one carriage re
 });
 
 test('Claude PTY usage probes suppress history without changing the parent environment', async (t) => {
-  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-claude-history-'));
-  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'token-monitor-claude-history-'));
+  t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
+  const probeDir = path.join(fixtureDir, 'probe');
   for (const platform of ['darwin', 'linux']) {
     const env = { CLAUDE_CODE_SKIP_PROMPT_HISTORY: '0' };
     const provider = await fetchClaudeLimits({}, {
@@ -1070,6 +1094,7 @@ test('Claude PTY usage probes suppress history without changing the parent envir
       stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
       readMacKeychain: false,
       isClaudeCliAuthenticated: async () => true,
+      runClaudeVersion: async () => '',
       existsSync: () => false,
       spawn: (command, _args, options) => {
         assert.equal(command, 'python3');
@@ -1095,31 +1120,39 @@ test('Claude PTY usage probes suppress history without changing the parent envir
 test('Claude CLI commands execute from a Windows path containing spaces', {
   skip: process.platform !== 'win32'
 }, async (t) => {
-  const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token monitor claude '));
+  const fixtureDir = await fs.mkdtemp(path.join(probeTempRoot, 'token monitor claude '));
+  t.mock.method(os, 'userInfo', () => ({ homedir: fixtureDir }));
+  const expectedProbeDir = claudeProbeDir({ platform: 'win32' });
   const command = path.join(fixtureDir, 'claude.cmd');
+  const handler = path.join(fixtureDir, 'fake-claude.cjs');
   t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
-  await fs.writeFile(command, [
-    '@echo off',
-    'if not "%CLAUDE_CODE_SKIP_PROMPT_HISTORY%"=="1" exit /b 2',
-    'if /I "%~1"=="auth" goto auth',
-    'if /I "%~1"=="/usage" goto usage',
-    'exit /b 1',
-    ':auth',
-    'echo {"loggedIn":true}',
-    'exit /b 0',
-    ':usage',
-    'echo Current session',
-    'echo 95%% left',
-    'echo Resets 6pm',
-    'echo Current week ^(all models^)',
-    'echo 80%% left',
-    'echo Resets Jun 19',
-    'exit /b 0'
-  ].join('\r\n'));
+  await fs.writeFile(command, `@echo off\r\n"${process.execPath}" "${handler}" %*\r\n`);
+  await fs.writeFile(handler, `
+const assert = require('node:assert/strict');
+const args = process.argv.slice(2);
+assert.equal(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY, '1');
+if (args[0] === 'auth') console.log('{"loggedIn":true}');
+else if (args.includes('--version')) console.log('2.1.177 (Claude Code)');
+else {
+  const fs = require('node:fs');
+  assert.equal(fs.realpathSync(process.cwd()), fs.realpathSync(process.env.EXPECTED_PROBE_CWD));
+  assert.equal(args.at(-1), '/usage');
+  assert.equal(args.at(-2), '--');
+  assert.equal(args[args.indexOf('--setting-sources') + 1], 'user');
+  assert.equal(JSON.parse(args[args.indexOf('--settings') + 1]).disableAllHooks, true);
+  assert.ok(args.includes('--strict-mcp-config'));
+  assert.equal(args[args.indexOf('--allowed-tools') + 1], '');
+  console.log('Current session\\n95% left\\nResets 6pm\\nCurrent week (all models)\\n80% left\\nResets Jun 19');
+}
+`);
 
   const deps = {
     platform: 'win32',
-    env: { ...process.env, TOKEN_MONITOR_CLAUDE_COMMAND: command },
+    env: { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec,
+      HOME: fixtureDir, USERPROFILE: fixtureDir, CLAUDE_CONFIG_DIR: path.join(fixtureDir, 'config'),
+      EXPECTED_PROBE_CWD: expectedProbeDir,
+      TOKEN_MONITOR_CLAUDE_COMMAND: command },
+    claudeProbeDir: path.join(fixtureDir, 'probe'),
     now: () => Date.parse('2026-06-13T07:00:00Z'),
     claudeCredentialPath: path.join(fixtureDir, 'missing-credentials.json'),
     stat: async () => {

@@ -503,8 +503,10 @@
     info.setAttribute(
       'aria-label',
       ariaLabel || entries
-        .filter(Array.isArray)
-        .map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`)
+        .map((entry) => Array.isArray(entry)
+          ? `${entry[0]}: ${entry.slice(1).filter(Boolean).join(' ')}`
+          : entry?.full)
+        .filter(Boolean)
         .join(', ')
     );
     const tooltip = detailTooltipNode(entries, columns);
@@ -1570,6 +1572,10 @@
       }
       if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
     } else if (provider.provider === 'ollama') {
+      const spent = spendWindow(provider);
+      const visibleSpend = options.showAllUsageItems || !usageItems.isLimitWindowHidden(settings()?.limitProviderHiddenItems, 'ollama', spent)
+        ? spent : null;
+      let hasWallet = false;
       const session = windowForKind(provider, 'session');
       const weekly = windowForKind(provider, 'weekly');
       if (session) {
@@ -1578,6 +1584,46 @@
         windows.append(node);
       }
       if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
+      for (const monthly of windowsForKind(provider, 'billing').filter((window) => !window.metric)) {
+        const node = limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.95);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
+      // Included credits have a real denominator. Wallet balances do not;
+      // their showMeter:false survives both local and synced presentation.
+      for (const creditsWindow of (provider.windows || []).filter((window) => isCreditsWindow(window) && window.showMeter !== false)) {
+        const amount = creditsAmount(provider, creditsWindow);
+        if (amount === null) continue;
+        const node = limitWindowNode(
+          providerWindowLabel(provider, creditsWindow, 'Balance'),
+          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow, { inferBalance: creditsWindow.showMeter !== false }) },
+          color,
+          0.95,
+          formatMoney(amount, creditsCurrency(provider, creditsWindow))
+        );
+        node.classList.add('limit-window-wide');
+        if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) node.classList.add('limit-window-no-reset');
+        windows.append(node);
+      }
+      for (const wallet of (provider.windows || []).filter((window) => isCreditsWindow(window) && window.showMeter === false)) {
+        if (!options.showAllUsageItems && usageItems.isLimitWindowHidden(settings()?.limitProviderHiddenItems, 'ollama', wallet)) continue;
+        const amount = creditsAmount(provider, wallet);
+        if (amount === null) continue;
+        const details = [];
+        if (visibleSpend && Number.isFinite(visibleSpend.used)) details.push([visibleSpend.label || 'Monthly credits used', formatMoney(visibleSpend.used, visibleSpend.currency)]);
+        if (wallet.resetDescription) details.push({ full: wallet.resetDescription });
+        const label = providerWindowLabel(provider, wallet, 'Credit balance');
+        const value = formatMoney(amount, creditsCurrency(provider, wallet));
+        const node = limitNoteRowNode({ label, summary: value, detailEntries: details.length ? details : null, ariaParts: [value] });
+        tagUsageItem(node, 'credits', label);
+        windows.append(node);
+        hasWallet = true;
+      }
+      if (!hasWallet && spent && Number.isFinite(spent.used)) {
+        const node = limitWindowNode(spent.label || 'Monthly credits used', { ...spent, showMeter: false }, color, 0.68, formatMoney(spent.used, spent.currency));
+        node.classList.add('limit-window-wide', 'limit-window-no-reset');
+        windows.append(node);
+      }
     } else if (provider.provider === 'claude') {
       // Claude usually shows session + one all-models weekly, but can carry a second
       // model-scoped weekly (the temporary "Fable only" promo cap). Render every
@@ -1735,6 +1781,9 @@
     };
     for (const record of records || []) {
       if (record) collect(renderProviderWindows(record, color, { showAllUsageItems: true }));
+      // Ollama spending stays independently selectable when folded into the wallet tooltip.
+      const spent = record?.provider === 'ollama' ? spendWindow(record) : null;
+      if (spent && Number.isFinite(spent.used)) items.set('spend', spent.label || 'Monthly credits used');
     }
     return [...items].map(([id, label]) => ({ id, label }));
   }

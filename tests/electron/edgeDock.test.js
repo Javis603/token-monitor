@@ -116,7 +116,9 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   assert.equal(number.style.fontSize, undefined);
   assert.match(css, /\.edge-dock-total-row \{[^}]*white-space: nowrap/);
   const bubble = dock.slice(dock.indexOf('function renderBubble('));
-  assert.ok(bubble.indexOf('fitCardTotal(card);') < bubble.indexOf('const height = '));
+  const freshCard = bubble.slice(bubble.indexOf('const card = cell.kind'));
+  assert.ok(freshCard.indexOf('fitCardTotal(card);') >= 0);
+  assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('const height = '));
 });
 
 test('a card commits after its reported height is clamped to the work area', () => {
@@ -135,6 +137,7 @@ test('a card commits after its reported height is clamped to the work area', () 
       const renderBubble = Function('deps', `
         const { root, stagingLayer, providerCard, statCard, fitCardTotal,
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
+        const surface = 'fixture', pluginContent = null;
         ${source}
         return renderBubble;
       `)({
@@ -199,7 +202,8 @@ const edgeDockPresentation = require('../../src/electron/renderer/edgeDock/prese
 // tests assert the same reading a surface would.
 const sessionLive = require('../../src/shared/sessionLive');
 const verticalDragSort = require('../../src/electron/renderer/verticalDragSort');
-const { matchProviderAccount } = require('../../src/shared/subscriptionDisplay');
+const { matchProviderAccount, needsRebinding } = require('../../src/shared/subscriptionDisplay');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 const accountIdentity = require('../../src/electron/renderer/accountIdentity');
 const {
   buildEdgeDockCells,
@@ -1043,7 +1047,7 @@ test('provider detail reserves natural account height without exceeding half the
   const reserve = Function(`${source}; return reserveAccountHeight;`)();
   for (const [natural, cap, expected] of [[75.15, 570, '76px'], [1200, 570, '285px'], [75.15, 228, '76px']]) {
     const accounts = { style: { flexShrink: '' }, getBoundingClientRect: () => ({ height: accounts.style.flexShrink === '0' ? natural : 48 }) };
-    const card = { querySelector: selector => selector.endsWith('accounts') ? accounts : {} };
+    const card = { querySelector: selector => selector.endsWith('accounts') ? accounts : selector.endsWith('sessions') ? {} : null };
     reserve(card, cap);
     assert.equal(accounts.style.minHeight, expected);
     assert.equal(accounts.style.flexShrink, '', 'keep the original shared scrolling/flex rule');
@@ -1573,6 +1577,43 @@ function provider(id, overrides = {}) {
     ...overrides
   };
 }
+
+test('edge dock keeps anonymous Muse accounts from every synced device', () => {
+  const museRow = (remainingPercent, updatedAt, overrides = {}) => provider('muse', {
+    accountKey: '',
+    updatedAt,
+    windows: [{ kind: 'session', label: 'Session', remainingPercent, resetsAt: '2026-09-17T12:00:00.000Z' }],
+    ...overrides
+  });
+  // Local raw row (41%) differs from its aggregate copy (40%) so the surviving
+  // subscription account proves the local copy won without being duplicated.
+  const devices = [
+    { deviceId: 'device-a', limits: { providers: [museRow(41, '2026-08-31T10:00:00.000Z')] } },
+    { deviceId: 'device-b', limits: { providers: [museRow(70, '2026-08-31T10:02:00.000Z')] } }
+  ];
+  const aggregate = aggregateLimits([
+    { deviceId: 'device-a', limits: { providers: [museRow(40, '2026-08-31T10:00:00.000Z')] } },
+    devices[1]
+  ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
+  const stats = { devices, limits: aggregate };
+  const [cell] = buildEdgeDockCells(stats, {
+    items: [{ type: 'limit', provider: 'muse' }],
+    localDeviceId: 'device-a'
+  });
+
+  // The drawn card reads the raw aggregate: both devices display.
+  assert.equal(cell.accountCount, 2);
+  assert.deepEqual(cell.accounts.map((account) => account.record.sourceDeviceId), ['device-a', 'device-b']);
+  // The subscription universe dedupes local + aggregate per device: exactly
+  // A and B, local first, no local duplicate.
+  assert.deepEqual(cell.subscriptionAccounts.map((account) => account.sourceDeviceId), ['device-a', 'device-b']);
+  assert.equal(cell.subscriptionAccounts[0].windows[0].remainingPercent, 41);
+  assert.equal(devices[0].limits.providers[0].sourceDeviceId, undefined, 'stats are not mutated');
+
+  const anonymous = { provider: 'muse', binding: { accountKey: '', accountEmail: '', profileName: '' } };
+  assert.equal(matchProviderAccount(anonymous, cell.subscriptionAccounts), null);
+  assert.equal(needsRebinding(anonymous, cell.subscriptionAccounts), true);
+});
 
 test('automatic items follow the limits order and enabled set, capped at the default count', () => {
   const stats = {

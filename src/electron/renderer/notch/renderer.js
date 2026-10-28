@@ -26,7 +26,7 @@
     const {
       el, t, appearance, prefersReducedMotion, providerLabel, limitProviderColor, readableColor, limitAccountTitle,
       markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
-      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit
+      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit, pluginHost, pluginContent
     } = shared;
     const presentation = window.TokenMonitorEdgeDockPresentation;
     const numberAnimation = window.TokenMonitorTokenNumberAnimation;
@@ -41,7 +41,7 @@
     const panelApi = window.TokenMonitorNotchPanel;
     const panel = panelApi.createNotchPanel({ document, window, el, t, state, bridge, shared: {
       markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate,
-      appearance, prefersReducedMotion, ensureRefreshButton, readableColor, limitAccountTitle, overflowText, limitWindowsView
+      appearance, prefersReducedMotion, ensureRefreshButton, readableColor, limitAccountTitle, overflowText, limitWindowsView, pluginHost, pluginContent
     } });
 
     // ---- Top notch ------------------------------------------------------------
@@ -155,6 +155,9 @@
       head.style.width = `${width}px`;
       const offset = payload.geometry.notched ? payload.geometry.gapOffset : (width - payload.geometry.gapWidth) / 2;
       head.style.gridTemplateColumns = `${offset}px ${payload.geometry.gapWidth}px ${width - offset - payload.geometry.gapWidth}px`;
+      head.style.setProperty('--notch-native-left', payload.geometry.gapWidth > 0 ? `${offset}px` : 'minmax(0, 1fr)');
+      head.style.setProperty('--notch-camera-gap', `${payload.geometry.gapWidth}px`);
+      head.style.setProperty('--notch-plugin-clearance', payload.geometry.gapWidth > 0 ? `${offset + payload.geometry.gapWidth}px` : '0px');
       head.style.setProperty('--notch-shoulder', `${payload.geometry.shoulder}px`);
       head.style.setProperty('--notch-summary-zoom', payload.geometry.summaryZoom);
       head.style.setProperty('--notch-ring-size', `${payload.geometry.summaryRingSize || 28}px`);
@@ -213,6 +216,37 @@
       return { left, right, primary: distributed ? readings[0] : null, optionalRight: Boolean(distributed) };
     }
 
+    function notchSessionActivity(block, item, mixed) {
+      block.classList.add('notch-session-activity');
+      const labels = [];
+      if (item.running) labels.push(t('notch.runningCount', { count: item.running }));
+      if (item.waiting) labels.push(t('edgeDock.waitingCount', { count: item.waiting }));
+      block.setAttribute('aria-label', labels.join(' · '));
+      if (item.running === 1 && !item.waiting) {
+        const wave = el('span', 'notch-wave');
+        wave.setAttribute('aria-hidden', 'true');
+        for (let index = 0; index < 5; index += 1) wave.append(el('i'));
+        block.append(wave);
+        return;
+      }
+      if (item.running) {
+        const count = el('span', 'notch-activity-count', String(item.running));
+        count.classList.toggle('is-mixed', mixed);
+        block.append(count);
+      }
+      if (item.waiting) {
+        const badge = el('span', 'notch-waiting-badge');
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('viewBox', '0 0 16 16');
+        icon.setAttribute('aria-hidden', 'true');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', 'M4 2.5h8a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-3.5 3v-3A1.5 1.5 0 0 1 2 9V4A1.5 1.5 0 0 1 4 2.5ZM5.5 6.5h5');
+        icon.append(path);
+        badge.append(icon, el('span', 'notch-waiting-count', String(item.waiting)));
+        block.append(badge);
+      }
+    }
+
     function notchSummary(payload) {
       const head = el('div', 'notch-summary');
       const left = el('div', 'notch-slot notch-left');
@@ -224,7 +258,18 @@
       left.append(leftContent); right.append(rightContent);
       const used = new Set();
       const parts = [];
+      const sessionOnly = payload.summary?.sessionOnly === true;
+      head.classList.toggle('is-light-session-summary', sessionOnly && payload.style !== 'black' && !payload.geometry.notched
+        && window.TokenMonitorThemePresets?.isLightHex(payload.appearance?.themeColors?.bg) === true);
+      const activityProviders = new Set((payload.summary?.items || []).filter(item => item.type === 'icon').map(item => item.provider));
       for (const item of payload.summary?.items || []) {
+        if (item.type === 'plugin') {
+          const canvas = el('canvas', 'notch-plugin-bitmap');
+          canvas.dataset.pluginRef = item.ref;
+          canvas.width = canvas.height = 40;
+          parts.push(canvas);
+          continue;
+        }
         const iconProvider = item.type === 'icon' ? item.provider : item.iconProvider;
         const mark = iconProvider ? notchIcon({ ...item, provider: iconProvider }) : null;
         if (mark) mark.setAttribute('aria-label', iconProvider === 'app' ? 'Token Monitor' : providerLabel(iconProvider));
@@ -262,7 +307,9 @@
         } else if (item.type === 'activity') {
           block.classList.add('notch-activity');
           block.style.setProperty('--notch-accent', clientColors[item.provider] || limitProviderColor(item.provider));
-          if (item.running === 1 && !item.waiting) {
+          if (sessionOnly) {
+            notchSessionActivity(block, item, activityProviders.size > 1);
+          } else if (item.running === 1 && !item.waiting) {
             const wave = el('span', 'notch-wave');
             for (let index = 0; index < 5; index += 1) wave.append(el('i'));
             block.append(wave);
@@ -291,7 +338,16 @@
       const allocation = allocateNotchSummary(payload.summary?.items || [], payload.geometry.gapWidth > 0);
       if (allocation.primary !== null) parts[allocation.primary].dataset.notchPrimary = 'true';
       rightContent.dataset.notchOptional = String(allocation.optionalRight);
-      leftContent.append(...allocation.left.map(index => parts[index]));
+      if (sessionOnly && allocation.left.length > 1) {
+        // One measured group preserves the overlap and keeps marks out of the camera gap.
+        const icons = el('span', 'notch-session-icons');
+        allocation.left.forEach((index, order) => {
+          const icon = el('span', 'notch-session-icon');
+          icon.style.zIndex = String(allocation.left.length - order);
+          icon.append(parts[index]); icons.append(icon);
+        });
+        leftContent.append(icons);
+      } else leftContent.append(...allocation.left.map(index => parts[index]));
       rightContent.append(...allocation.right.map(index => parts[index]));
       for (const [key, held] of notchNumbers) {
         if (used.has(key)) continue;
@@ -397,6 +453,9 @@
       const geometry = state.payload?.geometry;
       const compact = geometry?.gapWidth === 0;
       const budget = geometry.summaryBudget;
+      const pluginNodes = [...head.children].filter(node => node.classList.contains('plugin-content'));
+      const pluginWidth = pluginNodes.reduce((sum, node) => sum + Math.min(Number.isFinite(budget) ? budget : head.clientWidth, node.scrollWidth), 0);
+      const nativeBudget = Math.max(0, budget - pluginWidth);
       const leftContent = head.querySelector('.notch-left .notch-slot-content');
       const rightContent = head.querySelector('.notch-right .notch-slot-content');
       // Hover transforms are visual only. Fit at rest so live pushes and
@@ -405,15 +464,15 @@
       leftContent.style.transform = rightContent.style.transform = 'none';
       try {
         const gap = 12 * (Number(state.payload.appearance.zoomFactor) || 1);
-        const primaryRight = compact ? Math.min(budget, fitNotchSlot(rightContent, Infinity).minimum) : 0;
-        const left = fitNotchSlot(leftContent, compact ? Math.max(0, budget - primaryRight - gap) : budget);
-        const right = fitNotchSlot(rightContent, compact ? Math.max(0, budget - left.width - gap) : budget);
+        const primaryRight = compact ? Math.min(nativeBudget, fitNotchSlot(rightContent, Infinity).minimum) : 0;
+        const left = fitNotchSlot(leftContent, compact ? Math.max(0, nativeBudget - primaryRight - gap) : budget);
+        const right = fitNotchSlot(rightContent, compact ? Math.max(0, nativeBudget - left.width - gap) : nativeBudget);
         const firstBlock = [...leftContent.children].find(node => !node.hidden);
         const firstIcon = firstBlock?.classList.contains('notch-summary-field') ? firstBlock.firstElementChild : firstBlock;
         const firstMark = firstIcon?.querySelector('.edge-dock-mark');
         const iconInset = firstMark ? notchLogicalPoint(Math.max(0, firstMark.getBoundingClientRect().left - leftContent.getBoundingClientRect().left)) : 0;
         head.dataset.notchIconInset = iconInset;
-        const slots = { left: Math.ceil(notchLogicalPoint(left.width)), right: Math.ceil(notchLogicalPoint(right.width)), iconInset };
+        const slots = { left: Math.ceil(notchLogicalPoint(left.width)), right: Math.ceil(notchLogicalPoint(right.width + pluginWidth)), iconInset };
         const key = JSON.stringify([slots, measurement?.measuring ? measurement.id : null]);
         if (key !== lastNotchSlots) {
           lastNotchSlots = key;
@@ -544,6 +603,8 @@
     }
 
     function renderNotch(payload) {
+      const bitmapRefs = (payload.summary?.items || []).filter(item => item.type === 'plugin').map(item => item.ref);
+      pluginHost?.setExplicitDemand('notch', bitmapRefs);
       const opening = payload.expanded === true && !notchExpanded;
       if (!payload.expanded) panel.suspend();
       notchExpanded = payload.expanded === true;
@@ -580,8 +641,16 @@
       }
       const summary = contentLayer.querySelector('.notch-summary');
       if (summary) {
+        const target = 'notch.summary.content';
+        if (pluginContent && (pluginContent.hasTarget(target) || summary.querySelector('.plugin-native-content'))) {
+          let native = summary.querySelector('.plugin-native-content');
+          if (!native) { native = el('div', 'plugin-native-content'); native.append(...summary.childNodes); summary.append(native); }
+          pluginContent.render(target, native, { surface: 'notch', surfaceVariant: 'summary', nativeData: payload });
+          for (const node of summary.children) if (node.classList.contains('plugin-content')) notchSummaryObserver.observe(node);
+        }
         summary.style.visibility = payload.summaryMeasurement?.measuring ? 'hidden' : '';
         positionNotchSummary(summary, payload); reportNotchSlots(summary);
+        paintSummaryPlugins();
         animateNotchNumbers();
       }
       renderNotchPanel(payload, opening);
@@ -590,6 +659,13 @@
       // The native window can appear only after this measured shape and header
       // have been applied together, not when the raw width report reaches main.
       if (payload.summaryMeasurement?.measuring === false) bridge.reportNotchSize(0, null, { id: payload.summaryMeasurement.id, ready: true });
+    }
+    function paintSummaryPlugins() {
+      for (const canvas of contentLayer.querySelectorAll('.notch-plugin-bitmap')) {
+        const view = pluginHost?.state('notch', canvas.dataset.pluginRef);
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        if (view?.entry) pluginHost.renderTray(view, canvas, { height: 40, textColor: getComputedStyle(canvas).color, trackColor: 'rgba(255,255,255,.2)' });
+      }
     }
     let notchAnimation = null;
     function startNotchAnimation(config) {
@@ -644,7 +720,9 @@
         return Boolean(state.payload?.summary?.needsClock
           || state.payload?.expanded);
       },
-      repaint() { notchClock++; renderNotch(state.payload); }
+      repaint() { notchClock++; renderNotch(state.payload); },
+      paintSummaryPlugins,
+      pluginViewsChanged() { panel.pluginViewsChanged(); if (state.payload) renderNotch(state.payload); }
     };
   }
   return { createNotchRenderer, notchGlassGeometry };

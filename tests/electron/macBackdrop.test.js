@@ -236,16 +236,22 @@ test('the edge dock follows the widget style unless it names its own', () => {
   assert.equal(edgeDockBackdropMode({ macBackdrop: 'liquid-glass' }), 'liquid-glass');
   assert.equal(edgeDockBackdropMode({ macBackdrop: 'vibrancy', edgeDockMacBackdrop: 'liquid-glass' }), 'liquid-glass');
   assert.equal(edgeDockBackdropMode({ macBackdrop: 'liquid-glass', edgeDockMacBackdrop: 'vibrancy' }), 'vibrancy');
+  // Transparent is kept, but the material it would fall back to is the widget's.
+  assert.equal(normalizeEdgeDockBackdropMode('transparent'), 'transparent');
+  assert.equal(edgeDockBackdropMode({ macBackdrop: 'liquid-glass', edgeDockMacBackdrop: 'transparent' }), 'liquid-glass');
 });
 
 test('the edge dock style is persisted, feeds only the dock glass, and has a localized selector', () => {
   assert.match(main, /edgeDockMacBackdrop: 'inherit',/);
   assert.match(main, /merged\.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode\(merged\.edgeDockMacBackdrop\)/);
   assert.match(main, /edgeDockMacBackdrop: normalizeEdgeDockBackdropMode\(patch\.edgeDockMacBackdrop \?\? settings\.edgeDockMacBackdrop\)/);
-  // It picks the style only: System Glass and Reduce Transparency still gate the material.
-  assert.match(main, /options\.enabled\s+&& isLiquidGlassBackdrop\(edgeDockBackdropMode\(source\)\)\s+&& !options\.reducedTransparency/);
+  // The controller decides whether there is material; Reduce Transparency still keeps Liquid Glass off.
+  assert.match(main, /process\.platform === 'darwin'\s+&& isLiquidGlassBackdrop\(edgeDockBackdropMode\(source\)\)\s+&& !options\.reducedTransparency/);
   assert.match(html, /id="edgeDockMacBackdropRow" class="settings-item hidden"[\s\S]*?<select id="edgeDockMacBackdropInput"><option value="inherit"/);
-  assert.match(app, /edgeDockMacBackdropRow\?\.classList\.toggle\('hidden', !macGlass\.showBackdropControl\)/);
+  assert.match(html, /<select id="edgeDockMacBackdropInput">[^]*?<option value="transparent" data-i18n="settings\.appearance\.glassEffectTransparent">/);
+  // The dock's own style overrides System Glass, so the row only needs macOS.
+  assert.match(app, /edgeDockMacBackdropRow\?\.classList\.toggle\('hidden', !isMac\)/);
+  assert.match(app, /edgeDockWindowsBackdropRow\?\.classList\.toggle\('hidden', !isWindows\)/);
   assert.match(app, /saveSettings\(\{ edgeDockMacBackdrop: macBackdropApi\.normalizeEdgeDockBackdropMode\(els\.edgeDockMacBackdropInput\.value\) \}\)/);
   for (const key of ['macBackdrop', 'macBackdropInherit']) {
     assert.equal((i18n.match(new RegExp(`'settings\\.edgeDock\\.${key}':`, 'g')) || []).length, 6, key);
@@ -256,7 +262,7 @@ test('the notch style stores Frosted Glass as vibrancy and offers Liquid Glass o
   assert.match(html, /<select id="notchStyleInput">[^]*?<option value="vibrancy"[^]*?<option value="liquid-glass"/);
   assert.doesNotMatch(html, /<select id="notchStyleInput">[^]*?<option value="default"/);
   // Material pushes and appearance previews re-run this pass, so the select follows both.
-  assert.match(app, /edgeDockMacBackdropRow\?\.classList\.toggle\('hidden', !macGlass\.showBackdropControl\);\s+syncNotchStyleInput\(settings\);/);
+  assert.match(app, /syncEdgeDockMacBackdropInput\(settings\);\s+syncNotchStyleInput\(settings\);/);
 
   const start = app.indexOf('function syncNotchStyleInput(');
   const end = app.indexOf('function syncNotchCapabilities(', start);
@@ -285,5 +291,30 @@ test('the notch style stores Frosted Glass as vibrancy and offers Liquid Glass o
   assert.equal(run({ saved: { notchStyle: 'liquid-glass-clear' }, liquidGlassSupported: false }).value, 'vibrancy');
   // Where Liquid Glass cannot be drawn, the option hides and the saved choice shows its fallback.
   assert.deepEqual(run({ saved: { notchStyle: 'liquid-glass' }, liquidGlassSupported: false }), { value: 'vibrancy', hidden: true, disabled: true });
-  assert.deepEqual(run({ saved: { notchStyle: 'liquid-glass' }, preview: { systemGlass: false } }), { value: 'vibrancy', hidden: true, disabled: true });
+  // An explicit notch style overrides System Glass, so turning it off keeps the choice.
+  assert.deepEqual(run({ saved: { notchStyle: 'liquid-glass' }, preview: { systemGlass: false } }), { value: 'liquid-glass', hidden: false, disabled: false });
+});
+
+test('the macOS dock style select offers Transparent everywhere and Liquid Glass only where it exists', () => {
+  const start = app.indexOf('function syncNotchStyleInput(');
+  const end = app.indexOf('function syncNotchCapabilities(', start);
+  const { normalizeEdgeDockBackdropMode } = require('../../src/electron/macBackdropMode');
+  const run = ({ saved, liquidGlassSupported = true }) => {
+    const option = { hidden: false, disabled: false };
+    const select = { value: '', querySelector: (selector) => selector === 'option[value="liquid-glass"]' ? option : null };
+    const context = vm.createContext({
+      els: { edgeDockMacBackdropInput: select },
+      state: { settings: saved },
+      pendingSettingsPatches: new Set(),
+      nativeMaterialState: { liquidGlassSupported },
+      macBackdropApi: { appearanceState, isLiquidGlassBackdrop, normalizeEdgeDockBackdropMode }
+    });
+    vm.runInContext(`${app.slice(start, end)}; syncEdgeDockMacBackdropInput();`, context);
+    return { value: select.value, hidden: option.hidden };
+  };
+
+  assert.deepEqual(run({ saved: {} }), { value: 'inherit', hidden: false });
+  assert.deepEqual(run({ saved: { edgeDockMacBackdrop: 'transparent' }, liquidGlassSupported: false }), { value: 'transparent', hidden: true });
+  assert.deepEqual(run({ saved: { edgeDockMacBackdrop: 'liquid-glass' }, liquidGlassSupported: false }), { value: 'vibrancy', hidden: true });
+  assert.deepEqual(run({ saved: { edgeDockMacBackdrop: 'liquid-glass' } }), { value: 'liquid-glass', hidden: false });
 });

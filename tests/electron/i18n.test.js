@@ -333,8 +333,8 @@ test('Notch settings and shared labels are present in every bundled locale', () 
   const fs = require('node:fs');
   const path = require('node:path');
   const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
-  const notch = html.split('id="notchFeature"')[1].split('id="tokscaleGroup"')[0];
-  const keys = [...new Set(['settings.advanced.experimental', 'settings.notch.experimentalNote',
+  const notch = html.split('id="notchFeature"')[1].split('id="floatingBubbleOptions"')[0];
+  const keys = [...new Set(['settings.notch.title',
     'settings.notch.accountTitle', 'settings.notch.summaryModeNote',
     ...['sessions', 'tray', 'custom'].map(mode => `settings.notch.summaryMode.${mode}Note`),
     ...[...notch.matchAll(/data-i18n="([^"]+)"/g)].map(match => match[1])])];

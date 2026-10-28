@@ -7,6 +7,7 @@
     <script src="floatingBubbleBoot.js"></script>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="edgeDock/composer.css" />
+    <link rel="stylesheet" href="pluginViews.css" />
   </head>
   <body>
     <main class="shell">
@@ -117,66 +118,6 @@
               </button>
               <div id="advancedSettingsDetails" class="advanced-settings-details hidden" inert>
                 <div class="advanced-settings-body">
-                  <div id="experimentalFeaturesGroup" class="settings-group advanced-settings-block hidden">
-                    <div class="settings-group-header"><span data-i18n="settings.advanced.experimental">Experimental features</span></div>
-                    <div id="notchFeature" class="presence-feature hidden">
-                      <label class="checkbox-label settings-item">
-                        <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.experimentalTitle">Notch Panel (Experimental)</span></span>
-                        <input id="notchInput" type="checkbox" aria-describedby="notchExperimentalNote" />
-                        <span id="notchExperimentalNote" class="settings-item-desc" data-i18n="settings.notch.experimentalNote">Still in development. Appearance, behavior and settings may change with updates.</span>
-                      </label>
-                      <div id="notchOptions" class="presence-feature-body hidden">
-                        <p class="settings-note" data-i18n="settings.notch.note">Click to open. What shows while closed follows Collapsed content.</p>
-                        <div class="settings-item">
-                          <span id="notchHoverActionLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hoverAction">On hover</span></span>
-                          <div class="inline-options" role="radiogroup" aria-labelledby="notchHoverActionLabel">
-                            <label class="inline-option"><input type="radio" name="notchHoverAction" value="peek" /><span data-i18n="settings.notch.hoverAction.peek">Grow</span></label>
-                            <label class="inline-option"><input type="radio" name="notchHoverAction" value="open" /><span data-i18n="settings.notch.hoverAction.open">Open</span></label>
-                          </div>
-                        </div>
-                        <div id="notchHoverDelayRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchHoverDelayLabel" class="settings-item-title" data-i18n="settings.notch.hoverDelay">Hover duration</span><button id="resetNotchHoverDelayButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset hover duration" data-i18n-aria-label="settings.notch.resetHoverDelay">↺</button></span></span><input id="notchHoverDelayInput" type="range" min="0" max="600" step="100" aria-labelledby="notchHoverDelayLabel" /><span class="slider-value" aria-hidden="true"></span></div>
-                        <div class="settings-item">
-                          <span id="notchShapeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.shape">Entry shape</span></span>
-                          <div class="inline-options" role="radiogroup" aria-labelledby="notchShapeLabel">
-                            <label class="inline-option"><input type="radio" name="notchShape" value="auto" /><span data-i18n="settings.notch.shape.auto">Auto</span></label>
-                            <label class="inline-option"><input type="radio" name="notchShape" value="notch" /><span data-i18n="settings.notch.shape.notch">Notch</span></label>
-                            <label class="inline-option"><input type="radio" name="notchShape" value="pill" /><span data-i18n="settings.notch.shape.pill">Pill</span></label>
-                          </div>
-                        </div>
-                        <div class="settings-item">
-                          <span id="notchSizeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.size">Size</span></span>
-                          <div class="inline-options is-wrapping" role="radiogroup" aria-labelledby="notchSizeLabel">
-                            <label class="inline-option"><input type="radio" name="notchSize" value="small" /><span data-i18n="settings.edgeDock.size.small">Small</span></label>
-                            <label class="inline-option"><input type="radio" name="notchSize" value="medium" /><span data-i18n="settings.edgeDock.size.medium">Medium</span></label>
-                            <label class="inline-option"><input type="radio" name="notchSize" value="large" /><span data-i18n="settings.edgeDock.size.large">Large</span></label>
-                            <label class="inline-option"><input type="radio" name="notchSize" value="custom" /><span data-i18n="settings.edgeDock.size.custom">Custom</span></label>
-                          </div>
-                        </div>
-                        <div id="notchCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="notchCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="notchCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
-                        <div id="notchMoreOptionsGroup" class="settings-group cursor-account-group">
-                          <button id="notchMoreOptionsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="notchMoreOptionsDetails">
-                            <span data-i18n="settings.edgeDock.moreOptions">More options</span>
-                            <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
-                          </button>
-                          <div id="notchMoreOptionsDetails" class="cursor-settings-details hidden" inert>
-                            <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="notchStyleInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="black" data-i18n="settings.notch.black">Pure black</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.progressiveBlur">Blur behind the panel</span></span><input id="notchProgressiveBlurInput" type="checkbox" /></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.showSummary">Show collapsed summary</span></span><input id="notchSummaryInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.showSummaryNote">Off: hide the summary while closed.</span></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hideSummaryInFullScreen">Hide summary in full screen</span></span><input id="notchHideSummaryInFullScreenInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.hideSummaryInFullScreenNote">Other apps only.</span></label>
-                            <label id="notchRunningIndicatorRow" class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.iconRings">Quota &amp; activity status</span></span><input id="notchRunningIndicatorInput" type="checkbox" /></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.warnColors">Highlight low limits in colour</span></span><input id="notchWarnColorsInput" type="checkbox" /></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="notchHapticInput" type="checkbox" /></label>
-                            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.swipeGestures">Swipe gestures</span></span><input id="notchSwipeGesturesInput" type="checkbox" aria-describedby="notchSwipeGesturesNote" /><span id="notchSwipeGesturesNote" class="settings-item-desc" data-i18n="settings.notch.swipeGesturesNote">Swipe down on the notch to open, up on its top row to close. Swipe up again to hide the summary; swipe down to bring it back.</span></label>
-                            <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.summaryMode">Collapsed content</span></span><select id="notchSummaryModeInput" aria-describedby="notchSummaryModeNote"><option value="sessions" data-i18n="settings.notch.summaryMode.sessions">Session activity only</option><option value="auto" data-i18n="settings.notch.summaryMode.auto">Automatic</option><option value="tray" data-i18n="settings.notch.summaryMode.tray">Same as tray</option><option value="custom" data-i18n="settings.notch.summaryMode.custom">Custom</option></select><span id="notchSummaryModeNote" class="settings-item-desc" data-i18n="settings.notch.summaryMode.sessionsNote">Show running or waiting sessions. Hide the summary when there is no activity.</span></label>
-                            <div id="notchComposerDetails" class="cursor-settings-details hidden" inert>
-                              <div id="notchComposer" class="tray-composer" data-surface="notch"></div>
-                            </div>
-                          </div>
-                        </div>
-                        <div id="notchItemsComposer" class="edge-dock-composer notch-limits-composer"></div>
-                      </div>
-                    </div>
-                  </div>
                   <div id="tokscaleGroup" class="settings-group advanced-settings-block maintenance-panel">
                     <div class="settings-group-header maintenance-header"><span>Tokscale</span><span data-i18n="settings.tokscale.source">Bundled CLI dependency</span></div>
                     <div class="maintenance-version-grid tokscale-version-grid">
@@ -358,7 +299,8 @@
                       <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
                     </button>
                     <div id="edgeDockMoreOptionsDetails" class="cursor-settings-details hidden" inert>
-                      <label id="edgeDockMacBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockMacBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
+                      <label id="edgeDockWindowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockWindowsBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="host-backdrop" data-i18n="settings.appearance.glassEffectSystem">System</option><option value="transparent" data-i18n="settings.appearance.glassEffectTransparent">Transparent</option></select></label>
+                      <label id="edgeDockMacBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockMacBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option><option value="transparent" data-i18n="settings.appearance.glassEffectTransparent">Transparent</option></select></label>
                       <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.warnColors">Highlight low limits in colour</span></span><input id="edgeDockWarnColorsInput" type="checkbox" /></label>
                       <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.runningIndicator">Show running indicator</span></span><input id="edgeDockRunningIndicatorInput" type="checkbox" /></label>
                       <label id="edgeDockHapticRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="edgeDockHapticInput" type="checkbox" /></label>
@@ -368,6 +310,63 @@
                 </div>
                 <div id="edgeDockComposerRow" class="presence-feature-body hidden">
                   <div id="edgeDockComposer" class="edge-dock-composer"></div>
+                </div>
+              </div>
+              <div id="notchFeature" class="presence-feature hidden">
+                <label class="checkbox-label settings-item">
+                  <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.title">Notch Panel</span></span>
+                  <input id="notchInput" type="checkbox" />
+                </label>
+                <div id="notchOptions" class="presence-feature-body hidden">
+                  <p class="settings-note" data-i18n="settings.notch.note">Click to open. What shows while closed follows Collapsed content.</p>
+                  <div class="settings-item">
+                    <span id="notchHoverActionLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hoverAction">On hover</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="notchHoverActionLabel">
+                      <label class="inline-option"><input type="radio" name="notchHoverAction" value="peek" /><span data-i18n="settings.notch.hoverAction.peek">Grow</span></label>
+                      <label class="inline-option"><input type="radio" name="notchHoverAction" value="open" /><span data-i18n="settings.notch.hoverAction.open">Open</span></label>
+                    </div>
+                  </div>
+                  <div id="notchHoverDelayRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchHoverDelayLabel" class="settings-item-title" data-i18n="settings.notch.hoverDelay">Hover duration</span><button id="resetNotchHoverDelayButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset hover duration" data-i18n-aria-label="settings.notch.resetHoverDelay">↺</button></span></span><input id="notchHoverDelayInput" type="range" min="0" max="600" step="100" aria-labelledby="notchHoverDelayLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+                  <div class="settings-item">
+                    <span id="notchShapeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.shape">Entry shape</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="notchShapeLabel">
+                      <label class="inline-option"><input type="radio" name="notchShape" value="auto" /><span data-i18n="settings.notch.shape.auto">Auto</span></label>
+                      <label class="inline-option"><input type="radio" name="notchShape" value="notch" /><span data-i18n="settings.notch.shape.notch">Notch</span></label>
+                      <label class="inline-option"><input type="radio" name="notchShape" value="pill" /><span data-i18n="settings.notch.shape.pill">Pill</span></label>
+                    </div>
+                  </div>
+                  <div class="settings-item">
+                    <span id="notchSizeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.size">Size</span></span>
+                    <div class="inline-options is-wrapping" role="radiogroup" aria-labelledby="notchSizeLabel">
+                      <label class="inline-option"><input type="radio" name="notchSize" value="small" /><span data-i18n="settings.edgeDock.size.small">Small</span></label>
+                      <label class="inline-option"><input type="radio" name="notchSize" value="medium" /><span data-i18n="settings.edgeDock.size.medium">Medium</span></label>
+                      <label class="inline-option"><input type="radio" name="notchSize" value="large" /><span data-i18n="settings.edgeDock.size.large">Large</span></label>
+                      <label class="inline-option"><input type="radio" name="notchSize" value="custom" /><span data-i18n="settings.edgeDock.size.custom">Custom</span></label>
+                    </div>
+                  </div>
+                  <div id="notchCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="notchCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="notchCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+                  <div class="notch-page-settings"><div class="edge-dock-composer-heading"><span id="notchPagesLabel" data-i18n="settings.notch.pages">Pages</span><span class="edge-dock-composer-heading-actions"><span class="edge-dock-composer-heading-hint" data-i18n="settings.notch.pagesHint">Drag to reorder · Click to show or hide</span><button id="resetNotchPageOrderButton" class="edge-dock-composer-reset" type="button" aria-label="Reset order" data-i18n="settings.edgeDock.reset" data-i18n-aria-label="settings.views.resetOrder" hidden>Reset</button></span></div><div id="notchPageChoices" class="notch-page-chips" role="group" aria-labelledby="notchPagesLabel"></div><p class="settings-note" data-i18n="settings.notch.pagesNote">Use the arrows to browse when space is limited.</p></div>
+                  <div id="notchMoreOptionsGroup" class="settings-group cursor-account-group">
+                    <button id="notchMoreOptionsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="notchMoreOptionsDetails">
+                      <span data-i18n="settings.edgeDock.moreOptions">More options</span>
+                      <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
+                    </button>
+                    <div id="notchMoreOptionsDetails" class="cursor-settings-details hidden" inert>
+                      <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="notchStyleInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="black" data-i18n="settings.notch.black">Pure black</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.progressiveBlur">Blur behind the panel</span></span><input id="notchProgressiveBlurInput" type="checkbox" /></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.showSummary">Show collapsed summary</span></span><input id="notchSummaryInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.showSummaryNote">Off: hide the summary while closed.</span></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.hideSummaryInFullScreen">Hide summary in full screen</span></span><input id="notchHideSummaryInFullScreenInput" type="checkbox" /><span class="settings-item-desc" data-i18n="settings.notch.hideSummaryInFullScreenNote">Other apps only.</span></label>
+                      <label id="notchRunningIndicatorRow" class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.iconRings">Quota &amp; activity status</span></span><input id="notchRunningIndicatorInput" type="checkbox" /></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.warnColors">Highlight low limits in colour</span></span><input id="notchWarnColorsInput" type="checkbox" /></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="notchHapticInput" type="checkbox" /></label>
+                      <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.swipeGestures">Swipe gestures</span></span><input id="notchSwipeGesturesInput" type="checkbox" aria-describedby="notchSwipeGesturesNote" /><span id="notchSwipeGesturesNote" class="settings-item-desc" data-i18n="settings.notch.swipeGesturesNote">Swipe sideways to change pages. Grow mode: down on the entry opens, up on the top row closes; up again hides the summary, down restores it.</span></label>
+                      <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.notch.summaryMode">Collapsed content</span></span><select id="notchSummaryModeInput" aria-describedby="notchSummaryModeNote"><option value="sessions" data-i18n="settings.notch.summaryMode.sessions">Session activity only</option><option value="auto" data-i18n="settings.notch.summaryMode.auto">Automatic</option><option value="tray" data-i18n="settings.notch.summaryMode.tray">Same as tray</option><option value="custom" data-i18n="settings.notch.summaryMode.custom">Custom</option></select><span id="notchSummaryModeNote" class="settings-item-desc" data-i18n="settings.notch.summaryMode.sessionsNote">Show running or waiting sessions. Hide the summary when there is no activity.</span></label>
+                      <div id="notchComposerDetails" class="cursor-settings-details hidden" inert>
+                        <div id="notchComposer" class="tray-composer" data-surface="notch"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div id="notchItemsComposer" class="edge-dock-composer notch-limits-composer"></div>
                 </div>
               </div>
               <div class="presence-feature">
@@ -935,12 +934,12 @@
                       </div>
                       <div id="opencodeCookieFields" class="opencode-credential-fields hidden">
                         <p class="settings-note">
-                          <strong>1.</strong> <span data-i18n="settings.opencode.step1Before">Open</span> <code>opencode.ai/auth</code> <span data-i18n="settings.opencode.step1After">in your browser and sign in.</span><br>
+                          <strong>1.</strong> <span data-i18n="settings.opencode.step1Before">Open</span> <code>opencode.ai/console</code> <span data-i18n="settings.opencode.step1After">in your browser and sign in.</span><br>
                           <strong>2.</strong> <span data-i18n="settings.opencode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> opencode.ai.</span><br>
-                          <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>auth</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
+                          <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>__Host-console_session</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
                           <strong>4.</strong> <span data-i18n="settings.opencode.step4">Paste it below and click Save.</span>
                         </p>
-                        <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="auth=..." data-i18n-placeholder="settings.opencode.cookiePlaceholder" aria-label="Cookie" data-i18n-aria-label="settings.opencode.kindCookie"></textarea>
+                        <textarea id="opencodeCookieInput" rows="3" spellcheck="false" placeholder="__Host-console_session=..." data-i18n-placeholder="settings.opencode.cookiePlaceholder" aria-label="Cookie" data-i18n-aria-label="settings.opencode.kindCookie"></textarea>
                       </div>
                       <div class="settings-actions">
                         <button id="opencodeCookieSubmit" data-i18n="settings.opencode.saveProfile">保存</button>
@@ -1634,6 +1633,16 @@
             </div>
           </div>
         </div>
+
+        <div class="settings-group settings-collapsible-group settings-plugins-group">
+          <button class="settings-section-toggle" type="button" data-settings-section="plugins" aria-expanded="false" aria-controls="pluginsSettingsDetails">
+            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-plugins" aria-hidden="true"></span><span data-i18n="settings.plugins.title">Plugins</span><span class="plugin-section-experimental" data-i18n="settings.plugins.experimental">Experimental</span></span>
+            <span class="settings-section-meta"><span id="pluginsSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
+          </button>
+          <div id="pluginsSettingsDetails" class="settings-section-details hidden">
+            <div id="pluginSettingsList" class="plugin-settings-list"></div>
+          </div>
+        </div>
       </section>
 
       <section class="total-panel">
@@ -1651,6 +1660,7 @@
 
       <section id="fixedPeriodMessage" class="fixed-period-message hidden" role="status" aria-live="polite"></section>
 
+      <section id="pluginMainPanel" class="plugin-main-panel hidden"></section>
       <section id="homePanel" class="home-panel hidden"></section>
       <section id="breakdown" class="breakdown"></section>
       <div id="session-detail-head" class="detail-head hidden"></div>
@@ -1673,21 +1683,23 @@
           <span class="live-token-rate-icon" aria-hidden="true"></span>
           <span id="liveTokenRateValue" class="live-token-rate-value">— tok/s</span>
         </button>
-        <div id="appUpdatePill" class="update-pill hidden">
-          <button id="appUpdatePillAction" type="button" class="update-pill-action" data-status="available">
-            <svg class="update-pill-progress" viewBox="0 0 34 30" aria-hidden="true">
-              <path id="appUpdatePillProgress" class="update-pill-progress-bar" pathLength="100" d="M17 .5H27A6.5 6.5 0 0 1 33.5 7V23A6.5 6.5 0 0 1 27 29.5H7A6.5 6.5 0 0 1 .5 23V7A6.5 6.5 0 0 1 7 .5Z" />
-            </svg>
-            <span class="update-pill-icon" aria-hidden="true"></span>
-            <span class="update-pill-badge" aria-hidden="true"></span>
-          </button>
-        </div>
-        <span id="footerActionSlot">
-          <span id="utilityActions" class="utility-actions">
-            <button id="refreshButton" class="refresh-button" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true"></span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
-            <button id="settingsButton" class="icon-button settings-icon-button" aria-label="Settings"></button>
+        <div class="footer-update-actions">
+          <div id="appUpdatePill" class="update-pill hidden">
+            <button id="appUpdatePillAction" type="button" class="update-pill-action" data-status="available">
+              <svg class="update-pill-progress" viewBox="0 0 34 30" aria-hidden="true">
+                <path id="appUpdatePillProgress" class="update-pill-progress-bar" pathLength="100" d="M17 .5H27A6.5 6.5 0 0 1 33.5 7V23A6.5 6.5 0 0 1 27 29.5H7A6.5 6.5 0 0 1 .5 23V7A6.5 6.5 0 0 1 7 .5Z" />
+              </svg>
+              <span class="update-pill-icon" aria-hidden="true"></span>
+              <span class="update-pill-badge" aria-hidden="true"></span>
+            </button>
+          </div>
+          <span id="footerActionSlot">
+            <span id="utilityActions" class="utility-actions">
+              <button id="refreshButton" class="refresh-button" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true"></span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
+              <button id="settingsButton" class="icon-button settings-icon-button" aria-label="Settings"></button>
+            </span>
           </span>
-        </span>
+        </div>
       </footer>
       <div id="appUpdatePopover" class="app-update-popover" popover="manual" role="dialog" aria-labelledby="appUpdatePopoverTitle">
         <div class="app-update-popover-header">
@@ -1801,6 +1813,7 @@
     <script src="../../shared/compactMoney.js"></script>
     <script src="../../shared/fontSettings.js"></script>
     <script src="../../shared/trayText.js"></script>
+    <script src="../../shared/plugins/placements.js"></script>
     <script src="edgeDock/items.js"></script>
     <script src="edgeDock/presentation.js"></script>
     <script src="edgeDock/composer.js"></script>
@@ -1808,6 +1821,12 @@
     <script src="tokenRatePresentation.js"></script>
     <script src="../motionPreference.js"></script>
     <script src="../tokenNumberAnimation.js"></script>
+    <script src="edgeDock/railNumberRoll.js"></script>
+    <script src="pluginUi.js"></script><script src="pluginContent.js"></script><script src="pluginViews.js"></script>
+    <script src="pluginSettings.js"></script>
+
+    <script src="pluginMainPages.js"></script>
+
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>
     <script src="../macBackdropMode.js"></script>
@@ -1815,6 +1834,9 @@
     <script src="trayTypography.js"></script>
     <script src="trayComposer.js"></script>
     <script src="diagnosticsPanel.js"></script>
+    <script src="notch/pageSettings.js"></script>
+    <script src="displaySettings.js"></script>
+    <script src="displaySettingsPreview.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

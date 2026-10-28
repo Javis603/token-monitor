@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { customPricingPath } = require('./tokscaleConfig');
+const { senpiWatchSources } = require('./providers/senpi/paths');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
@@ -59,6 +60,7 @@ const {
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { sessionActivityProvidersFor, refreshSessionActivity } = require('./sessionActivityRegistry');
 const { isSessionActivityClient } = require('./sessionActivityProviders');
+const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const { readT3Activities } = require('./t3SessionActivity');
 const { createProcessStartBatch } = require('./processStarts');
 const { catpawDatabaseName, catpawSourcesFingerprint } = require('./providers/catpaw/paths');
@@ -753,6 +755,13 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (Object.prototype.hasOwnProperty.call(session, 'promptCache')) {
         target.promptCache = session.promptCache;
       }
+      if (isSessionReasoningEffortClient(session.client)) {
+        const freshAt = Date.parse(session.lastUsedAt) || 0;
+        const retainedAt = Date.parse(target.lastUsedAt) || 0;
+        if (freshAt >= retainedAt && Object.prototype.hasOwnProperty.call(session, 'reasoningEffort')) {
+          target.reasoningEffort = normalizeReasoningEffort(session.reasoningEffort);
+        } else if (freshAt > retainedAt) target.reasoningEffort = null;
+      }
       // The turn boundary is copied in all three states, matching what the
       // fresh scan said: `true` finished, `false` open, absent unknown. Copying
       // only `true` left a stale `true` in a derived period after its session
@@ -1427,6 +1436,9 @@ const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage']);
 // The watcher only ever wants paths, so it keeps its original shape rather than
 // learning about check ids it would immediately discard.
 function clientWatchCandidates(clientsCsv, options = {}) {
+  const senpiSources = String(clientsCsv).split(',').map(id => id.trim()).includes('senpi')
+    ? options.senpiSources || senpiWatchSources(options) : null;
+  if (senpiSources) options = { ...options, senpiSources };
   const byClient = {};
   for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv, options))) {
     // The Copilot data root already keeps its `otel/` child through the
@@ -1440,6 +1452,7 @@ function clientWatchCandidates(clientsCsv, options = {}) {
       ))
       .map((root) => root.dir);
   }
+  if (senpiSources) byClient.senpi = [...new Set([...byClient.senpi, ...senpiSources.dirs])];
   return byClient;
 }
 
@@ -1541,6 +1554,10 @@ function watchPathsForClients(clientsCsv, options = {}) {
 function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options = {}) {
   const rootsByClient = watchRoots || watchClientRootsForClients(clientsCsv, options);
   const attributed = { ...rootsByClient };
+  if (rootsByClient.senpi) {
+    const sources = options.senpiSources || senpiWatchSources(options);
+    attributed.senpi = [...sources.targets.map(target => target.path), ...(normalizeCustomScanPaths(options.customScanPaths, options).senpi || [])];
+  }
   const exporter = copilotExporterWatch(os.homedir());
   if (exporter && rootsByClient.copilot) {
     const exporterDir = path.resolve(exporter.dir);
@@ -1789,6 +1806,14 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   };
   const withBasename = (client, basename) =>
     (candidates[client] || []).filter((dir) => path.basename(dir) === basename);
+
+  if (candidates.senpi) {
+    const sources = options.senpiSources || senpiWatchSources(options);
+    const targets = sources.targets.map(target => ({ ...target, path: canonicalRoot(target.path) }));
+    bound('senpi', candidates.senpi, (_parts, file) => !targets.some(target =>
+      file === target.path || target.path.startsWith(file + path.sep)
+      || (target.recursive && file.startsWith(target.path + path.sep))));
+  }
 
   // Hermes: SQLite totals and per-call logs provide usage and date evidence. Each explicit
   // watch root — the home AND every profile dir under it — is kept by the
@@ -2465,7 +2490,8 @@ function openWatch(chokidar, config = {}) {
     customScanPaths: config.customScanPaths,
     cursorDesktopRoots: config.cursorDesktopRoots,
     homeDir: config.homeDir,
-    env: config.env
+    env: config.env,
+    senpiSources: config.senpiSources
   }), config.usageDirs || config.dirs || [], config.activitySources || []);
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
@@ -2586,7 +2612,8 @@ function startCollector(options) {
     customScanPaths: options.customScanPaths,
     env: options.env || options.sessionMetadataDeps?.env,
     homeDir: options.homeDir,
-    platform: options.platform
+    platform: options.platform,
+    cwdDir: options.cwdDir
   };
   const qoderCnSources = qoderCnSourcesForClients(normalizedClients, {
     homeDir: options.homeDir,
@@ -3182,7 +3209,9 @@ function startCollector(options) {
           durationMs: lastTickDurationMs
         });
       }
-      if (!anchored) setupWatchers();
+      // A newly written Senpi header can expose a different project's child
+      // tree during an anchored Today tick, before the fallback interval.
+      if (!anchored || trackedClients.has('senpi')) setupWatchers();
       if (Number.isFinite(tickOptions.activityRevision)) {
         collectedActivityRevision = Math.max(collectedActivityRevision, tickOptions.activityRevision);
         initialCollectionComplete = true;
@@ -3449,13 +3478,16 @@ function startCollector(options) {
 
   function setupWatchers() {
     if (!watchEnabled || watchIntervalFallback) return;
+    const watchOptions = trackedClients.has('senpi')
+      ? { ...sourceOptions, senpiSources: senpiWatchSources(sourceOptions) }
+      : sourceOptions;
     // Canonicalise before anything derives from these roots, so the paths handed
     // to chokidar and the paths clientsForWatchPath matches against are the same
     // strings. Resolving only one of the two would silently break attribution.
     // One dirExists sweep feeds both maps: probing twice would let a directory
     // created between the sweeps land in the watch list and not the attribution
     // list, or the reverse.
-    const watchRoots = watchClientRootsForClients(clients, sourceOptions);
+    const watchRoots = watchClientRootsForClients(clients, watchOptions);
     const rootsByClient = Object.fromEntries(
       Object.entries(watchRoots)
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
@@ -3465,7 +3497,7 @@ function startCollector(options) {
     // copilot prefix. Canonicalised through the same function so both still
     // compare equal to the paths chokidar reports.
     const attributionRootsByClient = Object.fromEntries(
-      Object.entries(watchAttributionRootsForClients(clients, watchRoots, sourceOptions))
+      Object.entries(watchAttributionRootsForClients(clients, watchRoots, watchOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
     // A subset of the same roots, matched separately so a write to a client's
@@ -3483,7 +3515,7 @@ function startCollector(options) {
       target: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.target)),
       ...(source.runtimeFile ? { runtimeFile: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.runtimeFile)) } : {}) }));
     const dirs = [...new Set([...usageDirs, ...activitySources.map((source) => source.dir)])];
-    const directoryKey = JSON.stringify([dirs, activitySources]);
+    const directoryKey = JSON.stringify([dirs, activitySources, watchOptions.senpiSources]);
     if (directoryKey === watchedDirectoryKey) return;
     closeWatchers();
     if (dirs.length === 0) {
@@ -3560,6 +3592,7 @@ function startCollector(options) {
           cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
           homeDir: sourceOptions.homeDir,
           env: sourceOptions.env,
+          senpiSources: watchOptions.senpiSources,
           usePolling,
           pollingEntryLimit: watchPollingEntryLimit
         },

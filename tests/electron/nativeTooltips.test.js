@@ -14,7 +14,9 @@ test('Electron surfaces do not create native HTML or SVG tooltips', () => {
   const offenders = [];
   for (const file of files) {
     const source = fs.readFileSync(path.join(electronDir, file), 'utf8');
-    if (/\.title\s*=(?!=)|\.setAttribute\(\s*['"]title['"]|\stitle=["']|data-i18n-title/.test(source)
+    // Document titles name windows/tabs; they do not create hover tooltips.
+    const tooltipSource = source.replace(/\bdocument\.title\s*=/g, 'documentTitle =');
+    if (/\.title\s*=(?!=)|\.setAttribute\(\s*['"]title['"]|\stitle=["']|data-i18n-title/.test(tooltipSource)
       || file.replaceAll('\\', '/') === 'renderer/usageCharts.js' && /<title>/.test(source)) offenders.push(file);
   }
   assert.deepEqual(offenders, [], 'use accessible labels/descriptions or app-owned detail tooltips');

@@ -234,7 +234,7 @@ test('the renderer wires the ring driver and the shared card animator', () => {
   // account and window identities the projection now carries.
   assert.match(dock, /node\.dataset\.ringMotionKey = `\$\{cell\.id\}\\0\$\{cell\.headlineAccount \|\| ''\}\\0\$\{cell\.headlineWindowKey \|\| ''\}`;/);
   assert.match(dock, /node\.dataset\.ringResetAt = cell\.resetsAt \|\| '';/);
-  assert.match(dock, /const ringSnapshot = captureRingResetMotion\(\);[\s\S]*?railNode\.replaceChildren\(\.\.\.nodes\);\s*const refilling = animateRingResets\(ringSnapshot\);/);
+  assert.match(dock, /const ringSnapshot = captureRingResetMotion\(\);[\s\S]*?railNode\.insertBefore\(node, cursor\);[\s\S]*?const refilling = animateRingResets\(ringSnapshot\);/);
   assert.match(dock, /strokeDashoffset: `\$\{fromOffset\}px`/);
   // The card is the page's animator scoped to the card layer, bound in
   // commitCard around the same replaceChildren the refresh performs.

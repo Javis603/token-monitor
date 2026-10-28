@@ -30,6 +30,42 @@
     view.setDetailTooltip(node, entries);
   }
 
+  function sessionReasoningEffortForRow(row) {
+    const main = row?.groupRows?.[0] || row;
+    return sessionLive.isSessionReasoningEffortClient(main?.client) ? sessionLive.normalizeReasoningEffort(main.reasoningEffort) : null;
+  }
+
+  function sessionModelMetadataLabel(row) {
+    return [row?.modelLabel ?? sessionModelLabel(row), sessionReasoningEffortForRow(row)].filter(Boolean).join(' · ');
+  }
+
+  // Shared by full session rows and compact Home/Dock/Notch rows. Settings
+  // remain visible after live metrics expire, including archived sessions.
+  function sessionModelMetadataNode(document, row, { translate, view, ...options }) {
+    const node = document.createElement('span');
+    node.className = 'session-model-metadata';
+    const modelLabel = row?.modelLabel ?? sessionModelLabel(row);
+    const entries = row?.modelTooltipEntries ?? sessionModelTooltipEntries(row, options);
+    if (modelLabel) {
+      const model = document.createElement('span');
+      model.className = 'session-models';
+      model.textContent = modelLabel;
+      if (entries.length > 1) view.setDetailTooltip(model, entries);
+      node.append(model);
+    }
+    const effort = sessionReasoningEffortForRow(row);
+    if (effort) {
+      if (modelLabel) node.append(document.createTextNode(' · '));
+      const setting = document.createElement('span');
+      setting.className = 'session-reasoning-effort';
+      setting.textContent = effort;
+      const label = translate('session.reasoningEffortLabel', { effort });
+      setting.setAttribute('aria-label', label);
+      node.append(setting);
+    }
+    return node;
+  }
+
   // The compact status every glanceable session row shows (Home list, Edge Dock
   // card, Notch Panel): a context gauge while the session is live, otherwise the
   // prompt-cache estimate. The cache badge's tooltip still names the context
@@ -40,6 +76,7 @@
     const context = sessionActivityState(statusRow, now) !== 'idle'
       ? statusRow.context || sessionContextForRow(statusRow, now) || null : null;
     const promptCache = sessionLive.sessionPromptCacheForRow(statusRow, now);
+    if (!context && !promptCache) return null;
     const span = (className, text) => {
       const node = document.createElement('span');
       node.className = className;
@@ -47,7 +84,6 @@
       return node;
     };
     if (!context) {
-      if (!promptCache) return null;
       const badge = span(`${prefix}-cache`, translate('session.cacheEstimate', { minutes: promptCache.minutes }));
       setSessionTooltip(badge, statusRow, promptCache, translate, view);
       return badge;
@@ -258,7 +294,7 @@
       client,
       clientLabel,
       modelLabel,
-      titleParts: [clientLabel, modelLabel].filter(Boolean)
+      titleParts: [clientLabel, modelLabel, sessionReasoningEffortForRow(session)].filter(Boolean)
     };
   }
 
@@ -389,7 +425,7 @@
   }
 
   function sessionRowDetailAvailable(row) {
-    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi', 'omp'].includes(row?.client)
+    return ['claude', 'codebuddy', 'codex', 'opencode', 'dsh', 'workbuddy', 'pi', 'omp', 'senpi'].includes(row?.client)
       || (row?.client === 'reasonix' && row?.sessionDetailAvailable === true);
   }
 
@@ -467,6 +503,7 @@
       // window so the reading survives the turn ending, and the dock's card
       // calls the same function so the two cannot disagree.
       context: sessionContextForRow(session, now),
+      reasoningEffort: session.reasoningEffort,
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
@@ -517,7 +554,8 @@
           && native.sessionId === session.sessionId && ['running', 'waiting'].includes(sessionActivityState(native, now))) {
           session = { ...session, archived: false, deleted: false, sourceDeleted: false,
             lastUsedAt: native.lastUsedAt, liveActivity: native.liveActivity,
-            turnEnded: native.turnEnded, waitingForInput: native.waitingForInput };
+            turnEnded: native.turnEnded, waitingForInput: native.waitingForInput,
+            ...(sessionLive.isSessionReasoningEffortClient(session.client) ? { reasoningEffort: native.reasoningEffort ?? null } : {}) };
         }
         if (isReasonixSyntheticSession(session, key)) return null;
         const value = finiteNumber(session?.totalTokens);
@@ -572,6 +610,7 @@
           running: running || undefined,
           activityState,
           context: sessionContextForRow(session, now),
+          reasoningEffort: session.reasoningEffort,
           contextSnapshot: !archived ? sessionLive.sessionContextRow(session) : undefined,
           promptCache: sessionLive.sessionPromptCacheForRow(session, now),
           client,
@@ -728,7 +767,7 @@
     const group = { client: parent.client, models, modelCosts, totalTokens: value };
     const modelLabel = sessionModelLabel(group);
     const display = main[0];
-    const titleParts = [display.clientLabel || display.client, modelLabel].filter(Boolean).join(' · ');
+    const titleParts = [display.clientLabel || display.client, modelLabel, sessionReasoningEffortForRow(display)].filter(Boolean).join(' · ');
     const usageMetrics = sessionUsageMetrics();
     for (const row of groupRows) {
       const metrics = row.usageMetrics;
@@ -868,6 +907,9 @@
   return {
     setSessionTooltip,
     sessionStatusNode,
+    sessionReasoningEffortForRow,
+    sessionModelMetadataLabel,
+    sessionModelMetadataNode,
     applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,

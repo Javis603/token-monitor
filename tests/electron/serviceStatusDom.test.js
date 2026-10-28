@@ -216,10 +216,11 @@ test('Home limit percentages use the compact Limits view typography', () => {
   assert.match(cssRule(css, '.home-limit-window .home-list-value'), /line-height:\s*1\.1/);
 });
 
-test('Home billing-only limit rows span the full summary width', () => {
+test('Home billing-only and explicit wide limit rows span the full summary width', () => {
   const css = readRendererFile('styles.css');
-  assert.match(cssRule(css, '.home-limit-window:only-child'), /grid-column:\s*1 \/ -1/);
-  assert.match(cssRule(css, '.home-limit-window:only-child'), /max-width:\s*none/);
+  const rule = cssRule(css, '.home-limit-window:only-child,\n.home-limit-window-wide');
+  assert.match(rule, /grid-column:\s*1 \/ -1/);
+  assert.match(rule, /max-width:\s*none/);
 });
 
 test('Home limit provider settings stay compact and list only enabled providers', () => {

@@ -101,6 +101,44 @@
     };
   }
 
+  // Wrapped flex rows retain their measured item widths. Repack the proposed
+  // order using the same start alignment and gaps as the browser's flex layout.
+  function createWrappedDragSnapshot(items, draggedId, grab = {}, layout = {}) {
+    const rows = (items || []).map(row => ({ id: normalizeId(row.id),
+      left: numberOr(row.left, 0), top: numberOr(row.top, 0),
+      width: Math.max(0, numberOr(row.width, 0)), height: Math.max(0, numberOr(row.height, 0)) })).filter(row => row.id);
+    const sourceIndex = rows.findIndex(row => row.id === normalizeId(draggedId));
+    const source = rows[sourceIndex];
+    return { rows, sourceIndex, width: Math.max(1, numberOr(layout.width, 1)),
+      columnGap: Math.max(0, numberOr(layout.columnGap, 0)), rowGap: Math.max(0, numberOr(layout.rowGap, 0)),
+      originX: source ? source.left + numberOr(grab.x, 0) : 0,
+      originY: source ? source.top + numberOr(grab.y, 0) : 0 };
+  }
+
+  function resolveWrappedDrag(snapshot, offset = {}) {
+    const { rows = [], sourceIndex = -1 } = snapshot || {};
+    if (!rows[sourceIndex]) return { targetIndex: -1, shifts: [], order: [] };
+    const source = rows[sourceIndex];
+    const centerX = source.left + source.width / 2 + numberOr(offset.x, 0);
+    const centerY = source.top + source.height / 2 + numberOr(offset.y, 0);
+    let targetIndex = sourceIndex, bestY = Infinity, bestX = Infinity;
+    rows.forEach((row, index) => {
+      const dy = Math.abs(centerY - row.top - row.height / 2), dx = Math.abs(centerX - row.left - row.width / 2);
+      if (dy < bestY - .5 || (Math.abs(dy - bestY) <= .5 && dx < bestX)) { targetIndex = index; bestY = dy; bestX = dx; }
+    });
+    const order = reorderIds(rows.map(row => row.id), sourceIndex, targetIndex);
+    const byId = new Map(rows.map(row => [row.id, row]));
+    const startX = Math.min(...rows.map(row => row.left));
+    let x = startX, y = Math.min(...rows.map(row => row.top)), height = 0;
+    const positions = new Map();
+    for (const id of order) {
+      const row = byId.get(id);
+      if (x > startX && x + row.width > snapshot.width + .01) { x = startX; y += height + snapshot.rowGap; height = 0; }
+      positions.set(id, { x, y }); x += row.width + snapshot.columnGap; height = Math.max(height, row.height);
+    }
+    return { targetIndex, order, shifts: rows.map(row => ({ x: positions.get(row.id).x - row.left, y: positions.get(row.id).y - row.top })) };
+  }
+
   // Auto-scroll while the pointer sits in the `zone` band at either edge of the
   // scroller. A panel shorter than two bands resolves upward first; that only
   // happens far below the widget's minimum height.
@@ -115,5 +153,5 @@
     return 0;
   }
 
-  return { createVerticalDragSnapshot, resolveVerticalDrag, edgeScrollDelta };
+  return { createVerticalDragSnapshot, resolveVerticalDrag, createWrappedDragSnapshot, resolveWrappedDrag, edgeScrollDelta };
 });

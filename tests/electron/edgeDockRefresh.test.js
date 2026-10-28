@@ -68,6 +68,7 @@ function fixture() {
     rendererSnapshots: { stamp: (_, stats) => stats },
     rendererStats: (stats) => stats,
     scheduleMacWidgetSnapshot() {},
+    pluginRuntime: null,
     updateTrayDisplay() {},
     mainWindow: null,
     dashboardWindow: null,

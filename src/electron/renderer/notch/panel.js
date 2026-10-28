@@ -1,19 +1,24 @@
 'use strict';
 
-// The open top entry: a fixed-height panel with four pages, built from the
+// The open top entry: a fixed-height panel with built-in and plugin pages, built from the
 // cells the main process projects (limits, today, month, sessions, live rate)
 // and the panel facts it adds (the last seven days). It shares the widget's
 // typography and colours but owns its own layout; no card or list styles from
 // the Edge Dock or the Home view are reused here.
 (function exposeNotchPanel(root, factory) {
-  const api = factory();
+  const placements = typeof module === 'object' && module.exports ? require('../../../shared/plugins/placements') : root.TokenMonitorPluginPlacements;
+  const api = factory(placements);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorNotchPanel = api;
-})(typeof window !== 'undefined' ? window : null, function createNotchPanelApi() {
+})(typeof window !== 'undefined' ? window : null, function createNotchPanelApi(placements) {
+  const scrollApi = (typeof module === 'object' && module.exports) ? require('./scrollGesture') : window.TokenMonitorNotchScroll;
+  const { swipeDestination } = scrollApi;
   // Logical points inside the zoomed panel. The band shares the camera row on
   // an attached shell and becomes the first row of a capsule.
   const PANEL_METRICS = Object.freeze({ band: 34, pages: 176, gap: 6, bottom: 18, padding: 24 });
   const PAGES = Object.freeze(['home', 'limits', 'sessions', 'breakdown']);
+  // Plugin pages follow the fixed ones as `plugin:<pluginId>/<viewId>`.
+  const PLUGIN_PAGE_PREFIX = 'plugin:';
   const LIMIT_COLUMNS = 3;
   const BREAKDOWN_ROWS = 4;
 
@@ -34,7 +39,8 @@
 
   function createNotchPanel({ document, window, el, t, state, bridge, shared }) {
     const { markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, usageCostNode: usageCost, formatRate,
-      appearance, prefersReducedMotion, readableColor = color => color, limitAccountTitle, overflowText, limitWindowsView } = shared;
+      appearance, prefersReducedMotion, readableColor = color => color, limitAccountTitle, overflowText, limitWindowsView, pluginHost = null, pluginContent = null } = shared;
+    const pluginViews = window.TokenMonitorPluginViews;
     const presentation = window.TokenMonitorEdgeDockPresentation;
     const trayText = window.TokenMonitorTrayText;
     const balance = window.TokenMonitorLimitBalanceDisplay;
@@ -53,53 +59,218 @@
     const view = { page: 'home', limitPage: 0, breakdownPeriod: 'today', scrub: null };
     const node = el('div', 'notch-panel');
     const band = el('div', 'notch-band');
-    const tabs = el('div', 'notch-tabs');
-    tabs.setAttribute('role', 'tablist');
-    const tabPill = el('span', 'notch-tab-pill');
-    tabs.append(tabPill);
+    const leadTrack = el('div', 'notch-tabs');
+    leadTrack.setAttribute('role', 'tablist');
+    const leadPill = el('span', 'notch-tab-pill');
+    leadTrack.append(leadPill);
+    const leadRail = el('div', 'notch-tab-rail is-leading');
+    leadRail.append(leadTrack);
+    const trailTrack = el('div', 'notch-tabs');
+    const trailPill = el('span', 'notch-tab-pill');
+    trailTrack.append(trailPill);
+    const trailRail = el('div', 'notch-tab-rail is-trailing');
+    trailRail.append(trailTrack);
     const status = el('div', 'notch-status');
-    band.append(tabs, el('div', 'notch-band-gap'), status);
-    const pages = el('div', 'notch-pages');
-    const pageNodes = new Map(PAGES.map((page) => [page, el('section', `notch-page notch-page-${page}`)]));
-    for (const [page, pageNode] of pageNodes) {
-      pageNode.dataset.page = page;
-      pageNode.setAttribute('role', 'tabpanel');
-      pageNode.id = `notch-page-${page}`;
-      pageNode.setAttribute('aria-labelledby', `notch-tab-${page}`);
-      pages.append(pageNode);
+    const trailLane = el('div', 'notch-band-trailing');
+    trailLane.append(trailRail, status);
+    band.append(leadRail, el('div', 'notch-band-gap'), trailLane);
+    // Pages fill the left lane first and continue right of the camera; only
+    // when both sides are full does a track become a pager, stepped one slot
+    // per press. Steps never change the selection or take focus.
+    const stepBack = el('button', 'notch-tab-step is-back');
+    const stepForward = el('button', 'notch-tab-step is-forward');
+    for (const [button, path] of [[stepBack, 'M6.5 1.5 3 5l3.5 3.5'], [stepForward, 'M3.5 1.5 7 5 3.5 8.5']]) {
+      button.type = 'button';
+      button.tabIndex = -1;
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 10 10');
+      svg.setAttribute('aria-hidden', 'true');
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      line.setAttribute('d', path);
+      line.setAttribute('fill', 'none');
+      line.setAttribute('stroke', 'currentColor');
+      line.setAttribute('stroke-width', '1.6');
+      line.setAttribute('stroke-linecap', 'round');
+      line.setAttribute('stroke-linejoin', 'round');
+      svg.append(line);
+      button.append(svg);
     }
-    node.append(band, pages);
+    activateOnPress(stepBack, () => stepWindow(-1));
+    activateOnPress(stepForward, () => stepWindow(1));
+    // A slot is a 34px tab plus the 2px gap; the track adds 2px of padding on
+    // each side, so n slots occupy 36n + 2 and a pair of 16px step buttons
+    // costs exactly one slot.
+    const TAB_SLOT = 36;
+    const STEP_SLOT = 18;
+    // The pager window (start index into the segment) survives data pushes; it
+    // re-centres on the selected page only when the page or the segment moved.
+    let tabWindow = 0;
+    let lastFitPage;
+    let lastPagerKey = '';
+    function stepWindow(delta) {
+      tabWindow += delta;
+      fitTabs();
+    }
+    function fitTabs() {
+      // clientWidth is already in logical points: CSS zoom widens the layout
+      // viewport it reports, while the 36px slot is counted in the same unit.
+      const total = pageOrder.length;
+      const L = leadRail.clientWidth > 0 ? Math.max(0, Math.floor((leadRail.clientWidth - 2) / TAB_SLOT)) : total;
+      const T = trailRail.clientWidth > 0 ? Math.max(0, Math.floor((trailRail.clientWidth - 2) / TAB_SLOT)) : 0;
+      let leadPages = [], trailPages = [], segment = null, k = 0, segmentTrack = null;
+      if (total <= L) leadPages = [...pageOrder];
+      else if (total <= L + T) { leadPages = pageOrder.slice(0, L); trailPages = pageOrder.slice(L); }
+      else if (T >= 2) { leadPages = pageOrder.slice(0, L); segment = pageOrder.slice(L); k = T - 1; segmentTrack = trailTrack; }
+      else { segment = [...pageOrder]; k = L >= 2 ? L - 1 : Math.max(1, L); segmentTrack = leadTrack; }
+      // The step pair needs a whole slot of its own; a single-slot lead rail
+      // shows one whole tab instead, and keyboard selection still pages it.
+      const stepsShown = Boolean(segment) && (segmentTrack === trailTrack || L >= 2);
+      if (segment) {
+        const key = `${segmentTrack === trailTrack ? 'trail' : 'lead'}|${k}|${segment.join('|')}`;
+        if (key !== lastPagerKey || view.page !== lastFitPage) {
+          const index = Math.max(0, segment.indexOf(view.page));
+          tabWindow = index - Math.floor((k - 1) / 2);
+        }
+        tabWindow = Math.max(0, Math.min(tabWindow, Math.max(0, segment.length - k)));
+        lastPagerKey = key;
+        if (segmentTrack === trailTrack) trailPages = segment.slice(tabWindow, tabWindow + k);
+        else leadPages = segment.slice(tabWindow, tabWindow + k);
+      } else {
+        tabWindow = 0;
+        lastPagerKey = '';
+      }
+      lastFitPage = view.page;
+      const shown = new Set([...leadPages, ...trailPages]);
+      for (const [page, button] of tabButtons) button.hidden = !shown.has(page);
+      stepBack.hidden = stepForward.hidden = !stepsShown;
+      stepBack.disabled = !stepsShown || tabWindow <= 0;
+      stepForward.disabled = !stepsShown || tabWindow >= segment.length - k;
+      // Leave stable tracks in place on data pushes: reparenting a focused
+      // tab would blur it even when the resulting order is identical.
+      const focused = document.activeElement;
+      const leadChildren = [leadPill], trailChildren = [trailPill];
+      if (segmentTrack === leadTrack) leadChildren.push(stepBack);
+      leadChildren.push(...leadPages.map(page => tabButtons.get(page)));
+      if (segmentTrack === leadTrack) leadChildren.push(stepForward);
+      if (segmentTrack === trailTrack) trailChildren.push(stepBack);
+      trailChildren.push(...trailPages.map(page => tabButtons.get(page)));
+      if (segmentTrack === trailTrack) trailChildren.push(stepForward);
+      leadChildren.push(...[...tabButtons.values()].filter(button => button.hidden));
+      if (!segmentTrack) leadChildren.push(stepBack, stepForward);
+      for (const [track, children] of [[leadTrack, leadChildren], [trailTrack, trailChildren]]) {
+        const current = [...track.children];
+        if (current.length !== children.length || children.some((child, index) => current[index] !== child)) track.append(...children);
+      }
+      // An empty trailing track would still paint its padded fill beside the camera.
+      trailTrack.hidden = trailChildren.length === 1;
+      if (focused && tabButtons.get(focused.dataset?.page) === focused && !focused.hidden && document.activeElement !== focused) focused.focus({ preventScroll: true });
+      const owned = trailPages.map((page) => tabButtons.get(page).id).filter(Boolean).join(' ');
+      if (owned) leadTrack.setAttribute('aria-owns', owned); else leadTrack.removeAttribute('aria-owns');
+      stepBack.setAttribute('aria-label', t('settings.notch.previousPage'));
+      stepForward.setAttribute('aria-label', t('settings.notch.nextPage'));
+      syncPill(leadPill, leadPages.indexOf(view.page), segmentTrack === leadTrack && stepsShown ? STEP_SLOT : 0);
+      syncPill(trailPill, trailPages.indexOf(view.page), segmentTrack === trailTrack && stepsShown ? STEP_SLOT : 0);
+      const selected = tabButtons.get(view.page);
+      const entry = selected && !selected.hidden ? selected : tabButtons.get(leadPages[0] || trailPages[0]);
+      for (const button of tabButtons.values()) button.tabIndex = button === entry ? 0 : -1;
+    }
+    // Across the camera, position the incoming pill while it is hidden and
+    // retain its opacity transition. Local moves keep the existing spring.
+    function syncPill(pill, index, offset) {
+      if (index < 0) { pill.classList.add('is-off'); return; }
+      const wasOff = pill.classList.contains('is-off');
+      if (wasOff) pill.style.transitionProperty = 'opacity';
+      pill.style.transform = `translateX(${index * TAB_SLOT + offset}px)`;
+      if (wasOff) { void pill.offsetWidth; pill.style.transitionProperty = ''; }
+      pill.classList.remove('is-off');
+    }
+    const pages = el('div', 'notch-pages');
+    // The fixed pages first, then any plugin pages the user placed here.
+    let pageOrder = [...PAGES];
+    const pageNodes = new Map();
     const tabButtons = new Map();
     const TAB_ICONS = {
       home: 'home', limits: 'limits', sessions: 'session', breakdown: 'model'
     };
-    for (const page of PAGES) {
-      const button = el('button', 'notch-tab');
+    const domId = (page) => encodeURIComponent(page);
+    function pluginPageState(page) {
+      return pluginHost?.state('notch', page.slice(PLUGIN_PAGE_PREFIX.length));
+    }
+    function pluginIconName(page) {
+      const ref = page.slice(PLUGIN_PAGE_PREFIX.length);
+      return pluginPageState(page)?.icon || payload?.panel?.pluginCatalog?.[ref]?.icon || 'dot';
+    }
+    function pageTitle(page) {
+      if (!page.startsWith(PLUGIN_PAGE_PREFIX)) return t(`notch.tab.${page}`);
+      const ref = page.slice(PLUGIN_PAGE_PREFIX.length);
+      return pluginPageState(page)?.title || payload?.panel?.pluginCatalog?.[ref]?.title || t('notch.tab.plugin');
+    }
+    function addPage(page) {
+      const isPlugin = page.startsWith(PLUGIN_PAGE_PREFIX);
+      const pageNode = el('section', `notch-page notch-page-${isPlugin ? 'plugin' : page}`);
+      pageNode.dataset.page = page;
+      pageNode.setAttribute('role', 'tabpanel');
+      pageNode.id = `notch-page-${domId(page)}`;
+      pageNode.setAttribute('aria-labelledby', `notch-tab-${domId(page)}`);
+      pages.append(pageNode);
+      pageNodes.set(page, pageNode);
+      const button = el('button', `notch-tab${isPlugin ? ' notch-tab-plugin' : ''}`);
       button.type = 'button';
       button.dataset.page = page;
       button.setAttribute('role', 'tab');
-      button.id = `notch-tab-${page}`;
-      button.setAttribute('aria-controls', `notch-page-${page}`);
-      const icon = el('span', `view-switcher-icon view-icon-${TAB_ICONS[page]}`);
+      button.id = `notch-tab-${domId(page)}`;
+      button.setAttribute('aria-controls', pageNode.id);
+      const icon = isPlugin ? el('span', 'notch-tab-plugin-icon') : el('span', `view-switcher-icon view-icon-${TAB_ICONS[page]}`);
       icon.setAttribute('aria-hidden', 'true');
       button.append(icon, el('span', 'notch-tab-badge'));
       activateOnPress(button, () => selectPage(page));
       tabButtons.set(page, button);
-      tabs.append(button);
+      leadTrack.append(button);
     }
-    tabs.addEventListener('keydown', (event) => {
-      const current = PAGES.indexOf(view.page);
-      const index = event.key === 'Home' ? 0 : event.key === 'End' ? PAGES.length - 1
-        : event.key === 'ArrowRight' ? (current + 1) % PAGES.length
-          : event.key === 'ArrowLeft' ? (current + PAGES.length - 1) % PAGES.length : -1;
+    for (const page of PAGES) addPage(page);
+    node.append(band, pages);
+    // Placed plugin pages arrive with each push; a page whose plugin went away
+    // is removed, and the panel falls back to Home if it was showing.
+    function syncPluginPages(refs, builtins, order) {
+      const wanted = (Array.isArray(refs) && pluginHost ? refs : []).map((ref) => `${PLUGIN_PAGE_PREFIX}${ref}`);
+      const selectedBuiltins = Array.isArray(builtins) ? PAGES.filter(page => builtins.includes(page)) : PAGES;
+      const next = placements.orderNotchPages([...selectedBuiltins, ...wanted], order);
+      if (next.join('|') === pageOrder.join('|')) return;
+      dropGesture();
+      clearPageMotion();
+      for (const page of pageOrder) {
+        if (next.includes(page) || PAGES.includes(page)) continue;
+        releasePluginPage(page);
+        pageNodes.get(page)?.remove();
+        tabButtons.get(page)?.remove();
+        pageNodes.delete(page);
+        tabButtons.delete(page);
+        pageKeys.delete(page);
+      }
+      for (const page of wanted) if (!pageNodes.has(page)) addPage(page);
+      pageOrder = next;
+      fitTabs();
+      if (!pageOrder.includes(view.page)) { releasePluginPage(view.page); view.page = pageOrder[0] || ''; }
+    }
+    for (const track of [leadTrack, trailTrack]) track.addEventListener('keydown', (event) => {
+      if (!pageOrder.length) return;
+      const focusedPage = event.target?.closest?.('.notch-tab')?.dataset.page;
+      const current = pageOrder.indexOf(pageOrder.includes(focusedPage) ? focusedPage : view.page);
+      const index = event.key === 'Home' ? 0 : event.key === 'End' ? pageOrder.length - 1
+        : event.key === 'ArrowRight' ? (current + 1) % pageOrder.length
+          : event.key === 'ArrowLeft' ? (current + pageOrder.length - 1) % pageOrder.length : -1;
       if (index < 0) return;
       event.preventDefault();
-      selectPage(PAGES[index]);
-      tabButtons.get(PAGES[index]).focus({ preventScroll: true });
+      const page = pageOrder[index];
+      selectPage(page);
+      // fitTabs re-centred the pager window on the new selection, so its
+      // button is visible whichever track it landed in.
+      tabButtons.get(page)?.focus({ preventScroll: true });
     });
 
     let payload = null;
     let pageKeys = new Map();
+    let sessionScroll = { active: 0, recent: 0 };
     let enteringTimer = null;
     let fitHomeFuel = () => {};
     const numberAnimation = window.TokenMonitorTokenNumberAnimation;
@@ -117,15 +288,15 @@
     // previous node's glyphs are captured before the page is replaced.
     function captureRolls(pageNode) {
       const snapshot = new Map();
-      for (const node of pageNode.querySelectorAll('[data-roll-key]')) {
-        snapshot.set(node.dataset.rollKey, { text: node.dataset.rollText, value: Number(node.dataset.rollValue), glyphs: numberAnimation.capture(node) });
+      for (const node of pageNode.querySelectorAll('[data-roll-key]:not([data-pv-roll])')) {
+        snapshot.set(node.dataset.rollKey, { text: node.dataset.rollText, value: numberAnimation.currentCountValue?.(node) ?? Number(node.dataset.rollValue), glyphs: numberAnimation.capture(node) });
       }
       settleRolls();
       return snapshot;
     }
     function playRolls(pageNode, snapshot) {
       if (prefersReducedMotion()) return;
-      for (const node of pageNode.querySelectorAll('[data-roll-key]')) {
+      for (const node of pageNode.querySelectorAll('[data-roll-key]:not([data-pv-roll])')) {
         const previous = snapshot.get(node.dataset.rollKey);
         const next = node.textContent;
         if (!previous || previous.text === next || !/[0-9]/.test(previous.text) || !/[0-9]/.test(next)) continue;
@@ -134,15 +305,7 @@
         if (numberAnimation.normalize(appearance().tokenNumberAnimation) === 'roll') {
           settle = numberAnimation.beginRoll(node, previous.text, next, !(value < previous.value), null, previous.glyphs);
         } else {
-          const started = performance.now();
-          let frame;
-          const step = (now) => {
-            const progress = Math.min(1, (now - started) / numberAnimation.duration);
-            node.textContent = rollFormats.get(node)(previous.value + (value - previous.value) * (1 - (1 - progress) ** 4));
-            if (progress < 1) frame = requestAnimationFrame(step);
-          };
-          frame = requestAnimationFrame(step);
-          settle = () => { cancelAnimationFrame(frame); node.textContent = next; };
+          settle = numberAnimation.beginCount(node, previous.value, value, rollFormats.get(node), { toText: next });
         }
         const timer = setTimeout(() => { settle(); rolls.delete(node); }, numberAnimation.duration);
         rolls.set(node, { settle, timer });
@@ -212,36 +375,129 @@
 
     // ---- Band -----------------------------------------------------------------
 
-    function selectPage(page) {
-      if (!PAGES.includes(page) || view.page === page) return;
-      const previous = PAGES.indexOf(view.page);
+    // A plugin page is mounted only while selected, so the plugin samples
+    // nothing for a page the user is not looking at.
+    function releasePluginPage(page) {
+      if (!page?.startsWith(PLUGIN_PAGE_PREFIX)) return;
+      pageNodes.get(page)?.replaceChildren();
+      pageKeys.delete(page);
+      pluginHost?.refreshDemand();
+    }
+
+    function commitPage(page) {
+      const previous = pageOrder.indexOf(view.page);
       settleRolls();
       stopTitleReading();
       view.scrub = null;
+      releasePluginPage(view.page);
       view.page = page;
       for (const [name, pageNode] of pageNodes) {
-        pageNode.classList.toggle('is-before', PAGES.indexOf(name) < PAGES.indexOf(page));
+        pageNode.classList.toggle('is-before', pageOrder.indexOf(name) < pageOrder.indexOf(page));
       }
-      pages.dataset.direction = PAGES.indexOf(page) > previous ? 'forward' : 'back';
+      pages.dataset.direction = pageOrder.indexOf(page) > previous ? 'forward' : 'back';
       paintTabs();
       renderPage(page);
     }
 
+    let gesture = null;
+    let shown = true;
+    function clearPageMotion() {
+      for (const pageNode of pageNodes.values()) {
+        pageNode.style.opacity = '';
+        pageNode.style.transform = '';
+        pageNode.style.filter = '';
+      }
+      if (pages.classList.contains('is-handoff')) {
+        // CSS transitions resume only after resting styles are committed.
+        void pages.offsetWidth;
+        pages.classList.remove('is-handoff');
+        for (const pill of [leadPill, trailPill]) { pill.style.transition = ''; pill.style.opacity = ''; }
+      }
+    }
+    function dropGesture() {
+      gesture = null;
+      for (const page of pageOrder) if (page !== view.page) releasePluginPage(page);
+      const strip = node.querySelector('.notch-limits');
+      strip?.classList.remove('is-handoff');
+    }
+    function selectPage(page) {
+      if (!pageOrder.includes(page) || view.page === page) return;
+      dropGesture();
+      clearPageMotion();
+      commitPage(page);
+    }
+    // An empty page must not overwrite the last scroll positions.
+    function captureSessionScroll(pageNode) {
+      if (pageNode.childElementCount) {
+        sessionScroll = {
+          active: pageNode.querySelector('.notch-active-list')?.scrollTop || 0,
+          recent: pageNode.querySelector('.notch-recent-list')?.scrollTop || 0
+        };
+      }
+      return sessionScroll;
+    }
+    function dropHiddenPages() {
+      for (const [page, pageNode] of pageNodes) {
+        if (page === view.page) continue;
+        if (page === 'sessions') captureSessionScroll(pageNode);
+        pageNode.replaceChildren();
+        pageKeys.delete(page);
+      }
+    }
+    function showDrag(origin, target, amount) {
+      if (origin === target) amount = 0;
+      const travel = Math.min(1, Math.abs(amount));
+      pages.classList.add('is-handoff');
+      pageOrder.forEach((page, index) => {
+        const pageNode = pageNodes.get(page);
+        const shift = index === origin ? -amount : Math.sign(target - origin) * (1 - travel);
+        pageNode.style.opacity = index === origin || index === target ? '1' : '0';
+        pageNode.style.transform = `translateX(${shift * gesture.pageStep}px)`;
+        pageNode.style.filter = 'none';
+      });
+      placeTabs(origin + (target - origin) * travel, { track: true });
+    }
+    // Tab springs are disabled during native tracking.
+    function placeTabs(position) {
+      const clamped = Math.max(0, Math.min(pageOrder.length - 1, position));
+      const from = Math.floor(clamped), to = Math.ceil(clamped), fraction = clamped - from;
+      for (const [track, pill] of [[leadTrack, leadPill], [trailTrack, trailPill]]) {
+        const buttons = [...track.children].filter(child => child.classList.contains('notch-tab') && !child.hidden);
+        const a = buttons.indexOf(tabButtons.get(pageOrder[from]));
+        const b = buttons.indexOf(tabButtons.get(pageOrder[to]));
+        const offset = stepBack.parentNode === track && !stepBack.hidden ? STEP_SLOT : 0;
+        pill.style.transition = 'none';
+        if (a < 0 && b < 0) { pill.classList.add('is-off'); continue; }
+        const index = a >= 0 && b >= 0 ? a + (b - a) * fraction : a >= 0 ? a : b;
+        pill.style.transform = `translateX(${index * TAB_SLOT + offset}px)`;
+        pill.style.opacity = String(a >= 0 && b >= 0 ? 1 : a >= 0 ? 1 - fraction : fraction);
+        pill.classList.remove('is-off');
+      }
+    }
+
     function paintTabs() {
-      tabs.setAttribute('aria-label', t('settings.notch.experimentalTitle'));
+      leadTrack.setAttribute('aria-label', t('settings.notch.pages'));
       for (const [page, button] of tabButtons) {
         const selected = page === view.page;
         button.classList.toggle('is-selected', selected);
         button.setAttribute('aria-selected', String(selected));
-        button.tabIndex = selected ? 0 : -1;
-        button.setAttribute('aria-label', t(`notch.tab.${page}`));
+        if (page.startsWith(PLUGIN_PAGE_PREFIX)) {
+          const icon = button.querySelector('.notch-tab-plugin-icon');
+          const iconName = pluginIconName(page);
+          if (icon && icon.dataset.icon !== iconName && pluginViews) {
+            icon.dataset.icon = iconName;
+            icon.replaceChildren(pluginViews.iconNode(document, iconName, null, 15));
+          }
+        }
+        button.setAttribute('aria-label', pageTitle(page));
       }
-      tabPill.style.transform = `translateX(${PAGES.indexOf(view.page) * 36}px)`;
+      fitTabs();
       for (const [page, pageNode] of pageNodes) {
         pageNode.classList.toggle('is-selected', page === view.page);
         pageNode.inert = page !== view.page;
         pageNode.setAttribute('aria-hidden', String(page !== view.page));
       }
+      pluginHost?.refreshDemand();
     }
 
     // The reading is rebuilt only when its structure changes. Live samples
@@ -251,7 +507,8 @@
       const waiting = presentation.waitingSessionSummary(cell('stat:sessions')?.sessions || []).count;
       tabButtons.get('sessions').classList.toggle('has-badge', waiting > 0);
       const key = JSON.stringify([Boolean(rate), payload?.refreshEnabled, state.appearanceKey, state.locale]);
-      if (statusKey !== key) {
+      const structureChanged = statusKey !== key;
+      if (structureChanged) {
         statusKey = key;
         status.replaceChildren();
         if (rate) {
@@ -259,7 +516,12 @@
           reading.type = 'button';
           const icon = el('span', 'notch-rate-icon');
           icon.setAttribute('aria-hidden', 'true');
-          reading.append(icon, text('notch-rate-value', ''), text('notch-rate-unit', ''));
+          const probe = el('span', 'notch-rate-probe');
+          // Compact rounding and unit transitions can add a glyph (99,999
+          // becomes 100.0K). Measure the envelope, including localized units.
+          for (const boundary of [0.01, 0.99, 999, 9999, 88888, 99999, 999999, 9999999, 99999999, 999999999]) probe.append(text('', formatRate(boundary)));
+          probe.setAttribute('aria-hidden', 'true');
+          reading.append(icon, text('notch-rate-value', ''), text('notch-rate-unit', ''), probe);
           activateOnPress(reading, () => bridge.toggleRateMode());
           status.append(reading);
         }
@@ -269,16 +531,32 @@
         }
       }
       const reading = status.querySelector('.notch-rate');
-      if (!rate || !reading) return;
+      if (!rate || !reading) { if (structureChanged) reserveStatus(); return; }
       const hasSample = Number.isFinite(rate.rate);
       const idle = !hasSample || rate.idle === true;
       const value = hasSample ? formatRate(rate.rate) : '—';
       const unit = t(rate.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit');
       reading.classList.toggle('is-idle', idle);
       reading.querySelector('.notch-rate-value').textContent = value;
-      reading.querySelector('.notch-rate-unit').textContent = unit;
+      const unitNode = reading.querySelector('.notch-rate-unit');
+      const unitChanged = unitNode.textContent !== unit;
+      unitNode.textContent = unit;
       const description = `${t(!hasSample ? 'edgeDock.rate.noSample' : idle ? 'edgeDock.rate.idle' : 'edgeDock.rate.live')} · ${t('notch.rateToggle')}`;
       reading.setAttribute('aria-label', `${value} ${unit} · ${description}`);
+      if (structureChanged || unitChanged) reserveStatus();
+    }
+
+    // Reserve compact-format rounding boundaries up front so normal rate changes do not
+    // squeeze the trailing rail mid-paint; the probe is absolutely positioned
+    // so it measures the upper bound without growing the status itself.
+    function reserveStatus() {
+      status.style.minWidth = '';
+      const probe = status.querySelector('.notch-rate-probe');
+      const value = [...status.querySelectorAll('.notch-rate-value')].find(node => !node.classList.contains('notch-rate-probe'));
+      const reserve = probe && value ? status.offsetWidth + Math.max(0, probe.offsetWidth - value.offsetWidth) : NaN;
+      if (!Number.isFinite(reserve) || reserve <= 0) return;
+      status.style.minWidth = `${Math.ceil(reserve)}px`;
+      fitTabs();
     }
 
     // ---- Home -----------------------------------------------------------------
@@ -349,11 +627,13 @@
       body.append(sessionHeading(row, 'notch-now-title'));
       const meta = el('div', 'notch-now-meta');
       if (running) meta.append(wave());
-      const parts = [clientLabel(row.client), sessionRows.sessionModelLabel(row)];
-      if (running) parts.push(duration(row.startedAt, nowMs));
-      else if (!live) parts.push(relativeAgo(row.lastUsedAt, nowMs));
-      else parts.unshift(t('notch.waiting'));
-      meta.append(text('', parts.filter(Boolean).join(' · ')));
+      const label = el('span');
+      if (!running && live) label.append(text('', `${t('notch.waiting')} · `));
+      label.append(text('', clientLabel(row.client)));
+      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
+      const time = running ? duration(row.startedAt, nowMs) : !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
+      if (time) label.append(text('', ` · ${time}`));
+      meta.append(label);
       const extra = (running ? waitingCount : Math.max(0, waitingCount - 1));
       if (extra > 0) meta.append(text('notch-waiting-note', t('notch.moreWaiting', { count: extra })));
       body.append(meta);
@@ -670,10 +950,6 @@
       return column;
     }
 
-    // The columns scroll sideways a page of LIMIT_COLUMNS slots at a time: a
-    // trackpad swipe is native (scroll snapping keeps pages whole), a vertical
-    // wheel steps one page per gesture, and the dots only show where the strip
-    // is. Past one page the next column peeks in at the edge.
     const limitWheel = { sum: 0, stepped: false, timer: null };
 
     function limitPageWidth(strip) {
@@ -785,6 +1061,13 @@
         showUsed: appearance().sessionContextMetric !== 'remaining', now: nowMs });
     }
 
+    function sessionModelMetadata(row) {
+      return sessionRows.sessionModelMetadataNode(document, row, {
+        translate: t, view: limitWindowsView, formatTokens: formatBreakdownTokens,
+        unattributedLabel: t('dashboard.tooltip.unclassified')
+      });
+    }
+
     function activeRow(row, stateName, nowMs) {
       const node = el('div', `notch-active is-${stateName}`);
       node.setAttribute('role', 'listitem');
@@ -794,7 +1077,12 @@
       const meta = el('div', 'notch-active-meta');
       if (stateName === 'running') meta.append(wave());
       else meta.append(text('notch-pill', t('notch.waiting')));
-      meta.append(text('', [clientLabel(row.client), sessionRows.sessionModelLabel(row), duration(row.startedAt, nowMs)].filter(Boolean).join(' · ')));
+      const label = el('span');
+      label.append(text('', clientLabel(row.client)));
+      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
+      const time = duration(row.startedAt, nowMs);
+      if (time) label.append(text('', ` · ${time}`));
+      meta.append(label);
       body.append(meta);
       const value = el('div', 'notch-active-value');
       value.append(sessionTokens(row, 'notch-active-tokens', false));
@@ -846,8 +1134,11 @@
         const line = el('div', 'notch-recent');
         line.setAttribute('role', 'listitem');
         const body = el('div', 'notch-recent-body');
-        body.append(sessionHeading(row, 'notch-recent-title'),
-          text('notch-recent-meta', [sessionRows.sessionModelLabel(row), relativeAgo(row.lastUsedAt, nowMs)].filter(Boolean).join(' · ')));
+        const meta = el('span', 'notch-recent-meta');
+        meta.append(sessionModelMetadata(row));
+        const age = relativeAgo(row.lastUsedAt, nowMs);
+        if (age) meta.append(text('', `${sessionRows.sessionModelMetadataLabel(row) ? ' · ' : ''}${age}`));
+        body.append(sessionHeading(row, 'notch-recent-title'), meta);
         const value = el('div', 'notch-recent-value');
         value.append(sessionTokens(row, 'notch-recent-tokens'));
         const status = sessionStatus(row, nowMs);
@@ -976,43 +1267,146 @@
       if (page === 'home') return JSON.stringify([...base, cell('stat:today'), cell('stat:sessions')?.sessions, payload?.panel?.week,
         status, providerCells().map((entry) => [entry.id, entry.remainingPercent, entry.headlineAccount, entry.accounts?.map((account) => account.record)])]);
       if (page === 'limits') return JSON.stringify([...base, providerCells().map((entry) => [entry.id, entry.status, entry.accounts?.map((account) => [account.record, account.active])])]);
+      // Plugin content repaints itself in place; the page only needs mounting.
+      if (page.startsWith(PLUGIN_PAGE_PREFIX)) return JSON.stringify([state.appearanceKey, state.locale, page]);
       if (page === 'sessions') return JSON.stringify([...base, cell('stat:sessions')?.sessions, status]);
       return JSON.stringify([...base, view.breakdownPeriod, cell(`stat:${view.breakdownPeriod}`)]);
     }
 
     function renderPage(page, { force = false } = {}) {
+      if (!page || !pageNodes.has(page)) return;
       const nowMs = Date.now();
       const key = pageKey(page, nowMs);
       if (!force && pageKeys.get(page) === key) return;
       // Hover readings belong to the DOM they were made on; a rebuild under
-      // the pointer would otherwise drop the scrubbed day mid-gesture.
+      // the pointer would otherwise drop the scrubbed day mid-gesture; a swipe
+      // likewise owns the limits strip it measured.
       if (page === 'home' && view.scrub && !force) return;
+      if (page === 'limits' && gesture?.strip && !force) return;
       if (pageKeys.has(page)) node.classList.remove('is-entering');
       pageKeys.set(page, key);
       const pageNode = pageNodes.get(page);
       const focused = pageNode.contains(document.activeElement) ? document.activeElement?.dataset.focusKey : null;
-      const sessionScroll = {
-        active: pageNode.querySelector('.notch-active-list')?.scrollTop || 0,
-        recent: pageNode.querySelector('.notch-recent-list')?.scrollTop || 0
-      };
+      const scroll = page === 'sessions' ? captureSessionScroll(pageNode) : null;
       const snapshot = page === view.page ? captureRolls(pageNode) : new Map();
       const previous = el('div');
       previous.append(...pageNode.children);
-      if (page === 'home') renderHome(pageNode, nowMs);
+      if (page.startsWith(PLUGIN_PAGE_PREFIX)) renderPluginPage(pageNode, page.slice(PLUGIN_PAGE_PREFIX.length));
+      else if (page === 'home') renderHome(pageNode, nowMs);
       else if (page === 'limits') renderLimits(pageNode, nowMs);
-      else if (page === 'sessions') renderSessions(pageNode, nowMs, sessionScroll);
+      else if (page === 'sessions') renderSessions(pageNode, nowMs, scroll);
       else renderBreakdown(pageNode, nowMs);
+      if (!page.startsWith(PLUGIN_PAGE_PREFIX) && pluginContent?.hasTarget(`notch.${page}.content`)) {
+        const native = el('div', 'plugin-native-content'); native.append(...pageNode.childNodes); pageNode.append(native);
+        pluginContent.render(`notch.${page}.content`, native, { surface: 'notch', page, period: view.breakdownPeriod, nativeData: payload });
+      }
+      pluginContent?.retain(['notch.summary.content', ...[...pageNodes.keys()].filter(key => !key.startsWith(PLUGIN_PAGE_PREFIX)).map(key => `notch.${key}.content`)]);
+      pluginHost?.refreshDemand();
       overflowText.preserveReading(previous, pageNode);
       overflowText.refresh();
       playRolls(pageNode, snapshot);
       if (focused) [...pageNode.querySelectorAll('[data-focus-key]')].find((node) => node.dataset.focusKey === focused)?.focus({ preventScroll: true });
     }
 
+    function renderPluginPage(pageNode, ref) {
+      const pluginState = pluginHost?.state('notch', ref);
+      const head = el('div', 'notch-kicker-row');
+      head.append(el('span', 'notch-kicker', pluginState?.title || t('notch.tab.plugin')));
+      if (pluginState?.pluginName && pluginState.pluginName !== pluginState.title) head.append(el('span', 'notch-plugin-owner', pluginState.pluginName));
+      const mount = el('div', 'notch-plugin-body');
+      pageNode.replaceChildren(head, mount);
+      pluginHost?.mount(mount, ref, 'notch');
+    }
+
+    // Plugin pushes refresh tab titles and icons that arrived after mount.
+    function pluginViewsChanged() {
+      paintTabs();
+      if (!view.page.startsWith(PLUGIN_PAGE_PREFIX)) renderPage(view.page, { force: true });
+      if (view.page.startsWith(PLUGIN_PAGE_PREFIX)) {
+        const kicker = pageNodes.get(view.page)?.querySelector('.notch-kicker');
+        const pluginState = pluginHost?.state('notch', view.page.slice(PLUGIN_PAGE_PREFIX.length));
+        if (kicker && pluginState?.title) kicker.textContent = pluginState.title;
+      }
+    }
+
+    function scrollEnv(hit) {
+      const stripNode = node.querySelector('.notch-limits');
+      const strip = hit === 'strip' && stripNode?.classList.contains('is-paged') ? {
+        origin: view.limitPage,
+        pageWidth: limitPageWidth(stripNode),
+        pageCount: stripNode.querySelectorAll('.is-page-start').length
+      } : null;
+      return { page: pageOrder.indexOf(view.page), strip };
+    }
+    function hitFromPoint(record) {
+      const target = document.elementFromPoint?.(record.x, record.y);
+      return view.page === 'limits' && target?.closest('.notch-page-limits') ? 'strip' : 'page';
+    }
+    function finishSwipe() {
+      if (!gesture) return;
+      const { destination, decision = 0, strip: held } = gesture;
+      const page = destination?.lane === 'outer' && decision ? pageOrder[destination.target] : view.page;
+      if (gesture.strip) {
+        const strip = node.querySelector('.notch-limits');
+        view.limitPage = destination?.lane === 'strip' && decision ? destination.target : gesture.strip.origin;
+        if (strip) strip.scrollLeft = view.limitPage * gesture.strip.pageWidth;
+      }
+      dropGesture();
+      if (page !== view.page) commitPage(page);
+      else {
+        paintTabs();
+        if (held) renderPage('limits');
+      }
+      clearPageMotion();
+    }
+    function paintSwipe() {
+      const { destination, amount } = gesture;
+      if (!destination) return;
+      const strip = gesture.strip && node.querySelector('.notch-limits');
+      if (strip) {
+        strip.classList.add('is-handoff');
+        const position = destination.lane === 'strip'
+          ? destination.origin + (destination.target - destination.origin) * Math.abs(amount) : gesture.strip.origin;
+        strip.scrollLeft = position * gesture.strip.pageWidth;
+      }
+      showDrag(gesture.page, destination.lane === 'outer' ? destination.target : gesture.page, amount);
+    }
+    function applyScroll(record) {
+      if (!shown || !record || !pageOrder.length) return;
+      if (record.phase === 'began') {
+        finishSwipe();
+        const env = scrollEnv(hitFromPoint(record));
+        const style = window.getComputedStyle(pages);
+        gesture = { id: record.id, ...env,
+          pageStep: parseFloat(style.width) + parseFloat(style.getPropertyValue('--notch-page-gap')) };
+      }
+      if (!gesture || gesture.id !== record.id) return;
+      const amount = Math.max(-1, Math.min(1, record.amount));
+      if (amount) {
+        const previous = gesture.destination;
+        const destination = swipeDestination(gesture.page, pageOrder.length, gesture.strip, amount);
+        if (destination.lane === 'outer' && destination.target !== gesture.page
+          && (previous?.lane !== 'outer' || previous.target !== destination.target)) renderPage(pageOrder[destination.target]);
+        gesture.destination = destination;
+      }
+      if (record.phase === 'ended' || record.phase === 'cancelled') {
+        gesture.decision = record.phase === 'ended' ? Math.sign(amount) : 0;
+        if (prefersReducedMotion()) { finishSwipe(); return; }
+      }
+      gesture.amount = amount;
+      paintSwipe();
+      if (record.complete) finishSwipe();
+    }
+
     function render(next, { opening = false } = {}) {
+      shown = true;
       payload = next;
+      syncPluginPages(next?.panel?.pluginPages, next?.panel?.builtinPages, next?.panel?.pageOrder);
       node.classList.toggle('is-reduced-motion', prefersReducedMotion());
       if (opening) {
-        view.scrub = null; pageKeys = new Map();
+        view.scrub = null;
+        dropHiddenPages();
+        pageKeys = new Map();
         // Entrance motion plays once per reveal, never on a data push.
         node.classList.add('is-entering');
         clearTimeout(enteringTimer);
@@ -1020,8 +1414,11 @@
       }
       paintTabs();
       paintStatus();
-      // Hidden pages refresh when selected; only the visible one tracks pushes.
+      // The visible page owns the hover reading.
+      const preview = gesture?.destination;
+      if (preview?.lane === 'outer' && preview.target !== preview.origin) renderPage(pageOrder[preview.target]);
       renderPage(view.page);
+      if (gesture) paintSwipe();
     }
 
     function place(geometry, zoom) {
@@ -1029,6 +1426,8 @@
       node.style.setProperty('--notch-band-height', `${attached ? geometry.height / zoom : PANEL_METRICS.band}px`);
       node.style.setProperty('--notch-gap-width', `${attached ? geometry.gapWidth / zoom : 0}px`);
       node.classList.toggle('is-attached', attached);
+      reserveStatus();
+      fitTabs();
     }
 
     node.addEventListener('pointerleave', () => { if (view.scrub) { view.scrub = null; renderPage('home', { force: true }); } });
@@ -1036,19 +1435,30 @@
       for (const title of node.querySelectorAll('.fade-overflow')) overflowText.stop(title);
     }
     function suspend() {
+      releasePluginPage(view.page);
+      shown = false;
+      clearTimeout(limitWheel.timer);
+      Object.assign(limitWheel, { sum: 0, stepped: false, timer: null });
       settleRolls();
       stopTitleReading();
       clearTimeout(enteringTimer);
+      dropGesture();
+      clearPageMotion();
       node.classList.remove('is-entering');
       view.scrub = null;
+      dropHiddenPages();
     }
     const fuelObserver = typeof window.ResizeObserver === 'function'
       ? new window.ResizeObserver(() => { fitHomeFuel(); fitLimitPlans(); }) : null;
     fuelObserver?.observe(pageNodes.get('home'));
     fuelObserver?.observe(pageNodes.get('limits'));
-    window.addEventListener('pagehide', () => { suspend(); fuelObserver?.disconnect(); }, { once: true });
+    const tabObserver = typeof window.ResizeObserver === 'function' ? new window.ResizeObserver(fitTabs) : null;
+    tabObserver?.observe(leadRail);
+    tabObserver?.observe(trailRail);
+    const removeScroll = bridge.onScroll?.(applyScroll);
+    window.addEventListener('pagehide', () => { suspend(); removeScroll?.(); fuelObserver?.disconnect(); tabObserver?.disconnect(); }, { once: true });
     paintTabs();
-    return { node, render, place, selectPage, suspend, contentHeight: panelContentHeight, view };
+    return { node, render, place, selectPage, suspend, pluginViewsChanged, contentHeight: panelContentHeight, view };
   }
 
   return { PANEL_METRICS, PAGES, breakdownRows, createNotchPanel, panelContentHeight };
