@@ -23,6 +23,15 @@
       <button id="trendsTab" class="dash-tab" data-tab="trends" data-i18n="dashboard.tab.trends">Trends</button>
     </nav>
 
+    <div class="dash-range-row">
+      <div id="rangeSelect" class="dash-range-group"></div>
+      <div id="dashCustomRangeBar" class="dash-custom-range-bar hidden">
+        <input type="date" id="dashCustomStart" class="dash-date-input" aria-label="Start date" data-i18n-aria-label="periodRange.startDate">
+        <span class="dash-date-sep" aria-hidden="true">–</span>
+        <input type="date" id="dashCustomEnd" class="dash-date-input" aria-label="End date" data-i18n-aria-label="periodRange.endDate">
+      </div>
+    </div>
+
     <section id="trendsPane" class="dash-pane hidden">
       <div class="dash-controls">
         <div class="dash-control-row">
@@ -34,7 +43,6 @@
             <button class="seg-btn active" data-mode="bars" data-i18n="dashboard.mode.bars">Bars</button>
             <button class="seg-btn" data-mode="kline" data-i18n="dashboard.mode.kline">K-line</button>
           </div>
-          <div id="rangeSelect" class="dash-range-group"></div>
         </div>
       </div>
       <div id="dashChart" class="dash-chart-wrap"></div>

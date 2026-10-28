@@ -13,7 +13,7 @@
   const period = query.get('period');
   const breakdown = query.get('breakdown');
   const viewState = {};
-  if (['today', 'month', 'week', 'last7', 'last30', 'allTime'].includes(period)) {
+  if (['today', 'month', 'week', 'last7', 'last30', 'custom', 'allTime'].includes(period)) {
     viewState.period = period;
   }
   if (['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].includes(breakdown)) viewState.breakdown = breakdown;

@@ -3,14 +3,15 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorFixedPeriodRanges = api;
 })(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi() {
-  const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30']);
+  const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30', 'custom']);
   const LABELS = Object.freeze({
     today: 'DAY',
     month: 'MONTH',
     allTime: 'TOTAL',
     week: 'WEEK',
     last7: '7D',
-    last30: '30D'
+    last30: '30D',
+    custom: 'CUSTOM'
   });
 
   function finiteNumber(value) {
@@ -86,14 +87,24 @@
   }
 
   function isDerived(value) {
-    return value === 'week' || value === 'last7' || value === 'last30';
+    return value === 'week' || value === 'last7' || value === 'last30' || value === 'custom';
   }
 
   function slotForSelection(value) {
     return isDerived(value) || value === 'month' ? 'month' : value;
   }
 
-  function displayLabel(value) {
+  function formatRangeLabel(range) {
+    const start = normalizeDateKey(range?.start);
+    const end = normalizeDateKey(range?.end);
+    if (!start || !end) return 'CUSTOM';
+    return `${start.slice(5, 7)}/${start.slice(8, 10)}\u2013${end.slice(5, 7)}/${end.slice(8, 10)}`;
+  }
+
+  function displayLabel(value, options = {}) {
+    if (value === 'custom') {
+      return formatRangeLabel(options?.range) || LABELS.custom;
+    }
     return LABELS[value] || LABELS.today;
   }
 
@@ -107,6 +118,17 @@
     }
     if (selection === 'last7') return { start: dayKeyAddDays(todayKey, -6), end: todayKey };
     if (selection === 'last30') return { start: dayKeyAddDays(todayKey, -29), end: todayKey };
+    if (selection === 'custom') {
+      const custom = options.customRange || {};
+      let start = normalizeDateKey(custom.start || options.customPeriodStart) || todayKey;
+      let end = normalizeDateKey(custom.end || options.customPeriodEnd) || todayKey;
+      if (start > end) {
+        const temp = start;
+        start = end;
+        end = temp;
+      }
+      return { start, end };
+    }
     return null;
   }
 
@@ -433,8 +455,15 @@
     return currentKey ? { currentKey, snapshotKey: key } : null;
   }
 
-  function readySnapshotForSelection(snapshot, selection) {
-    return snapshot?.status === 'ready' && snapshot.selection === selection ? snapshot : null;
+  function readySnapshotForSelection(snapshot, selection, options = {}) {
+    if (snapshot?.status !== 'ready' || snapshot.selection !== selection) return null;
+    if (selection === 'custom' && (options.customRange || options.customPeriodStart || options.customPeriodEnd)) {
+      const expected = rangeForSelection('custom', options);
+      if (!expected || snapshot.range?.start !== expected.start || snapshot.range?.end !== expected.end) {
+        return null;
+      }
+    }
+    return snapshot;
   }
 
   function devicesForReadySnapshot(snapshot, selection) {
@@ -707,10 +736,12 @@
     fixedPeriodDeviceSnapshots,
     fixedPeriodSnapshot,
     fixedPeriodSnapshotFromDevices,
+    formatRangeLabel,
     isDerived,
     joinDeviceHistorySources,
     localDayKey,
     handlePeriodMenuNavigation,
+    normalizeDateKey,
     normalizeMonthMode,
     periodMenuTargetIndex,
     readySnapshotForSelection,

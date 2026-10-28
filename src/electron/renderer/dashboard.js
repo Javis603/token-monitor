@@ -26,6 +26,9 @@ const els = {
   trendsPane: document.getElementById('trendsPane'),
   activityPane: document.getElementById('activityPane'),
   rangeSelect: document.getElementById('rangeSelect'),
+  dashCustomRangeBar: document.getElementById('dashCustomRangeBar'),
+  dashCustomStart: document.getElementById('dashCustomStart'),
+  dashCustomEnd: document.getElementById('dashCustomEnd'),
   chart: document.getElementById('dashChart'),
   legend: document.getElementById('dashLegend'),
   heatmap: document.getElementById('dashHeatmap'),
@@ -37,12 +40,12 @@ const els = {
   heatmapMetricBtns: Array.from(document.querySelectorAll('[data-control="heatmapMetric"] .seg-btn'))
 };
 
-const RANGES = ['7', '30', '90', '365', 'all'];
+const RANGES = ['7', '30', '90', '365', 'all', 'custom'];
 const state = {
   tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
   locale: 'en', currency: 'USD', compactTokenUnits: 'western', history: null, chartModel: null,
   chartKind: 'bars', motion: 'none', reduceMotion: 'system',
-  heatmapMetric: 'cost'
+  heatmapMetric: 'cost', customStart: '', customEnd: ''
 };
 let nativeMaterialState = glassRenderingApi?.normalizeNativeMaterialState?.() || { type: 'transparent', reducedTransparency: false, highContrast: false };
 let nativeMaterialRevision = 0;
@@ -299,12 +302,138 @@ function chartSize() {
   return { w: Math.max(320, els.chart.clientWidth || 800), h: Math.max(200, els.chart.clientHeight || 360) };
 }
 
+function syncCustomRangeInputs() {
+  if (!els.dashCustomRangeBar) return;
+  const isCustom = state.range === 'custom';
+  els.dashCustomRangeBar.classList.toggle('hidden', !isCustom);
+  if (isCustom) {
+    const daily = state.history?.daily || [];
+    const today = new Date().toISOString().slice(0, 10);
+    const start = state.customStart || (daily[0]?.date ? String(daily[0].date).slice(0, 10) : today);
+    const end = state.customEnd || (daily.length ? String(daily[daily.length - 1].date).slice(0, 10) : today);
+    if (els.dashCustomStart && !els.dashCustomStart.value) els.dashCustomStart.value = start;
+    if (els.dashCustomEnd && !els.dashCustomEnd.value) els.dashCustomEnd.value = end;
+    state.customStart = els.dashCustomStart?.value || start;
+    state.customEnd = els.dashCustomEnd?.value || end;
+  }
+}
+
+function getEffectiveRange() {
+  if (state.range !== 'custom') return null;
+  const today = new Date().toISOString().slice(0, 10);
+  let start = state.customStart || els.dashCustomStart?.value || today;
+  let end = state.customEnd || els.dashCustomEnd?.value || today;
+  if (start > end) {
+    const temp = start;
+    start = end;
+    end = temp;
+    if (els.dashCustomStart) els.dashCustomStart.value = start;
+    if (els.dashCustomEnd) els.dashCustomEnd.value = end;
+  }
+  return { start, end };
+}
+
+function getFilteredDaily() {
+  const allDaily = state.history?.daily || [];
+  if (state.range === 'custom') {
+    const r = getEffectiveRange();
+    if (!r) return allDaily;
+    return allDaily.filter((d) => {
+      const date = String(d.date || '').slice(0, 10);
+      return date >= r.start && date <= r.end;
+    });
+  }
+  return charts.clampDaily(allDaily, state.range === 'all' ? 0 : Number(state.range));
+}
+
+function onDashCustomDateChange() {
+  const r = getEffectiveRange();
+  if (r) {
+    state.customStart = r.start;
+    state.customEnd = r.end;
+  }
+  state.motion = 'update';
+  render();
+}
+
+let dashCustomInputsWired = false;
+function wireCustomRangeInputs() {
+  if (dashCustomInputsWired) return;
+  dashCustomInputsWired = true;
+  if (els.dashCustomStart) els.dashCustomStart.addEventListener('change', onDashCustomDateChange);
+  if (els.dashCustomEnd) els.dashCustomEnd.addEventListener('change', onDashCustomDateChange);
+}
+
+function summaryForDaily(daily) {
+  let totalTokens = 0;
+  let totalCost = 0;
+  let unpricedTokens = 0;
+  let activeTimeMs = 0;
+  let messages = 0;
+  let peakDayTokens = 0;
+  const activeDaysSet = new Set();
+  const modelCounts = {};
+
+  for (const d of daily) {
+    const tokens = Number(d.tokens || 0);
+    const cost = Number(d.cost || 0);
+    totalTokens += tokens;
+    totalCost += cost;
+    unpricedTokens += Number(d.unpricedTokens || 0);
+    activeTimeMs += Number(d.activeTimeMs || 0);
+    if (tokens > 0) {
+      activeDaysSet.add(d.date);
+      if (tokens > peakDayTokens) peakDayTokens = tokens;
+    }
+    if (d.perClient) {
+      for (const client of Object.values(d.perClient)) {
+        messages += Number(client?.messages || 0);
+      }
+    }
+    if (d.perModel) {
+      for (const [model, val] of Object.entries(d.perModel)) {
+        const mTokens = Number(val?.tokens || 0);
+        modelCounts[model] = (modelCounts[model] || 0) + mTokens;
+      }
+    }
+  }
+
+  let currentStreak = 0;
+  for (let i = daily.length - 1; i >= 0 && Number(daily[i]?.tokens || 0) > 0; i--) {
+    currentStreak++;
+  }
+
+  let favoriteModel = '';
+  let favTokens = 0;
+  for (const [m, count] of Object.entries(modelCounts)) {
+    if (count > favTokens) {
+      favTokens = count;
+      favoriteModel = m;
+    }
+  }
+
+  return {
+    totalTokens,
+    totalCost,
+    unpricedTokens,
+    activeDays: activeDaysSet.size,
+    currentStreak,
+    activeTimeMs,
+    peakDayTokens,
+    favoriteModel,
+    messages
+  };
+}
+
 function populateRangeSelect() {
+  wireCustomRangeInputs();
   els.rangeSelect.innerHTML = RANGES.map((r) => `<button class="range-btn${r === state.range ? ' active' : ''}" data-val="${r}">${t(`dashboard.range.${r}`)}</button>`).join('');
+  syncCustomRangeInputs();
   els.rangeSelect.querySelectorAll('.range-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       if (state.range === e.target.dataset.val) return;
       state.range = e.target.dataset.val;
+      syncCustomRangeInputs();
       state.motion = 'update';
       els.rangeSelect.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b === e.target));
       render();
@@ -355,7 +484,7 @@ function renderLegend(model) {
 function renderTrends() {
   const previousKind = state.chartKind;
   const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
-  const daily = charts.clampDaily(state.history?.daily || [], state.range === 'all' ? 0 : Number(state.range));
+  const daily = getFilteredDaily();
   if (daily.length === 0) { els.chart.innerHTML = ''; els.legend.innerHTML = ''; state.chartModel = null; return; }
   const pad = { padTop: 10, padRight: 14, padBottom: 24, padLeft: 52 };
   
@@ -392,7 +521,7 @@ function renderBreakdown() {
   const elsBreakdown = document.getElementById('dashBreakdown');
   if (!elsBreakdown) return;
   const previousBars = captureGeometry(elsBreakdown, '.dash-bd-bar-fill[data-motion-key]');
-  const daily = state.history?.daily || [];
+  const daily = getFilteredDaily();
   if (daily.length === 0) { elsBreakdown.innerHTML = ''; return; }
   
   const clientTotals = {};
@@ -490,19 +619,25 @@ function balanceStatCards() {
 }
 
 function renderActivity() {
-  const daily = charts.computeHeatmapIntensities(state.history?.daily || []);
-  const end = todayKey();
-  // Start at the 1st of the month 11 months back → exactly 12 distinct months (Jul→Jun),
-  // like GitHub/codex, so there's no duplicate leading month label.
+  const filtered = getFilteredDaily();
+  const allDaily = charts.computeHeatmapIntensities(state.history?.daily || []);
+  const daily = state.range === 'all' ? allDaily : filtered;
+  let end = todayKey();
   const now = new Date(`${end}T00:00:00Z`);
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
+  let start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
+  if (state.range === 'custom') {
+    const r = getEffectiveRange();
+    if (r) {
+      start = r.start;
+      end = r.end;
+    }
+  }
   const intensityKey = state.heatmapMetric === 'cost' ? 'costIntensity' : 'tokenIntensity';
   const gap = 4;
   let heat = charts.contribHeatmap(daily, { cell: 14, gap, startDate: start, endDate: end, intensityKey });
   const avail = els.heatmap.clientWidth || 0;
   if (heat.weeks > 0 && avail > 0) {
-    // Size cells to the available width, capped so a wide window doesn't stretch them edge-to-edge.
-    const cell = Math.max(9, Math.min(22, (avail - heat.weeks * gap) / heat.weeks)); // fractional → fills exactly
+    const cell = Math.max(9, Math.min(22, (avail - heat.weeks * gap) / heat.weeks));
     heat = charts.contribHeatmap(daily, { cell, gap, startDate: start, endDate: end, intensityKey });
   }
   const hideHeatmapForEntry = !prefersReducedMotion()
@@ -511,8 +646,9 @@ function renderActivity() {
     ? charts.heatmapSvg(heat, { monthLabel: (m) => monthLabel(m.label), initialHidden: hideHeatmapForEntry })
     : '';
   animateHeatmapEntry();
-  state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0), unpricedTokens: Number(d.unpricedTokens || 0) }]));
-  const cards = charts.statsCards(state.history?.summary || {});
+  state.dayMap = new Map((daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0), unpricedTokens: Number(d.unpricedTokens || 0) }]));
+  const summary = state.range === 'all' ? (state.history?.summary || summaryForDaily(filtered)) : summaryForDaily(filtered);
+  const cards = charts.statsCards(summary);
   const LABELS = {
     totalTokens: 'dashboard.stat.totalTokens', totalCost: 'dashboard.stat.totalCost',
     activeDays: 'trends.activeDays', currentStreak: 'trends.currentStreak',
@@ -521,11 +657,11 @@ function renderActivity() {
   };
   els.cards.innerHTML = charts.statsCardsHtml(cards, {
     label: (k) => t(LABELS[k] || k),
-    format: (c) => (c.kind === 'cost' ? formatCostCompact(c.value, state.history?.summary?.unpricedTokens)
+    format: (c) => (c.kind === 'cost' ? formatCostCompact(c.value, summary?.unpricedTokens)
       : c.kind === 'duration' ? formatDurationCompact(c.value)
         : c.kind === 'model' ? (c.value || '—') : formatCompact(c.value))
   });
-  const missing = Number(state.history?.summary?.unpricedTokens || 0);
+  const missing = Number(summary?.unpricedTokens || 0);
   const costValue = els.cards.querySelector('[data-stat="totalCost"] .dash-card-v');
   if (costValue && missing > 0) {
     const info = document.createElement('span');

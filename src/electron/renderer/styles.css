@@ -3371,6 +3371,34 @@ html.is-windows .settings-panel select option {
   background: transparent;
   box-shadow: none;
 }
+.custom-period-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 2px 12px 8px;
+  position: relative;
+  z-index: 2;
+}
+.custom-period-input {
+  background: var(--bg-card, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.6875rem;
+  padding: 3px 6px;
+  outline: none;
+  color-scheme: dark light;
+}
+.custom-period-input:focus {
+  border-color: var(--accent);
+}
+.custom-period-sep {
+  color: var(--muted);
+  font-size: 0.75rem;
+  user-select: none;
+}
 .fixed-period-message {
   position: relative;
   z-index: 1;

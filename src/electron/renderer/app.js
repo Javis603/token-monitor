@@ -264,7 +264,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'trends', labelKey: 'views.trends' },
   { id: 'status', labelKey: 'views.status' }
 ];
-const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
+const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'custom', 'allTime']);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
@@ -406,6 +406,9 @@ Object.assign(els, {
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
   periodMonthModeInput: document.getElementById('periodMonthModeInput'),
+  customPeriodBar: document.getElementById('customPeriodBar'),
+  customPeriodStartDate: document.getElementById('customPeriodStartDate'),
+  customPeriodEndDate: document.getElementById('customPeriodEndDate'),
   modelRankingMetricInputs: Array.from(document.querySelectorAll('input[name="modelRankingMetric"]'))
 });
 Object.assign(els, {
@@ -3097,7 +3100,11 @@ function buildFixedPeriodSourcesSnapshot() {
     historyEnabled: state.settings?.historyEnabled !== false,
     historyAvailable: meta.historyTransportAvailable === true,
     todayKey: fixedPeriodTodayKey(),
-    locale: currentCalendarLocale()
+    locale: currentCalendarLocale(),
+    customRange: state.customPeriodRange || {
+      start: state.settings?.customPeriodStart,
+      end: state.settings?.customPeriodEnd
+    }
   });
 }
 
@@ -5931,7 +5938,8 @@ function buildFixedPeriodSnapshot() {
   if (state.fixedPeriodHistoryBusy) {
     const ready = fixedPeriodRangesApi.readySnapshotForSelection(
       state.fixedPeriodSnapshot,
-      state.period
+      state.period,
+      { customRange: state.customPeriodRange || { start: state.settings?.customPeriodStart, end: state.settings?.customPeriodEnd } }
     );
     return ready
       ? ready
@@ -9310,8 +9318,29 @@ function syncPeriodTabs() {
     const mode = activeSlot === 'month'
       ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
       : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
-    els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode);
+    els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode, {
+      range: state.fixedPeriodSnapshot?.range || state.customPeriodRange || {
+        start: state.settings?.customPeriodStart,
+        end: state.settings?.customPeriodEnd
+      }
+    });
     els.monthPeriodTab.dataset.period = mode;
+  }
+  if (els.customPeriodBar) {
+    const isCustom = state.period === 'custom';
+    els.customPeriodBar.classList.toggle('hidden', !isCustom);
+    if (isCustom) {
+      const today = fixedPeriodRangesApi.localDayKey();
+      const currentRange = state.fixedPeriodSnapshot?.range || state.customPeriodRange || {};
+      const start = currentRange.start || state.settings?.customPeriodStart || today;
+      const end = currentRange.end || state.settings?.customPeriodEnd || today;
+      if (els.customPeriodStartDate && document.activeElement !== els.customPeriodStartDate && !els.customPeriodStartDate.value) {
+        els.customPeriodStartDate.value = start;
+      }
+      if (els.customPeriodEndDate && document.activeElement !== els.customPeriodEndDate && !els.customPeriodEndDate.value) {
+        els.customPeriodEndDate.value = end;
+      }
+    }
   }
   syncPeriodMenu();
 }
@@ -13303,6 +13332,32 @@ els.periodMonthModeInput?.addEventListener('change', async () => {
   render();
   await saveSettings({ periodMonthMode: selection });
 });
+
+async function onCustomPeriodDateChange() {
+  const startVal = els.customPeriodStartDate?.value;
+  const endVal = els.customPeriodEndDate?.value;
+  const today = fixedPeriodRangesApi.localDayKey();
+  let start = fixedPeriodRangesApi.normalizeDateKey(startVal) || today;
+  let end = fixedPeriodRangesApi.normalizeDateKey(endVal) || today;
+  if (start > end) {
+    const temp = start;
+    start = end;
+    end = temp;
+    if (els.customPeriodStartDate) els.customPeriodStartDate.value = start;
+    if (els.customPeriodEndDate) els.customPeriodEndDate.value = end;
+  }
+  state.customPeriodRange = { start, end };
+  if (!state.settings) state.settings = {};
+  state.settings.customPeriodStart = start;
+  state.settings.customPeriodEnd = end;
+  state.fixedPeriodSnapshot = buildFixedPeriodSourcesSnapshot();
+  syncPeriodTabs();
+  render();
+  await saveSettings({ customPeriodStart: start, customPeriodEnd: end });
+}
+
+els.customPeriodStartDate?.addEventListener('change', onCustomPeriodDateChange);
+els.customPeriodEndDate?.addEventListener('change', onCustomPeriodDateChange);
 
 document.addEventListener('click', (event) => {
   if (!state.periodMenuOpen) return;

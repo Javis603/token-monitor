@@ -744,3 +744,92 @@ test('latest request coordinator catches up revisions and upgrades a background 
   assert.deepEqual(settled, [{ render: true }]);
   assert.equal(coordinator.active(), false);
 });
+
+test('MONTH_MODES includes custom and slotForSelection maps custom to month slot', () => {
+  assert.ok(ranges.MONTH_MODES.includes('custom'));
+  assert.equal(ranges.slotForSelection('custom'), 'month');
+  assert.equal(ranges.isDerived('custom'), true);
+  assert.equal(ranges.normalizeMonthMode('custom'), 'custom');
+});
+
+test('custom date range produces exact range and auto-normalizes reversed dates and invalid fallbacks', () => {
+  const normal = ranges.rangeForSelection('custom', {
+    todayKey: '2026-10-28',
+    customRange: { start: '2026-10-01', end: '2026-10-28' }
+  });
+  assert.deepEqual(normal, { start: '2026-10-01', end: '2026-10-28' });
+
+  // Reversed dates: start > end
+  const reversed = ranges.rangeForSelection('custom', {
+    todayKey: '2026-10-28',
+    customRange: { start: '2026-10-28', end: '2026-10-05' }
+  });
+  assert.deepEqual(reversed, { start: '2026-10-05', end: '2026-10-28' });
+
+  // Single-day custom range
+  const single = ranges.rangeForSelection('custom', {
+    todayKey: '2026-10-28',
+    customRange: { start: '2026-10-15', end: '2026-10-15' }
+  });
+  assert.deepEqual(single, { start: '2026-10-15', end: '2026-10-15' });
+
+  // Invalid or missing date strings fall back safely to todayKey
+  const fallback = ranges.rangeForSelection('custom', {
+    todayKey: '2026-10-28',
+    customRange: { start: 'invalid-date', end: '' }
+  });
+  assert.deepEqual(fallback, { start: '2026-10-28', end: '2026-10-28' });
+
+  // Leap year and month transitions
+  const leapYear = ranges.rangeForSelection('custom', {
+    todayKey: '2028-03-01',
+    customRange: { start: '2028-02-28', end: '2028-03-02' }
+  });
+  assert.deepEqual(leapYear, { start: '2028-02-28', end: '2028-03-02' });
+});
+
+test('displayLabel formats custom range with en-dash MM/DD–MM/DD or CUSTOM fallback', () => {
+  assert.equal(ranges.displayLabel('custom'), 'CUSTOM');
+  assert.equal(ranges.displayLabel('custom', { range: null }), 'CUSTOM');
+  assert.equal(ranges.displayLabel('custom', { range: { start: '', end: '' } }), 'CUSTOM');
+  assert.equal(ranges.displayLabel('custom', {
+    range: { start: '2026-10-01', end: '2026-10-28' }
+  }), '10/01\u201310/28');
+  assert.equal(ranges.displayLabel('custom', {
+    range: { start: '2028-02-29', end: '2028-03-01' }
+  }), '02/29\u201303/01');
+});
+
+test('dailyForRange and fixedPeriodSnapshot aggregate custom ranges with live today reconciliation', () => {
+  const history = [
+    day('2026-10-10', 100, 'codex', 'gpt'),
+    day('2026-10-11', 200, 'codex', 'gpt'),
+    day('2026-10-12', 300, 'claude', 'opus')
+  ];
+  const rows = ranges.dailyForRange(history, { start: '2026-10-10', end: '2026-10-12' });
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].tokens, 100);
+  assert.equal(rows[1].tokens, 200);
+  assert.equal(rows[2].tokens, 300);
+
+  const snapshot = ranges.fixedPeriodSnapshot('custom', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-10-12',
+    customRange: { start: '2026-10-10', end: '2026-10-12' },
+    daily: [day('2026-10-10', 100), day('2026-10-11', 200), day('2026-10-12', 150)],
+    todayPeriod: {
+      totalTokens: 350,
+      costUsd: 3.5,
+      clients: { claude: 350 },
+      clientCosts: { claude: 3.5 },
+      models: { opus: 350 },
+      modelCosts: { opus: 3.5 }
+    }
+  });
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.range.start, '2026-10-10');
+  assert.equal(snapshot.range.end, '2026-10-12');
+  assert.equal(snapshot.period.totalTokens, 650);
+  assert.equal(snapshot.period.costUsd, 6.5);
+});

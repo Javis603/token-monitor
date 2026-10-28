@@ -557,10 +557,17 @@ if (!gotLock) app.exit(0);
 
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
-const PERIOD_MONTH_MODES = new Set(['month', 'week', 'last7', 'last30']);
+const PERIOD_MONTH_MODES = new Set(['month', 'week', 'last7', 'last30', 'custom']);
 
 function normalizePeriodMonthMode(value) {
   return PERIOD_MONTH_MODES.has(value) ? value : 'month';
+}
+
+function normalizeCustomPeriodDate(value) {
+  const key = String(value || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
+  const date = new Date(`${key}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === key ? key : '';
 }
 
 function normalizeProjectBreakdownMode(value) {
@@ -620,6 +627,8 @@ function defaultSettings() {
     sessionContextMetric: 'used',
     sessionTitlesEnabled: true,
     periodMonthMode: 'month',
+    customPeriodStart: '',
+    customPeriodEnd: '',
     themeColors: {},
     vendorColors: {},
     textSize: 'standard',
@@ -2708,6 +2717,8 @@ function readSettings() {
     merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
+    merged.customPeriodStart = normalizeCustomPeriodDate(merged.customPeriodStart);
+    merged.customPeriodEnd = normalizeCustomPeriodDate(merged.customPeriodEnd);
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
@@ -8231,6 +8242,8 @@ app.whenReady().then(() => {
       limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
+      customPeriodStart: normalizeCustomPeriodDate(patch.customPeriodStart ?? settings.customPeriodStart),
+      customPeriodEnd: normalizeCustomPeriodDate(patch.customPeriodEnd ?? settings.customPeriodEnd),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
       sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
