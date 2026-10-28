@@ -173,11 +173,14 @@ function pluginCard(cell) {
   card.dataset.pluginRef = cell.ref;
   const head = el('header', 'edge-dock-card-head');
   const view = pluginHost?.state('edgeDock', cell.ref);
-  head.append(el('span', 'edge-dock-stat-caption', view?.title || cell.ref));
-  if (view?.pluginName && view.pluginName !== view.title) head.append(el('span', 'edge-dock-plugin-owner', view.pluginName));
+  const identity = el('div', 'edge-dock-plugin-identity');
+  identity.append(el('span', 'edge-dock-stat-caption', view?.title || cell.ref));
+  if (view?.pluginName && view.pluginName !== view.title) identity.append(el('span', 'edge-dock-plugin-owner', view.pluginName));
+  const headerActions = el('div', 'edge-dock-plugin-header-actions');
+  head.append(identity, headerActions);
   const body = el('div', 'edge-dock-plugin-card');
   card.append(head, body);
-  pluginHost?.mount(body, cell.ref, 'edgeDock', { variant: 'full' });
+  pluginHost?.mount(body, cell.ref, 'edgeDock', { variant: 'full', headerActions });
   return card;
 }
 

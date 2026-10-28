@@ -2982,3 +2982,31 @@ test('expired idle leases restore transcript running and waiting before Home and
     assert.deepEqual(provider.sessions.map(row => row.sessionId), ['old', 'new']);
   }
 });
+
+test('full plugin cards expose header actions beside identity while compact rail mounts stay minimal', () => {
+  const source = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const { Element } = require('../helpers/notchPanel');
+  const document = {};
+  const el = (tag, className, value) => {
+    const node = new Element(tag, document); node.className = className || '';
+    if (value !== undefined) node.textContent = value;
+    return node;
+  };
+  const mounts = [];
+  const pluginHost = {
+    state: () => ({ title: 'Routes', pluginName: 'Author' }),
+    mount(...args) { mounts.push(args); }
+  };
+  const cardSource = source.slice(source.indexOf('function pluginCard('), source.indexOf('const codexAccountControl =')).trim();
+  const card = Function('el', 'pluginHost', `return (${cardSource})`)(el, pluginHost)({ ref: 'demo/routes' });
+  const header = card.querySelector('.edge-dock-card-head');
+  const slot = mounts[0][3].headerActions;
+  assert.equal(slot.parentNode, header);
+  assert.equal(header.querySelector('.edge-dock-stat-caption').textContent, 'Routes');
+  assert.equal(header.querySelector('.edge-dock-plugin-owner').textContent, 'Author');
+  assert.equal(mounts[0][0], card.querySelector('.edge-dock-plugin-card'));
+  assert.equal(mounts[0][3].variant, 'full');
+  const railSource = source.slice(source.indexOf('function pluginCellNode('), source.indexOf('function pluginCard(')).trim();
+  Function('el', 'pluginHost', 'pluginCellLabel', `return (${railSource})`)(el, pluginHost, () => 'Routes')({ ref: 'demo/routes' });
+  assert.deepEqual(mounts[1][3], { variant: 'compact' });
+});
