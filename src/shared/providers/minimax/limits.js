@@ -477,7 +477,7 @@ function commitMinimaxCodeRefresh(session, updated, deps, state, pendingKey, sta
 }
 
 async function refreshMinimaxCodeSession(session, deps = {}) {
-  if (deps.probe || deps.signal?.aborted) throw errorWithStatus('unavailable', 'Refresh skipped');
+  if (deps.signal?.aborted) throw errorWithStatus('unavailable', 'Refresh skipped');
   // The official proper-lockfile mutex is auth.lock.lock. Never steal it.
   const lockPath = path.join(path.dirname(session.authPath), 'auth.lock.lock');
   try { fs.mkdirSync(lockPath, { mode: 0o700 }); }
