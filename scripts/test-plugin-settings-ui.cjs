@@ -33,7 +33,7 @@ async function main() {
     const data = {enabled:true, plugins:[{id:'alpha',trusted:true,types:['widget','page'],name:'Alpha',description:'Plugin description',version:'1.0.0',source:'user',status:'active',enabled:true,views:[{ref:'alpha/view',title:'View',surfaces:['home','page'],placements:{home:false}}],background:{supported:true,enabled:false},logs:[{at:0,level:'info',text:'Fixture ready'}],runtime:{state:'idle',cpuPercent:null,memoryMB:null}},{id:'beta',name:'Beta',source:'user',status:'disabled',enabled:false,views:[]}]};
     let pending, reject, previewPending, catalogCalls = 0, importResult = null, copyFailure = false;
     let catalogMode = 'success', previewMode = 'success', globalMode = 'success', savedMasterEnabled = true;
-    const catalog = {entries:[{id:'demo',types:['page'],name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'custom-fixture',kind:'community'},versions:[{version:'1.0.0',compatible:true,installable:true},{version:'2.0.0',compatible:true,installable:true}],status:'available'}],sources:[]};
+    const catalog = {entries:[{id:'demo',types:['page'],name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'custom-fixture',kind:'community'},versions:[{version:'1.0.0',compatible:true,installable:true,updateNotes:[]},{version:'2.0.0',compatible:true,installable:true,updateNotes:[]}],status:'available'}],sources:[]};
     const tooltips = TokenMonitorLimitWindowsView.createLimitWindowsView({document,tooltip:{hasOpened:()=>false,markOpened:()=>{},release:()=>{}}});
     const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,setDetailTooltip:tooltips.setDetailTooltip,getEnabled:()=>savedMasterEnabled,onCopyText:async text=>{if(copyFailure)throw Error('clipboard unavailable');calls.push(['copy',text])},onOpenExternal:async url=>{calls.push(['guide',url])},onSetEnabled:async enabled=>{calls.push(['global',enabled]);if(globalMode==='error')throw Error('settings write failed');savedMasterEnabled=enabled;data.enabled=enabled&&!data.safeMode;return structuredClone(data)},t:(key,args)=>key==='plugins.authoring.prompt'?'Fixture prompt with exact punctuation:':key==='plugins.ui.locationCount'?String(args.count)+' locations':key==='settings.plugins.actionFailed'?args.error:key,api:{
       list:async()=>structuredClone(data),
@@ -239,7 +239,7 @@ async function main() {
     const shortTab=tab('discover');shortTab.focus({preventScroll:true});const shortTabY=shortTab.getBoundingClientRect().y, shortScroll=scroll.scrollTop;
     shortTab.click();await tick();
     check('short-tab-keeps-rail-position-without-downstream-spacer',scroll.scrollTop===shortScroll&&shortTab.getBoundingClientRect().y===shortTabY,{before:shortScroll,after:scroll.scrollTop,beforeY:shortTabY,afterY:shortTab.getBoundingClientRect().y});
-    catalog.entries[0].versions.push({version:'3.0.0',compatible:true,installable:true,changelog:'Version three'});
+    catalog.entries[0].versions.push({version:'3.0.0',compatible:true,installable:true,changelog:'Version three',updateNotes:[]});
     click('plugins.package.install');await tick();previewMode='deferred';
     let rapid=box.querySelector('.plugin-version-picker select');rapid.focus({preventScroll:true});rapid.value='2.0.0';rapid.dispatchEvent(new Event('change'));await tick();
     rapid.value='3.0.0';rapid.dispatchEvent(new Event('change'));

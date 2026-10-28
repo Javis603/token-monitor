@@ -8465,6 +8465,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-detail-toolbar { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .plugin-detail-section { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
 .plugin-detail-heading { margin: 0; font-size: .6875rem; font-weight: 600; }
+.plugin-update-note { display: flex; flex-direction: column; gap: 4px; }
 .plugin-detail .settings-note { margin: 0; }
 .plugin-detail .plugin-views { gap: 10px; }
 .plugin-detail-utilities { border-top: 1px solid var(--line); padding-top: 14px; }

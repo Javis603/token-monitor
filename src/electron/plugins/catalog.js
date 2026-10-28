@@ -21,7 +21,7 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
   let readmeDocument = null, detailRevision = 0, discoveryPending = null;
   const attempts = new Map();
   const maintainerCatalogs = () => sources.list().sources.filter(s => s.kind === 'maintainer');
-  const refreshAt = source => Math.max(source.cached ? source.lastFetched + CATALOG_REFRESH_MS : 0,
+  const refreshAt = source => Math.max(source.lastFetched === null ? 0 : source.lastFetched + CATALOG_REFRESH_MS,
     attempts.has(source.id) ? attempts.get(source.id) + CATALOG_RETRY_MS : 0);
   const packages = new Map(), errors = [];
   // Only App-distributed files receive official attribution. Discovery never
@@ -61,10 +61,16 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
       const installed = installation(entry.id);
       const compatible = entry.versions.filter(v => v.compatible);
       const chosen = compatible.find(v => !semver.prerelease(v.version)) || compatible[0] || entry.versions[0];
+      const versions = entry.versions.map(v => ({ ...v,
+        installable: v.compatible && (!installed.exists || Boolean(installed.version && installed.record?.origin.id === entry.origin.id && semver.gt(v.version, installed.version))),
+        changelog: localize(v.changelog, getLocale()) }));
+      const history = installed.version && installed.record?.origin.id === entry.origin.id
+        ? versions.filter(v => semver.gt(v.version, installed.version) && v.changelog).sort((a, b) => semver.rcompare(a.version, b.version)) : [];
       entries.push({ id: entry.id, name: localize(entry.name, getLocale()), description: localize(entry.description, getLocale()), author: entry.author, identityIcon: entry.identityIcon,
         repository: entry.repository, readmePaths: entry.readmePaths, types: chosen.types, origin: entry.origin, version: chosen.version, installedVersion: installed.version,
         status: !chosen.compatible ? 'incompatible' : !installed.exists ? 'available' : installed.version && installed.record?.origin.id === entry.origin.id && semver.gt(chosen.version, installed.version) ? 'update' : 'installed',
-        versions: entry.versions.map(v => ({ ...v, installable: v.compatible && (!installed.exists || Boolean(installed.version && installed.record?.origin.id === entry.origin.id && semver.gt(v.version, installed.version))), changelog: localize(v.changelog, getLocale()) })) });
+        versions: versions.map(v => ({ ...v, updateNotes: v.installable && installed.exists
+          ? history.filter(change => semver.lte(change.version, v.version)).map(({ version, changelog }) => ({ version, changelog })) : [] })) });
     }
     const state = sources.list();
     return { sources: [OFFICIAL, ...state.sources], entries, github: github.list(), error: [...errors, state.error].filter(Boolean).join('\n'), communityConfigured: state.sources.length > 0 };

@@ -102,7 +102,8 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
       const saved = JSON.parse(readBounded(cacheFile(source.id), MAX_INDEX_BYTES * 2));
       if (saved.url !== source.url) throw new Error('cached source does not match');
       const index = parseIndex(Buffer.from(saved.bytes, 'base64'), source.publicKey);
-      cache.set(source.id, index); source.lastFetched = saved.at;
+      cache.set(source.id, index);
+      source.lastFetched = Number.isSafeInteger(saved.at) && saved.at >= 0 && saved.at <= now() ? saved.at : null;
     } catch (error) { source.error = `cached catalog unavailable: ${error.message}`; }
   }
   try {

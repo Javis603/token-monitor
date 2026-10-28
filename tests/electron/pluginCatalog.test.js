@@ -378,3 +378,41 @@ test('a cache-only discovery just before expiry cannot postpone a newly due refr
   time += 6 * 60 * 60 * 1000 - 60000; await catalog.discover(); assert.equal(calls, 1);
   time += 60000; await catalog.discover(); assert.equal(calls, 2);
 });
+
+test('invalid cached timestamps retain entries but refresh immediately with bounded retries', async t => {
+  for (const at of [undefined, null, 'yesterday', '1000', {}, -1, 100000001]) {
+    const root = temp(t), id = 'maintainer-invalid-time'; let time = 100000000, calls = 0;
+    fs.writeFileSync(path.join(root, `${id}.json`), JSON.stringify({ url: URL, at, bytes: Buffer.from(JSON.stringify(index())).toString('base64') }));
+    const catalog = createPluginCatalog({ root, now: () => time,
+      manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
+      maintainerSources: [{ id, url: URL }], fetchImpl: async () => { calls++; throw Error('offline'); } });
+    t.after(() => catalog.dispose());
+    assert.equal(catalog.list().entries.length, 1);
+    assert.equal(catalog.nextRefreshDelay(), 0);
+    await catalog.discover(); assert.equal(calls, 1);
+    assert.equal(catalog.nextRefreshDelay(), 300000);
+    await catalog.discover(); assert.equal(calls, 1);
+    time += 300000; await catalog.discover(); assert.equal(calls, 2);
+    assert.equal(catalog.list().entries.length, 1);
+  }
+});
+
+test('update notes span the installed-to-selected range in SemVer order for the same source only', async t => {
+  let installedVersion = '1.0.0', originId = 'maintainer-notes';
+  const raw = index();
+  raw.plugins[0].versions = ['2.0.0', '1.2.0', '1.0.0', '1.10.0', '3.0.0'].map(version => ({
+    version, sha256: digest(packageBytes(version)), url: `https://catalog.example/${version}.tmplugin`,
+    changelog: { en: `Changes ${version}`, 'zh-TW': `變更 ${version}` }
+  }));
+  const catalog = createPluginCatalog({ root: temp(t), getLocale: () => 'zh-TW',
+    manager: { list: () => ({ plugins: installedVersion ? [{ id: 'community-demo', version: installedVersion }] : [] }) },
+    managed: { describe: () => installedVersion ? { version: installedVersion, origin: { id: originId } } : null, cancelSource() {} },
+    maintainerSources: [{ id: 'maintainer-notes', url: URL }], fetchImpl: async () => new Response(JSON.stringify(raw)) });
+  t.after(() => catalog.dispose()); await catalog.discover();
+  const notes = version => catalog.list().entries[0].versions.find(v => v.version === version).updateNotes;
+  assert.deepEqual(notes('2.0.0'), ['2.0.0', '1.10.0', '1.2.0'].map(version => ({ version, changelog: `變更 ${version}` })));
+  assert.deepEqual(notes('1.2.0'), [{ version: '1.2.0', changelog: '變更 1.2.0' }]);
+  assert.deepEqual(notes('1.0.0'), []);
+  originId = 'other-source'; assert.deepEqual(notes('2.0.0'), []);
+  installedVersion = null; assert.deepEqual(notes('2.0.0'), []);
+});

@@ -190,6 +190,26 @@ test('catalog details select the plugin README language and keep its nested link
   assert.ok(!calls.some(target => target.includes('/search/')));
 });
 
+test('custom catalogs use the default README unless they explicitly declare localized plugin paths', async t => {
+  const url = 'https://catalog.example/custom.json', calls = [];
+  const catalog = createPluginCatalog({ root: temp(t), getLocale: () => 'zh-TW',
+    manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
+    fetchImpl: async target => {
+      calls.push(target);
+      if (target === url) return response({ format: 1, title: 'Custom', plugins: [
+        { id: 'root-readme', name: 'Root', repository: 'https://github.com/author/project', versions: [{ version: '1.0.0', url: 'https://example.test/package', sha256: 'a'.repeat(64) }] },
+        { id: 'nested-readme', name: 'Nested', repository: 'https://github.com/author/project', readmePaths: { 'zh-TW': 'plugins/nested/README.zh-TW.md' }, versions: [{ version: '1.0.0', url: 'https://example.test/package', sha256: 'b'.repeat(64) }] }
+      ] });
+      const file = target.endsWith('/readme') ? 'README.md' : 'plugins/nested/README.zh-TW.md';
+      return response({ type: 'file', path: file, encoding: 'base64', content: Buffer.from(`# ${file}`).toString('base64'),
+        download_url: `https://raw.githubusercontent.com/author/project/main/${file}`, html_url: `https://github.com/author/project/blob/main/${file}` });
+    } });
+  t.after(() => catalog.dispose());
+  const state = await catalog.addSource({ url }), id = state.sources.find(s => s.kind === 'community').id;
+  await catalog.details(id, 'root-readme'); assert.equal(calls.at(-1), 'https://api.github.com/repos/author/project/readme');
+  await catalog.details(id, 'nested-readme'); assert.equal(calls.at(-1), 'https://api.github.com/repos/author/project/contents/plugins/nested/README.zh-TW.md');
+});
+
 test('explicit README content must be the requested file, with no redirect-like raw URL metadata', async t => {
   const file = 'plugins/one/README.md'; let patch = {};
   const github = createGitHubDiscovery({ root: temp(t), fetchImpl: async () => response({ type: 'file', path: file, encoding: 'base64', content: Buffer.from('Hello').toString('base64'),

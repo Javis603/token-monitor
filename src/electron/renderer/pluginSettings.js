@@ -290,7 +290,16 @@
         });
         row.append(select); wrap.append(row);
         const selected = entry.versions.find(v => v.version === version);
-        if (selected?.changelog) wrap.append(el(document, 'p', 'plugin-description', selected.changelog));
+        if (entry.installedVersion && selected?.updateNotes.length) {
+          const notes = el(document, 'section', 'plugin-update-notes plugin-detail-section');
+          notes.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.updateRange', { from: entry.installedVersion, to: version })));
+          for (const change of selected.updateNotes) {
+            const release = el(document, 'div', 'plugin-update-note');
+            release.append(el(document, 'h4', 'plugin-detail-heading', `v${change.version}`), el(document, 'p', 'plugin-description', change.changelog));
+            notes.append(release);
+          }
+          wrap.append(notes);
+        }
       }
       if (packagePreview) wrap.append(packagePanel());
       else wrap.append(button(t('plugins.ui.previewPackage'), () => void run(async () => { await previewCatalog(entry, version); return null; })));
@@ -434,8 +443,6 @@
       body.append(meta);
       if (entry.repository) body.append(button(t('plugins.catalog.openRepository'), () => void onOpenExternal(entry.repository), 'plugin-inline-action'));
       if (!isFeatured(entry.origin)) body.append(el(document, 'p', 'settings-note', t('plugins.catalog.unreviewed')));
-      const selected = entry.versions?.find(v => v.version === entry.version);
-      if (selected?.changelog) body.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.changelog')), el(document, 'p', 'plugin-description', selected.changelog));
       const readme = el(document, 'div', 'plugin-catalog-readme', t('plugins.view.loading'));
       body.append(readme);
       void api.catalogDetails(entry.origin.id, entry.id).then(result => {
@@ -494,6 +501,7 @@
         }
       }).catch(() => { if (dialog.isConnected) readme.textContent = t('plugins.catalog.noReadme'); });
       const footer = el(document, 'footer', 'plugin-catalog-dialog-footer');
+      const selected = entry.versions?.find(v => v.version === entry.version);
       if (selected ? selected.installable : ['available', 'update'].includes(entry.status)) {
         footer.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => {
           dialog.close();
