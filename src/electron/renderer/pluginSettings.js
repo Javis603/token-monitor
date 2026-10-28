@@ -505,6 +505,9 @@
       const wrap = el(document, 'div', 'plugin-catalog');
       if (!catalogData) { wrap.append(el(document, 'p', 'settings-note', t('plugins.view.loading'))); return wrap; }
       if (catalogData.error) wrap.append(el(document, 'p', 'plugin-risk', catalogData.error));
+      for (const source of catalogData.sources.filter(source => source.kind === 'community' && source.error)) {
+        wrap.append(el(document, 'p', 'plugin-risk', `${source.label}: ${source.error}`));
+      }
       const search = el(document, 'input', 'plugin-catalog-search');
       search.type = 'search'; search.value = query;
       search.placeholder = t('plugins.catalog.search'); search.setAttribute('aria-label', t('plugins.catalog.search'));

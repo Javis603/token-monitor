@@ -37,6 +37,7 @@ async function main() {
     const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,setDetailTooltip:tooltips.setDetailTooltip,getEnabled:()=>savedMasterEnabled,onCopyText:async text=>{if(copyFailure)throw Error('clipboard unavailable');calls.push(['copy',text])},onOpenExternal:async url=>{calls.push(['guide',url])},onSetEnabled:async enabled=>{calls.push(['global',enabled]);if(globalMode==='error')throw Error('settings write failed');savedMasterEnabled=enabled;data.enabled=enabled&&!data.safeMode;return structuredClone(data)},t:(key,args)=>key==='plugins.authoring.prompt'?'Fixture prompt with exact punctuation:':key==='plugins.ui.locationCount'?String(args.count)+' locations':key==='settings.plugins.actionFailed'?args.error:key,api:{
       list:async()=>structuredClone(data),
       catalog:()=>{catalogCalls++;return catalogMode==='deferred'?new Promise((yes,no)=>{pending=yes;reject=no}):Promise.resolve(catalog)},
+      refreshSource:async id=>{calls.push(['refreshSource',id]);const source=catalog.sources.find(s=>s.id===id);source.error=source.nextError||'';return catalog},
       place:async(ref,surface,on)=>{calls.push(['place',ref,surface,on]);data.plugins[0].views[0].placements.home=on;return structuredClone(data)},
       setEnabled:async(id,on)=>{const p=data.plugins.find(p=>p.id===id);p.enabled=on;p.status=on?'active':'disabled';return structuredClone(data)},
       catalogPreview:async(source,id,version)=>{calls.push(['preview',version]);if(previewMode==='error')throw Error('preview rejected');if(previewMode==='deferred')await new Promise(resolve=>{previewPending=resolve});return {token:'token-'+version,id,name:'Demo',description:'Example',version,author:'Author',origin:{id:source,kind:'community'},operation:'install',sha256:'abc'}},
@@ -132,6 +133,14 @@ async function main() {
     check('discover-shows-bundled-without-custom-sources',box.querySelectorAll('[data-catalog-id]').length===1&&box.querySelector('.plugin-type')?.textContent==='plugins.type.page'&&!box.querySelector('.plugin-source-route'));
     catalog.entries.push({id:'third-party',name:'Third party',description:'Custom listing',version:'1.0.0',types:['appearance'],origin:{id:'custom',kind:'community',label:'Example source'},status:'incompatible'});await panel.refresh();
     check('discover-combines-origins-with-distinct-attribution',box.querySelectorAll('[data-catalog-id]').length===2&&box.querySelector('[data-catalog-id="third-party"] .plugin-origin-note')?.textContent==='Example source'&&!box.querySelector('[data-catalog-id="third-party"] .plugin-shield'));
+    catalog.sources=[{id:'custom',kind:'community',label:'Cached source',nextError:'request failed'},{id:'empty',kind:'community',label:'Empty source',nextError:'invalid catalog'},{id:'healthy',kind:'community',label:'Healthy source'}];await panel.refresh();
+    box.querySelector('.plugin-catalog-refresh button').click();await tick();
+    check('discover-shows-each-returned-source-error-and-keeps-cached-entries',box.querySelector('.plugin-catalog').textContent.includes('Cached source: request failed')&&box.querySelector('.plugin-catalog').textContent.includes('Empty source: invalid catalog')&&box.querySelectorAll('[data-catalog-id]').length===2&&calls.filter(c=>c[0]==='refreshSource').length===3);
+    await panel.refresh();
+    check('discover-retains-source-errors-on-panel-refresh',box.querySelector('.plugin-catalog').textContent.includes('Cached source: request failed'));
+    for(const source of catalog.sources)source.nextError='';box.querySelector('.plugin-catalog-refresh button').click();await tick();
+    check('discover-clears-source-errors-after-successful-refresh',!box.querySelector('.plugin-catalog').textContent.includes('request failed')&&!box.querySelector('.plugin-catalog').textContent.includes('invalid catalog'));
+    catalog.sources=[];
     const search=box.querySelector('.plugin-catalog-search');search.value='third party';search.dispatchEvent(new Event('input'));
     check('discover-search-spans-all-origins',box.querySelectorAll('[data-catalog-id]').length===1&&box.querySelector('[data-catalog-id="third-party"]'));
     search.value='';search.dispatchEvent(new Event('input'));catalog.entries.pop();await panel.refresh();
