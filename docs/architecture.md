@@ -93,7 +93,7 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 
 ### Outbound transport
 
-`src/electron/limits/fetch.js` injects the same transport into collection and credential probes: env-proxy-aware `outboundFetch.js` when configured, otherwise Electron `net.fetch` for OS proxy support. Providers must preserve an injected fetch; custom transports do not inherit these guarantees and must be documented in the provider note. The probe supplies `credentialFetch` over the same transport and retry-header handling without its cancellation signal: once a rotating credential exchange starts, it must finish and persist its successor even if usage collection is superseded. Providers still check cancellation before starting that transaction and bound the exchange with their own timeout; ordinary resource calls use the cancellable `fetch`.
+`src/electron/limits/fetch.js` injects the same transport into collection and credential probes: env-proxy-aware `outboundFetch.js` when configured, otherwise Electron `net.fetch` for OS proxy support. Providers must preserve an injected fetch; custom transports do not inherit these guarantees and must be documented in the provider note.
 
 Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies cannot shadow provider-managed cookies, and expect cross-origin `Referer` paths to be cancelled without a suitable `referrerPolicy`.
 

@@ -3,12 +3,11 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFile } = require('node:child_process');
-const { randomUUID } = require('node:crypto');
+const { createHash } = require('node:crypto');
 
 const { normalizeLimitProvider } = require('../../limits/core');
-const { cleanSecret, numberOrNull: parseNumberOrNull, errorWithStatus } = require('../../limits/providerHelpers');
-const { writePrivateJsonAtomic } = require('../../credentialStore');
+const { cleanSecret, numberOrNull: parseNumberOrNull, errorWithStatus, envValue, pathApiForPlatform, uniqueStrings } = require('../../limits/providerHelpers');
+const { runCapturedCliProcess } = require('../../limits/cliProcess');
 const { hashKey } = require('../../hashKey');
 const { mcodeDataDirs } = require('../mcode/paths');
 
@@ -21,15 +20,11 @@ const MINIMAX_TOKEN_PLAN_REMAINS_URL_EN = 'https://api.minimax.io/v1/token_plan/
 const MINIMAX_BALANCE_URL_CN = 'https://api.minimaxi.com/account/query_balance';
 const MINIMAX_BALANCE_URL_EN = 'https://api.minimax.io/account/query_balance';
 
-const MINIMAX_CODE_OAUTH_URL_CN = 'https://account.minimax.cn/oauth2/token';
-const MINIMAX_CODE_OAUTH_URL_INTL = 'https://account.minimax.io/oauth2/token';
 const MINIMAX_CODE_MEMBERSHIP_URL_CN = 'https://agent.minimax.cn/matrix/api/v1/commerce/get_membership_info';
 const MINIMAX_CODE_MEMBERSHIP_URL_INTL = 'https://agent.minimax.io/matrix/api/v1/commerce/get_membership_info';
 const MINIMAX_CODE_PLAN_REMAINS_URL_CN = 'https://www.minimaxi.com/backend/account/token_plan/remains_percent';
 const MINIMAX_CODE_PLAN_REMAINS_URL_INTL = 'https://platform.minimax.io/backend/account/token_plan/remains_percent';
 
-const MINIMAX_CODE_REFRESH_LEEWAY_MS = 10 * 60 * 1000;
-const MINIMAX_CODE_PENDING_WRITE_STATE_KEY = 'minimax.code.pending-write';
 const MINIMAX_CODE_GROUP_STATE_KEY = 'minimax.code.group';
 
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
@@ -227,11 +222,13 @@ async function minimaxCashSpend(balanceUrl, headers, fetchJson, deps, now) {
   const specs = [['todaySpend', today], ['weekSpend', week], ['monthSpend', month]].map(([key, start]) =>
     [key, { page: 1, limit: 10, aggregate: true, start_date: day(start), end_date: day(today) }]);
   specs.push(['allTimeSpend', { page_num: 1, page_size: 10 }]);
+  const requests = new Map();
   const results = await Promise.allSettled(specs.map(async ([key, params]) => {
     const cumulative = key === 'allTimeSpend';
     const url = new URL(cumulative ? '/account/query_recharge' : '/account/amount', balanceUrl);
     url.search = new URLSearchParams(params);
-    const body = await fetchJson(url.href, headers, deps);
+    if (!requests.has(url.href)) requests.set(url.href, fetchJson(url.href, headers, deps));
+    const body = await requests.get(url.href);
     if (parseNumberOrNull(body?.base_resp?.status_code) !== 0) return null;
     const amount = parseNumberOrNull(cumulative ? body.cash_total_usage : body.consume_cash_after_voucher_sum);
     return amount === null ? null : [key, amount];
@@ -313,9 +310,7 @@ async function minimaxJsonFetch(fetchFn, url, init, deps = {}) {
       let body;
       try { body = await response.json(); } catch (_) { /* HTTP status still carries the verdict */ }
       // The API host rejects foreign-region keys as HTTP 400 + business 1004.
-      // Keep OAuth invalid_grant and other HTTP failures on their own paths.
       if (response.status === 400 && parseNumberOrNull(body?.base_resp?.status_code) === 1004) error.status = 'unauthorized';
-      error.oauthError = body?.error;
       throw error;
     }
     return await response.json();
@@ -345,12 +340,10 @@ function readMinimaxCodeAuth(authPath, deps = {}) {
   return auth;
 }
 
-function minimaxCodeFs(deps = {}) {
-  return {
-    readFileSync: deps.readFileSync || fs.readFileSync,
-    writeFileSync: deps.writeFileSync || fs.writeFileSync,
-    renameSync: deps.renameSync || fs.renameSync
-  };
+function minimaxCodeRecordKey(dataDir, regionDir) {
+  // The official account key hashes the path spelling, not just the physical directory.
+  const account = createHash('sha256').update(`${path.join(path.resolve(dataDir), 'auth')}\0mcode-public`).digest('base64url');
+  return `com.minimax.mcode.oauth.prod.${regionDir}\0${account}`;
 }
 
 function minimaxCodeAuthFiles(options = {}, deps = {}) {
@@ -368,45 +361,16 @@ function minimaxCodeAuthFiles(options = {}, deps = {}) {
         if (error.code !== 'ENOENT') unreadable = true;
         continue;
       }
-      const keys = Object.keys(auth.records).filter(key => key.startsWith(`com.minimax.mcode.oauth.prod.${regionDir}`));
-      if (keys.length !== 1) {
-        if (keys.length) unreadable = true;
-        continue;
-      }
-      return { authPath, statePath: path.join(directory, 'auth-state.json'), regionDir, recordKey: keys[0], record: auth.records[keys[0]] };
+      const recordKey = minimaxCodeRecordKey(base, regionDir);
+      if (!auth.records[recordKey]) continue;
+      return { dataDir: path.resolve(base), authPath, statePath: path.join(directory, 'auth-state.json'), regionDir, recordKey, record: auth.records[recordKey] };
     }
   }
   if (unreadable) throw errorWithStatus('unavailable', 'MiniMax Code credential store unreadable');
   return null;
 }
 
-// Failed process detection is not evidence that the official client has stopped.
-function minimaxCodeClientRunning(deps = {}) {
-  if (typeof deps.clientRunning === 'function') return Promise.resolve().then(() => deps.clientRunning()).then(Boolean);
-  const platform = deps.platform || process.platform;
-  const execute = deps.execFile || execFile;
-  return new Promise((resolve) => {
-    try {
-      if (platform === 'win32') {
-        execute('tasklist', ['/FI', 'IMAGENAME eq MiniMax Code.exe', '/FO', 'CSV', '/NH'],
-          { timeout: 2000, windowsHide: true }, (error, stdout) => {
-            resolve(Boolean(error) || /MiniMax Code\.exe/i.test(String(stdout)));
-          });
-      } else {
-        execute('pgrep', ['-f', 'MiniMax Code'], { timeout: 2000 }, (error) => {
-          resolve(!error || error.code !== 1);
-        });
-      }
-    } catch (_) { resolve(true); }
-  });
-}
-
-function sameMinimaxCodeLease(left, right) {
-  return left?.refreshToken === right?.refreshToken && left?.generation === right?.generation
-    && left?.loginEpoch === right?.loginEpoch;
-}
-
-function minimaxCodeAuthState(session, deps = {}, pending) {
+function minimaxCodeAuthState(session, deps = {}) {
   let state;
   try { state = JSON.parse((deps.readFileSync || fs.readFileSync)(session.statePath, 'utf8')); }
   catch (error) { throw errorWithStatus(error.code === 'ENOENT' ? 'notConfigured' : 'unavailable', 'MiniMax Code auth state unavailable'); }
@@ -418,169 +382,69 @@ function minimaxCodeAuthState(session, deps = {}, pending) {
   if (['anonymous', 'logging_out', 'logout_pending', 'scope_upgrade_required'].includes(state.status)) {
     throw errorWithStatus('unauthorized', 'MiniMax Code sign-in required');
   }
-  const record = session.record;
-  if (!isMinimaxCodeRecord(record) || !record.scopes.includes('agent.default')) {
-    throw errorWithStatus('unavailable', 'MiniMax Code credential contract changed');
-  }
-  if (pending) {
-    if (minimaxCodeRefreshCurrent(pending.session, state, pending.updated.generation)) {
-      const auth = readMinimaxCodeAuth(session.authPath, deps);
-      const current = auth?.records?.[session.recordKey];
-      if (sameMinimaxCodeLease(current, pending.session.record)
-        || sameMinimaxCodeLease(current, { ...pending.session.record, ...pending.updated })) return state;
-    }
-    throw Object.assign(errorWithStatus('unavailable', 'MiniMax Code login changed'), { pendingStale: true });
-  }
-  // Recovery after a partial commit requires the exact fenced generation.
-  if (state.status === 'refreshing' && typeof state.refresh?.id === 'string' && state.refresh.id
-    && state.generation === record.generation) return state;
-  if (!['authenticated', 'expired'].includes(state.status) || state.generation !== session.record.generation) {
-    throw errorWithStatus('unavailable', 'MiniMax Code auth transition pending');
-  }
+  if (!session.record.scopes.includes('agent.default') || !['authenticated', 'expired'].includes(state.status)
+    || state.generation !== session.record.generation) throw errorWithStatus('unavailable', 'MiniMax Code auth transition pending');
   return state;
 }
 
-function minimaxCodeRefreshCurrent(session, state, generation) {
-  return state?.status === 'refreshing' && state.refresh?.id === session.refreshId && state.generation === generation;
+function minimaxCodeCommand(deps) {
+  const env = deps.env || process.env;
+  const platform = deps.platform || process.platform;
+  const paths = pathApiForPlatform(platform);
+  const home = deps.homeDir || os.homedir();
+  const installDir = envValue(env, 'MCODE_INSTALL_DIR') || paths.join(home, '.minimax-code');
+  const dirs = uniqueStrings([
+    ...String(envValue(env, 'PATH') || '').split(platform === 'win32' ? ';' : ':').filter(Boolean),
+    platform === 'win32' ? installDir : paths.join(installDir, 'bin'),
+    ...(platform === 'win32'
+      ? [envValue(env, 'APPDATA') && paths.join(envValue(env, 'APPDATA'), 'npm'), paths.join(home, '.npm-global')]
+      : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', paths.join(home, '.npm-global', 'bin'), paths.join(home, '.local', 'bin')])
+  ]);
+  const names = platform === 'win32' ? ['mcode.exe', 'mcode.cmd'] : ['mcode'];
+  return dirs.filter(dir => paths.isAbsolute(dir)).flatMap(dir => names.map(name => paths.join(dir, name)))
+    .find(command => (deps.existsSync || fs.existsSync)(command));
 }
 
-// A late refresh must not restore a login that was replaced or logged out.
-function writeMinimaxCodeAuth(session, updated, deps = {}, status = 'authenticated') {
-  const fsApi = { ...fs, ...minimaxCodeFs(deps) };
-  try {
-    const state = JSON.parse(fsApi.readFileSync(session.statePath, 'utf8'));
-    if (!minimaxCodeRefreshCurrent(session, state, updated.generation)) return 'stale';
-    const fresh = readMinimaxCodeAuth(session.authPath, deps);
-    const current = fresh?.records?.[session.recordKey];
-    if (!current || (!sameMinimaxCodeLease(current, session.record)
-      && !sameMinimaxCodeLease(current, { ...session.record, ...updated }))) return 'stale';
-    if (status === 'authenticated') {
-      fresh.records[session.recordKey] = { ...current, ...updated };
-      writePrivateJsonAtomic(session.authPath, fresh, { fs: fsApi });
-    }
-    const latest = JSON.parse(fsApi.readFileSync(session.statePath, 'utf8'));
-    if (!minimaxCodeRefreshCurrent(session, latest, updated.generation)) return 'stale';
-    writePrivateJsonAtomic(session.statePath, { ...latest, status, refresh: undefined,
-      generation: updated.generation, expiresAtMs: updated.expiresAtMs,
-      ...(status === 'authenticated' ? { scopes: updated.scopes } : {}) }, { fs: fsApi });
-    return 'written';
-  } catch (_) { return 'pending'; }
-}
-
-function commitMinimaxCodeRefresh(session, updated, deps, state, pendingKey, status = 'authenticated') {
-  const result = writeMinimaxCodeAuth(session, updated, deps, status);
-  if (result === 'written' || result === 'stale') state?.delete(pendingKey);
-  if (result === 'stale') throw errorWithStatus('unavailable', 'MiniMax Code login changed');
-  if (result === 'pending') minimaxCodeAuthState(session, deps, { session, updated });
-  if (status === 'anonymous') throw errorWithStatus('unauthorized', 'MiniMax Code sign-in required');
-  return { ...session, record: { ...session.record, ...updated } };
+function readMinimaxCodeSession(session, deps) {
+  const record = readMinimaxCodeAuth(session.authPath, deps).records[session.recordKey];
+  if (!record) throw errorWithStatus('notConfigured', 'MiniMax Code login missing');
+  const current = { ...session, record };
+  const state = minimaxCodeAuthState(current, deps);
+  if (record.loginEpoch !== session.record.loginEpoch) throw errorWithStatus('unavailable', 'MiniMax Code login changed');
+  return { current, state };
 }
 
 async function refreshMinimaxCodeSession(session, deps = {}) {
   if (deps.signal?.aborted) throw errorWithStatus('unavailable', 'Refresh skipped');
-  // The official proper-lockfile mutex is auth.lock.lock. Never steal it.
-  const lockPath = path.join(path.dirname(session.authPath), 'auth.lock.lock');
-  try { fs.mkdirSync(lockPath, { mode: 0o700 }); }
-  catch (_) { throw errorWithStatus('unavailable', 'MiniMax Code auth is locked'); }
-  const identity = fs.statSync(lockPath);
-  const ownsLock = () => {
-    try { const current = fs.statSync(lockPath); return current.ino === identity.ino && current.dev === identity.dev && current.birthtimeMs === identity.birthtimeMs; }
-    catch (_) { return false; }
-  };
-  const heartbeat = setInterval(() => {
-    if (ownsLock()) {
-      try { const time = new Date(); fs.utimesSync(lockPath, time, time); } catch (_) {}
-    }
-  }, 10000);
+  if (!session.record.loginEpoch) throw errorWithStatus('unavailable', 'MiniMax Code login epoch unavailable');
+  const { current, state } = readMinimaxCodeSession(session, deps);
+  if (current.record.accessToken !== session.record.accessToken && state.status === 'authenticated'
+    && current.record.expiresAtMs > (deps.now || Date.now)()) return current;
+  const command = minimaxCodeCommand(deps);
+  if (!command) throw errorWithStatus('unavailable', 'MiniMax Code CLI unavailable');
+  const platform = deps.platform || process.platform;
+  const env = { ...(deps.env || process.env), MINIMAX_DATA_DIR: session.dataDir, MAVIS_DATA_DIR: session.dataDir,
+    MAVIS_REGION: session.regionDir, MAVIS_BUILD_ENV: 'prod' };
+  const windowsShim = platform === 'win32' && /\.cmd$/i.test(command);
+  // A fixed cmd line with the launcher in env avoids re-expanding path characters.
+  const executable = windowsShim ? envValue(env, 'ComSpec') || 'cmd.exe' : command;
+  const args = windowsShim ? ['/d', '/s', '/v:off', '/c', '""%TOKEN_MONITOR_MCODE_COMMAND_PATH%" provider list --json"']
+    : ['provider', 'list', '--json'];
+  if (windowsShim) env.TOKEN_MONITOR_MCODE_COMMAND_PATH = command;
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-mcode-'));
   try {
-    const state = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
-    const pendingKey = `${MINIMAX_CODE_PENDING_WRITE_STATE_KEY}:${session.authPath}:${session.recordKey}`;
-    const pending = state?.get(pendingKey) || (session.refreshId ? { session, updated: session.record } : null);
-    if (pending) {
-      minimaxCodeAuthState(session, deps, pending);
-      if (!ownsLock()) throw errorWithStatus('unavailable', 'MiniMax Code auth lock changed');
-      return commitMinimaxCodeRefresh(pending.session, pending.updated, deps, state, pendingKey, pending.status);
-    }
-    if (await minimaxCodeClientRunning(deps)) throw errorWithStatus('unavailable', 'MiniMax Code is running');
-    const auth = readMinimaxCodeAuth(session.authPath, deps);
-    const record = auth?.records?.[session.recordKey];
-    if (!record) throw errorWithStatus('unavailable', 'MiniMax Code login changed');
-    const authState = minimaxCodeAuthState({ ...session, record }, deps);
-    if (!sameMinimaxCodeLease(record, session.record)) {
-      if (authState.status === 'authenticated' && record.expiresAtMs > (deps.now || Date.now)()) return { ...session, record };
-      throw errorWithStatus('unavailable', 'MiniMax Code replacement lease not ready');
-    }
-    const fsApi = { ...fs, ...minimaxCodeFs(deps) };
-    session = { ...session, refreshId: randomUUID() };
-    const generation = record.generation + 1;
-    const fence = { ...authState, status: 'refreshing', generation,
-      refresh: { id: session.refreshId, owner: { pid: process.pid, startedAtMs: Math.trunc(performance.timeOrigin) } } };
-    if (!ownsLock()) throw errorWithStatus('unavailable', 'MiniMax Code auth lock changed');
     if (deps.signal?.aborted) throw errorWithStatus('unavailable', 'Refresh skipped');
-    writePrivateJsonAtomic(session.statePath, fence, { fs: fsApi });
-    const url = session.regionDir === 'cn' ? MINIMAX_CODE_OAUTH_URL_CN : MINIMAX_CODE_OAUTH_URL_INTL;
-    let json;
-    try {
-      json = await minimaxJsonFetch(deps.credentialFetch || deps.fetch || fetch, url, {
-        method: 'POST', redirect: 'error', headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: record.refreshToken,
-          client_id: 'mcode-public', scope: 'agent.default', audience: 'agent-backend' }).toString()
-      }, { ...deps, signal: undefined });
-      if (json?.error) throw errorWithStatus('unavailable', 'OAuth response rejected');
-      let scopes = json?.scope;
-      if (scopes == null) {
-        try {
-          const segments = json.access_token.split('.');
-          if (segments.length === 3) {
-            const claims = JSON.parse(Buffer.from(segments[1], 'base64url').toString('utf8'));
-            scopes = claims.scope ?? claims.scp;
-          }
-        } catch (_) { /* opaque tokens require a scope in the response */ }
-      }
-      scopes = typeof scopes === 'string' ? scopes.split(/\s+/).filter(Boolean)
-        : Array.isArray(scopes) && scopes.every(scope => typeof scope === 'string') ? scopes : [];
-      json = { ...json, scopes, expires_in: parseNumberOrNull(json?.expires_in),
-        refresh_token: cleanSecret(json?.refresh_token) || record.refreshToken };
-      if (typeof json?.access_token !== 'string' || !json.access_token
-        || typeof json?.refresh_token !== 'string' || !json.refresh_token
-        || String(json.token_type).toLowerCase() !== 'bearer'
-        || !scopes.includes('agent.default')
-        || !(json.expires_in > 0)) {
-        throw errorWithStatus('unavailable', 'OAuth response missing tokens');
-      }
-    } catch (error) {
-      // Only HTTP 400 invalid_grant revokes the shared login.
-      const grantRejected = error.statusCode === 400 && error.oauthError === 'invalid_grant';
-      if (grantRejected) {
-        const updated = { generation };
-        state?.set(pendingKey, { session, updated, status: 'anonymous' });
-        if (!ownsLock()) throw errorWithStatus('unavailable', 'MiniMax Code auth lock changed');
-        return commitMinimaxCodeRefresh(session, updated, deps, state, pendingKey, 'anonymous');
-      }
-      if (error.status === 'unauthorized') error.status = 'unavailable';
-      if (!ownsLock()) throw errorWithStatus('unavailable', 'MiniMax Code auth lock changed');
-      const latest = JSON.parse(fsApi.readFileSync(session.statePath, 'utf8'));
-      if (minimaxCodeRefreshCurrent(session, latest, generation)) {
-        writePrivateJsonAtomic(session.statePath, authState, { fs: fsApi });
-      }
-      throw error;
-    }
-    const updated = {
-      accessToken: json.access_token, refreshToken: json.refresh_token,
-      scopes: json.scopes,
-      expiresAtMs: (deps.now || Date.now)() + json.expires_in * 1000,
-      generation
-    };
-    // A consumed predecessor cannot be replayed while successor persistence is pending.
-    state?.set(pendingKey, { session, updated });
-    if (!ownsLock()) throw errorWithStatus('unavailable', 'MiniMax Code auth lock changed');
-    return commitMinimaxCodeRefresh(session, updated, deps, state, pendingKey);
-  } finally {
-    clearInterval(heartbeat);
-    if (ownsLock()) {
-      try { fs.rmdirSync(lockPath); } catch (_) { /* a leftover lock blocks further rotations */ }
-    }
+    // Official rotation must finish even when its quota collection is superseded.
+    await runCapturedCliProcess(executable, args, { env, cwd, platform, execFile: deps.execFile,
+      windowsVerbatimArguments: windowsShim, timeoutMs: deps.mcodeCliTimeoutMs || 12000 });
+  } finally { fs.rmSync(cwd, { recursive: true, force: true }); }
+  const reread = readMinimaxCodeSession(session, deps);
+  const unchanged = reread.current.record.accessToken === session.record.accessToken;
+  const expired = reread.current.record.expiresAtMs <= (deps.now || Date.now)();
+  if (reread.state.status !== 'authenticated' || unchanged || expired) {
+    throw errorWithStatus(unchanged && expired ? 'unauthorized' : 'unavailable', 'MiniMax Code CLI did not renew the login');
   }
+  return reread.current;
 }
 
 async function minimaxCodeRequest(url, init, deps = {}) {
@@ -604,7 +468,7 @@ async function minimaxCodeCreditMeter(membershipUrl, headers, credits, deps) {
     const url = new URL('/minimax-cloud/api/v1/credit/details', membershipUrl);
     url.search = new URLSearchParams({ page_number: page, page_size: 100, include_expired: false }).toString();
     const body = await minimaxCodeRequest(url.href, { headers }, deps);
-    if (!Array.isArray(body.details) || !Number.isSafeInteger(body.total_count) || body.total_count < 0
+    if (!Array.isArray(body.details) || !Number.isSafeInteger(body.total_count) || body.total_count < 0 || body.total_count > 1000
       || (total !== null && total !== body.total_count)) return null;
     total = body.total_count;
     grants.push(...body.details);
@@ -655,27 +519,14 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
     session = await refreshMinimaxCodeSession(session, deps);
     refreshSucceeded = true;
   };
-  const pendingKey = `${MINIMAX_CODE_PENDING_WRITE_STATE_KEY}:${session.authPath}:${session.recordKey}`;
   let authState;
-  try { authState = minimaxCodeAuthState(session, deps, state?.get(pendingKey)); }
-  catch (error) {
-    if (error.status === 'unauthorized' || error.pendingStale) state?.delete(pendingKey);
-    return row(error.status || 'unavailable');
-  }
-  if (authState.status === 'refreshing') session = { ...session, refreshId: authState.refresh.id };
-  const expiry = session.record.expiresAtMs;
-  if (state?.has(pendingKey) || authState.status !== 'authenticated' || expiry - now < MINIMAX_CODE_REFRESH_LEEWAY_MS) {
+  try { authState = minimaxCodeAuthState(session, deps); }
+  catch (error) { return row(error.status || 'unavailable'); }
+  if (authState.status === 'expired' || session.record.expiresAtMs <= now) {
     try { await refresh(); }
-    catch (error) {
-      if (error.pendingStale) state?.delete(pendingKey);
-      if (error.status === 'unauthorized') return row('unauthorized');
-      try { authState = minimaxCodeAuthState(session, deps, state?.get(pendingKey)); }
-      catch (stateError) { return row(stateError.status || 'unavailable'); }
-      if (authState.status !== 'authenticated') return row('unavailable');
-    }
+    catch (error) { return row(mapMinimaxErrorStatus(error)); }
   }
-  if (session.record.expiresAtMs <= (deps.now || Date.now)()) return row('unavailable');
-  // Membership and plan share one auth recovery: one exchange, then one retry.
+  // Membership and plan share at most one auth recovery per collection.
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const headers = { authorization: `Bearer ${session.record.accessToken}`, 'content-type': 'application/json' };
@@ -758,8 +609,8 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
   return row('unauthorized');
 }
 
-async function fetchMinimaxCodeRows(options, deps, { now, updatedAt }) {
-  const current = await fetchMinimaxCodeLimits(options, deps, { now, updatedAt });
+async function fetchMinimaxCodeRows(options, deps, context) {
+  const current = await fetchMinimaxCodeLimits(options, deps, context);
   const scope = options.limitRefreshScope;
   if (scope?.provider === 'minimax' && scope.accountKey) {
     // A scoped attempt keeps its target identity; unidentified or different
@@ -875,7 +726,7 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
           (candidate, candidateIndex) => candidateIndex > index && candidate.region !== attempt.region
         );
         if (nextRegionIndex > index) {
-          index = nextRegionIndex - 1; // the loop's own increment lands on it
+          index = nextRegionIndex - 1;
           continue;
         }
         break;
@@ -980,7 +831,6 @@ function mapMinimaxErrorStatus(error) {
 module.exports = {
   MINIMAX_KEY_NAMES,
   MINIMAX_REGION_MEMORY_STATE_KEY,
-  MINIMAX_CODE_OAUTH_URL_CN,
   MINIMAX_CODE_MEMBERSHIP_URL_CN,
   MINIMAX_CODE_PLAN_REMAINS_URL_CN,
   MINIMAX_REMAINS_URL_CN,
