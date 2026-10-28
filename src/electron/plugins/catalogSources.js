@@ -129,7 +129,9 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
     } finally { clearTimeout(timer); if (active.get(id) === controller) active.delete(id); }
   }
   async function refresh(id) {
-    requireWritable(); const s = sources.get(id); if (!s) throw new Error('unknown catalog source');
+    const s = sources.get(id);
+    if (!s) { requireWritable(); throw new Error('unknown catalog source'); }
+    if (!s.preset) requireWritable();
     try {
       const bytes = await request(id, s.url, MAX_INDEX_BYTES, activeRefreshes);
       const index = parseIndex(bytes, s.publicKey);

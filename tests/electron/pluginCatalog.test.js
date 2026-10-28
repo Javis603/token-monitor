@@ -125,6 +125,29 @@ test('only App-supplied definitions receive maintainer provenance, including aft
   const noPreset = createCatalogSources({ root, fetchImpl }); t.after(() => noPreset.dispose());
   assert.equal(noPreset.entries().length, 1); assert.equal(noPreset.entries()[0].origin.kind, 'community');
 });
+for (const broken of ['malformed', 'directory']) test(`maintainer discovery refreshes independently of ${broken} user configuration`, async t => {
+  const root = temp(t), configFile = path.join(root, 'sources.json');
+  if (broken === 'malformed') fs.writeFileSync(configFile, '{broken');
+  else { fs.mkdirSync(configFile); fs.writeFileSync(path.join(configFile, 'retained'), 'keep'); }
+  let requests = 0;
+  const catalog = createPluginCatalog({ root, manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
+    maintainerSources: [{ id: 'maintainer-fixture', url: URL }],
+    fetchImpl: async url => { assert.equal(url, URL); requests++; return new Response(JSON.stringify(index())); } });
+  t.after(() => catalog.dispose());
+  assert.match(catalog.list().error, /could not be loaded/);
+  assert.equal(catalog.list().sources.find(s => s.id === 'maintainer-fixture').cached, false);
+  const discovered = await catalog.discover();
+  assert.equal(requests, 1); assert.equal(discovered.entries[0].origin.kind, 'maintainer');
+  assert.match(discovered.error, /could not be loaded/);
+  await catalog.discover(); assert.equal(requests, 1);
+  await catalog.discover(true); assert.equal(requests, 2);
+  await assert.rejects(catalog.addSource({ url: 'https://custom.example/catalog.json' }), /could not be loaded/);
+  await assert.rejects(catalog.refreshSource('custom-missing'), /could not be loaded/);
+  assert.throws(() => catalog.removeSource('custom-missing'), /could not be loaded/);
+  if (broken === 'malformed') assert.equal(fs.readFileSync(configFile, 'utf8'), '{broken');
+  else { assert.ok(fs.statSync(configFile).isDirectory()); assert.equal(fs.readFileSync(path.join(configFile, 'retained'), 'utf8'), 'keep'); }
+  assert.ok(fs.existsSync(path.join(root, 'maintainer-fixture.json')));
+});
 test('maintainer discovery bootstraps cache and keeps catalog order, hashes and installation approval', async t => {
   const root = temp(t), userDir = path.join(root, 'plugins');
   let settings = { pluginStates: {} }, requests = 0;
