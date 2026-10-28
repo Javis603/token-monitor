@@ -110,6 +110,96 @@ test('removing a source aborts its download and prevents a late result restoring
   sources.remove(id); resolve(new Response(JSON.stringify(index()))); await pending;
   assert.equal(sources.entries().length, 0); assert.equal(sources.list().sources.length, 0);
 });
+for (const operation of ['install', 'update']) test(`a same-source refresh does not block a real ${operation} preview and explicit approval`, async t => {
+  const root = temp(t), userDir = path.join(root, 'plugins');
+  let settings = { pluginStates: {} }, pkg = packageBytes(), holdIndex = false, finishIndex;
+  const manager = createPluginManager({ userDir, dataDir: path.join(root, 'data'), getSettings: () => settings,
+    saveStates: states => { settings.pluginStates = states; } });
+  const managed = createManagedPlugins({ root: path.join(root, 'managed'), userDir, dataDir: path.join(root, 'data'), manager,
+    getSettings: () => settings, saveSettings: patch => { settings = { ...settings, ...patch }; } });
+  managed.recover(); await manager.reload();
+  const catalog = createPluginCatalog({ root: path.join(root, 'catalog'), manager, managed, fetchImpl: async url => {
+    if (url === URL && holdIndex) return new Promise(resolve => { finishIndex = () => resolve(new Response(JSON.stringify(index(pkg)))); });
+    return new Response(url === URL ? JSON.stringify(index(pkg)) : pkg);
+  } });
+  t.after(async () => { finishIndex?.(); catalog.dispose(); managed.dispose(); await manager.dispose(); });
+  await catalog.addSource({ url: URL });
+  if (operation === 'update') {
+    const entry = catalog.list().entries[0];
+    await managed.install((await catalog.preview(entry.origin.id, entry.id, entry.version)).token, { trustInstall: true });
+    pkg = packageBytes('2.0.0'); await catalog.refreshSource(entry.origin.id);
+  }
+  const entry = catalog.list().entries[0]; assert.equal(entry.status, operation === 'install' ? 'available' : 'update');
+  holdIndex = true; const refreshing = catalog.refreshSource(entry.origin.id);
+  assert.equal(catalog.list().sources.find(source => source.id === entry.origin.id).refreshing, true);
+  // Keep the index response pending throughout download, preview and install.
+  const preview = await catalog.preview(entry.origin.id, entry.id, entry.version);
+  assert.equal(preview.version, entry.version); assert.equal(preview.sha256, digest(pkg));
+  assert.equal(preview.origin.id, entry.origin.id);
+  await managed.install(preview.token, operation === 'install' ? { trustInstall: true } : { trustUpdate: true });
+  assert.equal(manager.list().plugins[0].version, entry.version);
+  assert.equal(manager.list().plugins[0].status, 'active');
+  assert.equal(catalog.list().sources.find(source => source.id === entry.origin.id).refreshing, true);
+  finishIndex(); await refreshing;
+  assert.equal(catalog.list().sources.find(source => source.id === entry.origin.id).error, '');
+  assert.equal(catalog.list().entries[0].status, 'installed');
+});
+test('package-first overlap stays bounded independently and does not masquerade as an index refresh', async t => {
+  const pending = [];
+  let hold = false;
+  const sources = createCatalogSources({ root: temp(t), fetchImpl: async url => hold
+    ? new Promise(resolve => pending.push({ url, resolve })) : new Response(JSON.stringify(index())) });
+  t.after(() => sources.dispose()); await sources.add({ url: URL });
+  const id = sources.list().sources[0].id; hold = true;
+  const downloading = sources.request(id, 'https://catalog.example/demo.tmplugin', 1024);
+  assert.equal(sources.list().sources[0].refreshing, false);
+  await assert.rejects(sources.request(id, 'https://catalog.example/another.tmplugin', 1024), /download in progress/);
+  const refreshing = sources.refresh(id);
+  assert.equal(pending.length, 2); assert.equal(sources.list().sources[0].refreshing, true);
+  await sources.refresh(id); assert.equal(pending.length, 2);
+  assert.match(sources.list().sources[0].error, /download in progress/);
+  pending.find(item => item.url === URL).resolve(new Response(JSON.stringify(index()))); await refreshing;
+  assert.equal(sources.list().sources[0].refreshing, false);
+  pending.find(item => item.url !== URL).resolve(new Response('package')); assert.equal((await downloading).toString(), 'package');
+  assert.equal(sources.list().sources[0].error, '');
+});
+for (const action of ['remove', 'dispose']) test(`${action} aborts both an index refresh and package download and discards late bytes`, async t => {
+  const root = temp(t), pending = [];
+  let hold = false;
+  const sources = createCatalogSources({ root, fetchImpl: async (url, init) => hold
+    ? new Promise(resolve => pending.push({ url, signal: init.signal, resolve })) : new Response(JSON.stringify(index())) });
+  t.after(() => sources.dispose()); await sources.add({ url: URL });
+  const id = sources.list().sources[0].id, cachePath = path.join(root, `${id}.json`), saved = fs.readFileSync(cachePath);
+  hold = true; const refreshing = sources.refresh(id);
+  const downloading = assert.rejects(sources.request(id, 'https://catalog.example/demo.tmplugin', 1024), /removed|cancelled/);
+  assert.equal(pending.length, 2); sources[action](id);
+  assert.ok(pending.every(item => item.signal.aborted));
+  for (const item of pending) item.resolve(new Response(item.url === URL ? JSON.stringify(index(packageBytes('2.0.0'))) : 'package'));
+  await Promise.all([refreshing, downloading]);
+  if (action === 'remove') {
+    assert.equal(sources.entries().length, 0); assert.equal(fs.existsSync(cachePath), false);
+  } else {
+    assert.equal(sources.entries()[0].versions[0].version, '1.0.0'); assert.deepEqual(fs.readFileSync(cachePath), saved);
+  }
+});
+test('overlapping index and package requests retain their independent 15-second deadlines', async t => {
+  let hold = false;
+  const signals = [];
+  const sources = createCatalogSources({ root: temp(t), fetchImpl: async (_url, init) => {
+    if (!hold) return new Response(JSON.stringify(index()));
+    signals.push(init.signal);
+    return new Promise((resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('deadline aborted')), { once: true }));
+  } }); t.after(() => sources.dispose()); await sources.add({ url: URL });
+  const id = sources.list().sources[0].id;
+  t.mock.timers.enable({ apis: ['setTimeout'] }); hold = true;
+  const refreshing = sources.refresh(id);
+  t.mock.timers.tick(5000);
+  const downloading = assert.rejects(sources.request(id, 'https://catalog.example/demo.tmplugin', 1024), /deadline aborted/);
+  t.mock.timers.tick(10000); await refreshing;
+  assert.equal(signals[0].aborted, true); assert.equal(signals[1].aborted, false);
+  t.mock.timers.tick(5000); await downloading;
+  assert.equal(signals[1].aborted, true);
+});
 test('discover → verify → install → approve → update pauses new access → rollback → uninstall', async t => {
   const dir = temp(t), userDir = path.join(dir, 'plugins'), builtinDir = path.join(dir, 'builtin'); fs.mkdirSync(builtinDir);
   let settings = { pluginStates: {}, homeModuleOrder: '', hiddenHomeModules: '', edgeDockItems: null, notchPluginPages: [] };
