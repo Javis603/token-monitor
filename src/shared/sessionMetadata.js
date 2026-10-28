@@ -5,6 +5,7 @@ const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { normalizeSessionContext } = require('./sessionContext');
+const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const antigravitySessionMetadata = require('./providers/antigravity/sessionMetadata');
 const codebuddySession = require('./providers/codebuddy/sessionMetadata');
@@ -17,6 +18,7 @@ const dshSessionMetadata = require('./providers/dsh/sessionMetadata');
 const workbuddySession = require('./providers/workbuddy/sessionMetadata');
 const devinSessionMetadata = require('./providers/devin/sessionMetadata');
 const grokSessionMetadata = require('./providers/grok/sessionMetadata');
+const zcodeSessionMetadata = require('./providers/zcode/sessionMetadata');
 const { readT3SessionRelationResult } = require('./t3SessionMetadata');
 const { supportsT3SessionClient, nativeAccountingId } = require('./t3SessionIdentity');
 
@@ -261,7 +263,11 @@ const SESSION_METADATA_RESOLVERS = new Map([
   // within the tick. grok writes `summary.json` after tokscale first exposes
   // the id, so it needs the retry.
   ['grok', { resolve: grokSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
-  ['workbuddy', { resolve: workbuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }]
+  ['workbuddy', { resolve: workbuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  // ZCode keeps titles in its own CLI SQLite database, which tokscale's JSONL
+  // scan never reads; the resolver shares the scan's home, and the retry
+  // covers the tick where the database row lands after the usage does.
+  ['zcode', { resolve: zcodeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
 ]);
 
 function resolverDefinition(entry) {
@@ -512,6 +518,9 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
+      if (isSessionReasoningEffortClient(session.client) && Object.prototype.hasOwnProperty.call(meta, 'reasoningEffort')) {
+        session.reasoningEffort = normalizeReasoningEffort(meta.reasoningEffort);
+      }
       if (session.client === 'codex' && typeof meta.waitingForInput === 'boolean') {
         session.waitingForInput = meta.waitingForInput;
       }

@@ -39,6 +39,16 @@ Current model/agent/location selections are metadata, not usage activity: they m
 
 Every Web probe must receive the runtime-injected transport. Do not bypass proxy and Electron behavior by constructing provider-local fetch implicitly.
 
+## Console migration
+
+Go quota and Zen balance are separate reads. The Bearer-key Go usage API (`/zen/go/v1/usage`) does not supply Zen money. Cookie reads use the Console JSON API when the header contains `__Host-console_session`; legacy-only cookies keep the workspace/server-function path. The Console form accepts the browser's Value alone and stores it with the explicit `__Host-console_session` name. Named cookie headers remain accepted, while existing stored/environment bare values keep their legacy `auth` interpretation.
+
+Each collection or settings probe pair shares one refresh-scoped workspace discovery: `GET /console/api/orgs` without an organization header, then Go `/console/api/go/status` and Zen `/console/api/billing/status` with the same `x-org-id`. Both `wrk_` and `org_` IDs and same-origin Console/workspace override URLs are accepted. Once discovery selects a workspace, legacy fallback keeps that ID rather than rediscovering another account.
+
+Go meters use `usedMicroCents / limitMicroCents` for percentages. Missing weekly/monthly meters and reset times stay absent; the month meter can use `access.endsAt`. Explicit `null` or `access: null` means no Go subscription, not invalid credentials, and blocks stale local estimates just like the API's explicit entitlement rejection. Zen billing is independent of that result: only `billingMode: prepaid` plus `mode: pay-as-you-go` maps `balanceMicroCents / 100000000` to USD, preserving zero and negative balances. Never substitute available credit, invoiceable limits or Go's month meter for the balance.
+
+Console and legacy authentication can expire independently. A working legacy session may recover a Console failure only when it returns quota windows or a finite balance (including zero); an empty legacy success preserves the Console failure. An unsuccessful legacy read must not reclassify a Console permission failure as expired authentication. HTTP 401 means unauthorized, 403 means unavailable access, and 429 means source rate limiting. TLS/certificate errors stop that source without legacy fallback; collection and settings isolate the failed source so healthy API quotas, sibling Web results and other accounts survive. Credential-save probes retain strict transport failures. Cancellation still aborts the scoped operation. When no source succeeds, remote failures outrank missing subscriptions in both single- and multi-account mode. Console requests omit the browser cookie jar and do not follow redirects. No Console spend-summary reads are needed to obtain the Zen balance.
+
 ## Verification
 
 Run the OpenCode profile, source-precedence and session tests when changing this note's scope:

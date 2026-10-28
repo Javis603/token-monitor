@@ -7,6 +7,7 @@ const { readSessionDetail } = require('./sessionDetail');
 const { priceLocalSessionDetail } = require('./providers/codex/localUsage');
 const { readDshSessionDetail } = require('./providers/dsh/sessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
+const { tokscaleHomeDir } = require('./tokscaleConfig');
 
 // wslUsage.js's MARKER_CLIENTS also scans `.dsh/sessions` and
 // `.codebuddy/projects`, so a session surfaced from a WSL distro on Windows is a
@@ -15,12 +16,14 @@ const { wslUsageHomes } = require('./wslUsage');
 // transcripts directly, not tokscale JSONL). CodeBuddy resolves its transcripts
 // under the scoped home exactly as Claude and Codex do, so it needs the entry
 // and nothing else.
-const WSL_FALLBACK_CLIENTS = new Set(['claude', 'claude-desktop', 'codebuddy', 'codex', 'dsh', 'omp', 'pi', 'workbuddy']);
+const WSL_FALLBACK_CLIENTS = new Set(['claude', 'claude-desktop', 'codebuddy', 'codex', 'dsh', 'omp', 'pi', 'senpi', 'workbuddy']);
 const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
 async function resolveSessionDetailForPlatform(args = {}, deps = {}) {
-  const nativeHome = (deps.homedir || os.homedir)();
+  const profileHome = (deps.homedir || os.homedir)();
   const platform = deps.platform || process.platform;
+  const nativeHome = args.client === 'senpi'
+    ? tokscaleHomeDir({ homeDir: profileHome, platform, env: deps.env }) : profileHome;
   // resolveDshHome in providers/dsh/paths.js checks env.DSH_HOME before the
   // homeDir it's
   // given, same as tokscale's own PathRoot::EnvVar. tokscale's own scanner

@@ -1,60 +1,60 @@
 {
   "mode": "override",
-  "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote). While the client catalog has forkOnly clients (Proma, CatPaw, Qoder CN), \"upstream\" fails verify-vendored-tokscale-clients.js by design: no upstream release parses them, and failing closed beats silently reporting zero usage for them.",
+  "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote). While the client catalog has forkOnly clients (CatPaw, Qoder CN), \"upstream\" fails verify-vendored-tokscale-clients.js by design: no upstream release parses them, and failing closed beats silently reporting zero usage for them.",
   "upstream": "junhoyeo/tokscale",
   "fork": "Javis603/tokscale",
-  "commit": "324d51362201b746fc35c2f2a3793c971f01d5aa",
-  "commitTitle": "feat(report): link Codex subagent and guardian sessions to their parent",
-  "baseVersion": "4.20.0",
+  "commit": "f52a392c0e1eed3a6c7ba013e6b6e0e2251b9540",
+  "commitTitle": "fix(deps): bump rustls-webpki and webpki-roots past the emSign distrust",
+  "baseVersion": "4.20.1",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file — either pin a new build or flip the mode — instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
-  "releaseTag": "token-monitor-324d5136",
-  "reason": "Pinned to upstream c1973901fc2f7ba0d134252bfd923c714cc123db (v4.20.0), retaining the downstream session/workspace report, parent links, request-performance timing, custom-price authority, and fork-owned clients. This alignment inherits provider-scoped billing/pricing, Codex OpenCodex physical-model attribution and configurable archive limits, Pi non-assistant billed operations, Kilo extension usage/cost fixes and native macOS/Windows VS Code roots, Cursor signed-in desktop sync, and upstream Claude retained-history behavior after transcript deletion. Custom rates use raw model and billing evidence and remain final without Fast or hosted markup; incomplete coverage preserves reported costs. Combined cache generations are shared 14, MiMo 15 and Claude/Copilot 16, with explicit migrations for both upstream billing and previously released downstream timing layouts, preserving retained messages and MiMo row provenance. Codex parser generation 20 rebuilds timing/parent state once; DSH generation 11 retains the seed/keepalive fixes and upstream billing provenance. Token Monitor preserves manually authored provider_overrides in its pricing file and mirrors the newly scanned Kilo roots. OpenCodex ledger-only changes have no dedicated App watcher and wait for normal collection/full-period reconciliation. Upstream usage-dashboard additions do not change Token Monitor limits UI.",
+  "releaseTag": "token-monitor-f52a392c",
+  "reason": "Pinned to upstream 39ecb83ab045a300c6f502f9c9319acf5c80e764 (main after v4.20.1), retaining the downstream session/workspace report, parent links, request-performance timing, custom-price authority, and fork-owned clients. Proma moves from the fork to upstream's native client, which reads the Agent journals and both SDK transcript trees under ~/.proma and ~/.proma-dev; session ids come from the record or Pi session header, falling back to the transcript file stem, instead of the fork's path-hashed ids. This alignment also inherits machine labels, offline reports, streamed DSH transcripts, Cursor usage events counted once across snapshots with recount-proof cache rows, OpenCode V2 provider configs and UTF-8 BOM configs, pre-5.6 OpenAI cache-write pricing, legacy OpenCode/MiMo cache replay fixes, Qwen cached/reasoning double-count fixes, Pi standalone usage entries, Grok Build per-inference timing, OpenCodex strict-then-late matching, the Codex review-parent diagnostic exemption, and the rustls-webpki/webpki-roots emSign distrust fix. Custom rates use raw model and billing evidence and remain final without Fast or hosted markup; incomplete coverage preserves reported costs. Combined cache generations remain shared 14, MiMo 15 and Claude/Copilot 16. Codex parser generation 21 joins upstream review-mode state with downstream timing/parent state; DSH generation 12 retains the seed/keepalive fixes over upstream streaming; Codex, DSH, Cursor, Grok, Qwen and Pi sources reparse once. Token Monitor preserves manually authored provider_overrides in its pricing file. OpenCodex ledger-only changes and Proma index-only edits have no dedicated App watcher and wait for normal collection/full-period reconciliation. Upstream usage-dashboard additions do not change Token Monitor limits UI.",
   "platforms": {
     "android-arm64": {
       "package": "@tokscale/cli-android-arm64",
       "asset": "tokscale-android-arm64",
-      "sha256": "f501fc035d156252dccbafb38caf6b480b3e70cf16698c456e2ed5e88969deae"
+      "sha256": "7d87b818a07d542c89c831b5aace9bb9a9d131844b71ce8884ea2ae02a759968"
     },
     "darwin-arm64": {
       "package": "@tokscale/cli-darwin-arm64",
       "asset": "tokscale-darwin-arm64",
-      "sha256": "9d0f64bec1b564e19afbc93cb152a5aa82c5e2a10fba4a95a3d5bbc789718a10"
+      "sha256": "fbd23bc31ecba60131816098d59c5838ab4186cc8c000c6174275afc54f845fd"
     },
     "darwin-x64": {
       "package": "@tokscale/cli-darwin-x64",
       "asset": "tokscale-darwin-x64",
-      "sha256": "62207d217f31c30ca3602ab00d5e00ee2e3befe5221370ef96032b454e5b0364"
+      "sha256": "b3d356e4d070364f579bef636dd97b6d97dd96576d5c03c7a4d9845504903a88"
     },
     "linux-arm64": {
       "package": "@tokscale/cli-linux-arm64-gnu",
       "asset": "tokscale-linux-arm64",
-      "sha256": "328b64c877cd127dddfbe2f95c8ed3eda1e81f770a3511a7b3bd5b16f6cd9fcc"
+      "sha256": "dcc04f09593fb8765afe1b6780e347236ab09e0454d00bd17a6624627b37fa16"
     },
     "linux-arm64-musl": {
       "package": "@tokscale/cli-linux-arm64-musl",
       "asset": "tokscale-linux-arm64-musl",
-      "sha256": "8683d9da4dba2b395a888b049fe5183d45ac159564954a425e4f397e4c03532c"
+      "sha256": "5f46ab7025249d0ebff9680d808dd431ce6fb32efd9bf98a35247dd4152797b5"
     },
     "linux-x64": {
       "package": "@tokscale/cli-linux-x64-gnu",
       "asset": "tokscale-linux-x64",
-      "sha256": "6d147e46acea5dd5452493a8b4357ae0112441c4e90edaa55aaef7c0ee77fadf"
+      "sha256": "28407648170276cf50383136d8a029bb230579730fd87c5b8e804a408fd7f60f"
     },
     "linux-x64-musl": {
       "package": "@tokscale/cli-linux-x64-musl",
       "asset": "tokscale-linux-x64-musl",
-      "sha256": "cbf8da189b26d35ecef80e59644173cb5bd2d3232be239caa759822e870c2179"
+      "sha256": "f7e7d4b26296bd203217bd161d3a2d0264d36a43d0c361384b30cc621acc8b45"
     },
     "win32-arm64": {
       "package": "@tokscale/cli-win32-arm64-msvc",
       "asset": "tokscale-win32-arm64.exe",
-      "sha256": "d13c18553924343365ec5a404f953e411ee58207f4be28b82fbf7913fa6829dc"
+      "sha256": "d685ff27d46e539fe97a4a18c2db9c1bf5ec07c0960fe89ad487e2d9695e684d"
     },
     "win32-x64": {
       "package": "@tokscale/cli-win32-x64-msvc",
       "asset": "tokscale-win32-x64.exe",
-      "sha256": "887113d6adeb4aa15bb298e80d316a1dc1c961d4aa469cec64533ac606b9d173"
+      "sha256": "3ce12bab573617dfd8ae4a2e80f7c10029861a5457667538efa2d6ee7ba2f3c1"
     }
   }
 }

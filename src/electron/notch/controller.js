@@ -3,7 +3,7 @@
 const os = require('node:os');
 const path = require('node:path');
 const { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchBounds, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
-const { toSvgPath } = require('../renderer/edgeDock/shapes');
+const { toSvgPath, toPolygons } = require('../renderer/edgeDock/shapes');
 const { notchGlassGeometry } = require('../renderer/notch/renderer');
 const { readMacNotchScreens } = require('./screen');
 const { notchBlurBounds } = require('./blur');
@@ -95,12 +95,12 @@ function normalizeNotchShape(value) {
 function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens,
   nativeGlass = () => false, liquidGlass = () => null, createGlass, applyShapeMask,
-  onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, naturalScrolling = () => true, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
+  onWebSurfaceChanged = () => {}, onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, naturalScrolling = () => true, monitorScrollGesture, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
   logger = () => {} }) {
   const surfaces = ['notch'];
   const windows = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
   let materialKey = '', running = false, expanded = false, peeked = false, hoverTicked = false, locked = false;
-  let capabilities = null;
+  let capabilities = null, scrollBinding = null;
   let appearance = {}, data = { cells: [], summary: null };
   let nativeScreens = { screens: [], mainDisplayId: null }, geometryReadAt = -Infinity, geometryDirty = true;
   let geometryConfigs = new Map(), displays = [], primaryDisplay = null;
@@ -127,6 +127,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   let motionGeneration = 0, refreshInFlight = null, refreshEpoch = 0;
   let fullScreen = false, fullScreenCheckedAt = -Infinity, fullScreenDisplayId = null;
   let progress = 0, commands = null, frame = null, layoutKey = '', viewport = null;
+  let hitCommands = null, hitPolygons = [];
   let viewportDisplayId = null;
   let summaryMeasured = false, summaryMeasurement = null, summaryGeneration = 0, settleSummary = false;
   const settings = () => getSettings() || {};
@@ -217,7 +218,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // choose those items, so only the display bounds the summary.
     const closedMaxWidth = maxWidth;
     const summaryBudget = Math.max(0, Math.floor(compact ? closedMaxWidth - 2 * ((geometry.notched ? NOTCH_METRICS.restingFlare : 0) + 8)
-      : (closedMaxWidth - geometry.gapWidth) / 2 - 16 - NOTCH_METRICS.restingFlare));
+      : (closedMaxWidth - geometry.gapWidth) / 2 - 8 - NOTCH_METRICS.cameraClearance - NOTCH_METRICS.restingFlare));
     const boundedSlots = activeSlots && !compact
       ? { left: Math.min(activeSlots.left, summaryBudget), right: Math.min(activeSlots.right, summaryBudget) } : activeSlots;
     const closed = notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom(), closedMaxWidth);
@@ -289,6 +290,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function send(surface, current = layout()) {
+    onWebSurfaceChanged();
     const win = windows[surface];
     if (!alive(win) || !ready[surface] || !current) return;
     const base = { surface, notch: true, shape: shapes[surface], platform, osRelease: os.release(),
@@ -362,8 +364,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       const gapLeft = current.geometry.centerX - current.geometry.gapWidth / 2 - canvas.x;
       const gapRight = gapLeft + current.geometry.gapWidth;
       const left = frame.summaryEdges.left + frame.summaryIconInset - current.summaryIconInset;
-      const leftScale = slots.left > 0 ? (gapLeft - 8 - left) / slots.left : Infinity;
-      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - 8) / slots.right : Infinity;
+      const leftScale = slots.left > 0 ? (gapLeft - NOTCH_METRICS.cameraClearance - left) / slots.left : Infinity;
+      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - NOTCH_METRICS.cameraClearance) / slots.right : Infinity;
       frame.summaryScale = Math.max(0, Math.min(frame.summaryScale, leftScale, rightScale));
     }
     // The camera cap must share the native material's compositor transaction.
@@ -511,6 +513,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function visibility() {
+    onWebSurfaceChanged();
     const win = windows.notch;
     if (!alive(win)) return;
     if (ready.notch && !locked && (!summaryVisible() || summaryMeasured) && !win.isVisible()) win.showInactive();
@@ -545,6 +548,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   function setExpanded(value) {
     if (expanded === value || locked) return;
     expanded = value; enterAt = leaveAt = null;
+    if (!value) scrollBinding?.cancel();
     if (value) peeked = summaryDismissed = false;
     else refreshEpoch++;
     const current = layout();
@@ -633,9 +637,54 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return peeked ? notchPeekBounds(closed) : closed;
   }
 
-  // Swipes belong to click-to-open: a hover that opens the panel would reopen
-  // it straight after a swipe closed it, and hide the summary it swiped away.
-  function swipesEnabled() {
+  function shellContains(current, point) {
+    // An empty camera-free summary retains its existing invisible wake target.
+    if (!expanded && current.closed.width === 0) return rectContains(entryBounds(current), point);
+    if (!commands) return false;
+    if (hitCommands !== commands) {
+      hitCommands = commands;
+      hitPolygons = toPolygons(commands);
+    }
+    const canvas = viewport || current.canvas;
+    const x = point.x - canvas.x, y = point.y - canvas.y;
+    // Use the same flattened curves as the native mask. Cache per painted
+    // frame so cursor polls neither grow the target ahead of the spring nor
+    // include transparent flares, rounded corners or the drop shadow.
+    return hitPolygons.some(polygon => {
+      let inside = false;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const [xi, yi] = polygon[i], [xj, yj] = polygon[j];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    });
+  }
+
+  function startScrollMonitor() {
+    if (!monitorScrollGesture || scrollBinding || locked) return;
+    const win = windows.notch;
+    const handle = win?.getNativeWindowHandle?.();
+    if (!handle) return;
+    try {
+      const binding = monitorScrollGesture(record => {
+        if (scrollBinding !== binding || !running || locked || !expanded || !ready.notch || windows.notch !== win || !alive(win)) return;
+        const bounds = win.getContentBounds?.() || win.getBounds();
+        win.webContents.send('topNotch:scroll', { ...record, x: record.x - bounds.x, y: record.y - bounds.y });
+      }, { view: handle.length >= 8 ? handle.readBigUInt64LE(0) : BigInt(handle.readUInt32LE(0)),
+        shouldTrack: () => settings().notchSwipeGestures !== false && running && !locked && expanded && ready.notch && windows.notch === win && alive(win) });
+      scrollBinding = binding;
+    } catch (error) { logger(`[top-notch] swipe tracking unavailable: ${error.message}`); }
+  }
+
+  function stopScrollMonitor() {
+    const binding = scrollBinding;
+    scrollBinding = null;
+    try { binding?.dispose(); }
+    catch (error) { logger(`[top-notch] swipe cleanup failed: ${error.message}`); }
+  }
+
+  // Vertical open/close gestures apply only to click-to-open mode.
+  function verticalSwipesEnabled() {
     return settings().notchSwipeGestures !== false && normalizeNotchHoverAction(settings().notchHoverAction) === 'peek';
   }
 
@@ -651,7 +700,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   // `deltaY` follows the page: positive scrolls content down, which is fingers
   // or wheel moving up under natural scrolling.
   function wheeled(event) {
-    if (!running || locked || !ready.notch || !alive(windows.notch) || !swipesEnabled()) return;
+    if (!running || locked || !ready.notch || !alive(windows.notch) || !verticalSwipesEnabled()) return;
     if (![event?.deltaX, event?.deltaY].every(Number.isFinite)) return;
     const now = Date.now();
     if (now - scrollGesture.at > SCROLL_GESTURE_GAP_MS) scrollGesture = { at: now, travel: 0, done: false, natural: naturalScrolling() !== false };
@@ -667,7 +716,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!current) return;
     const band = { x: current.open.x, y: current.open.y, width: current.open.width,
       height: current.geometry.notched && current.geometry.gapWidth > 0 ? current.geometry.height : NOTCH_BAND_HEIGHT * zoom() };
-    if (!rectContains(expanded ? band : entryBounds(current), screen.getCursorScreenPoint())) { scrollGesture.travel = 0; return; }
+    const point = screen.getCursorScreenPoint();
+    if (!shellContains(current, point) || (expanded && !rectContains(band, point))) { scrollGesture.travel = 0; return; }
     scrollGesture.travel += hand;
     if (Math.abs(scrollGesture.travel) < SCROLL_GESTURE_DISTANCE) return;
     const down = scrollGesture.travel > 0;
@@ -683,7 +733,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     const current = layout();
     // The press reached the page, so the window was taking input; confirm it
     // landed on the entry rather than a transparent part of the canvas.
-    if (current && rectContains(entryBounds(current), screen.getCursorScreenPoint())) { setExpanded(true); schedulePoll(); }
+    if (current && shellContains(current, screen.getCursorScreenPoint())) { setExpanded(true); schedulePoll(); }
   }
 
   function poll(now = Date.now()) {
@@ -704,19 +754,20 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // target reaches inward by half the side dock's physical wake depth. It
     // never widens across menu items.
     const approach = fullScreen;
-    // The grown outline keeps the hover it was grown for.
-    const entry = entryBounds(current);
+    // Full-screen approach extends below the entry; transparent corners beside
+    // the painted shell must not become an alternate way to trigger it.
+    const entry = current.closed.width > 0 ? current.closed : entryBounds(current);
     const trigger = { ...entry, height: entry.height + (approach ? M.wakeDepth / 2 : 0) };
-    const onEntry = rectContains(entry, point);
+    const onEntry = shellContains(current, point);
     // null: the button state is unreadable (no native bridge).
     const button = primaryButtonDown();
-    const nearEntry = approach && rectContains(trigger, point) && button !== true;
-    const inside = expanded ? rectContains(current.open, point) : onEntry || nearEntry;
+    const nearEntry = approach && point.y >= entry.y + entry.height && rectContains(trigger, point) && button !== true;
+    const inside = onEntry || (!expanded && nearEntry);
     const depth = point.y - current.display.bounds.y;
     nearTop = depth >= 0 && depth < NEAR_TOP_DEPTH && Math.abs(point.x - current.geometry.centerX) < current.canvas.width;
     setPeeked(!expanded && (onEntry || nearEntry));
     // Transparent parts of the stable canvas must not swallow desktop clicks.
-    pointerInside = rectContains(expanded ? current.open : entryBounds(current), point);
+    pointerInside = shellContains(current, point);
     syncCapture(button);
     if (inside) {
       leaveAt = null;
@@ -749,6 +800,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function destroyWindows() {
+    stopScrollMonitor();
     destroyBlur();
     resetShellMotion(); refreshInFlight = null;
     summaryMeasured = false; summaryMeasurement = null; settleSummary = false;
@@ -770,12 +822,14 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (platform !== 'darwin' || settings().notchEnabled !== true) { stop(); return; }
     running = true;
     // Turning swipes off, or the mode they need, brings a hidden summary back.
-    const restoreSummary = summaryDismissed && !swipesEnabled();
+    const restoreSummary = summaryDismissed && !verticalSwipesEnabled();
     if (restoreSummary) summaryDismissed = false;
     const style = normalizeNotchStyle(settings().notchStyle);
     // `inherit` follows only the widget, never the Edge Dock's own style.
     const backdrop = backdropMode();
-    const key = style === 'black' || !nativeGlass() ? 'none' : isLiquidGlassBackdrop(backdrop) && liquidGlass() ? 'liquid' : 'vibrancy';
+    // An explicit style overrides System Glass either way; inherit follows it.
+    const material = style === 'inherit' ? nativeGlass() : style !== 'black';
+    const key = !material ? 'none' : isLiquidGlassBackdrop(backdrop) && liquidGlass() ? 'liquid' : 'vibrancy';
     if (materialKey !== key || !surfaces.every((s) => alive(windows[s]))) {
       destroyWindows(); materialKey = key; expanded = peeked = hoverTicked = false; enterAt = leaveAt = null;
       for (const s of surfaces) {
@@ -789,7 +843,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
           if (windows[s] !== win) return;
           windows[s] = null; delete ignoredMouse[s]; ready[s] = false; shapes[s] = null; lastSent[s] = '';
           disposeGlass(s); nativeMaterial[s] = false;
-          if (s === 'notch') { motion = null; pointerInside = capturing = false; }
+          if (s === 'notch') { motion = null; pointerInside = capturing = false; stopScrollMonitor(); }
         });
         nativeMaterial[s] = key === 'vibrancy';
         if (key === 'liquid') {
@@ -813,6 +867,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!blurEnabled()) destroyBlur();
     if (!screenListeners) { for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, invalidateGeometry); screenListeners = true; }
     updateGlassAppearance();
+    startScrollMonitor();
     refreshGeometry(); visibility();
     if (restoreSummary) refreshLayout();
     if (!pollTimer) schedulePoll();
@@ -886,6 +941,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return onSwitchCodexAccount?.(String(payload?.accountId || '')) || { ok: false, error: 'Unavailable' };
   });
   return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
+    webSurface: (host) => host === windows.notch?.webContents ? { kind: 'notch', visible: running && expanded && !locked && !motion && progress === 1, preparing: running && expanded && !locked && Boolean(motion),
+      summaryVisible: running && ready.notch && !locked && summaryMeasured && summaryVisible() && !shellHidden() } : null,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),
     previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); refreshLayout(); },
     setAppearance(value, { preview = false } = {}) {
@@ -906,9 +963,10 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       if (locked) {
         refreshEpoch++; expanded = peeked = hoverTicked = false; enterAt = leaveAt = null;
         pointerInside = capturing = false;
-        resetShellMotion(); destroyBlur();
+        resetShellMotion(); destroyBlur(); stopScrollMonitor();
         clearTimeout(pollTimer); pollTimer = null;
       } else if (running) {
+        startScrollMonitor();
         invalidateGeometry();
         if (!pollTimer) schedulePoll();
       }

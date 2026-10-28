@@ -30,13 +30,17 @@ const CUSTOM_SCAN_PATH_LIMIT_ERRORS = Object.freeze({
 // are ignored by the pinned scanner.
 // Derived rows (claude-desktop) are split out of their parent's scan and have
 // no tokscale roots of their own; extra roots belong on the parent.
+// are ignored by the pinned scanner. Proma never offered extra roots while it
+// was fork-only; offering them is a separate feature from moving its parser
+// upstream, so they stay hidden.
 const UNSUPPORTED_CUSTOM_SCAN_CLIENTS = new Set([
   ...FORK_ONLY_CLIENT_IDS,
   ...DERIVED_CLIENT_IDS,
   'opencode',
   'cursor',
   'goose',
-  'mcode'
+  'mcode',
+  'proma'
 ]);
 const CUSTOM_SCAN_CLIENT_IDS = Object.freeze(
   CLIENT_IDS.filter((id) => !UNSUPPORTED_CUSTOM_SCAN_CLIENTS.has(id))

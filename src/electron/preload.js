@@ -2,6 +2,15 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+async function pluginSettingsResult(promise) {
+  const result = await promise;
+  if (result?.ok === true) return result.value;
+  // contextBridge strips custom properties from Error instances. A plain
+  // rejection record preserves validation fields in the isolated main world.
+  return Promise.reject({ message: result?.error?.code || 'settings-unavailable',
+    code: result?.error?.code || 'settings-unavailable', fields: result?.error?.fields || {} });
+}
+
 contextBridge.exposeInMainWorld('tokenMonitor', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => {
@@ -18,6 +27,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   discardOrphanedSubscriptions: () => ipcRenderer.invoke('subscriptions:discardOrphans'),
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
+  getDisplayPreview: (surface, phase, slots) => ipcRenderer.invoke('settings:displayPreview', surface, phase, slots),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
   getBackgroundImage: () => ipcRenderer.invoke('appearance:getBackgroundImage'),
   chooseBackgroundImage: () => ipcRenderer.invoke('appearance:chooseBackgroundImage'),
@@ -90,7 +100,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('theme:systemUi', listener);
   },
   onOpenSettings: (callback) => {
-    const listener = () => { try { callback(); } catch (_) {} };
+    const listener = (_event, section) => { try { callback(section); } catch (_) {} };
     ipcRenderer.on('settings:open', listener);
     return () => ipcRenderer.removeListener('settings:open', listener);
   },
@@ -178,10 +188,17 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),
     status: (options = {}) => ipcRenderer.invoke('cursor:status', options)
   },
+  claude: {
+    accounts: () => ipcRenderer.invoke('claude:accounts'),
+    saveWebAccount: (values) => ipcRenderer.invoke('claude:saveWebAccount', values),
+    removeWebAccount: (id) => ipcRenderer.invoke('claude:removeWebAccount', id),
+    setAccountEnabled: (id, enabled) => ipcRenderer.invoke('claude:setAccountEnabled', id, enabled)
+  },
   limits: {
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
     listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
-    clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)
+    clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId),
+    refresh: (providerId) => ipcRenderer.invoke('limits:refresh', providerId)
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),
@@ -239,6 +256,75 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
       return () => ipcRenderer.removeListener('copilot:loginStatus', handler);
     }
   },
+  // Plugin management and the views this window draws (Home, tray bitmap).
+  // Trust and installation run in main; enabled author UI executes in this page.
+  plugins: {
+    getSettings: id => pluginSettingsResult(ipcRenderer.invoke('plugins:getSettings', id)),
+    updateSettings: (id, input) => pluginSettingsResult(ipcRenderer.invoke('plugins:updateSettings', id, input)),
+    list: () => ipcRenderer.invoke('plugins:list'),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled }),
+    setBackground: (id, enabled) => ipcRenderer.invoke('plugins:setBackground', { id, enabled }),
+    restart: (id) => ipcRenderer.invoke('plugins:restart', { id }),
+    reload: () => ipcRenderer.invoke('plugins:reload'),
+    openFolder: () => ipcRenderer.invoke('plugins:openFolder'),
+    openPage: ref => ipcRenderer.invoke('plugins:openPage', ref),
+    catalog: () => ipcRenderer.invoke('plugins:catalog'),
+    catalogPreview: (source, id, version) => ipcRenderer.invoke('plugins:catalogPreview', source, id, version),
+    addSource: input => ipcRenderer.invoke('plugins:addSource', input),
+    refreshSource: id => ipcRenderer.invoke('plugins:refreshSource', id),
+    removeSource: id => ipcRenderer.invoke('plugins:removeSource', id),
+    importPackage: kind => ipcRenderer.invoke('plugins:import', kind),
+    install: token => ipcRenderer.invoke('plugins:install', token),
+    cancelInstall: token => ipcRenderer.invoke('plugins:cancelInstall', token),
+    rollback: id => ipcRenderer.invoke('plugins:rollback', id),
+    uninstall: (id, options) => ipcRenderer.invoke('plugins:uninstall', id, options),
+    place: (ref, surface, placed) => ipcRenderer.invoke('plugins:place', { ref, surface, placed }),
+    skins: () => ipcRenderer.invoke('plugins:skins'),
+    views: (surface) => ipcRenderer.invoke('plugins:views', { surface }),
+    setDemand: (surface, refs) => ipcRenderer.send('plugins:demand', { surface, refs }),
+    onViews: (callback) => {
+      const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
+      ipcRenderer.on('plugins:views', listener);
+      return () => ipcRenderer.removeListener('plugins:views', listener);
+    },
+    onChanged: (callback) => {
+      const listener = () => { try { callback(); } catch (_) {} };
+      ipcRenderer.on('plugins:changed', listener);
+      return () => ipcRenderer.removeListener('plugins:changed', listener);
+    }
+  },
   minimize: () => ipcRenderer.send('window:minimize'),
   close: () => ipcRenderer.send('window:close')
+});
+
+// Trusted plugin UI shares this renderer. This is routing, not plugin isolation.
+contextBridge.exposeInMainWorld('tokenMonitorTrustedPlugins', {
+  uiLoading: id => ipcRenderer.send('plugins:uiLoading', id),
+  onLifecycle(callback) {
+    const listener = async (_event, request) => {
+      try { ipcRenderer.send('plugins:lifecycleReply', { request: request.request, value: await callback(request) }); }
+      catch (error) { ipcRenderer.send('plugins:lifecycleReply', { request: request.request, error: String(error?.message || error) }); }
+    };
+    ipcRenderer.on('plugins:lifecycle', listener);
+    ipcRenderer.send('plugins:lifecycleHost', true);
+    return () => { ipcRenderer.removeListener('plugins:lifecycle', listener); ipcRenderer.send('plugins:lifecycleHost', false); };
+  },
+  contentSelections: () => ipcRenderer.invoke('plugins:contentSelections'),
+  orderContent: (target, refs) => ipcRenderer.invoke('plugins:orderContent', target, refs),
+  selectContent: (target, ref) => ipcRenderer.invoke('plugins:selectContent', target, ref),
+  call: (id, method, args) => ipcRenderer.invoke('plugins:call', id, method, args),
+  host: (id, method, args) => ipcRenderer.invoke('plugins:host', id, method, args),
+  views: surface => ipcRenderer.invoke('plugins:views', { surface }),
+  subscribe(id, callback) {
+    const listener = (_event, message) => { if (message.id === id) callback(message.value); };
+    ipcRenderer.on('plugins:backend', listener);
+    return () => ipcRenderer.removeListener('plugins:backend', listener);
+  },
+  subscribeData: (id, query) => ipcRenderer.invoke('plugins:subscribe', id, query),
+  unsubscribeData: subscription => ipcRenderer.invoke('plugins:unsubscribe', subscription),
+  onData(callback) {
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on('plugins:data', listener);
+    return () => ipcRenderer.removeListener('plugins:data', listener);
+  }
 });

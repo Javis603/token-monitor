@@ -20,6 +20,7 @@
       getStats,
       save,
       providerLabel,
+      pluginLabel = (ref) => ref,
       providerColor,
       windowLabel,
       hasProviderMark,
@@ -106,6 +107,7 @@
         if (item.metric === itemsApi.SESSIONS_METRIC) return t('edgeDock.sessions');
         return t(`edgeDock.period.${item.metric}`);
       }
+      if (item.type === 'plugin') return pluginLabel(item.ref) || item.ref;
       return providerLabel(item.provider);
     }
 
@@ -124,6 +126,10 @@
             : t(`edgeDock.periodShort.${item.metric}`);
         return mark;
       }
+      if (item.type === 'plugin') {
+        mark.classList.add('is-fallback');
+        return mark;
+      }
       if (hasProviderMark(item.provider)) mark.classList.add(`row-icon-${item.provider}`);
       else mark.classList.add('is-fallback');
       mark.style.setProperty('--composer-color', providerColor(item.provider));
@@ -138,7 +144,6 @@
       else button.dataset.itemId = id;
       button.classList.toggle('is-selected', ui.selected === id);
       button.classList.toggle('is-stat', item.type === 'stat');
-      button.title = itemLabel(item);
       button.setAttribute('aria-label', itemLabel(item));
       button.setAttribute('aria-pressed', String(ui.selected === id));
       button.append(markFor(item));
@@ -313,6 +318,10 @@
       head.append(remove);
       pane.append(head);
 
+      if (item.type === 'plugin') {
+        pane.append(el('p', 'edge-dock-composer-hint', item.ref));
+        return pane;
+      }
       if (item.type === 'action') {
         pane.append(el('p', 'edge-dock-composer-hint', t(itemsKey === 'notchItems' ? 'settings.notch.refreshNote' : 'settings.edgeDock.refreshNote')));
         return pane;
@@ -385,7 +394,7 @@
             ? [identity, product].filter(Boolean).join(' · ')
             : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
-          text.title = name;
+          text.setAttribute('aria-label', name);
           const plan = account.planLabel && name !== account.planLabel ? el('span', 'edge-dock-composer-account-plan', account.planLabel) : null;
           label.append(input, text);
           if (plan) label.append(plan);
@@ -443,7 +452,6 @@
       for (const item of items) rail.append(railItem(item, items.length));
       const add = el('button', 'edge-dock-composer-add', '+');
       add.type = 'button';
-      add.title = t('settings.edgeDock.add');
       add.setAttribute('aria-label', t('settings.edgeDock.add'));
       add.setAttribute('aria-expanded', String(ui.menuOpen));
       add.classList.toggle('is-open', ui.menuOpen);

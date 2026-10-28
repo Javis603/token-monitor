@@ -38,6 +38,21 @@ test('creditsMeterPercent uses the window percent when the provider reports one'
   assert.equal(creditsMeterPercent({}, { remainingPercent: 99 }), 99);
 });
 
+test('creditsMeterPercent can explicitly disable inference for a wallet', () => {
+  for (const remaining of [0, 18.25]) {
+    assert.equal(creditsMeterPercent({ balance: { monthSpend: 4.5 } }, { remaining, showMeter: false }, { inferBalance: false }), null);
+  }
+});
+
+test('Sub2API keeps its display-only balance percentage despite a meterless adapter window', () => {
+  const { THIRD_PARTY_ADAPTERS } = require('../../src/shared/providers/thirdparty/limits');
+  const quota = THIRD_PARTY_ADAPTERS.sub2api.quota({ code: 0, data: { id: 7, balance: 4 } }, null, null, null, {
+    month: { code: 0, data: { total_actual_cost: 6 } }
+  });
+  assert.equal(quota.window.showMeter, false);
+  assert.equal(creditsMeterPercent(quota, quota.window), 40);
+});
+
 test('creditsMeterPercent derives the percent from month spend when no percent exists', () => {
   // 4 / (4 + 6) = 40%
   assert.equal(creditsMeterPercent({ balance: { amount: 4, monthSpend: 6 } }, {}), 40);

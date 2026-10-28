@@ -1218,6 +1218,43 @@ test('aggregateLimits keeps anonymous Antigravity RPC fallback identities device
   );
 });
 
+test('aggregateLimits keeps Muse rows device-scoped because the CLI exposes no account identity', () => {
+  const museProvider = (remainingPercent, updatedAt) => ({
+    provider: 'muse',
+    accountKey: '',
+    status: 'ok',
+    source: 'cli',
+    updatedAt,
+    windows: [{
+      kind: 'session',
+      label: 'Session',
+      usedPercent: 100 - remainingPercent,
+      remainingPercent
+    }]
+  });
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'device-a',
+      limits: { providers: [museProvider(40, '2026-08-31T10:00:00.000Z')] }
+    },
+    {
+      deviceId: 'device-b',
+      limits: { providers: [museProvider(70, '2026-08-31T10:02:00.000Z')] }
+    }
+  ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
+
+  const museRows = aggregate.providers.filter((provider) => provider.provider === 'muse');
+  assert.equal(museRows.length, 2);
+  assert.deepEqual(
+    new Set(museRows.map((provider) => provider.sourceDeviceId)),
+    new Set(['device-a', 'device-b'])
+  );
+  assert.deepEqual(
+    new Set(museRows.map((provider) => provider.windows[0].remainingPercent)),
+    new Set([40, 70])
+  );
+});
+
 test('aggregateLimits does not merge anonymous Antigravity RPC with managed OAuth', () => {
   const sharedFallbackKey = 'sha256:antigravity-shared-fallback';
   const aggregate = aggregateLimits([

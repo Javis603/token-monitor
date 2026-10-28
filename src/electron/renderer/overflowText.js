@@ -30,13 +30,15 @@
     }
     function update(element) {
       element.classList.toggle('is-overflow-enabled', enabled(element));
-      if (prefersReducedMotion()) element.title = element.textContent || '';
-      else element.removeAttribute('title');
+      // Reduced motion keeps the full text manually scrollable, without asking
+      // Chromium to create an OS tooltip that can outlive a floating window.
+      element.classList.toggle('is-overflow-static', prefersReducedMotion());
+      element.removeAttribute('title');
       const distance = distanceFor(element);
       const offset = Math.min(offsets.get(element) || 0, distance);
       move(element, offset);
       element.classList.toggle('has-overflow-fade', enabled(element)
-        && distance - offset > 1);
+        && distance - offset - element.scrollLeft > 1);
       const motion = motions.get(element);
       if (motion && motion.startedAt !== null && motion.distance !== distance) animate(motion, distance);
     }
@@ -100,6 +102,7 @@
       contents.set(element, content);
       element.classList.add('fade-overflow');
       update(element);
+      element.addEventListener('scroll', () => update(element));
       element.addEventListener('mouseenter', event => start(element, event));
       element.addEventListener('mousemove', event => {
         const motion = motions.get(element);

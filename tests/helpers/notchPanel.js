@@ -29,14 +29,22 @@ class Element {
       node.parent = this; this.children.push(node);
     }
   }
+  remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; }
   replaceChildren(...nodes) { this.children.forEach(node => { node.parent = null; }); this.children = []; this.append(...nodes); }
-  setAttribute(key, value) { this.attributes[key] = String(value); }
+  setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'class') this.className = value; }
+  getAttribute(key) { return this.attributes[key]; }
   removeAttribute(key) { delete this.attributes[key]; }
   addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); }
   fire(name, event = {}) { for (const fn of this.listeners[name] || []) fn(event); }
   scrollTo({ left }) { this.scrollLeft = left; this.fire('scroll'); }
   // Every child is laid out 40 units after the previous one.
   get parentNode() { return this.parent || null; }
+  closest(selector) {
+    for (let node = this; node; node = node.parentNode) {
+      if (node.classList.contains(selector.slice(1))) return node;
+    }
+    return null;
+  }
   get offsetLeft() { return this.parent ? this.parent.children.indexOf(this) * 40 : 0; }
   contains(node) { return this === node || this.children.some(child => child.contains(node)); }
   focus() {
@@ -45,7 +53,9 @@ class Element {
     this.ownerDocument.activeElement = this; this.fire('focus');
   }
   querySelectorAll(selector) {
-    const match = node => selector[0] === '.' ? node.classes.has(selector.slice(1))
+    const match = node => selector === '[data-roll-key]:not([data-pv-roll])'
+      ? Object.hasOwn(node.dataset, 'rollKey') && !Object.hasOwn(node.dataset, 'pvRoll')
+      : selector[0] === '.' ? node.classes.has(selector.slice(1))
       : selector.startsWith('[data-') ? Object.hasOwn(node.dataset, selector.slice(6, -1).replace(/-([a-z])/g, (_, char) => char.toUpperCase()))
         : selector === 'button.is-selected' ? node.tagName === 'BUTTON' && node.classes.has('is-selected') : node.tagName.toLowerCase() === selector;
     return this.children.flatMap(node => [...(match(node) ? [node] : []), ...node.querySelectorAll(selector)]);
@@ -53,14 +63,17 @@ class Element {
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
-function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
+function panelFixture(t, settings = {}, { viaRenderer = false, pluginHost = null, pluginViews = null } = {}) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.parse('2026-10-18T10:00:00Z') });
   const savedRaf = global.requestAnimationFrame, savedCancel = global.cancelAnimationFrame;
   global.requestAnimationFrame = () => 1; global.cancelAnimationFrame = () => {};
   t.after(() => { global.requestAnimationFrame = savedRaf; global.cancelAnimationFrame = savedCancel; });
-  const document = { activeElement: null };
+  const document = { activeElement: null, listeners: {} };
+  document.addEventListener = (name, fn) => { (document.listeners[name] ||= []).push(fn); };
+  document.fire = (name, event = {}) => { for (const fn of document.listeners[name] || []) fn(event); };
   document.createElementNS = (_ns, tag) => new Element(tag, document);
   document.createElement = (tag) => new Element(tag, document);
+  document.createTextNode = value => { const node = new Element('#text', document); node.textContent = value; return node; };
   const el = (tag, className = '', value) => {
     const node = new Element(tag, document); node.className = className;
     if (value !== undefined) node.textContent = value;
@@ -68,9 +81,12 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   };
   const rolls = [], settled = [];
   const resizeObservers = [];
+  const pageEvents = new EventTarget();
+  let scrollListener = null;
+  const pageHide = () => pageEvents.dispatchEvent(new Event('pagehide'));
   const window = {
-    addEventListener() {},
-    getComputedStyle: () => ({ columnGap: '40px' }),
+    addEventListener: (...args) => pageEvents.addEventListener(...args),
+    getComputedStyle: () => ({ width: '600px', columnGap: '40px', getPropertyValue: name => name === '--notch-page-gap' ? '40px' : '' }),
     ResizeObserver: class {
       constructor(callback) { this.callback = callback; resizeObservers.push(this); }
       observe(node) { this.node = node; }
@@ -101,6 +117,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
       }
     }
   };
+  if (pluginViews) window.TokenMonitorPluginViews = pluginViews;
   const state = { locale: 'en', appearanceKey: 'initial' };
   const overflowText = {
     bound: [], stopped: [], preserved: [],
@@ -128,7 +145,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
       limitAccountPlan: (...args) => plans.limitAccountPlan(...args),
       limitDetailInfoNode: (...args) => plans.limitDetailInfoNode(...args)
     },
-    markNode: id => el('span', 'edge-dock-mark', id), hasMask: () => true,
+    markNode: id => el('span', 'edge-dock-mark', id), hasMask: () => true, pluginHost,
     providerLabel: id => id, limitProviderColor: () => '#888',
     limitAccountTitle: (_id, record, index, peers) => window.TokenMonitorAccountIdentity.accountTitleLabel(record, peers, { index, maskEmail: settings.maskLimitAccountEmails === true }),
     formatTokens: value => String(value), formatCardTokens: value => String(value), formatBreakdownTokens: value => String(value), formatCost: value => `$${value}`,
@@ -146,7 +163,9 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
     el, shared.formatCost, (key, params) => i18n.translate(state.locale, key, params), shared.formatCardTokens, shared.limitWindowsView
   );
   const deps = { document, window, el, t: (key, params) => i18n.translate(state.locale, key, params), state,
-    bridge: { toggleRateMode() {}, onAnimate() {}, onMotion() {} }, shared };
+    bridge: { toggleRateMode() {}, onAnimate() {}, onMotion() {},
+      onScroll(callback) { scrollListener = callback; return () => { scrollListener = null; }; }
+    }, shared };
   let panel;
   if (viaRenderer) {
     // Exercise the real dependency handoff instead of giving the panel helpers
@@ -160,8 +179,10 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
         shared: { ...shared, el, t: deps.t } });
     } finally { global.ResizeObserver = previousObserver; }
   } else panel = createNotchPanel(deps);
-  t.after(() => panel.suspend());
-  return { panel, document, state, settings, rolls, settled, el, overflowText,
+  t.after(pageHide);
+  return { panel, document, state, settings, rolls, settled, el, overflowText, pageHide,
+    scroll: record => scrollListener?.(record),
+    get scrollSubscribed() { return scrollListener !== null; },
     resize: () => resizeObservers.forEach(observer => { if (observer.node) observer.callback(); }),
     find: className => panel.node.querySelector(`.${className}`),
     all: className => panel.node.querySelectorAll(`.${className}`) };

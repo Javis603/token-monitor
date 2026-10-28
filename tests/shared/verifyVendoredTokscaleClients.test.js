@@ -125,7 +125,7 @@ test('fork-only clients are verified by an isolated scan, not by --help', () => 
 test('a binary without the fork client module fails closed', () => {
   const spawn = (bin, args) => (args[0] === '--help'
     ? { status: 0, stdout: helpTextFor(ALL_TOKSCALE_SUPPORTED), stderr: '' }
-    : { status: 2, stdout: '', stderr: "error: invalid value 'proma' for '--client <CLIENTS>'" });
+    : { status: 2, stdout: '', stderr: "error: invalid value 'catpaw' for '--client <CLIENTS>'" });
   assert.throws(
     () => verifyVendoredTokscaleClients({
       manifest: { platforms: { x: {} } },
@@ -134,6 +134,6 @@ test('a binary without the fork client module fails closed', () => {
       spawn,
       log: () => {}
     }),
-    /does not accept the fork-only client ids proma, catpaw, qodercn \(scan exited 2/
+    /does not accept the fork-only client ids catpaw, qodercn \(scan exited 2/
   );
 });

@@ -105,6 +105,7 @@ const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
   registerProvider(require('../providers/zed/account'), () => require('../providers/zed/limits')),
   registerProvider(require('../providers/commandcode/account'), () => require('../providers/commandcode/limits')),
   registerProvider(require('../providers/mimo/account'), () => require('../providers/mimo/limits')),
+  registerProvider(require('../providers/muse/account'), () => require('../providers/muse/limits')),
   registerProvider(require('../providers/zai/account'), () => require('../providers/zai/limits')),
   registerProvider(require('../providers/zaiteam/account'), () => require('../providers/zaiteam/limits')),
   registerProvider(require('../providers/kiro/account'), () => require('../providers/kiro/limits')),

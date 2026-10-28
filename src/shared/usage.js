@@ -3,7 +3,7 @@
 const { isSessionActivityClient } = require('./sessionActivityProviders');
 
 const PERIODS = ['today', 'month', 'allTime'];
-const { normalizeLiveActivity, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
+const { normalizeLiveActivity, normalizeReasoningEffort, isSessionReasoningEffortClient, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -301,6 +301,10 @@ function normalizeClientName(value) {
   if (raw.includes('grok')) return 'grok';
   if (raw === 'droid') return 'droid';
   if (raw.includes('copilot')) return 'copilot';
+  // Senpi before Oh My Pi and the generic Pi test. Tokscale's id is `senpi`;
+  // "Senpi (OmO Native)" must not fall through to a hyphenated label, and the
+  // Pi word test must not capture a future spelling that contains "pi".
+  if (raw === 'senpi' || /^omo[\s_-]*native$/.test(raw) || /^senpi(?:[\s_-]*\([^)]*\))?$/.test(raw)) return 'senpi';
   // Oh My Pi before the generic Pi test: its display name contains "Pi" as a
   // word, so the Pi heuristic would otherwise capture it. Tokscale reports the
   // id `omp`; these spellings only appear when a caller passes a display name.
@@ -688,6 +692,16 @@ function mergeSession(target, source) {
   if (hasOwn(source, 'promptCache') && sourceLastUsed >= targetLastUsed) {
     target.promptCache = normalizePromptCache(source.promptCache);
   }
+  if (isSessionReasoningEffortClient(source.client) && sourceLastUsed >= targetLastUsed) {
+    if (sourceLastUsed > targetLastUsed || !hasOwn(target, 'reasoningEffort')) {
+      if (hasOwn(source, 'reasoningEffort') || hasOwn(target, 'reasoningEffort')) {
+        target.reasoningEffort = normalizeReasoningEffort(source.reasoningEffort);
+      }
+    } else if (hasOwn(source, 'reasoningEffort') && target.reasoningEffort !== source.reasoningEffort) {
+      // Conflicting or missing configuration at the same timestamp is unknown.
+      target.reasoningEffort = null;
+    }
+  }
   const sourceProjectId = String(source.projectId || '');
   if (!target.projectId && sourceProjectId) {
     target.projectId = sourceProjectId;
@@ -843,6 +857,7 @@ function normalizeSession(input, fallbackKey) {
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
   if (hasOwn(input, 'promptCache')) session.promptCache = normalizePromptCache(input.promptCache);
+  if (isSessionReasoningEffortClient(client) && hasOwn(input, 'reasoningEffort')) session.reasoningEffort = normalizeReasoningEffort(input.reasoningEffort);
   session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
   session.contextWindow = Math.max(0, Math.round(asNumber(input.contextWindow ?? input.context_window ?? 0)));
   // Carried rather than summed, and only when the source actually states it:
@@ -1952,6 +1967,7 @@ function deltaValue(base, fresh, anchor, key) {
   // Cache observations are snapshots, never additive accounting. Missing
   // metadata retains the base; only an explicit null clears an observation.
   if (key === 'promptCache') return fresh === undefined ? base : normalizePromptCache(fresh);
+  if (key === 'reasoningEffort') return fresh === undefined ? base : normalizeReasoningEffort(fresh);
   if (key === 'tokenComponents') {
     // A warm tick may introduce aggregate-only fallback data. Boolean
     // provenance is not arithmetically subtractable, so retain exactness only
@@ -1997,6 +2013,19 @@ function deltaValue(base, fresh, anchor, key) {
       delete result.parentSessionId;
       delete result.parentClient;
       applyParentLink(result, base?.parentSessionId ? base : fresh || {});
+      // Compare before lastUsedAt is projected to the maximum: a missing
+      // setting preserves only the same observation, never a newer turn.
+      if (isSessionReasoningEffortClient(sample.client)) {
+        const freshAt = timestampMs(fresh?.lastUsedAt);
+        const retainedAt = timestampMs(base?.lastUsedAt);
+        if (freshAt < retainedAt) {
+          if (hasOwn(base || {}, 'reasoningEffort')) result.reasoningEffort = normalizeReasoningEffort(base.reasoningEffort);
+          else delete result.reasoningEffort;
+        } else if (!hasOwn(fresh || {}, 'reasoningEffort')) {
+          if (freshAt > retainedAt) result.reasoningEffort = null;
+          else if (!hasOwn(base || {}, 'reasoningEffort')) delete result.reasoningEffort;
+        }
+      }
     }
     return result;
   }

@@ -40,6 +40,13 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .edge-dock-root[data-surface="notch"] .edge-dock-content { overflow: hidden; }
 /* Retain the summary in its own compositor layer while the silhouette changes. */
 .notch-summary { opacity: var(--notch-summary-opacity, 1); pointer-events: none; transform: translate3d(0, calc(-1 * var(--notch-progress, 0) * var(--edge-dock-card-enter-shift)), 0); z-index: 1; position: absolute; top: 0; display: grid; align-items: center; flex: 0 0 auto; gap: 0; padding: 0; box-sizing: border-box; }
+/* Root extensions share one compact row. Native slots retain the camera gap;
+   replacements use the safe shoulder (the full width on camera-free entries). */
+.notch-summary:has(> .plugin-native-content) { display: flex; overflow: hidden; }
+.notch-summary > .plugin-native-content:not([hidden]) { display: grid; grid-template-columns: var(--notch-native-left) var(--notch-camera-gap) minmax(0, 1fr); align-items: center; flex: 1 1 auto; width: 100%; min-width: var(--notch-plugin-clearance); height: 100%; overflow: hidden; }
+.notch-summary > .plugin-content { flex: 0 1 auto; min-width: 0; max-height: 100%; overflow: hidden; }
+.notch-summary:has(> .plugin-native-content[hidden]) { padding-left: var(--notch-plugin-clearance); }
+.notch-summary:has(> .plugin-native-content[hidden]) > .plugin-content { flex: 1 1 0; }
 .notch-slot { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; overflow: visible; white-space: nowrap; }
 .notch-left { justify-content: flex-start; padding-left: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
 .notch-right { justify-content: flex-end; padding-right: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
@@ -48,6 +55,7 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-right .notch-slot-content { transform-origin: right center; }
 .notch-summary-field { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .notch-gap { flex: 0 0 auto; }
+.notch-plugin-bitmap { width: 20px; height: 20px; flex: 0 0 20px; }
 .notch-summary .edge-dock-mark { flex-shrink: 0; width: 17px; height: 17px; }
 .notch-app-mark { font-size: 18px; font-weight: 650; line-height: 1; color: var(--text); }
 .notch-reading { display: inline-flex; flex-shrink: 0; align-items: center; font-family: var(--display-font); line-height: 1.2; font-variant-numeric: tabular-nums; }
@@ -75,6 +83,19 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-activity-count { font-weight: 600; }
 .notch-activity-waiting { color: var(--yellow); }
 .notch-waiting-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+/* Session-only marks are one measured group, with a surface-coloured separator. */
+.notch-session-icons { display: inline-flex; align-items: center; isolation: isolate; }
+.notch-session-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 21px; width: 21px; height: 21px; border-radius: 50%; background: rgb(var(--glass-rgb)); }
+.notch-session-icon + .notch-session-icon { margin-left: -9px; }
+.is-notch-attached .notch-session-icon, html.notch-black .notch-session-icon { background: #000; }
+.notch-session-activity { --notch-waiting-color: #e7b764; gap: 6px; }
+.notch-session-activity .notch-activity-count { color: var(--notch-accent, var(--text)); font-size: 1.3em; font-weight: 600; line-height: 1; }
+.notch-session-activity .notch-activity-count.is-mixed { background: linear-gradient(115deg, #81d9e0 8%, #adbfdf 48%, #efb08e 95%); background-clip: text; -webkit-background-clip: text; color: transparent; }
+.notch-waiting-badge { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; padding: 3px 4px; border-radius: 5px; color: var(--notch-waiting-color); background: color-mix(in srgb, var(--notch-waiting-color) 14%, transparent); font-size: 1em; font-weight: 600; line-height: 1; }
+.notch-waiting-badge svg { width: 11px; height: 11px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.is-light-session-summary .notch-session-activity { --notch-waiting-color: #8a570a; }
+.is-light-session-summary .notch-activity-count { color: var(--text); }
+.is-light-session-summary .notch-activity-count.is-mixed { background-image: linear-gradient(115deg, #17626c 8%, #575a88 48%, #8f4d32 95%); color: transparent; }
 .notch-wave { display: inline-flex; align-items: center; gap: 2.5px; height: 16px; }
 .notch-summary .notch-wave { scale: 1 1.15; }
 .notch-wave i { width: 3px; border-radius: 2px; background: var(--notch-accent, var(--text)); animation: notch-wave 1.05s ease-in-out infinite; }
@@ -92,7 +113,7 @@ html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
 .notch-body { position: absolute; top: 0; left: 0; width: 100%; height: calc(var(--notch-header-height, 32px) + var(--notch-body-height, 0px)); overflow: hidden;
   opacity: var(--notch-content-opacity, 0); filter: blur(calc((1 - var(--notch-content-progress, 0)) * 10px)); }
 .notch-panel {
-  --notch-band-height: 34px; --notch-gap-width: 0px;
+  --notch-band-height: 34px; --notch-gap-width: 0px; --notch-page-gap: 40px;
   --notch-ink: var(--text); --notch-dim: var(--muted); --notch-faint: color-mix(in srgb, var(--muted) 82%, transparent);
   --notch-rule: rgba(var(--overlay-rgb), .085); --notch-fill: rgba(var(--overlay-rgb), .055); --notch-fill-strong: rgba(var(--overlay-rgb), .13);
   --notch-ui: var(--ui-font, ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace);
@@ -120,17 +141,20 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 
 /* Band: tabs left of the camera, live status right of it. */
 .notch-band { height: var(--notch-band-height); display: grid; grid-template-columns: minmax(0, 1fr) var(--notch-gap-width) minmax(0, 1fr); align-items: center; }
-.notch-tabs { position: relative; justify-self: start; display: flex; gap: 2px; padding: 2px; border-radius: 11px; background: var(--notch-fill); }
+.notch-tabs { width: max-content; position: relative; display: flex; gap: 2px; padding: 2px; border-radius: 11px; background: var(--notch-fill); }
 .notch-tab-pill { position: absolute; top: 2px; left: 2px; width: 34px; height: 24px; border-radius: 9px; background: var(--notch-fill-strong);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 1px 6px rgba(0,0,0,.3); transition: transform .42s var(--notch-spring); }
-.notch-tab { position: relative; z-index: 1; width: 34px; height: 24px; border-radius: 9px; display: grid; place-items: center; color: var(--notch-faint); transition: color .25s ease; }
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 1px 6px rgba(0,0,0,.3); transition: transform .42s var(--notch-spring), opacity .18s ease; }
+.notch-tab-pill.is-off { opacity: 0; }
+.notch-tab { flex: 0 0 34px; position: relative; z-index: 1; width: 34px; height: 24px; border-radius: 9px; display: grid; place-items: center; color: var(--notch-faint); transition: color .25s ease; }
 .notch-tab:hover, .notch-tab.is-selected { color: var(--notch-ink); }
 .notch-tab .view-switcher-icon { width: 15px; height: 15px; }
 .notch-tab-badge { position: absolute; top: 3px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 6px var(--yellow); display: none; }
 .notch-tab.has-badge .notch-tab-badge { display: block; }
-.notch-status { justify-self: end; display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--notch-dim); white-space: nowrap; }
+.notch-status { flex: none; margin-left: auto; justify-content: flex-end; display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--notch-dim); white-space: nowrap; }
 .notch-rate { display: inline-flex; align-items: center; gap: 6px; }
 .notch-rate-value { color: var(--notch-ink); }
+.notch-rate-probe { display: inline-grid; position: absolute; visibility: hidden; pointer-events: none; white-space: nowrap; }
+.notch-rate-probe > span { grid-area: 1 / 1; }
 .notch-rate.is-idle .notch-rate-value { color: var(--notch-dim); }
 .notch-rate.is-idle .notch-rate-icon { color: var(--notch-faint); }
 .notch-rate-icon { width: 12px; height: 12px; flex: 0 0 auto; color: var(--notch-ink); background: currentColor;
@@ -139,8 +163,9 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-status-rule { width: 1px; height: 12px; background: var(--notch-rule); }
 .notch-status .edge-dock-refresh { width: 24px; height: 24px; }
 
-/* Pages share one fixed slot and cross-fade sideways. */
 .notch-pages { position: relative; height: 176px; margin-top: 6px; }
+.notch-pages.is-handoff { overflow: clip; }
+.notch-pages.is-handoff .notch-page { overflow: clip; transition: none; }
 .notch-page { position: absolute; inset: 0; opacity: 0; transform: translateX(12px); filter: blur(5px); pointer-events: none;
   transition: opacity .22s ease, transform .38s var(--notch-spring), filter .28s ease; }
 .notch-page.is-before { transform: translateX(-12px); }
@@ -223,8 +248,9 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 /* Limits */
 /* Three columns per page; past one page the strip scrolls sideways, snapping a
    page at a time, and the next column peeks in under a fade. */
-.notch-limits { --notch-limit-gap: 40px; --notch-limit-peek: 0px; display: flex; column-gap: var(--notch-limit-gap); height: 160px;
+.notch-limits { --notch-limit-gap: var(--notch-page-gap); --notch-limit-peek: 0px; display: flex; column-gap: var(--notch-limit-gap); height: 160px;
   overflow: auto hidden; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; }
+.notch-limits.is-handoff { scroll-snap-type: none; }
 .notch-limits::-webkit-scrollbar { display: none; }
 .notch-limits.is-paged { --notch-limit-peek: 64px; }
 .notch-limits.has-after { mask-image: linear-gradient(to right, #000 calc(100% - var(--notch-limit-peek)), transparent); }
@@ -350,3 +376,30 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-rank-share { font-size: 10px; color: var(--notch-dim); text-align: right; }
 
 .notch-panel.is-reduced-motion *, .notch-panel.is-reduced-motion *::before { animation: none !important; transition: none !important; }
+
+/* Plugin pages: the plugin's view fills the page under a kicker row. */
+.notch-page-plugin { display: flex; flex-direction: column; gap: 10px; }
+.notch-plugin-owner { font-size: 10px; color: var(--notch-faint); }
+.notch-plugin-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.notch-plugin-body .pv-root { height: 100%; }
+.notch-tab-plugin-icon { display: grid; place-items: center; width: 15px; height: 15px; }
+.notch-tab-plugin-icon .pv-icon { width: 15px; height: 15px; }
+
+/* Each rail spans one lane and never scrolls: the leading rail sits left of
+   the camera, the trailing rail continues the page order to its right ahead
+   of the status. Every track keeps width:max-content so the fill stays
+   rounded at both ends and never shows a clipped icon. */
+.notch-tab-rail { position: relative; min-width: 0; max-width: 100%; overflow: visible; }
+.notch-tab-rail [hidden] { display: none; }
+.notch-tab-rail button:focus-visible { outline-offset: -2px; }
+.notch-tab-rail.is-leading { margin-right: 6px; }
+.notch-band-trailing { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.notch-tab-rail.is-trailing { flex: 1 1 0; min-width: 0; margin-left: 6px; }
+/* No camera: the band collapses to a single left lane plus the status. */
+.notch-panel:not(.is-attached) .notch-band { grid-template-columns: minmax(0, 1fr) 0 auto; }
+.notch-panel:not(.is-attached) .notch-tab-rail.is-trailing { display: none; }
+/* Step buttons share the track fill; a pair costs exactly one 36px slot. */
+.notch-tab-step { flex: 0 0 16px; width: 16px; height: 24px; border-radius: 8px; display: grid; place-items: center; color: var(--notch-faint); }
+.notch-tab-step:hover:not(:disabled) { color: var(--notch-ink); }
+.notch-tab-step:disabled { opacity: .25; cursor: default; }
+.notch-tab-step svg { width: 9px; height: 9px; }

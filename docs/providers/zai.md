@@ -1,9 +1,10 @@
 ---
-summary: "Z.ai/GLM provider notes: the two-key system, the three quota pools that merge into one row, the ZCode billing gateway's device-id gate, and the local spend store."
-ids: [zai]
+summary: "Z.ai/GLM provider notes: credential identity, quota pools, ZCode billing and session metadata, and the local spend store."
+ids: [zai, zcode]
 read_when:
   - Adding or changing Z.ai quota, balance, or subscription windows
   - Changing ZCode local discovery, the selection fields, or the credential path
+  - Changing ZCode session titles, parent links, or metadata source roots
   - Debugging ZCode Start/Weekend plan buckets or the billing endpoint
   - Changing the zai-balance.json spend store or its day-key semantics
   - Changing Z.ai credential handling or security boundaries
@@ -18,6 +19,14 @@ Z.ai appears in Token Monitor as one limits row fed by up to three independent a
 | Subscription quota | Console API key (manual / env), or the ZCode login's coding key | `{z.ai\|bigmodel}/api/monitor/usage/quota/limit` | `session`/`weekly`, MCP `billing` |
 | Cash balance | Console API key | `{host}/api/biz/account/query-customer-account-report` | `credits` |
 | ZCode Start/Weekend plans | ZCode login: the credential store's account JWT (3.12.3+), or the entry's mirror where no identity is established (3.11.x, an unreadable store or profile) | `zcode.z.ai/api/v1/zcode-plan/billing/balance` | model-aggregated `daily`/`billing` with `limitId` |
+
+## ZCode session metadata
+
+Tokscale reads ZCode usage from `<home>/.zcode/projects` without the titles or parent links. The session-metadata resolver joins by session id against the `session` table in `<home>/.zcode/cli/db/db.sqlite`. Both roots use the collector's home, including a scoped WSL home; the limits-discovery chain (`ZCODE_DATA_BASE_DIR` → `HOME` → `os.homedir()`) must not redirect metadata to a store whose sessions the scan did not read.
+
+Only `task_type` values `subagent_child` and `workflow_child` expose `parent_id` as a grouping link. `interactive` sessions remain independent; `fork` and `selection_side_chat` also keep their own rows because they represent conversations the user opened deliberately. Missing parent columns leave titles usable without inferring a relationship.
+
+The database opens read-only. Its fingerprint includes the main file and WAL so renames can refresh on the next metadata pass. Missing databases, unreadable rows and unsupported schemas add no metadata and must not fail usage collection.
 
 ## Two keys, two chains, never mixed
 

@@ -33,6 +33,9 @@ test('each shared host directory discovers and attributes a WSL-only home', asyn
     ['.qwen/projects', 'qwen'],
     ['.pi/agent/sessions', 'pi'],
     ['.omp/agent/sessions', 'omp'],
+    ['.omo/agent/sessions', 'senpi'],
+    ['.senpi/agent/sessions', 'senpi'],
+    ['.omo/senpi-task', 'senpi'],
     ['.commandcode/projects', 'commandcode']
   ];
   for (const [marker, client] of entries) {

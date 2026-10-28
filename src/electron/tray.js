@@ -11,6 +11,7 @@ const {
 } = require('../shared/trayText');
 const { codexAccountDisplayLabel } = require('./renderer/accountIdentity');
 const { EDGE_DOCK_MODES, normalizeEdgeDockMode } = require('./edgeDock/geometry');
+const { normalizeNotchHoverAction } = require('./notch/controller');
 const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
@@ -353,6 +354,29 @@ function buildTrayMenuTemplate(options = {}) {
       ]
     };
   })() : null;
+  const notchItem = platform === 'darwin' && state.notchSupported ? (() => {
+    const setNotch = callback('onSetNotch');
+    const toggle = (key, labelKey, fallback = true) => {
+      const checked = typeof state[key] === 'boolean' ? state[key] : fallback;
+      return { label: t(labelKey), type: 'checkbox', checked, click: () => setNotch({ [key]: !checked }) };
+    };
+    return {
+      label: t('settings.notch.title'),
+      submenu: [
+        toggle('notchEnabled', 'trayMenu.notchShow', false),
+        { type: 'separator' },
+        ...[['peek', 'trayMenu.notchHoverPeek'], ['open', 'trayMenu.notchHoverOpen']].map(([value, labelKey]) => ({
+          label: t(labelKey), type: 'radio', checked: normalizeNotchHoverAction(state.notchHoverAction) === value,
+          click: () => setNotch({ notchHoverAction: value })
+        })),
+        { type: 'separator' },
+        toggle('notchSummaryEnabled', 'settings.notch.showSummary'),
+        toggle('notchHideSummaryInFullScreen', 'settings.notch.hideSummaryInFullScreen'),
+        { type: 'separator' },
+        { label: t('trayMenu.settings'), click: () => callback('onOpenSettings')('notch') }
+      ]
+    };
+  })() : null;
   return [
     {
       label: t(state.refreshing ? 'trayMenu.refreshing' : 'trayMenu.refreshNow'),
@@ -388,13 +412,12 @@ function buildTrayMenuTemplate(options = {}) {
       }))
     },
     ...(edgeDockItem ? [edgeDockItem] : []),
-    ...(platform === 'darwin' && state.notchSupported ? [{
-      label: t('settings.notch.title'), type: 'checkbox', checked: state.notchEnabled === true,
-      click: () => callback('onSetEdgeDock')({ notchEnabled: state.notchEnabled !== true })
-    }] : []),
+    ...(notchItem ? [notchItem] : []),
+    ...(state.pluginMenu || []).map(item => ({ label: `${item.pluginName}: ${item.label}`, click: () => callback('onPluginMenu')(item.pluginId, item.id) })),
     { type: 'separator' },
     { label: t('trayMenu.version', { version: state.appVersion || '' }), enabled: false },
     { label: t('trayMenu.settings'), click: callback('onOpenSettings') },
+    { label: t('plugins.trusted.safeMode'), click: callback('onRestartPluginsSafe') },
     {
       label: t('trayMenu.quit'),
       // macOS draws a menu item's shortcut from `accelerator` as that item's key
@@ -431,12 +454,15 @@ function createTray({
   electron = require('electron'),
   getMenuState,
   onOpenSettings,
+  onRestartPluginsSafe,
+  onPluginMenu,
   onOpenView,
   onQuit,
   onRefresh,
   onSetTrayContent,
   onSetWindowPresentation,
   onSetEdgeDock,
+  onSetNotch,
   onSwitchCodexAccount,
   onToggle,
   getWindowVisible,
@@ -447,13 +473,15 @@ function createTray({
 }) {
   const { Tray, Menu, nativeImage } = electron;
   const tray = new Tray(buildTrayIcon({ platform, nativeImage }));
-  tray.setToolTip('Token Monitor');
+  tray.setToolTip('');
 
   const menuState = () => (typeof getMenuState === 'function' ? getMenuState() : {});
   const buildMenu = (state = menuState()) => Menu.buildFromTemplate(buildTrayMenuTemplate({
     state,
     platform,
     onOpenSettings,
+    onRestartPluginsSafe,
+    onPluginMenu,
     onOpenView,
     onQuit,
     onRefresh,
@@ -476,6 +504,7 @@ function createTray({
         refreshContextMenu();
       }
     },
+    onSetNotch,
     onSwitchCodexAccount,
     translate: translateMenu
   }));

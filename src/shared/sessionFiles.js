@@ -7,6 +7,7 @@ const { codebuddyProjectsRoot } = require('./providers/codebuddy/paths');
 const { resolvePiSessionsDir } = require('./providers/pi/paths');
 const { resolveOmpSessionsDir } = require('./providers/omp/paths');
 const { findOmpSubagentSessionFile } = require('./providers/omp/subagents');
+const { resolveSenpiSessionsDirs } = require('./providers/senpi/paths');
 const { findSubagentSessionFile } = require('./providers/codebuddy/subagents');
 
 // 5.5 moved the WorkBuddy home to ~/.workbuddy-ai and tokscale still scans
@@ -212,6 +213,17 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     return findTimestampedSessionFiles(sessionsDir, [id]).get(id)
       || findOmpSubagentSessionFile(sessionsDir, id, { fs: options.fs })
       || '';
+  }
+  if (client === 'senpi') {
+    for (const sessionsDir of resolveSenpiSessionsDirs({
+      homeDir: home,
+      env: options.env,
+      useEnvRoots: options.useEnvRoots
+    })) {
+      const found = findTimestampedSessionFiles(sessionsDir, [id]).get(id);
+      if (found) return found;
+    }
+    return '';
   }
   return '';
 }

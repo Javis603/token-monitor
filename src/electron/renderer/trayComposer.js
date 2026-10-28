@@ -129,7 +129,7 @@
     const current = layoutApi.normalizeTrayLayout(currentLayout);
     const item = current.items.find((entry) => entry.id === itemId);
     if (!item || current.items.length >= layoutApi.MAX_ITEMS) return current;
-    const appended = layoutApi.appendTrayLayoutItem(current, item.style, options);
+    const appended = layoutApi.appendTrayLayoutItem(current, item.style, item.type === 'plugin' ? { ...options, ref: item.ref } : options);
     const appendedItem = appended.items[current.items.length];
     if (!appendedItem) return current;
     return layoutApi.replaceTrayLayoutItem(appended, appendedItem.id, {
@@ -189,6 +189,7 @@
       isEditable,
       onCustomize,
       onLayoutChange,
+      pluginChoices = () => [],
       providerChoices,
       accountChoices,
       windowChoices,
@@ -247,7 +248,7 @@
     }
 
     function itemTitle(item) {
-      return styleTitle(item.style);
+      return item.type === 'plugin' ? pluginChoices().find(view => view.ref === item.ref)?.title || item.ref : styleTitle(item.style);
     }
 
     function closePopover(popover) {
@@ -353,6 +354,27 @@
           name.className = 'tray-composer-gallery-name';
           name.textContent = styleTitle(style);
           choice.append(preview, name);
+          grid.append(choice);
+        }
+        section.append(heading, grid);
+        popover.append(section);
+      }
+      const plugins = pluginChoices();
+      if (plugins.length) {
+        const section = document.createElement('section');
+        section.className = 'tray-composer-gallery-group';
+        const heading = document.createElement('h4');
+        heading.textContent = l('settings.plugins.title', 'Plugins');
+        const grid = document.createElement('div');
+        grid.className = 'tray-composer-gallery-grid';
+        for (const view of plugins) {
+          const choice = button('tray-composer-gallery-choice', view.title, () => {
+            const next = layoutApi.appendTrayLayoutItem(layout(), 'plugin', { ref: view.ref });
+            selectedId = next.items.at(-1)?.id || '';
+            emit(next, true);
+            closePopover(popover);
+          });
+          choice.dataset.pluginRef = view.ref;
           grid.append(choice);
         }
         section.append(heading, grid);
@@ -1365,7 +1387,7 @@
         current.items.forEach((item) => {
           const itemEl = button('tray-composer-item', '');
           itemEl.dataset.itemId = item.id;
-          itemEl.title = itemTitle(item);
+          itemEl.setAttribute('aria-label', itemTitle(item));
           itemEl.setAttribute('aria-label', `${itemTitle(item)}. ${l('trayComposer.itemHint', 'Drag to reorder; click to configure.')}`);
           itemEl.classList.toggle('selected', selectedId === item.id);
           itemEl.classList.toggle('is-spacer', item.type === 'spacer');
