@@ -14,7 +14,7 @@ function bytes(version = '1.0.0', extra = {}) {
 }
 function fixture(t, fault) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-managed-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  let settings = { floatingBubbleCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchPageOrder: ['plugin:test-plugin/page', 'home', 'plugin:other/page'], pluginContentOrder: { 'main.model.content': ['test-plugin/page', 'other/page'] }, pluginContentSelections: { 'main.limits.content': 'test-plugin/page', 'main.home.content': 'other/page' }, pluginStates: {}, homeModuleOrder: 'summary,plugin:test-plugin/page,plugin:other/page', hiddenHomeModules: '', edgeDockItems: [], notchPluginPages: ['test-plugin/page', 'other/page'] };
+  let settings = { pluginPlacementDefaults: {}, pluginMainPages: [], trayContent: 'tokens', trayCustomLayout: { version: 1, items: [] }, floatingBubbleCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchPageOrder: ['plugin:test-plugin/page', 'home', 'plugin:other/page'], pluginContentOrder: { 'main.model.content': ['test-plugin/page', 'other/page'] }, pluginContentSelections: { 'main.limits.content': 'test-plugin/page', 'main.home.content': 'other/page' }, pluginStates: {}, homeModuleOrder: 'summary,plugin:test-plugin/page,plugin:other/page', hiddenHomeModules: '', edgeDockItems: [], notchPluginPages: ['test-plugin/page', 'other/page'] };
   let stopped = 0;
   const manager = { list: () => ({ plugins: [] }), beginMutation: () => stopped++, endMutation() {}, reload() {} };
   const args = { root: path.join(dir, 'manager'), userDir: path.join(dir, 'plugins'), dataDir: path.join(dir, 'data'), settingsDir: path.join(dir, 'author-settings'), manager,
@@ -530,4 +530,14 @@ for (const point of ['settings-written', 'reloaded']) test(`failed install-and-e
   const restarted = createManagedPlugins(f.args); restarted.recover();
   assert.deepEqual(restarted.list(), []);
   assert.deepEqual(f.settings, before.settings);
+});
+
+for (const point of ['settings-written', 'reloaded']) test(`default locations roll back with trust and tray mode at ${point}`, async t => {
+  const f = fixture(t, step => { if (step === point) throw new Error('interrupted defaults'); });
+  f.args.manager.list = () => ({ enabled: true, plugins: [] });
+  const before = structuredClone(f.settings);
+  const pkg = parsePackage(bytes('1.0.0', { views: [{ id: 'page', surfaces: ['page','tray'], defaultSurfaces: ['page','tray'] }] }));
+  await assert.rejects(f.api.install(f.api.preview(pkg).token, { trustInstall:true }), /interrupted defaults/);
+  assert.deepEqual(f.settings, before);
+  assert.equal(f.api.list().length, 0);
 });

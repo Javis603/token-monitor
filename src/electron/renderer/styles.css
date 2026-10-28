@@ -8749,3 +8749,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   flex: 0 0 auto;
   overflow: visible;
 }
+
+.plugin-default-placements { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; }
+.settings-panel label.plugin-placement-choice { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.plugin-placement-choice > input[type="checkbox"] { flex: 0 0 14px; width: 14px; height: 14px; margin: 0; }

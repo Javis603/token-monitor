@@ -90,6 +90,46 @@ function placementPatch(settings, { ref, surface, placed }, context = {}) {
   return { notchPluginPages: pages };
 }
 
+function normalizePlacementDefaults(value) {
+  const result = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
+  for (const [id, entry] of Object.entries(value)) {
+    if (!/^[a-z0-9][a-z0-9-]{1,39}$/.test(id) || !entry || typeof entry.applied !== 'boolean' || !Array.isArray(entry.placements) || entry.placements.length > 256) continue;
+    if (entry.placements.some(choice => !choice || !placements.isRef(choice.ref) || !choice.ref.startsWith(`${id}/`) || !PLACEMENT_SURFACES.includes(choice.surface))) continue;
+    result[id] = { applied: entry.applied, placements: entry.placements.map(({ ref, surface }) => ({ ref, surface })) };
+  }
+  return result;
+}
+
+// Stored separately from executable trust so kept placements include an explicit
+// choice of no locations, even across uninstall/reinstall.
+function initialPlacements(manifest, selected) {
+  const allowed = new Set(manifest.views.flatMap(view => view.surfaces.filter(surface => PLACEMENT_SURFACES.includes(surface)).map(surface => `${manifest.id}/${view.id}:${surface}`)));
+  const choices = selected === undefined
+    ? manifest.views.flatMap(view => (view.defaultSurfaces || []).map(surface => ({ ref: `${manifest.id}/${view.id}`, surface }))) : selected;
+  if (!Array.isArray(choices) || choices.length > 256 || choices.some(choice => !choice || !allowed.has(`${choice.ref}:${choice.surface}`))) throw new Error('invalid initial plugin placements');
+  const keys = choices.map(choice => `${choice.ref}:${choice.surface}`);
+  if (new Set(keys).size !== keys.length) throw new Error('duplicate initial plugin placements');
+  return choices.map(({ ref, surface }) => ({ ref, surface }));
+}
+
+function initializePlacementPatch(settings, id, context = {}, views = null) {
+  const preference = settings.pluginPlacementDefaults?.[id];
+  if (!preference || preference.applied) return {};
+  const patch = {};
+  for (const choice of preference.placements) {
+    if (views && !views.some(view => (view.ref || `${id}/${view.id}`) === choice.ref && view.surfaces.includes(choice.surface))) continue;
+    if (placementsFor({ ...settings, ...patch }, choice.ref)[choice.surface]) continue;
+    try { Object.assign(patch, placementPatch({ ...settings, ...patch }, { ...choice, placed: true }, context)); }
+    catch (error) {
+      // A default never evicts existing content. Users can place it later.
+      if (!['page-full', 'edgeDock-full', 'tray-full', 'Notch page storage limit exceeded'].includes(error.message)) throw error;
+    }
+  }
+  patch.pluginPlacementDefaults = { ...settings.pluginPlacementDefaults, [id]: { ...preference, applied: true } };
+  return patch;
+}
+
 function removePluginPlacements(settings, id) {
   const owns = ref => typeof ref === 'string' && ref.startsWith(`${id}/`);
   const tokenPrefix = placements.homeToken(`${id}/x`).slice(0, -1);
@@ -109,4 +149,4 @@ function removePluginPlacements(settings, id) {
     notchPluginPages: placements.normalizeNotchPluginPages(settings.notchPluginPages).filter(ref => !owns(ref))
   };
 }
-module.exports = { summaryBitmapRefs, PLACEMENT_SURFACES, placementPatch, placementsFor, removePluginPlacements };
+module.exports = { normalizePlacementDefaults, initialPlacements, initializePlacementPatch, summaryBitmapRefs, PLACEMENT_SURFACES, placementPatch, placementsFor, removePluginPlacements };

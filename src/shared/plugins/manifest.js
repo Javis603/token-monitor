@@ -80,6 +80,8 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
     if (!ui) fail('views require ui');
     const surfaces = Array.isArray(view.surfaces) ? [...new Set(view.surfaces)] : [];
     if (surfaces.some(surface => !SURFACES.includes(surface))) fail(`invalid surface: ${view.id}`);
+    const defaultSurfaces = view.defaultSurfaces ?? [];
+    if (!Array.isArray(defaultSurfaces) || new Set(defaultSurfaces).size !== defaultSurfaces.length || defaultSurfaces.some(surface => (!surfaces.includes(surface) || surface === 'settings'))) fail(`defaultSurfaces must be a subset of surfaces: ${view.id}`);
     const targets = Array.isArray(view.targets) ? [...new Set(view.targets)] : [];
     if (targets.some(target => typeof target !== 'string' || !/^[a-zA-Z][a-zA-Z0-9.-]{0,119}$/.test(target))) fail(`invalid content target: ${view.id}`);
     if (!surfaces.length && !targets.length) fail(`view needs surfaces or content targets: ${view.id}`);
@@ -88,7 +90,7 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
     const selector = view.selector ?? null;
     if (selector !== null && (typeof selector !== 'string' || !selector.trim() || selector.length > 500 || !targets.length)) fail(`invalid content selector: ${view.id}`);
     if (mode === 'replace' && targets.includes('main.navigation.content')) fail('core navigation cannot be replaced');
-    views.push({ id: view.id, title: normalizeLocalized(view.title, 80) || name, surfaces, targets, mode, selector,
+    views.push({ id: view.id, title: normalizeLocalized(view.title, 80) || name, surfaces, defaultSurfaces, targets, mode, selector,
       icon: typeof view.icon === 'string' ? view.icon.slice(0, 32) : 'dot' });
   }
   const trayMenu = [], menuIds = new Set();

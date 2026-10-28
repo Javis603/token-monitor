@@ -7,7 +7,7 @@ Read the [API and trust contract](README.md) first. This experimental API runs a
 Create `manifest.json`:
 
 ```json
-{"tmApi":1,"id":"my-panel","name":"My panel","version":"1.0.0","ui":"ui.mjs","files":["ui.mjs"],"views":[{"id":"panel","title":"My panel","surfaces":["home","page"]}]}
+{"tmApi":1,"id":"my-panel","name":"My panel","version":"1.0.0","ui":"ui.mjs","files":["ui.mjs"],"views":[{"id":"panel","title":"My panel","surfaces":["home","page"],"defaultSurfaces":["page"]}]}
 ```
 
 Create `ui.mjs`:
@@ -47,3 +47,5 @@ node scripts/build-plugin-package.js /path/to/my-panel /path/to/my-panel.tmplugi
 ```
 
 The output must not already exist. Share the file or use a trusted HTTPS catalog. Update `version`, test against the target App/OS, and disclose local/network/data access accurately. Do not present a hash as an audit. See [distribution](distribution-design.md) and [verification](validation.md).
+
+Optional `defaultSurfaces` suggests initial locations from the view's supported surfaces. Users confirm or change these at installation; install-only defers placement until first enable. Updates preserve user choices. Surface master switches stay unchanged, full locations are skipped, and native replacements remain explicit user choices. See [placement semantics](README.md) for reinstall and recovery behavior.

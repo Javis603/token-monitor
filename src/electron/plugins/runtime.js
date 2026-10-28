@@ -14,7 +14,7 @@ const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const { createPluginManager } = require('./manager');
 const { translate } = require('../renderer/i18n');
-const { placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
+const { initializePlacementPatch, placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
 const { trayLayoutPluginRefs } = require('../../shared/trayLayout');
 const { createElectronNetFetch } = require('../limits/fetch');
 const { createOutboundFetch, resolveProxyConfig } = require('../../shared/outboundFetch');
@@ -150,7 +150,7 @@ function createPluginRuntime({
   const contentSelections = () => getSettings().pluginContentSelections || {};
   let pages = null;
   const managed = createManagedPlugins({ root: path.join(userDataDir, 'plugin-manager'), userDir,
-    dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), manager, getSettings, saveSettings: persistManagementSettings, getLocale });
+    dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), manager, getSettings, saveSettings: persistManagementSettings, getLocale, placementContext });
   try { managed.recover(); }
   catch (error) { log(`[plugins] Plugin management unavailable: ${error.message}`); }
   const catalog = createPluginCatalog({ manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch });
@@ -480,6 +480,10 @@ function createPluginRuntime({
     handle('plugins:setEnabled', async (event, { id, enabled } = {}) => {
       requireMain(event); id = String(id);
       const finish = enabled ? await resumeHosts(event, [id]) : await prepareDisable(event, [id]);
+      if (enabled === true) {
+        const patch = initializePlacementPatch(getSettings(), id, placementContext(), manager.list().plugins.find(plugin => plugin.id === id)?.views || []);
+        if (Object.keys(patch).length) persistManagementSettings(patch);
+      }
       manager.setEnabled(id, enabled === true);
       await finish();
       return listWithPlacements();
@@ -520,7 +524,7 @@ function createPluginRuntime({
       if (selection.canceled || !selection.filePaths.length) return null;
       return kind === 'directory' ? managed.previewDirectory(selection.filePaths[0]) : managed.previewFile(selection.filePaths[0]);
     });
-    handle('plugins:install', (event, token, options) => changePackage(event, () => managed.install(token, { trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true }), [managed.previewId(token)]));
+    handle('plugins:install', (event, token, options) => changePackage(event, () => managed.install(token, { trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true, placements: options?.placements }), [managed.previewId(token)]));
     handle('plugins:cancelInstall', (event, token) => { requireMain(event); managed.cancel(token); });
     handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id), [id]));
     handle('plugins:uninstall', (event, id, options) => changePackage(event, () => managed.uninstall(id, options), [id]));
@@ -536,7 +540,10 @@ function createPluginRuntime({
       const view = manager.list().plugins.flatMap((plugin) => plugin.views || []).find((entry) => entry.ref === ref);
       if (!view?.surfaces.includes(surface)) throw new Error('unsupported plugin placement');
       const patch = placementPatch(getSettings() || {}, { ref: String(ref || ''), surface: String(surface || ''), placed: placed === true }, placementContext());
+      const id = view.pluginId;
       applySettingsPatch(patch);
+      const preference = getSettings().pluginPlacementDefaults?.[id];
+      if (preference && !preference.applied) persistManagementSettings({ pluginPlacementDefaults: { ...getSettings().pluginPlacementDefaults, [id]: { ...preference, applied: true } } });
       return listWithPlacements();
     });
     handle('plugins:skins', (event) => {

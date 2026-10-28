@@ -22,6 +22,7 @@ manifest.views.push(
   { id: 'navigation', targets: ['main.navigation.content'], selector: '.view-switcher-label' },
   { id: 'navigation-second', targets: ['main.navigation.content'], selector: '.view-switcher-label' }
 );
+if (process.env.TM_DEFAULT_PLACEMENTS === '1') manifest.views.find(view => view.id === 'panel').defaultSurfaces = ['page','notch'];
 fs.renameSync(path.join(fixtureDir, 'ui.mjs'), path.join(fixtureDir, 'basic.mjs'));
 manifest.files.push('basic.mjs');
 manifest.files.push('fixture.png');
@@ -233,6 +234,40 @@ app.whenReady().then(async () => {
     await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
   }
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
+  if (process.env.TM_DEFAULT_PLACEMENTS === '1') {
+    await js(`tokenMonitor.plugins.cancelInstall(${JSON.stringify(preview.token)})`);
+    selectedDirectory = path.join(scratch,'initial-locations.tmplugin');
+    fs.writeFileSync(selectedDirectory,require('../src/electron/plugins/package').packageDirectory(fixtureDir).bytes);
+    await js("openSettingsPanel();for(const section of SETTINGS_SECTION_IDS)setSettingsSectionExpanded(section,section==='plugins');pluginSettingsPanel.refresh()");
+    await waitFor("[...document.querySelectorAll('button')].some(b=>b.textContent===t('plugins.package.import'))", 'import action');
+    await js("[...document.querySelectorAll('button')].find(b=>b.textContent===t('plugins.package.import')).click()");
+    await waitFor("document.querySelector('.plugin-package-preview .plugin-allow')", 'placement consent');
+    await js("document.querySelector('.plugin-package-preview').scrollIntoView({block:'start',behavior:'instant'})");
+    await pause(200);
+    fs.writeFileSync(path.join(evidence,'initial-locations-consent.png'),(await capture()).toPNG());
+    if (process.env.TM_EXPECT_BASELINE === '1') {
+      assert.equal(await js("!!document.querySelector('.plugin-default-placements')"),false);
+    } else {
+      assert.equal(await js("document.querySelector('.plugin-default-placements input[data-surface=page]').checked"),true);
+      assert.equal(await js("document.querySelector('.plugin-default-placements input[data-surface=notch]').checked"),true);
+      assert.equal(await js("document.querySelector('.plugin-default-placements input[data-surface=edgeDock]').checked"),false);
+      await js("document.querySelector('.plugin-default-placements input[data-surface=notch]').click()");
+      await js("document.querySelector('.plugin-package-preview .plugin-allow').click()");
+      await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'",'installed with choices');
+      assert.deepEqual(settings.pluginMainPages,['trusted-fixture/panel']);
+      assert.deepEqual(settings.notchPluginPages,[]);
+      assert.equal(settings.notchEnabled,false);assert.equal(settings.edgeDockEnabled,false);
+      const ready=new Promise(resolve=>win.webContents.once('did-finish-load',resolve));
+      win.webContents.reload();await ready;
+      await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'",'restart restores choices');
+      await js("openViewFromTray('plugin:trusted-fixture/panel')");
+      await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')",'default page author UI');
+      fs.writeFileSync(path.join(evidence,'initial-locations-installed.png'),(await capture()).toPNG());
+      assert.equal(settings.pluginPlacementDefaults['trusted-fixture'].applied,true);
+    }
+    assertConsoleClean();console.log('PASS actual renderer initial placement consent and selected page after reload');
+    await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
+  }
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
   if (process.env.TM_PACKAGE_RECOVERY_ONLY === '1') {
     let loads = 0; win.webContents.on('did-finish-load', () => loads++);

@@ -21,7 +21,7 @@ Module-private variables and another process's memory are not automatically avai
   "css": ["panel.css"],
   "files": ["ui.mjs", "backend.cjs", "panel.css"],
   "views": [
-    {"id": "panel", "title": "My panel", "surfaces": ["home", "page", "notch", "edgeDock", "settings"]},
+    {"id": "panel", "title": "My panel", "surfaces": ["home", "page", "notch", "edgeDock", "settings"], "defaultSurfaces": ["page", "notch"]},
     {"id": "layout", "title": "My layout", "targets": ["main.limits.content"], "mode": "replace"}
   ]
 }
@@ -30,6 +30,10 @@ Module-private variables and another process's memory are not automatically avai
 `ui`, `backend`, `css`, `views`, `trayMenu`, `settings`, `skins` and `background` are optional; at least UI, backend or skins is required. UI views require `ui`. List every distributed file explicitly. Paths are package-relative, portable and cannot traverse parents or symlinks. Dependencies must be bundled beforehand; installation never runs npm or lifecycle scripts. Native addons require compatible OS/architecture/Electron ABI, and utility-process loading must be tested in a packaged build; arbitrary addons are not universally supported.
 
 `name`, `description` and view titles support localized strings. Optional `author`, HTTPS `homepage` and validated `identityIcon` provide attribution, not trust. The App uses `identityIcon` in main-page navigation and Notch tabs (and their settings choices) before loading the plugin UI. Without artwork, navigation keeps its built-in fallback; image decode failures also fall back. Do not rely on UI CSS loading to supply navigation artwork. `engines.tokenMonitor` can constrain the App version. `tmApi` identifies the plugin API contract, not the plugin release or package format. Only `tmApi: 1` is accepted; other values fail with `incompatible-plugin-api` and are not converted. This experimental API can break; authors must follow release changes.
+
+Each view may declare `defaultSurfaces`, a duplicate-free subset of its `surfaces` (`home`, `page`, `notch`, `edgeDock`, `tray`; never `settings`). These are initial placement suggestions, not automatic permission grants. The install confirmation lists supported locations and preselects the author's suggestions; the user can change or clear them. Trust-and-install applies the confirmed choices. Install-only stores them for first enable, including across restarts. No defaults are applied to previously installed plugins lacking a first-install record.
+
+After first enable, updates and enable/disable cycles preserve the user's layout, including an explicit choice of no locations. Uninstall with kept placements preserves that decision; removing placements resets it for a later fresh install. Locations that are full are skipped without evicting existing items. The `tray` default places the bitmap in the system Tray; Floating Bubble and Notch-summary custom layouts still use their existing manual composers. Defaults do not select native content replacements or enable Notch, Edge Dock, Tray or background-work master switches. Pending defaults for views or surfaces removed by an update are skipped. Local packages and catalog packages use the same confirmation and transaction. The API remains experimental.
 
 Bitmap views declaring `tray` can be added from the existing Tray, Floating Bubble and custom Notch-summary composers after the plugin is enabled. They use the same reorder, duplicate, remove and save controls as native items. Notch “Same as tray” follows the active Tray layout; its custom layout stays independent. Uninstall with placement removal also clears bubble/summary entries and mixed Notch page-order entries. Keeping placements retains them for a later reinstall and explicit enable.
 

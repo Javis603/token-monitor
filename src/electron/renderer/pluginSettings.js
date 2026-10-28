@@ -314,11 +314,28 @@
       if (p.origin.packageUrl) panel.append(el(document, 'code', 'plugin-log', p.origin.packageUrl));
       panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
       panel.append(el(document, 'p', 'settings-note', t(p.operation === 'install' ? (list.enabled ? 'plugins.package.installConsent' : 'plugins.package.enableLater') : 'plugins.package.grants')));
+      if (p.operation === 'install' && !p.placementsRetained && p.views?.some(view => view.surfaces.some(surface => SURFACE_ORDER.includes(surface)))) {
+        p.placements ??= p.views.flatMap(view => (view.defaultSurfaces || []).map(surface => ({ ref: view.ref, surface })));
+        const locations = el(document, 'fieldset', 'plugin-default-placements');
+        locations.append(el(document, 'legend', '', t('plugins.package.initialLocations')));
+        locations.append(el(document, 'p', 'settings-note', t('plugins.package.initialLocationsNote')));
+        for (const view of p.views) for (const surface of SURFACE_ORDER.filter(surface => view.surfaces.includes(surface))) {
+          const label = el(document, 'label', 'plugin-placement-choice');
+          const input = el(document, 'input'); input.type = 'checkbox'; input.dataset.ref = view.ref; input.dataset.surface = surface;
+          input.checked = p.placements.some(choice => choice.ref === view.ref && choice.surface === surface);
+          input.addEventListener('change', () => {
+            p.placements = p.placements.filter(choice => !(choice.ref === view.ref && choice.surface === surface));
+            if (input.checked) p.placements.push({ ref: view.ref, surface });
+          });
+          label.append(input, el(document, 'span', '', `${view.title} · ${t(`settings.plugins.surface.${surface}`)}`)); locations.append(label);
+        }
+        panel.append(locations);
+      }
       const details = el(document, 'details', 'plugin-logs'); details.append(el(document, 'summary', '', t('plugins.package.integrity')));
       details.append(el(document, 'code', 'plugin-log', p.sha256)); panel.append(details);
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const install = trustInstall => void run(async () => {
-        const next = await api.install(p.token, { trustUpdate: p.operation === 'update', trustInstall });
+        const next = await api.install(p.token, { trustUpdate: p.operation === 'update', trustInstall, placements: p.placements });
         packagePreview = null; catalogReview = null; activeTab = 'installed';
         if (p.operation === 'update' && next.plugins.find(plugin => plugin.id === p.id)?.status === 'needsApproval') { consentFor = p.id; revealConsent = true; }
         return next;

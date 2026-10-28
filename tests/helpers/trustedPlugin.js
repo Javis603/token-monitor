@@ -19,7 +19,7 @@ function fakeFork(children, { delayedExit = false } = {}) {
 async function runtimeFixture(t, { Notification, safeMode = false, delayedExit = false, businessAdapters = {}, surfaceContext, beforeStart = () => {}, sourceDirectory = path.resolve(__dirname, '../fixtures/trusted-plugin') } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trusted-test-'));
   const handlers = new Map(), events = new Map(), children = [], windows = [];
-  let settings = { pluginsEnabled: true, pluginStates: {}, homeModuleOrder: 'plugin:trusted-fixture/panel', pluginMainPages: ['trusted-fixture/panel'], notchPluginPages: ['trusted-fixture/panel'] };
+  let settings = { pluginPlacementDefaults: {}, pluginsEnabled: true, pluginStates: {}, homeModuleOrder: 'plugin:trusted-fixture/panel', pluginMainPages: ['trusted-fixture/panel'], notchPluginPages: ['trusted-fixture/panel'] };
   let confirmation = 1; const confirmations = [], dialogs = [];
   class BrowserWindow extends EventEmitter {
     constructor() {

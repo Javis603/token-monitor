@@ -665,6 +665,7 @@ function defaultSettings() {
     edgeDockItems: null,
     pluginsEnabled: true,
     pluginStates: {},
+    pluginPlacementDefaults: {},
     pluginAuthorSkin: null,
     notchPluginPages: [],
     notchPageOrder: [],
@@ -2818,6 +2819,7 @@ function readSettings() {
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
+    merged.pluginPlacementDefaults = require('./plugins/placementSettings').normalizePlacementDefaults(merged.pluginPlacementDefaults);
     merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
     merged.pluginContentSelections = pluginPlacements.normalizeContentSelections(merged.pluginContentSelections);
     merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
@@ -8070,6 +8072,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.syncContentStatus;
     delete normalizedPatch.syncContentBase;
     delete normalizedPatch.pluginStates;
+    delete normalizedPatch.pluginPlacementDefaults;
     delete normalizedPatch.pluginContentSelections;
     delete normalizedPatch.pluginContentOrder;
     // Account fields declared persist:'never' (managed account lists, profile
@@ -9719,10 +9722,11 @@ app.whenReady().then(() => {
         },
         persistManagementSettings: (patch) => {
           // Main-owned transaction state only; never exposed as generic renderer settings.
-          const allowed = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
+          const allowed = ['pluginStates', 'pluginPlacementDefaults', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
           settings = { ...settings, ...Object.fromEntries(allowed.filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]])) };
           settings.pluginStates = normalizePluginStates(settings.pluginStates);
           saveSettings({ throwOnError: true });
+          if (Object.hasOwn(patch, 'trayContent') || Object.hasOwn(patch, 'trayCustomLayout')) updateTrayDisplay();
           pushSettingsToRenderer();
         },
         getLocale: () => trayMenuLocale(),
