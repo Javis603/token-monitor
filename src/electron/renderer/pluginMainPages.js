@@ -12,14 +12,22 @@
   }
   function create({ document, container, headingContainer, actionsContainer, host, t, openWindow, formatError = error => t('settings.plugins.actionFailed', { error: error.message || String(error) }) }) {
     const retained = new Map(), errors = new WeakMap();
-    let selection = null, generation = 0;
+    let selection = null, generation = 0, inputEpoch = 0;
     if (document.defaultView) {
-      // Input modality controls the focus ring, never the focused element.
-      // OS window switching does not reliably emit renderer key events.
-      document.addEventListener('pointerdown', () => document.documentElement.classList.add('plugin-pointer-focus'), true);
-      document.addEventListener('keydown', () => document.documentElement.classList.remove('plugin-pointer-focus'), true);
+      const interacted = () => { inputEpoch++; };
+      document.addEventListener('pointerdown', interacted, true);
+      document.addEventListener('keydown', interacted, true);
     }
     return {
+      pointerActivate() {
+        const opened = generation, input = inputEpoch;
+        document.defaultView.requestAnimationFrame(() => {
+          if (opened !== generation || input !== inputEpoch) return;
+          const record = [...retained.values()].find(({node}) => !node.classList.contains('hidden'));
+          const active = document.activeElement;
+          if (record && active?.tagName === 'BUTTON' && record.actions.contains(active)) record.node.focus({ preventScroll: true });
+        });
+      },
       render(pages, selected) {
         if (selected !== selection) {
           selection = selected; generation++;

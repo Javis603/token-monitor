@@ -6289,10 +6289,13 @@ function handleWindowToggleShortcut() {
   else focusExistingWindow();
 }
 
-function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
+function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false, pointerActivation = false) {
   const action = trayToggleAction(settings);
   if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
   else if (action === 'focusWindow') focusExistingWindow();
+  // A paired native press/release is evidence of pointer activation. OS app
+  // switching and accessibility tray clicks must not reset keyboard focus.
+  if (pointerActivation && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:pointerActivation');
 }
 
 function trayMenuLocale() {

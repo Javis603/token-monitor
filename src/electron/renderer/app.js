@@ -14491,6 +14491,7 @@ window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
   state.windowVisible = visible;
   handleWindowVisibilityChange();
 });
+window.tokenMonitor.onWindowPointerActivation(() => pluginMainPages?.pointerActivate());
 
 window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;

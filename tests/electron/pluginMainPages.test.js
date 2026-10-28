@@ -87,32 +87,33 @@ test('standalone-window errors stay with their page, retry once and discard stal
   assert.equal(headingContainer.classList.contains('hidden'), true);
 });
 
-test('window activation preserves focus for pointer, OS shortcuts, keyboard navigation and editors', () => {
+test('only confirmed pointer activation parks header focus; OS switching and new input preserve it', () => {
   const { create } = require('../../src/electron/renderer/pluginMainPages');
   const { Element } = require('../helpers/notchPanel');
   const handlers = {}, windowHandlers = {}, frames = [];
   const document = { createElement: tag => new Element(tag, document), createElementNS: (_, tag) => new Element(tag, document),
     addEventListener(name, fn) { handlers[name] = fn; },
     defaultView: { addEventListener(name, fn) { windowHandlers[name] = fn; }, requestAnimationFrame(fn) { frames.push(fn); } } };
-  document.documentElement = document.createElement('html');
   document.body = document.createElement('body'); document.activeElement = document.body;
   const container = document.createElement('main'), headingContainer = document.createElement('div'), actionsContainer = document.createElement('div');document.body.append(container,headingContainer,actionsContainer);
-  let button, editor;
+  let button, editor, bodyButton;
   const ui = create({ document, container, headingContainer, actionsContainer, host: { refreshDemand() {}, mount(node, _ref, _surface, options) {
-    button = document.createElement('button'); editor = document.createElement('input'); options.headerActions.append(button); node.append(editor);
+    button = document.createElement('button'); editor = document.createElement('input'); bodyButton = document.createElement('button'); options.headerActions.append(button); node.append(editor, bodyButton);
   } }, t: key => key, openWindow: async () => {} });
   const pages = [{ id: 'plugin:demo/view', ref: 'demo/view', title: 'Demo' }];
   ui.render(pages, pages[0].id);
-  const page = container.querySelector('.plugin-main-page');
+  const page = container.querySelector('.plugin-main-page'), flush = () => frames.splice(0).forEach(fn => fn());
   assert.equal(page.tabIndex, -1); assert.equal(page.getAttribute('aria-label'), 'Demo');
-  const reopen = () => { windowHandlers.focus?.(); frames.splice(0).forEach(fn => fn()); };
-  handlers.pointerdown(); button.focus(); reopen(); assert.equal(document.activeElement, button);
-  assert.equal(document.documentElement.classList.contains('plugin-pointer-focus'), true);
-  for (const event of [{key:'Tab'}, {key:'Tab',metaKey:true}, {key:'Tab',altKey:true}]) {
-    handlers.keydown(event); button.focus(); reopen(); assert.equal(document.activeElement, button);
-    assert.equal(document.documentElement.classList.contains('plugin-pointer-focus'), false);
+  button.focus(); windowHandlers.focus?.(); flush(); assert.equal(document.activeElement, button);
+  assert.equal(windowHandlers.focus, undefined, 'activation without pointer evidence must not move focus');
+  ui.pointerActivate(); flush(); assert.equal(document.activeElement, page);
+  for (const target of [editor, bodyButton]) {
+    target.focus(); ui.pointerActivate(); flush(); assert.equal(document.activeElement, target);
   }
-  handlers.pointerdown(); editor.focus(); reopen(); assert.equal(document.activeElement, editor);
-  handlers.pointerdown(); button.focus(); reopen();
-  assert.equal(document.activeElement, button, 'activation without renderer key events also preserves focus');
+  for (const name of ['keydown', 'pointerdown']) {
+    button.focus(); ui.pointerActivate(); handlers[name](); flush();
+    assert.equal(document.activeElement, button, 'new input wins over the queued pointer reset');
+  }
+  button.focus(); ui.pointerActivate(); ui.render(pages, 'home'); flush();
+  assert.equal(document.activeElement, button, 'navigation invalidates the queued reset');
 });
