@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { statsPatch, applyStatsPatch } = require('../../src/shared/hubDelta');
-const { createStatsStreamReceiver, prepareSseFanout, sseFrameForClient, sseClientKinds, wantsDeltaEvents, wantsFreshnessEvents } = require('../../src/shared/hubProtocol');
+const { createStatsStreamReceiver, encodeSseEvent, prepareSseFanout, sseFrameForClient, sseClientKinds, wantsDeltaEvents, wantsFreshnessEvents } = require('../../src/shared/hubProtocol');
 const wire = value => JSON.parse(JSON.stringify(value));
 function stats(n = 1) {
   return { periods: { today: { totalTokens: n, sessions: { 'a/~:1': { totalTokens: n, liveActivity: {state: 'running', observedAt: `2026-10-28T10:00:0${n}.000Z`} } } } },
@@ -94,6 +94,59 @@ test('large delta falls back to a full frame and a subsequent small delta resume
   const frames=prepareSseFanout({stats:{n:2},previousStats:{n:1},revision:2,hasDeltaClients:true});
   assert.equal(frames.delta,undefined);
   assert.match(sseFrameForClient(frames,{deltaEvents:true,streamRevision:1}),/^event: stats/);
+});
+
+test('fan-out skips UTF-8 encoding when string-length bounds decide the smaller frame', t => {
+  const encode = TextEncoder.prototype.encode;
+  const spy = t.mock.method(TextEncoder.prototype, 'encode', function (value) {
+    return encode.call(this, value);
+  });
+  const smaller = prepareSseFanout({
+    stats: { n: 2, stable: 'x'.repeat(10000) },
+    previousStats: { n: 1, stable: 'x'.repeat(10000) },
+    revision: 2, hasDeltaClients: true
+  });
+  assert.match(smaller.delta, /^event: delta/);
+  assert.ok(smaller.delta.length * 3 < smaller.stats.length);
+  const larger = prepareSseFanout({
+    stats: { n: 2 },
+    previousStats: Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`key${i}`, i])),
+    revision: 2, hasDeltaClients: true
+  });
+  assert.equal(larger.delta, undefined);
+  assert.equal(spy.mock.callCount(), 0);
+  const overlapping = prepareSseFanout({
+    stats: { n: 2 }, previousStats: { n: 1 }, revision: 2, hasDeltaClients: true
+  });
+  assert.equal(overlapping.delta, undefined);
+  assert.equal(spy.mock.callCount(), 2);
+});
+
+test('fan-out keeps exact UTF-8 frame selection across Unicode and equal byte lengths', () => {
+  const check = (previousStats, stats) => {
+    const input = { reason: 'ingest', at: '2026-10-28T10:00:00.000Z', revision: 2 };
+    const delta = encodeSseEvent('delta', {
+      type: 'delta', reason: input.reason, baseRevision: 1, revision: 2,
+      patch: statsPatch(previousStats, stats), at: input.at
+    });
+    const frames = prepareSseFanout({ ...input, previousStats, stats, hasDeltaClients: true });
+    assert.equal(frames.delta, Buffer.byteLength(delta) < Buffer.byteLength(frames.stats) ? delta : undefined);
+    return Buffer.byteLength(delta) - Buffer.byteLength(frames.stats);
+  };
+  for (const text of ['x', '中', '😀', '\ud800', '\udc00', 'a中😀\ud800']) {
+    for (const stableLength of [0, 16, 64, 128, 512]) {
+      for (const changedLength of [1, 16, 128]) {
+        const stable = text.repeat(stableLength);
+        check({ stable, value: '' }, { stable, value: text.repeat(changedLength) });
+      }
+    }
+  }
+  const padding = check({ stable: '', n: 1 }, { stable: '', n: 2 });
+  assert.ok(padding > 0);
+  for (const offset of [-1, 0, 1]) {
+    const stable = 'x'.repeat(padding + offset);
+    assert.equal(check({ stable, n: 1 }, { stable, n: 2 }), offset === 0 ? 0 : -offset);
+  }
 });
 
 test('seeded stream replay preserves full snapshot equivalence over membership, reorder and deletion', () => {

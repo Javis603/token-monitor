@@ -229,9 +229,15 @@ function prepareSseFanout({
         type: 'delta', reason, baseRevision: revision - 1, revision,
         patch: statsPatch(previousStats, stats), at
       });
-      // Both are UTF-8 wire strings. Avoid a Node dependency in the Worker core.
-      const encoder = new TextEncoder();
-      if (encoder.encode(delta).byteLength < encoder.encode(frames.stats).byteLength) frames.delta = delta;
+      // UTF-8 uses 1–3 bytes per UTF-16 code unit. Encode only if the bounds overlap.
+      let smaller;
+      if (delta.length * 3 < frames.stats.length) smaller = true;
+      else if (delta.length >= frames.stats.length * 3) smaller = false;
+      else {
+        const encoder = new TextEncoder();
+        smaller = encoder.encode(delta).byteLength < encoder.encode(frames.stats).byteLength;
+      }
+      if (smaller) frames.delta = delta;
     }
   }
   return frames;
