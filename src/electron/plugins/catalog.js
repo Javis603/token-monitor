@@ -13,11 +13,16 @@ const OFFICIAL = Object.freeze({ id: 'bundled', kind: 'official', label: 'Token 
 const { createGitHubDiscovery } = require('./githubDiscovery');
 const { createCatalogMedia } = require('./catalogMedia');
 const CATALOG_REFRESH_MS = 6 * 60 * 60 * 1000;
+const CATALOG_RETRY_MS = 5 * 60 * 1000;
 function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog'), githubDiscoveryEnabled = false, maintainerSources = [], now = Date.now }) {
   const sources = createCatalogSources({ root, fetchImpl, getLocale, maintainerSources, now, cancelPreviews: id => managed.cancelSource(id) });
   const github = createGitHubDiscovery({ root, fetchImpl, enabled: githubDiscoveryEnabled });
   const media = createCatalogMedia({ fetchImpl, nativeImage });
-  let readmeDocument = null, detailRevision = 0, discoveryPending = null, lastAttempt = null;
+  let readmeDocument = null, detailRevision = 0, discoveryPending = null;
+  const attempts = new Map();
+  const maintainerCatalogs = () => sources.list().sources.filter(s => s.kind === 'maintainer');
+  const refreshAt = source => Math.max(source.cached ? source.lastFetched + CATALOG_REFRESH_MS : 0,
+    attempts.has(source.id) ? attempts.get(source.id) + CATALOG_RETRY_MS : 0);
   const packages = new Map(), errors = [];
   // Only App-distributed files receive official attribution. Discovery never
   // executes them, and a broken entry must not disable package management.
@@ -70,13 +75,19 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
   return {
     list,
     closeDetails,
+    nextRefreshDelay() {
+      const deadlines = maintainerCatalogs().map(refreshAt);
+      return deadlines.length ? Math.max(0, Math.min(...deadlines) - now()) : null;
+    },
     async discover(force = false) {
       if (discoveryPending) return discoveryPending;
-      if (!force && lastAttempt !== null && now() - lastAttempt < 300000) return list();
-      lastAttempt = now();
       discoveryPending = (async () => {
-        await Promise.all([github.refresh(force), ...sources.list().sources
-          .filter(s => s.kind === 'maintainer' && (force || !s.cached || now() - s.lastFetched >= CATALOG_REFRESH_MS)).map(s => sources.refresh(s.id))]);
+        await Promise.all([github.refresh(force), ...maintainerCatalogs()
+          .filter(s => force || now() >= refreshAt(s)).map(s => {
+            // Cache-only discovery must not consume a source's retry window.
+            attempts.set(s.id, now());
+            return sources.refresh(s.id);
+          })]);
         return list();
       })();
       try { return await discoveryPending; } finally { discoveryPending = null; }

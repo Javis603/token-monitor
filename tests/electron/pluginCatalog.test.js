@@ -367,3 +367,14 @@ test('maintainer catalogs refresh after six hours, coalesce calls, and retain ca
   time += 60000; await catalog.discover(); assert.equal(calls, 3);
   await catalog.discover(true); assert.equal(calls, 4);
 });
+
+test('a cache-only discovery just before expiry cannot postpone a newly due refresh', async t => {
+  let time = 1000, calls = 0;
+  const catalog = createPluginCatalog({ root: temp(t), now: () => time,
+    manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
+    maintainerSources: [{ id: 'maintainer-due', url: URL }], fetchImpl: async () => { calls++; return new Response(JSON.stringify(index())); } });
+  t.after(() => catalog.dispose());
+  await catalog.discover();
+  time += 6 * 60 * 60 * 1000 - 60000; await catalog.discover(); assert.equal(calls, 1);
+  time += 60000; await catalog.discover(); assert.equal(calls, 2);
+});
