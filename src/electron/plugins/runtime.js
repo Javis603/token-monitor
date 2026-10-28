@@ -542,7 +542,8 @@ function createPluginRuntime({
       const patch = placementPatch(getSettings() || {}, { ref: String(ref || ''), surface: String(surface || ''), placed: placed === true }, placementContext());
       const id = view.pluginId;
       applySettingsPatch(patch);
-      const preference = getSettings().pluginPlacementDefaults?.[id];
+      const preferences = getSettings().pluginPlacementDefaults;
+      const preference = preferences && Object.hasOwn(preferences, id) ? preferences[id] : null;
       if (preference && !preference.applied) persistManagementSettings({ pluginPlacementDefaults: { ...getSettings().pluginPlacementDefaults, [id]: { ...preference, applied: true } } });
       return listWithPlacements();
     });

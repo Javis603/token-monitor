@@ -7,12 +7,13 @@ const os = require('node:os');
 const { runtimeFixture } = require('../helpers/trustedPlugin');
 const { normalizeManifest } = require('../../src/shared/plugins/manifest');
 const { initialPlacements, initializePlacementPatch } = require('../../src/electron/plugins/placementSettings');
-async function setup(t) {
+async function setup(t, id = 'trusted-fixture') {
   const sourceDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-initial-'));
   t.after(() => fs.rmSync(sourceDirectory, { recursive:true, force:true }));
   fs.cpSync(path.resolve(__dirname, '../fixtures/trusted-plugin'), sourceDirectory, {recursive:true});
   const file = path.join(sourceDirectory,'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(file));
+  manifest.id = id;
   manifest.views.find(view=>view.id==='panel').defaultSurfaces=['page','notch'];
   fs.writeFileSync(file,JSON.stringify(manifest));
   const f = await runtimeFixture(t,{sourceDirectory});
@@ -69,4 +70,43 @@ test('manual placement before first enable overrides pending author defaults',as
  await f.invoke('plugins:place',{ref:'trusted-fixture/panel',surface:'page',placed:false});
  await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true});
  assert.deepEqual(f.settings.pluginMainPages,[]);assert.deepEqual(f.settings.notchPluginPages,[]);
+});
+
+for (const trustInstall of [true, false]) test(`constructor ID has real initial placement records, install enabled=${trustInstall}`, async t => {
+  const { f } = await setup(t, 'constructor');
+  const preview = await f.invoke('plugins:import', 'directory');
+  assert.equal(preview.placementsRetained, false, 'an inherited constructor is not a retained choice');
+  await f.invoke('plugins:install', preview.token, { trustInstall });
+  assert.equal(Object.hasOwn(f.settings.pluginPlacementDefaults, 'constructor'), true);
+  assert.equal(f.settings.pluginPlacementDefaults.constructor.applied, trustInstall);
+  if (!trustInstall) {
+    assert.deepEqual(f.settings.pluginMainPages, []);
+    await f.runtime.manager.reload();
+    await f.invoke('plugins:setEnabled', { id: 'constructor', enabled: true });
+  }
+  assert.equal(f.runtime.manager.active('constructor'), true);
+  assert.deepEqual(f.settings.pluginMainPages, ['constructor/panel']);
+  assert.deepEqual(f.settings.notchPluginPages, ['constructor/panel']);
+  await f.invoke('plugins:place', { ref: 'constructor/panel', surface: 'page', placed: false });
+  await f.invoke('plugins:place', { ref: 'constructor/panel', surface: 'notch', placed: false });
+  await f.invoke('plugins:uninstall', 'constructor', { keepPlacements: true });
+  const retained = await f.invoke('plugins:import', 'directory');
+  assert.equal(retained.placementsRetained, true);
+  await f.invoke('plugins:install', retained.token, { trustInstall: true });
+  assert.deepEqual(f.settings.pluginMainPages, []);
+  assert.deepEqual(f.settings.notchPluginPages, []);
+  await f.invoke('plugins:uninstall', 'constructor', { keepPlacements: false });
+  const fresh = await f.invoke('plugins:import', 'directory');
+  assert.equal(fresh.placementsRetained, false);
+  await f.invoke('plugins:install', fresh.token, { trustInstall: true });
+  assert.deepEqual(f.settings.pluginMainPages, ['constructor/panel']);
+});
+test('inherited constructor is ignored by initialization and legacy manual placement', async t => {
+  assert.deepEqual(initializePlacementPatch({ pluginPlacementDefaults: {} }, 'constructor'), {});
+  const { f } = await setup(t, 'constructor');
+  const preview = await f.invoke('plugins:import', 'directory');
+  await f.invoke('plugins:install', preview.token);
+  delete f.settings.pluginPlacementDefaults.constructor;
+  await f.invoke('plugins:place', { ref: 'constructor/panel', surface: 'page', placed: true });
+  assert.equal(Object.hasOwn(f.settings.pluginPlacementDefaults, 'constructor'), false);
 });

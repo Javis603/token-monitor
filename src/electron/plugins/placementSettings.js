@@ -114,7 +114,8 @@ function initialPlacements(manifest, selected) {
 }
 
 function initializePlacementPatch(settings, id, context = {}, views = null) {
-  const preference = settings.pluginPlacementDefaults?.[id];
+  const preferences = settings.pluginPlacementDefaults;
+  const preference = preferences && Object.hasOwn(preferences, id) ? preferences[id] : null;
   if (!preference || preference.applied) return {};
   const patch = {};
   for (const choice of preference.placements) {

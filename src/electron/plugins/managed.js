@@ -163,7 +163,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     if (previews.size >= 8) previews.delete(previews.keys().next().value);
     previews.set(token, { pkg, origin: structuredClone(origin), expires: now() + 10 * 60 * 1000, baseline: JSON.stringify(registry[pkg.manifest.id] || null) });
     return { ...describePackage(pkg, { locale: getLocale() }), token,
-      placementsRetained: Boolean(getSettings().pluginPlacementDefaults?.[pkg.manifest.id]),
+      placementsRetained: Object.hasOwn(getSettings().pluginPlacementDefaults || {}, pkg.manifest.id),
       operation: registry[pkg.manifest.id] ? 'update' : 'install', installedVersion: registry[pkg.manifest.id]?.version || null, origin };
   }
   async function transact(id, operation, pkg, origin, options = {}) {
@@ -222,7 +222,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
         if (operation === 'install') {
           const enabled = options.trustInstall === true && manager.list().enabled === true;
           patch.pluginStates[id] = { enabled, background: false, trustedRevision: enabled ? contentDigest(pkg) : null };
-          if (!patch.pluginPlacementDefaults?.[id]) patch.pluginPlacementDefaults = { ...patch.pluginPlacementDefaults, [id]: { applied: false, placements: initialPlacements(pkg.manifest, options.placements) } };
+          if (!Object.hasOwn(patch.pluginPlacementDefaults || {}, id)) patch.pluginPlacementDefaults = { ...patch.pluginPlacementDefaults, [id]: { applied: false, placements: initialPlacements(pkg.manifest, options.placements) } };
           if (enabled) Object.assign(patch, initializePlacementPatch({ ...getSettings(), ...patch }, id, placementContext(), pkg.manifest.views));
         }
         // Consent applies only to the exact package held by this preview token.
