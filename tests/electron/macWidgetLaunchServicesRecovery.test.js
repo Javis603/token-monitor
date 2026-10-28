@@ -494,6 +494,7 @@ test('bounds packaged config and marker reads before parsing', async () => {
 test('child launch failures and timeouts are contained and remain retryable', async () => {
   for (const childError of [
     Object.assign(new Error('sensitive launch error'), { code: 'ENOENT' }),
+    Object.assign(new Error('native process lookup failed'), { code: 1 }),
     Object.assign(new Error('sensitive timeout error'), { killed: true, signal: 'SIGKILL' })
   ]) {
     const setup = fixture();

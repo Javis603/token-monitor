@@ -58,25 +58,45 @@ private func launchExecutablePath(_ pid: pid_t) -> String? {
     return URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
 }
 
-private func widgetProcess(_ pid: pid_t, executablePath: String) -> WidgetProcess? {
+private enum WidgetProcessLookupError: Error {
+    case unavailable
+}
+
+private func processHasExited(_ pid: pid_t) -> Bool {
+    // A failed identity query is not evidence of exit. Only ESRCH confirms it;
+    // permission errors leave the process state unknown.
+    kill(pid, 0) != 0 && errno == ESRCH
+}
+
+private func widgetProcess(_ pid: pid_t, executablePath: String) throws -> WidgetProcess? {
     guard pid > 0, pid != getpid() else { return nil }
     var info = proc_bsdinfo()
     let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
-    guard
-        proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, infoSize) == infoSize,
-        info.pbi_uid == getuid()
-    else { return nil }
+    guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, infoSize) == infoSize else {
+        if processHasExited(pid) { return nil }
+        throw WidgetProcessLookupError.unavailable
+    }
+    guard info.pbi_uid == getuid() else { return nil }
 
     // PROC_PIDPATHINFO_MAXSIZE is 4 * MAXPATHLEN in the public SDK header,
     // but its expression is not imported as a Swift constant.
     var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-    guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-    let processPath = URL(fileURLWithPath: String(cString: buffer))
-        .standardizedFileURL.resolvingSymlinksInPath().path
-    guard
-        URL(fileURLWithPath: processPath).lastPathComponent == "TokenMonitorWidget",
-        processPath == executablePath || launchExecutablePath(pid) == executablePath
-    else { return nil }
+    var matchesCurrentPath = false
+    if proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 {
+        let processURL = URL(fileURLWithPath: String(cString: buffer))
+            .standardizedFileURL.resolvingSymlinksInPath()
+        guard processURL.lastPathComponent == "TokenMonitorWidget" else { return nil }
+        matchesCurrentPath = processURL.path == executablePath
+    }
+    // An updated executable may no longer have a resolvable current path.
+    // The launch-time path is still usable even when proc_pidpath fails.
+    if !matchesCurrentPath {
+        guard let originalPath = launchExecutablePath(pid) else {
+            if processHasExited(pid) { return nil }
+            throw WidgetProcessLookupError.unavailable
+        }
+        guard originalPath == executablePath else { return nil }
+    }
     return WidgetProcess(
         pid: pid,
         startedSeconds: info.pbi_start_tvsec,
@@ -92,23 +112,28 @@ private func stopResidentWidgetProcesses(executablePath: String) -> Bool {
     let capacityBytes = Int32(pids.count * MemoryLayout<pid_t>.size)
     let writtenBytes = proc_listpids(UInt32(PROC_UID_ONLY), getuid(), &pids, capacityBytes)
     guard writtenBytes > 0, writtenBytes < capacityBytes else { return false }
-    let processes = pids.prefix(Int(writtenBytes) / MemoryLayout<pid_t>.size)
-        .compactMap { widgetProcess($0, executablePath: executablePath) }
+    do {
+        let processes = try pids.prefix(Int(writtenBytes) / MemoryLayout<pid_t>.size)
+            .compactMap { try widgetProcess($0, executablePath: executablePath) }
 
-    for process in processes {
-        // Recheck the path, owner and start time so a reused PID is not signalled.
-        guard widgetProcess(process.pid, executablePath: executablePath) == process else { continue }
-        if kill(process.pid, SIGTERM) != 0 && errno != ESRCH { return false }
-    }
-
-    let deadline = ProcessInfo.processInfo.systemUptime + 2
-    repeat {
-        if processes.allSatisfy({ widgetProcess($0.pid, executablePath: executablePath) != $0 }) {
-            return true
+        for process in processes {
+            // Recheck the path, owner and start time so a reused PID is not signalled.
+            guard try widgetProcess(process.pid, executablePath: executablePath) == process else { continue }
+            if kill(process.pid, SIGTERM) != 0 && errno != ESRCH { return false }
         }
-        usleep(50_000)
-    } while ProcessInfo.processInfo.systemUptime < deadline
-    return false
+
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        repeat {
+            if try processes.allSatisfy({ try widgetProcess($0.pid, executablePath: executablePath) != $0 }) {
+                return true
+            }
+            usleep(50_000)
+        } while ProcessInfo.processInfo.systemUptime < deadline
+        return false
+    } catch {
+        // Do not persist successful recovery when any candidate remains unknown.
+        return false
+    }
 }
 
 private func recoverContainingHost() -> Never {
