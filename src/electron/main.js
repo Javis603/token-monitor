@@ -6102,7 +6102,7 @@ function pushNotchCells(visibleStats) {
   const data = notchDataFor(visibleStats, notchLastCells);
   // Tab names and icons are metadata; opening a page alone requests its data.
   if (pluginRuntime) data.panel.pluginCatalog = Object.fromEntries(pluginRuntime.manager.surfaceCatalog('notch')
-    .map(view => [view.ref, { title: view.title, icon: view.icon }]));
+    .map(view => [view.ref, { title: view.title, icon: view.icon, identityIcon: view.identityIcon }]));
   data.panel.pluginPages = data.panel.pluginPages.filter(ref => Object.hasOwn(data.panel.pluginCatalog || {}, ref));
   const history = notchHistory.read(visibleStats, { enabled: settings.historyEnabled !== false, generation: hubModeGeneration });
   if (history) data.panel.week = notchWeek(visibleStats, new Date(), history);

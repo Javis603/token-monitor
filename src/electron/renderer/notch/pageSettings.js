@@ -16,7 +16,7 @@
       ...(settings.pluginsEnabled === false || catalog?.enabled === false ? [] : catalog?.plugins || []).filter(plugin => plugin.status === 'active').flatMap(plugin => (plugin.views || []).filter(view => view.surfaces.includes('notch')).map(view => ({
         id: `plugin:${view.ref}`, ref: view.ref, label: view.title,
         title: plugin.name === view.title ? view.title : `${plugin.name} · ${view.title}`,
-        icon: { kind: 'plugin', name: view.icon || 'dot' },
+        icon: { kind: 'plugin', name: view.icon || 'dot', identityIcon: plugin.identityIcon },
         checked: view.placements?.notch === true
       })))
     ];
@@ -114,7 +114,7 @@
       });
       chip.setAttribute('aria-pressed', String(entry.checked));
       if (entry.title !== entry.label) { chip.setAttribute('aria-label', entry.title); }
-      const icon = entry.icon?.kind === 'plugin' && typeof pluginIcon === 'function' ? pluginIcon(entry.icon.name)
+      const icon = entry.icon?.kind === 'plugin' && typeof pluginIcon === 'function' ? pluginIcon(entry.icon.name, entry.icon.identityIcon)
         : entry.icon?.kind === 'builtin' ? document.createElement('span') : null;
       if (entry.icon?.kind === 'builtin') {
         icon.className = `view-switcher-icon view-icon-${entry.icon.name}`;

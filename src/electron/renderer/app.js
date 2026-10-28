@@ -6160,6 +6160,8 @@ function nextBreakdown(value) {
 }
 
 function viewSwitcherIcon(id) {
+  const page = pluginPageOptions().find(page => page.id === id);
+  if (page?.identityIcon) return window.TokenMonitorPluginViews.navigationIcon(document, page, 14);
   const icon = document.createElement('span');
   icon.className = `view-switcher-icon ${VIEW_ICON_CLASSES[id] || (pluginPlacementsApi.isHomeToken(id) ? 'view-icon-plugin' : 'view-icon-home')}`;
   icon.setAttribute('aria-hidden', 'true');
@@ -12904,7 +12906,7 @@ function renderNotchPageChoices() {
     resetButton: document.getElementById('resetNotchPageOrderButton'),
     save: async patch => { await saveSettings(patch); },
     place: async (ref, placed) => { await pluginApi.place(ref, 'notch', placed); },
-    pluginIcon: name => window.TokenMonitorPluginViews?.iconNode(document, name, null, 14),
+    pluginIcon: (name, identityIcon) => window.TokenMonitorPluginViews?.navigationIcon(document, { icon: name, identityIcon }, 14),
     createRowDrag: config => rowDragControllerApi.createRowDragController({
       dragSort: verticalDragSortApi, getScrollPanel: () => els.settingsPanel,
       preserveScroll: preserveSettingsPanelScroll, ...config

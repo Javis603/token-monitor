@@ -33,6 +33,22 @@
     for (const [key, value] of Object.entries({ d: path || ICON_PATHS[name] || ICON_PATHS.dot, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) shape.setAttribute(key, String(value));
     node.append(shape); return node;
   }
+  // Navigation uses validated manifest metadata, without loading author code/CSS.
+  function navigationIcon(document, view, size = 16) {
+    const node = document.createElement('span');
+    node.setAttribute('aria-hidden', 'true');
+    Object.assign(node.style, { display: 'inline-flex', width: `${size}px`, height: `${size}px`, flexShrink: '0' });
+    const fallback = () => node.replaceChildren(iconNode(document, view?.icon || 'dot', null, size));
+    if (view?.identityIcon) {
+      const image = document.createElement('img');
+      image.alt = ''; image.width = size; image.height = size;
+      image.style.objectFit = 'contain';
+      image.addEventListener('error', fallback, { once: true });
+      image.src = view.identityIcon;
+      node.append(image);
+    } else fallback();
+    return node;
+  }
   function drawIcon(ctx, name, { x, y, size, color }) {
     ctx.save();
     ctx.translate(x, y);
@@ -126,5 +142,5 @@
       dispose() { disposed = true; observer?.disconnect(); if (frame !== null) window.cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', refreshDemand); return ui.dispose(); }
     };
   }
-  return { iconNode, drawIcon, actionErrorMessage, createPluginViewHost };
+  return { iconNode, navigationIcon, drawIcon, actionErrorMessage, createPluginViewHost };
 });

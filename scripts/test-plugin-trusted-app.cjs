@@ -31,6 +31,10 @@ for (let y=0;y<60;y++) for (let x=0;x<160;x++) {
   const offset=(y*160+x)*4; pixels[offset]=bar?180:32; pixels[offset+1]=bar?190:32; pixels[offset+2]=bar?100:32; pixels[offset+3]=255;
 }
 fs.writeFileSync(path.join(fixtureDir,'fixture.png'),nativeImage.createFromBitmap(pixels,{width:160,height:60}).toPNG());
+if (process.env.TM_NAV_ICONS === '1') {
+  manifest.identityIcon = nativeImage.createFromBitmap(pixels,{width:160,height:60}).toDataURL();
+  manifest.views = [{ id: 'panel', title: 'Fixture', surfaces: ['page'] }];
+}
 fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify(manifest));
 fs.writeFileSync(path.join(fixtureDir, 'ui.mjs'), `
 import { activate as base } from './basic.mjs';
@@ -418,6 +422,21 @@ app.whenReady().then(async () => {
     await runtime.dispose();runtime=null;clearTimeout(deadline);app.exit(0);return;
   }
   await js("pluginApi.setEnabled('trusted-fixture',true)");
+  if (process.env.TM_NAV_ICONS === '1') {
+    await js("pluginApi.place('trusted-fixture/panel','page',true).then(applyPluginCatalog)");
+    await js("if(isSettingsPanelOpen())els.settingsButton.click();setViewSwitcherOpen(true)");
+    await waitFor("document.querySelector('[data-view=\"plugin:trusted-fixture/panel\"] img')?.naturalWidth > 0", 'navigation artwork before opening page');
+    assert.equal(await js("globalThis.fixtureMountCount || 0"),0);
+    assert.equal(runtime.manager.backendCount(),0);
+    fs.writeFileSync(path.join(evidence,'main-navigation.png'),(await capture()).toPNG());
+    await js("pluginApi.openPage('trusted-fixture/panel')");
+    await waitFor("document.querySelector('.view-switcher-current img')?.naturalWidth > 0", 'selected navigation artwork');
+    await js("pluginApi.setEnabled('trusted-fixture',false)");
+    assert.equal(await js("Boolean(document.querySelector('[data-view=\"plugin:trusted-fixture/panel\"]'))"),false);
+    assertConsoleClean();
+    for(const host of BrowserWindow.getAllWindows())host.destroy();
+    await runtime.dispose();runtime=null;clearTimeout(deadline);app.exit(0);return;
+  }
   if (process.env.TM_PAGE_SETTINGS_LAYOUT === '1') {
     await js("pluginApi.place('trusted-fixture/panel','page',true).then(applyPluginCatalog).then(()=>pluginApi.openPage('trusted-fixture/panel'))");
     await waitFor("document.querySelector('.plugin-main-content input')", 'plugin page input');

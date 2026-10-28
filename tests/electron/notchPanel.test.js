@@ -1350,3 +1350,19 @@ test('cached native page selection refreshes plugin demand after updating page a
   assert.ok(active.length > before, 'cached content must still publish its activity change');
   assert.deepEqual(active.at(-1), ['limits']);
 });
+
+test('plugin navigation artwork arrives from metadata before page mount and refreshes', t => {
+  const pluginViews = require('../../src/electron/renderer/pluginViews');
+  let mounts = 0;
+  const f = panelFixture(t, {}, { pluginViews, pluginHost: { state: () => null, mount() { mounts++; }, refreshDemand() {} } });
+  const data = payload(); data.panel.pluginPages = ['demo/panel'];
+  data.panel.pluginCatalog = { 'demo/panel': { title: 'Demo', icon: 'cpu', identityIcon: 'data:image/png;base64,fixture' } };
+  f.panel.render(data);
+  const icon = f.all('notch-tab-plugin-icon')[0];
+  assert.equal(icon.querySelector('img')?.src, data.panel.pluginCatalog['demo/panel'].identityIcon);
+  assert.equal(mounts, 0);
+  data.panel.pluginCatalog['demo/panel'].identityIcon = '';
+  f.panel.render(data);
+  assert.equal(icon.querySelector('img'), null);
+  assert.ok(icon.querySelector('svg'));
+});

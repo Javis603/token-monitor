@@ -396,3 +396,17 @@ test('per-container activity parks native-page demand without disposing retained
   nodes[0].active = true; nodes[1].active = false; host.refreshDemand(); frame(); assert.deepEqual(demands.at(-1), [descriptor.ref]);
   await host.dispose();
 });
+
+test('navigation artwork is static metadata and decode errors restore the named fallback', () => {
+  const document = dom(); document.createElementNS = (_namespace, tag) => document.createElement(tag);
+  const { navigationIcon } = require('../../src/electron/renderer/pluginViews');
+  const icon = navigationIcon(document, { identityIcon: 'data:image/png;base64,bad', icon: 'cpu' }, 15);
+  const image = icon.querySelector('img');
+  assert.equal(image.src, 'data:image/png;base64,bad');
+  assert.equal(image.alt, '');
+  assert.equal(image.width, 15);
+  image.fire('error');
+  assert.equal(icon.querySelector('img'), null);
+  assert.deepEqual(icon.querySelector('path').attributes,
+    navigationIcon(document, { icon: 'cpu' }, 15).querySelector('path').attributes);
+});

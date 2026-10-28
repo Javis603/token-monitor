@@ -99,7 +99,7 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
   }
   function descriptor(plugin, view) {
     const base = `tm-plugin://${plugin.id}/${plugin.revision}/`;
-    return { ...view, title: localize(view.title, getLocale()), pluginId: plugin.id, ref: `${plugin.id}/${view.id}`,
+    return { ...view, identityIcon: plugin.manifest.identityIcon, title: localize(view.title, getLocale()), pluginId: plugin.id, ref: `${plugin.id}/${view.id}`,
       contentOrder: Object.fromEntries((view.targets || []).map(target => { const index = (getSettings().pluginContentOrder?.[target] || []).indexOf(`${plugin.id}/${view.id}`); return [target, index < 0 ? Number.MAX_SAFE_INTEGER : index]; })),
       revision: plugin.revision, entry: plugin.manifest.ui ? base + plugin.manifest.ui : null,
       css: plugin.manifest.css.map(name => base + name), data: plugin.data, status: status(plugin) };
