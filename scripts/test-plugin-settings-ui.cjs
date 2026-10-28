@@ -38,6 +38,7 @@ async function main() {
       list:async()=>structuredClone(data),
       catalog:()=>{catalogCalls++;return catalogMode==='deferred'?new Promise((yes,no)=>{pending=yes;reject=no}):Promise.resolve(catalog)},
       refreshSource:async id=>{calls.push(['refreshSource',id]);const source=catalog.sources.find(s=>s.id===id);source.error=source.nextError||'';return catalog},
+      catalogDetails:async()=>({html:'',imageCount:0}),
       place:async(ref,surface,on)=>{calls.push(['place',ref,surface,on]);data.plugins[0].views[0].placements.home=on;return structuredClone(data)},
       setEnabled:async(id,on)=>{const p=data.plugins.find(p=>p.id===id);p.enabled=on;p.status=on?'active':'disabled';return structuredClone(data)},
       catalogPreview:async(source,id,version)=>{calls.push(['preview',version]);if(previewMode==='error')throw Error('preview rejected');if(previewMode==='deferred')await new Promise(resolve=>{previewPending=resolve});return {token:'token-'+version,id,name:'Demo',description:'Example',version,author:'Author',origin:{id:source,kind:'community'},operation:'install',sha256:'abc'}},
@@ -133,6 +134,10 @@ async function main() {
     check('discover-shows-bundled-without-custom-sources',box.querySelectorAll('[data-catalog-id]').length===1&&box.querySelector('.plugin-type')?.textContent==='plugins.type.page'&&!box.querySelector('.plugin-source-route'));
     catalog.entries.push({id:'third-party',name:'Third party',description:'Custom listing',version:'1.0.0',types:['appearance'],origin:{id:'custom',kind:'community',label:'Example source'},status:'incompatible'});await panel.refresh();
     check('discover-combines-origins-with-distinct-attribution',box.querySelectorAll('[data-catalog-id]').length===2&&box.querySelector('[data-catalog-id="third-party"] .plugin-origin-note')?.textContent==='Example source'&&!box.querySelector('[data-catalog-id="third-party"] .plugin-shield'));
+    check('incompatible-card-explains-unavailability',box.querySelector('[data-catalog-id="third-party"] .plugin-card-meta').textContent.includes('plugins.catalog.incompatible'));
+    box.querySelector('[data-catalog-id="third-party"] .plugin-catalog-title').click();await tick();
+    check('incompatible-details-explain-unavailability-without-install',box.querySelector('dialog footer .plugin-risk')?.textContent==='plugins.catalog.incompatible'&&!box.querySelector('dialog .plugin-allow'));
+    box.querySelector('.plugin-dialog-close').click();await tick();
     catalog.sources=[{id:'custom',kind:'community',label:'Cached source',nextError:'request failed'},{id:'empty',kind:'community',label:'Empty source',nextError:'invalid catalog'},{id:'healthy',kind:'community',label:'Healthy source'}];await panel.refresh();
     box.querySelector('.plugin-catalog-refresh button').click();await tick();
     check('discover-shows-each-returned-source-error-and-keeps-cached-entries',box.querySelector('.plugin-catalog').textContent.includes('Cached source: request failed')&&box.querySelector('.plugin-catalog').textContent.includes('Empty source: invalid catalog')&&box.querySelectorAll('[data-catalog-id]').length===2&&calls.filter(c=>c[0]==='refreshSource').length===3);
@@ -156,6 +161,14 @@ async function main() {
     previewMode='error';select=box.querySelector('.plugin-version-picker select');select.value='1.0.0';select.dispatchEvent(new Event('change'));await tick();
     check('failed-version-preview-removes-stale-install-consent',!box.querySelector('.plugin-package-preview')&&box.querySelector('.plugin-catalog-review .plugin-action-error')?.textContent==='preview rejected'&&calls.some(c=>c[0]==='cancel'&&c[1]==='token-2.0.0'));
     click('plugins.ui.backCatalog');await tick();previewMode='success';
+    catalog.entries[0].version='2.0.0';await panel.refresh();
+    click('plugins.package.install');await tick();
+    check('card-reentry-retains-selected-old-version-and-preview',box.querySelector('.plugin-version-picker select').value==='1.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='1.0.0'&&calls.at(-1)[1]==='1.0.0');
+    click('plugins.ui.backCatalog');await tick();box.querySelector('.plugin-catalog-title').click();await tick();box.querySelector('dialog .plugin-allow').click();await tick();
+    check('detail-reentry-retains-selected-old-version-and-preview',box.querySelector('.plugin-version-picker select').value==='1.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='1.0.0');
+    click('plugins.ui.backCatalog');await tick();catalog.entries[0].versions[0].installable=false;await panel.refresh();click('plugins.package.install');await tick();
+    check('unavailable-remembered-version-falls-back-to-current-installable-version',box.querySelector('.plugin-version-picker select').value==='2.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='2.0.0');
+    click('plugins.ui.backCatalog');await tick();catalog.entries[0].versions[0].installable=true;catalog.entries[0].version='1.0.0';await panel.refresh();
     box.querySelector('.plugin-toolbar .plugin-more').click();await tick();click('plugins.catalog.sources');await tick();
     check('sources-open-as-route-without-nested-disclosures',Boolean(box.querySelector('.plugin-sources .plugin-source-form'))&&!box.querySelector('.plugin-sources details')&&document.activeElement===box.querySelector('.plugin-back'));
     const sourceUrl=box.querySelector('.plugin-source-form input');sourceUrl.value='https://example.test/catalog.json';sourceUrl.dispatchEvent(new Event('input'));click('plugins.ui.backCatalog');await tick();
@@ -246,6 +259,48 @@ async function main() {
     pages.render(routes.filter(p=>p.ref!=='alpha/view'),'home');
     check('removed-page-releases-retained-dom',!draft.isConnected&&pageBox.classList.contains('hidden'));
     await pageHost.dispose();
+    // Network freshness must never hold the management UI or its drafts.
+    const backgroundBox=document.createElement('div');document.body.append(backgroundBox);
+    const backgroundCatalog={entries:[{...catalog.entries[0],version:'1.0.0',status:'available'}],sources:Array.from({length:16},(_,i)=>({id:'source-'+i,kind:'community',label:'Source '+i}))};
+    let finishDiscovery,discoveryCalls=0,activeSources=0,maxSources=0,sourceCalls=0;
+    const waitingSources=[];
+    const backgroundPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:backgroundBox,t:(key,args)=>key==='settings.plugins.actionFailed'?args.error:key,api:{
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>structuredClone(backgroundCatalog),
+      discoverCatalog:()=>{discoveryCalls++;return new Promise(resolve=>{finishDiscovery=()=>resolve(structuredClone(backgroundCatalog))})},
+      refreshSource:async id=>{sourceCalls++;activeSources++;maxSources=Math.max(maxSources,activeSources);try{await new Promise((resolve,reject)=>waitingSources.push({id,resolve,reject}))}finally{activeSources--}},
+      catalogDetails:async()=>({html:'',imageCount:0}),
+      catalogPreview:async(source,id,version)=>({token:'background-'+version,id,name:'Background package',version,origin:{id:source,kind:'community'},operation:'install',sha256:'abc'}),cancelInstall:async()=>{}
+    }});
+    const backgroundTab=id=>backgroundBox.querySelector('[data-tab="'+id+'"]');
+    const backgroundClick=text=>[...backgroundBox.querySelectorAll('button')].find(n=>n.textContent===text).click();
+    await backgroundPanel.refresh();backgroundTab('discover').click();await tick();
+    check('discover-shows-cache-before-github-completes',backgroundTab('discover').getAttribute('aria-selected')==='true'&&Boolean(backgroundBox.querySelector('.plugin-card'))&&backgroundBox.getAttribute('aria-busy')==='false'&&discoveryCalls===1);
+    backgroundTab('installed').click();await tick();backgroundTab('discover').click();await tick();
+    check('pending-discovery-allows-navigation-and-coalesces-refresh',backgroundTab('discover').getAttribute('aria-selected')==='true'&&discoveryCalls===1);
+    const backgroundSearch=backgroundBox.querySelector('.plugin-catalog-search');backgroundSearch.value='Example';backgroundSearch.dispatchEvent(new Event('input'));backgroundSearch.focus();backgroundSearch.setSelectionRange(2,2);
+    backgroundCatalog.entries[0].description='Example refreshed';finishDiscovery();await tick();
+    check('background-results-preserve-search-node-value-and-focus',backgroundSearch===backgroundBox.querySelector('.plugin-catalog-search')&&document.activeElement===backgroundSearch&&backgroundSearch.value==='Example'&&backgroundSearch.selectionStart===2&&backgroundBox.querySelector('.plugin-card .plugin-description').textContent==='Example refreshed');
+    backgroundBox.querySelector('.plugin-catalog-refresh button').click();await tick();
+    check('manual-refresh-bounds-custom-concurrency-without-blocking-github',activeSources===4&&maxSources===4&&discoveryCalls===2&&backgroundBox.getAttribute('aria-busy')==='false');
+    backgroundClick('plugins.package.install');await tick();const backgroundPreview=backgroundBox.querySelector('.plugin-package-preview');
+    check('package-review-stays-usable-during-network-refresh',Boolean(backgroundPreview)&&!backgroundPreview.querySelector('.plugin-allow').disabled);
+    for(let wave=0;wave<4;wave++){
+      for(const task of waitingSources.splice(0)){if(task.id==='source-0')task.reject(Error('IPC refresh failed'));else task.resolve()}
+      await tick();
+    }
+    finishDiscovery();await tick();
+    check('all-sources-refresh-after-one-ipc-failure-and-review-is-retained',sourceCalls===16&&maxSources===4&&backgroundBox.querySelector('.plugin-package-preview')===backgroundPreview);
+    backgroundClick('plugins.ui.backCatalog');await tick();
+    check('refresh-ipc-failure-is-visible-after-return',backgroundBox.querySelector('.plugin-catalog').textContent.includes('Source 0: IPC refresh failed')&&!backgroundBox.querySelector('.plugin-catalog-refresh button').disabled);
+    backgroundTab('installed').click();await tick();backgroundTab('discover').click();await tick();
+    const backgroundTitle=backgroundBox.querySelector('.plugin-catalog-title');backgroundTitle.focus();backgroundTitle.click();await tick();const backgroundDialog=backgroundBox.querySelector('dialog');
+    backgroundCatalog.entries[0].description='Example after details';finishDiscovery();await tick();
+    check('background-results-wait-for-open-details-to-close',backgroundBox.querySelector('.plugin-catalog-title')===backgroundTitle&&backgroundDialog.open);
+    backgroundBox.querySelector('.plugin-dialog-close').click();await tick();
+    check('closing-details-applies-fresh-results-and-restores-logical-focus',backgroundBox.querySelector('.plugin-card .plugin-description').textContent==='Example after details'&&document.activeElement===backgroundBox.querySelector('.plugin-catalog-title'));
+    backgroundTab('installed').click();await tick();backgroundTab('discover').click();await tick();
+    backgroundPanel.dispose();const disposedContent=backgroundBox.innerHTML;finishDiscovery();await tick();
+    check('disposed-panel-ignores-late-catalog-completion',backgroundBox.innerHTML===disposedContent);backgroundBox.remove();
     // New discovery details remain inert until explicit package review.
     catalogMode='success';
     let imageResolve;

@@ -40,6 +40,8 @@
     let catalogData = null, activeTab = 'installed', query = '', sourcesOpen = false;
     let selectedPluginId = '', diagnostics = false, installedPosition = null;
     let catalogModal = null;
+    let catalogRefreshing = false, catalogRefreshPending = null, catalogRefreshError = '', disposed = false;
+    let updateCatalog = null, catalogResultsDirty = false;
     let catalogReview = null, menuId = 0, aboutOpen = false;
     let actionError = null;
     const sourceDraft = { url: '', publicKey: '' };
@@ -251,6 +253,11 @@
       packagePreview = await api.catalogPreview(entry.origin.id, entry.id, version);
     }
 
+    function catalogVersion(entry) {
+      const remembered = chosenVersions.get(`${entry.origin.id}/${entry.id}`);
+      return entry.versions?.some(version => version.version === remembered && version.installable) ? remembered : entry.version;
+    }
+
     function catalogReviewPanel() {
       const entry = catalogReview;
       const wrap = el(document, 'section', 'plugin-detail plugin-catalog-review');
@@ -259,7 +266,7 @@
         packagePreview = null; catalogReview = null; render(); tabControls.get(activeTab)?.focus({ preventScroll: true });
       }, 'plugin-back'));
       const key = `${entry.origin.id}/${entry.id}`;
-      const version = chosenVersions.get(key) || entry.version;
+      const version = catalogVersion(entry);
       if (entry.versions?.length) {
         const row = el(document, 'label', 'plugin-version-picker', t('plugins.catalog.version'));
         const select = el(document, 'select'); select.dataset.controlKey = 'review-version';
@@ -274,9 +281,9 @@
             // pending. Drain to its latest choice before enabling installation.
             let requested;
             do {
-              requested = chosenVersions.get(key);
+              requested = catalogVersion(entry);
               await previewCatalog(entry, requested);
-            } while (requested !== chosenVersions.get(key));
+            } while (requested !== catalogVersion(entry));
             return null;
           });
         });
@@ -469,9 +476,10 @@
       if (selected ? selected.installable : ['available', 'update'].includes(entry.status)) {
         footer.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => {
           dialog.close();
-          void run(async () => { activeTab = 'discover'; sourcesOpen = false; catalogReview = entry; await previewCatalog(entry, entry.version); return null; });
+          void run(async () => { activeTab = 'discover'; sourcesOpen = false; catalogReview = entry; await previewCatalog(entry, catalogVersion(entry)); return null; });
         }, 'plugin-allow'));
       } else if (entry.status === 'repository') footer.append(el(document, 'span', 'settings-note', t('plugins.catalog.repositoryOnly')));
+      else if (entry.status === 'incompatible') footer.append(el(document, 'span', 'plugin-risk', t('plugins.catalog.incompatible')));
       footer.append(button(t('settings.plugins.cancel'), () => dialog.close()));
       dialog.append(heading, body, footer); container.append(dialog);
       dialog.setAttribute('aria-label', entry.name);
@@ -481,6 +489,7 @@
           catalogModal = null; void Promise.resolve(api.closeCatalogDetails?.()).catch(() => {});
         }
         if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+        applyCatalogResults();
       });
       dialog.showModal();
     }
@@ -504,10 +513,7 @@
     function catalogPanel() {
       const wrap = el(document, 'div', 'plugin-catalog');
       if (!catalogData) { wrap.append(el(document, 'p', 'settings-note', t('plugins.view.loading'))); return wrap; }
-      if (catalogData.error) wrap.append(el(document, 'p', 'plugin-risk', catalogData.error));
-      for (const source of catalogData.sources.filter(source => source.kind === 'community' && source.error)) {
-        wrap.append(el(document, 'p', 'plugin-risk', `${source.label}: ${source.error}`));
-      }
+      const errors = el(document, 'div');
       const search = el(document, 'input', 'plugin-catalog-search');
       search.type = 'search'; search.value = query;
       search.placeholder = t('plugins.catalog.search'); search.setAttribute('aria-label', t('plugins.catalog.search'));
@@ -538,7 +544,7 @@
             head.append(title);
             const actions = el(document, 'div', 'settings-actions');
             const available = entry.versions?.find(v => v.version === entry.version)?.installable ?? ['available', 'update'].includes(entry.status);
-            if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => { catalogReview = entry; await previewCatalog(entry, entry.version); return null; })));
+            if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => { catalogReview = entry; await previewCatalog(entry, catalogVersion(entry)); return null; })));
             else actions.append(button(t('plugins.catalog.details'), () => catalogDialog(entry)));
             if (entry.installedVersion) actions.append(button(t('plugins.catalog.installed'), () => { activeTab = 'installed'; selectedPluginId = ''; diagnostics = false; render(); container.querySelector(`[data-plugin-id="${entry.id}"]`)?.scrollIntoView({ block: 'nearest' }); }, 'plugin-installed-link plugin-installed-check'));
             head.append(actions);
@@ -546,6 +552,7 @@
             const meta = el(document, 'div', 'plugin-card-meta');
             if (entry.version) meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`));
             meta.append(typeLabels(entry));
+            if (entry.status === 'incompatible') meta.append(el(document, 'span', 'plugin-risk', t('plugins.catalog.incompatible')));
             if (Number.isSafeInteger(entry.stars)) {
               const stars = el(document, 'span', 'plugin-stars', `☆ ${entry.stars.toLocaleString(getLocale())}`);
               stars.setAttribute('aria-label', `${t('plugins.catalog.stars')}: ${entry.stars}`); meta.append(stars);
@@ -561,14 +568,73 @@
         if (content?.contains(results)) identifyContent();
       }
       search.addEventListener('input', () => { query = search.value; renderResults(); });
-      wrap.append(search, results);
+      wrap.append(errors, search, results);
       const refresh = el(document, 'div', 'settings-actions plugin-catalog-refresh');
-      refresh.append(button(t('plugins.catalog.refresh'), () => void run(async () => {
-        for (const source of catalogData.sources.filter(source => source.kind === 'community')) await api.refreshSource(source.id);
-        catalogData = api.discoverCatalog ? await api.discoverCatalog(true) : await api.catalog(); return null;
-      })));
-      if (catalogData.github?.lastFetched) refresh.append(el(document, 'span', 'settings-note', t('plugins.catalog.lastChecked', { time: new Date(catalogData.github.lastFetched).toLocaleString(getLocale()) })));
-      wrap.append(refresh); renderResults(); return wrap;
+      refresh.append(button(t('plugins.catalog.refresh'), () => void refreshCatalog(true)));
+      const lastChecked = el(document, 'span', 'settings-note'); refresh.append(lastChecked);
+      updateCatalog = () => {
+        errors.replaceChildren();
+        for (const error of [catalogData.error, catalogRefreshError, ...catalogData.sources.filter(source => source.kind === 'community' && source.error).map(source => `${source.label}: ${source.error}`)].filter(Boolean)) {
+          errors.append(el(document, 'p', 'plugin-risk', error));
+        }
+        lastChecked.textContent = catalogData.github?.lastFetched ? t('plugins.catalog.lastChecked', { time: new Date(catalogData.github.lastFetched).toLocaleString(getLocale()) }) : '';
+        renderResults();
+        catalogResultsDirty = false;
+      };
+      wrap.append(refresh); updateCatalog(); return wrap;
+    }
+
+    function catalogRefreshControls() {
+      const control = container.querySelector('.plugin-catalog-refresh button');
+      if (!control) return;
+      control.disabled = busy || catalogRefreshing;
+      control.textContent = t(catalogRefreshing ? 'plugins.view.loading' : 'plugins.catalog.refresh');
+      control.setAttribute('aria-busy', String(catalogRefreshing));
+    }
+
+    function applyCatalogResults() {
+      if (!catalogResultsDirty || disposed || busy || activeTab !== 'discover' || catalogReview || sourcesOpen || aboutOpen || catalogModal) return;
+      const saved = rememberPosition();
+      updateCatalog?.();
+      restorePosition(saved);
+    }
+
+    function refreshCatalog(force = false) {
+      if (disposed || catalogRefreshPending || (!force && !api.discoverCatalog)) return catalogRefreshPending;
+      catalogRefreshing = true; catalogRefreshError = ''; catalogRefreshControls();
+      catalogRefreshPending = (async () => {
+        try {
+          // Sources own their per-request deadlines. Bound concurrent custom
+          // requests, and let GitHub run alongside them without locking writes.
+          const sources = force ? catalogData.sources.filter(source => source.kind === 'community') : [];
+          const failures = [];
+          let next = 0;
+          const workers = Array.from({ length: Math.min(4, sources.length) }, async () => {
+            while (!disposed && next < sources.length) {
+              const source = sources[next++];
+              try { await api.refreshSource(source.id); }
+              catch (error) { failures.push(`${source.label}: ${actionErrorMessage(error, t)}`); }
+            }
+          });
+          if (api.discoverCatalog) workers.push(api.discoverCatalog(force));
+          const results = await Promise.allSettled(workers);
+          if (disposed) return;
+          catalogData = await api.catalog();
+          const failure = results.find(result => result.status === 'rejected');
+          if (failure) failures.push(actionErrorMessage(failure.reason, t));
+          catalogRefreshError = failures.join('\n');
+        } catch (error) { if (!disposed) catalogRefreshError = actionErrorMessage(error, t); }
+        finally {
+          catalogRefreshing = false; catalogRefreshPending = null;
+          // A package review/settings draft can stay open while results arrive.
+          if (!disposed) {
+            catalogResultsDirty = true;
+            applyCatalogResults();
+            catalogRefreshControls();
+          }
+        }
+      })();
+      return catalogRefreshPending;
     }
 
     function sourcesPanel() {
@@ -1063,6 +1129,7 @@
       }
       content.setAttribute('aria-labelledby', tabControls.get(activeTab).id);
       setBusy();
+      catalogRefreshControls();
       restorePosition(saved);
     }
 
@@ -1109,9 +1176,9 @@
             void run(async () => {
               // Only switch after the new page is ready; failed loads leave
               // the current page and its drafts intact.
-              if (tab !== 'installed') catalogData = api.discoverCatalog ? await api.discoverCatalog() : await api.catalog();
+              if (tab !== 'installed') catalogData = await api.catalog();
               activeTab = tab; query = ''; sourcesOpen = false; if (tab === 'installed') { selectedPluginId = ''; diagnostics = false; } return null;
-            });
+            }).then(() => { if (tab === 'discover' && activeTab === tab) void refreshCatalog(); });
           });
           control.dataset.tab = tab;
           control.id = `${container.id || 'plugin-settings'}-tab-${tab}`;
@@ -1229,7 +1296,7 @@
         render();
       },
       render,
-      dispose() { catalogModal?.close(); authorSettings.clear(); for (const held of settingsMounts.values()) unmountSettings(held.node); settingsMounts.clear(); },
+      dispose() { disposed = true; catalogModal?.close(); authorSettings.clear(); for (const held of settingsMounts.values()) unmountSettings(held.node); settingsMounts.clear(); },
       summary() {
         if (!list) return '';
         const active = list.plugins.filter((plugin) => plugin.status === 'active').length;
