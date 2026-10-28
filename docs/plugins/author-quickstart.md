@@ -28,7 +28,7 @@ export function activate(ctx) {
 }
 ```
 
-In Settings → Plugins → Installed → More actions, import the folder. Installation copies the declared files into managed storage without executing them. Review the trusted-code warning, enable it, and choose Home or Main app page.
+In Settings → Plugins → Installed → More actions, import the folder and review the trusted-code warning. Choose Trust, install and enable to approve the previewed code and run it, or Install only to copy the declared files into managed storage without executing them. With the master switch off or safe mode active, installation stays disabled. Once enabled, choose Home or Main app page.
 
 ## Interface
 
@@ -46,6 +46,6 @@ Test in a disposable profile with synthetic data. Cover no-demand idle, multiple
 node scripts/build-plugin-package.js /path/to/my-panel /path/to/my-panel.tmplugin
 ```
 
-The output must not already exist. Share the file or use a trusted HTTPS catalog. Update `version`, test against the target App/OS, and disclose local/network/data access accurately. Do not present a hash as an audit. See [distribution](distribution-design.md) and [verification](validation.md).
+The output must not already exist. Share the file or use a trusted HTTPS catalog. Update `version`, test against the target App/OS, and disclose local/network/data access accurately. Do not present a hash as an audit. Before sharing publicly, follow the [publishing guide and README template](publishing.md). See [distribution](distribution-design.md) and [verification](validation.md) for package, catalog and test details.
 
 Optional `defaultSurfaces` suggests initial locations from the view's supported surfaces. Users confirm or change these at installation; install-only defers placement until first enable. Updates preserve user choices. Surface master switches stay unchanged, full locations are skipped, and native replacements remain explicit user choices. See [placement semantics](README.md) for reinstall and recovery behavior.

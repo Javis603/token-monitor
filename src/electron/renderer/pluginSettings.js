@@ -39,6 +39,7 @@
     let operation = null;
     let catalogData = null, activeTab = 'installed', query = '', sourcesOpen = false;
     let selectedPluginId = '', diagnostics = false, installedPosition = null;
+    let catalogModal = null;
     let catalogReview = null, menuId = 0, aboutOpen = false;
     let actionError = null;
     const sourceDraft = { url: '', publicKey: '' };
@@ -159,7 +160,7 @@
       node.type = 'button'; node.disabled = busy; node.addEventListener('click', action); return node;
     }
 
-    function identity(name, author, origin, iconName, image) {
+    function identity(name, author, origin, iconName, image, official = false) {
       const group = el(document, 'div', 'plugin-identity');
       const art = el(document, 'span', 'plugin-identity-art'); art.setAttribute('aria-hidden', 'true');
       if (typeof image === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image) && image.length <= 90000) {
@@ -168,10 +169,15 @@
         art.append(img);
       } else art.append(window.TokenMonitorPluginViews.iconNode(document, iconName || 'dot', null, 20));
       const title = el(document, 'div', 'plugin-card-title');
-      const source = el(document, 'span', 'plugin-source');
-      if (author) source.append(el(document, 'span', 'plugin-author', author));
-      if (origin) {
-        const label = el(document, 'span', 'plugin-origin-label', origin);
+      const source = el(document, 'span', official ? 'plugin-source plugin-source-official' : 'plugin-source');
+      if (author && !official) source.append(el(document, 'span', 'plugin-author', author));
+      if (origin || official) {
+        const label = el(document, 'span', `plugin-origin-label${official ? ' plugin-origin-official' : ''}`);
+        if (official) {
+          const shield = el(document, 'span', 'plugin-shield'); shield.setAttribute('aria-hidden', 'true');
+          label.append(shield);
+        }
+        label.append(document.createTextNode(official ? `Token Monitor ${t('plugins.origin.official')}` : origin));
         source.append(label);
       }
       title.append(el(document, 'span', 'plugin-name', name), source);
@@ -305,7 +311,7 @@
       const panel = el(document, 'section', 'plugin-consent plugin-package-preview');
       panel.dataset.errorTarget = 'package';
       panel.setAttribute('aria-label', t('plugins.package.review'));
-      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon));
+      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, p.origin.kind === 'official'));
       const meta = el(document, 'div', 'plugin-card-meta');
       meta.append(el(document, 'span', 'plugin-version', `${p.installedVersion ? `${p.installedVersion} → ` : ''}${p.version}`), typeLabels(p)); panel.append(meta);
       panel.append(el(document, 'p', 'plugin-description', p.description));
@@ -394,6 +400,100 @@
       actions.append(copy, guide); panel.append(actions, prompt, status); return panel;
     }
 
+    function catalogDialog(entry) {
+      catalogModal?.close();
+      const previousFocus = document.activeElement;
+      const dialog = el(document, 'dialog', 'plugin-catalog-dialog');
+      catalogModal = dialog;
+      const heading = el(document, 'header', 'plugin-catalog-dialog-head');
+      heading.append(identity(entry.name, entry.author,
+        entry.origin.id === 'github-discovery' ? '' : t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon, entry.origin.kind === 'official'));
+      const close = button('×', () => dialog.close(), 'plugin-dialog-close');
+      close.setAttribute('aria-label', t('settings.plugins.cancel')); heading.append(close);
+      const body = el(document, 'div', 'plugin-catalog-dialog-body');
+      body.append(el(document, 'p', 'plugin-description', entry.description));
+      const meta = el(document, 'div', 'plugin-card-meta');
+      if (entry.version) meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`));
+      meta.append(typeLabels(entry));
+      if (Number.isSafeInteger(entry.stars)) {
+        const stars = el(document, 'span', 'plugin-stars', `☆ ${entry.stars.toLocaleString(getLocale())}`);
+        stars.setAttribute('aria-label', `${t('plugins.catalog.stars')}: ${entry.stars}`); meta.append(stars);
+      }
+      body.append(meta);
+      if (entry.repository) body.append(button(t('plugins.catalog.openRepository'), () => void onOpenExternal(entry.repository), 'plugin-inline-action'));
+      if (entry.origin.kind !== 'official') body.append(el(document, 'p', 'settings-note', t('plugins.catalog.unreviewed')));
+      const selected = entry.versions?.find(v => v.version === entry.version);
+      if (selected?.changelog) body.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.changelog')), el(document, 'p', 'plugin-description', selected.changelog));
+      const readme = el(document, 'div', 'plugin-catalog-readme', t('plugins.view.loading'));
+      body.append(readme);
+      void api.catalogDetails(entry.origin.id, entry.id).then(async result => {
+        if (!dialog.isConnected) return;
+        // Main supplies Markdown-generated markup with author HTML disabled.
+        readme.innerHTML = result.html || '';
+        if (!result.html) readme.textContent = t('plugins.catalog.noReadme');
+        for (const link of readme.querySelectorAll('a[href]')) {
+          link.addEventListener('click', event => {
+            event.preventDefault();
+            void Promise.resolve(onOpenExternal(link.href)).catch(() => {});
+          });
+        }
+        // Load sequentially to keep a README with many images bounded in flight.
+        for (const slot of readme.querySelectorAll('[data-readme-image]')) {
+          if (!dialog.isConnected) return;
+          const index = Number(slot.dataset.readmeImage);
+          try {
+            const data = await api.catalogReadmeImage(result.documentId, index);
+            if (!dialog.isConnected) return;
+            const image = el(document, 'img'); image.src = data; image.alt = slot.getAttribute('aria-label') || t('plugins.catalog.screenshot', { index: index + 1 });
+            const zoom = button('', event => {
+              event.preventDefault(); event.stopPropagation();
+              const lightbox = el(document, 'dialog', 'plugin-catalog-dialog plugin-image-dialog');
+              const bar = el(document, 'header', 'plugin-catalog-dialog-head');
+              const exit = button('×', () => lightbox.close(), 'plugin-dialog-close'); exit.setAttribute('aria-label', t('settings.plugins.cancel')); bar.append(exit);
+              const imageBody = el(document, 'div', 'plugin-catalog-dialog-body');
+              const large = el(document, 'img'); large.src = data; large.alt = image.alt; imageBody.append(large);
+              lightbox.append(bar, imageBody); dialog.append(lightbox);
+              dismissOnOutside(lightbox);
+              lightbox.addEventListener('close', () => { lightbox.remove(); if (zoom.isConnected) zoom.focus({ preventScroll: true }); });
+              lightbox.showModal();
+            }, 'plugin-screenshot'); zoom.setAttribute('aria-label', image.alt); zoom.append(image); slot.replaceWith(zoom);
+          } catch { if (dialog.isConnected) slot.textContent = t('plugins.catalog.imageUnavailable'); }
+        }
+      }).catch(() => { if (dialog.isConnected) readme.textContent = t('plugins.catalog.noReadme'); });
+      const footer = el(document, 'footer', 'plugin-catalog-dialog-footer');
+      if (selected ? selected.installable : ['available', 'update'].includes(entry.status)) {
+        footer.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => {
+          dialog.close();
+          void run(async () => { activeTab = 'discover'; sourcesOpen = false; catalogReview = entry; await previewCatalog(entry, entry.version); return null; });
+        }, 'plugin-allow'));
+      } else if (entry.status === 'repository') footer.append(el(document, 'span', 'settings-note', t('plugins.catalog.repositoryOnly')));
+      footer.append(button(t('settings.plugins.cancel'), () => dialog.close()));
+      dialog.append(heading, body, footer); container.append(dialog);
+      dialog.setAttribute('aria-label', entry.name);
+      dismissOnOutside(dialog);
+      dialog.addEventListener('close', () => {
+        dialog.remove(); if (catalogModal === dialog) catalogModal = null;
+        if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+      });
+      dialog.showModal();
+    }
+
+    function dismissOnOutside(dialog) {
+      // Chromium may group programmatically opened close watchers. Handle the
+      // key on the focused dialog so one Escape cannot close both layers.
+      dialog.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || event.target.closest('dialog') !== dialog) return;
+        event.preventDefault(); event.stopPropagation(); dialog.close();
+      });
+      let startedOutside = false;
+      const outside = event => {
+        const rect = dialog.getBoundingClientRect();
+        return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom);
+      };
+      dialog.addEventListener('pointerdown', event => { startedOutside = outside(event); });
+      dialog.addEventListener('click', event => { if (startedOutside && outside(event)) dialog.close(); startedOutside = false; });
+    }
+
     function catalogPanel() {
       const wrap = el(document, 'div', 'plugin-catalog');
       if (!catalogData) { wrap.append(el(document, 'p', 'settings-note', t('plugins.view.loading'))); return wrap; }
@@ -403,35 +503,62 @@
       search.placeholder = t('plugins.catalog.search'); search.setAttribute('aria-label', t('plugins.catalog.search'));
       const results = el(document, 'div', 'plugin-catalog-results');
       function renderResults() {
-        const entries = catalogData.entries.filter(p => `${p.name} ${p.description} ${p.author} ${p.id}`.toLowerCase().includes(query.toLowerCase()));
-        const cards = entries.map(entry => {
-          const card = el(document, 'article', 'plugin-card'); card.dataset.catalogId = entry.id;
-          const head = el(document, 'div', 'plugin-card-head');
-          head.append(identity(entry.name, entry.author || entry.id, t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon));
-          card.append(head, el(document, 'p', 'plugin-description', entry.description));
-          const meta = el(document, 'div', 'plugin-card-meta');
-          meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`), typeLabels(entry));
-          if (entry.origin.kind === 'community') meta.append(el(document, 'span', 'plugin-origin-note', entry.origin.label));
-          card.append(meta);
-          const key = `${entry.origin.id}/${entry.id}`;
-          const version = entry.versions?.find(v => v.version === chosenVersions.get(key)) || entry.versions?.find(v => v.version === entry.version);
-          const actions = el(document, 'div', 'settings-actions');
-          const available = version ? version.installable : ['available', 'update'].includes(entry.status);
-          if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => {
-            catalogReview = entry; await previewCatalog(entry, version?.version || entry.version); return null;
-          })));
-          if (entry.installedVersion) actions.append(button(t('plugins.catalog.installed'), () => { activeTab = 'installed'; selectedPluginId = ''; diagnostics = false; render(); container.querySelector(`[data-plugin-id="${entry.id}"]`)?.scrollIntoView({ block: 'nearest' }); }, 'plugin-installed-link plugin-installed-check'));
-          if (!entry.installedVersion && !available) actions.append(el(document, 'span', 'settings-note', t('plugins.catalog.incompatible')));
-          head.append(actions); return card;
-        });
-        if (!cards.length) cards.push(el(document, 'p', 'settings-note', t('plugins.catalog.noResults')));
-        results.replaceChildren(...cards);
+        const matches = p => `${p.name} ${p.description} ${p.author || ''} ${p.id}`.toLowerCase().includes(query.toLowerCase());
+        const sections = [];
+        const groups = [
+          ['plugins.catalog.official', catalogData.entries.filter(p => p.origin.kind === 'official')],
+          ['plugins.catalog.github', catalogData.github?.entries || []],
+          ['plugins.catalog.custom', catalogData.entries.filter(p => p.origin.kind !== 'official')]
+        ];
+        for (const [label, all] of groups) {
+          if (label === 'plugins.catalog.custom' && !all.length) continue;
+          const section = el(document, 'section', 'plugin-catalog-group');
+          section.append(el(document, 'h3', 'plugin-detail-heading', t(label)));
+          if (label === 'plugins.catalog.github') {
+            section.append(el(document, 'p', 'settings-note', t('plugins.catalog.githubNote')));
+            if (catalogData.github?.error) section.append(el(document, 'p', 'settings-note', t('plugins.catalog.githubFailed', { error: catalogData.github.error })));
+            if (catalogData.github?.limited) section.append(el(document, 'p', 'settings-note', t('plugins.catalog.githubLimited')));
+          }
+          const grid = el(document, 'div', 'plugin-catalog-grid');
+          for (const entry of all.filter(matches)) {
+            const card = el(document, 'article', 'plugin-card'); card.dataset.catalogId = entry.id;
+            const head = el(document, 'div', 'plugin-card-head');
+            const title = button('', () => catalogDialog(entry), 'plugin-catalog-title');
+            title.append(identity(entry.name, entry.author, '', entry.icon, entry.identityIcon, entry.origin.kind === 'official'));
+            head.append(title);
+            const actions = el(document, 'div', 'settings-actions');
+            const available = entry.versions?.find(v => v.version === entry.version)?.installable ?? ['available', 'update'].includes(entry.status);
+            if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => { catalogReview = entry; await previewCatalog(entry, entry.version); return null; })));
+            else actions.append(button(t('plugins.catalog.details'), () => catalogDialog(entry)));
+            if (entry.installedVersion) actions.append(button(t('plugins.catalog.installed'), () => { activeTab = 'installed'; selectedPluginId = ''; diagnostics = false; render(); container.querySelector(`[data-plugin-id="${entry.id}"]`)?.scrollIntoView({ block: 'nearest' }); }, 'plugin-installed-link plugin-installed-check'));
+            head.append(actions);
+            card.append(head, el(document, 'p', 'plugin-description', entry.description));
+            const meta = el(document, 'div', 'plugin-card-meta');
+            if (entry.version) meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`));
+            meta.append(typeLabels(entry));
+            if (Number.isSafeInteger(entry.stars)) {
+              const stars = el(document, 'span', 'plugin-stars', `☆ ${entry.stars.toLocaleString(getLocale())}`);
+              stars.setAttribute('aria-label', `${t('plugins.catalog.stars')}: ${entry.stars}`); meta.append(stars);
+            } else if (entry.origin.kind === 'community' && entry.origin.id !== 'github-discovery') meta.append(el(document, 'span', 'plugin-origin-note', entry.origin.label));
+            card.append(meta);
+            card.addEventListener('click', event => { if (!event.target.closest('button')) catalogDialog(entry); });
+            grid.append(card);
+          }
+          if (!grid.children.length) grid.append(el(document, 'p', 'settings-note', t('plugins.catalog.noResults')));
+          section.append(grid); sections.push(section);
+        }
+        results.replaceChildren(...sections);
         if (content?.contains(results)) identifyContent();
       }
       search.addEventListener('input', () => { query = search.value; renderResults(); });
-      wrap.append(search, results); renderResults();
-
-      return wrap;
+      wrap.append(search, results);
+      const refresh = el(document, 'div', 'settings-actions');
+      refresh.append(button(t('plugins.catalog.refresh'), () => void run(async () => {
+        for (const source of catalogData.sources.filter(source => source.kind === 'community')) await api.refreshSource(source.id);
+        catalogData = api.discoverCatalog ? await api.discoverCatalog(true) : await api.catalog(); return null;
+      })));
+      if (catalogData.github?.lastFetched) refresh.append(el(document, 'span', 'settings-note', t('plugins.catalog.lastChecked', { time: new Date(catalogData.github.lastFetched).toLocaleString(getLocale()) })));
+      wrap.append(refresh); renderResults(); return wrap;
     }
 
     function sourcesPanel() {
@@ -560,7 +687,7 @@
 
     function pluginIdentity(plugin) {
       const head = el(document, 'div', 'plugin-card-head');
-      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon));
+      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon, plugin.installation?.origin.kind === 'official'));
       if (!plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) {
         const toggle = el(document, 'input', 'plugin-enable');
         toggle.type = 'checkbox'; toggle.checked = plugin.enabled; toggle.disabled = !list?.enabled;
@@ -616,6 +743,8 @@
       }, 'plugin-manage');
       manage.setAttribute('aria-label', t('plugins.ui.manageNamed', { name: plugin.name }));
       if (plugin.status === 'crashed') footer.append(button(t('settings.plugins.restart'), () => void run(() => api.restart(plugin.id)), 'plugin-restart plugin-inline-action'));
+      const update = catalogData?.entries.find(entry => entry.id === plugin.id && entry.status === 'update' && entry.origin.id === plugin.installation?.origin.id);
+      if (update) footer.append(button(t('plugins.catalog.updateTo', { version: update.version }), () => catalogDialog(update), 'plugin-update-action'));
       footer.append(manage); card.append(footer);
       return card;
     }
@@ -970,7 +1099,7 @@
             void run(async () => {
               // Only switch after the new page is ready; failed loads leave
               // the current page and its drafts intact.
-              if (tab !== 'installed') catalogData = await api.catalog();
+              if (tab !== 'installed') catalogData = api.discoverCatalog ? await api.discoverCatalog() : await api.catalog();
               activeTab = tab; query = ''; sourcesOpen = false; if (tab === 'installed') { selectedPluginId = ''; diagnostics = false; } return null;
             });
           });
@@ -1082,6 +1211,7 @@
       async refresh() {
         try {
           list = await api.list();
+          if (api.catalog) catalogData = await api.catalog();
           if (actionError?.load) actionError = null;
         } catch (error) {
           actionError = { error, target: '', scope: errorScope(), load: true };
@@ -1089,7 +1219,7 @@
         render();
       },
       render,
-      dispose() { authorSettings.clear(); for (const held of settingsMounts.values()) unmountSettings(held.node); settingsMounts.clear(); },
+      dispose() { catalogModal?.close(); authorSettings.clear(); for (const held of settingsMounts.values()) unmountSettings(held.node); settingsMounts.clear(); },
       summary() {
         if (!list) return '';
         const active = list.plugins.filter((plugin) => plugin.status === 'active').length;
@@ -1098,7 +1228,7 @@
       list: () => list,
       // Consent and logs are interaction state: a background push must not
       // close an open consent panel the user is reading.
-      isInteracting: () => activeTab === 'style' || Boolean(consentFor || packagePreview || operation || selectedPluginId || aboutOpen) || busy || Boolean(container.querySelector('.plugin-menu:popover-open, .plugin-location-count [role="tooltip"]:popover-open')) || container.contains(document.activeElement)
+      isInteracting: () => activeTab === 'style' || Boolean(catalogModal || consentFor || packagePreview || operation || selectedPluginId || aboutOpen) || busy || Boolean(container.querySelector('.plugin-menu:popover-open, .plugin-location-count [role="tooltip"]:popover-open')) || container.contains(document.activeElement)
     };
   }
 

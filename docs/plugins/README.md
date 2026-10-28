@@ -2,6 +2,8 @@
 
 Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review. No official plugins ship with the platform; the repository's minimal fixtures are tests, not a store.
 
+For author workflows, see the [development guide](author-quickstart.md) and [publishing guide](publishing.md), including the discovery topic and README template.
+
 ## Execution and trust
 
 Author UI is an ES module loaded into the host renderer document. It can use DOM/CSS/JS, existing host elements and exposed renderer services. It does not receive Node `require`: Electron retains context isolation, disabled Node integration and its normal CSP. For filesystem, network, subprocesses or computation, declare an optional Node backend. It runs in an Electron utility process under the same OS user, with ordinary Node authority. It is not a credential-isolating sandbox. Formal data projections remain useful contracts, not a security boundary against trusted backend code reading accessible internal files.

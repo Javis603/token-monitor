@@ -8753,3 +8753,33 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-default-placements { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; }
 .settings-panel label.plugin-placement-choice { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .plugin-placement-choice > input[type="checkbox"] { flex: 0 0 14px; width: 14px; height: 14px; margin: 0; }
+
+/* Catalog detail is a host-owned dialog. Only its body scrolls; image zoom
+   uses a second native dialog so Escape dismisses only the top layer. */
+.plugin-catalog-group { min-width: 0; }
+.plugin-catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 10px; margin-top: 10px; }
+.plugin-catalog-grid > .plugin-card { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(var(--overlay-rgb), .025); cursor: pointer; }
+.plugin-catalog-title { display: block; padding: 0; min-width: 0; text-align: start; border: 0; background: none; color: var(--text); font: inherit; cursor: pointer; }
+.plugin-catalog-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.plugin-stars { margin-inline-start: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.plugin-catalog-dialog { width: min(620px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; margin: auto; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: rgb(var(--panel-rgb)); overflow: hidden; -webkit-app-region: no-drag; }
+.plugin-catalog-dialog[open] { display: flex; flex-direction: column; }
+.plugin-catalog-dialog::backdrop { background: rgba(0, 0, 0, .48); }
+.plugin-catalog-dialog-head, .plugin-catalog-dialog-footer { display: flex; align-items: center; gap: 12px; padding: 12px 16px; flex: 0 0 auto; }
+.plugin-catalog-dialog-head { border-bottom: 1px solid var(--line); }
+.plugin-catalog-dialog-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px; scrollbar-width: thin; }
+.plugin-catalog-dialog-footer { border-top: 1px solid var(--line); justify-content: flex-end; }
+.plugin-catalog-dialog-footer button, .plugin-update-action { border: 1px solid var(--line); border-radius: 6px; background: rgba(var(--overlay-rgb), .05); color: var(--text); padding: 6px 10px; font: inherit; font-size: .6875rem; cursor: pointer; }
+.plugin-dialog-close { margin-inline-start: auto; width: 36px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 1.25rem; cursor: pointer; }
+.plugin-dialog-close:hover { background: rgba(var(--overlay-rgb), .06); color: var(--text); }
+.plugin-screenshot { display: block; margin: 12px 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; width: 100%; padding: 4px; cursor: zoom-in; }
+.plugin-screenshot img { display: block; width: 100%; height: auto; object-fit: contain; }
+.plugin-image-dialog .plugin-catalog-dialog-body img { display: block; max-width: 100%; height: auto; margin: auto; }
+.plugin-catalog-readme { margin-top: 16px; overflow-wrap: anywhere; font-size: .75rem; line-height: 1.6; }
+
+.plugin-catalog-readme h1, .plugin-catalog-readme h2, .plugin-catalog-readme h3 { margin: 18px 0 10px; font-size: 1em; }
+.plugin-catalog-readme pre { overflow: auto; padding: 10px; background: rgba(var(--overlay-rgb), .04); border-radius: 6px; }
+.plugin-catalog-readme blockquote { margin-inline: 0; padding-inline-start: 12px; border-inline-start: 2px solid var(--line); color: var(--muted); }
+.plugin-catalog-readme table { display: block; overflow: auto; border-collapse: collapse; }
+.plugin-catalog-readme th, .plugin-catalog-readme td { padding: 6px; border: 1px solid var(--line); }
+.plugin-catalog-readme a { color: var(--accent); }

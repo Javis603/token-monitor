@@ -41,6 +41,8 @@ function parseIndex(bytes, publicKey) {
     seen.add(entry.id);
     const name = normalizeLocalized(entry.name, 80);
     if (!name || !Array.isArray(entry.versions) || !entry.versions.length || entry.versions.length > 32) throw new Error(`${entry.id}: name and 1–32 versions are required`);
+    const repository = entry.repository === undefined ? '' : httpsUrl(entry.repository);
+    if (repository && !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(repository)) throw new Error('repository must be a GitHub repository URL');
     const versionsSeen = new Set();
     const versions = entry.versions.map(v => {
       if (typeof v?.version !== 'string' || !semver.valid(v.version) || versionsSeen.has(v.version)) throw new Error(`${entry.id}: invalid or duplicate version`);
@@ -51,13 +53,13 @@ function parseIndex(bytes, publicKey) {
       return { types: normalizeTypes(v.types), version: v.version, sha256: v.sha256, url: httpsUrl(v.url), compatible: !range || semver.satisfies(HOST_VERSION, range),
         changelog: normalizeLocalized(v.changelog, 2000), engines: range || '*' };
     }).sort((a, b) => semver.rcompare(a.version, b.version));
-    return { id: entry.id, name, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), versions };
+    return { id: entry.id, name, repository, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), versions };
   });
   return { title, plugins };
 }
-async function download(fetchImpl, url, limit, signal) {
+async function download(fetchImpl, url, limit, signal, accept = 'application/json') {
   const response = await fetchImpl(httpsUrl(url), { redirect: 'manual', credentials: 'omit', cache: 'no-store', signal,
-    headers: { Accept: 'application/json' } });
+    headers: { Accept: accept } });
   if (!response.ok || response.status < 200 || response.status >= 300) throw new Error(`download failed (HTTP ${response.status}); redirects are not followed`);
   if (Number(response.headers?.get('content-length')) > limit) { await response.body?.cancel(); throw new Error('download exceeds size limit'); }
   if (!response.body?.getReader) throw new Error('streaming download is unavailable');

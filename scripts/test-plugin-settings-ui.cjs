@@ -31,7 +31,7 @@ async function main() {
     const tick = () => new Promise(r => setTimeout(r, 20));
     const data = {enabled:true, plugins:[{id:'alpha',trusted:true,types:['widget','page'],name:'Alpha',description:'Plugin description',version:'1.0.0',source:'user',status:'active',enabled:true,views:[{ref:'alpha/view',title:'View',surfaces:['home','page'],placements:{home:false}}],background:{supported:true,enabled:false},logs:[{at:0,level:'info',text:'Fixture ready'}],runtime:{state:'idle',cpuPercent:null,memoryMB:null}},{id:'beta',name:'Beta',source:'user',status:'disabled',enabled:false,views:[]}]};
     let pending, reject, previewPending, catalogCalls = 0, importResult = null, copyFailure = false;
-    let catalogMode = 'deferred', previewMode = 'success', globalMode = 'success', savedMasterEnabled = true;
+    let catalogMode = 'success', previewMode = 'success', globalMode = 'success', savedMasterEnabled = true;
     const catalog = {entries:[{id:'demo',types:['page'],name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'custom-fixture',kind:'community'},versions:[{version:'1.0.0',compatible:true,installable:true},{version:'2.0.0',compatible:true,installable:true}],status:'available'}],sources:[]};
     const tooltips = TokenMonitorLimitWindowsView.createLimitWindowsView({document,tooltip:{hasOpened:()=>false,markOpened:()=>{},release:()=>{}}});
     const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,setDetailTooltip:tooltips.setDetailTooltip,getEnabled:()=>savedMasterEnabled,onCopyText:async text=>{if(copyFailure)throw Error('clipboard unavailable');calls.push(['copy',text])},onOpenExternal:async url=>{calls.push(['guide',url])},onSetEnabled:async enabled=>{calls.push(['global',enabled]);if(globalMode==='error')throw Error('settings write failed');savedMasterEnabled=enabled;data.enabled=enabled&&!data.safeMode;return structuredClone(data)},t:(key,args)=>key==='plugins.authoring.prompt'?'Fixture prompt with exact punctuation:':key==='plugins.ui.locationCount'?String(args.count)+' locations':key==='settings.plugins.actionFailed'?args.error:key,api:{
@@ -54,6 +54,8 @@ async function main() {
     check('author-text-never-gets-a-trust-shield',!sourceIdentity.querySelector('.plugin-shield'));
     data.plugins[0].installation={origin:{kind:'community'}};await panel.refresh();
     check('community-author-cannot-spoof-official-shield',!box.querySelector('[data-plugin-id="alpha"] .plugin-shield')&&box.querySelector('[data-plugin-id="alpha"] .plugin-origin-label').textContent==='plugins.origin.community');
+    data.plugins[0].installation={origin:{kind:'official'}};await panel.refresh();
+    check('official-installed-identity-has-host-publisher-and-shield',Boolean(box.querySelector('[data-plugin-id="alpha"] .plugin-shield'))&&box.querySelector('[data-plugin-id="alpha"] .plugin-origin-official').textContent==='Token Monitor plugins.origin.official'&&!box.querySelector('[data-plugin-id="alpha"] .plugin-author'));
     delete data.plugins[0].installation;
     data.plugins[0].views[0].placements={home:true,page:false,tray:true};
     data.plugins[0].views[0].surfaces=['home','page','tray'];await panel.refresh();
@@ -83,6 +85,7 @@ async function main() {
     delete data.plugins[0].identityIcon;await panel.refresh();
     const tab = id=>box.querySelector('[data-tab="'+id+'"]');
     const click = text=>[...box.querySelectorAll('button')].find(n=>n.textContent===text).click();
+    catalogMode='deferred';catalogCalls=0;
     scroll.scrollTop=60;
     const official=tab('discover');official.focus({preventScroll:true});const y=official.getBoundingClientRect().y;
     official.click();const during={y:official.getBoundingClientRect().y,focus:document.activeElement===official,connected:official.isConnected};
@@ -234,8 +237,52 @@ async function main() {
     pages.render(routes.filter(p=>p.ref!=='alpha/view'),'home');
     check('removed-page-releases-retained-dom',!draft.isConnected&&pageBox.classList.contains('hidden'));
     await pageHost.dispose();
+    // New discovery details remain inert until explicit package review.
+    catalogMode='success';
+    let imageResolve;
+    const detailsBox=document.createElement('div');document.body.append(detailsBox);
+    const shot=canvas.toDataURL('image/png');
+    const officialEntry={...catalog.entries[0],id:'official-detail',name:'Official detail',author:'Hidden credit',origin:{id:'official',kind:'official'},repository:'https://github.com/owner/repo'};
+    const repoEntry={id:'owner/repo',name:'Community repo',author:'owner',description:'Repository',origin:{id:'github-discovery',kind:'community'},status:'repository',stars:42};
+    let shotCalls=0,readmeCalls=0;
+    const detailsPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:detailsBox,t:key=>key,api:{
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[officialEntry],github:{entries:[repoEntry]},sources:[]}),
+      catalogReadmeImage:()=>{shotCalls++;return new Promise(resolve=>{imageResolve=resolve})},
+      catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',html:'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
+    }});
+    await detailsPanel.refresh();detailsBox.querySelector('[data-tab="discover"]').click();await tick();
+    check('details-media-is-lazy-and-official-credit-hidden',shotCalls===0&&!detailsBox.textContent.includes('Hidden credit'));
+    check('official-card-shows-host-publisher-community-card-shows-owner-only',detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-shield'))&&detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-source')?.textContent==='owner');
+    check('github-stars-only-on-community-card',detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-stars')?.textContent.includes('42')&&!detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-stars'));
+    const title=detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-catalog-title');title.focus();title.click();await tick();
+    const dialog=detailsBox.querySelector('dialog');
+    check('official-detail-shows-same-host-publisher',dialog.querySelector('.plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(dialog.querySelector('.plugin-shield')));
+    check('details-opens-with-version-before-types',dialog.open&&dialog.querySelector('.plugin-card-meta').firstChild.className==='plugin-version'&&shotCalls===1);
+    imageResolve(shot);await tick();dialog.querySelector('.plugin-screenshot').click();await tick();
+    check('image-opens-above-parent-details',detailsBox.querySelectorAll('dialog[open]').length===2);
+    detailsBox.querySelector('.plugin-image-dialog .plugin-dialog-close').click();await tick();
+    check('image-close-keeps-parent-open',dialog.open&&detailsBox.querySelectorAll('dialog').length===1);
+    const rect=dialog.getBoundingClientRect();
+    check('narrow-details-header-footer-fit',rect.left>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight&&dialog.querySelector('footer').getBoundingClientRect().bottom<=innerHeight);
+    dialog.dispatchEvent(new PointerEvent('pointerdown',{clientX:0,clientY:0}));dialog.dispatchEvent(new MouseEvent('click',{clientX:0,clientY:0}));await tick();
+    check('outside-dismiss-restores-title-focus',!dialog.isConnected&&document.activeElement===title);
+    title.click();await tick();detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
+    check('late-image-cannot-resurrect-closed-details',!detailsBox.querySelector('dialog'));
+    detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-catalog-title').click();await tick();
+    check('github-detail-name-only-shows-owner',detailsBox.querySelector('dialog .plugin-source')?.textContent==='owner'&&!detailsBox.querySelector('dialog .plugin-shield'));
+    check('repository-readme-preserves-markdown-order-and-inert-html',readmeCalls===3&&detailsBox.querySelector('.plugin-catalog-readme h1')?.textContent==='README heading'&&detailsBox.querySelector('.plugin-catalog-readme').textContent.includes('<script>untrusted</script>')&&!detailsBox.querySelector('.plugin-catalog-readme script'));
+    detailsBox.querySelector('.plugin-dialog-close').click();await tick();
+    title.click();await tick();imageResolve(shot);await tick();detailsBox.querySelector('.plugin-screenshot').click();await tick();
+    window.finishDetailsTest=()=>{detailsPanel.dispose();detailsBox.remove()};
     return {checks};
   })()`);
+  for (let depth=1;depth>=0;depth--) {
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await new Promise(r=>setTimeout(r,40));
+    result.checks.push({name:'native-escape-details-depth-'+depth,ok:await win.webContents.executeJavaScript('document.querySelectorAll("dialog[open]").length === '+depth)});
+  }
+  await win.webContents.executeJavaScript('window.finishDetailsTest()');
   // Exercise Chromium's actual pointer/keyboard modality, not just synthetic DOM clicks.
   const point = await win.webContents.executeJavaScript(`(async()=>{
     document.querySelector('[data-tab="installed"]').click();

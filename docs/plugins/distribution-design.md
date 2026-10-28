@@ -1,5 +1,7 @@
 # Packages, trust and recovery
 
+For release naming, GitHub discovery, README presentation and an author checklist, see the [publishing guide](publishing.md).
+
 ## Package format
 
 A `.tmplugin` is JSON `{format:2, manifest, files}`. `files` maps each manifest-declared relative filename to base64 bytes. Maximum encoded envelope is 64 MiB; maximum manifest is 256 KiB. All files are explicit, including prebuilt dependencies. Path traversal, symlinks, case-insensitive collisions and file/directory-prefix collisions are rejected. Exact code/asset bytes, including UTF-8 BOM, survive packing and unpacking. Installing never executes dependency installation or package scripts.
@@ -26,9 +28,22 @@ Uninstall can retain plugin data/preferences and display locations independently
 
 ## Catalogs
 
-Discover combines the App-distributed offline official catalog with user-configured HTTPS catalogs. The official catalog is currently empty: no production example plugin ships. Only packages distributed with the App receive official attribution; this is provenance, not a safety guarantee. Official package updates arrive with an App update and use the same explicit preview, installation choice, revision trust and rollback workflow. Install from file and folder remain available for private unpublished plugins. Catalog refresh and update preview do not execute code; installation is always explicit.
+Discover separates the App-distributed offline official catalog, GitHub topic discovery and user-configured HTTPS catalogs. The official catalog is currently empty: no production example plugin ships. Only packages distributed with the App receive official attribution; this is provenance, not a safety guarantee. Official package updates arrive with an App update and use the same explicit preview, installation choice, revision trust and rollback workflow. Install from file and folder remain available for private unpublished plugins. Catalog refresh and update preview do not execute code; installation is always explicit.
 
 Catalogs use bounded downloads, source pins, package hashes and optional Ed25519 signatures. A source is a configured catalog URL, not a GitHub repository crawler. Source changes cannot silently replace another installation's origin. Community labels and author descriptions are publisher claims, never an audit badge. Experimental API compatibility is checked against the downloaded package before installation.
+
+## GitHub discovery and details
+
+Opening Discover searches public GitHub repositories tagged `token-monitor-plugin`, ordered by stars, with at most 100 results. A notice identifies truncated results. The topic is author-selected: entries remain nonofficial and unreviewed. Repository discovery supplies a source link and lazily loaded Markdown README, not an installable package or inferred version. No GitHub Release asset naming convention is assumed. Package installation still requires a configured catalog or local package.
+
+Successful search results are cached on disk for six hours and retained when offline or rate-limited. Failed searches have a five-minute retry cooldown; explicit Refresh bypasses the cache interval. No background GitHub polling runs. Stars appear only on GitHub discovery cards and details, never installed management rows; downloads are not counted. Cached metadata is informational and cannot confer trust.
+
+Catalog entries may provide a GitHub `repository` URL. Both catalog and discovered repositories use that repository's README for detailed descriptions and inline images, preserving Markdown order. There is no separate screenshot gallery or per-version image history. Version-specific changelogs remain in the catalog. Without a repository, basic description and package actions remain available.
+
+README Markdown is rendered by `markdown-it` with raw HTML disabled; headings, lists, tables, code and HTTPS links are supported. Relative image paths resolve against the README's actual location returned by GitHub, including nested README directories. Only main-generated document image indices cross the renderer bridge. Images load sequentially when details open, through the main process with a four MiB download bound and 15-second deadline. Only PNG, JPEG and WebP are decoded, constrained to 8192 pixels per dimension and 16 million pixels, then resized to at most 1600 pixels and returned as PNG. SVG, animated playback and author HTML are not supported. A failed image does not block installation. Details and enlarged images close with their close button, an outside click, or Escape; an enlarged image closes before its parent details. The previous four-image metadata limit no longer applies; images appear at their positions in the README.
+
+
+This does not add an official remote catalog or automatic package installation. Selecting official hosting and its release process remains a separate product decision.
 
 ## Create a community catalog
 
@@ -79,7 +94,7 @@ version.sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
 fs.writeFileSync(output, JSON.stringify(catalog, null, 2) + '\n', { flag: 'wx' });
 ```
 
-Required fields are `format`, `title`, `plugins`, each entry's unique `id`, `name`, and nonempty `versions`, and each version's unique SemVer `version`, direct HTTPS `url` and lowercase 64-character `sha256`. Optional entry fields are `description`, `author` and the manifest-compatible `identityIcon`; optional version fields are `types`, `engines.tokenMonitor` (a SemVer range) and `changelog`. Title/name/description/changelog can be strings or locale-to-string maps. `types` accepts `widget`, `page`, `appearance`; unknown values are ignored. These are display hints, not capabilities. Downloaded manifests determine actual installed types and API compatibility; keep catalog and package engine ranges aligned.
+Required fields are `format`, `title`, `plugins`, each entry's unique `id`, `name`, and nonempty `versions`, and each version's unique SemVer `version`, direct HTTPS `url` and lowercase 64-character `sha256`. Optional entry fields are `description`, `author`, the manifest-compatible `identityIcon`, and the `repository` presentation field described above; optional version fields are `types`, `engines.tokenMonitor` (a SemVer range) and `changelog`. Title/name/description/changelog can be strings or locale-to-string maps. `types` accepts `widget`, `page`, `appearance`; unknown values are ignored. These are display hints, not capabilities. Downloaded manifests determine actual installed types and API compatibility; keep catalog and package engine ranges aligned.
 
 Limits: 16 configured sources, 128 entries per index, 32 versions per entry, a 1 MiB downloaded index and 64 MiB package envelope. URLs must be HTTPS without credentials or fragments, at most 2048 normalized characters. Downloads omit cookies, reject redirects and have a 15-second request deadline. Serve actual file bytes, not a repository web page or a redirecting download link.
 

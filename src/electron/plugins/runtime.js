@@ -153,7 +153,7 @@ function createPluginRuntime({
     dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), manager, getSettings, saveSettings: persistManagementSettings, getLocale, placementContext });
   try { managed.recover(); }
   catch (error) { log(`[plugins] Plugin management unavailable: ${error.message}`); }
-  const catalog = createPluginCatalog({ manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch });
+  const catalog = createPluginCatalog({ nativeImage: electron.nativeImage, manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch });
   const demand = createSurfaceDemand((surface, refs) => manager.setSurfaceDemand(surface, refs));
   const detachedPageOwner = Symbol('detached-pages');
   pages = createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLocale,
@@ -512,6 +512,9 @@ function createPluginRuntime({
       if (status?.error) result.error = status.error.message;
       return result;
     });
+    handle('plugins:discoverCatalog', (event, force) => { requireMain(event); return catalog.discover(force === true); });
+    handle('plugins:catalogDetails', (event, source, id) => { requireMain(event); return catalog.details(source, id); });
+    handle('plugins:catalogReadmeImage', (event, documentId, index) => { requireMain(event); return catalog.readmeImage(documentId, index); });
     handle('plugins:catalogPreview', (event, source, id, version) => { requireMain(event); managed.assertAvailable(); return catalog.preview(source, id, version); });
     handle('plugins:import', async (event, kind) => {
       requireMain(event);
