@@ -72,8 +72,12 @@ private func widgetProcess(_ pid: pid_t, executablePath: String) throws -> Widge
     guard pid > 0, pid != getpid() else { return nil }
     var info = proc_bsdinfo()
     let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+    errno = 0
     guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, infoSize) == infoSize else {
-        if processHasExited(pid) { return nil }
+        let lookupErrno = errno
+        // This query excludes zombies. They have exited even while kill(pid, 0)
+        // still succeeds until the parent reaps them.
+        if lookupErrno == ESRCH || processHasExited(pid) { return nil }
         throw WidgetProcessLookupError.unavailable
     }
     guard info.pbi_uid == getuid() else { return nil }

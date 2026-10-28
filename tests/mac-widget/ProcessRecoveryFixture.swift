@@ -23,6 +23,10 @@ func fixture_proc_listpids(_ type: UInt32, _ uid: UInt32,
 func fixture_proc_pidinfo(_ pid: Int32, _ flavor: Int32, _ arg: UInt64,
                          _ buffer: UnsafeMutableRawPointer, _ size: Int32) -> Int32 {
     lookups += 1
+    if scenario == "zombie-scan" || (scenario == "zombie-wait" && lookups >= 3) {
+        errno = ESRCH
+        return 0
+    }
     if exited || failing("info") {
         errno = exited ? ESRCH : EACCES
         return 0
@@ -75,7 +79,7 @@ func fixture_kill(_ pid: pid_t, _ signal: Int32) -> Int32 {
     signals += 1
     if scenario == "signal-denied" { errno = EPERM; return -1 }
     if scenario == "signal-exited" { exited = true; errno = ESRCH; return -1 }
-    if !scenario.hasSuffix("fail-wait") && scenario != "still-running" { exited = true }
+    if !scenario.hasSuffix("fail-wait") && scenario != "still-running" && scenario != "zombie-wait" { exited = true }
     return 0
 }
 
