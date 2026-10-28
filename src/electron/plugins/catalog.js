@@ -4,6 +4,7 @@ const path = require('node:path');
 const semver = require('semver');
 const { randomUUID } = require('node:crypto');
 const { renderReadme } = require('./catalogReadme');
+const { imageBudget } = require('./catalogImagePolicy');
 const { parsePackage, readBounded, MAX_PACKAGE_BYTES, describePackage, digest } = require('./package');
 const { assertHostCompatibility } = require('./contracts');
 const { localize } = require('../../shared/plugins/localized');
@@ -60,12 +61,18 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
     const state = sources.list();
     return { sources: [OFFICIAL, ...state.sources], entries, github: github.list(), error: [...errors, state.error].filter(Boolean).join('\n'), communityConfigured: state.sources.length > 0 };
   }
+  function closeDetails() {
+    detailRevision++; readmeDocument?.controller.abort(); readmeDocument?.loads.clear(); readmeDocument = null;
+  }
   return {
     list,
+    closeDetails,
     async discover(force = false) { await github.refresh(force); return list(); },
     async details(sourceId, id) {
-      readmeDocument = null;
-      const revision = ++detailRevision;
+      closeDetails();
+      const revision = detailRevision;
+      const document = { id: randomUUID(), controller: new AbortController(), budget: imageBudget(), loads: new Map() };
+      readmeDocument = document;
       let repository;
       if (sourceId !== 'github-discovery') {
         const entry = list().entries.find(p => p.id === id && p.origin.id === sourceId);
@@ -73,21 +80,21 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
         repository = entry.repository;
         if (!repository) return { html: '', imageCount: 0 };
       }
-      const result = repository ? await github.repositoryReadme(repository) : await github.readme(id);
+      const result = repository ? await github.repositoryReadme(repository, document.controller.signal) : await github.readme(id, document.controller.signal);
       if (revision !== detailRevision) throw new Error('README details are no longer current');
-      const document = { ...renderReadme(result.readme, result.baseUrl), id: randomUUID() };
-      readmeDocument = document;
+      Object.assign(document, renderReadme(result.readme, result.baseUrl), { baseUrl: result.baseUrl });
       return { html: document.html, documentId: document.id, imageCount: document.images.length };
     },
     async readmeImage(documentId, index) {
       const document = readmeDocument;
-      if (!document || document.id !== documentId || !Number.isInteger(index) || index < 0 || !document.images[index]) throw new Error('Unknown README image');
-      return media.load(document.images[index]);
+      if (!document || document.id !== documentId || !Number.isInteger(index) || index < 0 || !document.images?.[index]) throw new Error('Unknown README image');
+      if (!document.loads.has(index)) document.loads.set(index, media.load(document.images[index], { baseUrl: document.baseUrl, signal: document.controller.signal, budget: document.budget }));
+      return document.loads.get(index);
     },
     async addSource(input) { await sources.add(input); return list(); },
     async refreshSource(id) { await sources.refresh(id); return list(); },
     removeSource(id) { sources.remove(id); return list(); },
-    dispose() { detailRevision++; readmeDocument = null; sources.dispose(); github.dispose(); media.dispose(); },
+    dispose() { closeDetails(); sources.dispose(); github.dispose(); media.dispose(); },
     async preview(sourceId, id, version) {
       if (sourceId === OFFICIAL.id) {
         const entry = packages.get(id);

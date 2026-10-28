@@ -165,6 +165,7 @@
     "chokidar": "^4.0.3",
     "dotenv": "^17.4.2",
     "electron-updater": "6.8.9",
+    "image-size": "^2.0.4",
     "koffi": "^3.1.5",
     "markdown-it": "^15.0.3",
     "semver": "^7.8.5",

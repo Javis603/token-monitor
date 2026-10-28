@@ -244,11 +244,12 @@ async function main() {
     const shot=canvas.toDataURL('image/png');
     const officialEntry={...catalog.entries[0],id:'official-detail',name:'Official detail',author:'Hidden credit',origin:{id:'official',kind:'official'},repository:'https://github.com/owner/repo'};
     const repoEntry={id:'owner/repo',name:'Community repo',author:'owner',description:'Repository',origin:{id:'github-discovery',kind:'community'},status:'repository',stars:42};
-    let shotCalls=0,readmeCalls=0;
+    let shotCalls=0,readmeCalls=0,closeCalls=0;
     const detailsPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:detailsBox,t:key=>key,api:{
       list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[officialEntry],github:{entries:[repoEntry],lastFetched:1700000000000},sources:[]}),
+      closeCatalogDetails:async()=>{closeCalls++},
       catalogReadmeImage:()=>{shotCalls++;return new Promise(resolve=>{imageResolve=resolve})},
-      catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',html:'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
+      catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',imageCount:1,html:'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
     }});
     await detailsPanel.refresh();detailsBox.querySelector('[data-tab="discover"]').click();await tick();
     const refreshButton=detailsBox.querySelector('.plugin-catalog-refresh button').getBoundingClientRect(),refreshTime=detailsBox.querySelector('.plugin-catalog-refresh .settings-note').getBoundingClientRect();
@@ -259,24 +260,27 @@ async function main() {
     const title=detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-catalog-title');title.focus();title.click();await tick();
     const dialog=detailsBox.querySelector('dialog');
     check('official-detail-shows-same-host-publisher',dialog.querySelector('.plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(dialog.querySelector('.plugin-shield')));
-    check('details-opens-with-version-before-types',dialog.open&&dialog.querySelector('.plugin-card-meta').firstChild.className==='plugin-version'&&shotCalls===1);
+    check('details-opens-with-version-before-types',dialog.open&&dialog.querySelector('.plugin-card-meta').firstChild.className==='plugin-version'&&shotCalls===0);
+    check('readme-images-require-explicit-load',Boolean(dialog.querySelector('.plugin-readme-load'))&&shotCalls===0);
+    dialog.querySelector('.plugin-readme-load').click();await tick();
+    check('readme-image-load-starts-once',shotCalls===1&&dialog.querySelector('.plugin-readme-load').disabled);
     imageResolve(shot);await tick();
     check('small-readme-image-keeps-intrinsic-width',dialog.querySelector('.plugin-screenshot img')?.getBoundingClientRect().width===32);
     dialog.querySelector('.plugin-screenshot').click();await tick();
     check('image-opens-above-parent-details',detailsBox.querySelectorAll('dialog[open]').length===2);
     detailsBox.querySelector('.plugin-image-dialog .plugin-dialog-close').click();await tick();
-    check('image-close-keeps-parent-open',dialog.open&&detailsBox.querySelectorAll('dialog').length===1);
+    check('image-close-keeps-parent-open',dialog.open&&detailsBox.querySelectorAll('dialog').length===1&&closeCalls===0);
     const rect=dialog.getBoundingClientRect();
     check('narrow-details-header-footer-fit',rect.left>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight&&dialog.querySelector('footer').getBoundingClientRect().bottom<=innerHeight);
     dialog.dispatchEvent(new PointerEvent('pointerdown',{clientX:0,clientY:0}));dialog.dispatchEvent(new MouseEvent('click',{clientX:0,clientY:0}));await tick();
-    check('outside-dismiss-restores-title-focus',!dialog.isConnected&&document.activeElement===title);
-    title.click();await tick();detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
+    check('outside-dismiss-restores-title-focus',!dialog.isConnected&&document.activeElement===title&&closeCalls===1);
+    title.click();await tick();detailsBox.querySelector('.plugin-readme-load').click();await tick();detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
     check('late-image-cannot-resurrect-closed-details',!detailsBox.querySelector('dialog'));
     detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-catalog-title').click();await tick();
     check('github-detail-name-only-shows-owner',detailsBox.querySelector('dialog .plugin-source')?.textContent==='owner'&&!detailsBox.querySelector('dialog .plugin-shield'));
     check('repository-readme-preserves-markdown-order-and-inert-html',readmeCalls===3&&detailsBox.querySelector('.plugin-catalog-readme h1')?.textContent==='README heading'&&detailsBox.querySelector('.plugin-catalog-readme').textContent.includes('<script>untrusted</script>')&&!detailsBox.querySelector('.plugin-catalog-readme script'));
     detailsBox.querySelector('.plugin-dialog-close').click();await tick();
-    title.click();await tick();imageResolve(shot);await tick();detailsBox.querySelector('.plugin-screenshot').click();await tick();
+    title.click();await tick();detailsBox.querySelector('.plugin-readme-load').click();await tick();imageResolve(shot);await tick();detailsBox.querySelector('.plugin-screenshot').click();await tick();
     window.finishDetailsTest=()=>{detailsPanel.dispose();detailsBox.remove()};
     return {checks};
   })()`);

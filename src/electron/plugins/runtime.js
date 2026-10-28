@@ -514,6 +514,7 @@ function createPluginRuntime({
     });
     handle('plugins:discoverCatalog', (event, force) => { requireMain(event); return catalog.discover(force === true); });
     handle('plugins:catalogDetails', (event, source, id) => { requireMain(event); return catalog.details(source, id); });
+    handle('plugins:closeCatalogDetails', event => { requireMain(event); catalog.closeDetails(); });
     handle('plugins:catalogReadmeImage', (event, documentId, index) => { requireMain(event); return catalog.readmeImage(documentId, index); });
     handle('plugins:catalogPreview', (event, source, id, version) => { requireMain(event); managed.assertAvailable(); return catalog.preview(source, id, version); });
     handle('plugins:import', async (event, kind) => {

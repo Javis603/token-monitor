@@ -426,7 +426,7 @@
       if (selected?.changelog) body.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.changelog')), el(document, 'p', 'plugin-description', selected.changelog));
       const readme = el(document, 'div', 'plugin-catalog-readme', t('plugins.view.loading'));
       body.append(readme);
-      void api.catalogDetails(entry.origin.id, entry.id).then(async result => {
+      void api.catalogDetails(entry.origin.id, entry.id).then(result => {
         if (!dialog.isConnected) return;
         // Main supplies Markdown-generated markup with author HTML disabled.
         readme.innerHTML = result.html || '';
@@ -437,28 +437,33 @@
             void Promise.resolve(onOpenExternal(link.href)).catch(() => {});
           });
         }
-        // Load sequentially to keep a README with many images bounded in flight.
-        for (const slot of readme.querySelectorAll('[data-readme-image]')) {
-          if (!dialog.isConnected) return;
-          const index = Number(slot.dataset.readmeImage);
-          try {
-            const data = await api.catalogReadmeImage(result.documentId, index);
+        if (!result.imageCount) return;
+        const loadImages = button(t('plugins.catalog.loadImages'), async () => {
+          loadImages.disabled = true; loadImages.textContent = t('plugins.view.loading');
+          for (const slot of readme.querySelectorAll('[data-readme-image]')) {
             if (!dialog.isConnected) return;
-            const image = el(document, 'img'); image.src = data; image.alt = slot.getAttribute('aria-label') || t('plugins.catalog.screenshot', { index: index + 1 });
-            const zoom = button('', event => {
-              event.preventDefault(); event.stopPropagation();
-              const lightbox = el(document, 'dialog', 'plugin-catalog-dialog plugin-image-dialog');
-              const bar = el(document, 'header', 'plugin-catalog-dialog-head');
-              const exit = button('×', () => lightbox.close(), 'plugin-dialog-close'); exit.setAttribute('aria-label', t('settings.plugins.cancel')); bar.append(exit);
-              const imageBody = el(document, 'div', 'plugin-catalog-dialog-body');
-              const large = el(document, 'img'); large.src = data; large.alt = image.alt; imageBody.append(large);
-              lightbox.append(bar, imageBody); dialog.append(lightbox);
-              dismissOnOutside(lightbox);
-              lightbox.addEventListener('close', () => { lightbox.remove(); if (zoom.isConnected) zoom.focus({ preventScroll: true }); });
-              lightbox.showModal();
-            }, 'plugin-screenshot'); zoom.setAttribute('aria-label', image.alt); zoom.append(image); slot.replaceWith(zoom);
-          } catch { if (dialog.isConnected) slot.textContent = t('plugins.catalog.imageUnavailable'); }
-        }
+            const index = Number(slot.dataset.readmeImage);
+            try {
+              const data = await api.catalogReadmeImage(result.documentId, index);
+              if (!dialog.isConnected) return;
+              const image = el(document, 'img'); image.src = data; image.alt = slot.getAttribute('aria-label') || t('plugins.catalog.screenshot', { index: index + 1 });
+              const zoom = button('', event => {
+                event.preventDefault(); event.stopPropagation();
+                const lightbox = el(document, 'dialog', 'plugin-catalog-dialog plugin-image-dialog');
+                const bar = el(document, 'header', 'plugin-catalog-dialog-head');
+                const exit = button('×', () => lightbox.close(), 'plugin-dialog-close'); exit.setAttribute('aria-label', t('settings.plugins.cancel')); bar.append(exit);
+                const imageBody = el(document, 'div', 'plugin-catalog-dialog-body');
+                const large = el(document, 'img'); large.src = data; large.alt = image.alt; imageBody.append(large);
+                lightbox.append(bar, imageBody); dialog.append(lightbox);
+                dismissOnOutside(lightbox);
+                lightbox.addEventListener('close', () => { lightbox.remove(); if (zoom.isConnected) zoom.focus({ preventScroll: true }); });
+                lightbox.showModal();
+              }, 'plugin-screenshot'); zoom.setAttribute('aria-label', image.alt); zoom.append(image); slot.replaceWith(zoom);
+            } catch { if (dialog.isConnected) slot.textContent = t('plugins.catalog.imageUnavailable'); }
+          }
+          loadImages.remove();
+        }, 'plugin-inline-action plugin-readme-load');
+        readme.before(loadImages);
       }).catch(() => { if (dialog.isConnected) readme.textContent = t('plugins.catalog.noReadme'); });
       const footer = el(document, 'footer', 'plugin-catalog-dialog-footer');
       if (selected ? selected.installable : ['available', 'update'].includes(entry.status)) {
@@ -472,7 +477,9 @@
       dialog.setAttribute('aria-label', entry.name);
       dismissOnOutside(dialog);
       dialog.addEventListener('close', () => {
-        dialog.remove(); if (catalogModal === dialog) catalogModal = null;
+        dialog.remove(); if (catalogModal === dialog) {
+          catalogModal = null; void Promise.resolve(api.closeCatalogDetails?.()).catch(() => {});
+        }
         if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
       });
       dialog.showModal();

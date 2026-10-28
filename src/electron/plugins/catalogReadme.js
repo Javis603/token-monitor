@@ -1,5 +1,6 @@
 'use strict';
 const MarkdownIt = require('markdown-it');
+const { MAX_IMAGES, repositoryImageUrl } = require('./catalogImagePolicy');
 // All markup comes from Markdown tokens with raw HTML disabled. Images never
 // receive a remote src in the renderer: only document-scoped indices cross IPC.
 function renderReadme(text, baseUrl) {
@@ -13,9 +14,9 @@ function renderReadme(text, baseUrl) {
     } catch { return null; }
   };
   md.renderer.rules.image = (tokens, index) => {
-    const token = tokens[index], url = resolve(token.attrGet('src'));
+    const token = tokens[index], url = repositoryImageUrl(token.attrGet('src'), baseUrl);
     const alt = md.utils.escapeHtml(token.content || '');
-    if (!url) return alt;
+    if (!url || images.length >= MAX_IMAGES) return alt;
     const image = images.length; images.push(url);
     return `<span data-readme-image="${image}" role="img" aria-label="${alt}">${alt}</span>`;
   };

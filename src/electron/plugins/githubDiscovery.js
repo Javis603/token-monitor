@@ -35,12 +35,13 @@ function createGitHubDiscovery({ root, fetchImpl, now = Date.now }) {
     }
   } catch { error = 'GitHub discovery cache is unavailable'; }
   const list = () => ({ entries, lastFetched, error, limited, topic: TOPIC });
-  async function request(url, limit = MAX_BYTES) {
-    if (disposed) throw new Error('GitHub discovery is closed');
+  async function request(url, limit = MAX_BYTES, signal) {
+    if (disposed || signal?.aborted) throw new Error('GitHub discovery is closed');
     const controller = new AbortController(); controllers.add(controller);
-    const timer = setTimeout(() => controller.abort(), 15000); timer.unref?.();
+    const abort = () => controller.abort(); signal?.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(abort, 15000); timer.unref?.();
     try { return await download(fetchImpl, url, limit, controller.signal); }
-    finally { clearTimeout(timer); controllers.delete(controller); }
+    finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); controllers.delete(controller); }
   }
   return {
     list,
@@ -61,19 +62,19 @@ function createGitHubDiscovery({ root, fetchImpl, now = Date.now }) {
       })();
       try { return await pending; } finally { pending = null; }
     },
-    async readme(id) {
+    async readme(id, signal) {
       if (!entries.some(entry => entry.id === id)) throw new Error('Unknown GitHub discovery entry');
-      return this.repositoryReadme(`https://github.com/${id}`);
+      return this.repositoryReadme(`https://github.com/${id}`, signal);
     },
-    async repositoryReadme(repository) {
+    async repositoryReadme(repository, signal) {
       const id = new URL(repository).pathname.replace(/^\/|\/$/g, '');
       if (!REPO_RE.test(id)) throw new Error('Invalid repository');
-      const raw = JSON.parse((await request(`https://api.github.com/repos/${id}/readme`, 512 * 1024)).toString('utf8'));
+      const raw = JSON.parse((await request(`https://api.github.com/repos/${id}/readme`, 512 * 1024, signal)).toString('utf8'));
       if (raw.encoding !== 'base64' || typeof raw.content !== 'string') throw new Error('README is unavailable');
       const bytes = Buffer.from(raw.content, 'base64');
       if (bytes.length > 256 * 1024) throw new Error('README is too large');
       const base = new URL(raw.download_url);
-      if (base.protocol !== 'https:' || base.hostname !== 'raw.githubusercontent.com' || !base.pathname.startsWith(`/${id}/`) || base.username || base.password) throw new Error('Invalid README location');
+      if (base.protocol !== 'https:' || base.hostname !== 'raw.githubusercontent.com' || !base.pathname.toLowerCase().startsWith(`/${id.toLowerCase()}/`) || base.username || base.password) throw new Error('Invalid README location');
       return { readme: new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ''), baseUrl: base.href };
     },
     dispose() { disposed = true; for (const controller of controllers) controller.abort(); controllers.clear(); }

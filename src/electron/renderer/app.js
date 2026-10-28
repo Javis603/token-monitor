@@ -13005,6 +13005,7 @@ pluginApi = pluginBridge ? {
   catalog: () => pluginBridge.catalog(),
   discoverCatalog: force => pluginBridge.discoverCatalog(force),
   catalogDetails: (source, id) => pluginBridge.catalogDetails(source, id),
+  closeCatalogDetails: () => pluginBridge.closeCatalogDetails(),
   catalogReadmeImage: (documentId, index) => pluginBridge.catalogReadmeImage(documentId, index),
   catalogPreview: (source, id, version) => pluginBridge.catalogPreview(source, id, version),
   addSource: input => pluginBridge.addSource(input),

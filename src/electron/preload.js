@@ -271,6 +271,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     catalog: () => ipcRenderer.invoke('plugins:catalog'),
     discoverCatalog: force => ipcRenderer.invoke('plugins:discoverCatalog', force === true),
     catalogDetails: (source, id) => ipcRenderer.invoke('plugins:catalogDetails', source, id),
+    closeCatalogDetails: () => ipcRenderer.invoke('plugins:closeCatalogDetails'),
     catalogReadmeImage: (documentId, index) => ipcRenderer.invoke('plugins:catalogReadmeImage', documentId, index),
     catalogPreview: (source, id, version) => ipcRenderer.invoke('plugins:catalogPreview', source, id, version),
     addSource: input => ipcRenderer.invoke('plugins:addSource', input),
