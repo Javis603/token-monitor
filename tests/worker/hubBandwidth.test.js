@@ -95,10 +95,13 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
   const initialAt = utcTodayAt('10:00:00.000');
   const refreshedAt = utcTodayAt('10:01:00.000');
   const changedAt = utcTodayAt('10:02:00.000');
+  // Live observations must be in the past even when CI runs before 10:00 UTC.
+  const activityAt = new Date(Date.now() - 2000).toISOString();
+  const renewedActivityAt = new Date(Date.now() - 1000).toISOString();
   const base = {
     deviceId: 'dev-a',
     updatedAt: initialAt,
-    today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: initialAt } } } },
+    today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: activityAt } } } },
     clientHealth: {
       version: 1,
       clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
@@ -141,14 +144,14 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
     legacy.length = 0;
 
     await hub.fetch(ingestRequest({ ...base, today: { ...base.today, sessions: { a: {
-      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: refreshedAt }
+      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: renewedActivityAt }
     } } } }, { 'x-token-monitor-response': 'minimal' }));
     await waitFor(() => modern.length === 1 && legacy.length === 1);
     assert.equal(modern[0].event, 'freshness');
-    assert.equal(Object.values(modern[0].data.stats.sessionActivityObservedAt.today)[0], refreshedAt);
-    assert.equal(Object.values(modern[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], refreshedAt);
+    assert.equal(Object.values(modern[0].data.stats.sessionActivityObservedAt.today)[0], renewedActivityAt);
+    assert.equal(Object.values(modern[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], renewedActivityAt);
     assert.equal(legacy[0].event, 'stats');
-    assert.equal(Object.values(legacy[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, refreshedAt);
+    assert.equal(Object.values(legacy[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, renewedActivityAt);
     modern.length = 0;
     legacy.length = 0;
 
