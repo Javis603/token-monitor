@@ -143,7 +143,7 @@ app.whenReady().then(async () => {
     pluginCalls.push({ channel, frameUrl: event.senderFrame?.url });
     return handler(event, ...args);
   });
-  const demandListener = event => pluginCalls.push({ channel: 'plugins:demand', frameUrl: event.senderFrame?.url });
+  const demandListener = (event, { surface, refs }) => pluginCalls.push({ channel: 'plugins:demand', frameUrl: event.senderFrame?.url, surface, refs });
   ipcMain.on('plugins:demand', demandListener);
   const toggleDialogs = []; let toggleResponse = 1, selectedDirectory = fixtureDir;
   runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain: pluginIpc, session, utilityProcess,
@@ -418,6 +418,31 @@ app.whenReady().then(async () => {
     await runtime.dispose();runtime=null;clearTimeout(deadline);app.exit(0);return;
   }
   await js("pluginApi.setEnabled('trusted-fixture',true)");
+  if (process.env.TM_PAGE_SETTINGS_LAYOUT === '1') {
+    await js("pluginApi.place('trusted-fixture/panel','page',true).then(applyPluginCatalog).then(()=>pluginApi.openPage('trusted-fixture/panel'))");
+    await waitFor("document.querySelector('.plugin-main-content input')", 'plugin page input');
+    await js("globalThis.retainedLayoutInput=document.querySelector('.plugin-main-content input');retainedLayoutInput.value='Keep my draft';els.settingsButton.click();document.querySelectorAll('.settings-section-toggle[aria-expanded=true]').forEach(node=>node.click())");
+    await pause(500);
+    fs.writeFileSync(path.join(evidence,'plugin-settings.png'),(await capture()).toPNG());
+    const geometry = await js(`(() => {
+      const shell=els.shell.getBoundingClientRect(),footer=document.querySelector('.footer').getBoundingClientRect();
+      return {bottomGap:shell.bottom-footer.bottom,viewport:innerHeight,pluginHidden:getComputedStyle(document.querySelector('.plugin-main-panel')).display==='none'};
+    })()`);
+    fs.writeFileSync(path.join(evidence,'page-settings-layout.json'),JSON.stringify(geometry,null,2));
+    assert.equal(geometry.pluginHidden,false, 'settings must retain the plugin page');
+    assert.ok(geometry.bottomGap < 40, 'footer must remain at the bottom with plugin content visible: '+JSON.stringify(geometry));
+    assert.ok(await js("document.querySelector('.plugin-main-content').getBoundingClientRect().height > 100"));
+    assert.ok(pluginCalls.filter(call=>call.channel==='plugins:demand' && call.surface==='page').at(-1)?.refs.includes('trusted-fixture/panel'), 'visible page retains foreground demand');
+    await js("retainedLayoutInput.focus()");
+    await win.webContents.insertText(' + continued');
+    assert.equal(await js("retainedLayoutInput.value"),'Keep my draft + continued');
+    await js("els.settingsButton.click()");await pause(200);
+    assert.equal(await js("document.querySelector('.plugin-main-content input')===retainedLayoutInput && retainedLayoutInput.value==='Keep my draft + continued'"),true);
+    fs.writeFileSync(path.join(evidence,'plugin-restored.png'),(await capture()).toPNG());
+    assertConsoleClean();
+    for(const host of BrowserWindow.getAllWindows())host.destroy();
+    await runtime.dispose();runtime=null;clearTimeout(deadline);app.exit(0);return;
+  }
   if (process.env.TM_PLACEMENTS_ONLY === '1') {
     // Exercise the installed-view route through the real existing composers.
     const placementBaseline = process.env.TM_EXPECT_BASELINE === '1';

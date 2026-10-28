@@ -12938,7 +12938,9 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
   onDemand: (surface, refs) => pluginBridge.setDemand(surface, refs),
   motionAllowed: () => !prefersReducedMotion(),
   motionMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
-  isSurfaceActive: surface => !isRendererWindowHidden() && !state.floatingBubble.collapsed && (surface === 'settings' ? isSettingsPanelOpen() : !isSettingsPanelOpen())
+  isSurfaceActive: (surface, container) => !isRendererWindowHidden() && !state.floatingBubble.collapsed
+    && (surface === 'settings' ? isSettingsPanelOpen() : !isSettingsPanelOpen()
+      || (surface === 'page' && Boolean(container?.closest('#pluginMainPanel'))))
 }) : null;
 pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ document,
   host: { mount: (container, view, context) => pluginViewHost.mount(container, view.ref, 'page', context), unmount: container => pluginViewHost.unmount(container) },

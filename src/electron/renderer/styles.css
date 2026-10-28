@@ -8579,7 +8579,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-main-detach { flex-shrink: 0; color: var(--muted); font: inherit; border: 0; background: transparent; padding: 6px 0 6px 6px; cursor: pointer; }
 .plugin-main-detach:hover { color: var(--text); }
 .plugin-main-content { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 2px; }
-.shell.settings-open > .plugin-main-panel { display: none; }
 .plugin-main-heading h2:focus-visible, .plugin-main-detach:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
 
 /* Plugin identity and task-specific tools share the compact settings scale. */
