@@ -417,3 +417,37 @@ for (const operation of ['uninstall', 'update']) {
     assert.equal(f.notch.webContents.reloads, 0);
   });
 }
+
+for (const proceed of [false, true]) {
+  test(`mixed reload and unsaved hosts use one warning before ${proceed ? 'continuing' : 'cancelling'} package cleanup`, async t => {
+    const f = await runtimeFixture(t); await f.install();
+    await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+    const actions = [];
+    f.lifecycle(f.main, request => {
+      actions.push(`main:${request.action}`);
+      if (request.action === 'inspect') throw Error('host inspection failed');
+      return {};
+    });
+    f.lifecycle(f.notch, request => {
+      actions.push(`notch:${request.action}`);
+      return { loaded: true, unsaved: true };
+    });
+    if (!proceed) f.cancel();
+    const operation = f.invoke('plugins:uninstall', 'trusted-fixture');
+    if (proceed) await operation;
+    else await assert.rejects(operation, /cancelled/);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(f.dialogs.length, 1);
+    const warning = [f.dialogs[0].message, f.dialogs[0].detail].join('\n');
+    assert.match(warning, /unsaved work/);
+    assert.match(warning, /discard that work/);
+    assert.match(warning, /reloads affected windows/);
+    assert.deepEqual(actions, proceed
+      ? ['main:inspect', 'notch:inspect', 'notch:release', 'notch:resume']
+      : ['main:inspect', 'notch:inspect']);
+    assert.equal(f.main.webContents.reloads, proceed ? 1 : 0);
+    assert.equal(f.notch.webContents.reloads, 0);
+    assert.equal(fs.existsSync(path.join(f.dir, 'plugins/trusted-fixture')), !proceed);
+    if (!proceed) assert.equal(f.runtime.manager.active('trusted-fixture'), true);
+  });
+}

@@ -322,11 +322,12 @@ function createPluginRuntime({
     }));
     return results.filter(item => !item.host.isDestroyed() && item.loaded);
   }
-  async function confirm(event, note) {
+  async function confirm(event, note, detail = null) {
     requireMain(event);
     const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
       type: 'warning', title: translate(getLocale(), note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
       message: translate(getLocale(), note),
+      ...(detail ? { detail: translate(getLocale(), detail) } : {}),
       buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.trusted.continue')],
       defaultId: 0, cancelId: 0
     });
@@ -404,8 +405,9 @@ function createPluginRuntime({
       else affected.push({ host, ids: ids.filter(id => failedIds.has(id)), error: 'Previous cleanup failed' });
     }
     const reload = affected.filter(item => item.error).map(item => item.host);
-    if (reload.length) await confirm(event, 'plugins.trusted.reloadNote');
-    else if (affected.some(item => item.unsaved)) await confirm(event, 'plugins.trusted.packageUnsavedNote');
+    const unsaved = affected.some(item => item.unsaved);
+    if (reload.length) await confirm(event, 'plugins.trusted.reloadNote', unsaved ? 'plugins.trusted.packageUnsavedNote' : null);
+    else if (unsaved) await confirm(event, 'plugins.trusted.packageUnsavedNote');
     const released = [], recovery = [];
     try {
       for (const item of affected.filter(item => !item.error)) {
