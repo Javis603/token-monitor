@@ -477,7 +477,7 @@ function commitMinimaxCodeRefresh(session, updated, deps, state, pendingKey, sta
 }
 
 async function refreshMinimaxCodeSession(session, deps = {}) {
-  if (deps.probe || deps.signal?.aborted) throw errorWithStatus('unavailable', 'Refresh skipped');
+  if (deps.signal?.aborted) throw errorWithStatus('unavailable', 'Refresh skipped');
   // The official proper-lockfile mutex is auth.lock.lock. Never steal it.
   const lockPath = path.join(path.dirname(session.authPath), 'auth.lock.lock');
   try { fs.mkdirSync(lockPath, { mode: 0o700 }); }
@@ -671,7 +671,7 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
       if (error.status === 'unauthorized') return row('unauthorized');
       try { authState = minimaxCodeAuthState(session, deps, state?.get(pendingKey)); }
       catch (stateError) { return row(stateError.status || 'unavailable'); }
-      if (authState.status !== 'authenticated' || expiry <= (deps.now || Date.now)()) return row('unavailable');
+      if (authState.status !== 'authenticated') return row('unavailable');
     }
   }
   if (session.record.expiresAtMs <= (deps.now || Date.now)()) return row('unavailable');

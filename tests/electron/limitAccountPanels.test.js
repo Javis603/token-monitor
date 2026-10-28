@@ -73,14 +73,15 @@ function renderPanel(form, callbacks = {}) {
   return { group, document };
 }
 
-function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, providerSource = 'api', providerRows, keyConfigured = false } = {}) {
+function appSource(from, to) {
   const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
-  const slice = (from, to) => {
-    const start = app.indexOf(from);
-    const end = app.indexOf(to, start);
-    assert.ok(start !== -1 && end !== -1, `${from} should exist`);
-    return app.slice(start, end);
-  };
+  const start = app.indexOf(from);
+  const end = app.indexOf(to, start);
+  assert.ok(start !== -1 && end !== -1, `${from} should exist`);
+  return app.slice(start, end);
+}
+
+function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, providerSource = 'api', providerRows, keyConfigured = false } = {}) {
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
   const { group, document } = renderPanel(form);
   group.byId('minimaxSettingsDetails').classList.remove('hidden');
@@ -112,9 +113,9 @@ function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, provider
     t: (key, params) => translated(key, params)
   };
   vm.runInNewContext(
-    slice('function externalProviderForAccount(', '\nfunction setAccountPanelMessage(')
-      + slice('function apiKeyAccountStatusText(', '\nfunction setExternalAccountExpanded(')
-      + slice('function renderExternalProviderStatus(', '\n// The override inputs'),
+    appSource('function externalProviderForAccount(', '\nfunction setAccountPanelMessage(')
+      + appSource('function apiKeyAccountStatusText(', '\nfunction setExternalAccountExpanded(')
+      + appSource('function renderExternalProviderStatus(', '\n// The override inputs'),
     context
   );
   context.renderExternalProviderStatus('minimax');
@@ -767,6 +768,10 @@ test('MiniMax billing choice waits for saving before key submission and follows 
 
 test('MiniMax key status reads only the API row and defaults to not configured without a key', () => {
   // OAuth/Code rows can coexist but do not configure, validate, or link the API key.
+  const withApiRow = (api) => minimaxAppStatus({
+    providerRows: [{ provider: 'minimax', status: 'ok', source: 'oauth' }, { provider: 'minimax', source: 'api', ...api }],
+    keyConfigured: true
+  });
   const { group: noKey, linked: oauthLinked } = minimaxAppStatus({
     providerRows: [{ provider: 'minimax', status: 'ok', source: 'oauth' }]
   });
@@ -777,48 +782,24 @@ test('MiniMax key status reads only the API row and defaults to not configured w
   assert.equal(isVisible(noKey, noKey.byId('minimaxLogoutButton')), false);
   assert.equal(isVisible(noKey, noKey.byId('minimaxRefreshButton')), false);
 
-  const { group: keyLinked, linked } = minimaxAppStatus({
-    providerRows: [
-      { provider: 'minimax', status: 'ok', source: 'oauth' },
-      { provider: 'minimax', status: 'ok', source: 'api' }
-    ],
-    keyConfigured: true
-  });
+  const { group: keyLinked, linked } = withApiRow({ status: 'ok' });
   assert.equal(linked, true);
   assert.equal(keyLinked.byId('minimaxAccountStatus').textContent, translated('settings.minimax.statusSet'));
   assert.equal(isVisible(keyLinked, keyLinked.byId('minimaxManualPanel')), false);
   assert.equal(isVisible(keyLinked, keyLinked.byId('minimaxOpenBrowser')), false);
   assert.equal(isVisible(keyLinked, keyLinked.byId('minimaxLogoutButton')), true);
 
-  const { group: rejected, linked: rejectedLinked } = minimaxAppStatus({
-    providerRows: [
-      { provider: 'minimax', status: 'ok', source: 'oauth' },
-      { provider: 'minimax', status: 'unauthorized', source: 'api' }
-    ],
-    keyConfigured: true
-  });
+  const { group: rejected, linked: rejectedLinked } = withApiRow({ status: 'unauthorized' });
   assert.equal(rejectedLinked, false);
   assert.equal(rejected.byId('minimaxAccountStatus').textContent, translated('settings.minimax.statusInvalid'));
   assert.equal(isVisible(rejected, rejected.byId('minimaxManualPanel')), true);
   assert.equal(isVisible(rejected, rejected.byId('minimaxLogoutButton')), true);
 
-  const { group: stalled } = minimaxAppStatus({
-    providerRows: [
-      { provider: 'minimax', status: 'ok', source: 'oauth' },
-      { provider: 'minimax', status: 'unavailable', source: 'api' }
-    ],
-    keyConfigured: true
-  });
+  const { group: stalled } = withApiRow({ status: 'unavailable' });
   assert.equal(isVisible(stalled, stalled.byId('minimaxManualPanel')), true);
   assert.equal(isVisible(stalled, stalled.byId('minimaxOpenBrowser')), true);
 
-  const { group: recheck, state, render } = minimaxAppStatus({
-    providerRows: [
-      { provider: 'minimax', status: 'ok', source: 'oauth' },
-      { provider: 'minimax', status: 'ok', source: 'api', updatedAt: '2026-10-26T00:00:00.000Z' }
-    ],
-    keyConfigured: true
-  });
+  const { group: recheck, state, render } = withApiRow({ status: 'ok', updatedAt: '2026-10-26T00:00:00.000Z' });
   assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), false);
   state.minimaxPendingCheckSince = Date.parse('2026-10-26T00:00:01.000Z');
   state.stats.limits.providers = state.stats.limits.providers.filter((row) => row.source !== 'api');
@@ -840,16 +821,13 @@ test('MiniMax key status reads only the API row and defaults to not configured w
 });
 
 test('MiniMax API-key rechecks leave the independent Code row in place', () => {
-  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
-  const start = app.indexOf('function clearExternalProviderPendingStatus(');
-  const end = app.indexOf('\nfunction nextCopilotSignInFlowId(', start);
-  assert.ok(start !== -1 && end !== -1);
+  const source = appSource('function clearExternalProviderPendingStatus(', '\nfunction nextCopilotSignInFlowId(');
   const state = { stats: { limits: { providers: [
     { provider: 'minimax', source: 'oauth', status: 'ok' },
     { provider: 'minimax', source: 'api', status: 'unauthorized' },
     { provider: 'deepseek', source: 'api', status: 'ok' }
   ] } } };
-  vm.runInNewContext(`${app.slice(start, end)}\nclearExternalProviderPendingStatus('minimax');`, { state });
+  vm.runInNewContext(`${source}\nclearExternalProviderPendingStatus('minimax');`, { state });
   assert.deepEqual(state.stats.limits.providers, [
     { provider: 'minimax', source: 'oauth', status: 'ok' },
     { provider: 'deepseek', source: 'api', status: 'ok' }

@@ -2925,22 +2925,14 @@ test('MiniMax limit-row statuses keep Code sign-in separate from API-key setup',
     presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'unauthorized' }),
     { label: 'Update API key', tone: 'setup' }
   );
-  assert.deepEqual(
-    presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'notConfigured', source: 'oauth' }),
-    { label: 'Sign in', tone: 'setup' }
-  );
-  assert.deepEqual(
-    presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'unauthorized', source: 'oauth' }),
-    { label: 'Sign in again', tone: 'setup' }
-  );
-  assert.deepEqual(
-    presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'unavailable', source: 'oauth' }),
-    { label: 'Unavailable', tone: 'warn' }
-  );
-  assert.deepEqual(
-    presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'ok', source: 'oauth' }),
-    { label: 'Live', tone: 'ok' }
-  );
+  for (const [status, expected] of [
+    ['notConfigured', { label: 'Sign in', tone: 'setup' }],
+    ['unauthorized', { label: 'Sign in again', tone: 'setup' }],
+    ['unavailable', { label: 'Unavailable', tone: 'warn' }],
+    ['ok', { label: 'Live', tone: 'ok' }]
+  ]) {
+    assert.deepEqual(presentation.limitProviderStatusLabel({ provider: 'minimax', status, source: 'oauth' }), expected, `oauth ${status}`);
+  }
 });
 
 test('MiMo uses shared Limits statuses while keeping errors distinct from rejected sessions', () => {
