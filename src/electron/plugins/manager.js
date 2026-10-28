@@ -141,7 +141,9 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
       } catch (error) { plugin.errors.push(error.message); }
       plugins.set(plugin.id, plugin);
     }
-    reconcile(); emit();
+    // Publish the committed or recovered revision once endMutation runs.
+    // An intermediate disabled catalog would navigate away from its page.
+    reconcile(); if (!mutating.has(id)) emit();
   }
   return {
     reload, list: () => ({ enabled: master(), safeMode, plugins: [...plugins.values()].map(describe) }), payload,

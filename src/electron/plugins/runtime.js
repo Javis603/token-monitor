@@ -394,6 +394,59 @@ function createPluginRuntime({
     return result;
   }
 
+  async function changePackage(event, change, ids) {
+    requireMain(event);
+    const affected = await inspectHosts(ids);
+    for (const [host, failedIds] of failedCleanup) {
+      if (host.isDestroyed() || !ids.some(id => failedIds.has(id))) continue;
+      const item = affected.find(item => item.host === host);
+      if (item) item.error = 'Previous cleanup failed';
+      else affected.push({ host, ids: ids.filter(id => failedIds.has(id)), error: 'Previous cleanup failed' });
+    }
+    const reload = affected.filter(item => item.error).map(item => item.host);
+    if (reload.length) await confirm(event, 'plugins.trusted.reloadNote');
+    else if (affected.some(item => item.unsaved)) await confirm(event, 'plugins.trusted.unsavedNote');
+    const released = [];
+    try {
+      for (const item of affected.filter(item => !item.error)) {
+        // Include partially released hosts in recovery if author cleanup fails.
+        try {
+          await requestLifecycle(item.host, 'release', item.ids);
+          released.push(item);
+        } catch (error) {
+          failedCleanup.set(item.host, new Set([...(failedCleanup.get(item.host) || []), ...item.ids]));
+          log(`[plugins] package cleanup failed: ${error.message}`);
+          await confirm(event, 'plugins.trusted.reloadNote');
+          reload.push(item.host);
+        }
+      }
+      await change();
+    } finally {
+      // Resume after both commit and rollback. Descriptor publication during
+      // the transaction was ignored by blocked hosts, so publish once more.
+      const resumeFailed = [];
+      for (const item of released) {
+        try { await requestLifecycle(item.host, 'resume', item.ids); }
+        catch (error) {
+          failedCleanup.set(item.host, new Set(item.ids));
+          log(`[plugins] package resume failed: ${error.message}`);
+          resumeFailed.push(item.host);
+        }
+      }
+      if (resumeFailed.length) {
+        const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
+          type: 'warning', title: translate(getLocale(), 'plugins.trusted.reloadTitle'),
+          message: translate(getLocale(), 'plugins.trusted.cleanupNote'),
+          buttons: [translate(getLocale(), 'plugins.trusted.later'), translate(getLocale(), 'plugins.trusted.reloadNow')], defaultId: 1, cancelId: 0
+        });
+        if (response.response === 1) reload.push(...resumeFailed);
+      }
+      reloadHosts(reload);
+      manager.settingsChanged();
+    }
+    return listWithPlacements();
+  }
+
   function registerIpc() {
     handle('plugins:orderContent', (event, target, refs) => {
       requireMain(event);
@@ -464,10 +517,10 @@ function createPluginRuntime({
       if (selection.canceled || !selection.filePaths.length) return null;
       return kind === 'directory' ? managed.previewDirectory(selection.filePaths[0]) : managed.previewFile(selection.filePaths[0]);
     });
-    handle('plugins:install', (event, token) => changeCode(event, () => managed.install(token), [managed.previewId(token)]));
+    handle('plugins:install', (event, token, options) => changePackage(event, () => managed.install(token, { trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true }), [managed.previewId(token)]));
     handle('plugins:cancelInstall', (event, token) => { requireMain(event); managed.cancel(token); });
     handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id), [id]));
-    handle('plugins:uninstall', (event, id, options) => changeCode(event, () => managed.uninstall(id, options), [id]));
+    handle('plugins:uninstall', (event, id, options) => changePackage(event, () => managed.uninstall(id, options), [id]));
     handle('plugins:openPage', (event, ref) => { requireMain(event); pages.open(ref); return { ok: true }; });
     handle('plugins:openFolder', async (event) => {
       requireMain(event);

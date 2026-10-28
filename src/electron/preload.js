@@ -274,7 +274,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     refreshSource: id => ipcRenderer.invoke('plugins:refreshSource', id),
     removeSource: id => ipcRenderer.invoke('plugins:removeSource', id),
     importPackage: kind => ipcRenderer.invoke('plugins:import', kind),
-    install: token => ipcRenderer.invoke('plugins:install', token),
+    install: (token, options) => ipcRenderer.invoke('plugins:install', token, options),
     cancelInstall: token => ipcRenderer.invoke('plugins:cancelInstall', token),
     rollback: id => ipcRenderer.invoke('plugins:rollback', id),
     uninstall: (id, options) => ipcRenderer.invoke('plugins:uninstall', id, options),

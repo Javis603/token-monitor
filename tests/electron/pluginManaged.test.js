@@ -492,3 +492,42 @@ for (const keepPlacements of [false, true]) test(`compact placement transaction 
   const restarted = createManagedPlugins(f.args); restarted.recover();
   assert.deepEqual(snapshot(f), before);
 });
+
+for (const enabled of [true, false]) test(`trusted update preserves enabled=${enabled} and background choice`, async t => {
+  const f = fixture(t); await f.install('1.0.0');
+  f.settings.pluginStates['test-plugin'] = { enabled, background: true, trustedRevision: 'a'.repeat(64) };
+  const pkg = parsePackage(bytes('2.0.0'));
+  await f.api.install(f.api.preview(pkg).token, { trustUpdate: true });
+  assert.deepEqual(f.settings.pluginStates['test-plugin'], { enabled, background: true, trustedRevision: require('../../src/electron/plugins/package').contentDigest(pkg) });
+});
+for (const point of ['settings-written', 'reloaded']) test(`failed trusted update restores previous trust at ${point}`, async t => {
+  let armed = false;
+  const f = fixture(t, step => { if (armed && step === point) throw Error('interrupted'); });
+  await f.install('1.0.0');
+  f.settings.pluginStates['test-plugin'] = { enabled: true, background: false, trustedRevision: 'a'.repeat(64) };
+  armed = true;
+  await assert.rejects(f.api.install(f.api.preview(parsePackage(bytes('2.0.0'))).token, { trustUpdate: true }), /interrupted/);
+  assert.equal(f.settings.pluginStates['test-plugin'].trustedRevision, 'a'.repeat(64));
+  assert.equal(f.api.describe('test-plugin').version, '1.0.0');
+});
+
+for (const allowed of [true, false]) test(`install consent enables only when runtime permits it (${allowed})`, async t => {
+  const f = fixture(t);
+  f.args.manager.list = () => ({ enabled: allowed, plugins: [] });
+  const pkg = parsePackage(bytes());
+  await f.api.install(f.api.preview(pkg).token, { trustInstall: true });
+  assert.deepEqual(f.settings.pluginStates['test-plugin'], { enabled: allowed, background: false,
+    trustedRevision: allowed ? require('../../src/electron/plugins/package').contentDigest(pkg) : null });
+});
+for (const point of ['settings-written', 'reloaded']) test(`failed install-and-enable restores uninstalled state at ${point}`, async t => {
+  const f = fixture(t, step => { if (step === point) throw Error('interrupted'); });
+  f.args.manager.list = () => ({ enabled: true, plugins: [] });
+  const before = snapshot(f);
+  await assert.rejects(f.api.install(f.api.preview(parsePackage(bytes())).token, { trustInstall: true }), /interrupted/);
+  assert.deepEqual(f.settings, before.settings);
+  assert.deepEqual(f.api.list(), []);
+  assert.equal(fs.existsSync(path.join(f.args.userDir, 'test-plugin')), false);
+  const restarted = createManagedPlugins(f.args); restarted.recover();
+  assert.deepEqual(restarted.list(), []);
+  assert.deepEqual(f.settings, before.settings);
+});

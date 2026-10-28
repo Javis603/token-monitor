@@ -234,6 +234,57 @@ app.whenReady().then(async () => {
   }
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
+  if (process.env.TM_PACKAGE_LIFECYCLE_ONLY === '1') {
+    let loads = 0; win.webContents.on('did-finish-load', () => loads++);
+    await js("pluginApi.setEnabled('trusted-fixture',true)");
+    await js("pluginApi.place('trusted-fixture/panel','page',true).then(applyPluginCatalog)");
+    await js("openViewFromTray('plugin:trusted-fixture/panel')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'original plugin page');
+    const oldPid = (await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','before')")).pid;
+    fs.writeFileSync(path.join(evidence,'package-before.png'), (await capture()).toPNG());
+    manifest.version = '9.0.0'; fs.writeFileSync(path.join(fixtureDir,'manifest.json'), JSON.stringify(manifest));
+    fs.appendFileSync(path.join(fixtureDir,'ui.mjs'), "\nglobalThis.packageRevisionLoaded = '9.0.0';\n");
+    selectedDirectory = path.join(scratch,'update.tmplugin'); require('./build-plugin-package').main([fixtureDir,selectedDirectory]);
+    await js("openSettingsPanel();for(const section of SETTINGS_SECTION_IDS)setSettingsSectionExpanded(section,section==='plugins');pluginSettingsPanel.refresh()");
+    await waitFor("[...document.querySelectorAll('button')].some(b=>b.textContent===t('plugins.package.import'))", 'import action');
+    await js("[...document.querySelectorAll('button')].find(b=>b.textContent===t('plugins.package.import')).click()");
+    await waitFor("document.querySelector('.plugin-package-preview .plugin-allow')", 'update consent');
+    assert.equal(await js("document.querySelector('.plugin-package-preview .plugin-allow').textContent"), '信任並更新');
+    await pause(600);
+    await js("document.querySelector('.plugin-package-preview').scrollIntoView({block:'center',behavior:'instant'})");
+    await pause(300);
+    fs.writeFileSync(path.join(evidence,'package-consent.png'), (await capture()).toPNG());
+    await js("document.querySelector('.plugin-package-preview .plugin-allow').click()");
+    await waitFor("globalThis.packageRevisionLoaded==='9.0.0' && state.pluginCatalog.plugins[0].status==='active'", 'new revision running');
+    assert.equal(await js('state.breakdown'), 'plugin:trusted-fixture/panel');
+    await js("els.settingsPanel.classList.add('hidden');openViewFromTray('plugin:trusted-fixture/panel')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'updated page');
+    const newPid = (await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','after')")).pid;
+    assert.notEqual(oldPid,newPid); assert.equal(loads,0); assert.equal(toggleDialogs.length,0);
+    fs.writeFileSync(path.join(evidence,'package-updated.png'), (await capture()).toPNG());
+    await js("pluginApi.uninstall('trusted-fixture',{keepData:true,keepPlacements:false})");
+    await waitFor("!document.querySelector('[aria-label=\"Fixture draft\"]')", 'removed controls');
+    assert.equal(runtime.manager.backendCount(),0); assert.equal(loads,0); assert.equal(toggleDialogs.length,0);
+    fs.writeFileSync(path.join(evidence,'package-removed.png'), (await capture()).toPNG());
+    await js("openSettingsPanel();for(const section of SETTINGS_SECTION_IDS)setSettingsSectionExpanded(section,section==='plugins');pluginSettingsPanel.refresh()");
+    await waitFor("[...document.querySelectorAll('button')].some(b=>b.textContent===t('plugins.package.import'))", 'fresh import');
+    await js("[...document.querySelectorAll('button')].find(b=>b.textContent===t('plugins.package.import')).click()");
+    await waitFor("document.querySelector('.plugin-package-preview .plugin-allow')", 'fresh consent');
+    assert.equal(await js("document.querySelector('.plugin-package-preview .plugin-allow').textContent"), '信任並安裝啟用');
+    assert.equal(await js("[...document.querySelectorAll('.plugin-package-preview button')].some(b=>b.textContent==='只安裝')"), true);
+    await pause(600);
+    await js("document.querySelector('.plugin-package-preview').scrollIntoView({block:'center',behavior:'instant'})");
+    await pause(300);
+    fs.writeFileSync(path.join(evidence,'install-consent.png'), (await capture()).toPNG());
+    await js("document.querySelector('.plugin-package-preview .plugin-allow').click()");
+    await waitFor("state.pluginCatalog.plugins[0]?.status==='active' && !document.querySelector('.plugin-package-preview')", 'fresh install active without second consent');
+    assert.equal(runtime.manager.list().plugins[0].background.enabled, false);
+    assert.equal(loads,0);
+    assert.deepEqual(errors,[]);
+    fs.writeFileSync(path.join(evidence,'package-results.json'),JSON.stringify({oldPid,newPid,loads,dialogs:toggleDialogs.length,errors},null,2));
+    console.log('PASS real App package consent, new revision/PID, update and uninstall without reload');
+    await runtime.dispose(); runtime=null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
+  }
   if (process.env.TM_TRANSACTIONS_ONLY === '1') {
     const baseline = process.env.TM_EXPECT_BASELINE === '1', results = [];
     await js("pluginApi.setEnabled('trusted-fixture',true)");

@@ -215,8 +215,14 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       } else {
         if (current) fs.writeFileSync(previous, current.bytes, { mode: 0o600 });
         else fs.rmSync(previous, { force: true });
-        if (operation === 'install') patch.pluginStates[id] = { enabled: false, background: false, trustedRevision: null };
-        // A changed revision needs an explicit new trust decision before execution.
+        if (operation === 'install') {
+          const enabled = options.trustInstall === true && manager.list().enabled === true;
+          patch.pluginStates[id] = { enabled, background: false, trustedRevision: enabled ? contentDigest(pkg) : null };
+        }
+        // Consent applies only to the exact package held by this preview token.
+        if (operation === 'update' && options.trustUpdate) {
+          patch.pluginStates[id] = { ...patch.pluginStates[id], trustedRevision: contentDigest(pkg) };
+        }
       }
       atomicJson(registryFile, next, MAX_REGISTRY_BYTES); fault('registry-written');
       saveSettings(patch); fault('settings-written');
@@ -243,13 +249,13 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     previewId: token => previews.get(token)?.pkg.manifest.id,
     cancel(token) { previews.delete(token); },
     cancelSource(id) { for (const [token, preview] of previews) if (preview.origin.id === id) previews.delete(token); },
-    async install(token) {
+    async install(token, options = {}) {
       assertAvailable();
       const item = previews.get(token); previews.delete(token);
       if (!item || item.expires < now()) throw new Error('package preview expired; select the package again');
       if (item.baseline !== JSON.stringify(registry[item.pkg.manifest.id] || null)) throw new Error('installed version changed; preview again');
       assertInstallable(item.pkg, item.origin);
-      return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin);
+      return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin, { trustUpdate: options.trustUpdate === true, trustInstall: options.trustInstall === true });
     },
     async rollback(id) {
       const old = managed(id);

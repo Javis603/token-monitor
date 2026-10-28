@@ -313,17 +313,20 @@
       if (p.origin.url) panel.append(el(document, 'code', 'plugin-log', p.origin.url));
       if (p.origin.packageUrl) panel.append(el(document, 'code', 'plugin-log', p.origin.packageUrl));
       panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
-      panel.append(el(document, 'p', 'settings-note', t(p.operation === 'install' ? 'plugins.package.enableLater' : 'plugins.package.grants')));
+      panel.append(el(document, 'p', 'settings-note', t(p.operation === 'install' ? (list.enabled ? 'plugins.package.installConsent' : 'plugins.package.enableLater') : 'plugins.package.grants')));
       const details = el(document, 'details', 'plugin-logs'); details.append(el(document, 'summary', '', t('plugins.package.integrity')));
       details.append(el(document, 'code', 'plugin-log', p.sha256)); panel.append(details);
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
-      actions.append(button(t('settings.plugins.cancel'), () => { void api.cancelInstall(p.token); packagePreview = null; catalogReview = null; render(); }),
-        button(t(`plugins.package.${p.operation}`), () => void run(async () => {
-          const next = await api.install(p.token); packagePreview = null; catalogReview = null;
-          activeTab = 'installed';
-          if (p.operation === 'install' || next.plugins.find(plugin => plugin.id === p.id)?.status === 'needsApproval') { consentFor = p.id; revealConsent = true; }
-          return next;
-        }, 'package'), 'plugin-allow'));
+      const install = trustInstall => void run(async () => {
+        const next = await api.install(p.token, { trustUpdate: p.operation === 'update', trustInstall });
+        packagePreview = null; catalogReview = null; activeTab = 'installed';
+        if (p.operation === 'update' && next.plugins.find(plugin => plugin.id === p.id)?.status === 'needsApproval') { consentFor = p.id; revealConsent = true; }
+        return next;
+      }, 'package');
+      actions.append(button(t('settings.plugins.cancel'), () => { void api.cancelInstall(p.token); packagePreview = null; catalogReview = null; render(); }));
+      if (p.operation === 'install' && list.enabled) actions.append(button(t('plugins.package.installOnly'), () => install(false)));
+      actions.append(button(t(p.operation === 'update' ? 'plugins.package.trustUpdate' : list.enabled ? 'plugins.package.trustInstall' : 'plugins.package.installOnly'),
+        () => install(p.operation === 'install' && list.enabled), 'plugin-allow'));
       panel.append(actions); return panel;
     }
 
