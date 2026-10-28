@@ -97,6 +97,10 @@ export class HubDO {
     this.heartbeatTimer = null;
     this.broadcastTimer = null;
     this.lastSseContentKey = '';
+    this.lastSseStats = null;
+    this.streamRevision = 0;
+    this.sseGeneration = 0;
+    this.broadcastTail = Promise.resolve();
     this.encoder = new TextEncoder();
     this.mutationTail = Promise.resolve();
     this.titlePrivacyServerEnabled = null;
@@ -270,7 +274,7 @@ export class HubDO {
     this.heartbeatTimer = setInterval(() => {
       const chunk = this.encoder.encode(': hb\n\n');
       for (const client of this.sseClients) {
-        client.writer.write(chunk).catch(() => this.dropClient(client));
+        if (!client.busy) this.writeEncoded(client, chunk);
       }
       if (this.sseClients.size === 0 && this.heartbeatTimer) {
         clearInterval(this.heartbeatTimer);
@@ -281,66 +285,98 @@ export class HubDO {
 
   dropClient(client) {
     this.sseClients.delete(client);
-    try { client.writer.close(); } catch (_) {}
+    client.onDrop?.();
+    try {
+      const stop = client.writer.close;
+      Promise.resolve(stop?.call(client.writer)).catch(() => {});
+    } catch (_) {}
     if (this.sseClients.size === 0 && this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
     if (this.sseClients.size === 0) {
       this.lastSseContentKey = '';
+      this.lastSseStats = null;
+      this.sseGeneration++;
       if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
       this.broadcastTimer = null;
     }
   }
 
   writeEncoded(client, chunk) {
-    client.writer.write(chunk).catch(() => this.dropClient(client));
+    if (!this.sseClients.has(client)) return false;
+    if (client.busy) {
+      client.needsSnapshot = true;
+      return false;
+    }
+    client.busy = true;
+    let write;
+    try { write = client.writer.write(chunk); }
+    catch (_) { this.dropClient(client); return false; }
+    Promise.resolve(write).then(async () => {
+      if (!this.sseClients.has(client)) return;
+      if (!client.needsSnapshot) { client.busy = false; return; }
+      // No queued frames: the pending write plus one dirty bit bounds memory.
+      // Keep busy during the read, so a concurrent broadcast cannot overtake it.
+      client.needsSnapshot = false;
+      client.streamRevision = null;
+      const stats = await this.statsWithSubscriptionVersion();
+      if (!this.sseClients.has(client)) return;
+      client.busy = false;
+      this.writeEncoded(client, this.encoder.encode(hubProtocol.encodeSseEvent('stats', {
+        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
+        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {})
+      })));
+    }).catch(() => this.dropClient(client));
+    return true;
   }
 
   fanoutSseFrames(frames) {
     // Reuse the same encoded frame across all subscribers of each kind.
     const chunks = new Map();
-    for (const frame of [frames.stats, frames.freshness]) {
+    for (const frame of [frames.stats, frames.freshness, frames.delta]) {
       if (frame) chunks.set(frame, this.encoder.encode(frame));
     }
     for (const client of this.sseClients) {
       const chunk = chunks.get(hubProtocol.sseFrameForClient(frames, client));
-      if (chunk) this.writeEncoded(client, chunk);
+      if (chunk && this.writeEncoded(client, chunk) && client.deltaEvents) client.streamRevision = frames.revision;
     }
   }
 
-  async broadcast(reason = 'update') {
-    if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
-    this.broadcastTimer = null;
-    if (this.sseClients.size === 0) return;
-    const stats = await this.statsWithSubscriptionVersion();
-    const at = new Date().toISOString();
-    const frames = hubProtocol.prepareSseFanout({
-      reason,
-      stats,
-      at,
-      lastContentKey: this.lastSseContentKey,
-      ...hubProtocol.sseClientKinds(this.sseClients),
-      allowFreshness: false
+  publishStats(reason, allowFreshness) {
+    // Serialize async reads and fan-out, not network writes. Slow subscribers
+    // must not hold up fast peers, and concurrent mutations must not reorder deltas.
+    const operation = this.broadcastTail.then(async () => {
+      if (this.sseClients.size === 0) return;
+      const generation = this.sseGeneration;
+      const stats = await this.statsWithSubscriptionVersion();
+      if (this.sseClients.size === 0 || generation !== this.sseGeneration) return;
+      const frames = hubProtocol.prepareSseFanout({
+        reason, stats, at: new Date().toISOString(),
+        lastContentKey: this.lastSseContentKey,
+        previousStats: this.lastSseStats,
+        revision: ++this.streamRevision,
+        ...hubProtocol.sseClientKinds(this.sseClients), allowFreshness
+      });
+      this.lastSseContentKey = frames.contentKey;
+      this.lastSseStats = stats;
+      this.fanoutSseFrames(frames);
     });
-    this.lastSseContentKey = frames.contentKey;
-    this.fanoutSseFrames(frames);
+    this.broadcastTail = operation.catch(() => {});
+    this.state.waitUntil?.(operation.catch(() => {}));
+    return operation;
   }
 
-  async flushBroadcast() {
+  broadcast(reason = 'update') {
+    if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
     this.broadcastTimer = null;
-    if (this.sseClients.size === 0) return;
-    const stats = await this.statsWithSubscriptionVersion();
-    const at = new Date().toISOString();
-    const frames = hubProtocol.prepareSseFanout({
-      reason: 'ingest',
-      stats,
-      at,
-      lastContentKey: this.lastSseContentKey,
-      ...hubProtocol.sseClientKinds(this.sseClients)
-    });
-    this.lastSseContentKey = frames.contentKey;
-    this.fanoutSseFrames(frames);
+    return this.publishStats(reason, false);
+  }
+
+  flushBroadcast() {
+    if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
+    this.broadcastTimer = null;
+    return this.publishStats('ingest', true);
   }
 
   queueBroadcast() {
@@ -439,14 +475,25 @@ export class HubDO {
       const stats = await this.statsWithSubscriptionVersion();
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
-      writer.write(this.encoder.encode(hubProtocol.encodeSseEvent('snapshot', {
-        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString()
-      }))).catch(() => {});
-      const client = { writer, freshnessEvents: hubProtocol.wantsFreshnessEvents(request) };
-      if (this.sseClients.size === 0) this.lastSseContentKey = hubProtocol.hubStatsContentKey(stats);
+      const client = {
+        writer, freshnessEvents: hubProtocol.wantsFreshnessEvents(request),
+        deltaEvents: hubProtocol.wantsDeltaEvents(request), streamRevision: null
+      };
+      if (this.sseClients.size === 0) {
+        this.lastSseContentKey = hubProtocol.hubStatsContentKey(stats);
+        this.lastSseStats = stats;
+        if (client.deltaEvents) client.streamRevision = this.streamRevision;
+      }
       this.sseClients.add(client);
+      this.writeEncoded(client, this.encoder.encode(hubProtocol.encodeSseEvent('snapshot', {
+        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
+        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {})
+      })));
       this.ensureHeartbeat();
-      request.signal.addEventListener('abort', () => this.dropClient(client));
+      const onAbort = () => this.dropClient(client);
+      request.signal.addEventListener('abort', onAbort, { once: true });
+      client.onDrop = () => request.signal.removeEventListener('abort', onAbort);
+      if (request.signal.aborted) this.dropClient(client);
       return new Response(readable, {
         status: 200,
         headers: {
