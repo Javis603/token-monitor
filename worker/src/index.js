@@ -101,6 +101,8 @@ export class HubDO {
     this.streamRevision = 0;
     this.sseGeneration = 0;
     this.broadcastTail = Promise.resolve();
+    this.pendingBroadcast = null;
+    this.broadcasting = false;
     this.encoder = new TextEncoder();
     this.mutationTail = Promise.resolve();
     this.titlePrivacyServerEnabled = null;
@@ -298,6 +300,8 @@ export class HubDO {
       this.lastSseContentKey = '';
       this.lastSseStats = null;
       this.sseGeneration++;
+      this.pendingBroadcast?.resolve();
+      this.pendingBroadcast = null;
       if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
       this.broadcastTimer = null;
     }
@@ -327,7 +331,7 @@ export class HubDO {
         type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
         ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {})
       })));
-    }).catch(() => this.dropClient(client));
+    }, () => this.dropClient(client)).catch(() => this.dropClient(client));
     return true;
   }
 
@@ -344,27 +348,48 @@ export class HubDO {
   }
 
   publishStats(reason, allowFreshness) {
-    // Serialize async reads and fan-out, not network writes. Slow subscribers
-    // must not hold up fast peers, and concurrent mutations must not reorder deltas.
-    const operation = this.broadcastTail.then(async () => {
-      if (this.sseClients.size === 0) return;
-      const generation = this.sseGeneration;
-      const stats = await this.statsWithSubscriptionVersion();
-      if (this.sseClients.size === 0 || generation !== this.sseGeneration) return;
-      const frames = hubProtocol.prepareSseFanout({
-        reason, stats, at: new Date().toISOString(),
-        lastContentKey: this.lastSseContentKey,
-        previousStats: this.lastSseStats,
-        revision: ++this.streamRevision,
-        ...hubProtocol.sseClientKinds(this.sseClients), allowFreshness
-      });
-      this.lastSseContentKey = frames.contentKey;
-      this.lastSseStats = stats;
-      this.fanoutSseFrames(frames);
-    });
-    this.broadcastTail = operation.catch(() => {});
-    this.state.waitUntil?.(operation.catch(() => {}));
-    return operation;
+    // One active read and one pending batch, shared by all waiting updates.
+    // A later ingest must not downgrade an explicit mutation's full snapshot.
+    if (this.pendingBroadcast) {
+      if (!allowFreshness) Object.assign(this.pendingBroadcast, { reason, allowFreshness: false });
+      return this.pendingBroadcast.promise;
+    }
+    const batch = { reason, allowFreshness, generation: this.sseGeneration };
+    batch.promise = new Promise((resolve, reject) => Object.assign(batch, { resolve, reject }));
+    this.pendingBroadcast = batch;
+    this.broadcastTail = batch.promise.catch(() => {});
+    this.state.waitUntil?.(this.broadcastTail);
+    if (!this.broadcasting) {
+      this.broadcasting = true;
+      void this.drainBroadcasts();
+    }
+    return batch.promise;
+  }
+
+  async drainBroadcasts() {
+    while (this.pendingBroadcast) {
+      const batch = this.pendingBroadcast;
+      this.pendingBroadcast = null;
+      try {
+        if (this.sseClients.size && batch.generation === this.sseGeneration) {
+          const stats = await this.statsWithSubscriptionVersion();
+          if (this.sseClients.size && batch.generation === this.sseGeneration) {
+            const frames = hubProtocol.prepareSseFanout({
+              reason: batch.reason, stats, at: new Date().toISOString(),
+              lastContentKey: this.lastSseContentKey,
+              previousStats: this.lastSseStats,
+              revision: ++this.streamRevision,
+              ...hubProtocol.sseClientKinds(this.sseClients), allowFreshness: batch.allowFreshness
+            });
+            this.lastSseContentKey = frames.contentKey;
+            this.lastSseStats = stats;
+            this.fanoutSseFrames(frames);
+          }
+        }
+        batch.resolve();
+      } catch (error) { batch.reject(error); }
+    }
+    this.broadcasting = false;
   }
 
   broadcast(reason = 'update') {

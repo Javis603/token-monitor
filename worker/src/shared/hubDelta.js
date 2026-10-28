@@ -110,7 +110,7 @@ function createStatsStreamReceiver(applyFreshness) {
       } else if (event === 'freshness') {
         if (!stats || !object(data?.stats) || Array.isArray(data.stats)) throw new Error('invalid_stats_freshness');
         const versioned = Number.isSafeInteger(data?.revision);
-        if (versioned && (revision === null || data.baseRevision !== revision || data.revision !== revision + 1)) throw new Error('stats_revision_mismatch');
+        if ((revision !== null && !versioned) || (versioned && (revision === null || data.baseRevision !== revision || data.revision !== revision + 1))) throw new Error('stats_revision_mismatch');
         stats = applyFreshness(stats, data);
         revision = versioned ? data.revision : null;
       } else return null;

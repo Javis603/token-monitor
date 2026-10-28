@@ -125,6 +125,56 @@ test('Worker serializes concurrent broadcasts before advancing revision baseline
   assert.equal(receiver.receive(frames[1].event,frames[1].data).n,2);
 });
 
+for (const forceFull of [false, true]) test(`Worker coalesces a slow read backlog and preserves full snapshot demand: ${forceFull}`, async t => {
+  const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
+  const hub = new worker.HubDO(fakeState(), { TOKEN_MONITOR_SECRET: 'shh' });
+  let latest = 1, reads = 0, release;
+  const frames = [];
+  hub.statsWithSubscriptionVersion = async () => {
+    const snapshot = { n: latest, devices: [], unchanged: 'large '.repeat(1000) };
+    if (++reads === 1) await new Promise(resolve => { release = resolve; });
+    return snapshot;
+  };
+  const client = { deltaEvents: true, streamRevision: null, writer: {
+    write(chunk) { frames.push(parseSseBlock(new TextDecoder().decode(chunk))); return Promise.resolve(); }, close() {}
+  } };
+  hub.sseClients.add(client); t.after(() => hub.dropClient(client));
+  const first = hub.flushBroadcast(); await flush();
+  const updates = [];
+  for (let n = 2; n <= 50; n++) {
+    latest = n;
+    updates.push(forceFull && n === 20 ? hub.broadcast('subscriptions') : hub.flushBroadcast());
+  }
+  assert.equal(reads, 1);
+  release(); await Promise.all([first, ...updates]); await flush();
+  assert.equal(reads, 2, 'only the active read and one latest pending batch should run');
+  assert.equal(frames.length, 2);
+  assert.equal(frames[1].event, forceFull ? 'stats' : 'delta');
+  if (forceFull) assert.equal(frames[1].data.reason, 'subscriptions');
+  const receiver = createStatsStreamReceiver();
+  receiver.receive(frames[0].event, frames[0].data);
+  assert.equal(receiver.receive(frames[1].event, frames[1].data).n, 50);
+});
+
+test('a failed Worker read does not strand the coalesced pending broadcast', async t => {
+  const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
+  const hub = new worker.HubDO(fakeState(), { TOKEN_MONITOR_SECRET: 'shh' });
+  let fail, reads = 0;
+  const frames = [];
+  hub.statsWithSubscriptionVersion = async () => {
+    if (++reads === 1) await new Promise((_, reject) => { fail = reject; });
+    return { n: reads, devices: [] };
+  };
+  const client = { writer: { write(chunk) { frames.push(parseSseBlock(new TextDecoder().decode(chunk))); return Promise.resolve(); }, close() {} } };
+  hub.sseClients.add(client); t.after(() => hub.dropClient(client));
+  const first = hub.flushBroadcast(); await flush();
+  const rejected = assert.rejects(first, /read fixture/);
+  const second = hub.flushBroadcast();
+  fail(new Error('read fixture')); await rejected; await second;
+  assert.equal(frames.length, 1); assert.equal(frames[0].data.stats.n, 2);
+  await hub.flushBroadcast(); assert.equal(reads, 3);
+});
+
 test('Worker heartbeat does not queue behind a blocked initial write or outlive a dropped client',async t=>{
   t.mock.timers.enable({apis:['setInterval']});
   const worker=await import(pathToFileURL(path.resolve(__dirname,'../../worker/src/index.js')).href);

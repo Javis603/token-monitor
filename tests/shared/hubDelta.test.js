@@ -73,6 +73,19 @@ test('connection receiver rejects missing/duplicate/reordered deltas and resets 
   assert.throws(()=>r.receive('delta',wire(delta)),/revision/);
 });
 
+test('versioned freshness cannot discard its revision baseline, while legacy freshness remains supported', () => {
+  const current = createStatsStreamReceiver();
+  current.receive('snapshot', { stats: stats(), revision: 1 });
+  for (const revision of [undefined, null, '2', 1.5]) {
+    assert.throws(() => current.receive('freshness', { stats: {}, revision }), /revision/);
+  }
+  // Rejection leaves the connection's baseline usable by the next valid event.
+  assert.deepEqual(current.receive('delta', { baseRevision: 1, revision: 2, patch: [] }), stats());
+  const legacy = createStatsStreamReceiver();
+  legacy.receive('snapshot', { stats: stats() });
+  assert.deepEqual(legacy.receive('freshness', { stats: {} }), stats());
+});
+
 test('mixed v4/v3/legacy fan-out uses one revision chain and a full fallback for late or skipped clients', () => {
   const before=stats(); const after=stats(2);
   const client={deltaEvents:true,freshnessEvents:true,streamRevision:1};
