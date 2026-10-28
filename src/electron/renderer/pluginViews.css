@@ -24,3 +24,7 @@
 /* Native shell geometry and hit testing remain owned by the host. */
 .plugin-native-content { display: contents; }
 .plugin-native-content[hidden] { display: none; }
+/* Shared by main, detached, Notch and Dock headers. Automatic native focus
+   restoration is not keyboard navigation; editors keep their own focus cues. */
+html .plugin-header-actions-mount button:focus-visible { outline-offset: -2px; }
+html:not(.plugin-keyboard-focus) :is(.plugin-header-actions-mount button, .plugin-main-detach):focus-visible { outline: none; }

@@ -468,3 +468,38 @@ test('reused mounts move header controls without replacing drafts and remove omi
   assert.equal(a.children[0], latest.headerActions); assert.notEqual(latest.headerActions, mount);
   await host.dispose(); assert.equal(a.children.length, 0);
 });
+
+
+test('shared plugin host shows keyboard cues only after input and never moves native-restored focus', async () => {
+  const document = dom(), handlers = {}, windowHandlers = {};
+  document.documentElement = document.createElement('html');
+  document.addEventListener = (name, fn) => { handlers[name] = fn; };
+  document.removeEventListener = (name, fn) => { assert.equal(handlers[name], fn); delete handlers[name]; };
+  const window = {
+    addEventListener(name, fn) { windowHandlers[name] = fn; },
+    removeEventListener(name, fn) { assert.equal(windowHandlers[name], fn); delete windowHandlers[name]; }
+  };
+  const host = createHost({ document, window, bridge: {}, importModule: async () => ({ mount(_node, context) {
+    context.headerActions.append(document.createElement('button')); return {};
+  } }) });
+  const keyboard = () => document.documentElement.classList.contains('plugin-keyboard-focus');
+  assert.equal(keyboard(), false, 'initial native autofocus has no keyboard cue');
+  for (const surface of ['page', 'notch', 'edgeDock']) {
+    const node = document.createElement('div'), actions = document.createElement('div'); document.body.append(node, actions);
+    await host.mount(node, { ...descriptor, ref: `fixture/${surface}` }, { surface, headerActions: actions });
+    const button = actions.children[0].children[0]; button.focus();
+    for (const key of ['Tab', 'ArrowRight', 'Enter']) {
+      handlers.keydown({ key }); assert.equal(keyboard(), true);
+      windowHandlers.blur?.(); assert.equal(keyboard(), true, 'keyboard cues survive OS switching');
+      assert.equal(document.activeElement, button, 'window switching preserves the focused control');
+    }
+    for (const name of ['pointerdown', 'pointermove']) {
+      handlers.keydown({ key: 'Tab' }); handlers[name](); assert.equal(keyboard(), false);
+      assert.equal(document.activeElement, button);
+    }
+    const editor = document.createElement('input'); node.append(editor); editor.focus();
+    handlers.pointerdown(); windowHandlers.blur?.(); assert.equal(document.activeElement, editor);
+  }
+  await host.dispose();
+  assert.deepEqual(handlers, {}); assert.deepEqual(windowHandlers, {});
+});

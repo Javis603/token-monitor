@@ -11,6 +11,15 @@
     const owners = new WeakMap();
     const modules = new Map(), mounts = new Map(), blocked = new Set(), jobs = new Map(), failures = new Map();
     let disposed = false;
+    // Chromium can restore :focus-visible on a button when a native window
+    // opens without a renderer pointer event (including hover-opened Notch).
+    // Keep focus and keyboard cues across OS window switches. Pointer input
+    // (including hover-to-open) clears only the cue, never the focused element.
+    const keyboardFocus = () => document.documentElement.classList.add('plugin-keyboard-focus');
+    const passiveFocus = () => document.documentElement.classList.remove('plugin-keyboard-focus');
+    document.addEventListener?.('keydown', keyboardFocus, true);
+    document.addEventListener?.('pointerdown', passiveFocus, true);
+    document.addEventListener?.('pointermove', passiveFocus, true);
     function report(error, record) {
       if (record && (disposed || mounts.get(record.container) !== record || record.failed)) return;
       if (record) { record.failed = true; record.observer?.disconnect(); }
@@ -241,6 +250,9 @@
       sweep() { for (const container of mounts.keys()) if (!container.isConnected) unmount(container); },
       async dispose() {
         disposed = true; offLifecycle?.();
+        document.removeEventListener?.('keydown', keyboardFocus, true);
+        document.removeEventListener?.('pointerdown', passiveFocus, true);
+        document.removeEventListener?.('pointermove', passiveFocus, true);
         const ids = [...new Set([...modules.keys()].map(key => key.slice(0, key.indexOf(':'))))];
         try { await release(ids); } catch (error) { onError(error); }
       }
