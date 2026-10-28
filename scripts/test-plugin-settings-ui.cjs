@@ -17,6 +17,7 @@ async function main() {
   fs.writeFileSync(path.join(scratch, 'ui.mjs'), "export function mount(container){const input=document.createElement('input');input.value='saved';container.append(input);return {dispose(){input.remove()}}}");
   win = new BrowserWindow({ show: false, width: 361, height: 799, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   const appHtml=fs.readFileSync(path.join(root,'src/electron/renderer/index.html'),'utf8');
+  const appHeader=appHtml.slice(appHtml.indexOf('<header class="titlebar">'),appHtml.indexOf('</header>')+9);
   assert.ok(!appHtml.includes('id="pluginsEnabledInput"')&&!appHtml.includes('data-i18n="settings.plugins.intro"'));
   const i18n=require(path.join(root,'src/electron/renderer/i18n.js'));
   for (const locale of i18n.LANGUAGE_OPTIONS.filter(item=>item.value!=='auto').map(item=>item.value)) assert.ok(!i18n.translate(locale,'plugins.package.import').includes('…'));
@@ -247,19 +248,23 @@ async function main() {
     const rapidAligned=box.querySelector('.plugin-version-picker select').value==='3.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='3.0.0';
     box.querySelector('.plugin-allow').click();await tick();previewMode='success';
     check('rapid-version-changes-align-selection-preview-and-installed-token',rapidAligned&&calls.filter(c=>c[0]==='install').at(-1)?.[1]==='token-3.0.0',{lastInstall:calls.filter(c=>c[0]==='install').at(-1)});
-    const pageBox=document.createElement('div');document.body.append(pageBox);
+    const pageShell=document.createElement('main');pageShell.className='shell plugin-page-mode title-icon-only';
+    pageShell.innerHTML=${JSON.stringify(appHeader)};
+    const pageBox=document.createElement('section');pageBox.id='pluginMainPanel';pageBox.className='plugin-main-panel';pageShell.append(pageBox);document.body.append(pageShell);
     window.tokenMonitorTrustedPlugins={views:async()=>({views:{}}),subscribe:()=>()=>{}};
     const demands=[], pageHost=TokenMonitorPluginViews.createPluginViewHost({document,window,t:k=>k,onDemand:(s,r)=>demands.push([s,r])});
-    const pages=TokenMonitorPluginMainPages.create({document,container:pageBox,host:pageHost,t:k=>k,openWindow:()=>{}});
+    const headingContainer=pageShell.querySelector('#pluginPageHeading'),actionsContainer=pageShell.querySelector('#pluginPageActions');
+    const pages=TokenMonitorPluginMainPages.create({document,container:pageBox,headingContainer,actionsContainer,host:pageHost,t:k=>k,openWindow:()=>{}});
     const routes=[{id:'plugin:alpha/view',ref:'alpha/view',title:'Alpha'},{id:'plugin:beta/view',ref:'beta/view',title:'Beta'}];
     const payload={surface:'page',views:Object.fromEntries(routes.map(route=>[route.ref,{id:'view',ref:route.ref,pluginId:route.ref.split('/')[0],revision:'test',status:'active',entry:'file://${scratch}/ui.mjs',css:[]}]))};
     pageHost.update(payload);pages.render(routes,'plugin:alpha/view');await tick();
+    check('main-page-title-and-detach-use-native-header',headingContainer.querySelector('h2')?.textContent==='Alpha'&&Boolean(actionsContainer.querySelector('.plugin-main-detach'))&&!pageBox.querySelector('.plugin-main-detach'));
     const draft=pageBox.querySelector('input');draft.value='unsubmitted';
     pages.render(routes,'plugin:beta/view');await tick();pages.render(routes,'plugin:alpha/view');pageHost.update(payload);await tick();
     check('main-page-draft-survives-ordinary-page-switch-and-context-update',draft.isConnected&&draft.value==='unsubmitted'&&draft===pageBox.querySelector('input'));
     pages.render(routes.filter(p=>p.ref!=='alpha/view'),'home');
     check('removed-page-releases-retained-dom',!draft.isConnected&&pageBox.classList.contains('hidden'));
-    await pageHost.dispose();
+    await pageHost.dispose();pageShell.remove();
     // Network freshness must never hold the management UI or its drafts.
     const backgroundBox=document.createElement('div');document.body.append(backgroundBox);
     const backgroundCatalog={github:{enabled:true},entries:[{...catalog.entries[0],version:'1.0.0',status:'available'}],sources:Array.from({length:16},(_,i)=>({id:'source-'+i,kind:'community',label:'Source '+i}))};
