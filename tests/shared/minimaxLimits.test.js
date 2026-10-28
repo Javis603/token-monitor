@@ -1901,6 +1901,68 @@ test('MiniMax Code follows workspace, membership and matched current-subscriptio
   }
 });
 
+test('MiniMax Code caches matched plan names while keeping quota fresh and isolating login scope', async () => {
+  let fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW + 3 * 3600000 } });
+  let timestamp = CODE_NOW, tier = '12345', group = 'group-A', points = 100, denyName = false;
+  let names = 0, quotas = 0;
+  const deps = codeDeps(fixture, async url => {
+    if (url.endsWith('/get_membership_info')) return okResponse(membershipBody({
+      token_plan_tier: tier, op_group_id: group, op_credit_summary: { total_remaining_amount: String(points) }
+    }));
+    if (url.includes('/cycle_audio_resource_package')) {
+      names++;
+      return denyName ? { ok: false, status: 403 } : okResponse({
+        current_subscribe: { curr_subscribe_combo_id: tier }, current_combo_card: { combo_id: tier, title: `Plan ${tier}` }
+      });
+    }
+    quotas++;
+    return okResponse(planRemainsBody({ model_remains: [{ model_name: 'general', current_interval_used_percent: quotas }] }));
+  }, { now: () => timestamp });
+  const read = async (expectedNames, step, expectedLabel = `Plan ${tier}`) => {
+    points--;
+    const result = await readCode(deps);
+    assert.equal(result.status, 'ok', step);
+    assert.equal(result.planLabel, expectedLabel, step);
+    assert.equal(names, expectedNames, step);
+    assert.equal(result.windows.find(window => window.label === 'Credits').remaining, points, step);
+    assert.ok(Math.abs(result.windows.find(window => window.label === '5h').usedPercent - quotas) < 1e-10, step);
+  };
+  await read(1, 'initial name');
+  timestamp += 300000;
+  await read(1, 'same login reuses only the name');
+  const record = codeDesktopRecord({ accessToken: ACCESS_ROTATED, generation: 8, expiresAtMs: CODE_NOW + 3 * 3600000 });
+  writeCodeLease(fixture, record);
+  await read(1, 'ordinary token rotation retains the name');
+  timestamp = CODE_NOW + 3600000;
+  await read(2, 'one-hour expiry');
+  tier = '23456';
+  await read(3, 'new tier');
+  group = 'group-B';
+  await read(4, 'new account group');
+  record.loginEpoch = 'epoch-2';
+  writeCodeLease(fixture, record);
+  await read(5, 'new login');
+  for (const [region, expectedNames] of [['cn', 6], ['en', 7]]) {
+    fixture = writeCodeAuthFixture({ region, record });
+    deps.env.MINIMAX_DATA_DIR = fixture.base;
+    await read(expectedNames, `new ${region} credential namespace`);
+  }
+  tier = '34567'; denyName = true;
+  await read(8, 'denied name', 'Subscription');
+  await read(9, 'denial is not cached', 'Subscription');
+  denyName = false;
+  await read(10, 'name recovers');
+  delete record.loginEpoch;
+  writeCodeLease(fixture, record);
+  await read(11, 'legacy login remains readable');
+  await read(12, 'legacy login cannot establish cache scope');
+  record.loginEpoch = 'epoch-2';
+  writeCodeLease(fixture, record);
+  deps.providerRuntimeState = undefined;
+  await read(13, 'one-shot without runtime state');
+  await read(14, 'one-shot does not persist a cache');
+});
+
 test('MiniMax Code meters a complete grant list and keeps the amount when the list is incomplete', async () => {
   const fixture = writeCodeAuthFixture();
   const grant = (amount, remaining) => ({ credit_type: 2, granted_amount: String(amount),
@@ -1960,10 +2022,12 @@ test('MiniMax Code partial refresh updates credits and retains visibly stale pla
   const fixture = writeCodeAuthFixture();
   let outage = false;
   let timestamp = CODE_NOW;
+  let nameRequests = 0;
   const runtime = createLimitsRuntime({ limitProviders: ['minimax'], minimaxBillingMode: 'api' }, {
     ...codeDeps(fixture, async url => {
       if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ token_plan_tier: '12345', op_credit_summary: { total_remaining_amount: outage ? '4000' : '4624' } }));
       if (new URL(url).pathname.endsWith('/charge/combo/cycle_audio_resource_package')) {
+        nameRequests++;
         return okResponse({ current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Build' } });
       }
       return outage ? { ok: false, status: 503 } : okResponse(planRemainsBody());
@@ -1982,6 +2046,7 @@ test('MiniMax Code partial refresh updates credits and retains visibly stale pla
     const partial = runtime.getSnapshot().providers[0];
     assert.equal(partial.status, 'unavailable');
     assert.equal(partial.planLabel, 'Build', 'quota failure must not suppress an available subscription name');
+    assert.equal(nameRequests, 1, 'quota failures do not require rereading a fresh plan name');
     assert.equal(partial.updatedAt, first.updatedAt);
     assert.equal(partial.windows.find(window => window.metric === 'credits').remaining, 4000);
     assert.deepEqual(partial.windows.filter(window => window.metric !== 'credits'), first.windows.filter(window => window.metric !== 'credits'));

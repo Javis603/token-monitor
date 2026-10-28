@@ -26,6 +26,8 @@ const MINIMAX_CODE_PLAN_REMAINS_URL_CN = 'https://www.minimaxi.com/backend/accou
 const MINIMAX_CODE_PLAN_REMAINS_URL_INTL = 'https://platform.minimax.io/backend/account/token_plan/remains_percent';
 
 const MINIMAX_CODE_GROUP_STATE_KEY = 'minimax.code.group';
+const MINIMAX_CODE_PLAN_NAME_STATE_KEY = 'minimax.code.plan-name';
+const MINIMAX_CODE_PLAN_NAME_TTL_MS = 60 * 60_000;
 
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
@@ -569,20 +571,32 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
       }
       if (groupId && hasPlan) {
         if (/^\d+$/u.test(tierName)) {
-          try {
-            const url = new URL('/v1/api/openplatform/charge/combo/cycle_audio_resource_package', platformUrl);
-            url.search = new URLSearchParams({ biz_line: '2', cycle_type: '3', resource_package_type: '7', business: 'Agent', device_platform: 'desktop' }).toString();
-            const metadata = await minimaxCodeRequest(url.href, { headers: platformHeaders }, deps);
-            const current = metadata?.current_subscribe;
-            // A catalog card alone is not evidence of the current subscription.
-            if (String(current?.curr_subscribe_combo_id ?? '').trim() === tierName) {
-              const card = metadata.current_combo_card;
-              planLabel = [String(card?.combo_id ?? '').trim() === tierName ? cleanSecret(card?.title) : '',
-                cleanSecret(current.current_subscribe_title)].find(name => name && !/^\d+$/u.test(name)) || planLabel;
+          // A login epoch separates re-logins without invalidating ordinary token rotation.
+          const nameKey = session.record.loginEpoch
+            ? hashKey(session.authPath, session.record.loginEpoch, accountKey, tierName) : '';
+          const cached = state?.get(MINIMAX_CODE_PLAN_NAME_STATE_KEY);
+          if (nameKey && cached?.key === nameKey && now - cached.at < MINIMAX_CODE_PLAN_NAME_TTL_MS) {
+            planLabel = cached.name;
+          } else {
+            try {
+              const url = new URL('/v1/api/openplatform/charge/combo/cycle_audio_resource_package', platformUrl);
+              url.search = new URLSearchParams({ biz_line: '2', cycle_type: '3', resource_package_type: '7', business: 'Agent', device_platform: 'desktop' }).toString();
+              const metadata = await minimaxCodeRequest(url.href, { headers: platformHeaders }, deps);
+              const current = metadata?.current_subscribe;
+              // A catalog card alone is not evidence of the current subscription.
+              if (String(current?.curr_subscribe_combo_id ?? '').trim() === tierName) {
+                const card = metadata.current_combo_card;
+                const name = [String(card?.combo_id ?? '').trim() === tierName ? cleanSecret(card?.title) : '',
+                  cleanSecret(current.current_subscribe_title)].find(name => name && !/^\d+$/u.test(name));
+                if (name) {
+                  planLabel = name;
+                  if (nameKey) state?.set(MINIMAX_CODE_PLAN_NAME_STATE_KEY, { key: nameKey, name, at: now });
+                }
+              }
+            } catch (error) {
+              if (deps.signal?.aborted) throw error;
+              // Optional names cannot invalidate quota or trigger token rotation.
             }
-          } catch (error) {
-            if (deps.signal?.aborted) throw error;
-            // Optional names cannot invalidate quota or trigger token rotation.
           }
         }
         try {
