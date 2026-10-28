@@ -1917,6 +1917,9 @@ function renderBubble(payload) {
   if (!cell) {
     if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
     observedPluginCard = null;
+    for (const body of root.querySelectorAll('.edge-dock-plugin-card')) pluginHost?.unmount(body);
+    pluginContent?.retain([]);
+    contentLayer.replaceChildren();
     stagingLayer.replaceChildren();
     return;
   }

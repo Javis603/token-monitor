@@ -167,6 +167,47 @@ test('a card commits after its reported height is clamped to the work area', () 
   }
 });
 
+test('a no-cell payload unmounts committed and staged plugin cards and removes their header actions', async () => {
+  const { Element } = require('../helpers/notchPanel');
+  const { createHost } = require('../../src/electron/renderer/pluginUi');
+  const document = { createElement: tag => new Element(tag, document) };
+  document.body = document.createElement('body'); document.head = document.createElement('head');
+  const root = document.createElement('main'), contentLayer = document.createElement('div'), stagingLayer = document.createElement('div');
+  document.body.append(root); root.append(contentLayer, stagingLayer);
+  let disposals = 0;
+  const pluginHost = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(_body, context) {
+    context.headerActions.append(document.createElement('button'));
+    return { dispose() { disposals++; } };
+  } }) });
+  const cards = [];
+  for (const layer of [contentLayer, stagingLayer]) {
+    const card = document.createElement('section'), actions = document.createElement('div'), body = document.createElement('div');
+    card.className = 'edge-dock-card edge-dock-card-plugin'; body.className = 'edge-dock-plugin-card';
+    card.append(actions, body); layer.append(card); cards.push({ card, actions, body });
+    await pluginHost.mount(body, { pluginId: 'fixture', ref: 'fixture/view', revision: 'one', entry: 'fixture' }, { headerActions: actions });
+    assert.equal(actions.children[0].children.length, 1);
+  }
+  const retained = [], unobserved = [];
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
+  const { renderBubble, observed } = Function('deps', `
+    const { root, contentLayer, stagingLayer, pluginHost, pluginContent, bubbleSizeObserver } = deps;
+    let observedPluginCard = deps.card;
+    ${source}
+    return { renderBubble, observed: () => observedPluginCard };
+  `)({ root, contentLayer, stagingLayer, pluginHost, card: cards[1].card,
+    pluginContent: { retain: targets => retained.push(targets) },
+    bubbleSizeObserver: { unobserve: card => unobserved.push(card) } });
+  renderBubble({ side: 'right', cell: null });
+  assert.equal(contentLayer.children.length, 0); assert.equal(stagingLayer.children.length, 0);
+  assert.ok(cards.every(({ actions }) => actions.children.length === 0), 'header ownership must be released, not just detached');
+  assert.deepEqual(retained, [[]]); assert.deepEqual(unobserved, [cards[1].card]); assert.equal(observed(), null);
+  await new Promise(setImmediate); assert.equal(disposals, 2);
+  renderBubble({ side: 'right', cell: null }); await new Promise(setImmediate);
+  assert.equal(disposals, 2, 'repeated empty payloads do not dispose an old mount twice');
+  await pluginHost.dispose();
+});
+
 const {
   EDGE_DOCK_METRICS,
   EDGE_DOCK_TIMING,
