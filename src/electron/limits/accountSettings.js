@@ -346,6 +346,7 @@ function limitAccountFormsForRenderer() {
       manual: form.manual,
       openUrl: form.openUrl,
       ...(form.credentialChoice ? { credentialChoice: form.credentialChoice } : {}),
+      ...(form.multipleAccounts ? { multipleAccounts: true } : {}),
       ...(form.messages ? { messages: form.messages } : {}),
       status: { configuredKey, sourceKey, pendingKey }
     }))];

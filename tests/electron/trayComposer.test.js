@@ -566,3 +566,9 @@ test('only the window own blur cancels the chip drag', () => {
   assert.match(source, /window\.removeEventListener\('blur', cancelDrag\);/);
   assert.doesNotMatch(source, /'blur', cancelDrag, true/);
 });
+
+test('installed bitmap choices can be duplicated without losing their plugin reference', () => {
+  const layout = { items: [trayLayoutApi.createTrayLayoutItem('plugin', { ref: 'fixture/bitmap', idFactory: () => 'first' })] };
+  const next = duplicateTrayLayoutItem(trayLayoutApi, layout, 'first', { idFactory: () => 'second' });
+  assert.deepEqual(next.items.map(item => [item.id,item.ref]), [['first','fixture/bitmap'],['second','fixture/bitmap']]);
+});

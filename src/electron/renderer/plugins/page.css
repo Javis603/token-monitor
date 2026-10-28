@@ -1,0 +1,20 @@
+html, body.plugin-page { border-radius: 0; background: rgb(var(--glass-rgb)); }
+body.plugin-page { display: flex; flex-direction: column; font-family: var(--ui-font); font-size: 14px; padding: 28px; gap: 22px; }
+.plugin-page header { display: flex; gap: 24px; align-items: baseline; justify-content: space-between; }
+.plugin-page h1 { margin: 0; font-size: 23px; font-weight: 650; letter-spacing: -.02em; }
+.plugin-page header p { color: var(--muted); margin: 8px 0 0; max-width: 68ch; line-height: 1.6; }
+#pageStatus { color: var(--muted); flex-shrink: 0; font-size: 12px; }
+#pageNavigation { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+#pageNavigation button { border: 1px solid transparent; color: var(--muted); background: transparent; border-radius: 7px; padding: 8px 12px; cursor: pointer; }
+#pageNavigation button:hover { background: var(--glass-soft); color: var(--text); }
+#pageNavigation button[aria-current="page"] { color: var(--accent); border-color: var(--line-strong); background: var(--glass-soft); }
+.plugin-page button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+#pageContent { overflow: auto; min-height: 0; flex: 1; padding: 4px 0 18px; }
+/* The adapter supplies the author's preferred height. The detached shell owns
+   the available viewport; overflowing Rich content scrolls inside its child. */
+#pageContent > .page-rich-viewport { max-height: 100%; overflow: auto; }
+#pageError { color: var(--red); line-height: 1.5; margin: 0; }
+.plugin-page .pv-placeholder { padding: 28px 0; justify-content: start; }
+.plugin-page .pv-stat-label, .plugin-page .pv-stat-caption { font-size: 12px; }
+.plugin-page .pv-size-l .pv-stat-number { font-size: 32px; }
+@media(max-width: 520px) { body.plugin-page { padding: 20px; gap: 18px; } .plugin-page header { flex-direction: column; gap: 8px; } .plugin-page .pv-dir-row { flex-wrap: wrap; } }

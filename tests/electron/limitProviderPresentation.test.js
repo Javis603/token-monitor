@@ -9,7 +9,8 @@ const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const compactTokenApi = require('../../src/shared/compactTokens');
-const { normalizeSubscriptions } = require('../../src/shared/subscriptionDisplay');
+const { matchProviderAccount, needsRebinding, normalizeSubscriptions } = require('../../src/shared/subscriptionDisplay');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
 const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
@@ -4514,6 +4515,7 @@ test('a record added on another device turns up without pushing settings at the 
   // this exercises the real rollback path rather than a stand-in.
   const run = (previous, incoming, { saveOk = true } = {}) => {
     const context = vm.createContext({
+    pluginRuntime: null,
       hubSubscriptions: previous,
       hubSubscriptionsHub: previous ? 'https://hub.example' : '',
       settings: {
@@ -4797,6 +4799,59 @@ test('a device with no limits of its own can still name the accounts on the hub'
   // matched to by key.
   assert.deepEqual(run(copy, [personal]).map((entry) => entry.accountKey), ['personal']);
   assert.deepEqual(run([personal], [copyAccount]).map((entry) => entry.accountKey), ['personal']);
+});
+
+test('limitProvidersForSubscriptions keeps anonymous Muse accounts from every device', () => {
+  const app = readRendererFile('app.js');
+  const source = functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountValue');
+  const museRow = (remainingPercent, updatedAt) => ({
+    provider: 'muse', accountKey: '', status: 'ok', source: 'cli', updatedAt,
+    windows: [{ kind: 'session', label: 'Session', usedPercent: 100 - remainingPercent, remainingPercent }]
+  });
+  // Two synced devices, each reporting its own Muse allowance. The local
+  // device's raw row (41%) deliberately differs from its aggregate copy (40%)
+  // so the survivor proves which copy won.
+  const devices = [
+    { deviceId: 'device-a', limits: { providers: [museRow(41, '2026-08-31T10:00:00.000Z')] } },
+    { deviceId: 'device-b', limits: { providers: [museRow(70, '2026-08-31T10:02:00.000Z')] } }
+  ];
+  const aggregate = aggregateLimits([
+    { deviceId: 'device-a', limits: { providers: [museRow(40, '2026-08-31T10:00:00.000Z')] } },
+    devices[1]
+  ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
+  const stats = { devices, limits: aggregate };
+  const run = (localStats, localDeviceId) => plain(vm.runInNewContext(
+    `${source}\nlimitProvidersForSubscriptions();`,
+    {
+      accountIdentityApi,
+      localDeviceLimitsProviders: () => accountIdentityApi.localDeviceLimitsProviders(localStats, localDeviceId),
+      state: { stats: localStats }
+    }
+  ));
+
+  const pool = run(stats, 'device-a');
+  assert.deepEqual(pool.map((entry) => entry.sourceDeviceId), ['device-a', 'device-b']);
+  assert.equal(pool[0].windows[0].remainingPercent, 41, 'the local copy wins its own device, without duplicating it');
+  assert.equal(pool.filter((entry) => entry.sourceDeviceId === 'device-a').length, 1);
+  assert.deepEqual(
+    aggregate.providers.filter((entry) => entry.provider === 'muse').map((entry) => entry.sourceDeviceId),
+    ['device-a', 'device-b'],
+    'the raw aggregate still displays both devices'
+  );
+  assert.equal(devices[0].limits.providers[0].sourceDeviceId, undefined, 'stats are not mutated');
+
+  // An anonymous binding names no account, so with two devices it must stay
+  // unresolved rather than silently landing on one of them.
+  const anonymous = { provider: 'muse', binding: { accountKey: '', accountEmail: '', profileName: '' } };
+  assert.equal(matchProviderAccount(anonymous, pool), null);
+  assert.equal(needsRebinding(anonymous, pool), true);
+
+  // One device is unambiguous, and the sole-account heal still applies.
+  const singleStats = { devices: [devices[0]], limits: aggregateLimits([devices[0]], 0, Date.parse('2026-08-31T10:03:00.000Z')) };
+  const singlePool = run(singleStats, 'device-a');
+  assert.equal(singlePool.length, 1);
+  assert.equal(matchProviderAccount(anonymous, singlePool), singlePool[0]);
+  assert.equal(needsRebinding(anonymous, singlePool), false);
 });
 
 test('the account picker tells two address-only accounts apart', () => {
@@ -5577,6 +5632,7 @@ test('a form opened on a hub is not written into this device own list instead', 
   ].join('\n');
 
   const context = vm.createContext({
+    pluginRuntime: null,
     // Switched to local mode with the hub still configured, which is the state
     // the mode switch leaves behind. Only the mode says which list is in front of
     // the user, so only the mode can say which one an edit belongs to.

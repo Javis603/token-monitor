@@ -72,7 +72,7 @@ test('a consented upload at the unchanged destination keeps the negotiated gener
 
 test('the actual settings IPC handler rejects a destination change while publication waits', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const start = source.indexOf("  ipcMain.handle('settings:update', async (_event, patch) => {");
+  const start = source.indexOf("  ipcMain.handle('settings:update', async (event, patch) => {");
   const end = source.indexOf('  // The settings:update body', start);
   assert.ok(start >= 0 && end > start);
   let handler;
@@ -80,12 +80,16 @@ test('the actual settings IPC handler rejects a destination change while publica
   let release;
   const held = new Promise(resolve => { release = resolve; });
   let applied = false;
-  const sandbox = vm.createContext({ syncContentContext: () => context,
+  const sandbox = vm.createContext({ pluginRuntime: null, syncContentContext: () => context,
     ipcMain: { handle: (_channel, callback) => { handler = callback; } },
     getSyncContentRuntime: () => ({ publishPatch: () => held, status: () => ({ identity: context.url }) }),
     applySettingsPatch: () => { applied = true; }, latestUsageHost: null });
-  vm.runInContext(source.slice(start, end), sandbox);
+  const guardStart = source.indexOf('function assertPluginSkinRequest(');
+  const guardEnd = source.indexOf('\nfunction settingsForRenderer(', guardStart);
+  assert.ok(guardStart >= 0 && guardEnd > guardStart);
+  vm.runInContext(source.slice(guardStart, guardEnd) + source.slice(start, end), sandbox);
   const edit = handler(null, { customModelPricing: [] });
+  await Promise.resolve();
   context = { ...context, url: 'https://second.example' };
   release();
   await assert.rejects(edit, /hub_changed/);

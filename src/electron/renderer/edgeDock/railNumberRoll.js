@@ -13,14 +13,15 @@
   const SELECTOR = '[data-roll-key]';
   const DIGIT = /[0-9]/;
 
-  function mark(node, key, value) {
+  function mark(node, key, value, format) {
+    if (format) node._numberFormat = format;
     node.dataset.rollKey = key;
     node.dataset.rollText = node.textContent;
     if (Number.isFinite(value)) node.dataset.rollValue = String(value);
     return node;
   }
 
-  function create({ animation, schedule = (callback, ms) => setTimeout(callback, ms) }) {
+  function create({ animation, schedule = (callback, ms) => setTimeout(callback, ms), selector = SELECTOR, mode = () => 'roll' }) {
     const settles = new Map();
 
     function settle() {
@@ -32,11 +33,11 @@
     // does not keep compositor layers alive off screen.
     function capture(container) {
       const snapshot = new Map();
-      for (const node of container?.querySelectorAll(SELECTOR) || []) {
+      for (const node of container?.querySelectorAll(selector) || []) {
         const key = node.dataset.rollKey;
         snapshot.set(key, snapshot.has(key) ? null : {
           text: node.dataset.rollText,
-          value: Number(node.dataset.rollValue),
+          value: animation.currentCountValue?.(node) ?? Number(node.dataset.rollValue),
           glyphs: animation.capture(node)
         });
       }
@@ -48,18 +49,22 @@
     // appears or disappears is swapped, not animated.
     function play(container, snapshot, { skip = () => false } = {}) {
       if (!snapshot?.size) return;
-      for (const node of container?.querySelectorAll(SELECTOR) || []) {
+      for (const node of container?.querySelectorAll(selector) || []) {
         const previous = snapshot.get(node.dataset.rollKey);
         const text = node.dataset.rollText;
         if (!previous || previous.text === text || skip(node)) continue;
         if (!DIGIT.test(previous.text) || !DIGIT.test(text)) continue;
         const value = Number(node.dataset.rollValue);
         const increasing = !(Number.isFinite(value) && Number.isFinite(previous.value)) || value > previous.value;
-        const done = animation.beginRoll(node, previous.text, text, increasing, null, previous.glyphs);
+        const counting = mode() === 'count';
+        if (counting && (!Number.isFinite(previous.value) || !Number.isFinite(value) || !node._numberFormat)) continue;
+        const done = counting
+          ? animation.beginCount(node, previous.value, value, node._numberFormat, { toText: text })
+          : animation.beginRoll(node, previous.text, text, increasing, null, previous.glyphs);
         settles.set(node, done);
         schedule(() => {
           done();
-          settles.delete(node);
+          if (settles.get(node) === done) settles.delete(node);
         }, animation.duration);
       }
     }

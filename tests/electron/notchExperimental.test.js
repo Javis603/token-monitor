@@ -19,7 +19,7 @@ function controls(platform, enabled) {
   const patches = [];
   const context = { els, state, edgeDockAvailable: () => platform !== 'linux',
     t: key => key,
-    syncDockSizeControls() {}, syncEdgeDockMacBackdropInput() {}, syncNotchStyleInput() {}, syncNotchCapabilities() {}, syncNotchHoverControls() {},
+    renderNotchPageChoices() {}, syncDockSizeControls() {}, syncEdgeDockMacBackdropInput() {}, syncNotchStyleInput() {}, syncNotchCapabilities() {}, syncNotchHoverControls() {},
     saveSettings: patch => patches.push(JSON.parse(JSON.stringify(patch))), refreshTrayComposers() {}, notchItemsComposer: null, edgeDockComposer: null };
   const source = app.slice(app.indexOf('function syncDockControls()'), app.indexOf('function createDockItemsComposer('));
   vm.runInNewContext(source, context);

@@ -22,6 +22,7 @@
 const fs = require('node:fs');
 const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./transcript');
 const { normalizeSessionContext } = require('../../sessionContext');
+const { normalizeReasoningEffort } = require('../../sessionLive');
 const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 
 const TAIL_READ_BUDGETS = [256 * 1024, 1024 * 1024];
@@ -40,12 +41,21 @@ function contextFromInfo(info) {
 }
 
 function applyLine(state, line, position, contextStart, cacheStart) {
+  // An unreadable new configuration cannot leave the previous turn's badge.
+  // Only inspect the bounded record prefix; never decode large tool output.
+  const configuration = /"type"\s*:\s*"turn_context"/.test(line.subarray(0, 512).toString('utf8'));
+  if (configuration && position >= contextStart) state.reasoningEffort = null;
   // Metadata records are small; never decode arbitrarily large tool output.
   if (!line.length || line.length > MAX_METADATA_LINE_BYTES) return;
   let entry;
   try { entry = JSON.parse(line.toString('utf8')); } catch (_) { return; }
   if (!entry || typeof entry !== 'object') return;
   const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : entry;
+  if (entry.type === 'turn_context' && position >= contextStart) {
+    state.reasoningEffort = normalizeReasoningEffort(
+      Object.prototype.hasOwnProperty.call(payload, 'effort') ? payload.effort : payload.reasoning_effort
+    );
+  }
   if (payload.type === 'token_count' && payload.info && position >= contextStart) {
     const context = contextFromInfo(payload.info);
     if (context) state.context = context;
@@ -54,6 +64,7 @@ function applyLine(state, line, position, contextStart, cacheStart) {
     state.turnEnded = true;
     state.pendingInputCalls.clear();
   } else if (payload.type === 'task_started') {
+    state.reasoningEffort = null;
     state.turnEnded = false;
     state.pendingInputCalls.clear();
   }
@@ -82,6 +93,7 @@ function consumeBytes(state, chunk, start, contextStart, cacheStart) {
   }
   const remainder = bytes.subarray(lineStart);
   if (state.droppingLine || remainder.length > MAX_METADATA_LINE_BYTES) {
+    if (!state.droppingLine) applyLine(state, remainder, base + lineStart, contextStart, cacheStart);
     state.trailing = Buffer.alloc(0);
     state.droppingLine = true;
   } else state.trailing = Buffer.from(remainder);

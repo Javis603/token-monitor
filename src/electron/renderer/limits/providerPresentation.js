@@ -38,6 +38,7 @@
     zed: { web: 'Web' },
     commandcode: { web: 'Web' },
     mimo: { web: 'Web' },
+    muse: { cli: 'CLI' },
     zai: { api: 'API' },
     zaiteam: { api: 'API' },
     kiro: { cli: 'CLI' },
@@ -76,6 +77,7 @@
     zed: ['Manual login', 'Web'],
     commandcode: ['Manual login', 'Web'],
     mimo: ['Auto', 'Desktop app', 'Token Plan'],
+    muse: ['Auto', 'CLI'],
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
@@ -493,6 +495,8 @@
           ? { label: 'Sign in again', tone: 'setup' }
           : providerName === 'grok'
           ? { label: 'Re-login', tone: 'setup' }
+          : providerName === 'muse'
+          ? { label: 'Run muse login', tone: 'setup' }
           : { label: 'Sign in again', tone: 'setup' };
     }
     if (status === 'rateLimited') return { label: 'Limited', tone: 'warn' };
@@ -510,6 +514,7 @@
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi' || providerName === 'cline') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
       if (providerName === 'kiro') return { label: 'Run kiro-cli login', tone: 'setup' };
+      if (providerName === 'muse') return { label: 'Install Muse Code', tone: 'setup' };
       return { label: 'Not set up', tone: 'setup' };
     }
     return status ? { label: 'Error', tone: 'warn' } : null;

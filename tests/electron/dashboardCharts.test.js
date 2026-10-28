@@ -53,6 +53,14 @@ test('modelVendorFor maps families and modelColor falls back deterministically',
   assert.equal(modelVendorFor('muse-spark-1.2-contributor-free'), 'meta');
   assert.equal(modelVendorFor('muse-spark-1.3-contributor-free'), 'meta');
   assert.equal(modelVendorFor('opencode/muse-spark-1.3-contributor-free'), 'meta');
+  assert.equal(modelVendorFor('muse-wonder-1.0'), 'meta');
+  assert.equal(modelVendorFor('openrouter/muse-wonder-1.0'), 'meta');
+  assert.equal(modelVendorFor('muse-glimmer'), 'meta');
+  assert.equal(modelVendorFor('muse-image'), 'meta');
+  assert.equal(modelVendorFor('muse-voice-transcribe'), 'meta');
+  assert.equal(modelVendorFor('muse-spark-open'), 'meta');
+  assert.equal(modelVendorFor('amuse-wonder-1.0'), null);
+  assert.equal(modelVendorFor('muse-wonderful'), null);
   assert.equal(modelVendorFor('kimi-k2'), 'kimi');
   assert.equal(modelVendorFor('moonshot-v1'), 'kimi');
   assert.equal(modelVendorFor('k2d6-agent'), 'kimi');

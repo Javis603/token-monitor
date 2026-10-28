@@ -552,7 +552,8 @@ test('Codex account email masking is an opt-in display-only setting', () => {
     main.indexOf("ipcMain.handle('settings:openConfig'")
   );
   assert.match(updateHandler, /maskLimitAccountEmails:\s*parseBoolean\(patch\.maskLimitAccountEmails \?\? settings\.maskLimitAccountEmails, false\)/);
-  assert.doesNotMatch(updateHandler, /accountEmail|accountKey|syncLimits|publicLimits/);
+  const settingsUpdate = updateHandler.slice(0, updateHandler.indexOf("ipcMain.handle('claude:accounts'"));
+  assert.doesNotMatch(settingsUpdate, /accountEmail|accountKey|syncLimits|publicLimits/);
 
   const settingsBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(settingsBody, /els\.maskLimitAccountEmailsInput\.checked = Boolean\(state\.settings\.maskLimitAccountEmails\);/);
@@ -1150,7 +1151,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     }
   }
   assert.equal(MESSAGES.en['settings.claude.title'], 'Claude Account');
-  assert.match(MESSAGES.en['settings.claude.note'], /detected automatically when Web login is not configured/);
+  assert.match(MESSAGES.en['settings.claude.note'], /collected alongside the automatically detected Claude Code OAuth or CLI account/);
   assert.match(MESSAGES.en['settings.claude.step2'], /Application\/Storage[\s\S]*Cookies[\s\S]*https:\/\/claude\.ai/);
   assert.match(MESSAGES.en['settings.claude.step3'], /Copy the sessionKey value/);
   assert.equal(MESSAGES.en['settings.claude.cookiePlaceholder'], 'sessionKey=...');
@@ -2796,6 +2797,7 @@ test('main collectors share one live GUI limit credential resolver in every widg
     'persistClaudeWebCookieRenewal',
     'credentialProbeDeps'
   );
+  assert.match(renewalPersistence, /claudeAccountService\(\)\.renew/);
   assert.match(renewalPersistence, /settings\.claudeWebCookie === renewed\) return true/);
   assert.match(renewalPersistence, /saveSettings\(\{ throwOnError: true \}\)/);
   assert.doesNotMatch(renewalPersistence, /queueLimitInvalidation|classifySettingsChange/);

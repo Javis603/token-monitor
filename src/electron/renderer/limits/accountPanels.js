@@ -57,6 +57,7 @@ function syncCredentialFields(form, { document, settings }) {
     const control = document.getElementById(controlId(field));
     if (!control) continue;
     if (field.input === 'select') {
+      if (form.multipleAccounts && field.key === 'claudeWebOrganizationId') continue;
       const stored = settings?.[field.key];
       control.value = [...(control.options || field.options)].some((option) => option.value === stored) ? stored : field.options[0].value;
     } else if (field.prefill && !control.value && document.activeElement !== control) {
@@ -248,7 +249,8 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
   manual.append(submitActions);
   const error = element('div', 'ErrorMessage', 'settings-note error hidden');
   error.setAttribute('role', 'alert');
-  details.append(actions, ...form.top.map(block), manual, error);
+  const accountList = form.multipleAccounts ? element('div', 'WebAccountList', 'managed-account-list') : null;
+  details.append(actions, ...(accountList ? [accountList] : []), ...form.top.map(block), manual, error);
   group.append(toggle, details);
 
   toggle.addEventListener('click', () => onToggle(form));

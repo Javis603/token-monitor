@@ -1,0 +1,152 @@
+'use strict';
+const { normalizeTypes } = require('./types');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const semver = require('semver');
+const { normalizeIdentityIcon } = require('../../shared/plugins/identityIcon');
+const { atomicJson } = require('./managed');
+const { ID_RE, readBounded, digest } = require('./package');
+const { normalizeLocalized, localize, cleanText } = require('../../shared/plugins/localized');
+const MAX_INDEX_BYTES = 1024 * 1024;
+const HOST_VERSION = require('../../../package.json').version;
+function httpsUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048) throw new Error('source must be an HTTPS URL');
+  const url = new URL(value);
+  if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error('source must be HTTPS without credentials or a fragment');
+  if (url.href.length > 2048) throw new Error('normalized HTTPS URL exceeds 2048 characters');
+  return url.href;
+}
+function signingKey(pem) {
+  if (typeof pem !== 'string' || pem.length > 1024) throw new Error('invalid public key');
+  const key = crypto.createPublicKey(pem);
+  if (key.asymmetricKeyType !== 'ed25519') throw new Error('signing key must be Ed25519');
+  return { pem: key.export({ type: 'spki', format: 'pem' }).toString(), fingerprint: digest(key.export({ type: 'spki', format: 'der' })) };
+}
+function parseIndex(bytes, publicKey) {
+  if (bytes.length > MAX_INDEX_BYTES) throw new Error('catalog exceeds 1 MB');
+  let raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  if (publicKey) {
+    if (typeof raw?.payload !== 'string' || typeof raw.signature !== 'string') throw new Error('catalog signature is required for this pinned source');
+    const payload = Buffer.from(raw.payload, 'base64');
+    if (payload.length > MAX_INDEX_BYTES || !crypto.verify(null, payload, publicKey, Buffer.from(raw.signature, 'base64'))) throw new Error('catalog signature is invalid');
+    raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(payload));
+  }
+  if (raw?.format !== 1 || !Array.isArray(raw.plugins) || raw.plugins.length > 128) throw new Error('catalog needs format 1 and at most 128 plugins');
+  const title = normalizeLocalized(raw.title, 80);
+  if (!title) throw new Error('catalog title is required');
+  const seen = new Set();
+  const plugins = raw.plugins.map(entry => {
+    if (!entry || typeof entry.id !== 'string' || !ID_RE.test(entry.id) || seen.has(entry.id)) throw new Error('invalid or duplicate catalog plugin id');
+    seen.add(entry.id);
+    const name = normalizeLocalized(entry.name, 80);
+    if (!name || !Array.isArray(entry.versions) || !entry.versions.length || entry.versions.length > 32) throw new Error(`${entry.id}: name and 1–32 versions are required`);
+    const versionsSeen = new Set();
+    const versions = entry.versions.map(v => {
+      if (typeof v?.version !== 'string' || !semver.valid(v.version) || versionsSeen.has(v.version)) throw new Error(`${entry.id}: invalid or duplicate version`);
+      versionsSeen.add(v.version);
+      if (typeof v.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(v.sha256)) throw new Error(`${entry.id}: SHA-256 is required`);
+      const range = v.engines?.tokenMonitor;
+      if (range !== undefined && (typeof range !== 'string' || !semver.validRange(range))) throw new Error(`${entry.id}: invalid compatibility range`);
+      return { types: normalizeTypes(v.types), version: v.version, sha256: v.sha256, url: httpsUrl(v.url), compatible: !range || semver.satisfies(HOST_VERSION, range),
+        changelog: normalizeLocalized(v.changelog, 2000), engines: range || '*' };
+    }).sort((a, b) => semver.rcompare(a.version, b.version));
+    return { id: entry.id, name, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), versions };
+  });
+  return { title, plugins };
+}
+async function download(fetchImpl, url, limit, signal) {
+  const response = await fetchImpl(httpsUrl(url), { redirect: 'manual', credentials: 'omit', cache: 'no-store', signal,
+    headers: { Accept: 'application/json' } });
+  if (!response.ok || response.status < 200 || response.status >= 300) throw new Error(`download failed (HTTP ${response.status}); redirects are not followed`);
+  if (Number(response.headers?.get('content-length')) > limit) { await response.body?.cancel(); throw new Error('download exceeds size limit'); }
+  if (!response.body?.getReader) throw new Error('streaming download is unavailable');
+  const reader = response.body.getReader(), chunks = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > limit) throw new Error('download exceeds size limit');
+      chunks.push(Buffer.from(value));
+    }
+  } catch (error) { try { await reader.cancel(); } catch {} throw error; }
+  return Buffer.concat(chunks);
+}
+function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getLocale = () => 'en', now = Date.now }) {
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  const configFile = path.join(root, 'sources.json');
+  const sources = new Map(), cache = new Map(), active = new Map();
+  let loadError = '';
+  function cacheFile(id) { return path.join(root, `${id}.json`); }
+  function persist() { atomicJson(configFile, [...sources.values()].map(({ id, url, publicKey, fingerprint }) => ({ id, url, publicKey, fingerprint }))); }
+  try {
+    const raw = fs.existsSync(configFile) ? JSON.parse(readBounded(configFile, 64 * 1024)) : [];
+    if (!Array.isArray(raw) || raw.length > 16) throw new Error('invalid catalog source configuration');
+    for (const s of raw) {
+      if (!/^custom-[a-f0-9-]{36}$/.test(s.id) || sources.has(s.id)) throw new Error('invalid catalog source id');
+      const key = s.publicKey ? signingKey(s.publicKey) : null;
+      const source = { id: s.id, url: httpsUrl(s.url), publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null };
+      sources.set(s.id, source);
+      if (fs.existsSync(cacheFile(s.id))) {
+        try {
+          const saved = JSON.parse(readBounded(cacheFile(s.id), MAX_INDEX_BYTES * 2));
+          if (saved.url !== source.url) throw new Error('cached source does not match');
+          const index = parseIndex(Buffer.from(saved.bytes, 'base64'), source.publicKey);
+          cache.set(s.id, index); source.lastFetched = saved.at;
+        } catch (error) { source.error = `cached catalog unavailable: ${error.message}`; }
+      }
+    }
+  } catch (error) { loadError = `catalog sources could not be loaded: ${error.message}`; sources.clear(); cache.clear(); }
+  function requireWritable() { if (loadError) throw new Error(loadError); }
+  function list() {
+    return { error: loadError, sources: [...sources.values()].map(s => ({ id: s.id, kind: 'community', url: s.url,
+      label: localize(cache.get(s.id)?.title, getLocale()) || new URL(s.url).hostname,
+      fingerprint: s.fingerprint, signed: Boolean(s.publicKey && cache.has(s.id)), lastFetched: s.lastFetched,
+      cached: cache.has(s.id), error: s.error, refreshing: active.has(s.id) })) };
+  }
+  async function request(id, url, limit) {
+    const source = sources.get(id); if (!source) throw new Error('unknown catalog source');
+    if (active.has(id)) throw new Error('this source already has a download in progress');
+    const controller = new AbortController(); active.set(id, controller);
+    const timer = setTimeout(() => controller.abort(), 15_000); timer.unref?.();
+    try {
+      const bytes = await download(fetchImpl, url, limit, controller.signal);
+      if (sources.get(id) !== source || controller.signal.aborted) throw new Error('catalog source was removed or download cancelled');
+      return bytes;
+    } finally { clearTimeout(timer); if (active.get(id) === controller) active.delete(id); }
+  }
+  async function refresh(id) {
+    requireWritable(); const s = sources.get(id); if (!s) throw new Error('unknown catalog source');
+    try {
+      const bytes = await request(id, s.url, MAX_INDEX_BYTES);
+      const index = parseIndex(bytes, s.publicKey);
+      atomicJson(cacheFile(id), { url: s.url, at: now(), bytes: bytes.toString('base64') });
+      cache.set(id, index); s.lastFetched = now(); s.error = '';
+    } catch (error) { s.error = cleanText(error.message, 300); }
+    return list();
+  }
+  return {
+    list, refresh, request,
+    entries() { return [...sources.values()].flatMap(s => (cache.get(s.id)?.plugins || []).map(p => ({ ...p, origin: {
+      id: s.id, kind: 'community', label: localize(cache.get(s.id).title, getLocale()), url: s.url, fingerprint: s.fingerprint,
+      signed: Boolean(s.publicKey), cached: true, lastFetched: s.lastFetched, error: s.error } }))); },
+    async add({ url, publicKey = '' } = {}) {
+      requireWritable(); const normalized = httpsUrl(url);
+      if (sources.size >= 16 || [...sources.values()].some(s => s.url === normalized)) throw new Error('source already exists or source limit reached');
+      const key = publicKey ? signingKey(publicKey) : null;
+      const source = { id: `custom-${crypto.randomUUID()}`, url: normalized, publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null };
+      sources.set(source.id, source);
+      try { persist(); } catch (error) { sources.delete(source.id); throw error; }
+      return refresh(source.id);
+    },
+    remove(id) {
+      requireWritable(); const source = sources.get(id); if (!source) throw new Error('unknown catalog source');
+      sources.delete(id); try { persist(); } catch (error) { sources.set(id, source); throw error; }
+      active.get(id)?.abort(); cache.delete(id); cancelPreviews(id);
+      fs.rmSync(cacheFile(id), { force: true }); return list();
+    },
+    dispose() { for (const controller of active.values()) controller.abort(); active.clear(); }
+  };
+}
+module.exports = { MAX_INDEX_BYTES, httpsUrl, signingKey, parseIndex, download, createCatalogSources };

@@ -137,6 +137,18 @@
 
 大多數用量監控工具只在它執行的那台機器上有用。Token Monitor 是為多裝置工作流而設計的：每台裝置監看自己的本機紀錄、把摘要更新送到你的 hub，每個連線中的小工具幾乎都能即時看到 Token 變化。
 
+## 快速安裝
+
+macOS 可透過官方 [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor) 安裝：
+
+```bash
+brew install --cask token-monitor
+```
+
+也可從 [GitHub Releases](https://github.com/Javis603/token-monitor/releases) 下載 macOS、Windows 或 Linux 版 App。
+
+啟動 App 即可開始追蹤這台裝置的本機用量，無需設定 hub。完整說明請見[安裝](#安裝)。
+
 ## 功能特色
 
 ### 用量追蹤
@@ -151,7 +163,7 @@
 
 ### 額度、趨勢與匯出
 
-- **AI 工具額度偵測**：涵蓋 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 29+ 家供應商的 session、每日、每週、帳單與 credits 視窗，支援多個 OpenRouter／第三方 profile，以及餘額型帳戶（Claude credits、DeepSeek 預付餘額與消費歷史、第三方餘額）
+- **AI 工具額度偵測**：涵蓋 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 30+ 家供應商的 session、每日、每週、帳單與 credits 視窗，支援多個 OpenRouter／第三方 profile，以及餘額型帳戶（Claude credits、DeepSeek 預付餘額與消費歷史、第三方餘額）
 - **多帳號與 Codex 帳號切換**：同一供應商可追蹤多個帳號、各自顯示額度；已加入追蹤的 Codex 帳號還能一鍵切換為本機使用帳號，免重新登入授權
 - **Codex 重置預測**：可選開啟的第三方重置預測，顯示預計重置時間、重置類型（Regular 或 Banked）與上次重置時間
 - **保留已刪除會話用量**：許多工具會定期清除舊 session（Claude Code 預設清 30 天前的 transcript），一刪就再也算不到。開啟後，Token Monitor 會在本機不設期限地封存已觀測到的每日工具／模型用量，讓熱力圖與趨勢即使在來源檔案被清掉後仍然完整（詳見下方[〈會話資料保留期〉](#會話資料保留期)）
@@ -184,6 +196,12 @@
 - **可錄製全域快捷鍵**：可從任何地方快速顯示或隱藏視窗
 - **Discord Rich Presence**：將今日 Token、花費與主要工具廣播到你的 Discord 個人檔案（需手動開啟）
 
+### 外掛（實驗性）
+
+以自訂內容擴展桌面頁面、新增外掛頁面與設定，並將內容放到瀏海、Edge Dock、選單列／系統匣或懸浮小窗。作者可設計自己的介面，並選用本機 Node 後端接駁資料來源及執行運算。
+
+在「設定 → 外掛」管理外掛。參閱[使用指南](https://javis-ai.com/token-monitor/docs/plugins.html?lang=zh-TW)、[開發指南](docs/plugins/author-quickstart.md)及[外掛 API](docs/plugins/README.md)。外掛 API 屬實驗性，日後可能變更，外掛可能需要更新。只啟用你信任的程式碼：外掛並非沙盒隔離，Node 後端以你的作業系統使用者權限執行。
+
 ## 支援工具詳情
 
 Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
@@ -212,12 +230,12 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`；VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 與 `kiro-cli` 資料庫 | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 與 IDE / VS Code 擴充套件日誌 | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（僅限中國版） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
@@ -244,6 +262,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 <br>
 
 - 上表為預設路徑。Token Monitor 與 Tokscale 遵循相同的環境變數覆寫：`~/.local/share/` 下的路徑跟隨 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$SENPI_CODING_AGENT_DIR`、`$SENPI_CODING_AGENT_SESSION_DIR`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
+- Muse Code 訂閱額度透過 Muse Code 1.4.13+ 的 `muse usage --json` 和既有登入讀取。未提供額度或使用 API 金鑰計費時，無法顯示額度百分比。詳見 [Muse 資料來源說明](docs/providers/muse.md)。
 - Goose 的跨日用量仍計入會話建立日；暫不支援遠端 goosed 與自訂掃描路徑。詳見 [Goose 資料來源說明](docs/providers/goose.md)。
 - CatPaw 預設關閉，可在 Settings → tools 中啟用；讀取 macOS 和 Windows 上國內版與海外版助手的資料庫。路徑與驗證邊界見 [CatPaw 資料來源說明](docs/providers/catpaw.md)。
 - OmO Native 同時統計 OmO Native 與獨立 Senpi 的本機 session 紀錄。全新安裝會追蹤它；已儲存的工具選擇在升級後不會自動加上，請在 Settings → tools 中啟用 OmO Native。見 [OmO Native 資料來源說明](docs/providers/senpi.md)。 部分子任務紀錄只計入用量，暫不支援 Session Detail。
@@ -264,6 +283,26 @@ Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 
 
 這是進階本機整合，但兩種格式都不需要額外執行環境。無法讀取的來源會保留上一次完整讀取的資料。舊資料庫的 session 只記錄專案名稱而非路徑，因此不會顯示所屬專案。只統計有實際 Token 欄位的 JSONL 記錄；目前第一方方案模型可能只有 credits 與 context 使用比例，欠缺可靠的每 session context window，因此不會猜測 Token。Credits 仍會顯示於 AI Tool Limits，含實際 Token 的 BYOK／自訂模型會正常統計。
 </details>
+
+### 其他功能支援
+
+| 功能 | 支援的工具／來源 | 補充說明 |
+|---------|-------------------------|------------|
+| 會話標題 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| 每次提示／回覆的用量與工具呼叫 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 明細只在本機讀取，不會同步。 |
+| 上下文用量／剩餘空間 | Claude Code, Codex, DeepSeek Harness | Claude Code 的上下文上限依模型估算。 |
+| 快取用量／會話快取命中率 | 提供快取欄位的來源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 有快取用量資料時才顯示命中率。 |
+| 快取剩餘時間估算 | Claude Code, Codex | Claude Code：5 分鐘或 1 小時；Codex：約 30 分鐘（估算）。 |
+| 輸出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 為輸出速度，`tok/min` 為總 Token 消耗速率；計時可能包含等待。 |
+| 推理強度設定 | Claude Code, Codex | 僅顯示會話中明確記錄的設定值。 |
+| 推理 Token 數 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| 原生執行中／等待輸入狀態 | Claude Code, Codex | — |
+| 父會話／子代理分組 | Codex, Antigravity, Oh My Pi, ZCode；具有可驗證父會話連結的 T3 Code 會話 | Claude Code 的分組透過 T3 Code 提供。 |
+| 同一對話的延續紀錄分組 | Codex；具有已驗證討論串連結的 T3 Code 會話 | — |
+| 切換本機帳戶 | Codex | 可切換至已加入 Token Monitor 的帳戶。 |
+| 額度重設時間／倒數 | 提供重設時間的來源，例如 Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| 可用額度重設券 | Claude Code, Codex | 顯示剩餘次數及到期時間，僅供查看。 |
+| 額度重設預測 | Codex | 可選的 codex-resets.com 第三方預測。 |
 
 ## 安裝
 

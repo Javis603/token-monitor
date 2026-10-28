@@ -437,7 +437,7 @@
     if (/grok|xai/.test(name)) return 'xai';
     if (/deepseek/.test(name)) return 'deepseek';
     if (/nemotron|nvidia/.test(name)) return 'nvidia';
-    if (/llama|meta|muse-spark(?:-|$)/.test(name)) return 'meta';
+    if (/llama|meta|(?:^|[^a-z0-9])muse-(?:spark|wonder|glimmer|image|voice)(?:-|$)/.test(name)) return 'meta';
     if (/mistral|mixtral|codestral/.test(name)) return 'mistral';
     if (/qwen|qwq|qvq|qmodel/.test(name)) return 'qwen';
     // Kimi's coding-plan catalog also serves bare `k2`/`k3` ids with no `kimi`

@@ -709,7 +709,7 @@ test('collectUsageOnce omits history entirely on a non-history tick', async () =
   assert.equal(Object.hasOwn(summary, 'history'), false);
 });
 
-test('collectUsageOnce requests fork-only Proma history from tokscale graph', async () => {
+test('collectUsageOnce requests Proma history from tokscale graph', async () => {
   const graphClients = [];
   const summary = await collectUsageOnce({
     clients: 'proma', allTimeSince: '2026-01-01', deviceId: 'proma-only',

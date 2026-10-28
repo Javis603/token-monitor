@@ -95,7 +95,7 @@ function normalizeNotchShape(value) {
 function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens,
   nativeGlass = () => false, liquidGlass = () => null, createGlass, applyShapeMask,
-  onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, naturalScrolling = () => true, monitorScrollGesture, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
+  onWebSurfaceChanged = () => {}, onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, naturalScrolling = () => true, monitorScrollGesture, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
   logger = () => {} }) {
   const surfaces = ['notch'];
   const windows = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
@@ -218,7 +218,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     // choose those items, so only the display bounds the summary.
     const closedMaxWidth = maxWidth;
     const summaryBudget = Math.max(0, Math.floor(compact ? closedMaxWidth - 2 * ((geometry.notched ? NOTCH_METRICS.restingFlare : 0) + 8)
-      : (closedMaxWidth - geometry.gapWidth) / 2 - 16 - NOTCH_METRICS.restingFlare));
+      : (closedMaxWidth - geometry.gapWidth) / 2 - 8 - NOTCH_METRICS.cameraClearance - NOTCH_METRICS.restingFlare));
     const boundedSlots = activeSlots && !compact
       ? { left: Math.min(activeSlots.left, summaryBudget), right: Math.min(activeSlots.right, summaryBudget) } : activeSlots;
     const closed = notchBounds(display, geometry, false, contentHeight, boundedSlots, zoom(), closedMaxWidth);
@@ -290,6 +290,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function send(surface, current = layout()) {
+    onWebSurfaceChanged();
     const win = windows[surface];
     if (!alive(win) || !ready[surface] || !current) return;
     const base = { surface, notch: true, shape: shapes[surface], platform, osRelease: os.release(),
@@ -363,8 +364,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
       const gapLeft = current.geometry.centerX - current.geometry.gapWidth / 2 - canvas.x;
       const gapRight = gapLeft + current.geometry.gapWidth;
       const left = frame.summaryEdges.left + frame.summaryIconInset - current.summaryIconInset;
-      const leftScale = slots.left > 0 ? (gapLeft - 8 - left) / slots.left : Infinity;
-      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - 8) / slots.right : Infinity;
+      const leftScale = slots.left > 0 ? (gapLeft - NOTCH_METRICS.cameraClearance - left) / slots.left : Infinity;
+      const rightScale = slots.right > 0 ? (frame.summaryEdges.right - gapRight - NOTCH_METRICS.cameraClearance) / slots.right : Infinity;
       frame.summaryScale = Math.max(0, Math.min(frame.summaryScale, leftScale, rightScale));
     }
     // The camera cap must share the native material's compositor transaction.
@@ -512,6 +513,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function visibility() {
+    onWebSurfaceChanged();
     const win = windows.notch;
     if (!alive(win)) return;
     if (ready.notch && !locked && (!summaryVisible() || summaryMeasured) && !win.isVisible()) win.showInactive();
@@ -939,6 +941,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return onSwitchCodexAccount?.(String(payload?.accountId || '')) || { ok: false, error: 'Unavailable' };
   });
   return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
+    webSurface: (host) => host === windows.notch?.webContents ? { kind: 'notch', visible: running && expanded && !locked && !motion && progress === 1, preparing: running && expanded && !locked && Boolean(motion),
+      summaryVisible: running && ready.notch && !locked && summaryMeasured && summaryVisible() && !shellHidden() } : null,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),
     previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); refreshLayout(); },
     setAppearance(value, { preview = false } = {}) {

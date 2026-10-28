@@ -20,6 +20,7 @@
       getStats,
       save,
       providerLabel,
+      pluginLabel = (ref) => ref,
       providerColor,
       windowLabel,
       hasProviderMark,
@@ -106,6 +107,7 @@
         if (item.metric === itemsApi.SESSIONS_METRIC) return t('edgeDock.sessions');
         return t(`edgeDock.period.${item.metric}`);
       }
+      if (item.type === 'plugin') return pluginLabel(item.ref) || item.ref;
       return providerLabel(item.provider);
     }
 
@@ -122,6 +124,10 @@
           : item.metric === itemsApi.SESSIONS_METRIC
             ? t('edgeDock.statGlyph.sessions')
             : t(`edgeDock.periodShort.${item.metric}`);
+        return mark;
+      }
+      if (item.type === 'plugin') {
+        mark.classList.add('is-fallback');
         return mark;
       }
       if (hasProviderMark(item.provider)) mark.classList.add(`row-icon-${item.provider}`);
@@ -312,6 +318,10 @@
       head.append(remove);
       pane.append(head);
 
+      if (item.type === 'plugin') {
+        pane.append(el('p', 'edge-dock-composer-hint', item.ref));
+        return pane;
+      }
       if (item.type === 'action') {
         pane.append(el('p', 'edge-dock-composer-hint', t(itemsKey === 'notchItems' ? 'settings.notch.refreshNote' : 'settings.edgeDock.refreshNote')));
         return pane;

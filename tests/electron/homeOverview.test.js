@@ -154,7 +154,7 @@ test('Home activity tooltip survives Home rerenders and is dismissed when the vi
   assert.match(renderHome[1], /hideHomeActivityTooltip\(\{\s*preserveHover:\s*true\s*\}\)/);
   assert.match(
     renderHome[1],
-    /replaceChildren\(\.\.\.nodes\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
+    /els\.homePanel\.insertBefore\(node, current \|\| null\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
   );
   const trendsModule = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(trendsModule, 'renderHomeTrendsModule exists');

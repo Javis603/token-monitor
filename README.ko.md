@@ -137,6 +137,18 @@ Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 47개 이상의 AI
 
 대부분의 사용량 모니터는 실행 중인 그 기기에서만 유용합니다. Token Monitor는 멀티 디바이스 작업을 위해 만들어졌습니다. 각 기기가 로컬 로그를 감시하고 hub로 요약을 보내면, 연결된 모든 위젯이 토큰 변화를 거의 실시간으로 볼 수 있습니다.
 
+## 빠른 설치
+
+macOS에서는 공식 [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor)로 설치할 수 있습니다:
+
+```bash
+brew install --cask token-monitor
+```
+
+또는 [GitHub Releases](https://github.com/Javis603/token-monitor/releases)에서 macOS, Windows, Linux용 앱을 다운로드하세요.
+
+앱을 실행하면 이 기기의 로컬 사용량 추적이 시작되며, hub 설정은 필요하지 않습니다. 자세한 내용은 [설치](#설치)를 참고하세요.
+
 ## 기능
 
 ### 사용량 추적
@@ -151,7 +163,7 @@ Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 47개 이상의 AI
 
 ### 한도·추세·내보내기
 
-- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, OpenRouter, 서드파티 API, GLM, Kimi 등 29개 이상 공급자의 session/daily/weekly/billing/credits, 여러 OpenRouter/서드파티 프로필, 잔액형 계정(Claude 크레딧, DeepSeek 선불 잔액과 사용 내역, 서드파티 잔액)
+- **AI 도구 한도 감지** — Claude Code, Codex, Cursor, OpenRouter, 서드파티 API, GLM, Kimi 등 30개 이상 공급자의 session/daily/weekly/billing/credits, 여러 OpenRouter/서드파티 프로필, 잔액형 계정(Claude 크레딧, DeepSeek 선불 잔액과 사용 내역, 서드파티 잔액)
 - **여러 계정과 Codex 전환** — 한 공급자에서 여러 계정을 추적하고 각각의 한도를 표시. 추적 중인 Codex 계정은 재인증 없이 로컬 계정으로 한 번에 전환 가능
 - **Codex 초기화 예측** — 선택적으로 켜는 서드파티 초기화 예측. 예상 초기화 시각, 초기화 유형(Regular 또는 Banked), 마지막 초기화 시각을 표시
 - **삭제된 세션 사용량 유지** — 많은 도구가 오래된 세션을 정리합니다(Claude Code는 기본적으로 30일 후 트랜스크립트 삭제). 켜면 Token Monitor가 관측한 일별 도구/모델 사용량을 로컬에 보관해, 원본 파일이 사라져도 히트맵과 추세를 유지합니다(아래 [세션 데이터 보존 기간](#세션-데이터-보존-기간) 참고)
@@ -184,6 +196,12 @@ Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 47개 이상의 AI
 - **전역 단축키** — 어디서든 창 표시/숨김
 - **Discord Rich Presence** — 오늘 토큰·비용·주요 클라이언트 (옵트인)
 
+### 플러그인 (실험적)
+
+데스크톱 페이지에 맞춤 콘텐츠를 추가하고 플러그인 페이지와 설정을 만들 수 있습니다. Notch, Edge Dock, 메뉴 막대/시스템 트레이, 플로팅 버블에도 콘텐츠를 배치할 수 있습니다. 제작자는 자체 UI와 데이터 수집 및 계산을 위한 선택적 로컬 Node 백엔드를 개발할 수 있습니다.
+
+설정 → 플러그인에서 관리하세요. [사용 가이드](https://javis-ai.com/token-monitor/docs/plugins.html?lang=ko), [개발 가이드](docs/plugins/author-quickstart.md), [플러그인 API](docs/plugins/README.md)를 참고하세요. 플러그인 API는 실험적이며 향후 변경으로 플러그인 업데이트가 필요할 수 있습니다. 신뢰하는 코드만 활성화하세요. 플러그인은 샌드박스로 격리되지 않으며 Node 백엔드는 OS 사용자 권한으로 실행됩니다.
+
 ## 지원 도구 상세
 
 Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 각각 지원합니다.
@@ -212,12 +230,12 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`, VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage 및 `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 확장 로그 | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`(중국판 전용) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
@@ -244,6 +262,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 <br>
 
 - 위 경로는 기본값입니다. Token Monitor는 Tokscale과 동일한 환경 변수 재정의를 따릅니다 — `~/.local/share/` 아래 경로는 `$XDG_DATA_HOME`, 도구별로는 `$CODEX_HOME`, `$SENPI_CODING_AGENT_DIR`, `$SENPI_CODING_AGENT_SESSION_DIR`, `$GROK_HOME`, `$HERMES_HOME`, `$GOOSE_PATH_ROOT`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME`, `$CLINE_*` 계열입니다.
+- Muse Code 구독 한도는 Muse Code 1.4.13+의 `muse usage --json`과 기존 로그인을 사용합니다. 할당량이 없거나 API 키 결제인 경우 비율을 표시할 수 없습니다. [Muse 데이터 소스 설명](docs/providers/muse.md)을 참고하세요.
 - Goose 사용량은 이후 날짜에 사용한 양도 세션 생성일에 포함됩니다. 원격 goosed와 사용자 지정 스캔 경로는 지원하지 않습니다. [Goose 데이터 소스 설명](docs/providers/goose.md)을 참고하세요.
 - CatPaw는 기본적으로 꺼져 있으며 Settings → tools에서 활성화할 수 있습니다. macOS와 Windows의 중국판·해외판 어시스턴트 데이터베이스를 읽습니다. 경로와 검증 범위는 [CatPaw 데이터 소스 안내](docs/providers/catpaw.md)를 참고하세요.
 - OmO Native는 OmO Native와 독립형 Senpi의 로컬 세션 기록을 함께 집계합니다. 새로 설치하면 추적됩니다. 저장된 도구 선택은 업그레이드 때 자동으로 추가되지 않으므로 Settings → tools에서 OmO Native를 활성화하세요. [OmO Native 데이터 소스 안내](docs/providers/senpi.md)를 참고하세요. 일부 하위 작업 로그는 사용량에만 포함되며 세션 상세는 아직 지원하지 않습니다.
@@ -264,6 +283,26 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 
 고급 로컬 통합이지만 두 형식 모두 추가 런타임이 필요 없습니다. 읽을 수 없는 소스는 마지막으로 완전히 읽은 데이터를 유지합니다. 이전 데이터베이스 세션은 경로가 아닌 프로젝트 이름만 기록하므로 프로젝트 없이 표시됩니다. 실제 토큰 필드가 있는 JSONL 행만 집계합니다. 현재 자사 플랜 행은 credits와 context 비율만 기록할 수 있고 신뢰할 수 있는 세션별 context window가 없으므로 토큰을 추측하지 않습니다. Credits는 AI Tool Limits에 표시되며 실제 토큰이 있는 BYOK/사용자 지정 모델은 정상 집계됩니다.
 </details>
+
+### 추가 기능 지원
+
+| 기능 | 지원 도구／데이터 소스 | 참고 |
+|---------|-------------------------|------------|
+| 세션 제목 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| 프롬프트／응답별 사용량 및 도구 호출 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 상세 정보는 로컬에서만 읽으며 동기화하지 않습니다. |
+| 컨텍스트 사용량／남은 공간 | Claude Code, Codex, DeepSeek Harness | Claude Code의 컨텍스트 한도는 모델을 기준으로 추정합니다. |
+| 캐시 사용량／세션 캐시 적중률 | 캐시 필드를 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 캐시 사용량 데이터가 있을 때 적중률을 표시합니다. |
+| 예상 캐시 잔여 시간 | Claude Code, Codex | Claude Code: 5분 또는 1시간. Codex: 약 30분(추정). |
+| 출력 속도／토큰 소비 속도 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 출력 속도는 `tok/s`, 전체 토큰 소비 속도는 `tok/min`이며, 측정 시간에 대기가 포함될 수 있습니다. |
+| 추론 강도 설정 | Claude Code, Codex | 세션에 명시적으로 기록된 설정값만 표시합니다. |
+| 추론 토큰 수 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| 네이티브 실행 중／입력 대기 상태 | Claude Code, Codex | — |
+| 부모 세션／하위 에이전트 그룹화 | Codex, Antigravity, Oh My Pi, ZCode; 부모 세션 연결을 검증할 수 있는 T3 Code 세션 | Claude Code의 그룹화는 T3 Code를 통해 제공합니다. |
+| 동일 대화의 이어진 기록 그룹화 | Codex; 검증된 스레드 연결이 있는 T3 Code 세션 | — |
+| 로컬 계정 전환 | Codex | Token Monitor에 추가한 계정으로 전환합니다. |
+| 한도 초기화 시간／카운트다운 | 초기화 시간을 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| 사용 가능한 한도 초기화권 | Claude Code, Codex | 남은 횟수와 만료 시간을 표시하며 조회 전용입니다. |
+| 한도 초기화 예측 | Codex | 선택 사항인 codex-resets.com의 서드파티 예측입니다. |
 
 ## 설치
 

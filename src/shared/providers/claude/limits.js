@@ -10,8 +10,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
-const { normalizeLimitProvider } = require('../../limits/core');
-const { abortError } = require('../../probeDeadline');
+const { aggregateLimits, normalizeLimitProvider } = require('../../limits/core');
+const { abortError, runWithProbeDeadline } = require('../../probeDeadline');
+const { claudeWebAccountMetadata, normalizeClaudeManagedAccounts } = require('./webAccounts');
 const { hashKey } = require('../../hashKey');
 const { CLAUDE_PROBE_ARGS, prepareClaudeProbeDir } = require('./probe');
 const {
@@ -1347,6 +1348,128 @@ async function refreshClaudeCredentials(currentCredentials, deps = {}) {
   return { ...currentCredentials, ...refreshed };
 }
 
+// The single-credential probe remains the save-time validator. Runtime fans out
+// the saved Web sessions alongside the automatic OAuth/CLI lane.
+async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
+  if (deps.probe === true) return fetchClaudeLimits(options, deps);
+  const accounts = normalizeClaudeManagedAccounts(options.claudeManagedAccounts).filter((account) => account.enabled);
+  const legacyCookie = claudeWebCookie(deps.env || process.env, options);
+  const web = [...accounts, ...(legacyCookie ? [{
+    id: 'legacy', cookie: legacyCookie, organizationId: options.claudeWebOrganizationId || ''
+  }] : [])];
+  const scope = options.limitRefreshScope;
+  const scopeId = String(scope?.accountId || scope?.managedAccountId || '');
+  const scopeField = ['accountKey', 'accountEmail', 'accountName'].find((key) => scope?.[key]);
+  const matchesScope = (row) => !scopeField
+    || String(row?.[scopeField] || '').toLowerCase() === String(scope[scopeField]).toLowerCase();
+  if (!scopeField && !scopeId && !web.length && !options.previousLimits?.providers?.some((row) => row.provider === 'claude')) {
+    return fetchClaudeLimits({ ...options, claudeWebCookie: '' }, deps);
+  }
+  const rows = [];
+  const retainedCreditKeys = new Set();
+  let unidentifiedWebFailure = false;
+  const renewedCookies = new Map();
+  for (const account of web) {
+    if (scopeId && account.id !== scopeId) continue;
+    if (scopeField && account[scopeField] && !matchesScope(account)) continue;
+    if (deps.signal?.aborted) throw abortError(deps.signal);
+    let row;
+    try {
+      const credential = account.id === 'legacy' ? account.cookie : await deps.resolveClaudeWebCredential?.(account);
+      if (!credential) throw errorWithStatus('notConfigured', 'Claude Web login is not configured');
+      const cookie = renewedCookies.get(credential) || credential;
+      account.cookie = cookie;
+      row = await runWithProbeDeadline(({ signal }) => fetchClaudeLimits({
+          ...options, claudeWebCookie: cookie, claudeWebOrganizationId: account.organizationId
+        }, {
+          ...deps, signal,
+          onClaudeWebCookieRenewed: async (renewal) => {
+            if (signal.aborted) return false;
+            for (const [old, current] of renewedCookies) {
+              if (current === renewal.previousCookie) renewedCookies.set(old, renewal.cookie);
+            }
+            renewedCookies.set(renewal.previousCookie, renewal.cookie);
+            return deps.onClaudeWebCookieRenewed?.({ ...renewal, ...(account.id !== 'legacy' ? { accountId: account.id } : {}) });
+          }
+        }), { signal: deps.signal, deadlineMs: deps.claudeAccountTimeoutMs || 45000 });
+    } catch (error) {
+      if (deps.signal?.aborted) throw abortError(deps.signal);
+      const cached = claudeCachedIdentity(claudeWebIdentityFingerprint(renewedCookies.get(account.cookie) || account.cookie), deps, { allowStale: true });
+      const identity = cached?.selectedOrganizationId === account.organizationId ? cached.identity : null;
+      row = normalizeLimitProvider({
+        provider: 'claude', ...claudeWebAccountMetadata(account), source: 'web',
+        ...identity,
+        status: error?.status || 'unavailable', updatedAt: nowIso((deps.now || Date.now)()), windows: []
+      });
+      if (!row.accountKey) unidentifiedWebFailure = true;
+      // Only a transient loss of a still-configured Web source may retain its
+      // last credits, bounded by the existing prepaid cache's read deadline.
+      if (['timeout', 'unavailable', 'rateLimited', 'sourceRateLimited', 'error'].includes(row.status)
+        && claudePrepaidBalanceEnabled(deps.env || process.env, options)) {
+        const context = { identity: { accountKey: row.accountKey }, organizationId: cached?.organizationId || account.organizationId };
+        if (claudeCachedPrepaid(claudePrepaidKey(context), deps, options, true)?.balance) retainedCreditKeys.add(row.accountKey);
+      }
+    }
+    rows.push(row);
+    if (!deps.signal?.aborted) {
+      try {
+        await deps.onClaudeWebAccountResolved?.({ id: account.id, organizationId: account.organizationId,
+          cookie: renewedCookies.get(account.cookie) || account.cookie, provider: row,
+          scopedById: Boolean(scopeId && !scopeField) });
+      } catch (_) {
+        deps.logger?.('[limits] Claude account observation could not be recorded');
+      }
+    }
+  }
+  let local;
+  try {
+    if (!scopeId && (scope?.reconcileSources || !scopeField || !rows.some((row) => row.status === 'ok' && matchesScope(row)))) {
+      local = await runWithProbeDeadline(({ signal }) => fetchClaudeLimits({ ...options, claudeWebCookie: '' }, { ...deps, signal }), {
+        signal: deps.signal, deadlineMs: deps.claudeLocalAccountTimeoutMs || 120000
+      });
+      rows.push(local);
+    }
+  } catch (error) {
+    if (deps.signal?.aborted) throw abortError(deps.signal);
+    local = { provider: 'claude', status: error?.status || 'unavailable', windows: [] };
+    rows.push(local);
+  }
+  const represented = new Set(rows.map((row) => row.accountKey).filter(Boolean));
+  for (const previous of options.previousLimits?.providers || []) {
+    if (scopeField || scopeId) break;
+    if (previous.provider !== 'claude' || !previous.accountKey || represented.has(previous.accountKey)) continue;
+    const retired = previous.source === 'web' ? !unidentifiedWebFailure
+      : local?.status === 'ok' || local?.status === 'notConfigured';
+    if (retired) rows.push({ provider: 'claude', accountKey: previous.accountKey, removed: true });
+  }
+  // Anonymous failures cannot stand in for every saved account in the runtime.
+  // Missing known rows already get last-good retention there.
+  let result = rows.some((row) => row.accountKey && !row.removed)
+    ? rows.filter((row) => row.accountKey)
+    : [...rows.filter((row) => row.removed), rows.find((row) => !row.removed)];
+  if (scopeField) {
+    result = result.filter(matchesScope);
+    if (!result.length) result.push({ provider: 'claude', [scopeField]: scope[scopeField],
+      ...(!unidentifiedWebFailure && ['ok', 'notConfigured'].includes(local?.status)
+        ? { removed: true } : { status: 'unavailable', windows: [] }) });
+  }
+  // Reuse the account aggregator before the runtime's one-row-per-key commit:
+  // Web-only credits survive an OAuth reading of the same subscription, and a
+  // failed credential cannot replace that account's healthy observation.
+  const removals = result.filter((row) => row?.removed);
+  const providers = aggregateLimits([{ limits: { providers: result.filter((row) => row && !row.removed) } }], 0, (deps.now || Date.now)()).providers;
+  return [...providers.map((provider) => {
+    const row = normalizeLimitProvider(provider);
+    const previous = options.previousLimits?.providers?.find((entry) => entry.provider === 'claude' && entry.accountKey === row.accountKey);
+    // Reuse runtime partial-window retention: current OAuth usage replaces
+    // quota, while credits retain their old timestamp and unavailable status.
+    return row.status === 'ok' && !row.balance && retainedCreditKeys.has(row.accountKey)
+      && previous?.balance && previous.windows?.some((window) => window.metric === 'credits')
+      ? { ...row, invalidateCachedWindowLabels: previous.windows.filter((window) => window.metric !== 'credits').map((window) => window.label) }
+      : row;
+  }), ...removals];
+}
+
 async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const platform = deps.platform || process.platform;
@@ -2148,6 +2271,9 @@ async function touchClaudeAuthPath(deps = {}) {
 }
 
 module.exports = {
+  claudeWebAccountMetadata,
+  normalizeClaudeManagedAccounts,
+  fetchClaudeAccountsLimits,
   claudeCommandCandidates,
   claudeWebCookie,
   delegatedClaudeRefresh,

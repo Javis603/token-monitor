@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Using the App · Token Monitor Docs</title>
+    <meta name="description" content="Install Token Monitor, read its views, configure settings and connect devices.">
+    <meta property="og:title" content="Using the App · Token Monitor Docs">
+    <meta property="og:description" content="Install Token Monitor, read its views, configure settings and connect devices.">
+    <meta property="og:type" content="article">
+    <meta property="og:image" content="../assets/icon.png">
+    <meta name="theme-color" content="#14171c">
+    <link rel="icon" href="../assets/icon.png">
+    <link rel="stylesheet" href="../styles/tokens.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/base.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/components.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/edgedock.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/sections.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/docs.css?v=20260929-v063">
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="nav.skip">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav shell" aria-label="Primary" data-i18n-attr="aria-label:nav.primary">
+        <a class="brand" href="../" aria-label="Token Monitor home" data-i18n-attr="aria-label:nav.home">
+          <img class="brand-mark" src="../assets/icon.png" alt="" width="36" height="36">
+          <span>Token Monitor</span>
+        </a>
+        <div class="nav-actions">
+          <a class="nav-docs-link" href="./" aria-current="page" data-i18n="nav.docs">Docs</a>
+          <details class="lang-menu" data-lang-menu>
+            <summary class="nav-icon-btn lang-btn" aria-label="Language" aria-haspopup="menu" aria-expanded="false" data-i18n-attr="aria-label:nav.language">
+              <svg class="lang-symbol" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 8 11 14"></path>
+                <path d="m4 14 6-6 2-3"></path>
+                <path d="M2 5h12"></path>
+                <path d="M7 2h1"></path>
+                <path d="m22 22-5-10-5 10"></path>
+                <path d="M14 18h6"></path>
+              </svg>
+              <span class="lang-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="lang-pop" role="menu" aria-label="Language" data-i18n-attr="aria-label:nav.language">
+              <button type="button" role="menuitemradio" data-lang="zh-TW" aria-checked="false">繁體中文</button>
+              <button type="button" role="menuitemradio" data-lang="zh-CN" aria-checked="false">简体中文</button>
+              <button type="button" role="menuitemradio" data-lang="en" aria-checked="true">English</button>
+              <button type="button" role="menuitemradio" data-lang="ko" aria-checked="false">한국어</button>
+              <button type="button" role="menuitemradio" data-lang="ja" aria-checked="false">日本語</button>
+              <button type="button" role="menuitemradio" data-lang="pt-BR" aria-checked="false">Português (Brasil)</button>
+            </div>
+          </details>
+          <a class="nav-github-link" href="https://github.com/Javis603/token-monitor" aria-label="Star Token Monitor on GitHub" data-i18n-attr="aria-label:nav.githubStar">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+            </svg>
+            <span class="nav-github-label" data-i18n="nav.star">Star</span>
+            <span class="nav-github-count" data-github-stars>1000</span>
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <button class="docs-menu-btn" type="button" aria-expanded="false" aria-controls="docs-nav"><span data-i18n="docs.menu">Docs menu</span></button>
+        <nav class="docs-nav" id="docs-nav" aria-label="Documentation" data-i18n-attr="aria-label:docs.nav">
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.start">Get started</h2>
+            <ul>
+              <li><a href="./" data-i18n="docs.page.home">Overview</a></li>
+              <li><a href="app.html" aria-current="page" data-i18n="docs.page.app">Using the App</a></li>
+              <li><a href="plugins.html" data-i18n="docs.page.plugins">Using plugins</a></li>
+              <li><a href="plugin-quickstart.html" data-i18n="docs.page.quickstart">Plugin development guide</a></li>
+            </ul>
+          </div>
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.reference">API references</h2>
+            <ul>
+              <li><a href="plugin-reference.html" data-i18n="docs.page.reference">Plugin API reference</a></li>
+              <li><a href="plugin-ui-reference.html" data-i18n="docs.page.uiReference">UI integration reference</a></li>
+              <li><a href="plugin-distribution-reference.html" data-i18n="docs.page.distributionReference">Distribution reference</a></li>
+            </ul>
+          </div>
+        </nav>
+      </aside>
+      <main class="docs-main" id="main">
+        <ol class="docs-crumbs"><li><a href="./" data-i18n="docs.crumb">Docs</a></li><li aria-current="page" data-i18n="docs.page.app">Using the App</li></ol>
+        <article class="doc-lang docs-article" lang="en">
+<h1>Using the App</h1>
+<p class="docs-lede">See tokens, known cost and limits for the tools you already use. Local mode needs no server.</p>
+
+<h2 id="install" data-anchor="install">Install and get a first reading</h2>
+<ol class="docs-steps"><li><a href="https://github.com/Javis603/token-monitor/releases/latest">Download the latest release</a>: choose the macOS DMG for Apple Silicon or Intel, Windows installer/portable EXE, or Linux x64 AppImage.</li><li>Open Token Monitor. Local mode tracks this device automatically. Use a supported AI coding tool, then return to the dashboard.</li><li>If a tool is absent, check its selection under Settings → Tools and the <a href="https://github.com/Javis603/token-monitor/blob/main/docs/providers/README.md">provider notes</a>. Some account-based limits require separate sign-in or credentials in App settings.</li></ol>
+<h2 id="views" data-anchor="views">Read the right view</h2>
+<ul><li><strong>Home:</strong> an overview of usage. Change the period before comparing numbers.</li><li><strong>Tools and Models:</strong> identify where tokens and known cost come from.</li><li><strong>Sessions and Projects:</strong> follow available local activity and accounting detail.</li><li><strong>Limits:</strong> read provider quotas and reset windows. Quota percentages are not token counts.</li><li><strong>Devices, Trends and Status:</strong> inspect connected devices, retained history and collection health.</li></ul><p>Cost can be incomplete when pricing is unknown. An unavailable value is not zero or free. Tool coverage and historical detail depend on the available source.</p>
+<h2 id="settings" data-anchor="settings">Make it comfortable</h2>
+<p>Open Settings to choose appearance, language, visible tools and display surfaces. The tray is a compact glance; Edge Dock is available on macOS/Windows and Notch on macOS. Enable each surface in its own settings. Platform support and the latest setup details are in the <a href="https://github.com/Javis603/token-monitor/blob/main/README.md">App README</a>.</p>
+<h2 id="sync" data-anchor="sync">Connect another device</h2>
+<p>In Settings → Multi-device Sync, choose one backend across your devices. For a simple LAN setup, select <strong>Host hub on this device</strong> on an always-on machine; on others choose <strong>Connect to a hub</strong> and enter its URL and secret. Quitting the hosting App stops that hub.</p><p>Use a headless agent only on machines without the widget. Self-hosted Node, Cloudflare Worker and macOS-widget-only iCloud options are explained in the <a href="https://github.com/Javis603/token-monitor/blob/main/README.md#multi-device-sync">sync guide</a>. Keep the secret private.</p>
+        <h2 id="sources-periods" data-anchor="sources-periods">Sources, periods and missing data</h2><p>Usage comes from supported tools’ local session files or databases. Today, Month and All time are separate collection periods; fixed week and rolling ranges are available in the dashboard. Match the period and selected device before comparing two views. A source can report a later correction, and a tool can delete old sessions. Settings → Collection → Preserve deleted session usage keeps daily totals already observed by Token Monitor; it cannot reconstruct days that disappeared before collection began.</p><p>Token counts and money answer different questions. Cost uses known model prices and your display currency; unpriced tokens make a total incomplete. A blank or unavailable limit means the account source could not supply that window. Limits may represent requests, time windows, or a credit balance, so read the unit and reset time shown for that account.</p><h2 id="local-privacy" data-anchor="local-privacy">Local data, sync and privacy</h2><p>Single-device use stays local. Session details can be read on demand from local transcripts or databases; prompts, replies and source code are not part of the Hub usage record. Opt-in Hub sync sends aggregate usage and selected shared data to the backend you choose. It does not turn a remote device into a local transcript source. iCloud Drive sync is a separate macOS widget option and can take longer to propagate than Hub push updates.</p><h2 id="app-troubleshoot" data-anchor="app-troubleshoot">When a number looks wrong</h2><ol><li>Check the selected period, device and tool. Hiding a tool from the dashboard does not stop tracking it.</li><li>Check Settings → Collection for the tool and any custom scan path. WSL file sources may arrive on a slower cycle; SQLite tools inside WSL can require an agent there.</li><li>Look at Status and the account’s own limits state. Usage collection and account-limit refresh are separate; a successful token scan does not refresh quota credentials.</li></ol>
+        </article>
+        <article class="doc-lang docs-article" lang="zh-TW">
+<h1>使用 App</h1>
+<p class="docs-lede">在同一處查看既有工具的 token、已知費用與額度。本地模式不需要伺服器。</p>
+
+<h2 data-anchor="install">安裝並取得第一筆讀數</h2>
+<ol class="docs-steps"><li><a href="https://github.com/Javis603/token-monitor/releases/latest">下載最新版本</a>：macOS 請選 Apple Silicon 或 Intel DMG；Windows 可選安裝版或可攜式 EXE；Linux 使用 x64 AppImage。</li><li>開啟 Token Monitor，本地模式會自動追蹤此裝置。使用支援的 AI 程式工具後，返回儀表板查看。</li><li>若缺少工具，檢查設定 → 工具及<a href="https://github.com/Javis603/token-monitor/blob/main/docs/providers/README.md">提供者說明</a>。部分帳戶額度需要在 App 設定中另外登入或提供憑證。</li></ol>
+<h2 data-anchor="views">選擇合適的檢視</h2>
+<ul><li><strong>首頁：</strong>掌握總覽；比較前先確認期間。</li><li><strong>工具與模型：</strong>查看 token 與已知費用的來源。</li><li><strong>工作階段與專案：</strong>追蹤可用的本地活動與用量細節。</li><li><strong>額度：</strong>查看配額及重設時間。百分比不是 token 數量。</li><li><strong>裝置、趨勢與狀態：</strong>查看同步裝置、保留的歷史與收集狀況。</li></ul><p>未知定價會令費用不完整；無法取得的數值不代表零或免費。資料來源決定可用的工具與歷史細節。</p>
+<h2 data-anchor="settings">調整顯示方式</h2>
+<p>在設定選擇外觀、語言、工具及顯示介面。系統匣適合快速閱讀；Edge Dock 支援 macOS／Windows，Notch 支援 macOS，需在各自設定啟用。最新平台與安裝細節請見 <a href="https://github.com/Javis603/token-monitor/blob/main/README.md">App README</a>。</p>
+<h2 data-anchor="sync">連接其他裝置</h2>
+<p>在設定 → 多裝置同步，為所有裝置選擇同一種後端。區域網路可在常開機器選擇「在此裝置託管 Hub」，其他裝置選「連接 Hub」，輸入網址與密鑰。結束託管 App 會停止 Hub。</p><p>只有未執行桌面小工具的機器才需要無介面代理程式。自架 Node、Cloudflare Worker 及僅限 macOS 小工具的 iCloud 選項，請見<a href="https://github.com/Javis603/token-monitor/blob/main/README.md#multi-device-sync">同步指南</a>。請妥善保管密鑰。</p>
+        <h2 data-anchor="sources-periods">資料來源、期間與缺漏</h2><p>用量取自支援工具的本機工作階段檔案或資料庫。「今天」、「本月」與「全部」是不同的收集期間；儀表板亦提供固定週期與滾動範圍。比較數字前，先確認期間和裝置一致。來源可能補報或修正資料，也可能刪除舊工作階段。在「設定 → 收集」啟用「保留已刪除工作階段用量」，可保存 Token Monitor 已觀察到的每日總量；開始追蹤前已消失的日子無法還原。</p><p>Token 與費用代表不同事情。費用依已知模型價格及顯示貨幣計算；有未定價 token 時總額並不完整。額度空白或無法取得，表示帳戶來源未提供該時窗。限制可能按請求、時間或餘額計，請連同單位與重設時間閱讀。</p><h2 data-anchor="local-privacy">本機資料、同步與私隱</h2><p>單一裝置使用留在本機。工作階段詳情可按需從本機記錄讀取；提示、回覆及原始碼不屬於 Hub 用量記錄。選用 Hub 同步才會把彙總用量及指定共享資料送往你選的後端；遠端裝置不會因此變成本機逐字記錄來源。iCloud Drive 是另一種 macOS widget 同步選項，傳播時間可能較 Hub 推送長。</p><h2 data-anchor="app-troubleshoot">數字不如預期時</h2><ol><li>核對期間、裝置和工具。從儀表板隱藏工具不會停止追蹤。</li><li>檢查「設定 → 收集」中的工具及自訂掃描路徑。WSL 檔案來源更新較慢；WSL 內的 SQLite 工具可能需要在當中執行 agent。</li><li>查看「狀態」及帳戶額度狀態。用量收集與帳戶額度更新彼此獨立；掃描到 token 不會刷新額度憑證。</li></ol>
+        </article>
+        <article class="doc-lang docs-article" lang="zh-CN">
+<h1>使用 App</h1>
+<p class="docs-lede">在同一处查看既有工具的 token、已知费用与额度。本地模式不需要服务器。</p>
+
+<h2 data-anchor="install">安装并取得第一笔读数</h2>
+<ol class="docs-steps"><li><a href="https://github.com/Javis603/token-monitor/releases/latest">下载最新版本</a>：macOS 请选 Apple Silicon 或 Intel DMG；Windows 可选安装版或便携式 EXE；Linux 使用 x64 AppImage。</li><li>开启 Token Monitor，本地模式会自动追踪此设备。使用支持的 AI 程序工具后，返回仪表板查看。</li><li>若缺少工具，检查设置 → 工具及<a href="https://github.com/Javis603/token-monitor/blob/main/docs/providers/README.md">提供者说明</a>。部分账户额度需要在 App 设置中另外登录或提供凭据。</li></ol>
+<h2 data-anchor="views">选择合适的视图</h2>
+<ul><li><strong>首页：</strong>掌握总览；比较前先确认期间。</li><li><strong>工具与模型：</strong>查看 token 与已知费用的来源。</li><li><strong>会话与项目：</strong>追踪可用的本地活动与用量细节。</li><li><strong>额度：</strong>查看配额及重设时间。百分比不是 token 数量。</li><li><strong>设备、趋势与状态：</strong>查看同步设备、保留的历史与收集状况。</li></ul><p>未知定价会令费用不完整；无法取得的数值不代表零或免费。数据来源决定可用的工具与历史细节。</p>
+<h2 data-anchor="settings">调整显示方式</h2>
+<p>在设置选择外观、语言、工具及显示界面。系统托盘适合快速阅读；Edge Dock 支持 macOS／Windows，Notch 支持 macOS，需在各自设置启用。最新平台与安装细节请见 <a href="https://github.com/Javis603/token-monitor/blob/main/README.md">App README</a>。</p>
+<h2 data-anchor="sync">连接其他设备</h2>
+<p>在设置 → 多设备同步，为所有设备选择同一种后端。区域网络可在常开机器选择「在此设备托管 Hub」，其他设备选「连接 Hub」，输入网址与密钥。结束托管 App 会停止 Hub。</p><p>只有未执行桌面小工具的机器才需要无界面代理程序。自架 Node、Cloudflare Worker 及仅限 macOS 小工具的 iCloud 选项，请见<a href="https://github.com/Javis603/token-monitor/blob/main/README.md#multi-device-sync">同步指南</a>。请妥善保管密钥。</p>
+        <h2 data-anchor="sources-periods">数据来源、时间范围与缺失</h2><p>用量来自受支持工具的本地会话文件或数据库。“今天”“本月”和“全部”是不同的采集范围；仪表板还提供固定周和滚动范围。比较数字前，先确认时间范围和设备一致。来源可能补报或修正数据，也可能删除旧会话。在“设置 → 采集”启用“保留已删除会话用量”，可保存 Token Monitor 已观察到的每日总量；开始追踪前已消失的日期无法恢复。</p><p>Token 和费用含义不同。费用根据已知模型价格和显示货币计算；存在未定价 token 时，总额并不完整。额度空白或不可用，表示账户来源未提供该时窗。限制可能按请求、时间或余额计算，请结合单位和重置时间阅读。</p><h2 data-anchor="local-privacy">本地数据、同步与隐私</h2><p>单设备使用保留在本地。会话详情可按需从本地记录读取；提示、回复和源代码不属于 Hub 用量记录。选择 Hub 同步后，才会将汇总用量和指定共享数据发送至你选择的后端；远程设备不会因此变成本地逐字记录来源。iCloud Drive 是另一种 macOS widget 同步方式，传播可能比 Hub 推送慢。</p><h2 data-anchor="app-troubleshoot">数字不符合预期时</h2><ol><li>核对时间范围、设备和工具。从仪表板隐藏工具不会停止追踪。</li><li>检查“设置 → 采集”中的工具和自定义扫描路径。WSL 文件来源更新较慢；WSL 内的 SQLite 工具可能需要在其中运行 agent。</li><li>查看“状态”和账户额度状态。用量采集与账户额度刷新相互独立；扫描到 token 不会刷新额度凭证。</li></ol>
+        </article>
+        <article class="doc-lang docs-article" lang="ko">
+<h1>앱 사용하기</h1>
+<p class="docs-lede">사용 중인 도구의 토큰, 확인된 비용과 한도를 한곳에서 봅니다. 로컬 모드에는 서버가 필요 없습니다.</p>
+
+<h2 data-anchor="install">설치하고 첫 수치 확인</h2>
+<ol class="docs-steps"><li><a href="https://github.com/Javis603/token-monitor/releases/latest">최신 릴리스</a>에서 macOS Apple Silicon/Intel DMG, Windows 설치/포터블 EXE 또는 Linux x64 AppImage를 선택합니다.</li><li>앱을 열면 현재 기기를 로컬로 추적합니다. 지원하는 AI 코딩 도구를 사용한 뒤 대시보드로 돌아옵니다.</li><li>도구가 없으면 설정 → 도구와 <a href="https://github.com/Javis603/token-monitor/blob/main/docs/providers/README.md">제공자 안내</a>를 확인합니다. 일부 계정 한도에는 별도 로그인이나 자격 증명이 필요합니다.</li></ol>
+<h2 data-anchor="views">보기에 맞게 읽기</h2>
+<p><strong>홈</strong>은 요약, <strong>도구/모델</strong>은 사용량 구성, <strong>세션/프로젝트</strong>는 가능한 활동 세부 정보, <strong>한도</strong>는 할당량과 초기화 시점을 보여 줍니다. <strong>기기/추세/상태</strong>에서 동기화, 보관 이력과 수집 상태를 살펴봅니다. 비교 전에 기간을 맞추세요.</p><p>가격을 모르면 비용이 불완전합니다. 없는 값은 0이나 무료가 아니며, 할당량 비율은 토큰 수가 아닙니다. 세부 정보는 데이터 소스에 따라 달라집니다.</p>
+<h2 data-anchor="settings">화면 조정</h2>
+<p>설정에서 모양, 언어, 도구와 표시 위치를 고릅니다. 트레이는 간단한 표시입니다. Edge Dock은 macOS/Windows, Notch는 macOS에서 지원하며 각각 켜야 합니다. 최신 환경 안내는 <a href="https://github.com/Javis603/token-monitor/blob/main/README.md">README</a>를 확인하세요.</p>
+<h2 data-anchor="sync">다른 기기 연결</h2>
+<p>설정 → 다중 기기 동기화에서 모든 기기에 같은 백엔드를 선택합니다. LAN에서는 항상 켜진 기기에 Hub 호스팅을, 다른 기기에 Hub 연결을 선택하고 URL과 비밀키를 입력합니다. 호스트 앱을 종료하면 Hub도 멈춥니다.</p><p>위젯이 없는 기기에만 헤드리스 에이전트를 사용합니다. Node, Cloudflare Worker, macOS 위젯 전용 iCloud 옵션은 <a href="https://github.com/Javis603/token-monitor/blob/main/README.md#multi-device-sync">동기화 가이드</a>를 보세요. 비밀키를 공개하지 마세요.</p>
+        <h2 data-anchor="sources-periods">데이터 출처, 기간과 누락</h2><p>사용량은 지원 도구의 로컬 세션 파일이나 데이터베이스에서 가져옵니다. 오늘, 이번 달, 전체 기간은 각각 별도로 수집하며 대시보드에는 고정 주간 및 이동 범위도 있습니다. 비교 전 기간과 기기를 맞추세요. 원본이 나중에 값을 수정하거나 오래된 세션을 지울 수 있습니다. 설정 → 수집의 삭제된 세션 사용량 보존은 이미 관측한 일별 합계를 보관하지만, 추적 전 사라진 날짜는 복구하지 못합니다.</p><p>토큰과 비용은 다른 값입니다. 비용은 알려진 모델 가격과 표시 통화로 계산됩니다. 가격을 모르는 토큰이 있으면 합계가 불완전합니다. 한도가 비어 있거나 사용할 수 없다면 해당 계정 출처가 그 구간을 제공하지 않은 것입니다. 요청량, 시간 또는 크레딧 잔액인지 단위와 초기화 시간을 함께 읽으세요.</p><h2 data-anchor="local-privacy">로컬 데이터, 동기화와 개인 정보</h2><p>기기 하나만 사용할 때 데이터는 로컬에 남습니다. 세션 상세는 로컬 기록에서 필요할 때 읽습니다. 프롬프트, 답변, 소스 코드는 Hub 사용량 기록에 포함되지 않습니다. Hub 동기화를 선택하면 집계 사용량과 선택된 공유 데이터를 지정한 백엔드로 보냅니다. 원격 기기의 원문 기록을 로컬에서 읽게 되는 것은 아닙니다. iCloud Drive는 macOS 위젯을 위한 별도 옵션이며 Hub 푸시보다 전파가 느릴 수 있습니다.</p><h2 data-anchor="app-troubleshoot">숫자가 예상과 다를 때</h2><ol><li>기간, 기기, 도구를 확인합니다. 대시보드에서 도구를 숨겨도 추적은 계속됩니다.</li><li>설정 → 수집의 도구와 사용자 지정 검색 경로를 확인합니다. WSL 파일 출처는 더 천천히 반영되며, WSL의 SQLite 도구에는 그 안에서 실행하는 에이전트가 필요할 수 있습니다.</li><li>상태와 계정 한도 상태를 확인합니다. 사용량 수집과 계정 한도 갱신은 별도이며, 토큰 스캔이 한도 자격 증명을 갱신하지 않습니다.</li></ol>
+        </article>
+        <article class="doc-lang docs-article" lang="ja">
+<h1>アプリの使い方</h1>
+<p class="docs-lede">使っているツールのトークン、既知の費用、利用上限を確認します。ローカルモードにサーバーは不要です。</p>
+
+<h2 data-anchor="install">インストールして最初の数値を見る</h2>
+<ol class="docs-steps"><li><a href="https://github.com/Javis603/token-monitor/releases/latest">最新版をダウンロード</a>。macOS は Apple Silicon／Intel 用 DMG、Windows はインストーラー／ポータブル EXE、Linux は x64 AppImage を選びます。</li><li>Token Monitor を開くと、この端末の追跡がローカルモードで始まります。対応する AI コーディングツールを使ってからダッシュボードに戻ります。</li><li>ツールが見つからない場合は設定 → ツールと<a href="https://github.com/Javis603/token-monitor/blob/main/docs/providers/README.md">プロバイダーの説明</a>を確認します。一部のアカウント上限には別途ログインや認証情報が必要です。</li></ol>
+<h2 data-anchor="views">表示を使い分ける</h2>
+<p><strong>ホーム</strong>は概要、<strong>ツール／モデル</strong>は使用量の内訳、<strong>セッション／プロジェクト</strong>は利用可能な活動の詳細、<strong>上限</strong>は割り当てとリセット時刻を表示します。<strong>端末／トレンド／状態</strong>で同期、保持された履歴、収集状態を調べられます。比較する前に期間を揃えてください。</p><p>不明な価格は費用を不完全にします。取得できない値はゼロや無料を意味しません。上限の割合をトークン数に換算しないでください。</p>
+<h2 data-anchor="settings">表示を調整する</h2>
+<p>設定で外観、言語、ツールと表示面を選びます。トレイはコンパクトな表示です。Edge Dock は macOS／Windows、Notch は macOS で利用でき、それぞれ有効化が必要です。最新の対応環境は <a href="https://github.com/Javis603/token-monitor/blob/main/README.md">README</a> を参照してください。</p>
+<h2 data-anchor="sync">別の端末を接続する</h2>
+<p>設定 → マルチデバイス同期で、全端末に同じバックエンドを選びます。LAN では常時稼働する端末で「この端末で Hub をホスト」、他の端末で「Hub に接続」を選び、URL とシークレットを入力します。ホスト側アプリを終了すると Hub も停止します。</p><p>ヘッドレスエージェントはウィジェットを使わない端末用です。Node、Cloudflare Worker、macOS ウィジェット専用 iCloud の詳細は<a href="https://github.com/Javis603/token-monitor/blob/main/README.md#multi-device-sync">同期ガイド</a>へ。シークレットは公開しないでください。</p>
+        <h2 data-anchor="sources-periods">データ元、期間、欠損</h2><p>使用量は対応ツールのローカルセッションファイルやデータベースから取得します。今日、今月、全期間は別々の収集範囲です。ダッシュボードには固定週や移動範囲もあります。比較前に期間と端末を揃えてください。元データが後で訂正されたり、古いセッションが削除されたりします。設定 → 収集の「削除済みセッション使用量を保持」は、既に観測した日別合計を保存します。追跡開始前に失われた日付は復元できません。</p><p>トークン数と費用は別の指標です。費用は既知のモデル価格と表示通貨を使います。価格不明のトークンがあれば合計は不完全です。上限が空欄や取得不能なら、その口座の取得元が当該期間を提供していません。回数、時間、残高のどれかを単位とリセット時刻と共に確認してください。</p><h2 data-anchor="local-privacy">ローカルデータ、同期、プライバシー</h2><p>単一端末の利用はローカルで完結します。セッション詳細は必要時にローカル記録から読みます。プロンプト、回答、ソースコードは Hub の使用量記録に含まれません。Hub 同期を選ぶと集計使用量と指定された共有データを選択したバックエンドに送ります。リモート端末の全文記録をローカルで読めるようにはなりません。iCloud Drive は macOS ウィジェット用の別方式で、Hub のプッシュより反映が遅い場合があります。</p><h2 data-anchor="app-troubleshoot">数値が予想と異なるとき</h2><ol><li>期間、端末、ツールを確認します。ダッシュボードでツールを隠しても追跡は続きます。</li><li>設定 → 収集のツールと追加スキャン先を確認します。WSL のファイルは反映が遅めで、WSL 内の SQLite ツールには内部で動くエージェントが必要な場合があります。</li><li>ステータスと口座上限の状態を確認します。使用量の収集と口座上限の更新は別で、トークンの検出は上限の認証情報を更新しません。</li></ol>
+        </article>
+        <article class="doc-lang docs-article" lang="pt-BR">
+<h1>Usando o app</h1>
+<p class="docs-lede">Veja tokens, custos conhecidos e limites das ferramentas que você já usa. O modo local dispensa servidor.</p>
+
+<h2 data-anchor="install">Instale e veja a primeira leitura</h2>
+<ol class="docs-steps"><li><a href="https://github.com/Javis603/token-monitor/releases/latest">Baixe a versão mais recente</a>: DMG para Apple Silicon ou Intel no macOS, instalador/EXE portátil no Windows ou AppImage x64 no Linux.</li><li>Abra o Token Monitor. O modo local acompanha este dispositivo automaticamente. Use uma ferramenta de programação com IA compatível e volte ao painel.</li><li>Se faltar uma ferramenta, confira Configurações → Ferramentas e as <a href="https://github.com/Javis603/token-monitor/blob/main/docs/providers/README.md">notas dos provedores</a>. Alguns limites de conta precisam de login ou credenciais nas configurações do app.</li></ol>
+<h2 data-anchor="views">Escolha a visualização certa</h2>
+<p><strong>Início</strong> mostra o resumo; <strong>Ferramentas/Modelos</strong>, a composição do uso; <strong>Sessões/Projetos</strong>, os detalhes disponíveis; e <strong>Limites</strong>, cotas e horários de redefinição. <strong>Dispositivos/Tendências/Status</strong> mostram sincronização, histórico retido e saúde da coleta. Confira o período antes de comparar.</p><p>Preços desconhecidos tornam o custo incompleto. Um valor indisponível não significa zero ou gratuito. Percentuais de cota não são contagens de tokens. Os detalhes dependem da fonte.</p>
+<h2 data-anchor="settings">Ajuste a apresentação</h2>
+<p>Nas configurações, escolha aparência, idioma, ferramentas e locais de exibição. A bandeja oferece uma leitura compacta. Edge Dock funciona no macOS/Windows; Notch, no macOS. Ative cada um nas próprias configurações. Consulte o <a href="https://github.com/Javis603/token-monitor/blob/main/README.md">README</a> para requisitos atuais.</p>
+<h2 data-anchor="sync">Conecte outro dispositivo</h2>
+<p>Em Configurações → Sincronização entre dispositivos, escolha o mesmo backend em todos. Na rede local, selecione hospedar o Hub em uma máquina sempre ligada; nas demais, conectar a um Hub e informe URL e segredo. Encerrar o app que hospeda interrompe o Hub.</p><p>Use o agente sem interface somente em máquinas sem o widget. Node, Cloudflare Worker e iCloud exclusivo do widget macOS estão no <a href="https://github.com/Javis603/token-monitor/blob/main/README.md#multi-device-sync">guia de sincronização</a>. Mantenha o segredo privado.</p>
+        <h2 data-anchor="sources-periods">Fontes, períodos e dados ausentes</h2><p>O uso vem dos arquivos de sessões ou bancos locais das ferramentas compatíveis. Hoje, Mês e Todo o período são coletas distintas; o painel também oferece semanas fixas e intervalos móveis. Alinhe período e dispositivo antes de comparar números. A fonte pode corrigir leituras depois ou apagar sessões antigas. Em Configurações → Coleta, Preservar uso de sessões excluídas guarda totais diários já observados; não reconstrói dias perdidos antes do início da coleta.</p><p>Tokens e dinheiro respondem a perguntas diferentes. O custo usa preços de modelos conhecidos e a moeda de exibição; tokens sem preço tornam o total incompleto. Limite vazio ou indisponível indica que a fonte da conta não forneceu aquela janela. Limites podem representar pedidos, períodos ou saldo de créditos: leia a unidade e o horário de redefinição.</p><h2 data-anchor="local-privacy">Dados locais, sincronização e privacidade</h2><p>O uso em um único dispositivo fica local. Detalhes da sessão podem ser lidos sob demanda de registros locais; prompts, respostas e código não fazem parte do registro de uso do Hub. Ao optar pelo Hub, uso agregado e dados compartilhados selecionados vão ao backend escolhido. Isso não transforma transcrições remotas em uma fonte local. iCloud Drive é uma opção separada para o widget macOS e pode demorar mais que as atualizações por push do Hub.</p><h2 data-anchor="app-troubleshoot">Quando um número parece errado</h2><ol><li>Confira período, dispositivo e ferramenta. Ocultar uma ferramenta do painel não interrompe o rastreamento.</li><li>Confira a ferramenta e caminhos extras em Configurações → Coleta. Fontes de arquivos WSL podem chegar mais devagar; ferramentas SQLite dentro do WSL podem exigir um agente lá.</li><li>Veja Status e o estado dos limites da conta. Coleta de uso e atualização de limites são separadas; detectar tokens não atualiza credenciais de cotas.</li></ol>
+        </article>
+
+      </main>
+    </div>
+
+    <footer class="footer section shell">
+      <span class="footer-copy">© 2026 Token Monitor</span>
+      <div class="footer-links">
+        <a href="https://github.com/Javis603/token-monitor">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+          </svg>
+          <span data-i18n="nav.github">GitHub</span>
+        </a>
+        <a href="./" data-i18n="footer.docs">Guides</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/docs/API.md" data-i18n="footer.api">API docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/worker/README.md" data-i18n="footer.worker">Worker docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/LICENSE" data-i18n="footer.license">License</a>
+      </div>
+    </footer>
+
+    <script src="../scripts/i18n.js?v=20260929-v063" defer></script>
+    <script src="../scripts/main.js?v=20260929-v063" defer></script>
+    <script src="../scripts/docs.js?v=20260929-v063" defer></script>
+  </body>
+</html>

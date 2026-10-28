@@ -288,9 +288,9 @@ test('settings:update normalizes provider fields and strips separately managed a
     const patch = { [key]: value };
     const normalized = { ...patch };
     normalizeAccountPatch(patch, normalized);
-    assert.equal(normalized[key], normalizeAccountField(key, value), key);
+    assert.deepEqual(normalized[key], normalizeAccountField(key, value), key);
     if (fields.find((field) => field.key === key).persist !== 'spread') {
-      assert.equal(finalAccountSettings(patch, {})[key], normalized[key], key);
+      assert.deepEqual(finalAccountSettings(patch, {})[key], normalized[key], key);
     }
   }
   assert.equal(finalAccountSettings({}, {}).zaiApiRegion, 'global');
@@ -303,7 +303,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   assert.equal(Object.hasOwn(finalAccountSettings({ kimiApiKey: 'x' }, {}), 'kimiApiKey'), false);
 
   const managedKeys = [
-    'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
+    'claudeManagedAccounts', 'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
     'workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId',
     'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo',
     'openrouterProfiles', 'thirdPartyProfiles'
@@ -502,7 +502,8 @@ test('the renderer account config names the settings keys main must project', ()
 test('static account statuses refresh in both paths while descriptor panels use the form loop', () => {
   const config = evalTopLevel(appSource, 'const externalLimitAccountConfig = {', '\nfunction clearDisabledLimitProviderPendingChecks(');
   const expected = Object.keys(config).sort();
-  const calls = [...appSource.matchAll(/renderExternalProviderStatus\('([a-z]+)'\)/g)].map((match) => match[1]);
+  const calls = [...appSource.matchAll(/renderExternalProviderStatus\('([a-z]+)'\)/g)].map((match) => match[1])
+    .filter((provider) => expected.includes(provider));
   assert.deepEqual(calls.slice(0, expected.length).sort(), expected);
   assert.deepEqual(calls.slice(expected.length, expected.length * 2).sort(), expected);
   for (const provider of expected) {
@@ -514,12 +515,12 @@ test('static account statuses refresh in both paths while descriptor panels use 
 test('every provider with an account panel has its group and status markup in index.html', () => {
   const nodes = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_NODES = {', '\nconst LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
   const groupIds = Object.fromEntries(Object.entries(nodes).map(([provider, node]) => [provider, node.group]));
-  // Not every catalog provider has a hand-written panel: grok and kiro
+  // Not every catalog provider has a hand-written panel: grok, muse and kiro
   // take their credentials from the tool itself, and the account-form providers
   // get theirs generated. The map is the list of those whose markup is static.
   assert.deepEqual(
     LIMIT_PROVIDER_IDS.filter((provider) => !groupIds[provider]).sort(),
-    ['grok', 'kiro', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
+    ['grok', 'muse', 'kiro', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
   );
   for (const [provider, id] of Object.entries(groupIds)) {
     assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);

@@ -305,7 +305,8 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     assert.equal(title.children.length, 0, 'membership never consumes title width');
     const description = meta.children[0];
     const countIndex = description.children.findIndex(node => node.className === 'home-session-member-count');
-    const modelIndex = description.children.findIndex(node => node.textContent === rowApi.sessionModelLabel(group));
+    const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
+      && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
     assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
     assert.equal(description.children[countIndex].textContent, '2 subagents');
     assert.equal(description.children.at(-1).textContent, ' · just now');
@@ -352,7 +353,8 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   assert.equal(titleLine.children.some(node => node.className === 'edge-dock-session-member-count'), false);
   assert.equal(description.className, 'edge-dock-session-description');
   const countIndex = description.children.findIndex(node => node.className === 'edge-dock-session-member-count');
-  const modelIndex = description.children.findIndex(node => node.textContent === rowApi.sessionModelLabel(group));
+  const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
+    && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
   assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
   assert.equal(description.children[countIndex].textContent, '2 subagents');
   assert.equal(family.children[1].children.at(-1).children.length, 3, 'members retain individual navigable expansion rows');
