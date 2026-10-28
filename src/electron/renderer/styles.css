@@ -6060,7 +6060,7 @@ html.is-windows .limit-live-badge {
   bottom: calc(100% + 6px);
   display: grid;
   width: 100%;
-  max-height: min(280px, calc(100vh - 84px));
+  max-height: calc(100vh - 84px);
   gap: 2px;
   overflow: hidden auto;
   transform-origin: left bottom;

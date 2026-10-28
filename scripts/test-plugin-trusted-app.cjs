@@ -34,6 +34,7 @@ fs.writeFileSync(path.join(fixtureDir,'fixture.png'),nativeImage.createFromBitma
 if (process.env.TM_NAV_ICONS === '1') {
   manifest.identityIcon = nativeImage.createFromBitmap(pixels,{width:160,height:60}).toDataURL();
   manifest.views = [{ id: 'panel', title: 'Fixture', surfaces: ['page'] }];
+  if (process.env.TM_NAV_HEIGHT === '1') for (let i=1;i<=3;i++) manifest.views.push({id:`extra-${i}`,title:`Plugin page ${i}`,surfaces:['page']});
 }
 fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify(manifest));
 fs.writeFileSync(path.join(fixtureDir, 'ui.mjs'), `
@@ -424,11 +425,29 @@ app.whenReady().then(async () => {
   await js("pluginApi.setEnabled('trusted-fixture',true)");
   if (process.env.TM_NAV_ICONS === '1') {
     await js("pluginApi.place('trusted-fixture/panel','page',true).then(applyPluginCatalog)");
+    if (process.env.TM_NAV_HEIGHT === '1') for (let i=1;i<=3;i++) await js(`pluginApi.place('trusted-fixture/extra-${i}','page',true).then(applyPluginCatalog)`);
     await js("if(isSettingsPanelOpen())els.settingsButton.click();setViewSwitcherOpen(true)");
     await waitFor("document.querySelector('[data-view=\"plugin:trusted-fixture/panel\"] img')?.naturalWidth > 0", 'navigation artwork before opening page');
     assert.equal(await js("globalThis.fixtureMountCount || 0"),0);
     assert.equal(runtime.manager.backendCount(),0);
     fs.writeFileSync(path.join(evidence,'main-navigation.png'),(await capture()).toPNG());
+    if (process.env.TM_NAV_HEIGHT === '1') {
+      const measure = () => js("(() => {const menu=document.querySelector('#viewSwitcherMenu'),r=menu.getBoundingClientRect();return {height:r.height,top:r.top,bottom:r.bottom,viewport:innerHeight,client:menu.clientHeight,scroll:menu.scrollHeight};})()");
+      const tall = await measure();
+      fs.writeFileSync(path.join(evidence,'navigation-tall.json'),JSON.stringify(tall));
+      assert.ok(tall.height > 280, 'menu uses available height rather than a fixed cap');
+      assert.ok(tall.scroll <= tall.client + 1, 'all entries fit without scrolling in tall window');
+      win.setSize(400,400); await pause(300);
+      const short = await measure();
+      console.log('menu short geometry', JSON.stringify({ ...short, nativeSize: win.getSize() }));
+      assert.ok(short.top >= 0 && short.bottom <= short.viewport, 'short menu stays inside viewport');
+      assert.ok(short.scroll > short.client, 'short window retains scrolling');
+      await js("document.querySelector('#viewSwitcherMenu').dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true}))");
+      await pause(100);
+      assert.equal(await js("document.activeElement.dataset.view"),'plugin:trusted-fixture/extra-3');
+      fs.writeFileSync(path.join(evidence,'navigation-short.json'),JSON.stringify(short));
+      fs.writeFileSync(path.join(evidence,'navigation-short.png'),(await capture()).toPNG());
+    }
     await js("pluginApi.openPage('trusted-fixture/panel')");
     await waitFor("document.querySelector('.view-switcher-current img')?.naturalWidth > 0", 'selected navigation artwork');
     await js("pluginApi.setEnabled('trusted-fixture',false)");
