@@ -346,3 +346,24 @@ test('catalog recovery updates use the managed version when discovery is invalid
   origins.delete('community-demo');
   assert.equal(catalog.list().entries.find(e => e.id === 'community-demo').versions[0].installable, false);
 });
+
+test('maintainer catalogs refresh after six hours, coalesce calls, and retain cached entries offline', async t => {
+  let time = 1000, calls = 0, offline = false, finish;
+  const raw = index();
+  const catalog = createPluginCatalog({ root: temp(t), now: () => time,
+    manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
+    maintainerSources: [{ id: 'maintainer-clock', url: URL }], fetchImpl: async () => {
+      calls++; if (offline) throw Error('offline');
+      if (finish === null) return new Promise(resolve => { finish = () => resolve(new Response(JSON.stringify(raw))); });
+      return new Response(JSON.stringify(raw));
+    } });
+  t.after(() => catalog.dispose());
+  await catalog.discover(); assert.equal(calls, 1);
+  time += 5 * 60 * 60 * 1000; await catalog.discover(); assert.equal(calls, 1);
+  time += 60 * 60 * 1000; finish = null;
+  const pending = [catalog.discover(), catalog.discover(true)]; assert.equal(calls, 2); finish(); await Promise.all(pending);
+  offline = true; time += 6 * 60 * 60 * 1000;
+  const failed = await catalog.discover(); assert.equal(calls, 3); assert.equal(failed.entries.length, 1); assert.match(failed.sources[1].error, /offline/);
+  time += 60000; await catalog.discover(); assert.equal(calls, 3);
+  await catalog.discover(true); assert.equal(calls, 4);
+});

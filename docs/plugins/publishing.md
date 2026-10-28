@@ -30,7 +30,7 @@ Do not identify a community plugin as official. Document original authors, artwo
 
 ## README content and images
 
-The App reads the repository's default README when details open. Maintain the detailed introduction and screenshots there rather than duplicating them in catalog fields. A catalog entry can set `repository` to its GitHub repository URL to use the same details. The README is the current project description, not a history of screenshots for individual releases.
+The App reads the repository's default README when details open, or a plugin-specific Markdown file selected from the catalog entry's optional `readmePaths` locale map. Maintain the detailed introduction and screenshots in that README rather than duplicating them in catalog fields. A catalog entry can set `repository` to its GitHub repository URL to use the same details. The README is the current project description, not a history of screenshots for individual releases.
 
 Include the plugin's purpose, supported App versions and platforms, installation steps, usage, local/network/data access, and a license. Add screenshots when they help explain the UI. The template below is a recommended structure, not a parser requirement; headings do not need exact names or a fixed order.
 
@@ -110,3 +110,5 @@ For each release:
 GitHub Release assets are suitable for manual download and import. Do not assume their browser download URLs work as catalog package URLs: the App rejects redirects. Catalogs need URLs that directly return the actual file bytes over HTTPS. See [creating a community catalog](distribution-design.md#create-a-community-catalog) for the index format, hosting limits and optional signing.
 
 Keep users on the same catalog source for updates; changing sources is not a silent migration. Explain breaking settings/data changes and rollback limitations in the release notes. A rollback restores code, not arbitrary data migrations or external side effects.
+
+For multiple plugins in one repository, set each entry’s `readmePaths` to its own README files. The App selects a matching locale/language, then English; a root README can remain a repository overview. Version-specific `changelog` values come from the catalog, independently of the README.

@@ -16,7 +16,7 @@ function fakeFork(children, { delayedExit = false } = {}) {
     children.push(child); queueMicrotask(() => child.emit('message', { type: 'ready' })); return child;
   };
 }
-async function runtimeFixture(t, { Notification, safeMode = false, delayedExit = false, businessAdapters = {}, surfaceContext, beforeStart = () => {}, sourceDirectory = path.resolve(__dirname, '../fixtures/trusted-plugin') } = {}) {
+async function runtimeFixture(t, { catalogFetch = async () => { throw Error('fixture offline'); }, Notification, safeMode = false, delayedExit = false, businessAdapters = {}, surfaceContext, beforeStart = () => {}, sourceDirectory = path.resolve(__dirname, '../fixtures/trusted-plugin') } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trusted-test-'));
   const handlers = new Map(), events = new Map(), children = [], windows = [];
   let settings = { pluginPlacementDefaults: {}, pluginsEnabled: true, pluginStates: {}, homeModuleOrder: 'plugin:trusted-fixture/panel', pluginMainPages: ['trusted-fixture/panel'], notchPluginPages: ['trusted-fixture/panel'] };
@@ -39,7 +39,7 @@ async function runtimeFixture(t, { Notification, safeMode = false, delayedExit =
   const main = new BrowserWindow(), notch = new BrowserWindow();
   const electron = { BrowserWindow, Notification, utilityProcess: { fork: fakeFork(children, { delayedExit }) },
     ipcMain: { handle: (name, fn) => handlers.set(name, fn), removeHandler: name => handlers.delete(name), on: (name, fn) => events.set(name, fn), removeListener: name => events.delete(name) },
-    session: { defaultSession: { protocol: { handle() {}, unhandle() {} } } },
+    session: { fromPartition: () => ({ fetch: catalogFetch }), defaultSession: { protocol: { handle() {}, unhandle() {} } } },
     dialog: { showMessageBox: async (_win, options) => { dialogs.push(options); return { response: confirmations.length ? confirmations.shift() : confirmation }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [sourceDirectory] }) } };
   beforeStart(dir);
   const runtime = createPluginRuntime({ electron, businessAdapters, userDataDir: dir, getSettings: () => settings, getAppSettings: () => ({ public: true }), getContext: () => ({ source: 'fixture' }), getLocale: () => 'en',

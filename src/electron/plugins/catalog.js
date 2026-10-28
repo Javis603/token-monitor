@@ -12,11 +12,12 @@ const { createCatalogSources } = require('./catalogSources');
 const OFFICIAL = Object.freeze({ id: 'bundled', kind: 'official', label: 'Token Monitor' });
 const { createGitHubDiscovery } = require('./githubDiscovery');
 const { createCatalogMedia } = require('./catalogMedia');
-function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog'), githubDiscoveryEnabled = false, maintainerSources = [] }) {
-  const sources = createCatalogSources({ root, fetchImpl, getLocale, maintainerSources, cancelPreviews: id => managed.cancelSource(id) });
+const CATALOG_REFRESH_MS = 6 * 60 * 60 * 1000;
+function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog'), githubDiscoveryEnabled = false, maintainerSources = [], now = Date.now }) {
+  const sources = createCatalogSources({ root, fetchImpl, getLocale, maintainerSources, now, cancelPreviews: id => managed.cancelSource(id) });
   const github = createGitHubDiscovery({ root, fetchImpl, enabled: githubDiscoveryEnabled });
   const media = createCatalogMedia({ fetchImpl, nativeImage });
-  let readmeDocument = null, detailRevision = 0;
+  let readmeDocument = null, detailRevision = 0, discoveryPending = null, lastAttempt = null;
   const packages = new Map(), errors = [];
   // Only App-distributed files receive official attribution. Discovery never
   // executes them, and a broken entry must not disable package management.
@@ -56,7 +57,7 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
       const compatible = entry.versions.filter(v => v.compatible);
       const chosen = compatible.find(v => !semver.prerelease(v.version)) || compatible[0] || entry.versions[0];
       entries.push({ id: entry.id, name: localize(entry.name, getLocale()), description: localize(entry.description, getLocale()), author: entry.author, identityIcon: entry.identityIcon,
-        repository: entry.repository, types: chosen.types, origin: entry.origin, version: chosen.version, installedVersion: installed.version,
+        repository: entry.repository, readmePaths: entry.readmePaths, types: chosen.types, origin: entry.origin, version: chosen.version, installedVersion: installed.version,
         status: !chosen.compatible ? 'incompatible' : !installed.exists ? 'available' : installed.version && installed.record?.origin.id === entry.origin.id && semver.gt(chosen.version, installed.version) ? 'update' : 'installed',
         versions: entry.versions.map(v => ({ ...v, installable: v.compatible && (!installed.exists || Boolean(installed.version && installed.record?.origin.id === entry.origin.id && semver.gt(v.version, installed.version))), changelog: localize(v.changelog, getLocale()) })) });
     }
@@ -70,26 +71,30 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
     list,
     closeDetails,
     async discover(force = false) {
-      // No production maintainer endpoint is configured yet. When supplied by
-      // the App, bootstrap its cache on first discovery; explicit refresh also
-      // checks cached sources. Local list() never starts network requests.
-      await Promise.all([github.refresh(force), ...sources.list().sources
-        .filter(s => s.kind === 'maintainer' && (force || !s.cached)).map(s => sources.refresh(s.id))]);
-      return list();
+      if (discoveryPending) return discoveryPending;
+      if (!force && lastAttempt !== null && now() - lastAttempt < 300000) return list();
+      lastAttempt = now();
+      discoveryPending = (async () => {
+        await Promise.all([github.refresh(force), ...sources.list().sources
+          .filter(s => s.kind === 'maintainer' && (force || !s.cached || now() - s.lastFetched >= CATALOG_REFRESH_MS)).map(s => sources.refresh(s.id))]);
+        return list();
+      })();
+      try { return await discoveryPending; } finally { discoveryPending = null; }
     },
     async details(sourceId, id) {
       closeDetails();
       const revision = detailRevision;
       const document = { id: randomUUID(), controller: new AbortController(), budget: imageBudget(), loads: new Map() };
       readmeDocument = document;
-      let repository;
+      let repository, filePath = '';
       if (sourceId !== 'github-discovery') {
         const entry = list().entries.find(p => p.id === id && p.origin.id === sourceId);
         if (!entry) throw new Error('Unknown catalog entry');
         repository = entry.repository;
+        filePath = localize(entry.readmePaths, getLocale());
         if (!repository) return { html: '', imageCount: 0 };
       }
-      const result = repository ? await github.repositoryReadme(repository, document.controller.signal) : await github.readme(id, document.controller.signal);
+      const result = repository ? await github.repositoryReadme(repository, document.controller.signal, filePath) : await github.readme(id, document.controller.signal);
       if (revision !== detailRevision) throw new Error('README details are no longer current');
       Object.assign(document, renderReadme(result.readme, result.baseUrl, result.imageBaseUrl), { baseUrl: result.imageBaseUrl });
       return { html: document.html, documentId: document.id, imageCount: document.images.length };

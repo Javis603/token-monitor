@@ -451,3 +451,22 @@ for (const proceed of [false, true]) {
     if (!proceed) assert.equal(f.runtime.manager.active('trusted-fixture'), true);
   });
 }
+
+test('runtime refreshes only the curated index at startup and six hours, notifying update listeners', async t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'Date'], now: 1000 });
+  const sources = require('../../src/electron/plugins/maintainerSources'); let calls = 0, offline = false;
+  const f = await runtimeFixture(t, { catalogFetch: async url => {
+    calls++; assert.equal(url, sources[0].url); if (offline) throw Error('offline');
+    return new Response(JSON.stringify({ format: 1, title: 'Community', plugins: [{ id: 'remote-plugin', name: 'Remote',
+      versions: [{ version: '1.0.0', url: 'https://example.test/plugin.tmplugin', sha256: 'a'.repeat(64) }] }] }));
+  } });
+  f.invoke('plugins:list');
+  for (let i = 0; i < 10; i++) await tick();
+  assert.equal(calls, 1); assert.equal(f.invoke('plugins:catalog').entries[0].origin.kind, 'maintainer');
+  assert.equal(f.runtime.manager.list().plugins.length, 0);
+  assert.ok(f.main.webContents.sent.some(event => event.channel === 'plugins:changed'));
+  offline = true;
+  t.mock.timers.tick(6 * 60 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
+  assert.equal(calls, 2); assert.equal(f.invoke('plugins:catalog').entries.length, 1);
+  await f.runtime.dispose(); t.mock.timers.tick(6 * 60 * 60 * 1000); assert.equal(calls, 2);
+});
