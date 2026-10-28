@@ -336,14 +336,13 @@ export class HubDO {
   }
 
   fanoutSseFrames(frames) {
-    // Reuse the same encoded frame across all subscribers of each kind.
+    // Encode only selected frames, once for all peers that need the same bytes.
     const chunks = new Map();
-    for (const frame of [frames.stats, frames.freshness, frames.delta]) {
-      if (frame) chunks.set(frame, this.encoder.encode(frame));
-    }
     for (const client of this.sseClients) {
-      const chunk = chunks.get(hubProtocol.sseFrameForClient(frames, client));
-      if (chunk && this.writeEncoded(client, chunk) && client.deltaEvents) client.streamRevision = frames.revision;
+      const frame = hubProtocol.sseFrameForClient(frames, client);
+      if (!frame) continue;
+      if (!chunks.has(frame)) chunks.set(frame, this.encoder.encode(frame));
+      if (this.writeEncoded(client, chunks.get(frame)) && client.deltaEvents) client.streamRevision = frames.revision;
     }
   }
 
