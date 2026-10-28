@@ -82,7 +82,7 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
       }
       const result = repository ? await github.repositoryReadme(repository, document.controller.signal) : await github.readme(id, document.controller.signal);
       if (revision !== detailRevision) throw new Error('README details are no longer current');
-      Object.assign(document, renderReadme(result.readme, result.baseUrl), { baseUrl: result.baseUrl });
+      Object.assign(document, renderReadme(result.readme, result.baseUrl, result.imageBaseUrl), { baseUrl: result.imageBaseUrl });
       return { html: document.html, documentId: document.id, imageCount: document.images.length };
     },
     async readmeImage(documentId, index) {

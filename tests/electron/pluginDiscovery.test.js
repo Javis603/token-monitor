@@ -43,7 +43,7 @@ test('GitHub refresh coalesces, keeps last good results offline, and survives re
 });
 test('README is fetched only for discovered repositories with its actual base location', async t => {
   const calls = []; const discovery = createGitHubDiscovery({ enabled: true, root: temp(t), fetchImpl: async url => {
-    calls.push(url); return response(url.endsWith('/readme') ? { download_url: 'https://raw.githubusercontent.com/author/project/main/docs/README.md', encoding: 'base64', content: Buffer.from('# Title\n<script>bad()</script>').toString('base64') } : raw());
+    calls.push(url); return response(url.endsWith('/readme') ? { download_url: 'https://raw.githubusercontent.com/author/project/main/docs/README.md', html_url: 'https://github.com/author/project/blob/main/docs/README.md', encoding: 'base64', content: Buffer.from('# Title\n<script>bad()</script>').toString('base64') } : raw());
   } }); t.after(() => discovery.dispose());
   await discovery.refresh(); assert.equal(calls.length, 1);
   await assert.rejects(discovery.readme('other/repo'), /Unknown/); assert.equal(calls.length, 1);
@@ -75,14 +75,14 @@ test('catalog lists saved repositories separately and README image IPC cannot fe
 
 const { renderReadme } = require('../../src/electron/plugins/catalogReadme');
 test('README Markdown preserves layout, resolves relative images and cannot inject HTML or active URLs', () => {
-  const result = renderReadme('# Heading\n\nBefore **bold**.\n\n![Preview](../images/demo.png)\n\nAfter.\n\n[Guide](./guide.md)\n\n<script>alert(1)</script>\n\n![bad](file:///secret)\n\n[bad](javascript:alert(1))', 'https://raw.githubusercontent.com/author/project/main/docs/README.md');
+  const result = renderReadme('# Heading\n\nBefore **bold**.\n\n![Preview](../images/demo.png)\n\nAfter.\n\n[Guide](./guide.md)\n\n<script>alert(1)</script>\n\n![bad](file:///secret)\n\n[bad](javascript:alert(1))', 'https://github.com/author/project/blob/main/docs/README.md', 'https://raw.githubusercontent.com/author/project/main/docs/README.md');
   assert.match(result.html, /<h1>Heading<\/h1>/); assert.match(result.html, /<strong>bold<\/strong>/);
   assert.deepEqual(result.images, ['https://raw.githubusercontent.com/author/project/main/images/demo.png']);
   assert.match(result.html, /data-readme-image="0"/); assert.doesNotMatch(result.html, /<img|<script|href="javascript:|src="file:/);
-  assert.match(result.html, /&lt;script&gt;/); assert.match(result.html, /href="https:\/\/raw.githubusercontent.com\/author\/project\/main\/docs\/guide.md"/);
+  assert.match(result.html, /&lt;script&gt;/); assert.match(result.html, /href="https:\/\/github.com\/author\/project\/blob\/main\/docs\/guide.md"/);
 });
 test('README image access is scoped to the active detail document, after another detail is opened', async t => {
-  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async url => response(url.endsWith('/readme') ? { download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') } : raw()) });
+  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async url => response(url.endsWith('/readme') ? { download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', html_url: 'https://github.com/author/project/blob/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') } : raw()) });
   t.after(() => catalog.dispose()); await catalog.discover();
   const first = await catalog.details('github-discovery', 'author/project');
   assert.equal(first.imageCount, 1); assert.match(first.html, /data-readme-image/);
@@ -97,7 +97,7 @@ test('README images stay lazy, duplicate IPC shares a load, and closing aborts t
   const image = { isEmpty: () => false, getSize: () => ({ width: 20, height: 10 }), toPNG: () => Buffer.from('png') };
   const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, nativeImage: { createFromBuffer: () => image }, fetchImpl: async (url, init) => {
     if (url.includes('/search/')) return response(raw());
-    if (url.endsWith('/readme')) return response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') });
+    if (url.endsWith('/readme')) return response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', html_url: 'https://github.com/author/project/blob/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') });
     images++; imageSignal = init.signal;
     return deferred ? new Promise(resolve => { finish = resolve; }) : new Response(bytes);
   } }); t.after(() => catalog.dispose()); await catalog.discover();
@@ -118,12 +118,35 @@ test('closing details also aborts a pending README and prevents a late result re
     signal = init.signal; return new Promise(resolve => { finish = resolve; });
   } }); t.after(() => catalog.dispose()); await catalog.discover();
   const pending = catalog.details('github-discovery', 'author/project'); catalog.closeDetails(); assert.equal(signal.aborted, true);
-  finish(response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', encoding: 'base64', content: Buffer.from('README').toString('base64') }));
+  finish(response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', html_url: 'https://github.com/author/project/blob/main/README.md', encoding: 'base64', content: Buffer.from('README').toString('base64') }));
   await assert.rejects(pending, /no longer current/);
 });
 
 test('catalog README repository ownership allows GitHub canonical casing without relaxing its host', async t => {
-  const discovery = createGitHubDiscovery({ enabled: true, root: temp(t), fetchImpl: async () => response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', encoding: 'base64', content: Buffer.from('README').toString('base64') }) });
+  const discovery = createGitHubDiscovery({ enabled: true, root: temp(t), fetchImpl: async () => response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', html_url: 'https://github.com/author/project/blob/main/README.md', encoding: 'base64', content: Buffer.from('README').toString('base64') }) });
   t.after(() => discovery.dispose());
-  assert.equal((await discovery.repositoryReadme('https://github.com/AUTHOR/PROJECT')).readme, 'README');
+  const result = await discovery.repositoryReadme('https://github.com/AUTHOR/PROJECT');
+  assert.equal(result.readme, 'README');
+  assert.equal(result.baseUrl, 'https://github.com/author/project/blob/main/README.md');
+  assert.equal(result.imageBaseUrl, 'https://raw.githubusercontent.com/author/project/main/README.md');
+});
+
+test('README page URLs must be browsable files owned by the selected repository', async t => {
+  let htmlUrl;
+  const discovery = createGitHubDiscovery({ root: temp(t), fetchImpl: async () => response({
+    download_url: 'https://raw.githubusercontent.com/author/project/main/docs/README.md', html_url: htmlUrl,
+    encoding: 'base64', content: Buffer.from('[Guide](./guide.md)\n\n![Shot](../images/demo.png)').toString('base64')
+  }) }); t.after(() => discovery.dispose());
+  for (const invalid of [undefined, 'https://evil.test/author/project/blob/main/docs/README.md',
+    'https://github.com/other/project/blob/main/README.md', 'https://github.com/author/project/issues/1',
+    'http://github.com/author/project/blob/main/README.md', 'https://github.com:8443/author/project/blob/main/README.md',
+    'https://user@github.com/author/project/blob/main/README.md', 'https://github.com/author/project/blob/main/README.md?q=1']) {
+    htmlUrl = invalid;
+    await assert.rejects(discovery.repositoryReadme('https://github.com/author/project'), /Invalid/);
+  }
+  htmlUrl = 'https://github.com/AUTHOR/PROJECT/blob/main/docs/README.md';
+  const result = await discovery.repositoryReadme('https://github.com/author/project');
+  const rendered = renderReadme(result.readme, result.baseUrl, result.imageBaseUrl);
+  assert.match(rendered.html, /href="https:\/\/github.com\/AUTHOR\/PROJECT\/blob\/main\/docs\/guide.md"/);
+  assert.deepEqual(rendered.images, ['https://raw.githubusercontent.com/author/project/main/images/demo.png']);
 });

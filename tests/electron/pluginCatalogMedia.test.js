@@ -36,7 +36,7 @@ test('README images are restricted to the same raw GitHub repository on standard
 });
 test('README image slots are capped without fetching blocked or excess images', () => {
   const text = Array.from({ length: 20 }, (_, i) => `![Shot ${i}](images/${i}.png)`).join('\n\n') + '\n\n![External](https://internal.example/image.png)';
-  const result = renderReadme(text, baseUrl);
+  const result = renderReadme(text, 'https://github.com/owner/plugin/blob/main/docs/README.md', baseUrl);
   assert.equal(result.images.length, 8); assert.equal((result.html.match(/data-readme-image=/g) || []).length, 8);
   assert.match(result.html, /Shot 19/); assert.match(result.html, /External/);
 });

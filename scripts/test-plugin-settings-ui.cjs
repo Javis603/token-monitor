@@ -39,6 +39,7 @@ async function main() {
       catalog:()=>{catalogCalls++;return catalogMode==='deferred'?new Promise((yes,no)=>{pending=yes;reject=no}):Promise.resolve(catalog)},
       refreshSource:async id=>{calls.push(['refreshSource',id]);const source=catalog.sources.find(s=>s.id===id);source.error=source.nextError||'';return catalog},
       catalogDetails:async()=>({html:'',imageCount:0}),
+      closeCatalogDetails:async()=>{},
       place:async(ref,surface,on)=>{calls.push(['place',ref,surface,on]);data.plugins[0].views[0].placements.home=on;return structuredClone(data)},
       setEnabled:async(id,on)=>{const p=data.plugins.find(p=>p.id===id);p.enabled=on;p.status=on?'active':'disabled';return structuredClone(data)},
       catalogPreview:async(source,id,version)=>{calls.push(['preview',version]);if(previewMode==='error')throw Error('preview rejected');if(previewMode==='deferred')await new Promise(resolve=>{previewPending=resolve});return {token:'token-'+version,id,name:'Demo',description:'Example',version,author:'Author',origin:{id:source,kind:'community'},operation:'install',sha256:'abc'}},
@@ -269,6 +270,7 @@ async function main() {
       discoverCatalog:()=>{discoveryCalls++;return new Promise(resolve=>{finishDiscovery=()=>resolve(structuredClone(backgroundCatalog))})},
       refreshSource:async id=>{sourceCalls++;activeSources++;maxSources=Math.max(maxSources,activeSources);try{await new Promise((resolve,reject)=>waitingSources.push({id,resolve,reject}))}finally{activeSources--}},
       catalogDetails:async()=>({html:'',imageCount:0}),
+      closeCatalogDetails:async()=>{},
       catalogPreview:async(source,id,version)=>({token:'background-'+version,id,name:'Background package',version,origin:{id:source,kind:'community'},operation:'install',sha256:'abc'}),cancelInstall:async()=>{}
     }});
     const backgroundTab=id=>backgroundBox.querySelector('[data-tab="'+id+'"]');

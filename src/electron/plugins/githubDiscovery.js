@@ -76,7 +76,9 @@ function createGitHubDiscovery({ root, fetchImpl, now = Date.now, enabled = fals
       if (bytes.length > 256 * 1024) throw new Error('README is too large');
       const base = new URL(raw.download_url);
       if (base.protocol !== 'https:' || base.hostname !== 'raw.githubusercontent.com' || !base.pathname.toLowerCase().startsWith(`/${id.toLowerCase()}/`) || base.username || base.password) throw new Error('Invalid README location');
-      return { readme: new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ''), baseUrl: base.href };
+      const page = new URL(raw.html_url);
+      if (page.protocol !== 'https:' || page.hostname !== 'github.com' || page.port || page.username || page.password || page.search || page.hash || !page.pathname.toLowerCase().startsWith(`/${id.toLowerCase()}/blob/`)) throw new Error('Invalid README page');
+      return { readme: new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ''), baseUrl: page.href, imageBaseUrl: base.href };
     },
     dispose() { disposed = true; for (const controller of controllers) controller.abort(); controllers.clear(); }
   };

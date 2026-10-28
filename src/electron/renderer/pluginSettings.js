@@ -489,7 +489,7 @@
       dismissOnOutside(dialog);
       dialog.addEventListener('close', () => {
         dialog.remove(); if (catalogModal === dialog) {
-          catalogModal = null; void Promise.resolve(api.closeCatalogDetails?.()).catch(() => {});
+          catalogModal = null; void api.closeCatalogDetails().catch(() => {});
         }
         if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
         applyCatalogResults();
@@ -606,7 +606,7 @@
     }
 
     function refreshCatalog(force = false) {
-      if (disposed || catalogRefreshPending || (!force && (!api.discoverCatalog || !catalogData.github?.enabled))) return catalogRefreshPending;
+      if (disposed || catalogRefreshPending || (!force && !catalogData.github?.enabled)) return catalogRefreshPending;
       catalogRefreshing = true; catalogRefreshError = ''; catalogRefreshControls();
       catalogRefreshPending = (async () => {
         try {
@@ -622,7 +622,7 @@
               catch (error) { failures.push(`${source.label}: ${actionErrorMessage(error, t)}`); }
             }
           });
-          if (api.discoverCatalog && catalogData.github?.enabled) workers.push(api.discoverCatalog(force));
+          if (catalogData.github?.enabled) workers.push(api.discoverCatalog(force));
           const results = await Promise.allSettled(workers);
           if (disposed) return;
           catalogData = await api.catalog();
