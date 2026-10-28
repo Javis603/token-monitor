@@ -246,11 +246,13 @@ async function main() {
     const repoEntry={id:'owner/repo',name:'Community repo',author:'owner',description:'Repository',origin:{id:'github-discovery',kind:'community'},status:'repository',stars:42};
     let shotCalls=0,readmeCalls=0;
     const detailsPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:detailsBox,t:key=>key,api:{
-      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[officialEntry],github:{entries:[repoEntry]},sources:[]}),
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[officialEntry],github:{entries:[repoEntry],lastFetched:1700000000000},sources:[]}),
       catalogReadmeImage:()=>{shotCalls++;return new Promise(resolve=>{imageResolve=resolve})},
       catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',html:'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
     }});
     await detailsPanel.refresh();detailsBox.querySelector('[data-tab="discover"]').click();await tick();
+    const refreshButton=detailsBox.querySelector('.plugin-catalog-refresh button').getBoundingClientRect(),refreshTime=detailsBox.querySelector('.plugin-catalog-refresh .settings-note').getBoundingClientRect();
+    check('catalog-refresh-time-aligns-with-button',Math.abs(refreshButton.y+refreshButton.height/2-refreshTime.y-refreshTime.height/2)<1);
     check('details-media-is-lazy-and-official-credit-hidden',shotCalls===0&&!detailsBox.textContent.includes('Hidden credit'));
     check('official-card-shows-host-publisher-community-card-shows-owner-only',detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-shield'))&&detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-source')?.textContent==='owner');
     check('github-stars-only-on-community-card',detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-stars')?.textContent.includes('42')&&!detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-stars'));
@@ -258,7 +260,9 @@ async function main() {
     const dialog=detailsBox.querySelector('dialog');
     check('official-detail-shows-same-host-publisher',dialog.querySelector('.plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(dialog.querySelector('.plugin-shield')));
     check('details-opens-with-version-before-types',dialog.open&&dialog.querySelector('.plugin-card-meta').firstChild.className==='plugin-version'&&shotCalls===1);
-    imageResolve(shot);await tick();dialog.querySelector('.plugin-screenshot').click();await tick();
+    imageResolve(shot);await tick();
+    check('small-readme-image-keeps-intrinsic-width',dialog.querySelector('.plugin-screenshot img')?.getBoundingClientRect().width===32);
+    dialog.querySelector('.plugin-screenshot').click();await tick();
     check('image-opens-above-parent-details',detailsBox.querySelectorAll('dialog[open]').length===2);
     detailsBox.querySelector('.plugin-image-dialog .plugin-dialog-close').click();await tick();
     check('image-close-keeps-parent-open',dialog.open&&detailsBox.querySelectorAll('dialog').length===1);

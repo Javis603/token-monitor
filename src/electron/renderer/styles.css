@@ -8757,6 +8757,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 /* Catalog detail is a host-owned dialog. Only its body scrolls; image zoom
    uses a second native dialog so Escape dismisses only the top layer. */
 .plugin-catalog-group { min-width: 0; }
+.plugin-catalog-refresh { align-items: center; margin-top: 12px; gap: 8px 12px; }
+.plugin-catalog-refresh .settings-note { min-width: 0; }
 .plugin-catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 10px; margin-top: 10px; }
 .plugin-catalog-grid > .plugin-card { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(var(--overlay-rgb), .025); cursor: pointer; }
 .plugin-catalog-title { display: block; padding: 0; min-width: 0; text-align: start; border: 0; background: none; color: var(--text); font: inherit; cursor: pointer; }
@@ -8772,8 +8774,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-catalog-dialog-footer button, .plugin-update-action { border: 1px solid var(--line); border-radius: 6px; background: rgba(var(--overlay-rgb), .05); color: var(--text); padding: 6px 10px; font: inherit; font-size: .6875rem; cursor: pointer; }
 .plugin-dialog-close { margin-inline-start: auto; width: 36px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 1.25rem; cursor: pointer; }
 .plugin-dialog-close:hover { background: rgba(var(--overlay-rgb), .06); color: var(--text); }
-.plugin-screenshot { display: block; margin: 12px 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; width: 100%; padding: 4px; cursor: zoom-in; }
-.plugin-screenshot img { display: block; width: 100%; height: auto; object-fit: contain; }
+.plugin-screenshot { display: block; margin: 12px 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; width: fit-content; max-width: 100%; box-sizing: border-box; padding: 4px; cursor: zoom-in; }
+.plugin-screenshot img { display: block; width: auto; max-width: 100%; height: auto; object-fit: contain; }
 .plugin-image-dialog .plugin-catalog-dialog-body img { display: block; max-width: 100%; height: auto; margin: auto; }
 .plugin-catalog-readme { margin-top: 16px; overflow-wrap: anywhere; font-size: .75rem; line-height: 1.6; }
 

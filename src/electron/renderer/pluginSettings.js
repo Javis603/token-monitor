@@ -552,7 +552,7 @@
       }
       search.addEventListener('input', () => { query = search.value; renderResults(); });
       wrap.append(search, results);
-      const refresh = el(document, 'div', 'settings-actions');
+      const refresh = el(document, 'div', 'settings-actions plugin-catalog-refresh');
       refresh.append(button(t('plugins.catalog.refresh'), () => void run(async () => {
         for (const source of catalogData.sources.filter(source => source.kind === 'community')) await api.refreshSource(source.id);
         catalogData = api.discoverCatalog ? await api.discoverCatalog(true) : await api.catalog(); return null;
