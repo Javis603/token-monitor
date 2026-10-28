@@ -87,13 +87,14 @@ test('standalone-window errors stay with their page, retry once and discard stal
   assert.equal(headingContainer.classList.contains('hidden'), true);
 });
 
-test('pointer reopen parks restored buttons on the page without stealing keyboard or editor focus', () => {
+test('window activation preserves focus for pointer, OS shortcuts, keyboard navigation and editors', () => {
   const { create } = require('../../src/electron/renderer/pluginMainPages');
   const { Element } = require('../helpers/notchPanel');
   const handlers = {}, windowHandlers = {}, frames = [];
   const document = { createElement: tag => new Element(tag, document), createElementNS: (_, tag) => new Element(tag, document),
     addEventListener(name, fn) { handlers[name] = fn; },
     defaultView: { addEventListener(name, fn) { windowHandlers[name] = fn; }, requestAnimationFrame(fn) { frames.push(fn); } } };
+  document.documentElement = document.createElement('html');
   document.body = document.createElement('body'); document.activeElement = document.body;
   const container = document.createElement('main'), headingContainer = document.createElement('div'), actionsContainer = document.createElement('div');document.body.append(container,headingContainer,actionsContainer);
   let button, editor;
@@ -104,12 +105,14 @@ test('pointer reopen parks restored buttons on the page without stealing keyboar
   ui.render(pages, pages[0].id);
   const page = container.querySelector('.plugin-main-page');
   assert.equal(page.tabIndex, -1); assert.equal(page.getAttribute('aria-label'), 'Demo');
-  const reopen = () => { windowHandlers.focus(); frames.shift()(); };
-  handlers.pointerdown(); button.focus(); reopen(); assert.equal(document.activeElement, page);
-  handlers.keydown({ key: 'Tab' }); button.focus(); reopen(); assert.equal(document.activeElement, button);
+  const reopen = () => { windowHandlers.focus?.(); frames.splice(0).forEach(fn => fn()); };
+  handlers.pointerdown(); button.focus(); reopen(); assert.equal(document.activeElement, button);
+  assert.equal(document.documentElement.classList.contains('plugin-pointer-focus'), true);
+  for (const event of [{key:'Tab'}, {key:'Tab',metaKey:true}, {key:'Tab',altKey:true}]) {
+    handlers.keydown(event); button.focus(); reopen(); assert.equal(document.activeElement, button);
+    assert.equal(document.documentElement.classList.contains('plugin-pointer-focus'), false);
+  }
   handlers.pointerdown(); editor.focus(); reopen(); assert.equal(document.activeElement, editor);
-  button.focus(); windowHandlers.focus(); handlers.pointerdown(); frames.shift()();
-  assert.equal(document.activeElement, button, 'a fresh interaction wins over the queued activation callback');
-  windowHandlers.focus(); ui.render(pages, 'home'); frames.shift()();
-  assert.equal(document.activeElement, button, 'navigation invalidates pending focus restoration');
+  handlers.pointerdown(); button.focus(); reopen();
+  assert.equal(document.activeElement, button, 'activation without renderer key events also preserves focus');
 });

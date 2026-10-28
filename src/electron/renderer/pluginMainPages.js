@@ -12,29 +12,12 @@
   }
   function create({ document, container, headingContainer, actionsContainer, host, t, openWindow, formatError = error => t('settings.plugins.actionFailed', { error: error.message || String(error) }) }) {
     const retained = new Map(), errors = new WeakMap();
-    let selection = null, generation = 0, keyboardFocus = false, inputEpoch = 0;
-    const window = document.defaultView;
-    if (window) {
-      document.addEventListener('pointerdown', () => { keyboardFocus = false; inputEpoch++; }, true);
-      document.addEventListener('keydown', event => {
-        if (!event.metaKey && !event.ctrlKey && !event.altKey) keyboardFocus = true;
-        inputEpoch++;
-      }, true);
-      window.addEventListener('focus', () => {
-        const opened = generation, input = inputEpoch;
-        window.requestAnimationFrame(() => {
-          if (keyboardFocus || opened !== generation || input !== inputEpoch) return;
-          const record = [...retained.values()].find(record => !record.node.classList.contains('hidden'));
-          const page = record?.node;
-          const active = document.activeElement;
-          // Chromium restores the last button on native activation, which can
-          // produce a keyboard ring after a pointer reopen. Leave editors and
-          // deliberate keyboard focus alone; the page is the neutral fallback.
-          if (page && (active === document.body || active?.tagName === 'BUTTON' && (page.contains(active) || record.actions.contains(active)))) {
-            page.focus({ preventScroll: true });
-          }
-        });
-      });
+    let selection = null, generation = 0;
+    if (document.defaultView) {
+      // Input modality controls the focus ring, never the focused element.
+      // OS window switching does not reliably emit renderer key events.
+      document.addEventListener('pointerdown', () => document.documentElement.classList.add('plugin-pointer-focus'), true);
+      document.addEventListener('keydown', () => document.documentElement.classList.remove('plugin-pointer-focus'), true);
     }
     return {
       render(pages, selected) {

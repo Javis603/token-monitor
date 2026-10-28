@@ -123,7 +123,7 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
 
 test('a card commits after its reported height is clamped to the work area', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const notchRenderer ='));
+  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
   for (const kind of ['provider', 'stat']) {
     for (const { measured, maxCardHeight, expected } of [
       // Chromium at 175% scaling can measure a max-height: 851px card this way.
@@ -137,7 +137,8 @@ test('a card commits after its reported height is clamped to the work area', () 
       const renderBubble = Function('deps', `
         const { root, stagingLayer, providerCard, statCard, fitCardTotal,
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
-        const surface = 'fixture', pluginContent = null;
+        let observedPluginCard = null;
+        const bubbleSizeObserver = null, pluginContent = null;
         ${source}
         return renderBubble;
       `)({

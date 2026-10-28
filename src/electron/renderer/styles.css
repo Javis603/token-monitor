@@ -8583,10 +8583,13 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-page-heading { display: flex; align-items: center; min-width: 0; overflow: hidden; }
 .plugin-main-heading { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
 .plugin-main-heading h2 { margin: 0; font-size: 13px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.shell.plugin-page-mode .title-controls { flex: 0 0 auto; width: auto; min-width: 114px; }
+.shell.plugin-page-mode .title-controls { flex: 0 1 auto; width: auto; min-width: 114px; max-width: calc(100% - 64px); }
 .plugin-page-actions, .plugin-main-actions, .plugin-header-actions, .plugin-header-actions-mount { display: flex; align-items: center; justify-content: flex-end; min-width: 0; gap: 6px; }
 .plugin-page-actions { height: 30px; transition: opacity 160ms ease 140ms; }
+.plugin-page-actions .plugin-header-actions { flex: 1 1 auto; overflow: auto; max-height: 30px; justify-content: flex-start; }
+.plugin-page-actions .plugin-header-actions-mount { flex: 0 0 auto; }
 .plugin-header-actions:empty { display: none; }
+html.plugin-pointer-focus .shell.plugin-page-mode :is(.plugin-main-page, .plugin-page-actions) button:focus-visible { outline: none; }
 .title-controls:has(.actions-hotspot:hover) .plugin-page-actions,
 .title-controls:has(.window-actions:hover) .plugin-page-actions,
 .title-controls:has(.window-actions:focus-within) .plugin-page-actions,

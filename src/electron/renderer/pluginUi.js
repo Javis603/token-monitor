@@ -136,23 +136,28 @@
       });
       container.replaceChildren();
     }
+    function syncHeaderActions(record, parent) {
+      if (!parent) { record.headerActions?.remove(); record.headerActions = undefined; return; }
+      if (!record.headerActions) {
+        record.headerActions = document.createElement('div');
+        record.headerActions.className = 'plugin-header-actions-mount';
+      }
+      if (record.headerActions.parentNode !== parent) parent.append(record.headerActions);
+    }
     async function mountRecord(container, descriptor, value = {}) {
       if (disposed || blocked.has(descriptor.pluginId)) return;
       const previous = mounts.get(container);
       if (previous && previous.descriptor.ref === descriptor.ref && previous.descriptor.revision === descriptor.revision) {
-        previous.descriptor = descriptor; previous.context = { ...previous.context, ...value };
+        previous.descriptor = descriptor; previous.context = { ...previous.context, ...value, headerActions: value.headerActions };
         if (previous.failed) { previous.context.onMountStatus?.(false); return; }
+        syncHeaderActions(previous, value.headerActions);
         await update(previous);
         if (mounts.get(container) === previous && previous.instance && !previous.failed) previous.context.onMountStatus?.(true);
         return;
       }
       unmount(container);
       const record = { container, descriptor, context: value };
-      if (value.headerActions) {
-        record.headerActions = document.createElement('div');
-        record.headerActions.className = 'plugin-header-actions-mount';
-        value.headerActions.append(record.headerActions);
-      }
+      syncHeaderActions(record, value.headerActions);
       mounts.set(container, record); owners.set(container, record);
       try {
         const loaded = await load(descriptor);

@@ -20,7 +20,7 @@ body.plugin-page { display: flex; flex-direction: column; font-family: var(--ui-
 @media(max-width: 520px) { body.plugin-page { padding: 20px; gap: 18px; } .plugin-page header { flex-direction: column; gap: 8px; } .plugin-page .pv-dir-row { flex-wrap: wrap; } }
 
 .plugin-detached-actions, .plugin-header-actions, .plugin-header-actions-mount { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.plugin-header-actions:not(:empty) + #pageStatus { display: none; }
+.plugin-header-actions:has(> .plugin-header-actions-mount:not(:empty)) + #pageStatus { display: none; }
 .plugin-page > header { align-items: center; }
 .plugin-page > header > div:first-child { flex: 1; min-width: 0; }
 .plugin-detached-actions { flex: 0 0 auto; }
