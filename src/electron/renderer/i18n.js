@@ -19,7 +19,7 @@
     en: {
       "plugins.trusted.warning": "Trusted plugins run code in the app and may access local files, credentials and the network. They can change data or freeze the interface. Enable only code you trust. Integrity hashes are not a security review.",
       "plugins.package.initialLocations": "Initial display locations",
-      "plugins.package.initialLocationsNote": "Choose where to add this plugin when first enabled. Full locations are skipped; Notch and Dock master switches stay unchanged.",
+      "plugins.package.initialLocationsNote": "Choose where the plugin appears when enabled.",
       "plugins.trusted.restore": "Restore original content",
       "plugins.trusted.useContent": "Use this content",
       "plugins.trusted.reloadTitle": "Reload plugin interfaces?",
@@ -2239,7 +2239,7 @@
     'zh-TW': {
       "plugins.trusted.warning": "可信外掛會在 App 內執行程式，並可能存取本機檔案、憑證及網路，也可能更改資料或令介面停止回應。只啟用你信任的程式碼。完整性雜湊不代表安全審核。",
       "plugins.package.initialLocations": "首次顯示位置",
-      "plugins.package.initialLocationsNote": "選擇首次啟用時加入的位置。已滿的位置會略過；Notch 及 Dock 總開關不會改動。",
+      "plugins.package.initialLocationsNote": "選擇外掛啟用後顯示的位置。",
       "plugins.trusted.restore": "恢復原生內容",
       "plugins.trusted.useContent": "使用此內容",
       "plugins.trusted.reloadTitle": "重新載入外掛介面？",
@@ -4459,7 +4459,7 @@
     'zh-CN': {
       "plugins.trusted.warning": "可信插件会在 App 内执行代码，并可能访问本机文件、凭证和网络，也可能更改数据或使界面停止响应。仅启用你信任的代码。完整性哈希不代表安全审核。",
       "plugins.package.initialLocations": "首次显示位置",
-      "plugins.package.initialLocationsNote": "选择首次启用时加入的位置。已满的位置会跳过；Notch 和 Dock 总开关不会改变。",
+      "plugins.package.initialLocationsNote": "选择插件启用后显示的位置。",
       "plugins.trusted.restore": "恢复原生内容",
       "plugins.trusted.useContent": "使用此内容",
       "plugins.trusted.reloadTitle": "重新加载插件界面？",
@@ -6679,7 +6679,7 @@
     ko: {
       "plugins.trusted.warning": "신뢰한 플러그인은 앱에서 코드를 실행하며 로컬 파일, 자격 증명 및 네트워크에 접근할 수 있습니다. 데이터를 변경하거나 UI를 멈출 수 있습니다. 신뢰하는 코드만 활성화하세요. 무결성 해시는 보안 검토가 아닙니다.",
       "plugins.package.initialLocations": "처음 표시할 위치",
-      "plugins.package.initialLocationsNote": "처음 활성화할 때 추가할 위치를 선택하세요. 가득 찬 위치는 건너뛰며 Notch 및 Dock의 전체 스위치는 변경하지 않습니다.",
+      "plugins.package.initialLocationsNote": "플러그인을 활성화한 후 표시할 위치를 선택하세요.",
       "plugins.trusted.restore": "기본 콘텐츠 복원",
       "plugins.trusted.useContent": "이 콘텐츠 사용",
       "plugins.trusted.reloadTitle": "플러그인 UI를 다시 불러올까요?",
@@ -8899,7 +8899,7 @@
     ja: {
       "plugins.trusted.warning": "信頼したプラグインはアプリ内でコードを実行し、ローカルファイル、認証情報、ネットワークにアクセスできます。データを変更したり、画面を応答不能にする可能性があります。信頼できるコードだけを有効にしてください。整合性ハッシュは安全性の審査ではありません。",
       "plugins.package.initialLocations": "初回の表示位置",
-      "plugins.package.initialLocationsNote": "初めて有効にするときの追加先を選択します。満員の場所はスキップし、Notch と Dock の全体スイッチは変更しません。",
+      "plugins.package.initialLocationsNote": "プラグインを有効にした後の表示位置を選択します。",
       "plugins.trusted.restore": "標準の内容に戻す",
       "plugins.trusted.useContent": "この内容を使用",
       "plugins.trusted.reloadTitle": "プラグイン画面を再読み込みしますか？",
@@ -11119,7 +11119,7 @@
     'pt-BR': {
       "plugins.trusted.warning": "Plugins confiáveis executam código no app e podem acessar arquivos locais, credenciais e a rede. Podem alterar dados ou travar a interface. Ative apenas código em que você confia. Hashes de integridade não são uma revisão de segurança.",
       "plugins.package.initialLocations": "Locais de exibição inicial",
-      "plugins.package.initialLocationsNote": "Escolha onde adicionar o plugin ao ativá-lo pela primeira vez. Locais cheios são ignorados; os controles gerais do Notch e Dock não mudam.",
+      "plugins.package.initialLocationsNote": "Escolha onde o plugin aparece quando ativado.",
       "plugins.trusted.restore": "Restaurar conteúdo original",
       "plugins.trusted.useContent": "Usar este conteúdo",
       "plugins.trusted.reloadTitle": "Recarregar interfaces dos plugins?",
