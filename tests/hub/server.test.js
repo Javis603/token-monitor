@@ -12,10 +12,10 @@ const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 
 function waitFor(predicate, timeoutMs = 1000) {
   return new Promise((resolve, reject) => {
-    const deadline = Date.now() + timeoutMs;
+    const deadline = performance.now() + timeoutMs;
     const check = () => {
       if (predicate()) return resolve();
-      if (Date.now() >= deadline) return reject(new Error('timed out waiting for SSE event'));
+      if (performance.now() >= deadline) return reject(new Error('timed out waiting for SSE event'));
       setTimeout(check, 10);
     };
     check();
@@ -614,7 +614,10 @@ test('official senders can request a minimal ingest acknowledgement while legacy
   }
 });
 
-test('the stats stream coalesces bursts and negotiates timestamp-only freshness events', async () => {
+test('the stats stream coalesces bursts and negotiates timestamp-only freshness events', async (t) => {
+  // Lease observations must be in the past regardless of the runner's wall clock.
+  // Only Date is mocked; SSE timers and monotonic wait deadlines remain real.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 9, 28, 12) });
   const dataFile = tempDataFile();
   const hub = createHub({
     port: 0,
@@ -631,10 +634,13 @@ test('the stats stream coalesces bursts and negotiates timestamp-only freshness 
     const initialAt = utcTodayAt('10:00:00.000');
     const refreshedAt = utcTodayAt('10:01:00.000');
     const changedAt = utcTodayAt('10:02:00.000');
+    // Live observations must be in the past even when CI runs before 10:00 UTC.
+    const activityAt = new Date(Date.now() - 2000).toISOString();
+    const renewedActivityAt = new Date(Date.now() - 1000).toISOString();
     const base = {
       deviceId: 'dev-a',
       updatedAt: initialAt,
-      today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: initialAt } } } },
+      today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: activityAt } } } },
       clientHealth: {
         version: 1,
         clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
@@ -664,14 +670,14 @@ test('the stats stream coalesces bursts and negotiates timestamp-only freshness 
 
     // A session-only lease renewal must not resend accounting detail.
     hub.ingest({ ...base, today: { ...base.today, sessions: { a: {
-      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: refreshedAt }
+      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: renewedActivityAt }
     } } } });
     await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
     assert.equal(modern.events[0].event, 'freshness');
-    assert.equal(Object.values(modern.events[0].data.stats.sessionActivityObservedAt.today)[0], refreshedAt);
-    assert.equal(Object.values(modern.events[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], refreshedAt);
+    assert.equal(Object.values(modern.events[0].data.stats.sessionActivityObservedAt.today)[0], renewedActivityAt);
+    assert.equal(Object.values(modern.events[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], renewedActivityAt);
     assert.equal(legacy.events[0].event, 'stats');
-    assert.equal(Object.values(legacy.events[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, refreshedAt);
+    assert.equal(Object.values(legacy.events[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, renewedActivityAt);
     modern.events.length = 0;
     legacy.events.length = 0;
 

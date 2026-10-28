@@ -197,6 +197,12 @@ brew install --cask token-monitor
 - **可錄製全域快捷鍵**：可從任何地方快速顯示或隱藏視窗
 - **Discord Rich Presence**：將今日 Token、花費與主要工具廣播到你的 Discord 個人檔案（需手動開啟）
 
+### 外掛（實驗性）
+
+以自訂內容擴展桌面頁面、新增外掛頁面與設定，並將內容放到瀏海、Edge Dock、選單列／系統匣或懸浮小窗。作者可設計自己的介面，並選用本機 Node 後端接駁資料來源及執行運算。
+
+在「設定 → 外掛」管理外掛。參閱[使用指南](https://javis-ai.com/token-monitor/docs/plugins.html?lang=zh-TW)、[開發指南](docs/plugins/author-quickstart.md)及[外掛 API](docs/plugins/README.md)。外掛 API 屬實驗性，日後可能變更，外掛可能需要更新。只啟用你信任的程式碼：外掛並非沙盒隔離，Node 後端以你的作業系統使用者權限執行。
+
 ## 支援工具詳情
 
 Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：

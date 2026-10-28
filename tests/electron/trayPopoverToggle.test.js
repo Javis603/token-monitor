@@ -8,6 +8,7 @@ const vm = require('node:vm');
 
 const ROOT = path.join(__dirname, '../..');
 const { createTray } = require(path.join(ROOT, 'src/electron/tray'));
+const { createWindowVisibilityActions } = require(path.join(ROOT, 'src/electron/plugins/windowVisibility'));
 const { popoverBlurMatchesPress, popoverToggleAction, trayToggleAction } = require(path.join(ROOT, 'src/electron/trayModeSettings'));
 const { windowToggleShortcutAction } = require(path.join(ROOT, 'src/electron/windowShortcut'));
 const source = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
@@ -24,7 +25,7 @@ function sourceBetween(first, next) {
 function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}) {
   let point = { x: 110, y: 10 };
   let now = 1000;
-  const changes = [];
+  const changes = [], pointerActivations = [];
   const timers = [];
   const win = {
     isDestroyed: () => false,
@@ -49,6 +50,8 @@ function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}
   const screen = { getCursorScreenPoint: () => point };
   const context = vm.createContext({
     mainWindow: win, win, tray: null, recentPopoverBlur: null,
+    sendMainWindowEvent: channel => pointerActivations.push(channel),
+    pluginWindowActions: createWindowVisibilityActions(hidden => assert.equal(hidden, win)),
     settings: { trayMode: true, showTrayIcon: true },
     process: { platform }, performance: { now: () => now }, screen,
     popoverBlurMatchesPress, popoverToggleAction, trayToggleAction, windowToggleShortcutAction,
@@ -78,7 +81,7 @@ function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}
   function emit(name) { tray.handlers[name]?.({}, {}, {}); }
   return {
     get visible() { return visible; },
-    get focused() { return focused; }, changes,
+    get focused() { return focused; }, changes, pointerActivations,
     advance(ms) { now += ms; },
     enter() { point = { x: 110, y: 10 }; emit('mouse-enter'); },
     leave() { point = { x: 150, y: 50 }; emit('mouse-leave'); },
@@ -235,4 +238,22 @@ test('VoiceOver refocuses after a suppressed blur without consuming its unpaired
   assert.deepEqual(f.changes, ['show', 'show']);
   f.voiceOver();
   assert.equal(f.visible, false);
+});
+
+
+test('only a completed physical tray press opening the window requests neutral plugin focus', () => {
+  const f = fixture({ visible: false });
+  f.enter(); f.down(); f.up(); f.click();
+  assert.equal(f.visible, true);
+  assert.deepEqual(f.pointerActivations, ['window:pointerActivation']);
+  f.finishShow(); f.down(); f.up(); f.click();
+  assert.equal(f.visible, false);
+  assert.equal(f.pointerActivations.length, 1, 'closing does not reset focus');
+});
+
+test('shortcut and VoiceOver opens never request a pointer focus reset', () => {
+  for (const open of ['shortcut', 'voiceOver']) {
+    const f = fixture({ visible: false }); f[open]();
+    assert.equal(f.visible, true); assert.deepEqual(f.pointerActivations, []);
+  }
 });

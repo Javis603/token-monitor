@@ -5,6 +5,10 @@ on:
     branches: ['main']
     paths:
       - 'site/**'
+      # Canonical plugin references are rendered by the site build.
+      - 'docs/plugins/README.md'
+      - 'docs/plugins/author-ui-options.md'
+      - 'docs/plugins/distribution-design.md'
       # site/scripts/islands.jsx imports this module, so the islands bundle
       # embeds it. Without this path a change here would deploy nothing and the
       # live site would keep rolling with the old animation.
@@ -32,11 +36,18 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: site/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            site/package-lock.json
+      # Documentation examples execute the production package/catalog validators.
+      - name: Install validator dependencies
+        run: npm ci --omit=dev --ignore-scripts
       - name: Install site dependencies
         run: npm ci --prefix site
       - name: Build static site
         run: npm run build --prefix site
+      - name: Check generated documentation
+        run: npm test --prefix site
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v5
         with:

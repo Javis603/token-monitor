@@ -197,6 +197,12 @@ brew install --cask token-monitor
 - **可录制全局快捷键**：可从任何地方快速显示或隐藏窗口
 - **Discord Rich Presence**：将今日 Token、花费与主要工具广播到你的 Discord 个人资料（需手动开启）
 
+### 插件（实验性）
+
+用自定义内容扩展桌面页面、新增插件页面与设置，并将内容放到刘海、Edge Dock、菜单栏／系统托盘或悬浮小窗。作者可以设计自己的界面，并选用本机 Node 后端接入数据源及执行计算。
+
+在“设置 → 插件”管理插件。参阅[使用指南](https://javis-ai.com/token-monitor/docs/plugins.html?lang=zh-CN)、[开发指南](docs/plugins/author-quickstart.md)及[插件 API](docs/plugins/README.md)。插件 API 属于实验性功能，日后可能变更，插件可能需要更新。只启用你信任的代码：插件并非沙盒隔离，Node 后端以你的操作系统用户权限运行。
+
 ## 支持工具详情
 
 Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：

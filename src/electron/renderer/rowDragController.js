@@ -36,6 +36,7 @@
 
     // Project either axis onto the same one-dimensional sort solver. Existing
     // settings lists stay vertical; the Notch provider strip sorts horizontally.
+    const wrapped = axis === 'grid';
     const horizontal = axis === 'x';
     const scrollKey = horizontal ? 'scrollLeft' : 'scrollTop';
     const startKey = horizontal ? 'left' : 'top';
@@ -55,6 +56,12 @@
       return clientPosition - panel.getBoundingClientRect()[startKey] + panel[scrollKey];
     }
 
+    function gridPoint(clientX, clientY) {
+      const list = getList(), rect = list.getBoundingClientRect();
+      const scale = list.offsetWidth > 0 ? rect.width / list.offsetWidth : 1;
+      return { x: (clientX - rect.left) / scale + list.scrollLeft, y: (clientY - rect.top) / scale + list.scrollTop, scale };
+    }
+
     function rowElements() {
       return Array.from(getList()?.querySelectorAll(rowSelector) || []);
     }
@@ -69,6 +76,13 @@
     }
 
     function measureRows() {
+      if (wrapped) {
+        const list = getList(), rect = list.getBoundingClientRect(), { scale } = gridPoint(rect.left, rect.top);
+        return rowElements().map(el => { const r = el.getBoundingClientRect(); return {
+          el, id: el.dataset[idKey], left: (r.left - rect.left) / scale + list.scrollLeft,
+          top: (r.top - rect.top) / scale + list.scrollTop, width: r.width / scale, height: r.height / scale
+        }; });
+      }
       const panelTop = panelContentTop();
       return rowElements().map((el) => {
         const rect = el.getBoundingClientRect();
@@ -88,6 +102,7 @@
       // clicked. That cancelled the drag before it could start. Without capture only
       // the window's own blur arrives, which is the case worth aborting on.
       window[method]('blur', onDragAbort);
+      if (wrapped) window[method]('resize', onDragAbort);
     }
 
     function startRowDrag(event, id) {
@@ -105,9 +120,15 @@
       if (excluded && rowEl.contains(excluded)) return;
       if (drag) finishRowDrag(false);
       if (rowElements().length <= 1) return;
+      const pressGrid = wrapped ? gridPoint(event.clientX, event.clientY) : null;
       const pressPosition = contentPosition(pointerPosition(event));
+      const rowRect = rowEl.getBoundingClientRect();
       drag = {
         id,
+        pressGrid,
+        lastClientX: event.clientX,
+        grabOffsetX: wrapped ? (event.clientX - rowRect.left) / pressGrid.scale : 0,
+        grabOffsetY: wrapped ? (event.clientY - rowRect.top) / pressGrid.scale : 0,
         pointerId: event.pointerId,
         // Where in the row the pointer landed. The origin is rebuilt from this once
         // the rows are measured, so a collapse between press and measurement cannot
@@ -137,11 +158,12 @@
       list?.classList.add('is-reordering');
       if (drag.expandedBefore) setExpanded('');
       drag.rows = measureRows();
-      drag.snapshot = dragSort.createVerticalDragSnapshot(
-        drag.rows.map(({ id, top, height }) => ({ id, top, height })),
-        drag.id,
-        drag.grabOffset
-      );
+      const style = wrapped ? window.getComputedStyle(list) : null;
+      drag.snapshot = wrapped ? dragSort.createWrappedDragSnapshot(drag.rows, drag.id,
+        { x: drag.grabOffsetX, y: drag.grabOffsetY },
+        { width: list.clientWidth, columnGap: parseFloat(style.columnGap) || 0, rowGap: parseFloat(style.rowGap) || 0 })
+        : dragSort.createVerticalDragSnapshot(
+          drag.rows.map(({ id, top, height }) => ({ id, top, height })), drag.id, drag.grabOffset);
       if (drag.snapshot.sourceIndex < 0) {
         finishRowDrag(false);
         return false;
@@ -154,12 +176,18 @@
 
     function updateDragPositions() {
       if (!drag?.started) return;
-      const offset = contentPosition(drag.lastClientPosition) - drag.snapshot.originY;
-      const resolved = dragSort.resolveVerticalDrag(drag.snapshot, offset);
+      const point = wrapped ? gridPoint(drag.lastClientX, drag.lastClientPosition) : null;
+      const offset = wrapped ? { x: point.x - drag.snapshot.originX, y: point.y - drag.snapshot.originY }
+        : contentPosition(drag.lastClientPosition) - drag.snapshot.originY;
+      const resolved = wrapped ? dragSort.resolveWrappedDrag(drag.snapshot, offset) : dragSort.resolveVerticalDrag(drag.snapshot, offset);
       drag.order = resolved.order;
       drag.changed = resolved.targetIndex !== drag.snapshot.sourceIndex;
       for (const [index, { el }] of drag.rows.entries()) {
-        if (index === drag.snapshot.sourceIndex) el.style.setProperty(dragProperty, `${offset}px`);
+        if (wrapped) {
+          const shift = index === drag.snapshot.sourceIndex ? offset : resolved.shifts[index];
+          el.style.setProperty(index === drag.snapshot.sourceIndex ? '--drag-x' : '--drag-shift-x', `${shift.x}px`);
+          el.style.setProperty(index === drag.snapshot.sourceIndex ? '--drag-y' : '--drag-shift-y', `${shift.y}px`);
+        } else if (index === drag.snapshot.sourceIndex) el.style.setProperty(dragProperty, `${offset}px`);
         else el.style.setProperty('--drag-shift', `${resolved.shifts[index]}px`);
       }
     }
@@ -186,8 +214,12 @@
     function onPointerMove(event) {
       if (!drag || drag.pointerId !== event.pointerId) return;
       drag.lastClientPosition = pointerPosition(event);
+      drag.lastClientX = event.clientX;
       if (!drag.started) {
-        if (Math.abs(contentPosition(pointerPosition(event)) - drag.pressPosition) < threshold) return;
+        const point = wrapped ? gridPoint(event.clientX, event.clientY) : null;
+        const distance = wrapped ? Math.hypot(point.x - drag.pressGrid.x, point.y - drag.pressGrid.y)
+          : Math.abs(contentPosition(pointerPosition(event)) - drag.pressPosition);
+        if (distance < threshold) return;
         // Capture only after the gesture crosses the drag threshold. Capturing on
         // pointerdown retargets the eventual click from the nested disclosure
         // button to the outer row, so an ordinary press can no longer expand it.
@@ -275,6 +307,7 @@
           for (const { el } of current.rows) {
             el.style.removeProperty(dragProperty);
             el.style.removeProperty('--drag-shift');
+            if (wrapped) for (const key of ['--drag-x', '--drag-y', '--drag-shift-x', '--drag-shift-y']) el.style.removeProperty(key);
             el.classList.remove('dragging');
           }
           list?.classList.remove('drag-active');

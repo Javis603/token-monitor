@@ -95,7 +95,7 @@ function normalizeNotchShape(value) {
 function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   rendererDir, preloadPath, platform = process.platform, readScreens = readMacNotchScreens,
   nativeGlass = () => false, liquidGlass = () => null, createGlass, applyShapeMask,
-  onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, naturalScrolling = () => true, monitorScrollGesture, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
+  onWebSurfaceChanged = () => {}, onSwitchCodexAccount, onToggleRateMode, onCapabilitiesChanged = () => {}, installNonActivatingInput = () => {}, blurAvailable = () => false, applyBlurMask, primaryButtonDown = () => null, naturalScrolling = () => true, monitorScrollGesture, prefersReducedMotion = () => false, isFullScreen = () => false, performHaptic = () => false, canRefreshLimits = () => false, onRefreshLimits,
   logger = () => {} }) {
   const surfaces = ['notch'];
   const windows = {}, ready = {}, shapes = {}, glass = {}, nativeMaterial = {}, lastSent = {};
@@ -290,6 +290,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function send(surface, current = layout()) {
+    onWebSurfaceChanged();
     const win = windows[surface];
     if (!alive(win) || !ready[surface] || !current) return;
     const base = { surface, notch: true, shape: shapes[surface], platform, osRelease: os.release(),
@@ -512,6 +513,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function visibility() {
+    onWebSurfaceChanged();
     const win = windows.notch;
     if (!alive(win)) return;
     if (ready.notch && !locked && (!summaryVisible() || summaryMeasured) && !win.isVisible()) win.showInactive();
@@ -939,6 +941,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     return onSwitchCodexAccount?.(String(payload?.accountId || '')) || { ok: false, error: 'Unavailable' };
   });
   return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
+    webSurface: (host) => host === windows.notch?.webContents ? { kind: 'notch', visible: running && expanded && !locked && !motion && progress === 1, preparing: running && expanded && !locked && Boolean(motion),
+      summaryVisible: running && ready.notch && !locked && summaryMeasured && summaryVisible() && !shellHidden() } : null,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),
     previewScale(value) { previewScale = normalizeEdgeDockCustomScale(value); refreshLayout(); },
     setAppearance(value, { preview = false } = {}) {

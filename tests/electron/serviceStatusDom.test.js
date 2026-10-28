@@ -295,7 +295,8 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.match(cssRule(css, '.view-switcher-disclosure'), /flex:\s*0 0 24px/);
   assert.match(cssRule(css, '.view-switcher-menu'), /position:\s*absolute/);
   assert.match(cssRule(css, '.view-switcher-menu'), /width:\s*100%/);
-  assert.match(cssRule(css, '.view-switcher-menu'), /max-height:\s*min\(280px, calc\(100vh - 84px\)\)/);
+  assert.match(cssRule(css, '.view-switcher-menu'), /max-height:\s*calc\(100vh - 84px\)/);
+  assert.match(cssRule(css, '.view-switcher-menu'), /overflow:\s*hidden auto/);
   assert.match(cssRule(css, '.view-switcher-menu'), /transform-origin:\s*left bottom/);
   assert.match(cssRule(css, '.view-switcher-menu'), /transition:[\s\S]*opacity 190ms/);
   assert.match(cssRule(css, '.view-switcher-menu'), /visibility 0s linear 0s/);

@@ -6,6 +6,7 @@ const balance = require('../../shared/limits/balanceDisplay');
 const { limitProviderForClient } = require('../../shared/limits/providers');
 const presentation = require('../renderer/edgeDock/presentation');
 const { notchWeek } = require('./panel');
+const { normalizeNotchPluginPages, normalizeNotchBuiltinPages, normalizeNotchPageOrder } = require('../../shared/plugins/placements');
 
 const NOTCH_SUMMARY_MODES = Object.freeze(['auto', 'sessions', 'tray', 'custom']);
 
@@ -166,7 +167,13 @@ function automaticIdleLayout() {
 }
 
 function buildNotchData(stats, cells, settings, options = {}) {
-  const panel = { week: notchWeek(stats, new Date(options.nowMs ?? Date.now()), settings.historyEnabled === false ? null : stats?.historyPreview) };
+  const panel = {
+    week: notchWeek(stats, new Date(options.nowMs ?? Date.now()), settings.historyEnabled === false ? null : stats?.historyPreview),
+    // Content arrives on the plugin channel; visibility and mixed order travel here.
+    pageOrder: normalizeNotchPageOrder(settings.notchPageOrder),
+    builtinPages: normalizeNotchBuiltinPages(settings.notchBuiltinPages),
+    pluginPages: settings.pluginsEnabled === false ? [] : normalizeNotchPluginPages(settings.notchPluginPages)
+  };
   if (settings.notchSummaryEnabled === false) return { cells, summary: null, panel };
   const mode = notchSummaryMode(settings);
   if (mode === 'sessions') return { cells, summary: activitySummary(cells, options, true), panel };
