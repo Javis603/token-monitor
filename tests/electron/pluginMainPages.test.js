@@ -87,12 +87,14 @@ test('standalone-window errors stay with their page, retry once and discard stal
   assert.equal(headingContainer.classList.contains('hidden'), true);
 });
 
-test('main pages leave native activation focus unchanged', () => {
+test('window activation preserves focus for pointer, OS shortcuts, keyboard navigation and editors', () => {
   const { create } = require('../../src/electron/renderer/pluginMainPages');
   const { Element } = require('../helpers/notchPanel');
-  const windowHandlers = {};
+  const handlers = {}, windowHandlers = {}, frames = [];
   const document = { createElement: tag => new Element(tag, document), createElementNS: (_, tag) => new Element(tag, document),
-    defaultView: { addEventListener(name, fn) { windowHandlers[name] = fn; } } };
+    addEventListener(name, fn) { handlers[name] = fn; },
+    defaultView: { addEventListener(name, fn) { windowHandlers[name] = fn; }, requestAnimationFrame(fn) { frames.push(fn); } } };
+  document.documentElement = document.createElement('html');
   document.body = document.createElement('body'); document.activeElement = document.body;
   const container = document.createElement('main'), headingContainer = document.createElement('div'), actionsContainer = document.createElement('div');document.body.append(container,headingContainer,actionsContainer);
   let button, editor;
@@ -103,9 +105,14 @@ test('main pages leave native activation focus unchanged', () => {
   ui.render(pages, pages[0].id);
   const page = container.querySelector('.plugin-main-page');
   assert.equal(page.tabIndex, -1); assert.equal(page.getAttribute('aria-label'), 'Demo');
-  for (const target of [button, editor]) {
-    target.focus(); windowHandlers.focus?.();
-    assert.equal(document.activeElement, target);
+  const reopen = () => { windowHandlers.focus?.(); frames.splice(0).forEach(fn => fn()); };
+  handlers.pointerdown(); button.focus(); reopen(); assert.equal(document.activeElement, button);
+  assert.equal(document.documentElement.classList.contains('plugin-pointer-focus'), true);
+  for (const event of [{key:'Tab'}, {key:'Tab',metaKey:true}, {key:'Tab',altKey:true}]) {
+    handlers.keydown(event); button.focus(); reopen(); assert.equal(document.activeElement, button);
+    assert.equal(document.documentElement.classList.contains('plugin-pointer-focus'), false);
   }
-  assert.equal(windowHandlers.focus, undefined, 'activation must not move focus');
+  handlers.pointerdown(); editor.focus(); reopen(); assert.equal(document.activeElement, editor);
+  handlers.pointerdown(); button.focus(); reopen();
+  assert.equal(document.activeElement, button, 'activation without renderer key events also preserves focus');
 });

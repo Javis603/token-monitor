@@ -8589,6 +8589,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-page-actions .plugin-header-actions { flex: 1 1 auto; overflow: auto; max-height: 30px; justify-content: flex-start; }
 .plugin-page-actions .plugin-header-actions-mount { flex: 0 0 auto; }
 .plugin-header-actions:empty { display: none; }
+html.plugin-pointer-focus .shell.plugin-page-mode :is(.plugin-main-page, .plugin-page-actions) button:focus-visible { outline: none; }
 .title-controls:has(.actions-hotspot:hover) .plugin-page-actions,
 .title-controls:has(.window-actions:hover) .plugin-page-actions,
 .title-controls:has(.window-actions:focus-within) .plugin-page-actions,
