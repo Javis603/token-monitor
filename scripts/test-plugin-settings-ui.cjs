@@ -303,6 +303,17 @@ async function main() {
     backgroundTab('installed').click();await tick();backgroundTab('discover').click();await tick();
     backgroundPanel.dispose();const disposedContent=backgroundBox.innerHTML;finishDiscovery();await tick();
     check('disposed-panel-ignores-late-catalog-completion',backgroundBox.innerHTML===disposedContent);backgroundBox.remove();
+    const presetBox=document.createElement('div');document.body.append(presetBox);let presetDiscoverCalls=[];
+    const presetData={entries:[],sources:[{id:'maintainer-fixture',kind:'maintainer',cached:false}],github:{enabled:false,entries:[]}};
+    const presetPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:presetBox,t:key=>key,api:{
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>presetData,
+      discoverCatalog:async force=>{presetDiscoverCalls.push(force);presetData.sources[0].cached=true;return presetData}
+    }});
+    await presetPanel.refresh();presetBox.querySelector('[data-tab="discover"]').click();await tick();
+    check('maintainer-source-bootstraps-with-public-github-disabled',presetDiscoverCalls.length===1&&presetDiscoverCalls[0]===false);
+    presetBox.querySelector('.plugin-catalog-refresh button').click();await tick();
+    check('maintainer-only-refresh-checks-preset-source',presetDiscoverCalls.length===2&&presetDiscoverCalls[1]===true);
+    presetPanel.dispose();presetBox.remove();
     const officialBox=document.createElement('div');document.body.append(officialBox);
     let officialPreview={id:'official-fixture',name:'Official fixture',version:'1.0.0',token:'official-token',operation:'install',origin:{id:'bundled',kind:'official'},sha256:'abc'};
     const officialList={enabled:true,plugins:[]};const officialActions=[];
@@ -329,6 +340,9 @@ async function main() {
     officialList.enabled=true;officialPreview.origin={id:'custom',kind:'community'};await officialPanel.refresh();officialClick('plugins.package.import');await tick();
     check('community-package-retains-trust-warning-and-action',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.trustInstall'&&officialBox.querySelector('.plugin-package-preview .plugin-risk')?.textContent==='plugins.trusted.warning');
     officialClick('settings.plugins.cancel');await tick();
+    officialPreview.origin={id:'maintainer-fixture',kind:'maintainer'};await officialPanel.refresh();officialClick('plugins.package.import');await tick();
+    check('maintainer-package-uses-simple-action-and-shield',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.installEnable'&&!officialBox.querySelector('.plugin-package-preview .plugin-risk')&&Boolean(officialBox.querySelector('.plugin-package-preview .plugin-shield')));
+    officialClick('settings.plugins.cancel');await tick();
     officialList.plugins=[{id:'official-fixture',name:'Official fixture',version:'1.0.0',source:'user',status:'needsApproval',enabled:false,trusted:false,installation:{origin:{kind:'official'}},views:[]}];await officialPanel.refresh();
     check('official-pending-revision-uses-enable-labels',officialBox.querySelector('.plugin-manage').textContent==='settings.plugins.enable'&&officialBox.querySelector('.plugin-status').textContent==='plugins.package.enableRequired');
     officialBox.querySelector('.plugin-enable').click();await tick();
@@ -341,13 +355,15 @@ async function main() {
     const detailsBox=document.createElement('div');document.body.append(detailsBox);
     const shot=canvas.toDataURL('image/png');
     const officialEntry={...catalog.entries[0],id:'official-detail',name:'Official detail',author:'Hidden credit',origin:{id:'official',kind:'official'},repository:'https://github.com/owner/repo'};
+    const maintainerEntry={...officialEntry,id:'maintainer-detail',name:'Maintainer detail',origin:{id:'maintainer-fixture',kind:'maintainer'},installedVersion:'0.9.0'};
+    const customEntry={...officialEntry,id:'custom-detail',author:'Token Monitor 社群',origin:{id:'custom-fixture',kind:'community',label:'Token Monitor 官方'},featured:true,official:true};
     const repoEntry={id:'owner/repo',name:'Community repo',author:'owner',description:'Repository',origin:{id:'github-discovery',kind:'community'},status:'repository',stars:42};
-    let shotCalls=0,readmeCalls=0,closeCalls=0;
+    let shotCalls=0,readmeCalls=0,closeCalls=0,longReadme=false;
     const detailsPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:detailsBox,t:key=>key,api:{
-      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[officialEntry],github:{enabled:true,entries:[repoEntry],lastFetched:1700000000000},sources:[]}),
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[maintainerEntry,customEntry,officialEntry],github:{enabled:true,entries:[repoEntry],lastFetched:1700000000000},sources:[]}),
       closeCatalogDetails:async()=>{closeCalls++},
       catalogReadmeImage:()=>{shotCalls++;return new Promise(resolve=>{imageResolve=resolve})},
-      catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',imageCount:1,html:'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
+      catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',imageCount:longReadme?3:1,html:longReadme?'<p><span data-readme-image="0">First</span></p><div style="height:2000px"></div><p><span data-readme-image="1">Second</span></p><p><span data-readme-image="2">Third</span></p>':'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
     }});
     await detailsPanel.refresh();detailsBox.querySelector('[data-tab="discover"]').click();await tick();
     const refreshButton=detailsBox.querySelector('.plugin-catalog-refresh button').getBoundingClientRect(),refreshTime=detailsBox.querySelector('.plugin-catalog-refresh .settings-note').getBoundingClientRect();
@@ -355,13 +371,15 @@ async function main() {
     check('details-media-is-lazy-and-official-credit-hidden',shotCalls===0&&!detailsBox.textContent.includes('Hidden credit'));
     check('official-card-shows-host-publisher-community-card-shows-owner-only',detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-shield'))&&detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-source')?.textContent==='owner');
     check('github-stars-only-on-community-card',detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-stars')?.textContent.includes('42')&&!detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-stars'));
+    check('featured-group-official-first-and-installed-maintainer-keeps-position',JSON.stringify([...detailsBox.querySelector('.plugin-catalog-group').querySelectorAll('[data-catalog-id]')].map(n=>n.dataset.catalogId))===JSON.stringify(['official-detail','maintainer-detail'])&&detailsBox.querySelector('.plugin-catalog-group h3').textContent==='plugins.catalog.featured');
+    check('maintainer-shield-brand-hides-personal-credit',detailsBox.querySelector('[data-catalog-id="maintainer-detail"] .plugin-source')?.textContent==='Token Monitor plugins.origin.maintainer'&&Boolean(detailsBox.querySelector('[data-catalog-id="maintainer-detail"] .plugin-shield')));
+    check('custom-title-author-flags-cannot-get-shield-or-featured-group',!detailsBox.querySelector('[data-catalog-id="custom-detail"] .plugin-shield')&&detailsBox.querySelector('[data-catalog-id="custom-detail"]').closest('section').querySelector('h3').textContent==='plugins.catalog.custom');
     const title=detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-catalog-title');title.focus();title.click();await tick();
     const dialog=detailsBox.querySelector('dialog');
     check('official-detail-shows-same-host-publisher',dialog.querySelector('.plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(dialog.querySelector('.plugin-shield')));
-    check('details-opens-with-version-before-types',dialog.open&&dialog.querySelector('.plugin-card-meta').firstChild.className==='plugin-version'&&shotCalls===0);
-    check('readme-images-require-explicit-load',Boolean(dialog.querySelector('.plugin-readme-load'))&&shotCalls===0);
-    dialog.querySelector('.plugin-readme-load').click();await tick();
-    check('readme-image-load-starts-once',shotCalls===1&&dialog.querySelector('.plugin-readme-load').disabled);
+    check('details-opens-with-version-before-types',dialog.open&&dialog.querySelector('.plugin-card-meta').firstChild.className==='plugin-version');
+    await new Promise(r=>setTimeout(r,80));
+    check('official-visible-readme-images-load-automatically-once',!dialog.querySelector('.plugin-readme-load')&&shotCalls===1);
     imageResolve(shot);await tick();
     check('small-readme-image-keeps-intrinsic-width',dialog.querySelector('.plugin-screenshot img')?.getBoundingClientRect().width===32);
     dialog.querySelector('.plugin-screenshot').click();await tick();
@@ -372,13 +390,31 @@ async function main() {
     check('narrow-details-header-footer-fit',rect.left>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight&&dialog.querySelector('footer').getBoundingClientRect().bottom<=innerHeight);
     dialog.dispatchEvent(new PointerEvent('pointerdown',{clientX:0,clientY:0}));dialog.dispatchEvent(new MouseEvent('click',{clientX:0,clientY:0}));await tick();
     check('outside-dismiss-restores-title-focus',!dialog.isConnected&&document.activeElement===title&&closeCalls===1);
-    title.click();await tick();detailsBox.querySelector('.plugin-readme-load').click();await tick();detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
+    title.click();await new Promise(r=>setTimeout(r,80));detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
     check('late-image-cannot-resurrect-closed-details',!detailsBox.querySelector('dialog'));
+    detailsBox.querySelector('[data-catalog-id="maintainer-detail"] .plugin-catalog-title').click();await new Promise(r=>setTimeout(r,80));
+    check('maintainer-images-also-load-automatically',shotCalls===3&&!detailsBox.querySelector('.plugin-readme-load'));
+    imageResolve(shot);await tick();detailsBox.querySelector('.plugin-dialog-close').click();await tick();
     detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-catalog-title').click();await tick();
     check('github-detail-name-only-shows-owner',detailsBox.querySelector('dialog .plugin-source')?.textContent==='owner'&&!detailsBox.querySelector('dialog .plugin-shield'));
-    check('repository-readme-preserves-markdown-order-and-inert-html',readmeCalls===3&&detailsBox.querySelector('.plugin-catalog-readme h1')?.textContent==='README heading'&&detailsBox.querySelector('.plugin-catalog-readme').textContent.includes('<script>untrusted</script>')&&!detailsBox.querySelector('.plugin-catalog-readme script'));
+    check('repository-readme-preserves-markdown-order-and-inert-html',readmeCalls===4&&detailsBox.querySelector('.plugin-catalog-readme h1')?.textContent==='README heading'&&detailsBox.querySelector('.plugin-catalog-readme').textContent.includes('<script>untrusted</script>')&&!detailsBox.querySelector('.plugin-catalog-readme script'));
+    check('third-party-images-still-require-explicit-load',Boolean(detailsBox.querySelector('.plugin-readme-load'))&&shotCalls===3);
+    detailsBox.querySelector('.plugin-readme-load').click();await tick();
+    check('third-party-click-starts-image-load',shotCalls===4);imageResolve(shot);await tick();
     detailsBox.querySelector('.plugin-dialog-close').click();await tick();
-    title.click();await tick();detailsBox.querySelector('.plugin-readme-load').click();await tick();imageResolve(shot);await tick();detailsBox.querySelector('.plugin-screenshot').click();await tick();
+    detailsBox.querySelector('[data-catalog-id="custom-detail"] .plugin-catalog-title').click();await tick();
+    check('spoofed-custom-author-still-needs-explicit-images',shotCalls===4&&Boolean(detailsBox.querySelector('.plugin-readme-load')));
+    detailsBox.querySelector('.plugin-dialog-close').click();await tick();
+    longReadme=true;title.click();await new Promise(r=>setTimeout(r,80));
+    check('featured-offscreen-images-wait-for-scroll',shotCalls===5);
+    imageResolve(shot);await new Promise(r=>setTimeout(r,80));
+    check('featured-below-fold-not-fetched-after-first-image',shotCalls===5);
+    const scrollBody=detailsBox.querySelector('.plugin-catalog-dialog-body');scrollBody.scrollTop=scrollBody.scrollHeight;await new Promise(r=>setTimeout(r,80));
+    check('featured-scroll-starts-next-image-serially',shotCalls===6);
+    detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
+    check('closing-featured-details-cancels-queued-offscreen-image',shotCalls===6&&!detailsBox.querySelector('dialog'));
+    longReadme=false;
+    title.click();await new Promise(r=>setTimeout(r,80));imageResolve(shot);await tick();detailsBox.querySelector('.plugin-screenshot').click();await tick();
     window.finishDetailsTest=()=>{detailsPanel.dispose();detailsBox.remove()};
     return {checks};
   })()`);

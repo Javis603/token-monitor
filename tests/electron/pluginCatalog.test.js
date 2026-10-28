@@ -103,6 +103,66 @@ test('sources persist validated cache, preserve it after failed refresh and neve
   restored.remove(id); assert.equal(restored.entries().length, 0);
   assert.equal(createCatalogSources({ root, fetchImpl }).list().sources.length, 0);
 });
+test('only App-supplied definitions receive maintainer provenance, including after cache restart', async t => {
+  const root = temp(t), maintainerSources = [{ id: 'maintainer-fixture', url: URL }];
+  const raw = index(); raw.title = 'Token Monitor 社群';
+  Object.assign(raw, { kind: 'maintainer', featured: true });
+  Object.assign(raw.plugins[0], { author: 'Token Monitor 官方', origin: { kind: 'maintainer' } });
+  const fetchImpl = async () => new Response(JSON.stringify(raw));
+  const sources = createCatalogSources({ root, fetchImpl, maintainerSources });
+  t.after(() => sources.dispose());
+  assert.equal(sources.list().sources[0].kind, 'maintainer');
+  assert.throws(() => sources.remove('maintainer-fixture'), /cannot be removed/);
+  await sources.refresh('maintainer-fixture');
+  assert.equal(sources.entries()[0].origin.kind, 'maintainer');
+  await sources.add({ url: 'https://custom.example/catalog.json', kind: 'maintainer', featured: true });
+  assert.equal(sources.entries()[1].origin.kind, 'community');
+  const saved = JSON.parse(fs.readFileSync(path.join(root, 'sources.json')));
+  assert.equal(saved.length, 1); assert.match(saved[0].id, /^custom-/);
+  const restored = createCatalogSources({ root, fetchImpl, maintainerSources });
+  t.after(() => restored.dispose());
+  assert.equal(restored.entries().find(p => p.origin.id === 'maintainer-fixture').origin.kind, 'maintainer');
+  const noPreset = createCatalogSources({ root, fetchImpl }); t.after(() => noPreset.dispose());
+  assert.equal(noPreset.entries().length, 1); assert.equal(noPreset.entries()[0].origin.kind, 'community');
+});
+test('maintainer discovery bootstraps cache and keeps catalog order, hashes and installation approval', async t => {
+  const root = temp(t), userDir = path.join(root, 'plugins');
+  let settings = { pluginStates: {} }, requests = 0;
+  const manager = createPluginManager({ userDir, dataDir: path.join(root, 'data'), getSettings: () => settings, saveStates: value => { settings.pluginStates = value; } });
+  const managed = createManagedPlugins({ root: path.join(root, 'managed'), userDir, dataDir: path.join(root, 'data'), manager, getSettings: () => settings, saveSettings: patch => { settings = { ...settings, ...patch }; } });
+  managed.recover(); await manager.reload();
+  const raw = index(); raw.plugins.push({ ...raw.plugins[0], id: 'another-plugin' });
+  const catalog = createPluginCatalog({ root: path.join(root, 'catalog'), manager, managed,
+    maintainerSources: [{ id: 'maintainer-fixture', url: URL }],
+    fetchImpl: async url => { requests++; return new Response(url === URL ? JSON.stringify(raw) : packageBytes()); } });
+  t.after(async () => { catalog.dispose(); managed.dispose(); await manager.dispose(); });
+  assert.equal(requests, 0); assert.deepEqual(catalog.list().entries, []);
+  const discovered = await catalog.discover(); assert.equal(requests, 1);
+  assert.deepEqual(discovered.entries.map(p => p.id), ['community-demo', 'another-plugin']);
+  await catalog.discover(); assert.equal(requests, 1);
+  const preview = await catalog.preview('maintainer-fixture', 'community-demo', '1.0.0');
+  assert.equal(preview.origin.kind, 'maintainer'); assert.equal(manager.list().plugins.length, 0);
+  await managed.install(preview.token, { trustInstall: true });
+  assert.equal(managed.describe('community-demo').origin.kind, 'maintainer');
+  assert.equal(manager.list().plugins[0].status, 'active');
+  await assert.rejects(catalog.preview('maintainer-fixture', 'another-plugin', '1.0.0'), /identity/);
+  raw.plugins[0].versions[0].sha256 = '0'.repeat(64); await catalog.discover(true);
+  await assert.rejects(catalog.preview('maintainer-fixture', 'community-demo', '1.0.0'), /SHA-256/);
+});
+test('bundled README uses its GitHub homepage and preserves manual filename order', async t => {
+  const root = temp(t), catalogDirectory = path.join(root, 'official'); fs.mkdirSync(catalogDirectory);
+  for (const [file, id] of [['20-a.tmplugin', 'alpha-plugin'], ['10-z.tmplugin', 'zulu-plugin']]) {
+    const pkg = JSON.parse(packageBytes()); pkg.manifest.id = id; pkg.manifest.homepage = 'https://github.com/owner/plugins';
+    fs.writeFileSync(path.join(catalogDirectory, file), JSON.stringify(pkg));
+  }
+  const catalog = createPluginCatalog({ root: path.join(root, 'catalog'), catalogDirectory,
+    manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
+    fetchImpl: async () => new Response(JSON.stringify({ encoding: 'base64', content: Buffer.from('![Preview](shot.png)').toString('base64'),
+      html_url: 'https://github.com/owner/plugins/blob/main/README.md', download_url: 'https://raw.githubusercontent.com/owner/plugins/main/README.md' })) });
+  t.after(() => catalog.dispose());
+  assert.deepEqual(catalog.list().entries.map(p => p.id), ['zulu-plugin', 'alpha-plugin']);
+  const details = await catalog.details('bundled', 'zulu-plugin'); assert.equal(details.imageCount, 1);
+});
 test('removing a source aborts its download and prevents a late result restoring the source', async t => {
   const root = temp(t); let resolve;
   const sources = createCatalogSources({ root, fetchImpl: () => new Promise(r => { resolve = r; }) });

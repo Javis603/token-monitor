@@ -118,7 +118,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     const item = registry[id];
     if (!item) return null;
     // Registry metadata is a management DTO, never a manifest or capability.
-    const origin = { id: item.origin.id, kind: ['local', 'official', 'community'].includes(item.origin.kind) ? item.origin.kind : 'local' };
+    const origin = { id: item.origin.id, kind: ['local', 'official', 'maintainer', 'community'].includes(item.origin.kind) ? item.origin.kind : 'local' };
     for (const key of ['label', 'url', 'packageUrl']) if (typeof item.origin[key] === 'string') origin[key] = item.origin[key].slice(0, 2048);
     return { version: item.version, sha256: item.sha256, installedAt: item.installedAt, origin,
       previousVersion: semver.valid(item.previousVersion) || null,

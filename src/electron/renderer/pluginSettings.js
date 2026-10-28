@@ -11,6 +11,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorPluginSettings = api;
 })(typeof window !== 'undefined' ? window : null, function createPluginSettingsApi(positionApi) {
+  const isFeatured = origin => origin?.kind === 'official' || origin?.kind === 'maintainer';
   const SURFACE_ORDER = ['home', 'page', 'tray', 'edgeDock', 'notch'];
 
   function el(document, tag, className, text) {
@@ -162,7 +163,7 @@
       node.type = 'button'; node.disabled = busy; node.addEventListener('click', action); return node;
     }
 
-    function identity(name, author, origin, iconName, image, official = false) {
+    function identity(name, author, origin, iconName, image, brand = '') {
       const group = el(document, 'div', 'plugin-identity');
       const art = el(document, 'span', 'plugin-identity-art'); art.setAttribute('aria-hidden', 'true');
       if (typeof image === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image) && image.length <= 90000) {
@@ -171,15 +172,15 @@
         art.append(img);
       } else art.append(window.TokenMonitorPluginViews.iconNode(document, iconName || 'dot', null, 20));
       const title = el(document, 'div', 'plugin-card-title');
-      const source = el(document, 'span', official ? 'plugin-source plugin-source-official' : 'plugin-source');
-      if (author && !official) source.append(el(document, 'span', 'plugin-author', author));
-      if (origin || official) {
-        const label = el(document, 'span', `plugin-origin-label${official ? ' plugin-origin-official' : ''}`);
-        if (official) {
+      const source = el(document, 'span', brand ? 'plugin-source plugin-source-official' : 'plugin-source');
+      if (author && !brand) source.append(el(document, 'span', 'plugin-author', author));
+      if (origin || brand) {
+        const label = el(document, 'span', `plugin-origin-label${brand ? ' plugin-origin-official' : ''}`);
+        if (brand) {
           const shield = el(document, 'span', 'plugin-shield'); shield.setAttribute('aria-hidden', 'true');
           label.append(shield);
         }
-        label.append(document.createTextNode(official ? `Token Monitor ${t('plugins.origin.official')}` : origin));
+        label.append(document.createTextNode(brand ? `Token Monitor ${t(`plugins.origin.${brand}`)}` : origin));
         source.append(label);
       }
       title.append(el(document, 'span', 'plugin-name', name), source);
@@ -315,19 +316,19 @@
 
     function packagePanel() {
       const p = packagePreview;
-      const official = p.origin.kind === 'official';
+      const featured = isFeatured(p.origin);
       const panel = el(document, 'section', 'plugin-consent plugin-package-preview');
       panel.dataset.errorTarget = 'package';
       panel.setAttribute('aria-label', t('plugins.package.review'));
-      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, p.origin.kind === 'official'));
+      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, isFeatured(p.origin) ? p.origin.kind : ''));
       const meta = el(document, 'div', 'plugin-card-meta');
       meta.append(el(document, 'span', 'plugin-version', `${p.installedVersion ? `${p.installedVersion} → ` : ''}${p.version}`), typeLabels(p)); panel.append(meta);
       panel.append(el(document, 'p', 'plugin-description', p.description));
       if (p.origin.kind !== 'local') panel.append(el(document, 'p', 'plugin-description', p.origin.label));
       if (p.origin.url) panel.append(el(document, 'code', 'plugin-log', p.origin.url));
       if (p.origin.packageUrl) panel.append(el(document, 'code', 'plugin-log', p.origin.packageUrl));
-      if (!official) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
-      panel.append(el(document, 'p', 'settings-note', t(official
+      if (!featured) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
+      panel.append(el(document, 'p', 'settings-note', t(featured
         ? p.operation === 'update' ? 'plugins.package.officialUpdate' : list.enabled ? 'plugins.package.officialInstall' : 'plugins.package.officialEnableLater'
         : p.operation === 'install' ? (list.enabled ? 'plugins.package.installConsent' : 'plugins.package.enableLater') : 'plugins.package.grants')));
       if (p.operation === 'install' && !p.placementsRetained && p.views?.some(view => view.surfaces.some(surface => SURFACE_ORDER.includes(surface)))) {
@@ -358,7 +359,7 @@
       }, 'package');
       actions.append(button(t('settings.plugins.cancel'), () => { void api.cancelInstall(p.token); packagePreview = null; catalogReview = null; render(); }));
       if (p.operation === 'install' && list.enabled) actions.append(button(t('plugins.package.installOnly'), () => install(false)));
-      actions.append(button(t(p.operation === 'update' ? official ? 'plugins.package.update' : 'plugins.package.trustUpdate' : list.enabled ? official ? 'plugins.package.installEnable' : 'plugins.package.trustInstall' : 'plugins.package.installOnly'),
+      actions.append(button(t(p.operation === 'update' ? featured ? 'plugins.package.update' : 'plugins.package.trustUpdate' : list.enabled ? featured ? 'plugins.package.installEnable' : 'plugins.package.trustInstall' : 'plugins.package.installOnly'),
         () => install(p.operation === 'install' && list.enabled), 'plugin-allow'));
       panel.append(actions); return panel;
     }
@@ -415,9 +416,10 @@
       const previousFocus = document.activeElement;
       const dialog = el(document, 'dialog', 'plugin-catalog-dialog');
       catalogModal = dialog;
+      let imageObserver = null;
       const heading = el(document, 'header', 'plugin-catalog-dialog-head');
       heading.append(identity(entry.name, entry.author,
-        entry.origin.id === 'github-discovery' ? '' : t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon, entry.origin.kind === 'official'));
+        entry.origin.id === 'github-discovery' ? '' : t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon, isFeatured(entry.origin) ? entry.origin.kind : ''));
       const close = button('×', () => dialog.close(), 'plugin-dialog-close');
       close.setAttribute('aria-label', t('settings.plugins.cancel')); heading.append(close);
       const body = el(document, 'div', 'plugin-catalog-dialog-body');
@@ -431,13 +433,13 @@
       }
       body.append(meta);
       if (entry.repository) body.append(button(t('plugins.catalog.openRepository'), () => void onOpenExternal(entry.repository), 'plugin-inline-action'));
-      if (entry.origin.kind !== 'official') body.append(el(document, 'p', 'settings-note', t('plugins.catalog.unreviewed')));
+      if (!isFeatured(entry.origin)) body.append(el(document, 'p', 'settings-note', t('plugins.catalog.unreviewed')));
       const selected = entry.versions?.find(v => v.version === entry.version);
       if (selected?.changelog) body.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.changelog')), el(document, 'p', 'plugin-description', selected.changelog));
       const readme = el(document, 'div', 'plugin-catalog-readme', t('plugins.view.loading'));
       body.append(readme);
       void api.catalogDetails(entry.origin.id, entry.id).then(result => {
-        if (!dialog.isConnected) return;
+        if (!dialog.isConnected || !dialog.open) return;
         // Main supplies Markdown-generated markup with author HTML disabled.
         readme.innerHTML = result.html || '';
         if (!result.html) readme.textContent = t('plugins.catalog.noReadme');
@@ -448,32 +450,48 @@
           });
         }
         if (!result.imageCount) return;
-        const loadImages = button(t('plugins.catalog.loadImages'), async () => {
-          loadImages.disabled = true; loadImages.textContent = t('plugins.view.loading');
-          for (const slot of readme.querySelectorAll('[data-readme-image]')) {
-            if (!dialog.isConnected) return;
-            const index = Number(slot.dataset.readmeImage);
-            try {
-              const data = await api.catalogReadmeImage(result.documentId, index);
-              if (!dialog.isConnected) return;
-              const image = el(document, 'img'); image.src = data; image.alt = slot.getAttribute('aria-label') || t('plugins.catalog.screenshot', { index: index + 1 });
-              const zoom = button('', event => {
-                event.preventDefault(); event.stopPropagation();
-                const lightbox = el(document, 'dialog', 'plugin-catalog-dialog plugin-image-dialog');
-                const bar = el(document, 'header', 'plugin-catalog-dialog-head');
-                const exit = button('×', () => lightbox.close(), 'plugin-dialog-close'); exit.setAttribute('aria-label', t('settings.plugins.cancel')); bar.append(exit);
-                const imageBody = el(document, 'div', 'plugin-catalog-dialog-body');
-                const large = el(document, 'img'); large.src = data; large.alt = image.alt; imageBody.append(large);
-                lightbox.append(bar, imageBody); dialog.append(lightbox);
-                dismissOnOutside(lightbox);
-                lightbox.addEventListener('close', () => { lightbox.remove(); if (zoom.isConnected) zoom.focus({ preventScroll: true }); });
-                lightbox.showModal();
-              }, 'plugin-screenshot'); zoom.setAttribute('aria-label', image.alt); zoom.append(image); slot.replaceWith(zoom);
-            } catch { if (dialog.isConnected) slot.textContent = t('plugins.catalog.imageUnavailable'); }
-          }
-          loadImages.remove();
-        }, 'plugin-inline-action plugin-readme-load');
-        readme.before(loadImages);
+        const loadImage = async slot => {
+          if (!dialog.isConnected || !dialog.open) return;
+          const index = Number(slot.dataset.readmeImage);
+          try {
+            const data = await api.catalogReadmeImage(result.documentId, index);
+            if (!dialog.isConnected || !dialog.open) return;
+            const image = el(document, 'img'); image.src = data; image.alt = slot.getAttribute('aria-label') || t('plugins.catalog.screenshot', { index: index + 1 });
+            const zoom = button('', event => {
+              event.preventDefault(); event.stopPropagation();
+              const lightbox = el(document, 'dialog', 'plugin-catalog-dialog plugin-image-dialog');
+              const bar = el(document, 'header', 'plugin-catalog-dialog-head');
+              const exit = button('×', () => lightbox.close(), 'plugin-dialog-close'); exit.setAttribute('aria-label', t('settings.plugins.cancel')); bar.append(exit);
+              const imageBody = el(document, 'div', 'plugin-catalog-dialog-body');
+              const large = el(document, 'img'); large.src = data; large.alt = image.alt; imageBody.append(large);
+              lightbox.append(bar, imageBody); dialog.append(lightbox);
+              dismissOnOutside(lightbox);
+              lightbox.addEventListener('close', () => { lightbox.remove(); if (zoom.isConnected) zoom.focus({ preventScroll: true }); });
+              lightbox.showModal();
+            }, 'plugin-screenshot'); zoom.setAttribute('aria-label', image.alt); zoom.append(image); slot.replaceWith(zoom);
+          } catch { if (dialog.isConnected && dialog.open) slot.textContent = t('plugins.catalog.imageUnavailable'); }
+        };
+        const slots = [...readme.querySelectorAll('[data-readme-image]')];
+        if (isFeatured(entry.origin)) {
+          // Observe the dialog's scroll body, and serialize requests so the
+          // existing main-process document budgets also bound automatic loads.
+          let pending = Promise.resolve();
+          imageObserver = new window.IntersectionObserver(entries => {
+            for (const item of entries) {
+              if (!item.isIntersecting) continue;
+              imageObserver.unobserve(item.target);
+              pending = pending.then(() => loadImage(item.target));
+            }
+          }, { root: body, rootMargin: '120px' });
+          for (const slot of slots) imageObserver.observe(slot);
+        } else {
+          const loadImages = button(t('plugins.catalog.loadImages'), async () => {
+            loadImages.disabled = true; loadImages.textContent = t('plugins.view.loading');
+            for (const slot of slots) await loadImage(slot);
+            loadImages.remove();
+          }, 'plugin-inline-action plugin-readme-load');
+          readme.before(loadImages);
+        }
       }).catch(() => { if (dialog.isConnected) readme.textContent = t('plugins.catalog.noReadme'); });
       const footer = el(document, 'footer', 'plugin-catalog-dialog-footer');
       if (selected ? selected.installable : ['available', 'update'].includes(entry.status)) {
@@ -488,6 +506,7 @@
       dialog.setAttribute('aria-label', entry.name);
       dismissOnOutside(dialog);
       dialog.addEventListener('close', () => {
+        imageObserver?.disconnect();
         dialog.remove(); if (catalogModal === dialog) {
           catalogModal = null; void api.closeCatalogDetails().catch(() => {});
         }
@@ -525,9 +544,12 @@
         const matches = p => `${p.name} ${p.description} ${p.author || ''} ${p.id}`.toLowerCase().includes(query.toLowerCase());
         const sections = [];
         const groups = [
-          ['plugins.catalog.official', catalogData.entries.filter(p => p.origin.kind === 'official')],
+          ['plugins.catalog.featured', [
+            ...catalogData.entries.filter(p => p.origin.kind === 'official'),
+            ...catalogData.entries.filter(p => p.origin.kind === 'maintainer')
+          ]],
           ['plugins.catalog.github', catalogData.github?.entries || []],
-          ['plugins.catalog.custom', catalogData.entries.filter(p => p.origin.kind !== 'official')]
+          ['plugins.catalog.custom', catalogData.entries.filter(p => !isFeatured(p.origin))]
         ];
         for (const [label, all] of groups) {
           if (label === 'plugins.catalog.github' && !catalogData.github?.enabled) continue;
@@ -544,7 +566,7 @@
             const card = el(document, 'article', 'plugin-card'); card.dataset.catalogId = entry.id;
             const head = el(document, 'div', 'plugin-card-head');
             const title = button('', () => catalogDialog(entry), 'plugin-catalog-title');
-            title.append(identity(entry.name, entry.author, '', entry.icon, entry.identityIcon, entry.origin.kind === 'official'));
+            title.append(identity(entry.name, entry.author, '', entry.icon, entry.identityIcon, isFeatured(entry.origin) ? entry.origin.kind : ''));
             head.append(title);
             const actions = el(document, 'div', 'settings-actions');
             const available = entry.versions?.find(v => v.version === entry.version)?.installable ?? ['available', 'update'].includes(entry.status);
@@ -574,12 +596,12 @@
       search.addEventListener('input', () => { query = search.value; renderResults(); });
       wrap.append(errors, search, results);
       const refresh = el(document, 'div', 'settings-actions plugin-catalog-refresh');
-      const canRefresh = catalogData.github?.enabled || catalogData.sources.some(source => source.kind === 'community');
+      const canRefresh = catalogData.github?.enabled || catalogData.sources.some(source => source.kind !== 'official');
       if (canRefresh) refresh.append(button(t('plugins.catalog.refresh'), () => void refreshCatalog(true)));
       const lastChecked = el(document, 'span', 'settings-note'); refresh.append(lastChecked);
       updateCatalog = () => {
         errors.replaceChildren();
-        for (const error of [catalogData.error, catalogRefreshError, ...catalogData.sources.filter(source => source.kind === 'community' && source.error).map(source => `${source.label}: ${source.error}`)].filter(Boolean)) {
+        for (const error of [catalogData.error, catalogRefreshError, ...catalogData.sources.filter(source => source.kind !== 'official' && source.error).map(source => `${source.label}: ${source.error}`)].filter(Boolean)) {
           errors.append(el(document, 'p', 'plugin-risk', error));
         }
         lastChecked.textContent = catalogData.github?.lastFetched ? t('plugins.catalog.lastChecked', { time: new Date(catalogData.github.lastFetched).toLocaleString(getLocale()) }) : '';
@@ -606,7 +628,8 @@
     }
 
     function refreshCatalog(force = false) {
-      if (disposed || catalogRefreshPending || (!force && !catalogData.github?.enabled)) return catalogRefreshPending;
+      const discover = catalogData.github?.enabled || catalogData.sources.some(source => source.kind === 'maintainer');
+      if (disposed || catalogRefreshPending || (!force && !discover)) return catalogRefreshPending;
       catalogRefreshing = true; catalogRefreshError = ''; catalogRefreshControls();
       catalogRefreshPending = (async () => {
         try {
@@ -622,7 +645,7 @@
               catch (error) { failures.push(`${source.label}: ${actionErrorMessage(error, t)}`); }
             }
           });
-          if (catalogData.github?.enabled) workers.push(api.discoverCatalog(force));
+          if (discover) workers.push(api.discoverCatalog(force));
           const results = await Promise.allSettled(workers);
           if (disposed) return;
           catalogData = await api.catalog();
@@ -679,21 +702,21 @@
 
     function statusChip(plugin) {
       const status = plugin.status;
-      const chip = el(document, 'span', `plugin-status plugin-status-${status}`, t(status === 'needsApproval' && plugin.installation?.origin.kind === 'official' ? 'plugins.package.enableRequired' : `settings.plugins.status.${status}`));
+      const chip = el(document, 'span', `plugin-status plugin-status-${status}`, t(status === 'needsApproval' && isFeatured(plugin.installation?.origin) ? 'plugins.package.enableRequired' : `settings.plugins.status.${status}`));
       if (status === 'active' && plugin.runtime?.state === 'running') chip.classList.add('is-live');
       return chip;
     }
 
     function consentPanel(plugin) {
       const panel = el(document, 'div', 'plugin-consent');
-      const official = plugin.installation?.origin.kind === 'official';
-      panel.append(el(document, 'div', 'plugin-consent-title', t(official ? 'settings.plugins.enable' : 'settings.plugins.consentTitle', { name: plugin.name })));
-      if (!official) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
+      const featured = isFeatured(plugin.installation?.origin);
+      panel.append(el(document, 'div', 'plugin-consent-title', t(featured ? 'settings.plugins.enable' : 'settings.plugins.consentTitle', { name: plugin.name })));
+      if (!featured) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const cancel = el(document, 'button', '', t('settings.plugins.cancel'));
       cancel.type = 'button';
       cancel.addEventListener('click', () => { consentFor = ''; render(); });
-      const allow = el(document, 'button', 'plugin-allow', t(official ? 'settings.plugins.enable' : 'settings.plugins.allow', { name: plugin.name }));
+      const allow = el(document, 'button', 'plugin-allow', t(featured ? 'settings.plugins.enable' : 'settings.plugins.allow', { name: plugin.name }));
       allow.type = 'button';
       allow.addEventListener('click', () => {
         consentFor = '';
@@ -770,7 +793,7 @@
 
     function pluginIdentity(plugin) {
       const head = el(document, 'div', 'plugin-card-head');
-      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon, plugin.installation?.origin.kind === 'official'));
+      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon, isFeatured(plugin.installation?.origin) ? plugin.installation.origin.kind : ''));
       if (!plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) {
         const toggle = el(document, 'input', 'plugin-enable');
         toggle.type = 'checkbox'; toggle.checked = plugin.enabled; toggle.disabled = !list?.enabled;
@@ -820,7 +843,7 @@
         count.setAttribute('aria-label', `${t('settings.plugins.views')}: ${t('plugins.ui.locationCount', { count: surfaces.length })}`);
         summary.append(count); footer.append(summary);
       }
-      const manage = button(t(plugin.status === 'needsApproval' ? plugin.installation?.origin.kind === 'official' ? 'settings.plugins.enable' : 'settings.plugins.reapprove' : 'plugins.ui.manage', { name: plugin.name }), () => {
+      const manage = button(t(plugin.status === 'needsApproval' ? isFeatured(plugin.installation?.origin) ? 'settings.plugins.enable' : 'settings.plugins.reapprove' : 'plugins.ui.manage', { name: plugin.name }), () => {
         if (plugin.status === 'needsApproval') consentFor = plugin.id;
         openPlugin(plugin.id);
       }, 'plugin-manage');
@@ -983,7 +1006,7 @@
       if (consentFor === plugin.id && !plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) wrap.append(consentPanel(plugin));
       else if (plugin.status === 'needsApproval') {
         const actions = el(document, 'div', 'settings-actions');
-        actions.append(button(t(plugin.installation?.origin.kind === 'official' ? 'settings.plugins.enable' : 'settings.plugins.reapprove', { name: plugin.name }), () => { consentFor = plugin.id; diagnostics = false; render(); })); wrap.append(actions);
+        actions.append(button(t(isFeatured(plugin.installation?.origin) ? 'settings.plugins.enable' : 'settings.plugins.reapprove', { name: plugin.name }), () => { consentFor = plugin.id; diagnostics = false; render(); })); wrap.append(actions);
       }
       if (plugin.installation && ['invalid', 'missing'].includes(plugin.status)) {
         const note = el(document, 'p', 'plugin-risk', t(plugin.status === 'missing' ? 'plugins.package.missingNote' : 'plugins.package.repairRequired'));

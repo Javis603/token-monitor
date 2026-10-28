@@ -75,13 +75,22 @@ async function download(fetchImpl, url, limit, signal, accept = 'application/jso
   } catch (error) { try { await reader.cancel(); } catch {} throw error; }
   return Buffer.concat(chunks);
 }
-function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getLocale = () => 'en', now = Date.now }) {
+function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getLocale = () => 'en', now = Date.now, maintainerSources = [] }) {
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   const configFile = path.join(root, 'sources.json');
   const sources = new Map(), cache = new Map(), activeRefreshes = new Map(), activePackages = new Map();
   let loadError = '';
   function cacheFile(id) { return path.join(root, `${id}.json`); }
-  function persist() { atomicJson(configFile, [...sources.values()].map(({ id, url, publicKey, fingerprint }) => ({ id, url, publicKey, fingerprint }))); }
+  function persist() { atomicJson(configFile, [...sources.values()].filter(s => !s.preset).map(({ id, url, publicKey, fingerprint }) => ({ id, url, publicKey, fingerprint }))); }
+  function loadCache(source) {
+    if (!fs.existsSync(cacheFile(source.id))) return;
+    try {
+      const saved = JSON.parse(readBounded(cacheFile(source.id), MAX_INDEX_BYTES * 2));
+      if (saved.url !== source.url) throw new Error('cached source does not match');
+      const index = parseIndex(Buffer.from(saved.bytes, 'base64'), source.publicKey);
+      cache.set(source.id, index); source.lastFetched = saved.at;
+    } catch (error) { source.error = `cached catalog unavailable: ${error.message}`; }
+  }
   try {
     const raw = fs.existsSync(configFile) ? JSON.parse(readBounded(configFile, 64 * 1024)) : [];
     if (!Array.isArray(raw) || raw.length > 16) throw new Error('invalid catalog source configuration');
@@ -90,19 +99,20 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
       const key = s.publicKey ? signingKey(s.publicKey) : null;
       const source = { id: s.id, url: httpsUrl(s.url), publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null };
       sources.set(s.id, source);
-      if (fs.existsSync(cacheFile(s.id))) {
-        try {
-          const saved = JSON.parse(readBounded(cacheFile(s.id), MAX_INDEX_BYTES * 2));
-          if (saved.url !== source.url) throw new Error('cached source does not match');
-          const index = parseIndex(Buffer.from(saved.bytes, 'base64'), source.publicKey);
-          cache.set(s.id, index); source.lastFetched = saved.at;
-        } catch (error) { source.error = `cached catalog unavailable: ${error.message}`; }
-      }
+      loadCache(source);
     }
   } catch (error) { loadError = `catalog sources could not be loaded: ${error.message}`; sources.clear(); cache.clear(); }
+  // Only the host constructor supplies these definitions. Persisted config,
+  // index titles, manifest authors and add-source IPC cannot opt into this role.
+  for (const s of maintainerSources) {
+    if (!/^maintainer-[a-z0-9-]+$/.test(s.id) || sources.has(s.id)) throw new Error('invalid maintainer source id');
+    const key = s.publicKey ? signingKey(s.publicKey) : null;
+    const source = { id: s.id, url: httpsUrl(s.url), publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null, preset: true };
+    sources.set(s.id, source); loadCache(source);
+  }
   function requireWritable() { if (loadError) throw new Error(loadError); }
   function list() {
-    return { error: loadError, sources: [...sources.values()].map(s => ({ id: s.id, kind: 'community', url: s.url,
+    return { error: loadError, sources: [...sources.values()].map(s => ({ id: s.id, kind: s.preset ? 'maintainer' : 'community', url: s.url,
       label: localize(cache.get(s.id)?.title, getLocale()) || new URL(s.url).hostname,
       fingerprint: s.fingerprint, signed: Boolean(s.publicKey && cache.has(s.id)), lastFetched: s.lastFetched,
       cached: cache.has(s.id), error: s.error, refreshing: activeRefreshes.has(s.id) })) };
@@ -134,11 +144,11 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
     // one request per source, with independent deadlines and cancellation.
     request: (id, url, limit) => request(id, url, limit, activePackages),
     entries() { return [...sources.values()].flatMap(s => (cache.get(s.id)?.plugins || []).map(p => ({ ...p, origin: {
-      id: s.id, kind: 'community', label: localize(cache.get(s.id).title, getLocale()), url: s.url, fingerprint: s.fingerprint,
+      id: s.id, kind: s.preset ? 'maintainer' : 'community', label: localize(cache.get(s.id).title, getLocale()), url: s.url, fingerprint: s.fingerprint,
       signed: Boolean(s.publicKey), cached: true, lastFetched: s.lastFetched, error: s.error } }))); },
     async add({ url, publicKey = '' } = {}) {
       requireWritable(); const normalized = httpsUrl(url);
-      if (sources.size >= 16 || [...sources.values()].some(s => s.url === normalized)) throw new Error('source already exists or source limit reached');
+      if ([...sources.values()].filter(s => !s.preset).length >= 16 || [...sources.values()].some(s => s.url === normalized)) throw new Error('source already exists or source limit reached');
       const key = publicKey ? signingKey(publicKey) : null;
       const source = { id: `custom-${crypto.randomUUID()}`, url: normalized, publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null };
       sources.set(source.id, source);
@@ -147,6 +157,7 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
     },
     remove(id) {
       requireWritable(); const source = sources.get(id); if (!source) throw new Error('unknown catalog source');
+      if (source.preset) throw new Error('App-distributed catalog sources cannot be removed');
       sources.delete(id); try { persist(); } catch (error) { sources.set(id, source); throw error; }
       activeRefreshes.get(id)?.abort(); activePackages.get(id)?.abort(); cache.delete(id); cancelPreviews(id);
       fs.rmSync(cacheFile(id), { force: true }); return list();
