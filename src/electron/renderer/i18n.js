@@ -17,6 +17,12 @@
 
   const MESSAGES = {
     en: {
+      "plugins.package.enableRequired": "Enable to use",
+      "plugins.package.installEnable": "Install and enable",
+      "plugins.package.officialInstall": "The plugin starts when enabled. Install only leaves it off. Background execution stays off.",
+      "plugins.package.officialUpdate": "Enabled plugins resume after updating; disabled plugins stay off.",
+      "plugins.package.officialEnableLater": "The plugin will stay off. You can enable it later.",
+      "plugins.catalog.updatesAvailable": "Updates available: {count}",
       "plugins.catalog.official": "Official plugins",
       "plugins.catalog.github": "Unofficial plugins · GitHub",
       "plugins.catalog.custom": "Custom catalogs",
@@ -2254,6 +2260,12 @@
       'sortMostTokens': '↕ Most tokens'
     },
     'zh-TW': {
+      "plugins.package.enableRequired": "啟用後使用",
+      "plugins.package.installEnable": "安裝並啟用",
+      "plugins.package.officialInstall": "啟用後即可使用。「只安裝」會保持停用，背景執行保持關閉。",
+      "plugins.package.officialUpdate": "更新後保留原有啟用狀態；已停用的外掛保持關閉。",
+      "plugins.package.officialEnableLater": "安裝後保持停用，你可以稍後啟用。",
+      "plugins.catalog.updatesAvailable": "{count} 個可更新",
       "plugins.catalog.official": "官方外掛",
       "plugins.catalog.github": "非官方外掛 · GitHub",
       "plugins.catalog.custom": "自訂目錄",
@@ -4491,6 +4503,12 @@
       'sortMostTokens': '↕ Token 最多'
     },
     'zh-CN': {
+      "plugins.package.enableRequired": "启用后使用",
+      "plugins.package.installEnable": "安装并启用",
+      "plugins.package.officialInstall": "启用后即可使用。「仅安装」会保持停用，后台运行保持关闭。",
+      "plugins.package.officialUpdate": "更新后保留原有启用状态；已停用的插件保持关闭。",
+      "plugins.package.officialEnableLater": "安装后保持停用，你可以稍后启用。",
+      "plugins.catalog.updatesAvailable": "{count} 个可更新",
       "plugins.catalog.official": "官方插件",
       "plugins.catalog.github": "非官方插件 · GitHub",
       "plugins.catalog.custom": "自定义目录",
@@ -6728,6 +6746,12 @@
       'sortMostTokens': '↕ Token 最多'
     },
     ko: {
+      "plugins.package.enableRequired": "활성화 필요",
+      "plugins.package.installEnable": "설치 및 활성화",
+      "plugins.package.officialInstall": "활성화하면 사용할 수 있습니다. 설치만 선택하면 비활성 상태로 유지되며 백그라운드 실행은 꺼져 있습니다.",
+      "plugins.package.officialUpdate": "업데이트 후에도 기존 활성화 상태가 유지됩니다. 비활성 플러그인은 꺼진 상태로 유지됩니다.",
+      "plugins.package.officialEnableLater": "설치 후 비활성 상태로 유지됩니다. 나중에 활성화할 수 있습니다.",
+      "plugins.catalog.updatesAvailable": "업데이트 가능: {count}개",
       "plugins.catalog.official": "공식 플러그인",
       "plugins.catalog.github": "비공식 플러그인 · GitHub",
       "plugins.catalog.custom": "사용자 지정 카탈로그",
@@ -8965,6 +8989,12 @@
       'views.trends': '추이',
     },
     ja: {
+      "plugins.package.enableRequired": "有効化が必要",
+      "plugins.package.installEnable": "インストールして有効化",
+      "plugins.package.officialInstall": "有効にすると使用できます。インストールのみの場合は無効のままです。バックグラウンド実行はオフのままです。",
+      "plugins.package.officialUpdate": "更新後も有効・無効の設定は維持されます。",
+      "plugins.package.officialEnableLater": "インストール後は無効のままです。後から有効にできます。",
+      "plugins.catalog.updatesAvailable": "{count} 件の更新があります",
       "plugins.catalog.official": "公式プラグイン",
       "plugins.catalog.github": "非公式プラグイン · GitHub",
       "plugins.catalog.custom": "カスタムカタログ",
@@ -11202,6 +11232,12 @@
       'views.trends': 'トレンド',
     },
     'pt-BR': {
+      "plugins.package.enableRequired": "Ative para usar",
+      "plugins.package.installEnable": "Instalar e ativar",
+      "plugins.package.officialInstall": "O plugin inicia ao ser ativado. Apenas instalar mantém o plugin desativado. A execução em segundo plano permanece desativada.",
+      "plugins.package.officialUpdate": "Plugins ativos retomam após a atualização; os desativados continuam desativados.",
+      "plugins.package.officialEnableLater": "O plugin permanecerá desativado. Você pode ativá-lo depois.",
+      "plugins.catalog.updatesAvailable": "Atualizações disponíveis: {count}",
       "plugins.catalog.official": "Plugins oficiais",
       "plugins.catalog.github": "Plugins não oficiais · GitHub",
       "plugins.catalog.custom": "Catálogos personalizados",

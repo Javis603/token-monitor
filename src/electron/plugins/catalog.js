@@ -12,9 +12,9 @@ const { createCatalogSources } = require('./catalogSources');
 const OFFICIAL = Object.freeze({ id: 'bundled', kind: 'official', label: 'Token Monitor' });
 const { createGitHubDiscovery } = require('./githubDiscovery');
 const { createCatalogMedia } = require('./catalogMedia');
-function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog') }) {
+function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog'), githubDiscoveryEnabled = false }) {
   const sources = createCatalogSources({ root, fetchImpl, getLocale, cancelPreviews: id => managed.cancelSource(id) });
-  const github = createGitHubDiscovery({ root, fetchImpl });
+  const github = createGitHubDiscovery({ root, fetchImpl, enabled: githubDiscoveryEnabled });
   const media = createCatalogMedia({ fetchImpl, nativeImage });
   let readmeDocument = null, detailRevision = 0;
   const packages = new Map(), errors = [];

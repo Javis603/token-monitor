@@ -2,7 +2,7 @@
 
 Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review. No official plugins ship with the platform; the repository's minimal fixtures are tests, not a store.
 
-For author workflows, see the [development guide](author-quickstart.md) and [publishing guide](publishing.md), including the discovery topic and README template.
+For author workflows, see the [development guide](author-quickstart.md) and [publishing guide](publishing.md), including current publishing routes and a README template. Public GitHub topic discovery is not yet open.
 
 ## Execution and trust
 
@@ -90,7 +90,7 @@ Subscriptions deliver `{type:'snapshot', value, sequence}` then coalesced invali
 
 ## Installation and recovery
 
-[Installation, revision trust, atomic updates, rollback and catalogs](distribution-design.md) are independent of execution freedom. Choose Trust, install and enable for one-step installation with explicit revision trust, or Install only to leave code disabled and untrusted. The master switch and safe mode are respected; background execution remains off. Reload discovers changed package bytes and requires approval before running them. Unchanged trusted code re-enables directly. Normal disable awaits mount/module cleanup and stops its backend without reloading. Mounts reporting `hasUnsavedChanges()` prompt before disable; cleanup failure or an unresponsive host offers recovery reload. Package updates and removal also cooperatively release affected UI; unsaved mounts prompt first. The package review offers one explicit trust-and-update action for the exact new revision, preserving the enabled/background choices. Failed cleanup or an unresponsive host may still require affected-window recovery. Rollback restores code, not arbitrary migrations a trusted backend performed on its data.
+[Installation, revision trust, atomic updates, rollback and catalogs](distribution-design.md) are independent of execution freedom. Official packages use Install and enable / Update; other sources use Trust, install and enable / Trust and update. Both approve the exact revision in one explicit action. Install only leaves code disabled and untrusted. The master switch and safe mode are respected; background execution remains off. Reload discovers changed package bytes and requires approval before running them. Unchanged trusted code re-enables directly. Normal disable awaits mount/module cleanup and stops its backend without reloading. Mounts reporting `hasUnsavedChanges()` prompt before disable; cleanup failure or an unresponsive host offers recovery reload. Package updates and removal also cooperatively release affected UI; unsaved mounts prompt first. The package review offers one explicit trust-and-update action for the exact new revision, preserving the enabled/background choices. Failed cleanup or an unresponsive host may still require affected-window recovery. Rollback restores code, not arbitrary migrations a trusted backend performed on its data.
 
 The native tray menu offers **Restart without plugins**. Alternatively launch with `--plugins-safe-mode` or `TOKEN_MONITOR_PLUGINS_SAFE_MODE=1`. Safe mode lists packages and permits management without starting author UI/backends. This recovery route does not depend on a responsive renderer. It cannot undo arbitrary filesystem changes made by trusted code.
 

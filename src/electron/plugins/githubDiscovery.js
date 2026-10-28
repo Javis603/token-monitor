@@ -23,18 +23,18 @@ function normalizeRepositories(raw) {
       types: [], origin: { id: 'github-discovery', kind: 'community', label: 'GitHub' }, status: 'repository' }];
   });
 }
-function createGitHubDiscovery({ root, fetchImpl, now = Date.now }) {
+function createGitHubDiscovery({ root, fetchImpl, now = Date.now, enabled = false }) {
   const file = path.join(root, 'github-discovery.json');
   let entries = [], lastFetched = null, error = '', limited = false, pending = null, attempted = null, disposed = false;
   const controllers = new Set();
   try {
-    if (fs.existsSync(file)) {
+    if (enabled && fs.existsSync(file)) {
       const saved = JSON.parse(readBounded(file, MAX_BYTES));
       entries = normalizeRepositories(saved.raw); limited = Boolean(saved.raw.incomplete_results || saved.raw.total_count > entries.length);
       lastFetched = Number.isFinite(saved.at) ? saved.at : null;
     }
   } catch { error = 'GitHub discovery cache is unavailable'; }
-  const list = () => ({ entries, lastFetched, error, limited, topic: TOPIC });
+  const list = () => ({ enabled, entries, lastFetched, error, limited, topic: TOPIC });
   async function request(url, limit = MAX_BYTES, signal) {
     if (disposed || signal?.aborted) throw new Error('GitHub discovery is closed');
     const controller = new AbortController(); controllers.add(controller);
@@ -46,6 +46,7 @@ function createGitHubDiscovery({ root, fetchImpl, now = Date.now }) {
   return {
     list,
     async refresh(force = false) {
+      if (!enabled) return list();
       if (pending) return pending;
       if (!force && ((lastFetched !== null && now() - lastFetched < REFRESH_MS) || (attempted !== null && now() - attempted < 300000))) return list();
       attempted = now();

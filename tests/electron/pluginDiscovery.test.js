@@ -10,6 +10,19 @@ const { createPluginCatalog } = require('../../src/electron/plugins/catalog');
 const raw = () => ({ total_count: 1, items: [{ full_name: 'author/project', name: 'Project', description: 'Description', stargazers_count: 42, official: true, html_url: 'https://evil.test/' }] });
 function temp(t) { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-plugin-discovery-')); t.after(() => fs.rmSync(root, { recursive: true, force: true })); return root; }
 const response = data => new Response(JSON.stringify(data));
+test('public topic discovery is disabled by default, including saved cache and forced requests', async t => {
+  const root = temp(t);
+  fs.writeFileSync(path.join(root, 'github-discovery.json'), JSON.stringify({ at: Date.now(), raw: raw() }));
+  const catalog = createPluginCatalog({ root, manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: () => assert.fail('disabled discovery must not fetch') });
+  t.after(() => catalog.dispose());
+  for (const snapshot of [catalog.list(), await catalog.discover(), await catalog.discover(true)]) {
+    assert.equal(snapshot.github.enabled, false);
+    assert.deepEqual(snapshot.github.entries, []);
+    assert.equal(snapshot.github.lastFetched, null);
+  }
+  await assert.rejects(catalog.details('github-discovery', 'author/project'), /Unknown/);
+  await assert.rejects(catalog.preview('github-discovery', 'author/project', '1.0.0'), /missing/);
+});
 test('topic discovery derives provenance and repository URL instead of trusting publisher claims', () => {
   const input = raw(); input.items.push({ full_name: '../../secret' }, { full_name: 'author/project' }, { full_name: 'a/private', private: true });
   const entries = normalizeRepositories(input);
@@ -21,15 +34,15 @@ test('topic discovery derives provenance and repository URL instead of trusting 
 test('GitHub refresh coalesces, keeps last good results offline, and survives restart', async t => {
   const root = temp(t); let time = 1000, calls = 0, offline = false;
   const fetchImpl = async (url, options) => { calls++; assert.match(url, /topic%3Atoken-monitor-plugin/); assert.equal(options.credentials, 'omit'); if (offline) throw Error('offline'); return response(raw()); };
-  const discovery = createGitHubDiscovery({ root, fetchImpl, now: () => time }); t.after(() => discovery.dispose());
+  const discovery = createGitHubDiscovery({ enabled: true, root, fetchImpl, now: () => time }); t.after(() => discovery.dispose());
   await Promise.all([discovery.refresh(), discovery.refresh()]); assert.equal(calls, 1);
   time += 1000; await discovery.refresh(); assert.equal(calls, 1);
   offline = true; await discovery.refresh(true); assert.equal(discovery.list().entries.length, 1); assert.match(discovery.list().error, /offline/);
-  const restarted = createGitHubDiscovery({ root, fetchImpl, now: () => time }); t.after(() => restarted.dispose());
+  const restarted = createGitHubDiscovery({ enabled: true, root, fetchImpl, now: () => time }); t.after(() => restarted.dispose());
   assert.equal(restarted.list().entries[0].stars, 42); assert.equal(restarted.list().lastFetched, 1000);
 });
 test('README is fetched only for discovered repositories with its actual base location', async t => {
-  const calls = []; const discovery = createGitHubDiscovery({ root: temp(t), fetchImpl: async url => {
+  const calls = []; const discovery = createGitHubDiscovery({ enabled: true, root: temp(t), fetchImpl: async url => {
     calls.push(url); return response(url.endsWith('/readme') ? { download_url: 'https://raw.githubusercontent.com/author/project/main/docs/README.md', encoding: 'base64', content: Buffer.from('# Title\n<script>bad()</script>').toString('base64') } : raw());
   } }); t.after(() => discovery.dispose());
   await discovery.refresh(); assert.equal(calls.length, 1);
@@ -38,7 +51,7 @@ test('README is fetched only for discovered repositories with its actual base lo
 });
 test('disposal aborts GitHub requests and a late response cannot populate cache', async t => {
   const root = temp(t); let finish;
-  const discovery = createGitHubDiscovery({ root, fetchImpl: () => new Promise(resolve => { finish = resolve; }) });
+  const discovery = createGitHubDiscovery({ enabled: true, root, fetchImpl: () => new Promise(resolve => { finish = resolve; }) });
   const pending = discovery.refresh(); discovery.dispose(); finish(response(raw())); await pending;
   assert.equal(discovery.list().entries.length, 0); assert.equal(fs.existsSync(path.join(root, 'github-discovery.json')), false);
 });
@@ -51,7 +64,7 @@ test('catalog presentation keeps repository and ignores retired gallery fields a
 });
 test('catalog lists saved repositories separately and README image IPC cannot fetch arbitrary URLs', async t => {
   let calls = 0;
-  const catalog = createPluginCatalog({ root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async () => { calls++; return response(raw()); } });
+  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async () => { calls++; return response(raw()); } });
   t.after(() => catalog.dispose());
   assert.equal(catalog.list().entries.length, 0); assert.equal(calls, 0);
   const next = await catalog.discover(); assert.equal(next.github.entries.length, 1); assert.equal(next.entries.length, 0);
@@ -69,7 +82,7 @@ test('README Markdown preserves layout, resolves relative images and cannot inje
   assert.match(result.html, /&lt;script&gt;/); assert.match(result.html, /href="https:\/\/raw.githubusercontent.com\/author\/project\/main\/docs\/guide.md"/);
 });
 test('README image access is scoped to the active detail document, after another detail is opened', async t => {
-  const catalog = createPluginCatalog({ root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async url => response(url.endsWith('/readme') ? { download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') } : raw()) });
+  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async url => response(url.endsWith('/readme') ? { download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') } : raw()) });
   t.after(() => catalog.dispose()); await catalog.discover();
   const first = await catalog.details('github-discovery', 'author/project');
   assert.equal(first.imageCount, 1); assert.match(first.html, /data-readme-image/);
@@ -82,7 +95,7 @@ test('README images stay lazy, duplicate IPC shares a load, and closing aborts t
   const bytes = Buffer.alloc(33); Buffer.from([137,80,78,71,13,10,26,10]).copy(bytes); bytes.writeUInt32BE(13,8); bytes.write('IHDR',12); bytes.writeUInt32BE(20,16); bytes.writeUInt32BE(10,20); bytes[24]=8; bytes[25]=2;
   let images = 0, deferred = false, finish, imageSignal;
   const image = { isEmpty: () => false, getSize: () => ({ width: 20, height: 10 }), toPNG: () => Buffer.from('png') };
-  const catalog = createPluginCatalog({ root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, nativeImage: { createFromBuffer: () => image }, fetchImpl: async (url, init) => {
+  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, nativeImage: { createFromBuffer: () => image }, fetchImpl: async (url, init) => {
     if (url.includes('/search/')) return response(raw());
     if (url.endsWith('/readme')) return response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') });
     images++; imageSignal = init.signal;
@@ -100,7 +113,7 @@ test('README images stay lazy, duplicate IPC shares a load, and closing aborts t
 });
 test('closing details also aborts a pending README and prevents a late result reopening it', async t => {
   let finish, signal;
-  const catalog = createPluginCatalog({ root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async (url, init) => {
+  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async (url, init) => {
     if (url.includes('/search/')) return response(raw());
     signal = init.signal; return new Promise(resolve => { finish = resolve; });
   } }); t.after(() => catalog.dispose()); await catalog.discover();
@@ -110,7 +123,7 @@ test('closing details also aborts a pending README and prevents a late result re
 });
 
 test('catalog README repository ownership allows GitHub canonical casing without relaxing its host', async t => {
-  const discovery = createGitHubDiscovery({ root: temp(t), fetchImpl: async () => response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', encoding: 'base64', content: Buffer.from('README').toString('base64') }) });
+  const discovery = createGitHubDiscovery({ enabled: true, root: temp(t), fetchImpl: async () => response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', encoding: 'base64', content: Buffer.from('README').toString('base64') }) });
   t.after(() => discovery.dispose());
   assert.equal((await discovery.repositoryReadme('https://github.com/AUTHOR/PROJECT')).readme, 'README');
 });

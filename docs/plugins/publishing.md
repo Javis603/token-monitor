@@ -6,11 +6,11 @@ Use this guide when sharing a plugin with users. Start with the [development gui
 
 | Route | What the author provides | What users can do |
 | --- | --- | --- |
-| GitHub discovery | A public repository with the `token-monitor-plugin` topic and a README | Find the repository in Discover, read its README and follow its installation instructions |
+| GitHub discovery (not yet open) | A public repository with the `token-monitor-plugin` topic and a README | Public topic discovery is temporarily disabled; a topic does not currently list the plugin in the App |
 | File or folder | A built `.tmplugin` file or a complete plugin source folder | Import it through Settings → Plugins |
 | HTTPS catalog | A catalog index and package files at direct HTTPS URLs | Preview and install a package, then discover compatible updates from the same source |
 
-These routes can be combined. A GitHub topic does not register a package or define how to install it. Discovery does not infer a version, compatibility or a downloadable asset from repository names, tags or GitHub Releases. Authors must describe an actual installation route in their README.
+Use file/folder import or a user-configured HTTPS catalog for now. GitHub discovery is retained for a later launch; it is not restricted to the maintainer's account and is not an official publishing route. A GitHub topic does not register a package or define how to install it. Discovery does not infer a version, compatibility or a downloadable asset from repository names, tags or GitHub Releases. Authors must describe an actual installation route in their README.
 
 GitHub discovery is nonofficial and unreviewed. Adding a topic, serving a catalog, providing a hash or signing an index does not grant official attribution or a safety review. Official attribution is assigned by Token Monitor's distribution mechanism, not by author metadata. See [distribution and trust](distribution-design.md).
 
@@ -18,13 +18,13 @@ GitHub discovery is nonofficial and unreviewed. Adding a topic, serving a catalo
 
 The App requires a stable manifest `id` of 2–40 characters matching `^[a-z0-9][a-z0-9-]{1,39}$`, a valid SemVer `version`, and `tmApi: 1`. See the [manifest contract](README.md#manifest) for the complete schema.
 
-Choose any repository name; no Token Monitor prefix is required. GitHub discovery matches the `token-monitor-plugin` topic, not the repository name. The repository name, display name and manifest id may differ.
+Choose any repository name; no Token Monitor prefix is required. The planned GitHub discovery matches the `token-monitor-plugin` topic, not the repository name. The repository name, display name and manifest id may differ.
 
 Recommended conventions:
 
 - Keep the manifest id stable across releases. Do not change it to include a version or release channel; the id identifies installed data, settings and placements.
 - Use a readable display name and a short repository description explaining the plugin's purpose. Keep compatibility and installation details in the README.
-- Set manifest `author` and an HTTPS `homepage` pointing to the project. GitHub discovery displays the repository owner's login below the name; this may differ from the manifest author of an installed package.
+- Set manifest `author` and an HTTPS `homepage` pointing to the project. When public discovery opens, its GitHub listings use the repository owner's login; this may differ from the manifest author of an installed package.
 
 Do not identify a community plugin as official. Document original authors, artwork and dependency licenses in the repository and retain required notices in distributed files. UI attribution and GitHub contribution history do not replace license obligations.
 

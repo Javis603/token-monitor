@@ -283,6 +283,7 @@ let pluginMainPages = null;
 function pluginPageOptions() { return window.TokenMonitorPluginMainPages?.entries(state.pluginCatalog) || []; }
 let pluginApi = null;
 let pluginSettingsPanel = null;
+let pluginUpdateCount = 0;
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;
 const VIEW_SWITCHER_HOVER_CLOSE_MS = 160;
 const VIEW_ICON_CLASSES = {
@@ -894,10 +895,10 @@ function viewsSummary() {
 function settingsSectionSummary(section) {
   if (!state.settings) return '';
   if (section === 'plugins') {
-    if (state.settings.pluginsEnabled === false) return t('settings.summary.off');
     const plugins = state.pluginCatalog?.plugins || [];
-    if (!plugins.length) return '';
-    return t('settings.summary.plugins', { active: plugins.filter((plugin) => plugin.status === 'active').length, total: plugins.length });
+    const summary = state.settings.pluginsEnabled === false ? t('settings.summary.off') : plugins.length
+      ? t('settings.summary.plugins', { active: plugins.filter((plugin) => plugin.status === 'active').length, total: plugins.length }) : '';
+    return [summary, pluginUpdateCount ? t('plugins.catalog.updatesAvailable', { count: pluginUpdateCount }) : ''].filter(Boolean).join(' · ');
   }
   if (section === 'sync') {
     const modeKeys = { host: 'settings.sync.hostHub', client: 'settings.sync.connectHub', icloud: 'settings.sync.icloud' };
@@ -12976,13 +12977,23 @@ function applyPluginCatalog(list) {
 }
 
 async function loadPluginCatalog() {
-  try { return applyPluginCatalog(await pluginBridge.list()); }
+  try {
+    const list = applyPluginCatalog(await pluginBridge.list());
+    try { applyPluginCatalogUpdates(await pluginBridge.catalog()); } catch (_) {}
+    return list;
+  }
   catch (error) {
     // Initial failure must resolve the pending restored page. Later transient
     // failures retain the last known catalog until a successful refresh.
     if (!state.pluginCatalog) applyPluginCatalog({ enabled: false, plugins: [] });
     throw error;
   }
+}
+
+function applyPluginCatalogUpdates(catalog) {
+  pluginUpdateCount = catalog.entries.filter(entry => entry.status === 'update').length;
+  renderSettingsSummaries();
+  return catalog;
 }
 
 pluginApi = pluginBridge ? {
@@ -13002,15 +13013,15 @@ pluginApi = pluginBridge ? {
   },
   getSettings: id => pluginBridge.getSettings(id),
   updateSettings: (id, input) => pluginBridge.updateSettings(id, input),
-  catalog: () => pluginBridge.catalog(),
-  discoverCatalog: force => pluginBridge.discoverCatalog(force),
+  catalog: async () => applyPluginCatalogUpdates(await pluginBridge.catalog()),
+  discoverCatalog: async force => applyPluginCatalogUpdates(await pluginBridge.discoverCatalog(force)),
   catalogDetails: (source, id) => pluginBridge.catalogDetails(source, id),
   closeCatalogDetails: () => pluginBridge.closeCatalogDetails(),
   catalogReadmeImage: (documentId, index) => pluginBridge.catalogReadmeImage(documentId, index),
   catalogPreview: (source, id, version) => pluginBridge.catalogPreview(source, id, version),
-  addSource: input => pluginBridge.addSource(input),
-  refreshSource: id => pluginBridge.refreshSource(id),
-  removeSource: id => pluginBridge.removeSource(id),
+  addSource: async input => applyPluginCatalogUpdates(await pluginBridge.addSource(input)),
+  refreshSource: async id => applyPluginCatalogUpdates(await pluginBridge.refreshSource(id)),
+  removeSource: async id => applyPluginCatalogUpdates(await pluginBridge.removeSource(id)),
   importPackage: kind => pluginBridge.importPackage(kind),
   install: async (token, options) => applyPluginCatalog(await pluginBridge.install(token, options)),
   cancelInstall: token => pluginBridge.cancelInstall(token),

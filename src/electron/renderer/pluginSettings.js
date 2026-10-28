@@ -315,6 +315,7 @@
 
     function packagePanel() {
       const p = packagePreview;
+      const official = p.origin.kind === 'official';
       const panel = el(document, 'section', 'plugin-consent plugin-package-preview');
       panel.dataset.errorTarget = 'package';
       panel.setAttribute('aria-label', t('plugins.package.review'));
@@ -325,8 +326,10 @@
       if (p.origin.kind !== 'local') panel.append(el(document, 'p', 'plugin-description', p.origin.label));
       if (p.origin.url) panel.append(el(document, 'code', 'plugin-log', p.origin.url));
       if (p.origin.packageUrl) panel.append(el(document, 'code', 'plugin-log', p.origin.packageUrl));
-      panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
-      panel.append(el(document, 'p', 'settings-note', t(p.operation === 'install' ? (list.enabled ? 'plugins.package.installConsent' : 'plugins.package.enableLater') : 'plugins.package.grants')));
+      if (!official) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
+      panel.append(el(document, 'p', 'settings-note', t(official
+        ? p.operation === 'update' ? 'plugins.package.officialUpdate' : list.enabled ? 'plugins.package.officialInstall' : 'plugins.package.officialEnableLater'
+        : p.operation === 'install' ? (list.enabled ? 'plugins.package.installConsent' : 'plugins.package.enableLater') : 'plugins.package.grants')));
       if (p.operation === 'install' && !p.placementsRetained && p.views?.some(view => view.surfaces.some(surface => SURFACE_ORDER.includes(surface)))) {
         p.placements ??= p.views.flatMap(view => (view.defaultSurfaces || []).map(surface => ({ ref: view.ref, surface })));
         const locations = el(document, 'fieldset', 'plugin-default-placements');
@@ -355,7 +358,7 @@
       }, 'package');
       actions.append(button(t('settings.plugins.cancel'), () => { void api.cancelInstall(p.token); packagePreview = null; catalogReview = null; render(); }));
       if (p.operation === 'install' && list.enabled) actions.append(button(t('plugins.package.installOnly'), () => install(false)));
-      actions.append(button(t(p.operation === 'update' ? 'plugins.package.trustUpdate' : list.enabled ? 'plugins.package.trustInstall' : 'plugins.package.installOnly'),
+      actions.append(button(t(p.operation === 'update' ? official ? 'plugins.package.update' : 'plugins.package.trustUpdate' : list.enabled ? official ? 'plugins.package.installEnable' : 'plugins.package.trustInstall' : 'plugins.package.installOnly'),
         () => install(p.operation === 'install' && list.enabled), 'plugin-allow'));
       panel.append(actions); return panel;
     }
@@ -527,6 +530,7 @@
           ['plugins.catalog.custom', catalogData.entries.filter(p => p.origin.kind !== 'official')]
         ];
         for (const [label, all] of groups) {
+          if (label === 'plugins.catalog.github' && !catalogData.github?.enabled) continue;
           if (label === 'plugins.catalog.custom' && !all.length) continue;
           const section = el(document, 'section', 'plugin-catalog-group');
           section.append(el(document, 'h3', 'plugin-detail-heading', t(label)));
@@ -570,7 +574,8 @@
       search.addEventListener('input', () => { query = search.value; renderResults(); });
       wrap.append(errors, search, results);
       const refresh = el(document, 'div', 'settings-actions plugin-catalog-refresh');
-      refresh.append(button(t('plugins.catalog.refresh'), () => void refreshCatalog(true)));
+      const canRefresh = catalogData.github?.enabled || catalogData.sources.some(source => source.kind === 'community');
+      if (canRefresh) refresh.append(button(t('plugins.catalog.refresh'), () => void refreshCatalog(true)));
       const lastChecked = el(document, 'span', 'settings-note'); refresh.append(lastChecked);
       updateCatalog = () => {
         errors.replaceChildren();
@@ -581,7 +586,8 @@
         renderResults();
         catalogResultsDirty = false;
       };
-      wrap.append(refresh); updateCatalog(); return wrap;
+      if (canRefresh) wrap.append(refresh);
+      updateCatalog(); return wrap;
     }
 
     function catalogRefreshControls() {
@@ -600,7 +606,7 @@
     }
 
     function refreshCatalog(force = false) {
-      if (disposed || catalogRefreshPending || (!force && !api.discoverCatalog)) return catalogRefreshPending;
+      if (disposed || catalogRefreshPending || (!force && (!api.discoverCatalog || !catalogData.github?.enabled))) return catalogRefreshPending;
       catalogRefreshing = true; catalogRefreshError = ''; catalogRefreshControls();
       catalogRefreshPending = (async () => {
         try {
@@ -616,7 +622,7 @@
               catch (error) { failures.push(`${source.label}: ${actionErrorMessage(error, t)}`); }
             }
           });
-          if (api.discoverCatalog) workers.push(api.discoverCatalog(force));
+          if (api.discoverCatalog && catalogData.github?.enabled) workers.push(api.discoverCatalog(force));
           const results = await Promise.allSettled(workers);
           if (disposed) return;
           catalogData = await api.catalog();
@@ -673,20 +679,21 @@
 
     function statusChip(plugin) {
       const status = plugin.status;
-      const chip = el(document, 'span', `plugin-status plugin-status-${status}`, t(`settings.plugins.status.${status}`));
+      const chip = el(document, 'span', `plugin-status plugin-status-${status}`, t(status === 'needsApproval' && plugin.installation?.origin.kind === 'official' ? 'plugins.package.enableRequired' : `settings.plugins.status.${status}`));
       if (status === 'active' && plugin.runtime?.state === 'running') chip.classList.add('is-live');
       return chip;
     }
 
     function consentPanel(plugin) {
       const panel = el(document, 'div', 'plugin-consent');
-      panel.append(el(document, 'div', 'plugin-consent-title', t('settings.plugins.consentTitle', { name: plugin.name })));
-      panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
+      const official = plugin.installation?.origin.kind === 'official';
+      panel.append(el(document, 'div', 'plugin-consent-title', t(official ? 'settings.plugins.enable' : 'settings.plugins.consentTitle', { name: plugin.name })));
+      if (!official) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const cancel = el(document, 'button', '', t('settings.plugins.cancel'));
       cancel.type = 'button';
       cancel.addEventListener('click', () => { consentFor = ''; render(); });
-      const allow = el(document, 'button', 'plugin-allow', t('settings.plugins.allow'));
+      const allow = el(document, 'button', 'plugin-allow', t(official ? 'settings.plugins.enable' : 'settings.plugins.allow', { name: plugin.name }));
       allow.type = 'button';
       allow.addEventListener('click', () => {
         consentFor = '';
@@ -813,7 +820,7 @@
         count.setAttribute('aria-label', `${t('settings.plugins.views')}: ${t('plugins.ui.locationCount', { count: surfaces.length })}`);
         summary.append(count); footer.append(summary);
       }
-      const manage = button(t(plugin.status === 'needsApproval' ? 'settings.plugins.reapprove' : 'plugins.ui.manage'), () => {
+      const manage = button(t(plugin.status === 'needsApproval' ? plugin.installation?.origin.kind === 'official' ? 'settings.plugins.enable' : 'settings.plugins.reapprove' : 'plugins.ui.manage', { name: plugin.name }), () => {
         if (plugin.status === 'needsApproval') consentFor = plugin.id;
         openPlugin(plugin.id);
       }, 'plugin-manage');
@@ -976,7 +983,7 @@
       if (consentFor === plugin.id && !plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) wrap.append(consentPanel(plugin));
       else if (plugin.status === 'needsApproval') {
         const actions = el(document, 'div', 'settings-actions');
-        actions.append(button(t('settings.plugins.reapprove'), () => { consentFor = plugin.id; diagnostics = false; render(); })); wrap.append(actions);
+        actions.append(button(t(plugin.installation?.origin.kind === 'official' ? 'settings.plugins.enable' : 'settings.plugins.reapprove', { name: plugin.name }), () => { consentFor = plugin.id; diagnostics = false; render(); })); wrap.append(actions);
       }
       if (plugin.installation && ['invalid', 'missing'].includes(plugin.status)) {
         const note = el(document, 'p', 'plugin-risk', t(plugin.status === 'missing' ? 'plugins.package.missingNote' : 'plugins.package.repairRequired'));

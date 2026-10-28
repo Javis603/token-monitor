@@ -261,7 +261,7 @@ async function main() {
     await pageHost.dispose();
     // Network freshness must never hold the management UI or its drafts.
     const backgroundBox=document.createElement('div');document.body.append(backgroundBox);
-    const backgroundCatalog={entries:[{...catalog.entries[0],version:'1.0.0',status:'available'}],sources:Array.from({length:16},(_,i)=>({id:'source-'+i,kind:'community',label:'Source '+i}))};
+    const backgroundCatalog={github:{enabled:true},entries:[{...catalog.entries[0],version:'1.0.0',status:'available'}],sources:Array.from({length:16},(_,i)=>({id:'source-'+i,kind:'community',label:'Source '+i}))};
     let finishDiscovery,discoveryCalls=0,activeSources=0,maxSources=0,sourceCalls=0;
     const waitingSources=[];
     const backgroundPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:backgroundBox,t:(key,args)=>key==='settings.plugins.actionFailed'?args.error:key,api:{
@@ -301,6 +301,38 @@ async function main() {
     backgroundTab('installed').click();await tick();backgroundTab('discover').click();await tick();
     backgroundPanel.dispose();const disposedContent=backgroundBox.innerHTML;finishDiscovery();await tick();
     check('disposed-panel-ignores-late-catalog-completion',backgroundBox.innerHTML===disposedContent);backgroundBox.remove();
+    const officialBox=document.createElement('div');document.body.append(officialBox);
+    let officialPreview={id:'official-fixture',name:'Official fixture',version:'1.0.0',token:'official-token',operation:'install',origin:{id:'bundled',kind:'official'},sha256:'abc'};
+    const officialList={enabled:true,plugins:[]};const officialActions=[];
+    const officialCatalog={entries:[],sources:[],github:{enabled:false,entries:[{id:'cached/external',name:'Hidden cached repo',origin:{id:'github-discovery',kind:'community'}}]}};
+    const officialPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:officialBox,t:key=>key,api:{
+      list:async()=>officialList,catalog:async()=>officialCatalog,discoverCatalog:()=>{throw Error('disabled discovery reached')},
+      importPackage:async()=>officialPreview,cancelInstall:async()=>{},install:async(token,options)=>{officialActions.push({token,options});return officialList},
+      setEnabled:async(id,enabled)=>{officialActions.push({id,enabled});officialList.plugins[0].enabled=enabled;officialList.plugins[0].trusted=true;return officialList}
+    }});
+    const officialClick=text=>[...officialBox.querySelectorAll('button')].find(n=>n.textContent===text).click();
+    await officialPanel.refresh();officialBox.querySelector('[data-tab="discover"]').click();await tick();
+    check('disabled-public-discovery-hides-section-cached-repos-and-unused-refresh',!officialBox.textContent.includes('plugins.catalog.github')&&!officialBox.textContent.includes('Hidden cached repo')&&!officialBox.textContent.includes('plugins.catalog.lastChecked')&&!officialBox.querySelector('.plugin-catalog-refresh'));
+    officialClick('plugins.package.import');await tick();
+    check('official-install-has-simple-copy-and-explicit-action',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.installEnable'&&!officialBox.querySelector('.plugin-package-preview .plugin-risk')&&officialBox.textContent.includes('plugins.package.officialInstall'));
+    officialClick('plugins.package.installEnable');await tick();
+    check('official-install-still-approves-exact-preview-token',officialActions.at(-1).token==='official-token'&&officialActions.at(-1).options.trustInstall===true&&officialActions.at(-1).options.trustUpdate===false);
+    officialPreview.operation='update';officialPreview.token='update-token';officialClick('plugins.package.import');await tick();
+    check('official-update-has-simple-copy',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.update'&&!officialBox.querySelector('.plugin-package-preview .plugin-risk'));
+    officialClick('plugins.package.update');await tick();
+    check('official-update-still-approves-exact-revision',officialActions.at(-1).token==='update-token'&&officialActions.at(-1).options.trustUpdate===true);
+    officialPreview.operation='install';officialList.enabled=false;await officialPanel.refresh();officialClick('plugins.package.import');await tick();
+    check('official-master-off-install-stays-off',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.installOnly'&&officialBox.textContent.includes('plugins.package.officialEnableLater'));
+    officialClick('plugins.package.installOnly');await tick();check('official-master-off-does-not-grant-trust',officialActions.at(-1).options.trustInstall===false);
+    officialList.enabled=true;officialPreview.origin={id:'custom',kind:'community'};await officialPanel.refresh();officialClick('plugins.package.import');await tick();
+    check('community-package-retains-trust-warning-and-action',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.trustInstall'&&officialBox.querySelector('.plugin-package-preview .plugin-risk')?.textContent==='plugins.trusted.warning');
+    officialClick('settings.plugins.cancel');await tick();
+    officialList.plugins=[{id:'official-fixture',name:'Official fixture',version:'1.0.0',source:'user',status:'needsApproval',enabled:false,trusted:false,installation:{origin:{kind:'official'}},views:[]}];await officialPanel.refresh();
+    check('official-pending-revision-uses-enable-labels',officialBox.querySelector('.plugin-manage').textContent==='settings.plugins.enable'&&officialBox.querySelector('.plugin-status').textContent==='plugins.package.enableRequired');
+    officialBox.querySelector('.plugin-enable').click();await tick();
+    check('official-enable-confirmation-uses-simple-copy',officialBox.querySelector('.plugin-allow').textContent==='settings.plugins.enable'&&!officialBox.querySelector('.plugin-consent .plugin-risk'));
+    officialClick('settings.plugins.enable');await tick();check('official-enable-remains-explicit',officialActions.at(-1).id==='official-fixture'&&officialActions.at(-1).enabled===true);
+    officialPanel.dispose();officialBox.remove();
     // New discovery details remain inert until explicit package review.
     catalogMode='success';
     let imageResolve;
@@ -310,7 +342,7 @@ async function main() {
     const repoEntry={id:'owner/repo',name:'Community repo',author:'owner',description:'Repository',origin:{id:'github-discovery',kind:'community'},status:'repository',stars:42};
     let shotCalls=0,readmeCalls=0,closeCalls=0;
     const detailsPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:detailsBox,t:key=>key,api:{
-      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[officialEntry],github:{entries:[repoEntry],lastFetched:1700000000000},sources:[]}),
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[officialEntry],github:{enabled:true,entries:[repoEntry],lastFetched:1700000000000},sources:[]}),
       closeCatalogDetails:async()=>{closeCalls++},
       catalogReadmeImage:()=>{shotCalls++;return new Promise(resolve=>{imageResolve=resolve})},
       catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',imageCount:1,html:'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
