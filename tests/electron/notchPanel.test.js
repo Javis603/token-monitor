@@ -577,6 +577,22 @@ test('limits give every account its own column with the Limits view plan and Hom
   assert.equal(f.all('notch-pager').length, 0);
 });
 
+test('verified MiniMax lanes preserve the shared empty account title without inventing an account count', t => {
+  const f = panelFixture(t);
+  const records = [
+    { provider: 'minimax', source: 'oauth', status: 'ok', region: 'cn', accountKey: 'code', accountLabel: 'MiniMax Code',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
+    { provider: 'minimax', source: 'api', status: 'ok', region: 'cn', accountKey: 'api', relatedAccountKey: 'code', accountLabel: 'Pay-as-you-go',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
+  ];
+  const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider: 'minimax' }] });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  assert.equal(f.all('notch-limit').length, 2);
+  assert.equal(f.all('notch-limit-account').length, 0);
+  assert.deepEqual(f.all('notch-chip').map(node => node.textContent), ['Pay-as-you-go']);
+  assert.deepEqual(f.all('notch-limit-money').map(node => node.textContent), ['4624.00', '¥14.97']);
+});
+
 test('a grant measured against an allowance reads as a percentage while a bare balance keeps its money', t => {
   const f = panelFixture(t);
   const { normalizeLimitWindow } = require('../../src/shared/limits/core');

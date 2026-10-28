@@ -123,6 +123,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
   const plans = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({
     document, t: (key, params) => i18n.translate(state.locale, key, params), settings: () => settings,
     currentLocale: () => state.locale, presentation: window.TokenMonitorLimitProviderPresentation,
+    accountIdentity: window.TokenMonitorAccountIdentity,
     motion: window.TokenMonitorLimitResetMotion,
     tooltip: { hasOpened: () => false, markOpened() {}, release() {} }
   });
@@ -140,7 +141,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
     },
     markNode: id => el('span', 'edge-dock-mark', id), hasMask: () => true,
     providerLabel: id => id, limitProviderColor: () => '#888',
-    limitAccountTitle: (_id, record, index, peers) => window.TokenMonitorAccountIdentity.accountTitleLabel(record, peers, { index, maskEmail: settings.maskLimitAccountEmails === true }),
+    limitAccountTitle: (...args) => plans.limitAccountTitle(...args),
     formatTokens: value => String(value), formatCardTokens: value => String(value), formatBreakdownTokens: value => String(value), formatCost: value => `$${value}`,
     formatRate: value => value > 0 && value < 0.1 ? '<0.1' : value > 0 && value < 1
       ? value.toLocaleString(state.locale, { maximumFractionDigits: 1 })

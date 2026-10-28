@@ -1,17 +1,7 @@
 'use strict';
 
-// The Limits view's provider rows, as a builder both windowed surfaces call.
-//
-// The Limits page and the edge dock card show the same thing — the same
-// windows, the same meters, the same spend and balance rows, the same info
-// tooltips — and they used to build all of it twice. That is how the card came
-// to show a balance with no spend line under it, and a money pool with no
-// denominator: not a different design, just a second implementation that had
-// been told less.
-//
-// So the DOM itself is shared, not only the wording. Each surface supplies its
-// own renderer state through `deps` and styles the result with its own CSS;
-// nothing in here reads a global.
+// Limits and Dock share account, quota and Spend presentation.
+// Host state must arrive through deps, not global renderer state.
 //
 // deps:
 //   t, currentLocale                   i18n
@@ -31,10 +21,7 @@
 //   tooltip                            { hasOpened(), markOpened(), release() },
 //                                      the host's render-hold bookkeeping
 //
-// The one exception to "everything arrives through deps" is the provider
-// catalog: which client a provider's tokens are recorded under is the same
-// answer on every host, so it is imported rather than passed. A dep would only
-// give three hosts three chances to supply a different one.
+// Provider/client mapping must be identical on every host.
 (function exposeLimitWindowsView(root, factory) {
   const node = typeof module === 'object' && module.exports;
   const api = factory(
@@ -2202,27 +2189,7 @@
     return row;
   }
 
-  // How each provider's accounts are drawn, read by every surface that draws
-  // them. The Limits page and the dock card are two callers of one builder, and
-  // every option a caller had to remember to pass was a way for the two to drift
-  // apart — the card passed none, so a third-party group wore the generic mark
-  // with no adapter name on its rows, and a Codex group lost the switch
-  // affordance and the reset forecast below it. Which mark, which colour and
-  // which plan text a provider's accounts take is a fact about the provider, not
-  // about the surface, so it lives with the builder that paints them.
-  //
-  // Each entry returns `{ color?, options }` for one account row. `grouped` is
-  // the one thing the surface decides: inside a group the header already names
-  // the provider and the ✓ badge is what separates one row from another;
-  // standing alone, the row keeps its own mark and has nothing to be told apart
-  // from.
-  //
-  // Every rule that takes something away is therefore gated on `grouped`. Drop
-  // the mark unconditionally and the provider loses it in both shapes, which is
-  // exactly what a policy that reads as if it were about the account did: a solo
-  // Claude row is the card's whole identity and it came back to the page with no
-  // mark at all. The same holds for a rule that replaces the plan cell — a group
-  // row has a sibling to be told apart from, a solo row's plan cell is its own.
+  // A group header carries the provider mark; a standalone account keeps its own.
   function namedAccountRowPolicy(provider, color, { grouped }) {
     return { options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) } };
   }

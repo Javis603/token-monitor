@@ -436,6 +436,34 @@ for (const { name, settings, expected } of [
   });
 }
 
+test('Home falls back to the provider name when verified lanes omit redundant account titles', () => {
+  const presentation = require('../../src/electron/renderer/limits/providerPresentation');
+  const settings = { homeLimitAccountCount: 12 };
+  const view = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({ presentation, settings: () => settings });
+  const providers = [
+    { provider: 'minimax', source: 'oauth', status: 'ok', region: 'cn', accountKey: 'code', accountLabel: 'MiniMax Code',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
+    { provider: 'minimax', source: 'api', status: 'ok', region: 'cn', accountKey: 'api', relatedAccountKey: 'code', accountLabel: 'Pay-as-you-go',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
+  ];
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('function homeLimitRows(');
+  const fn = source.slice(start, source.indexOf('\n}\n', start) + 2);
+  for (const showHomeLimitProviderNames of [false, true]) {
+    settings.showHomeLimitProviderNames = showHomeLimitProviderNames;
+    const rows = vm.runInNewContext(`${fn}\nhomeLimitRows();`, {
+      state: { settings, stats: { limits: { providers } } },
+      LIMIT_PROVIDERS: [{ id: 'minimax', label: 'Minimax' }],
+      clientColors: {}, enabledLimitProviderSet: () => new Set(['minimax']), hiddenHomeLimitProviderSet: () => new Set(),
+      limitProviderOrderApi, limitWindowsView: view, limitProviderPresentationApi: presentation,
+      limitUsageItemsApi: require('../../src/shared/limits/usageItems'),
+      limitAccountTitle: (...args) => view.limitAccountTitle(...args),
+      homeOverviewApi: { homeLimitAccountsForProviders }
+    });
+    assert.deepEqual(Array.from(rows, row => row.name), ['Minimax', 'Minimax']);
+  }
+});
+
 test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance', () => {
   const rows = homeLimitAccountsForProviders({
     providers: [
