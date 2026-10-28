@@ -8621,7 +8621,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-location-count.limit-detail-tooltip-wrap, .plugin-location-count { display: inline-flex; width: auto; height: auto; flex: 0 0 auto; min-height: 28px; padding: 3px 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .plugin-location-count:hover { color: var(--text); }
 .plugin-location-count:focus-visible, .plugin-views:focus-visible, .settings-actions button.plugin-installed-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.plugin-experimental-tooltip .limit-detail-tooltip,
 .plugin-location-count .limit-detail-tooltip { right: auto; left: anchor(center); translate: calc(-50% + var(--tooltip-shift, 0px)) 0; max-width: min(240px, calc(100vw - 32px)); grid-template-columns: minmax(0, 1fr); text-align: left; font-size: .6875rem; font-weight: 400; line-height: 1.45; white-space: normal; }
+.plugin-experimental-tooltip .limit-detail-tooltip::after,
 .plugin-location-count .limit-detail-tooltip::after { right: auto; left: calc(50% - 4px - var(--tooltip-shift, 0px)); }
 .plugin-location-count .is-heading { color: var(--text); }
 .plugin-identity .plugin-origin-official { display: inline-flex; align-items: center; gap: 3px; border: 0; padding: 0; color: var(--success); }
@@ -8739,3 +8741,11 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-about h3, .plugin-about .settings-note { margin: 0; }
 .settings-panel .plugin-author-prompt { height: auto; min-height: 220px; width: 100%; box-sizing: border-box; font: inherit; font-size: .6875rem; line-height: 1.6; overflow-wrap: anywhere; resize: vertical; user-select: text; }
 .plugin-copy-status { min-height: 1.6em; }
+
+.plugin-experimental-tooltip.limit-detail-tooltip-wrap {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+}

@@ -931,8 +931,8 @@
         ]) {
           const node = el(document, tag, className); overviewLabels.set(key, node); heading.append(node);
         }
-        const note = el(document, 'p', 'plugin-overview-note');
-        overviewLabels.set('settings.plugins.experimentalNote', note);
+        const description = el(document, 'p', 'plugin-overview-note');
+        overviewLabels.set('settings.plugins.overviewDescription', description);
         const guides = el(document, 'div', 'plugin-guide-links');
         for (const [page, key] of [['plugins', 'settings.plugins.guide'], ['plugin-quickstart', 'settings.plugins.authorGuide']]) {
           const link = el(document, 'a', 'plugin-guide-link');
@@ -943,7 +943,7 @@
           });
           overviewLabels.set(key, link); guideLinks.set(page, link); guides.append(link);
         }
-        overview.append(heading, note, guides);
+        overview.append(heading, description, guides);
         tabs = el(document, 'nav', 'plugin-catalog-tabs');
         tabs.setAttribute('aria-label', t('settings.plugins.title'));
         tabs.setAttribute('role', 'tablist');
@@ -979,6 +979,26 @@
       }
       for (const [key, node] of overviewLabels) {
         const label = t(key); if (node.textContent !== label) node.textContent = label;
+      }
+      const sectionToggle = document.querySelector('[data-settings-section="plugins"]');
+      const experimentalBadge = sectionToggle?.querySelector('.plugin-section-experimental');
+      if (experimentalBadge && setDetailTooltip) {
+        let trigger = sectionToggle.querySelector('.plugin-experimental-tooltip');
+        if (!trigger) {
+          trigger = el(document, 'span', 'plugin-experimental-tooltip');
+          experimentalBadge.before(trigger);
+          trigger.append(experimentalBadge);
+          // The disclosure remains the sole keyboard stop; only the badge is a hover target.
+          sectionToggle.addEventListener('focus', () => trigger.dispatchEvent(new Event('focusin')));
+          sectionToggle.addEventListener('blur', () => trigger.dispatchEvent(new Event('focusout')));
+          sectionToggle.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+          });
+        }
+        setDetailTooltip(trigger, [{ full: t('settings.plugins.experimentalNote') }], { centered: true });
+        trigger.removeAttribute('tabindex');
+        const tooltip = trigger.querySelector('[role="tooltip"]');
+        if (tooltip) { tooltip.id = 'plugin-experimental-tip'; sectionToggle.setAttribute('aria-describedby', tooltip.id); }
       }
       for (const [page, link] of guideLinks) link.href = `https://javis-ai.com/token-monitor/docs/${page}.html?lang=${encodeURIComponent(getLocale())}`;
       overview.hidden = activeTab === 'installed' && Boolean(selectedPluginId || aboutOpen);

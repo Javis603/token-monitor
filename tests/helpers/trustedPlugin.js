@@ -20,7 +20,7 @@ async function runtimeFixture(t, { Notification, safeMode = false, delayedExit =
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trusted-test-'));
   const handlers = new Map(), events = new Map(), children = [], windows = [];
   let settings = { pluginsEnabled: true, pluginStates: {}, homeModuleOrder: 'plugin:trusted-fixture/panel', pluginMainPages: ['trusted-fixture/panel'], notchPluginPages: ['trusted-fixture/panel'] };
-  let confirmation = 1; const dialogs = [];
+  let confirmation = 1; const confirmations = [], dialogs = [];
   class BrowserWindow extends EventEmitter {
     constructor() {
       super(); this.visible = true; this.minimized = false; this.destroyed = false;
@@ -40,7 +40,7 @@ async function runtimeFixture(t, { Notification, safeMode = false, delayedExit =
   const electron = { BrowserWindow, Notification, utilityProcess: { fork: fakeFork(children, { delayedExit }) },
     ipcMain: { handle: (name, fn) => handlers.set(name, fn), removeHandler: name => handlers.delete(name), on: (name, fn) => events.set(name, fn), removeListener: name => events.delete(name) },
     session: { defaultSession: { protocol: { handle() {}, unhandle() {} } } },
-    dialog: { showMessageBox: async (_win, options) => { dialogs.push(options); return { response: confirmation }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [sourceDirectory] }) } };
+    dialog: { showMessageBox: async (_win, options) => { dialogs.push(options); return { response: confirmations.length ? confirmations.shift() : confirmation }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [sourceDirectory] }) } };
   beforeStart(dir);
   const runtime = createPluginRuntime({ electron, businessAdapters, userDataDir: dir, getSettings: () => settings, getAppSettings: () => ({ public: true }), getContext: () => ({ source: 'fixture' }), getLocale: () => 'en',
     applySettingsPatch: patch => { settings = { ...settings, ...patch }; }, persistManagementSettings: patch => { settings = { ...settings, ...patch }; }, persistPluginStates: value => { settings.pluginStates = value; },
@@ -53,7 +53,7 @@ async function runtimeFixture(t, { Notification, safeMode = false, delayedExit =
   const send = (win, surface, refs = ['trusted-fixture/panel']) => events.get(win === main ? 'plugins:demand' : 'topNotch:pluginDemand')(event(win), { surface, refs });
   async function install() { const preview = await invoke('plugins:import', 'directory'); await invoke('plugins:install', preview.token); }
   return { dir, runtime, children, handlers, events, main, notch, windows, invoke, send, install, event,
-    get settings() { return settings; }, dialogs, cancel() { confirmation = 0; }, accept() { confirmation = 1; },
+    get settings() { return settings; }, dialogs, respond(...responses) { confirmations.push(...responses); }, cancel() { confirmation = 0; }, accept() { confirmation = 1; },
     lifecycle(win, callback, ids = ['trusted-fixture']) {
       const original = win.webContents.send;
       win.webContents.send = (channel, value) => {

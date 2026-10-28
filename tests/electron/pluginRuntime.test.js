@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { runtimeFixture } = require('../helpers/trustedPlugin');
 const tick = () => new Promise(setImmediate);
 test('bubble-only bitmap demand stops on native hide; system Tray demand survives it', async t => {
@@ -380,5 +381,39 @@ test('package cleanup failure cancels mutation and a later attempt offers only a
   assert.equal(f.main.webContents.reloads,0);
   f.accept(); await f.invoke('plugins:uninstall','trusted-fixture');
   await new Promise(resolve=>setTimeout(resolve,10));
-  assert.equal(f.dialogs.length,2); assert.equal(f.main.webContents.reloads,1); assert.equal(f.notch.webContents.reloads,0);
+  assert.equal(f.dialogs.length,3); assert.equal(f.main.webContents.reloads,1); assert.equal(f.notch.webContents.reloads,0);
 });
+
+for (const operation of ['uninstall', 'update']) {
+  test(`cancel ${operation} after cleanup failure offers immediate affected-window recovery`, async t => {
+    const sourceDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-recovery-source-'));
+    fs.cpSync(path.resolve(__dirname, '../fixtures/trusted-plugin'), sourceDirectory, { recursive: true });
+    t.after(() => fs.rmSync(sourceDirectory, { recursive: true, force: true }));
+    const f = await runtimeFixture(t, { sourceDirectory }); await f.install();
+    await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+    const before = fs.readFileSync(path.join(f.dir, 'plugins/trusted-fixture/manifest.json'), 'utf8');
+    const manifest = JSON.parse(before); manifest.version = '9.0.0';
+    fs.writeFileSync(path.join(sourceDirectory, 'manifest.json'), JSON.stringify(manifest));
+    const preview = operation === 'update' ? await f.invoke('plugins:import', 'directory') : null;
+    let loaded = true;
+    const actions = [];
+    f.lifecycle(f.main, request => {
+      actions.push(request.action);
+      if (request.action === 'release') { loaded = false; throw Error('author dispose failed'); }
+      return { loaded };
+    });
+    f.respond(0, 1); // Cancel the mutation, then explicitly recover the affected window.
+    await assert.rejects(operation === 'update'
+      ? f.invoke('plugins:install', preview.token, { trustUpdate: true })
+      : f.invoke('plugins:uninstall', 'trusted-fixture'), /cancelled/);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(f.dialogs.length, 2);
+    assert.match(f.dialogs[1].message, /could not be restored/);
+    assert.deepEqual(f.dialogs[1].buttons, ['Later', 'Reload now']);
+    assert.deepEqual(actions, ['inspect', 'release']); // Failed author cleanup is not resumed in place.
+    assert.equal(fs.readFileSync(path.join(f.dir, 'plugins/trusted-fixture/manifest.json'), 'utf8'), before);
+    assert.equal(f.runtime.manager.active('trusted-fixture'), true);
+    assert.equal(f.main.webContents.reloads, 1);
+    assert.equal(f.notch.webContents.reloads, 0);
+  });
+}

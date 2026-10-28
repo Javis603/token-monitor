@@ -150,9 +150,9 @@ app.whenReady().then(async () => {
   });
   const demandListener = (event, { surface, refs }) => pluginCalls.push({ channel: 'plugins:demand', frameUrl: event.senderFrame?.url, surface, refs });
   ipcMain.on('plugins:demand', demandListener);
-  const toggleDialogs = []; let toggleResponse = 1, selectedDirectory = fixtureDir;
+  const toggleDialogs = [], toggleResponses = []; let toggleResponse = 1, selectedDirectory = fixtureDir;
   runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain: pluginIpc, session, utilityProcess,
-    dialog: { showMessageBox: async (_owner, options) => { toggleDialogs.push(options); return { response: toggleResponse }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [selectedDirectory] }) } },
+    dialog: { showMessageBox: async (_owner, options) => { toggleDialogs.push(options); return { response: toggleResponses.length ? toggleResponses.shift() : toggleResponse }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [selectedDirectory] }) } },
     userDataDir: scratch, getSettings: () => settings, getAppSettings: () => settings, getContext: () => ({ source: 'fixture' }), getLocale: () => 'zh-TW',
     isMainSender: event => event.sender === win.webContents, persistPluginStates: pluginStates => patch({ pluginStates }), persistManagementSettings: patch,
     applySettingsPatch: patch, env: {}, log: console.log });
@@ -234,6 +234,52 @@ app.whenReady().then(async () => {
   }
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
+  if (process.env.TM_PACKAGE_RECOVERY_ONLY === '1') {
+    let loads = 0; win.webContents.on('did-finish-load', () => loads++);
+    await js("pluginApi.setEnabled('trusted-fixture',true)");
+    await js("pluginApi.place('trusted-fixture/panel','page',true).then(applyPluginCatalog)");
+    await js("openViewFromTray('plugin:trusted-fixture/panel')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'plugin mounted before failed cleanup');
+    const installedManifest = path.join(scratch, 'plugins/trusted-fixture/manifest.json');
+    const original = fs.readFileSync(installedManifest, 'utf8');
+    fs.writeFileSync(path.join(evidence,'recovery-original.png'), (await capture()).toPNG());
+    // Decline the package operation AND defer recovery: no reload without consent.
+    toggleResponse = 0;
+    await js("globalThis.fixtureCleanupFailure=true");
+    const cancellation = await js("pluginApi.uninstall('trusted-fixture').then(()=>'unexpected success',error=>String(error.message||error))");
+    assert.match(cancellation, /cancelled/);
+    assert.equal(toggleDialogs.length, 2);
+    assert.equal(loads, 0);
+    assert.equal(runtime.manager.active('trusted-fixture'), true);
+    assert.equal(fs.readFileSync(installedManifest, 'utf8'), original);
+    assert.equal(await js("!!document.querySelector('[aria-label=\"Fixture draft\"]')"), false);
+    fs.writeFileSync(path.join(evidence,'recovery-deferred.png'), (await capture()).toPNG());
+    // Start a fresh renderer, then repeat and accept the immediate recovery offer.
+    let ready = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    win.webContents.reload(); await ready;
+    await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'", 'fresh renderer ready');
+    await js("openViewFromTray('plugin:trusted-fixture/panel')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'plugin restored for second probe');
+    const beforeLoads = loads;
+    toggleResponses.push(0, 1);
+    ready = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    await js("globalThis.fixtureCleanupFailure=true; void pluginApi.uninstall('trusted-fixture').catch(()=>{})");
+    await ready;
+    await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active' && !globalThis.fixtureCleanupFailure", 'accepted recovery renderer');
+    await js("openViewFromTray('plugin:trusted-fixture/panel')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'author UI remounts after cancelled operation');
+    assert.equal(loads, beforeLoads + 1);
+    assert.equal(runtime.manager.active('trusted-fixture'), true);
+    assert.equal(fs.readFileSync(installedManifest, 'utf8'), original);
+    await js("document.querySelector('[aria-label=\"Fixture draft\"]').focus()");
+    await win.webContents.insertText('Recovered input');
+    assert.equal(await js("document.querySelector('[aria-label=\"Fixture draft\"]').value"), 'Recovered input');
+    fs.writeFileSync(path.join(evidence,'recovery-restored.png'), (await capture()).toPNG());
+    fs.writeFileSync(path.join(evidence,'recovery-results.json'), JSON.stringify({ loads, dialogs:toggleDialogs, cancellation, errors, electron:process.versions.electron },null,2));
+    assertConsoleClean(['Intentional fixture cleanup failure']);
+    console.log('PASS cancelled package keeps original enabled package, explicit recovery restores real renderer input; Later does not reload');
+    await runtime.dispose(); runtime=null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
+  }
   if (process.env.TM_PACKAGE_LIFECYCLE_ONLY === '1') {
     let loads = 0; win.webContents.on('did-finish-load', () => loads++);
     await js("pluginApi.setEnabled('trusted-fixture',true)");
@@ -276,6 +322,21 @@ app.whenReady().then(async () => {
     await js("document.querySelector('.plugin-package-preview').scrollIntoView({block:'center',behavior:'instant'})");
     await pause(300);
     fs.writeFileSync(path.join(evidence,'install-consent.png'), (await capture()).toPNG());
+    await js("document.querySelector('[data-settings-section=plugins]').scrollIntoView({block:'start',behavior:'instant'})");
+    await pause(300);
+    fs.writeFileSync(path.join(evidence,'overview-clean.png'), (await capture()).toPNG());
+    assert.equal(await js("(() => { document.querySelector('[data-settings-section=plugins]').dispatchEvent(new PointerEvent('pointerenter')); return !!document.querySelector('#plugin-experimental-tip')?.matches(':popover-open'); })()"), false);
+    assert.equal(await js("(() => { document.querySelector('.plugin-experimental-tooltip').dispatchEvent(new PointerEvent('pointerenter')); return document.querySelector('#plugin-experimental-tip').matches(':popover-open'); })()"), true);
+    await js("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+    assert.equal(await js("(() => { const tip=document.querySelector('#plugin-experimental-tip'); const badge=document.querySelector('.plugin-section-experimental').getBoundingClientRect(); const box=tip.getBoundingClientRect(); const arrow=getComputedStyle(tip,'::after'); return Math.abs(box.left+parseFloat(arrow.left)+3.5-(badge.left+badge.width/2))<2; })()"), true);
+    fs.writeFileSync(path.join(evidence,'overview-hover.png'), (await capture()).toPNG());
+    await js("document.querySelector('.plugin-experimental-tooltip').dispatchEvent(new PointerEvent('pointerleave'))");
+    await js("document.querySelector('[data-settings-section=plugins]').focus()");
+    await waitFor("document.querySelector('#plugin-experimental-tip')?.matches(':popover-open')", 'experimental keyboard tooltip');
+    fs.writeFileSync(path.join(evidence,'overview-tooltip.png'), (await capture()).toPNG());
+    await js("document.querySelector('[data-settings-section=plugins]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+    assert.equal(await js("document.querySelector('#plugin-experimental-tip').matches(':popover-open')"), false);
+
     await js("document.querySelector('.plugin-package-preview .plugin-allow').click()");
     await waitFor("state.pluginCatalog.plugins[0]?.status==='active' && !document.querySelector('.plugin-package-preview')", 'fresh install active without second consent');
     assert.equal(runtime.manager.list().plugins[0].background.enabled, false);

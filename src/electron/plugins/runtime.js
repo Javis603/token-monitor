@@ -325,7 +325,7 @@ function createPluginRuntime({
   async function confirm(event, note) {
     requireMain(event);
     const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
-      type: 'warning', title: translate(getLocale(), note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : 'plugins.trusted.reloadTitle'),
+      type: 'warning', title: translate(getLocale(), note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
       message: translate(getLocale(), note),
       buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.trusted.continue')],
       defaultId: 0, cancelId: 0
@@ -405,8 +405,8 @@ function createPluginRuntime({
     }
     const reload = affected.filter(item => item.error).map(item => item.host);
     if (reload.length) await confirm(event, 'plugins.trusted.reloadNote');
-    else if (affected.some(item => item.unsaved)) await confirm(event, 'plugins.trusted.unsavedNote');
-    const released = [];
+    else if (affected.some(item => item.unsaved)) await confirm(event, 'plugins.trusted.packageUnsavedNote');
+    const released = [], recovery = [];
     try {
       for (const item of affected.filter(item => !item.error)) {
         // Include partially released hosts in recovery if author cleanup fails.
@@ -415,6 +415,7 @@ function createPluginRuntime({
           released.push(item);
         } catch (error) {
           failedCleanup.set(item.host, new Set([...(failedCleanup.get(item.host) || []), ...item.ids]));
+          recovery.push(item.host);
           log(`[plugins] package cleanup failed: ${error.message}`);
           await confirm(event, 'plugins.trusted.reloadNote');
           reload.push(item.host);
@@ -424,22 +425,22 @@ function createPluginRuntime({
     } finally {
       // Resume after both commit and rollback. Descriptor publication during
       // the transaction was ignored by blocked hosts, so publish once more.
-      const resumeFailed = [];
       for (const item of released) {
         try { await requestLifecycle(item.host, 'resume', item.ids); }
         catch (error) {
           failedCleanup.set(item.host, new Set(item.ids));
           log(`[plugins] package resume failed: ${error.message}`);
-          resumeFailed.push(item.host);
+          recovery.push(item.host);
         }
       }
-      if (resumeFailed.length) {
+      const needsRecovery = [...new Set(recovery)].filter(host => !host.isDestroyed() && !reload.includes(host));
+      if (needsRecovery.length) {
         const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
           type: 'warning', title: translate(getLocale(), 'plugins.trusted.reloadTitle'),
-          message: translate(getLocale(), 'plugins.trusted.cleanupNote'),
+          message: translate(getLocale(), 'plugins.trusted.packageRecoveryNote'),
           buttons: [translate(getLocale(), 'plugins.trusted.later'), translate(getLocale(), 'plugins.trusted.reloadNow')], defaultId: 1, cancelId: 0
         });
-        if (response.response === 1) reload.push(...resumeFailed);
+        if (response.response === 1) reload.push(...needsRecovery);
       }
       reloadHosts(reload);
       manager.settingsChanged();
