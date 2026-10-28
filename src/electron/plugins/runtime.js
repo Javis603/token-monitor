@@ -4,6 +4,7 @@
 // Formal data operations reuse captured App state without refreshing collectors.
 
 const fs = require('node:fs');
+const { showPluginNotification } = require('./notification');
 const path = require('node:path');
 const { createBusinessDataService } = require('./businessData');
 const { createPluginSettingsStore } = require('./settings');
@@ -129,7 +130,7 @@ function createPluginRuntime({
       if (Object.hasOwn(args || {}, 'pluginsEnabled')) throw new Error('Use plugin management to change plugin execution');
       return applySettingsPatch(args);
     }
-    if (method === 'notify') { new Notification({ title: String(args?.title || id), body: String(args?.body || '') }).show(); return true; }
+    if (method === 'notify') return showPluginNotification(Notification, { title: String(args?.title || id), body: String(args?.body || '') });
     if (typeof hostActions[method] === 'function') return hostActions[method](args);
     throw new Error(`Unknown host operation: ${method}`);
   }

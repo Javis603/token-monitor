@@ -306,3 +306,28 @@ for (const [name, inPlace, mainFrame, retained] of [['hash', true, true, true], 
     assert.equal(await f.invoke('plugins:unsubscribe', subscription), retained);
   });
 }
+
+for (const outcome of ['show', 'failed']) test(`notify waits for native ${outcome} instead of reporting submission as success`, async t => {
+  const { EventEmitter } = require('node:events');
+  let notification;
+  class Notification extends EventEmitter {
+    static isSupported() { return true; }
+    constructor(options) { super(); this.options = options; notification = this; }
+    show() {}
+  }
+  const f = await runtimeFixture(t, { Notification }); await f.install();
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  let settled = false;
+  const result = f.invoke('plugins:host', 'trusted-fixture', 'notify', { body: 'Hello' });
+  result.then(() => { settled = true; }, () => { settled = true; });
+  await tick(); assert.equal(settled, false);
+  assert.deepEqual(notification.options, { title: 'trusted-fixture', body: 'Hello' });
+  if (outcome === 'show') {
+    notification.emit('show'); assert.equal(await result, true);
+  } else {
+    notification.emit('failed', {}, 'UNErrorDomain error 1');
+    await assert.rejects(result, /UNErrorDomain error 1/);
+  }
+  assert.equal(notification.listenerCount('show'), 0);
+  assert.equal(notification.listenerCount('failed'), 0);
+});
