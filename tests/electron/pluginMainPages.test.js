@@ -51,15 +51,20 @@ test('main and detached windows union page demand without destroying each other'
 test('standalone-window errors stay with their page, retry once and discard stale navigation results', async () => {
   const { create } = require('../../src/electron/renderer/pluginMainPages');
   const { Element } = require('../helpers/notchPanel');
-  const document = { createElement: tag => new Element(tag, document) };
-  const container = document.createElement('main');
+  const document = { createElement: tag => new Element(tag, document), createElementNS: (_, tag) => new Element(tag, document) };
+  const container = document.createElement('main'), headingContainer = document.createElement('div'), actionsContainer = document.createElement('div');
+  const mounts = [], unmounted = [];
   let pending, calls = 0;
   const pages = ['one', 'two'].map(id => ({ id: `plugin:demo/${id}`, ref: `demo/${id}`, title: id }));
-  const ui = create({ document, container, host: { mount() {}, refreshDemand() {} }, t: key => key,
+  const ui = create({ document, container, headingContainer, actionsContainer, host: { mount(...args) { mounts.push(args); }, unmount(node) { unmounted.push(node); }, refreshDemand() {} }, t: key => key,
     formatError: error => `Localized: ${error.message}`,
     openWindow: () => { calls++; return new Promise((resolve, reject) => { pending = { resolve, reject }; }); } });
   ui.render(pages, pages[0].id);
-  const button = container.querySelector('button');
+  assert.equal(container.querySelector('h2'), null, 'body has no duplicate heading row');
+  assert.equal(headingContainer.querySelector('h2').textContent, 'one');
+  const button = actionsContainer.querySelector('button');
+  assert.equal(mounts[0][3].headerActions, actionsContainer.querySelector('.plugin-header-actions'));
+  assert.equal(button.querySelectorAll('svg').length, 1);
   button.fire('click'); button.fire('click'); assert.equal(calls, 1);
   assert.equal(button.getAttribute('aria-busy'), 'true');
   pending.reject(Error('open failed')); await new Promise(setImmediate);
@@ -69,6 +74,7 @@ test('standalone-window errors stay with their page, retry once and discard stal
   assert.equal(button.getAttribute('aria-describedby'), notice.id);
   assert.equal(button.disabled, false);
   ui.render(pages, pages[0].id); assert.equal(container.querySelectorAll('.plugin-action-error').length, 1);
+  assert.equal(button.querySelectorAll('svg').length, 1, 'refresh retains icon');
   button.fire('click'); pending.resolve(); await new Promise(setImmediate);
   assert.equal(container.querySelector('.plugin-action-error'), null);
   button.fire('click'); ui.render(pages, pages[1].id); ui.render(pages, pages[0].id);
@@ -76,4 +82,34 @@ test('standalone-window errors stay with their page, retry once and discard stal
   assert.equal(container.querySelector('.plugin-action-error'), null, 'navigation invalidates late failures even after returning');
   button.fire('click'); ui.render([], 'home'); pending.reject(Error('removed')); await new Promise(setImmediate);
   assert.equal(container.querySelector('.plugin-action-error'), null);
+  assert.equal(unmounted.length, 2);assert.equal(actionsContainer.children.length, 0);
+  assert.equal(headingContainer.children.length, 0, 'removed plugin releases heading');
+  assert.equal(headingContainer.classList.contains('hidden'), true);
+});
+
+test('pointer reopen parks restored buttons on the page without stealing keyboard or editor focus', () => {
+  const { create } = require('../../src/electron/renderer/pluginMainPages');
+  const { Element } = require('../helpers/notchPanel');
+  const handlers = {}, windowHandlers = {}, frames = [];
+  const document = { createElement: tag => new Element(tag, document), createElementNS: (_, tag) => new Element(tag, document),
+    addEventListener(name, fn) { handlers[name] = fn; },
+    defaultView: { addEventListener(name, fn) { windowHandlers[name] = fn; }, requestAnimationFrame(fn) { frames.push(fn); } } };
+  document.body = document.createElement('body'); document.activeElement = document.body;
+  const container = document.createElement('main'), headingContainer = document.createElement('div'), actionsContainer = document.createElement('div');document.body.append(container,headingContainer,actionsContainer);
+  let button, editor;
+  const ui = create({ document, container, headingContainer, actionsContainer, host: { refreshDemand() {}, mount(node, _ref, _surface, options) {
+    button = document.createElement('button'); editor = document.createElement('input'); options.headerActions.append(button); node.append(editor);
+  } }, t: key => key, openWindow: async () => {} });
+  const pages = [{ id: 'plugin:demo/view', ref: 'demo/view', title: 'Demo' }];
+  ui.render(pages, pages[0].id);
+  const page = container.querySelector('.plugin-main-page');
+  assert.equal(page.tabIndex, -1); assert.equal(page.getAttribute('aria-label'), 'Demo');
+  const reopen = () => { windowHandlers.focus(); frames.shift()(); };
+  handlers.pointerdown(); button.focus(); reopen(); assert.equal(document.activeElement, page);
+  handlers.keydown({ key: 'Tab' }); button.focus(); reopen(); assert.equal(document.activeElement, button);
+  handlers.pointerdown(); editor.focus(); reopen(); assert.equal(document.activeElement, editor);
+  button.focus(); windowHandlers.focus(); handlers.pointerdown(); frames.shift()();
+  assert.equal(document.activeElement, button, 'a fresh interaction wins over the queued activation callback');
+  windowHandlers.focus(); ui.render(pages, 'home'); frames.shift()();
+  assert.equal(document.activeElement, button, 'navigation invalidates pending focus restoration');
 });

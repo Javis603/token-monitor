@@ -425,3 +425,24 @@ test('main navigation uses the named icon even without identity artwork', () => 
   assert.ok(context.icon.querySelector('path'));
   assert.deepEqual(context.icon.querySelector('path').attributes, views.navigationIcon(document, page, 14).querySelector('path').attributes);
 });
+
+test('header slots isolate late mounts and release actions on update failure', async () => {
+  const document = dom(), node = document.createElement('div'), actions = document.createElement('div');
+  document.body.append(node, actions);
+  let finish;
+  const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(_node, context) {
+    if (context.ref === descriptor.ref) return new Promise(resolve => { finish = () => {
+      context.headerActions.append(document.createElement('button')); resolve({});
+    }; });
+    context.headerActions.append(document.createElement('button'));
+    return { update() { throw Error('header update failed'); } };
+  } }) });
+  const pending = host.mount(node, descriptor, { headerActions: actions }); await new Promise(setImmediate);
+  host.unmount(node); assert.equal(actions.children.length, 0);
+  const next = { ...descriptor, ref: 'fixture/next' };
+  await host.mount(node, next, { headerActions: actions }); const owned = actions.children[0];
+  finish(); await pending;
+  assert.equal(actions.children.length, 1); assert.equal(actions.children[0], owned);
+  await host.mount(node, next, {}); assert.equal(actions.children.length, 0);
+  await host.dispose();
+});

@@ -17,7 +17,7 @@
       onError(error, record?.descriptor);
       record?.context.onMountStatus?.(false);
       if (record && mounts.get(record.container) === record) {
-        record.container.replaceChildren();
+        record.container.replaceChildren(); record.headerActions?.remove();
         const text = document.createElement('p'); text.className = 'plugin-inline-error';
         text.setAttribute('role', 'alert'); text.textContent = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
         record.container.append(text);
@@ -106,7 +106,7 @@
     }
     function context(record) {
       return { ...record.context, viewId: record.descriptor.id, ref: record.descriptor.ref,
-        data: record.descriptor.data, container: record.container };
+        data: record.descriptor.data, container: record.container, headerActions: record.headerActions };
     }
     function update(record) {
       if (record.failed || disposed || blocked.has(record.descriptor.pluginId) || mounts.get(record.container) !== record) return;
@@ -122,6 +122,7 @@
       const record = mounts.get(container);
       if (!record) return;
       mounts.delete(container); record.observer?.disconnect();
+      record.headerActions?.remove();
       record.context.onMountStatus?.(false);
       if (record.instance) cleanup(record.descriptor.pluginId, async () => {
         try {
@@ -147,6 +148,11 @@
       }
       unmount(container);
       const record = { container, descriptor, context: value };
+      if (value.headerActions) {
+        record.headerActions = document.createElement('div');
+        record.headerActions.className = 'plugin-header-actions-mount';
+        value.headerActions.append(record.headerActions);
+      }
       mounts.set(container, record); owners.set(container, record);
       try {
         const loaded = await load(descriptor);

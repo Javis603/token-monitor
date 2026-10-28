@@ -35,6 +35,8 @@ Host navigation, Settings and the native restart-without-plugins command remain 
 
 ## Lifecycle and appearance
 
+Page and Notch mounts receive a `context.headerActions` DOM container. Main/detached pages place it in the window header. Notch pages place it in the top navigation band's status area, replacing native TPS/refresh only while the selected page has nonempty controls. The host restores native status for empty, failed or unmounted controls and on return to a native page. Notch page identity stays in the selected tab and its accessible name; the body uses the full 176px page without a duplicate title row. Header actions stay within the camera-safe trailing lane; keep controls compact to fit the available width. Append only owned nodes and remove them in `dispose`. The host hides slots belonging to other pages and removes them on mount/update failure or unmount. This page-owned slot is separate from user-selected `replace` content targets. Other surfaces retain their own controls.
+
 Use `update(context)` for source/period/data/geometry changes. Honor `visible:false`; release work when hidden and clean up per-mount resources in `dispose`. Same-plugin backends are shared across all windows. Background execution is a separate explicit setting.
 
 Use any bundled CSS, DOM and canvas implementation. Optional host variables include `--plugin-default`, `--plugin-muted`, `--plugin-accent`, `--plugin-chart`, `--pv-font`, `--pv-padding` and `--pv-radius`. Skin presets remain a convenience for App colors and default author appearance; built-in theme selection/reset clears the applied author preset. They do not constrain author layouts. Respect reduced motion, keyboard access, readable contrast and narrow surfaces yourself.

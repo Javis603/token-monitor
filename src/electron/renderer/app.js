@@ -12951,7 +12951,7 @@ pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ docum
   selection: target => state.pluginCatalog?.contentSelections?.[target]
 }) : null;
 pluginMainPages = pluginViewHost ? window.TokenMonitorPluginMainPages.create({
-  document, container: document.getElementById('pluginMainPanel'), host: pluginViewHost, t,
+  document, container: document.getElementById('pluginMainPanel'), headingContainer: document.getElementById('pluginPageHeading'), actionsContainer: document.getElementById('pluginPageActions'), host: pluginViewHost, t,
   openWindow: ref => pluginBridge.openPage(ref),
   formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
 }) : null;
@@ -13009,7 +13009,7 @@ pluginApi = pluginBridge ? {
     const page = pluginPageOptions().find(page => page.ref === ref);
     if (!page) throw new Error(t('plugins.page.enableFirst'));
     openViewFromTray(page.id);
-    document.querySelector('#pluginMainPanel .plugin-main-page:not(.hidden) h2')?.focus({ preventScroll: true });
+    document.querySelector('#pluginPageHeading .plugin-main-heading:not(.hidden) h2')?.focus({ preventScroll: true });
   },
   getSettings: id => pluginBridge.getSettings(id),
   updateSettings: (id, input) => pluginBridge.updateSettings(id, input),
