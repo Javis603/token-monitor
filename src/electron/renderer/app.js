@@ -6161,7 +6161,7 @@ function nextBreakdown(value) {
 
 function viewSwitcherIcon(id) {
   const page = pluginPageOptions().find(page => page.id === id);
-  if (page?.identityIcon) return window.TokenMonitorPluginViews.navigationIcon(document, page, 14);
+  if (page) return window.TokenMonitorPluginViews.navigationIcon(document, page, 14);
   const icon = document.createElement('span');
   icon.className = `view-switcher-icon ${VIEW_ICON_CLASSES[id] || (pluginPlacementsApi.isHomeToken(id) ? 'view-icon-plugin' : 'view-icon-home')}`;
   icon.setAttribute('aria-hidden', 'true');

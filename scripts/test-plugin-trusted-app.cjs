@@ -474,6 +474,20 @@ app.whenReady().then(async () => {
     await js("retainedLayoutInput.focus()");
     await win.webContents.insertText(' + continued');
     assert.equal(await js("retainedLayoutInput.value"),'Keep my draft + continued');
+    const expandedLayouts = {};
+    for (const page of ['plugin:trusted-fixture/panel', 'model']) {
+      await js(`openViewFromTray(${JSON.stringify(page)});openSettingsPanel();document.querySelectorAll('.settings-section-toggle[aria-expanded=true]').forEach(node=>node.click());setSettingsSectionExpanded('general',true)`);
+      await pause(500);
+      expandedLayouts[page] = await js(`(() => {
+        const rect = selector => { const r=document.querySelector(selector).getBoundingClientRect();return {top:r.top,height:r.height,bottom:r.bottom}; };
+        return {settings:rect('.settings-panel'),content:rect(state.breakdown.startsWith('plugin:')?'.plugin-main-panel':'.breakdown'),footer:rect('.footer'),viewport:innerHeight};
+      })()`);
+      fs.writeFileSync(path.join(evidence,page.startsWith('plugin:')?'expanded-plugin.png':'expanded-native.png'),(await capture()).toPNG());
+    }
+    fs.writeFileSync(path.join(evidence,'expanded-layouts.json'),JSON.stringify(expandedLayouts,null,2));
+    await js("openViewFromTray('plugin:trusted-fixture/panel');openSettingsPanel();document.querySelectorAll('.settings-section-toggle[aria-expanded=true]').forEach(node=>node.click())");
+    await pause(500);
+    assert.ok(await js("document.querySelector('.plugin-main-content').getBoundingClientRect().height > 100"));
     await js("els.settingsButton.click()");await pause(200);
     assert.equal(await js("document.querySelector('.plugin-main-content input')===retainedLayoutInput && retainedLayoutInput.value==='Keep my draft + continued'"),true);
     fs.writeFileSync(path.join(evidence,'plugin-restored.png'),(await capture()).toPNG());
