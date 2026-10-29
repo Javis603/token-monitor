@@ -28,7 +28,11 @@ async function fixture(t, operation) {
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
   f.settings.homeModuleOrder = 'plugin:other-fixture/panel'; f.dialogs.length = 0;
   let checks = 0, mounts = 0;
-  f.lifecycle(f.main, () => { checks++; return { loaded: true, unsaved: true }; }, ['other-fixture']);
+  f.lifecycle(f.main, ({ content }) => {
+    // This draft belongs to a page, not to B's replacement outlets.
+    if (content) return { loaded: true, unsaved: false };
+    checks++; return { loaded: true, unsaved: true };
+  }, ['other-fixture']);
   const document = { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} };
   document.createElement = tag => {
     const node = new Element(tag, document); node.isConnected = true; node.getClientRects = () => [{}]; node.style.removeProperty = () => {}; return node;

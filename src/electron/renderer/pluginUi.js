@@ -188,8 +188,10 @@
     function mount(container, descriptor, value) {
       return track(descriptor.pluginId, mountRecord(container, descriptor, value));
     }
-    function hasUnsavedChanges(ids) {
-      return [...mounts.values()].some(record => (!ids || ids.includes(record.descriptor.pluginId)) && record.instance?.hasUnsavedChanges?.() === true);
+    function hasUnsavedChanges(ids, content) {
+      return [...mounts.values()].some(record => (!ids || ids.includes(record.descriptor.pluginId))
+        && (!content || content.some(item => item.ref === record.descriptor.ref && item.target === record.context.target))
+        && record.instance?.hasUnsavedChanges?.() === true);
     }
     async function release(ids) {
       for (const id of ids) blocked.add(id);
@@ -212,8 +214,8 @@
       const errors = ids.flatMap(id => failures.has(id) ? [`${id}: ${failures.get(id)}`] : []);
       if (errors.length) throw new Error(errors.join('; '));
     }
-    const offLifecycle = bridge.onLifecycle?.(async ({ action, ids }) => {
-      if (action === 'inspect') return { loaded: [...modules.keys()].some(key => ids.some(id => key.startsWith(id + ':'))), unsaved: hasUnsavedChanges(ids) };
+    const offLifecycle = bridge.onLifecycle?.(async ({ action, ids, content }) => {
+      if (action === 'inspect') return { loaded: [...modules.keys()].some(key => ids.some(id => key.startsWith(id + ':'))), unsaved: hasUnsavedChanges(ids, content) };
       if (action === 'release') { await release(ids); return {}; }
       if (action === 'resume') { for (const id of ids) if (!failures.has(id)) blocked.delete(id); return {}; }
       throw new Error('Unknown plugin lifecycle operation');

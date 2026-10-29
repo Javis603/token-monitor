@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 const { normalizeManifest } = require('../../src/shared/plugins/manifest');
 const { initialSetupReview, initialSetupPlan } = require('../../src/electron/plugins/initialSetup');
 const { runtimeFixture } = require('../helpers/trustedPlugin');
@@ -26,6 +27,43 @@ async function fixture(t) {
   const f = await runtimeFixture(t, { sourceDirectory, initialSettings: { pluginMainPages: [], notchPluginPages: [], notchEnabled: false, edgeDockEnabled: false, themeColors: { accent: '#112233' }, vendorColors: {} } });
   return { f, manifest, file };
 }
+
+test('the production App adapter preserves all four reviewed first-use choices through runtime IPC', async t => {
+  const { f } = await fixture(t);
+  await f.install();
+  const source = fs.readFileSync(path.resolve('src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('pluginApi = pluginBridge ? {');
+  assert.ok(start >= 0);
+  const adapter = source.slice(start, source.indexOf('\npluginSettingsPanel =', start));
+  const api = vm.runInNewContext(adapter + ';pluginApi', {
+    loadPluginCatalog: () => f.invoke('plugins:list'), applyPluginCatalog: value => value,
+    pluginBridge: { setEnabled: (id, enabled, initialSetup) => f.invoke('plugins:setEnabled', { id, enabled, initialSetup }) }
+  });
+  const choices = { 'placement:setup-fixture/page:page': false, 'placement:setup-fixture/page:notch': false,
+    'content:main.home.content': null, background: false, skin: null };
+  await api.setEnabled('setup-fixture', true, choices);
+  assert.deepEqual(f.settings.pluginMainPages, []);
+  assert.deepEqual(f.settings.notchPluginPages, []);
+  assert.equal(f.settings.pluginContentSelections['main.home.content'], undefined);
+  assert.equal(f.settings.pluginStates['setup-fixture'].background, false);
+  assert.equal(f.settings.themeColors.accent, '#112233');
+  assert.deepEqual(f.settings.pluginInitialSetup['setup-fixture'].values, choices);
+  assert.equal(f.runtime.manager.active('setup-fixture'), true);
+});
+
+for (const activate of [true, false]) test(`updates prune removed owned targets before enforcing the selection limit, activate=${activate}`, () => {
+  const target = 'main.new.content', plugin = { ...normalizeManifest(raw()).manifest,
+    views: [{ id: 'compact', mode: 'replace', targets: [target], surfaces: [], defaultSurfaces: [] }] };
+  const selections = Object.fromEntries(Array.from({ length: 127 }, (_, i) => [`main.kept${i}.content`, 'other/view']));
+  selections['main.removed.content'] = 'setup-fixture/old';
+  const settings = { pluginContentSelections: selections };
+  const plan = initialSetupPlan(settings, plugin, undefined, { activate, updating: true });
+  assert.equal(plan.patch.pluginContentSelections['main.removed.content'], undefined);
+  assert.equal(Object.keys(plan.patch.pluginContentSelections).length, activate ? 128 : 127);
+  for (let i = 0; i < 127; i++) assert.equal(plan.patch.pluginContentSelections[`main.kept${i}.content`], 'other/view');
+  assert.equal(plan.patch.pluginContentSelections[target], activate ? 'setup-fixture/compact' : undefined);
+  assert.equal(settings.pluginContentSelections['main.removed.content'], 'setup-fixture/old', 'planning must not mutate persisted settings');
+});
 
 test('manifest defaults select declared replacements, optional background support and a declared skin', () => {
   const manifest = normalizeManifest(raw()).manifest;

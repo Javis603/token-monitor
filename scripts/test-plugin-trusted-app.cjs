@@ -24,6 +24,12 @@ manifest.views.push(
   { id: 'navigation-second', targets: ['main.navigation.content'], selector: '.view-switcher-label' }
 );
 if (process.env.TM_DEFAULT_PLACEMENTS === '1') manifest.views.find(view => view.id === 'panel').defaultSurfaces = ['page','notch'];
+if (process.env.TM_FIRST_USE_CHOICES === '1') {
+  manifest.views.find(view => view.id === 'panel').defaultSurfaces = ['page', 'notch'];
+  manifest.background = true;
+  manifest.skins = [{ id: 'blue', name: 'Blue', colors: { accent: '#abcdef' } }];
+  manifest.defaults = { background: true, skin: 'blue' };
+}
 fs.renameSync(path.join(fixtureDir, 'ui.mjs'), path.join(fixtureDir, 'basic.mjs'));
 manifest.files.push('basic.mjs');
 manifest.files.push('fixture.png');
@@ -270,6 +276,75 @@ app.whenReady().then(async () => {
     await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
   }
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
+  if (process.env.TM_FIRST_USE_CHOICES === '1') {
+    const accent = settings.themeColors.accent;
+    await js("openSettingsPanel();for(const section of SETTINGS_SECTION_IDS)setSettingsSectionExpanded(section,section==='plugins');pluginSettingsPanel.refresh()");
+    await waitFor("document.querySelector('.plugin-enable')", 'installed plugin toggle');
+    await js("document.querySelector('.plugin-enable').click()");
+    await waitFor("document.querySelector('.plugin-consent .plugin-allow')", 'first-use consent');
+    const reviewed = await js(`(() => {
+      const inputs = [...document.querySelectorAll('.plugin-initial-setup input')];
+      const defaults = inputs.map(input => ({ key: input.dataset.controlKey, checked: input.checked }));
+      for (const item of defaults) if (item.checked) document.querySelector('[data-control-key="' + item.key + '"]').click();
+      return defaults;
+    })()`);
+    for (const key of ['initial/placement:trusted-fixture/panel:page', 'initial/placement:trusted-fixture/panel:notch', 'initial/content:main.home.content', 'initial/background', 'initial/skin']) {
+      assert.equal(reviewed.find(input => input.key === key)?.checked, true, `author default ${key}`);
+    }
+    await js("document.querySelector('.plugin-consent .plugin-allow').click()");
+    await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'", 'enabled with reviewed choices');
+    assert.deepEqual(settings.pluginMainPages, []);
+    assert.deepEqual(settings.notchPluginPages, []);
+    assert.deepEqual(settings.pluginContentSelections, {});
+    assert.equal(settings.pluginStates['trusted-fixture'].background, false);
+    assert.equal(settings.themeColors.accent, accent);
+    assert.equal(settings.pluginAuthorSkin, null);
+    const ready = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    win.webContents.reload(); await ready;
+    await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'", 'reviewed choices after reload');
+    await js("(async()=>{await pluginApi.setEnabled('trusted-fixture',false);await pluginApi.setEnabled('trusted-fixture',true)})()");
+    assert.deepEqual(settings.pluginMainPages, []);
+    assert.deepEqual(settings.notchPluginPages, []);
+    assert.deepEqual(settings.pluginContentSelections, {});
+    assert.equal(settings.pluginStates['trusted-fixture'].background, false);
+    assert.equal(settings.pluginAuthorSkin, null);
+    assertConsoleClean(); console.log('PASS actual App first-use choices: placements, native content, background and skin survive adapter, IPC, reload and re-enable');
+    await runtime.dispose(); runtime = null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
+  }
+  if (process.env.TM_CONTENT_SAFETY === '1') {
+    await js("pluginApi.setEnabled('trusted-fixture',true)");
+    const draft = '.plugin-content[data-plugin-target="main.home.content"] [aria-label="Fixture draft"]';
+    await waitFor(`document.querySelector(${JSON.stringify(draft)})`, 'selected Home replacement');
+    await js(`globalThis.savedContentInput=document.querySelector(${JSON.stringify(draft)});savedContentInput.value='UNSAVED HOME'`);
+    selectedDirectory = path.join(scratch, 'other-source');
+    fs.cpSync(fixtureDir, selectedDirectory, { recursive: true });
+    fs.writeFileSync(path.join(selectedDirectory, 'manifest.json'), JSON.stringify({ ...manifest, id: 'other-fixture', name: 'Other fixture' }));
+    const other = await js("tokenMonitor.plugins.importPackage('directory')");
+    const install = `pluginApi.install(${JSON.stringify(other.token)},{trustInstall:true})`;
+    toggleResponses.push(1, 0);
+    assert.match(await js(`${install}.then(()=>'',error=>error.message)`), /cancelled/);
+    assert.equal(settings.pluginContentSelections['main.home.content'], 'trusted-fixture/content');
+    assert.equal(fs.existsSync(path.join(scratch, 'plugins/other-fixture')), false);
+    assert.deepEqual(await js(`({same:document.querySelector(${JSON.stringify(draft)})===savedContentInput,value:savedContentInput.value})`), { same: true, value: 'UNSAVED HOME' });
+    assert.match(toggleDialogs.at(-1).message, /未儲存/);
+    toggleResponses.push(1, 1);
+    await js(install);
+    await waitFor(`document.querySelector(${JSON.stringify(draft)}) && document.querySelector(${JSON.stringify(draft)})!==savedContentInput`, 'replacement after retry');
+    assert.equal(settings.pluginContentSelections['main.home.content'], 'other-fixture/content');
+    assert.equal(runtime.manager.active('trusted-fixture'), true);
+    assert.equal(runtime.manager.active('other-fixture'), true);
+    await js(`globalThis.savedContentInput=document.querySelector(${JSON.stringify(draft)});savedContentInput.value='SECOND DRAFT'`);
+    toggleResponses.push(0);
+    assert.match(await js("pluginApi.selectContent('main.home.content',null).then(()=>'',error=>error.message)"), /cancelled/);
+    assert.deepEqual(await js(`({same:document.querySelector(${JSON.stringify(draft)})===savedContentInput,value:savedContentInput.value})`), { same: true, value: 'SECOND DRAFT' });
+    toggleResponses.push(1);
+    await js("pluginApi.selectContent('main.home.content',null)");
+    await waitFor(`!document.querySelector(${JSON.stringify(draft)})`, 'native content after consent');
+    assert.equal(settings.pluginContentSelections['main.home.content'], undefined);
+    assert.equal(runtime.manager.active('other-fixture'), true);
+    assertConsoleClean(); console.log('PASS actual App draft warnings: cancel preserves DOM and input, same preview retries, accepted switch and native restore keep plugins enabled');
+    await runtime.dispose(); runtime = null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
+  }
   if (process.env.TM_WINDOW_FOCUS_ONLY === '1') {
     await js("pluginApi.setEnabled('trusted-fixture',true)");
     await js("pluginApi.place('trusted-fixture/panel','page',true).then(applyPluginCatalog)");

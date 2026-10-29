@@ -324,7 +324,7 @@ function createPluginRuntime({
 
   const lifecycleHosts = new Set(), lifecyclePlugins = new Map(), observedLifecycleHosts = new WeakSet(), lifecycleRequests = new Map(), failedCleanup = new Map();
   let lifecycleSequence = 0;
-  function requestLifecycle(host, action, ids) {
+  function requestLifecycle(host, action, ids, content) {
     if (host.isDestroyed()) return Promise.resolve({});
     return new Promise((resolve, reject) => {
       const request = ++lifecycleSequence;
@@ -334,13 +334,13 @@ function createPluginRuntime({
       };
       const timer = setTimeout(() => finish('Plugin UI did not respond'), 5000);
       lifecycleRequests.set(request, { host, finish });
-      host.send('plugins:lifecycle', { request, action, ids });
+      host.send('plugins:lifecycle', { request, action, ids, ...(content ? { content } : {}) });
     });
   }
-  async function inspectHosts(ids) {
+  async function inspectHosts(ids, content) {
     const results = await Promise.all([...lifecycleHosts].filter(host => ids.some(id => lifecyclePlugins.get(host)?.get(id) === 'loaded')).map(async host => {
       const loadedIds = ids.filter(id => lifecyclePlugins.get(host)?.get(id) === 'loaded');
-      try { return { host, ids: loadedIds, ...await requestLifecycle(host, 'inspect', loadedIds) }; }
+      try { return { host, ids: loadedIds, ...await requestLifecycle(host, 'inspect', loadedIds, content) }; }
       catch (error) { return { host, ids: loadedIds, loaded: true, error: error.message }; }
     }));
     return results.filter(item => !item.host.isDestroyed() && item.loaded);
@@ -348,7 +348,7 @@ function createPluginRuntime({
   async function confirm(event, note, detail = null) {
     requireMain(event);
     const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
-      type: 'warning', title: translate(getLocale(), note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
+      type: 'warning', title: translate(getLocale(), note === 'plugins.content.unsavedNote' ? 'plugins.content.unsavedTitle' : note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
       message: translate(getLocale(), note),
       ...(detail ? { detail: translate(getLocale(), detail) } : {}),
       buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.trusted.continue')],
@@ -473,25 +473,44 @@ function createPluginRuntime({
     return listWithPlacements();
   }
 
-  async function confirmContentSwitch(event, plugin, plan) {
-    const next = plan.patch.pluginContentSelections || {};
+  async function protectContentSwitch(event, next) {
     const current = contentSelections();
+    const active = manager.list().plugins.filter(plugin => plugin.status === 'active');
+    const content = Object.entries(current).filter(([target, ref]) => next[target] !== ref
+      && active.some(plugin => plugin.views.some(view => view.ref === ref && view.mode === 'replace' && view.targets.includes(target))))
+      .map(([target, ref]) => ({ target, ref }));
+    if (!content.length) return;
+    const ids = [...new Set(content.map(item => item.ref.split('/')[0]))];
+    const affected = await inspectHosts(ids, content);
+    if (affected.some(item => item.error)) throw new Error(translate(getLocale(), 'plugins.content.inspectFailed'));
+    if (affected.some(item => item.unsaved)) await confirm(event, 'plugins.content.unsavedNote');
+    if (content.some(item => contentSelections()[item.target] !== item.ref)) throw new Error('Content selection changed; try again');
+  }
+
+  async function confirmContentSwitch(event, plugin, plan) {
+    const current = contentSelections();
+    const next = { ...(plan.patch.pluginContentSelections || current) };
     const displaced = manager.list().plugins.filter(item => item.id !== plugin.id && item.status === 'active'
       && item.views.some(view => view.mode === 'replace' && view.targets.some(target => current[target] === view.ref
         && Object.hasOwn(plan.values, contentKey(target)) && next[target] !== view.ref)));
-    if (!displaced.length) return plan.values;
-    const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
-      type: 'question', title: translate(getLocale(), 'plugins.content.switchTitle', { name: plugin.name }),
-      message: translate(getLocale(), 'plugins.content.switchNote', { names: displaced.map(item => item.name).join(', ') }),
-      buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.content.switch'), translate(getLocale(), 'plugins.content.keep')],
-      defaultId: 2, cancelId: 0
-    });
-    if (response.response === 0) throw new Error('Plugin change cancelled');
-    if (response.response === 2) {
-      for (const plugin of displaced) for (const view of plugin.views) {
-        for (const target of view.targets) if (current[target] === view.ref && Object.hasOwn(plan.values, contentKey(target))) plan.values[contentKey(target)] = view.ref;
+    if (displaced.length) {
+      const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
+        type: 'question', title: translate(getLocale(), 'plugins.content.switchTitle', { name: plugin.name }),
+        message: translate(getLocale(), 'plugins.content.switchNote', { names: displaced.map(item => item.name).join(', ') }),
+        buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.content.switch'), translate(getLocale(), 'plugins.content.keep')],
+        defaultId: 2, cancelId: 0
+      });
+      if (response.response === 0) throw new Error('Plugin change cancelled');
+      if (response.response === 2) {
+        for (const plugin of displaced) for (const view of plugin.views) {
+          for (const target of view.targets) if (current[target] === view.ref && Object.hasOwn(plan.values, contentKey(target))) {
+            plan.values[contentKey(target)] = view.ref;
+            next[target] = view.ref;
+          }
+        }
       }
     }
+    await protectContentSwitch(event, next);
     return plan.values;
   }
 
@@ -505,14 +524,24 @@ function createPluginRuntime({
       persistManagementSettings({ pluginContentOrder: next });
       manager.settingsChanged(); return listWithPlacements();
     });
-    handle('plugins:selectContent', (event, target, ref) => {
+    handle('plugins:selectContent', async (event, target, ref) => {
       requireMain(event);
       if (typeof target !== 'string' || !/^[a-zA-Z][a-zA-Z0-9.-]{0,119}$/.test(target)) throw new Error('Invalid content target');
-      if (ref !== null && !manager.list().plugins.some(plugin => plugin.status === 'active' && plugin.views?.some(view => view.ref === ref && view.mode === 'replace' && view.targets.includes(target)))) throw new Error('Content replacement is unavailable');
-      const next = { ...contentSelections() };
-      if (ref === null) delete next[target]; else next[target] = ref;
-      if (Object.keys(next).length > 128) throw new Error('Too many content selections');
-      const patch = { pluginContentSelections: next };
+      const validate = () => {
+        if (ref !== null && !manager.list().plugins.some(plugin => plugin.status === 'active' && plugin.views?.some(view => view.ref === ref && view.mode === 'replace' && view.targets.includes(target)))) throw new Error('Content replacement is unavailable');
+      };
+      const selection = () => {
+        const next = { ...contentSelections() };
+        if (ref === null) delete next[target]; else next[target] = ref;
+        if (Object.keys(next).length > 128) throw new Error('Too many content selections');
+        return next;
+      };
+      validate();
+      const previous = contentSelections()[target], next = selection();
+      await protectContentSwitch(event, next);
+      if (contentSelections()[target] !== previous) throw new Error('Content selection changed; try again');
+      validate();
+      const patch = { pluginContentSelections: selection() };
       for (const plugin of manager.list().plugins.filter(plugin => plugin.views?.some(view => view.mode === 'replace' && view.targets.includes(target)))) {
         patch.pluginInitialSetup = recordSetupChoice({ ...getSettings(), ...patch }, plugin.id, contentKey(target), ref);
       }

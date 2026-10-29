@@ -6,6 +6,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { runtimeFixture } = require('../helpers/trustedPlugin');
+const { Element } = require('../helpers/notchPanel');
+const { createHost } = require('../../src/electron/renderer/pluginUi');
 const { normalizeInitialSetup, contentKey } = require('../../src/electron/plugins/initialSetup');
 const TARGET = 'main.home.content';
 const REF = 'trusted-fixture/content';
@@ -81,16 +83,120 @@ test('trust-and-install selects content; cancelled conflicts leave no installed 
   const { f } = await setup(t, { competitor: true });
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
   const before = structuredClone(f.settings);
-  let preview = await f.invoke('plugins:import', 'directory');
+  const preview = await f.invoke('plugins:import', 'directory');
   f.cancel();
   await assert.rejects(f.invoke('plugins:install', preview.token, { trustInstall: true }), /cancelled/);
   assert.deepEqual(f.settings, before);
   assert.equal(fs.existsSync(path.join(f.dir, 'plugins', 'trusted-fixture')), false);
-  f.accept(); preview = await f.invoke('plugins:import', 'directory');
+  f.accept();
   await f.invoke('plugins:install', preview.token, { trustInstall: true });
   assert.equal(f.settings.pluginContentSelections[TARGET], REF);
   assert.equal(f.runtime.manager.active('trusted-fixture'), true);
   assert.equal(f.runtime.manager.active('other-fixture'), true);
+});
+
+for (const operation of ['enable', 'install', 'native', 'provider']) test(`cancelling the draft warning preserves the selected content during ${operation}`, async t => {
+  const { f } = await setup(t, { competitor: true });
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  if (operation !== 'install') await f.install();
+  if (operation === 'provider') {
+    f.respond(2);
+    await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  }
+  const requests = [];
+  f.lifecycle(f.main, value => { requests.push(value); return { loaded: true, unsaved: true }; }, ['other-fixture']);
+  const before = structuredClone(f.settings);
+  f.respond(...(operation === 'enable' || operation === 'install' ? [1, 0] : [0]));
+  const preview = operation === 'install' ? await f.invoke('plugins:import', 'directory') : null;
+  const change = () => operation === 'enable' ? f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true })
+    : operation === 'install' ? f.invoke('plugins:install', preview.token, { trustInstall: true })
+      : f.invoke('plugins:selectContent', TARGET, operation === 'native' ? null : REF);
+  await assert.rejects(async () => change(), /cancelled/);
+  assert.deepEqual(f.settings, before);
+  assert.deepEqual(requests.map(item => item.action), ['inspect']);
+  assert.deepEqual(requests[0].content, [{ target: TARGET, ref: 'other-fixture/content' }]);
+  assert.equal(f.main.webContents.reloads, 0);
+  if (operation === 'install') {
+    f.respond(1, 1);
+    await change();
+    assert.equal(f.settings.pluginContentSelections[TARGET], REF);
+  }
+});
+
+test('source switching checks real renderer drafts only in the departing ref and target', async t => {
+  const { f } = await setup(t, { competitor: true });
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  const document = { createElement: tag => new Element(tag, document) };
+  document.head = document.createElement('head');
+  let inspect, disposed = 0;
+  const host = createHost({ document, window: {}, bridge: { onLifecycle(fn) { inspect = fn; } },
+    importModule: async () => ({ mount(container) {
+      const input = document.createElement('input'); container.append(input);
+      return { hasUnsavedChanges: () => Boolean(input.value), dispose() { disposed++; } };
+    } }) });
+  t.after(() => host.dispose());
+  f.lifecycle(f.main, request => inspect(request), ['other-fixture']);
+  const mount = async (ref, target) => {
+    const container = document.createElement('div');
+    await host.mount(container, { pluginId: 'other-fixture', revision: 'one', ref, id: ref.split('/')[1], entry: 'tm-plugin://other/one/ui.mjs' }, { target });
+    return container.children[0];
+  };
+  const home = await mount('other-fixture/content', TARGET);
+  const model = await mount('other-fixture/content', 'main.model.content');
+  const page = await mount('other-fixture/panel');
+  home.value = 'home draft'; model.value = 'model draft'; page.value = 'page draft';
+  f.cancel();
+  await assert.rejects(f.invoke('plugins:selectContent', TARGET, null), /cancelled/);
+  assert.equal(home.value, 'home draft'); assert.equal(disposed, 0);
+  assert.equal(f.settings.pluginContentSelections[TARGET], 'other-fixture/content');
+  assert.match(f.dialogs.at(-1).message, /unsaved work/);
+  assert.equal(f.dialogs.at(-1).defaultId, 0);
+  home.value = '';
+  await f.invoke('plugins:selectContent', TARGET, null);
+  assert.equal(f.dialogs.length, 1, 'other targets and independent pages must not warn');
+  assert.equal(model.value, 'model draft'); assert.equal(page.value, 'page draft');
+  assert.equal(disposed, 0, 'inspection must not release the whole plugin');
+  assert.equal(f.runtime.manager.active('other-fixture'), true);
+});
+
+test('a failed draft inspection blocks the source change without reloading the renderer', async t => {
+  const { f } = await setup(t, { competitor: true });
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  f.lifecycle(f.main, () => { throw Error('author inspection failed'); }, ['other-fixture']);
+  await assert.rejects(f.invoke('plugins:selectContent', TARGET, null), /Could not check/);
+  assert.equal(f.settings.pluginContentSelections[TARGET], 'other-fixture/content');
+  assert.equal(f.main.webContents.reloads, 0);
+  assert.equal(f.dialogs.length, 0);
+});
+
+test('keeping the existing provider or selecting it again does not inspect or discard its draft', async t => {
+  const { f } = await setup(t, { competitor: true });
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  await f.install();
+  let inspections = 0;
+  f.lifecycle(f.main, () => { inspections++; return { loaded: true, unsaved: true }; }, ['other-fixture']);
+  f.respond(2);
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  await f.invoke('plugins:selectContent', TARGET, 'other-fixture/content');
+  assert.equal(inspections, 0);
+  assert.equal(f.settings.pluginContentSelections[TARGET], 'other-fixture/content');
+  assert.equal(f.dialogs.length, 1);
+});
+
+test('awaiting a draft inspection does not overwrite a concurrent choice for a different target', async t => {
+  const { f } = await setup(t, { competitor: true });
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  let respond;
+  const started = new Promise(resolve => {
+    f.lifecycle(f.main, () => new Promise(finish => { respond = finish; resolve(); }), ['other-fixture']);
+  });
+  const home = f.invoke('plugins:selectContent', TARGET, null);
+  await started;
+  f.settings.pluginContentSelections['main.model.content'] = 'another/model';
+  respond({ loaded: true, unsaved: false });
+  await home;
+  assert.equal(f.settings.pluginContentSelections['main.model.content'], 'another/model');
+  assert.equal(f.settings.pluginContentSelections[TARGET], undefined);
 });
 
 for (const response of [0, 1, 2]) test(`an author suggestion of native content confirms displacement, response=${response}`, async t => {
@@ -117,7 +223,7 @@ for (const response of [0, 1, 2]) test(`an author suggestion of native content c
 test('a trusted update defaults only unconfigured new targets and preserves native and other-plugin choices', async t => {
   const { f, file, manifest } = await setup(t, { competitor: true });
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
-  f.invoke('plugins:selectContent', 'main.model.content', null);
+  await f.invoke('plugins:selectContent', 'main.model.content', null);
   manifest.views = manifest.views.filter(view => view.id !== 'content');
   fs.writeFileSync(file, JSON.stringify(manifest));
   let preview = await f.invoke('plugins:import', 'directory');
@@ -134,6 +240,22 @@ test('a trusted update defaults only unconfigured new targets and preserves nati
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
   assert.equal(f.settings.pluginContentSelections[TARGET], 'other-fixture/content');
   assert.equal(f.settings.pluginContentSelections['main.model.content'], undefined);
+  assert.equal(f.invoke('plugins:list').plugins.find(plugin => plugin.id === 'trusted-fixture').version, '2.0.0');
+});
+
+test('a trusted update can replace a removed target at the 128-selection limit', async t => {
+  const { f, file, manifest } = await setup(t);
+  const first = await f.invoke('plugins:import', 'directory');
+  await f.invoke('plugins:install', first.token, { trustInstall: true });
+  for (let i = 0; i < 127; i++) f.settings.pluginContentSelections[`main.extra${i}.content`] = 'other/view';
+  manifest.version = '2.0.0';
+  manifest.views.find(view => view.id === 'content').targets = ['main.session.content'];
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  const update = await f.invoke('plugins:import', 'directory');
+  await f.invoke('plugins:install', update.token, { trustUpdate: true });
+  assert.equal(f.settings.pluginContentSelections[TARGET], undefined);
+  assert.equal(f.settings.pluginContentSelections['main.session.content'], REF);
+  assert.equal(Object.keys(f.settings.pluginContentSelections).length, 128);
   assert.equal(f.invoke('plugins:list').plugins.find(plugin => plugin.id === 'trusted-fixture').version, '2.0.0');
 });
 
@@ -173,7 +295,7 @@ test('updates replace a removed selected view but retain an explicit built-in co
   fs.writeFileSync(file, JSON.stringify(manifest)); preview = await f.invoke('plugins:import', 'directory');
   await f.invoke('plugins:install', preview.token, { trustUpdate: true });
   assert.equal(f.settings.pluginContentSelections[TARGET], 'trusted-fixture/alternative');
-  f.invoke('plugins:selectContent', TARGET, null);
+  await f.invoke('plugins:selectContent', TARGET, null);
   manifest.version = '3.0.0'; fs.writeFileSync(file, JSON.stringify(manifest));
   preview = await f.invoke('plugins:import', 'directory');
   await f.invoke('plugins:install', preview.token, { trustUpdate: true });
@@ -184,7 +306,7 @@ test('updates replace a removed selected view but retain an explicit built-in co
 test('restoring native content keeps the plugin enabled and survives off/on and a runtime restart', async t => {
   const { f, file } = await setup(t);
   await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
-  f.invoke('plugins:selectContent', TARGET, null);
+  await f.invoke('plugins:selectContent', TARGET, null);
   assert.equal(f.runtime.manager.active('trusted-fixture'), true);
   assert.ok(f.runtime.payload('page').views['trusted-fixture/panel']);
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
@@ -232,7 +354,7 @@ test('trust-and-install can keep existing content and remember that decision', a
 test('a new plugins defaults respect a native choice already made for that target', async t => {
   const { f } = await setup(t, { competitor: true }); await f.install();
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
-  f.invoke('plugins:selectContent', TARGET, null);
+  await f.invoke('plugins:selectContent', TARGET, null);
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
   assert.equal(f.settings.pluginContentSelections[TARGET], undefined);
   assert.ok(f.settings.pluginInitialSetup['trusted-fixture'].applied.includes(contentKey(TARGET)));
@@ -242,7 +364,7 @@ test('a new plugins defaults respect a native choice already made for that targe
 for (const keepPlacements of [false, true]) test(`reinstall retains the native decision only when keeping placements=${keepPlacements}`, async t => {
   const { f } = await setup(t); await f.install();
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
-  f.invoke('plugins:selectContent', TARGET, null);
+  await f.invoke('plugins:selectContent', TARGET, null);
   await f.invoke('plugins:uninstall', 'trusted-fixture', { keepPlacements });
   assert.equal(Object.hasOwn(f.settings.pluginInitialSetup, 'trusted-fixture'), keepPlacements);
   const preview = await f.invoke('plugins:import', 'directory');
@@ -254,7 +376,7 @@ test('recording a native choice also initializes targets of an already active pl
   const { f } = await setup(t); await f.install();
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
   delete f.settings.pluginInitialSetup;
-  f.invoke('plugins:selectContent', TARGET, null);
+  await f.invoke('plugins:selectContent', TARGET, null);
   assert.ok(f.settings.pluginInitialSetup['trusted-fixture'].applied.includes(contentKey(TARGET)));
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });

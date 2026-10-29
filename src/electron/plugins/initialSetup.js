@@ -85,6 +85,9 @@ function initialSetupPlan(settings, plugin, input, { activate = true, context = 
   const previous = ownRecord(settings, plugin.id);
   const record = { values: { ...previous.values, ...choices }, applied: [...previous.applied] };
   const patch = {};
+  const targets = new Set((plugin.views || []).filter(view => view.mode === 'replace').flatMap(view => view.targets));
+  const retained = Object.entries(settings.pluginContentSelections || {}).filter(([target, ref]) => !ref.startsWith(`${plugin.id}/`) || targets.has(target));
+  if (updating && retained.length !== Object.keys(settings.pluginContentSelections || {}).length) patch.pluginContentSelections = Object.fromEntries(retained);
   if (activate) for (const field of review.fields) {
     const value = choices[field.key], current = { ...settings, ...patch };
     if (field.kind === 'placement' && value) {
@@ -107,7 +110,7 @@ function initialSetupPlan(settings, plugin, input, { activate = true, context = 
   if (Object.keys(record.values).length > MAX_CHOICES) throw new Error('Too many initial settings');
   if (review.fields.length) patch.pluginInitialSetup = { ...settings.pluginInitialSetup, [plugin.id]: record };
   // Preserve the user's chosen plugin when an update removes only its view.
-  for (const target of new Set((plugin.views || []).filter(view => view.mode === 'replace').flatMap(view => view.targets))) {
+  for (const target of targets) {
     const selected = (patch.pluginContentSelections || settings.pluginContentSelections)?.[target];
     const options = plugin.views.filter(view => view.mode === 'replace' && view.targets.includes(target)).map(view => refFor(plugin.id, view));
     if (activate && selected?.startsWith(`${plugin.id}/`) && !options.includes(selected)) {

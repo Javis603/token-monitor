@@ -27,6 +27,7 @@ async function historyFixture(t, fault) {
   const f = fixture(t, fault); await f.install('1.0.0'); await f.install('2.0.0');
   f.settings.pluginStates['test-plugin'] = { enabled: true, background: false, trustedRevision: 'a'.repeat(64) };
   // Include every placement key in the rollback baseline.
+  f.settings.pluginContentSelections['main.limits.content'] = 'test-plugin/page';
   f.settings.trayCustomLayout = { version: 1, items: [] };
   f.settings.pluginMainPages = ['test-plugin/page', 'other/page'];
   for (const dir of [f.args.dataDir, f.args.settingsDir]) {
@@ -47,6 +48,20 @@ function snapshot(f) {
   visit(f.dir);
   return { files, settings: structuredClone(f.settings) };
 }
+
+for (const invalidate of ['cancel', 'expire']) test(`a preview ${invalidate}d while consent is open cannot be committed`, async t => {
+  const f = fixture(t);
+  let clock = 1;
+  f.args.manager.list = () => ({ enabled: true, plugins: [] });
+  const api = createManagedPlugins({ ...f.args, now: () => clock }); api.recover();
+  t.after(() => api.dispose());
+  const preview = api.preview(parsePackage(bytes()));
+  const before = snapshot(f);
+  await assert.rejects(api.install(preview.token, { trustInstall: true, beforeEnable() {
+    if (invalidate === 'cancel') api.cancel(preview.token); else clock += 10 * 60 * 1000 + 1;
+  } }), /preview expired/);
+  assert.deepEqual(snapshot(f), before);
+});
 async function operation(api, name, token) {
   if (name === 'preview') return api.preview(parsePackage(bytes('3.0.0', {})));
   if (name === 'update') return await api.install(token);

@@ -13000,7 +13000,7 @@ pluginApi = pluginBridge ? {
   list: loadPluginCatalog,
   orderContent: async (target, refs) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.orderContent(target, refs)),
   selectContent: async (target, ref) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.selectContent(target, ref)),
-  setEnabled: async (id, enabled) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled)),
+  setEnabled: async (id, enabled, initialSetup) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled, initialSetup)),
   setBackground: async (id, enabled) => applyPluginCatalog(await pluginBridge.setBackground(id, enabled)),
   restart: async (id) => applyPluginCatalog(await pluginBridge.restart(id)),
   reload: async () => applyPluginCatalog(await pluginBridge.reload()),

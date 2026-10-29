@@ -195,6 +195,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       const setupOptions = { activate: enabling, context: placementContext(), updating: operation === 'update' };
       const setup = pkg && operation !== 'rollback' ? initialSetupPlan(getSettings(), pkg.manifest, options.initialSetup, setupOptions) : null;
       const confirmed = enabling ? await options.beforeEnable?.(describePackage(pkg, { locale: getLocale() }), setup) : null;
+      options.consumePreview?.();
       fs.rmSync(txDir, { recursive: true, force: true }); fs.mkdirSync(txDir, { mode: 0o700 });
       if (pkg) unpackPackage(pkg, stage);
       const previous = path.join(historyDir, `${id}.tmplugin`), hadPrevious = fs.existsSync(previous);
@@ -267,11 +268,17 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     cancelSource(id) { for (const [token, preview] of previews) if (preview.origin.id === id) previews.delete(token); },
     async install(token, options = {}) {
       assertAvailable();
-      const item = previews.get(token); previews.delete(token);
+      const item = previews.get(token);
       if (!item || item.expires < now()) throw new Error('package preview expired; select the package again');
       if (item.baseline !== JSON.stringify(registry[item.pkg.manifest.id] || null)) throw new Error('installed version changed; preview again');
       assertInstallable(item.pkg, item.origin);
-      return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin, { trustUpdate: options.trustUpdate === true, trustInstall: options.trustInstall === true, initialSetup: options.initialSetup, beforeEnable: options.beforeEnable });
+      return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin, {
+        trustUpdate: options.trustUpdate === true, trustInstall: options.trustInstall === true, initialSetup: options.initialSetup, beforeEnable: options.beforeEnable,
+        consumePreview() {
+          if (previews.get(token) !== item || item.expires < now()) throw new Error('package preview expired; select the package again');
+          previews.delete(token);
+        }
+      });
     },
     async rollback(id) {
       const old = managed(id);

@@ -74,9 +74,9 @@ test('trust is revision-specific and missing installs remain manageable after re
 });
 test('replacement selection requires an active declared replacement; cancelling code changes preserves execution', async t => {
   const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
-  const selected = f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/content');
+  const selected = await f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/content');
   assert.equal(selected.contentSelections['main.limits.content'], 'trusted-fixture/content');
-  assert.throws(() => f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/panel'));
+  await assert.rejects(f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/panel'));
   f.lifecycle(f.main, () => ({ loaded: true, unsaved: true }));
   f.cancel(); await assert.rejects(f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false }), /cancelled/);
   assert.equal(f.runtime.manager.active('trusted-fixture'), true);
@@ -97,7 +97,7 @@ test('descriptor subscription receives first content selection without foregroun
   const first = f.handlers.get('plugins:views')(f.event(f.notch), { surface: 'notch' });
   assert.ok(first.views['trusted-fixture/content']); assert.equal(f.children.length, 0);
   f.notch.webContents.sent.length = 0;
-  f.invoke('plugins:selectContent', 'notch.home.content', 'trusted-fixture/content');
+  await f.invoke('plugins:selectContent', 'notch.home.content', 'trusted-fixture/content');
   assert.ok(f.notch.webContents.sent.some(item => item.channel === 'plugins:views' && item.value.surface === 'notch'));
   assert.equal(f.children.length, 0);
 });
