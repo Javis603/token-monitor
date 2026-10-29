@@ -362,6 +362,7 @@
       const group = el(document, 'fieldset', 'plugin-initial-setup');
       group.append(el(document, 'legend', '', t('plugins.initial.title')),
         el(document, 'p', 'settings-note', t('plugins.initial.note')));
+      const rows = el(document, 'div', 'plugin-initial-choices'); group.append(rows);
       for (const field of review.fields) {
         if (field.kind === 'placement' || field.kind === 'background') {
           const row = el(document, 'label', 'plugin-placement-choice');
@@ -369,21 +370,21 @@
           input.dataset.controlKey = `initial/${field.key}`;
           input.addEventListener('change', () => { source.initialChoices[field.key] = input.checked; });
           row.append(input, el(document, 'span', '', field.kind === 'background' ? t('settings.plugins.background') : t(`plugins.initial.place.${field.surface}`, { name: field.title })));
-          group.append(row);
+          rows.append(row);
         } else {
           const content = field.kind === 'content', own = field.options.filter(option => !option.current);
           const current = field.options.find(option => option.current), target = content ? contentTargetLabel(field.target, t) : '';
           if (content) {
             const choices = own.map(option => ({ ref: option.value, title: option.label, pluginId: source.id, pluginName: source.name,
               preferred: option.value === `${source.id}/${source.defaults?.content?.[field.target]}` }));
-            group.append(contentControls({ key: `initial/${field.key}`, target: field.target, choices, value: source.initialChoices[field.key],
+            rows.append(contentControls({ key: `initial/${field.key}`, target: field.target, choices, value: source.initialChoices[field.key],
               current: current ? { value: current.value, label: t('plugins.initial.keepCurrent') } : null,
               change: value => { source.initialChoices[field.key] = value; render(); } }));
             continue;
           }
           const options = [{ value: null, label: t(content ? 'plugins.content.native' : 'plugins.initial.keepAppearance') },
             ...field.options.map(option => ({ value: option.value, label: option.current ? t('plugins.initial.keepCurrent') : t(content ? 'plugins.content.use' : 'plugins.initial.applyAppearance', { name: option.label }) }))];
-          group.append(choiceControls({ key: `initial/${field.key}`, title: content ? t('plugins.content.title', { target }) : t('plugins.initial.appearance'),
+          rows.append(choiceControls({ key: `initial/${field.key}`, title: content ? t('plugins.content.title', { target }) : t('plugins.initial.appearance'),
             options, value: source.initialChoices[field.key], change: value => { source.initialChoices[field.key] = value; },
             toggle: own.length === 1 && !current ? { value: own[0].value, offValue: null,
               label: t(content ? 'plugins.content.replace' : 'plugins.initial.applyAppearance', { name: own[0].label, target }) } : null }));
