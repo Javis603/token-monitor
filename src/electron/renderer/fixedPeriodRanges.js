@@ -526,7 +526,9 @@
         const scope = usesToday ? today.cursorAccountUsage : snapshot.history?.cursorAccountUsage;
         const usage = usesToday && scope
           ? rowFromLivePeriod(scope.usage, row.date)
-          : accountRows.get(row.date);
+          // A compatible History snapshot covers zero-usage days too. Keep
+          // its scope in winner selection when a removed day has no bucket.
+          : scope ? accountRows.get(row.date) || {} : undefined;
         const entry = { deviceId: snapshot.deviceId, row, usage,
           scope: usage && scope ? { ...scope,
             range: `day:${row.date}:${snapshot.periodWindows?.timeZone || scope.range}` } : null };

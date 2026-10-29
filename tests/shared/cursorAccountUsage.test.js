@@ -342,3 +342,38 @@ test('HTTP 413 retries once without account evidence even below the local size b
   assert.doesNotMatch(bodies[1], /cursorAccountUsage/);
   assert.equal(JSON.parse(bodies[1]).today.totalTokens, 1100);
 });
+
+test('fixed ranges admit a missing account day as zero while retaining unrelated usage and archive residue', () => {
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  const { computePeriodWindows } = require('../../src/shared/collector');
+  // Tuesday keeps yesterday inside all three fixed ranges, including Week.
+  const clock = new Date(2026, 9, 27, 12);
+  const windows = computePeriodWindows(clock);
+  const yesterday = new Date(2026, 9, 26, 12).toLocaleDateString('en-CA');
+  const bucket = (date, cursor, codex = 0) => ({ date, clients: [
+    { client: 'cursor', modelId: 'shared', tokens: { input: cursor }, cost: cursor / 1000 },
+    ...(codex ? [{ client: 'codex', modelId: 'shared', tokens: { input: codex }, cost: codex / 1000 }] : [])
+  ] });
+  const history = rows => normalizeHistory(parseGraphResult({ contributions: rows }), { todayKey: windows.today.key });
+  const a = { ...record('A', 1, 2000), periodWindows: windows, historyAvailable: true };
+  const b = { ...record('B', 1, 1000), periodWindows: windows, historyAvailable: true };
+  for (const row of [a, b]) {
+    row.today = period('cursor', 1, 0.001);
+    row.today.cursorAccountUsage = { ...row.month.cursorAccountUsage, usage: accountingCounters(row.today) };
+  }
+  a.history = history([bucket(yesterday, 105, 20), bucket(windows.today.key, 1)]);
+  b.history = history([bucket(windows.today.key, 1)]);
+  a.history.cursorAccountUsage = { ...a.today.cursorAccountUsage,
+    usage: history([bucket(yesterday, 100), bucket(windows.today.key, 1)]) };
+  b.history.cursorAccountUsage = { ...b.today.cursorAccountUsage,
+    usage: history([bucket(windows.today.key, 1)]) };
+  for (const selection of ['week', 'last7', 'last30']) {
+    const result = ranges.fixedPeriodSnapshotFromDevices(selection, [a, b], { now: clock, historyAvailable: true });
+    assert.equal(result.status, 'ready');
+    assert.equal(result.period.totalTokens, 26);
+    assert.equal(result.period.clients.cursor, 6);
+    assert.equal(result.period.clients.codex, 20);
+    assert.equal(result.devices[0].period.totalTokens, 126);
+    assert.equal(result.devices[1].period.totalTokens, 1);
+  }
+});
