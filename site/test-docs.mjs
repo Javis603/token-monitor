@@ -25,12 +25,12 @@ test("canonical document links stay local while implementation links keep reposi
   assert.equal(referenceHref('../../../escape', references[0].source), null);
 });
 
-test("built references contain current canonical content and byte-identical agent Markdown", async () => {
+test("built references contain current canonical content and source-context Markdown links", async () => {
   for (const reference of references) {
     const markdown = await readFile(new URL(reference.source, root), 'utf8');
     const html = await readFile(new URL(`_site/docs/${reference.page}.html`, root), 'utf8');
-    const raw = await readFile(new URL(`_site/docs/${reference.page}.md`, root), 'utf8');
-    assert.equal(raw, markdown);
+    assert.ok(html.includes(`href="https://raw.githubusercontent.com/Javis603/token-monitor/main/${reference.source}"`));
+    assert.ok(!html.includes(`href="${reference.page}.md"`));
     assert.ok(html.includes(renderReference(markdown, reference.source).split('</h1>')[1]), reference.page);
     assert.equal((html.match(/<article /g) || []).length, 1);
     assert.ok(html.includes('data-docs-shared lang="en"'));
@@ -41,12 +41,52 @@ test("built references contain current canonical content and byte-identical agen
 
 test("canonical reference edits trigger Pages and each reference has a navigation entry", async () => {
   const workflow = await readFile(new URL('.github/workflows/pages.yml', root), 'utf8');
+  for (const event of ['push', 'pull_request']) {
+    const section = workflow.split(`  ${event}:`)[1].split(/\n  [a-z_]+:/)[0];
+    assert.ok(section.includes("'docs/plugins/author-quickstart.md'"), `${event}: quickstart parity trigger missing`);
+    for (const reference of references) assert.ok(section.includes(`'${reference.source}'`));
+  }
+  assert.ok(workflow.includes("if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"));
   const output = new URL('_site/docs/', root);
   for (const reference of references) {
     assert.ok(workflow.includes(`'${reference.source}'`), `Pages does not watch ${reference.source}`);
     const html = await readFile(new URL(reference.page + '.html', output), 'utf8');
     assert.ok(html.includes(`<a href="${reference.page}.html" aria-current="page"`), reference.page);
   }
+});
+
+test("agent Markdown relative links resolve to repository files in their original source context", async () => {
+  const { Marked } = await import('marked');
+  const marked = new Marked();
+  for (const reference of references) {
+    const markdown = await readFile(new URL(reference.source, root), 'utf8');
+    const links = [];
+    marked.walkTokens(marked.lexer(markdown), token => { if (token.type === 'link') links.push(token.href); });
+    const base = new URL(reference.source, 'https://raw.githubusercontent.com/Javis603/token-monitor/main/');
+    for (const href of links) {
+      if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')) continue;
+      const resolved = new URL(href, base);
+      const relative = resolved.pathname.split('/main/')[1];
+      assert.ok(relative, `${reference.page}: ${href}`);
+      assert.ok((await stat(new URL(relative, root))).isFile(), `${reference.page}: ${href}`);
+    }
+  }
+});
+
+test("quickstart query can be pasted into its first mount without changing async context", async () => {
+  const markdown = await readFile(new URL('docs/plugins/author-quickstart.md', root), 'utf8');
+  const blocks = [...markdown.matchAll(/```js\n([\s\S]*?)```/g)].map(match => match[1]);
+  const combined = blocks[0].replace('      return { update,', blocks[1] + '\n      return { update,');
+  const module = await import('data:text/javascript,' + encodeURIComponent(combined));
+  const output = { remove() {} };
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: () => output };
+  try {
+    const ctx = { data: { query: async () => ({availability: 'available', rows: [{totalTokens: 42}]}) } };
+    const mount = await module.activate(ctx).mount({ append() {} }, {surface: 'page'});
+    assert.equal(output.textContent, '42');
+    mount.dispose();
+  } finally { globalThis.document = savedDocument; }
 });
 
 test("reference cross-links and section anchors resolve in the built pages", async () => {

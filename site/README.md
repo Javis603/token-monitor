@@ -10,11 +10,11 @@ App usage, plugin usage and plugin development are separate topics. The author g
 
 ## Canonical plugin references
 
-`build-docs.mjs` maps canonical documents under `docs/plugins/` to reference pages, including data/settings examples, publishing and testing. Its `references` array is the source-to-route registry. Edit those Markdown sources, not generated `_site` files. Their English content is intentionally labelled as canonical; translated guide prose and navigation do not imply translated API specifications. Each generated page also exports the exact source Markdown for agent consumption.
+`build-docs.mjs` maps canonical documents under `docs/plugins/` to reference pages, including data/settings examples, publishing and testing. Its `references` array is the source-to-route registry. Edit those Markdown sources, not generated `_site` files. Their English content is intentionally labelled as canonical; translated guide prose and navigation do not imply translated API specifications. Each generated page links agents to its canonical raw GitHub Markdown at the original repository path, so relative document links keep their source context. Do not relocate raw Markdown under renamed website routes without rewriting its links.
 
 Marked is a pinned **build-only** dev dependency; it is not bundled into the website or the App. Rendering escapes raw HTML, keeps code literal and allows only HTTP(S), fragment or repository-relative links. Relative links between mapped reference documents remain on the website; implementation/example links retain their repository context. The site tests verify source/output parity, cross-reference anchors and rendering boundaries.
 
-The Pages workflow watches all mapped canonical sources as well as `site/**`. When adding a canonical reference, update the source mapping and workflow triggers together. Build tests should fail before upload when a mapped section link no longer resolves.
+The Pages workflow builds and tests pull requests and main pushes affecting mapped sources, the quickstart used by parity checks, or `site/**`; only main can deploy. When adding a canonical reference, update the source mapping and workflow triggers together. Build tests should fail before upload when a mapped section link no longer resolves.
 
 Published source links use `main`. Document actual API and App-version compatibility requirements rather than pull-request numbers or development-branch availability. Previewing this site locally does not publish it.
 

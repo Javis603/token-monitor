@@ -92,7 +92,7 @@
         <article class="doc-lang docs-article" lang="en">
 <h1>Plugin development guide</h1><p class="docs-lede">Build a same-page interface with an optional local Node backend. The plugin API is experimental and may change.</p><h2 id="manifest-basics" data-anchor="manifest-basics">First manifest</h2><p>Save this as manifest.json and add ui.mjs. Import the folder in Settings → Plugins, review the code and initial locations, then choose Trust, install and enable. Install only keeps it disabled; the global switch and safe mode still apply.</p><figure class="code"><pre><code>{&quot;tmApi&quot;:1,&quot;id&quot;:&quot;my-panel&quot;,&quot;name&quot;:&quot;My panel&quot;,&quot;version&quot;:&quot;1.0.0&quot;,&quot;ui&quot;:&quot;ui.mjs&quot;,&quot;files&quot;:[&quot;ui.mjs&quot;],&quot;views&quot;:[{&quot;id&quot;:&quot;panel&quot;,&quot;title&quot;:&quot;My panel&quot;,&quot;surfaces&quot;:[&quot;home&quot;,&quot;page&quot;],&quot;defaultSurfaces&quot;:[&quot;page&quot;]}]}</code></pre></figure><p>Optional defaultSurfaces suggests initial locations. Confirm or change them at installation; install-only defers them until first enable. Updates preserve your choices. Full locations are skipped, and surface master switches stay unchanged.</p><figure class="code"><pre><code>export function activate(ctx) {
   return {
-    mount(container, context) {
+    async mount(container, context) {
       const output = document.createElement(&#x27;p&#x27;);
       container.append(output);
       function update(next) {
@@ -111,7 +111,7 @@ My idea:</code></pre></figure>
         <article class="doc-lang docs-article" lang="zh-TW">
 <h1>外掛開發指南</h1><p class="docs-lede">以同頁介面配合選用的本機 Node 後端。外掛 API 屬實驗性，日後可能變更。</p><h2 data-anchor="manifest-basics">第一份宣告檔</h2><p>儲存為 manifest.json 並新增 ui.mjs。匯入資料夾、確認首次顯示位置，再信任並啟用。</p><figure class="code"><pre><code>{&quot;tmApi&quot;:1,&quot;id&quot;:&quot;my-panel&quot;,&quot;name&quot;:&quot;My panel&quot;,&quot;version&quot;:&quot;1.0.0&quot;,&quot;ui&quot;:&quot;ui.mjs&quot;,&quot;files&quot;:[&quot;ui.mjs&quot;],&quot;views&quot;:[{&quot;id&quot;:&quot;panel&quot;,&quot;title&quot;:&quot;My panel&quot;,&quot;surfaces&quot;:[&quot;home&quot;,&quot;page&quot;],&quot;defaultSurfaces&quot;:[&quot;page&quot;]}]}</code></pre></figure><p>defaultSurfaces 可建議首次顯示位置。安裝時可確認或修改；只安裝會留待首次啟用才套用。更新保留用戶選擇，位置已滿會略過，亦不會更改顯示區域的總開關。</p><figure class="code"><pre><code>export function activate(ctx) {
   return {
-    mount(container, context) {
+    async mount(container, context) {
       const output = document.createElement(&#x27;p&#x27;);
       container.append(output);
       function update(next) {
@@ -130,7 +130,7 @@ My idea:</code></pre></figure>
         <article class="doc-lang docs-article" lang="zh-CN">
 <h1>插件开发指南</h1><p class="docs-lede">同页界面配合可选的本机 Node 后端。插件 API 为实验性，今后可能变更。</p><h2 data-anchor="manifest-basics">首个声明文件</h2><p>保存为 manifest.json 并创建 ui.mjs。导入文件夹、确认首次显示位置，再信任并启用。</p><figure class="code"><pre><code>{&quot;tmApi&quot;:1,&quot;id&quot;:&quot;my-panel&quot;,&quot;name&quot;:&quot;My panel&quot;,&quot;version&quot;:&quot;1.0.0&quot;,&quot;ui&quot;:&quot;ui.mjs&quot;,&quot;files&quot;:[&quot;ui.mjs&quot;],&quot;views&quot;:[{&quot;id&quot;:&quot;panel&quot;,&quot;title&quot;:&quot;My panel&quot;,&quot;surfaces&quot;:[&quot;home&quot;,&quot;page&quot;],&quot;defaultSurfaces&quot;:[&quot;page&quot;]}]}</code></pre></figure><p>defaultSurfaces 可建议首次显示位置。安装时可以确认或修改；只安装会留待首次启用才应用。更新保留用户选择，位置已满会跳过，也不会更改显示区域的总开关。</p><figure class="code"><pre><code>export function activate(ctx) {
   return {
-    mount(container, context) {
+    async mount(container, context) {
       const output = document.createElement(&#x27;p&#x27;);
       container.append(output);
       function update(next) {
@@ -149,7 +149,7 @@ My idea:</code></pre></figure>
         <article class="doc-lang docs-article" lang="ko">
 <h1>플러그인 개발 가이드</h1><p class="docs-lede">같은 페이지의 UI와 선택적 로컬 Node 백엔드를 만들 수 있습니다. 플러그인 API는 실험적이며 변경될 수 있습니다.</p><h2 data-anchor="manifest-basics">첫 매니페스트</h2><p>manifest.json으로 저장하고 ui.mjs를 추가하세요. 폴더를 가져오고 초기 위치를 확인한 다음 신뢰하고 활성화하세요.</p><figure class="code"><pre><code>{&quot;tmApi&quot;:1,&quot;id&quot;:&quot;my-panel&quot;,&quot;name&quot;:&quot;My panel&quot;,&quot;version&quot;:&quot;1.0.0&quot;,&quot;ui&quot;:&quot;ui.mjs&quot;,&quot;files&quot;:[&quot;ui.mjs&quot;],&quot;views&quot;:[{&quot;id&quot;:&quot;panel&quot;,&quot;title&quot;:&quot;My panel&quot;,&quot;surfaces&quot;:[&quot;home&quot;,&quot;page&quot;],&quot;defaultSurfaces&quot;:[&quot;page&quot;]}]}</code></pre></figure><p>defaultSurfaces로 초기 표시 위치를 제안할 수 있습니다. 설치 시 확인하거나 변경하며, 설치만 한 경우 첫 활성화 시 적용합니다. 업데이트는 사용자 선택을 유지합니다. 가득 찬 위치는 건너뛰며 전체 스위치는 변경하지 않습니다.</p><figure class="code"><pre><code>export function activate(ctx) {
   return {
-    mount(container, context) {
+    async mount(container, context) {
       const output = document.createElement(&#x27;p&#x27;);
       container.append(output);
       function update(next) {
@@ -168,7 +168,7 @@ My idea:</code></pre></figure>
         <article class="doc-lang docs-article" lang="ja">
 <h1>プラグイン開発ガイド</h1><p class="docs-lede">同一ページの UI と任意のローカル Node バックエンドを作成できます。プラグイン API は実験的で、今後変更される可能性があります。</p><h2 data-anchor="manifest-basics">最初のマニフェスト</h2><p>manifest.json として保存し ui.mjs を追加します。フォルダーを取り込み、初回の表示位置を確認して、信頼して有効化します。</p><figure class="code"><pre><code>{&quot;tmApi&quot;:1,&quot;id&quot;:&quot;my-panel&quot;,&quot;name&quot;:&quot;My panel&quot;,&quot;version&quot;:&quot;1.0.0&quot;,&quot;ui&quot;:&quot;ui.mjs&quot;,&quot;files&quot;:[&quot;ui.mjs&quot;],&quot;views&quot;:[{&quot;id&quot;:&quot;panel&quot;,&quot;title&quot;:&quot;My panel&quot;,&quot;surfaces&quot;:[&quot;home&quot;,&quot;page&quot;],&quot;defaultSurfaces&quot;:[&quot;page&quot;]}]}</code></pre></figure><p>defaultSurfaces で初回の表示位置を提案できます。インストール時に確認・変更でき、インストールのみの場合は初回有効化時に適用します。更新ではユーザーの選択を維持します。満員の場所はスキップし、全体スイッチは変更しません。</p><figure class="code"><pre><code>export function activate(ctx) {
   return {
-    mount(container, context) {
+    async mount(container, context) {
       const output = document.createElement(&#x27;p&#x27;);
       container.append(output);
       function update(next) {
@@ -187,7 +187,7 @@ My idea:</code></pre></figure>
         <article class="doc-lang docs-article" lang="pt-BR">
 <h1>Guia de desenvolvimento de plugins</h1><p class="docs-lede">Crie uma interface na mesma página com backend Node local opcional. A API de plugins é experimental e pode mudar.</p><h2 data-anchor="manifest-basics">Primeiro manifesto</h2><p>Salve como manifest.json e adicione ui.mjs. Importe a pasta, confirme os locais iniciais, confie e ative.</p><figure class="code"><pre><code>{&quot;tmApi&quot;:1,&quot;id&quot;:&quot;my-panel&quot;,&quot;name&quot;:&quot;My panel&quot;,&quot;version&quot;:&quot;1.0.0&quot;,&quot;ui&quot;:&quot;ui.mjs&quot;,&quot;files&quot;:[&quot;ui.mjs&quot;],&quot;views&quot;:[{&quot;id&quot;:&quot;panel&quot;,&quot;title&quot;:&quot;My panel&quot;,&quot;surfaces&quot;:[&quot;home&quot;,&quot;page&quot;],&quot;defaultSurfaces&quot;:[&quot;page&quot;]}]}</code></pre></figure><p>defaultSurfaces sugere locais iniciais. Confirme ou altere na instalação; instalar sem ativar adia a aplicação até a primeira ativação. Atualizações preservam suas escolhas. Locais cheios são ignorados e os controles gerais não mudam.</p><figure class="code"><pre><code>export function activate(ctx) {
   return {
-    mount(container, context) {
+    async mount(container, context) {
       const output = document.createElement(&#x27;p&#x27;);
       container.append(output);
       function update(next) {

@@ -15,7 +15,7 @@ Create `ui.mjs`:
 ```js
 export function activate(ctx) {
   return {
-    mount(container, context) {
+    async mount(container, context) {
       const output = document.createElement('p');
       container.append(output);
       function update(next) {
@@ -36,7 +36,7 @@ Add a CSS file to both `files` and `css` for your own design. Add `targets` and 
 
 ## Data and settings
 
-Inside an async handler or mount, read a captured App snapshot:
+Paste this inside the async `mount` above, after `update(context)` and before its `return`, to read a captured App snapshot:
 
 ```js
 try {
