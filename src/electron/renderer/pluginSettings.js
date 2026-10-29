@@ -373,6 +373,14 @@
         } else {
           const content = field.kind === 'content', own = field.options.filter(option => !option.current);
           const current = field.options.find(option => option.current), target = content ? contentTargetLabel(field.target, t) : '';
+          if (content) {
+            const choices = own.map(option => ({ ref: option.value, title: option.label, pluginId: source.id, pluginName: source.name,
+              preferred: option.value === `${source.id}/${source.defaults?.content?.[field.target]}` }));
+            group.append(contentControls({ key: `initial/${field.key}`, target: field.target, choices, value: source.initialChoices[field.key],
+              current: current ? { value: current.value, label: t('plugins.initial.keepCurrent') } : null,
+              change: value => { source.initialChoices[field.key] = value; render(); } }));
+            continue;
+          }
           const options = [{ value: null, label: t(content ? 'plugins.content.native' : 'plugins.initial.keepAppearance') },
             ...field.options.map(option => ({ value: option.value, label: option.current ? t('plugins.initial.keepCurrent') : t(content ? 'plugins.content.use' : 'plugins.initial.applyAppearance', { name: option.label }) }))];
           group.append(choiceControls({ key: `initial/${field.key}`, title: content ? t('plugins.content.title', { target }) : t('plugins.initial.appearance'),
@@ -382,6 +390,38 @@
         }
       }
       return group;
+    }
+
+    function contentControls({ key, target, choices, value, change, current = null }) {
+      const providers = new Map();
+      for (const view of choices) {
+        const id = view.pluginId || view.ref.split('/')[0];
+        if (!providers.has(id)) providers.set(id, { name: view.pluginName, views: [] });
+        providers.get(id).views.push(view);
+      }
+      const groups = [...providers.values()].map(provider => {
+        const selected = provider.views.find(view => view.ref === value);
+        const id = provider.views[0].ref.split('/')[0];
+        const preferred = list.plugins?.find(plugin => plugin.id === id)?.defaults?.content[target];
+        return { ...provider, selected, ref: selected?.ref || provider.views.find(view => view.preferred || view.ref === `${id}/${preferred}`)?.ref || provider.views[0].ref };
+      });
+      const label = contentTargetLabel(target, t);
+      const options = [{ value: null, label: t('plugins.content.native') },
+        ...(current ? [current] : []), ...groups.map(provider => ({ value: provider.ref, label: t('plugins.content.use', { name: provider.name }) }))];
+      const row = choiceControls({ key, title: t('plugins.content.source', { target: label }), options, value, change,
+        toggle: groups.length === 1 && !current ? { value: groups[0].ref, offValue: null,
+          label: t('plugins.content.replace', { name: groups[0].name, target: label }) } : null });
+      row.classList.add('plugin-content-choice');
+      const selected = groups.find(provider => provider.selected);
+      if (selected?.views.length > 1) {
+        const details = el(document, 'details', 'plugin-content-variants');
+        details.dataset.detailKey = `${key}/variants`;
+        details.append(el(document, 'summary', '', t('plugins.content.variant', { name: selected.selected.title })),
+          choiceControls({ key: `${key}/variant`, title: t('plugins.content.variantTitle'), value,
+            options: selected.views.map(view => ({ value: view.ref, label: view.title })), change }));
+        row.append(details);
+      }
+      return row;
     }
 
     function packagePanel() {
@@ -1049,6 +1089,17 @@
       return section;
     }
 
+    function contentSourceRows(plugin) {
+      const targets = new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode === 'replace').flatMap(view => view.targets));
+      return [...targets].map(target => {
+        const choices = (list.plugins || []).filter(item => item.status === 'active').flatMap(item => (item.views || [])
+          .filter(view => view.mode === 'replace' && view.targets.includes(target)).map(view => ({ ...view, pluginName: item.name })));
+        return contentControls({ key: `content/${target}`, target, choices,
+          value: choices.some(view => view.ref === list.contentSelections?.[target]) ? list.contentSelections[target] : null,
+          change: value => void run(() => api.selectContent(target, value)) });
+      });
+    }
+
     function pluginDetail(plugin) {
       const wrap = el(document, 'section', 'plugin-detail'); wrap.dataset.pluginId = plugin.id;
       const toolbar = el(document, 'div', 'plugin-detail-toolbar');
@@ -1083,6 +1134,7 @@
         }
         return wrap;
       }
+      wrap.append(...contentSourceRows(plugin));
       if (plugin.settings && api.getSettings && api.updateSettings) wrap.append(authorSettingsSection(plugin));
       // Disabled plugins keep their saved placements visible, without offering
       // mutations until enabled. The count is a selection, not runtime activity.
@@ -1106,7 +1158,13 @@
           const text = el(document, 'span', 'settings-item-text'); text.append(el(document, 'span', 'settings-item-title', t('settings.plugins.background')));
           const input = el(document, 'input'); input.type = 'checkbox'; input.checked = plugin.background.enabled;
           input.addEventListener('change', () => void run(() => api.setBackground(plugin.id, input.checked)));
-          label.append(text, input, el(document, 'span', 'settings-note settings-item-desc', t('settings.plugins.backgroundNote'))); wrap.append(label);
+          input.setAttribute('aria-description', t('settings.plugins.backgroundNote'));
+          label.append(text, input, el(document, 'span', 'settings-note settings-item-desc', plugin.background.description || t('settings.plugins.backgroundNote'))); wrap.append(label);
+          if (plugin.background.description) {
+            const help = el(document, 'details', 'plugin-background-help');
+            help.append(el(document, 'summary', '', t('plugins.background.help')), el(document, 'p', 'settings-note', t('settings.plugins.backgroundNote')));
+            wrap.append(help);
+          }
         }
         if (plugin.skins?.length) {
           const skins = el(document, 'div', 'plugin-skins');
@@ -1130,19 +1188,6 @@
           }
           wrap.append(detailSection(t('plugins.ui.pages'), el(document, 'p', 'settings-note', t('plugins.ui.pagesNote')), actions));
         }
-      }
-      const replacementTargets = new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode === 'replace').flatMap(view => view.targets));
-      for (const target of replacementTargets) {
-        const choices = (list.plugins || []).filter(item => item.status === 'active').flatMap(item => (item.views || [])
-          .filter(view => view.mode === 'replace' && view.targets.includes(target)).map(view => ({ ...view, pluginName: item.name })));
-        const name = view => view.pluginName === view.title ? view.title : `${view.pluginName} · ${view.title}`;
-        const label = contentTargetLabel(target, t);
-        const row = choiceControls({ key: `content/${target}`, title: t('plugins.content.title', { target: label }),
-          options: [{ value: null, label: t('plugins.content.native') }, ...choices.map(view => ({ value: view.ref, label: t('plugins.content.use', { name: name(view) }) }))],
-          value: choices.some(view => view.ref === list.contentSelections?.[target]) ? list.contentSelections[target] : null,
-          change: value => void run(() => api.selectContent(target, value)),
-          toggle: choices.length === 1 ? { value: choices[0].ref, offValue: null, label: t('plugins.content.replace', { name: name(choices[0]), target: label }) } : null });
-        row.classList.add('plugin-content-choice'); wrap.append(row);
       }
       for (const target of new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode !== 'replace').flatMap(view => view.targets || []))) {
         const views = (list.plugins || []).flatMap(item => (item.views || []).filter(view => view.mode !== 'replace' && view.targets?.includes(target)))

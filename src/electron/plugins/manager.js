@@ -118,7 +118,7 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
       hasCode: Boolean(m.ui || m.backend), hasBackend: Boolean(m.backend), settings: m.settings, settingsIdentity: plugin.revision,
       revision: plugin.revision, defaults: m.defaults, views: m.views.map(view => descriptor(plugin, view)),
       skins: m.skins.map(skin => ({ ...skin, ref: `${plugin.id}/${skin.id}`, name: localize(skin.name, getLocale()) })),
-      background: { supported: Boolean(m.backend && m.background), enabled: state?.background === true },
+      background: { supported: Boolean(m.backend && m.background), enabled: state?.background === true, description: localize(m.backgroundDescription, getLocale()) },
       runtime: m.backend ? { state: plugin.failure ? 'error' : backends.has(plugin.id) ? 'running' : 'idle', mode: selected(plugin) ? 'visible' : 'background',
         cpuPercent: null, memoryMB: null, lastError: plugin.failure } : null, logs: plugin.logs.slice(-20) };
   }

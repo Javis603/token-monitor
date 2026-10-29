@@ -10,6 +10,7 @@ const { runtimeFixture } = require('../helpers/trustedPlugin');
 
 function raw() {
   return { tmApi: 1, id: 'setup-fixture', name: 'Setup fixture', version: '1.0.0', ui: 'ui.mjs', backend: 'backend.cjs', files: ['ui.mjs', 'backend.cjs'], background: true,
+    backgroundDescription: { en: 'Refresh usage periodically.', 'zh-TW': '定期更新用量資料。' },
     views: [{ id: 'page', title: 'Page', surfaces: ['page', 'notch'], defaultSurfaces: ['page'] },
       { id: 'details', title: 'Details', targets: ['main.home.content'], mode: 'replace' },
       { id: 'compact', title: 'Compact', targets: ['main.home.content'], mode: 'replace' }],
@@ -50,6 +51,7 @@ test('initial review rejects undeclared or incorrectly typed choices before chan
 test('install-and-enable applies all four author suggestions together, using host-owned skin snapshots', async t => {
   const { f } = await fixture(t); const preview = await f.invoke('plugins:import', 'directory');
   assert.ok(preview.initialSetup.fields.some(field => field.kind === 'skin'));
+  assert.equal(preview.background.description, 'Refresh usage periodically.');
   await f.invoke('plugins:install', preview.token, { trustInstall: true, initialSetup: preview.initialSetup.values });
   assert.deepEqual(f.settings.pluginMainPages, ['setup-fixture/page']);
   assert.equal(f.settings.pluginContentSelections['main.home.content'], 'setup-fixture/compact');
@@ -59,6 +61,7 @@ test('install-and-enable applies all four author suggestions together, using hos
   assert.equal(f.settings.pluginAuthorSkin.appearance.font, 'mono');
   assert.equal(f.settings.notchEnabled, false);
   assert.equal(f.invoke('plugins:list').plugins[0].initialSetup.fields.length, 0);
+  assert.equal(f.invoke('plugins:list').plugins[0].background.description, 'Refresh usage periodically.');
 });
 
 test('install-only persists explicit opt-outs and applies them only on first enable', async t => {

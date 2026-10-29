@@ -45,7 +45,7 @@ async function main() {
       dropdowns: box.querySelectorAll('.plugin-initial-setup select').length, fits: document.documentElement.scrollWidth <= innerWidth };
   })()`);
   assert.deepEqual(initial.values, [true, true, true, true]); assert.equal(initial.fits, true); assert.equal(initial.dropdowns, 0);
-  assert.deepEqual(initial.actions, ['新增 Dashboard 分頁', '用 Dashboard 替換主頁內容', '背景執行', '套用 Blue 外觀']);
+  assert.deepEqual(initial.actions, ['新增 Dashboard 分頁', '用 Custom Dashboard 替換主頁內容', '背景執行', '套用 Blue 外觀']);
   fs.writeFileSync(path.join(evidence, 'initial-install-defaults.png'), (await win.webContents.capturePage()).toPNG());
   const reviewBounds = await win.webContents.executeJavaScript(`(() => {
     const rect = document.querySelector('.plugin-package-preview').getBoundingClientRect();
@@ -94,17 +94,18 @@ async function main() {
     Object.assign(data.plugins[0], { enabled: false, status: 'disabled', initialSetup: review });
     await panel.refresh(); box.querySelector('.plugin-enable').click(); await new Promise(resolve => setTimeout(resolve, 30));
     const group = box.querySelector('[data-choice-key="initial/content:main.home.content"]');
-    const labels = [...group.querySelectorAll('label')].map(node => node.textContent);
-    [...group.querySelectorAll('input')].find(node => node.value === 'setup-demo/compact').click();
+    const labels = [...group.querySelectorAll(':scope > label')].map(node => node.textContent);
+    group.querySelector('.plugin-content-variants').open = true;
+    [...group.querySelectorAll('.plugin-content-variants input')].find(node => node.value === 'setup-demo/compact').click();
     box.querySelector('.plugin-allow').click(); await new Promise(resolve => setTimeout(resolve, 30));
     return { labels, selected: calls.at(-1).initialSetup['content:main.home.content'] };
   })()`);
-  assert.deepEqual(alternatives, { labels: ['內建內容', '使用 Dashboard', '使用 Compact'], selected: 'setup-demo/compact' });
+  assert.deepEqual(alternatives, { labels: ['用 Custom Dashboard 替換主頁內容'], selected: 'setup-demo/compact' });
   console.log('PASS install review renders all four author recommendations without overflow');
   console.log('PASS install-only submits explicit empty, false and native choices together');
   console.log('PASS first-enable review reuses the same fields and submits user overrides');
   console.log('PASS pending setup for trusted code does not ask for trust again');
-  console.log('PASS multiple first-use replacements list explicit choices and submit the selected view');
+  console.log('PASS first-use source and optional layout choices remain separate and submit the selected view');
   console.log('Evidence:', evidence); win.destroy(); app.exit(0);
 }
 app.whenReady().then(main).catch(error => { console.error(error); app.exit(1); });

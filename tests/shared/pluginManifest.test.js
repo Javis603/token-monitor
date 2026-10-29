@@ -14,6 +14,16 @@ test('backend-only and skin-only packages need no renderer views', () => {
   assert.equal(normalizeManifest({...fixture,ui:undefined,views:[]}).ok,true);
   assert.equal(normalizeManifest({tmApi:1,id:'my-skin',name:'Style',version:'1.0.0',skins:[{id:'blue',name:'Blue',colors:{accent:'#123456'}}]}).ok,true);
 });
+
+test('background purpose is author-supplied localized text and requires declared support', () => {
+  const backgroundDescription = { en: 'Refresh usage periodically.', 'zh-TW': '定期更新用量資料。' };
+  const result = normalizeManifest({ ...fixture, background: true, backgroundDescription });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.manifest.backgroundDescription, backgroundDescription);
+  for (const patch of [{ background: false }, { backend: null }, { backgroundDescription: 42 }, { backgroundDescription: {} }]) {
+    assert.equal(normalizeManifest({ ...fixture, background: true, backgroundDescription, ...patch }).ok, false);
+  }
+});
 test('content selectors and backend Tray menu are explicit contracts; navigation replacement is rejected', () => {
   const view = { id: 'metric', targets: ['main.model.content'], selector: '.row-value' };
   const manifest = { ...fixture, views: [view], trayMenu: [{ id: 'refresh', label: 'Refresh' }] };

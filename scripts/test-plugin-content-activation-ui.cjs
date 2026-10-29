@@ -24,14 +24,18 @@ async function main() {
     const view = { ref, title: 'Tool details', mode: 'replace', targets: [target], surfaces: [] };
     const data = { enabled: true, contentSelections: { [target]: ref }, plugins: [{ id: 'tool-details', name: 'Tool details', author: 'Fixture', version: '0.5.0', source: 'user', status: 'active', enabled: true, trusted: true, views: [view] }] };
     const calls = [], box = document.getElementById('settings');
+    const schema = { version: 1, fields: [{ id: 'usage', label: '顯示總用量', type: 'boolean', default: true }, { id: 'tools', label: '顯示工具明細', type: 'boolean', default: false }] };
+    const preferences = { usage: true, tools: false };
+    const settingsSnapshot = () => ({ schema, schemaVersion: 1, revision: 1, values: { ...preferences }, errors: {}, readOnly: false });
     const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({ document, container: box,
       t: (key, params) => TokenMonitorI18n.translate('zh-TW', key, params), api: {
         list: async () => structuredClone(data), catalog: async () => ({ entries: [], sources: [] }),
         selectContent: async (target, ref) => { calls.push([target, ref]); if (ref === null) delete data.contentSelections[target]; else data.contentSelections[target] = ref; return structuredClone(data); },
-        setEnabled: async (_id, enabled) => { data.plugins[0].enabled = enabled; data.plugins[0].status = enabled ? 'active' : 'disabled'; return structuredClone(data); }
+        setEnabled: async (_id, enabled) => { data.plugins[0].enabled = enabled; data.plugins[0].status = enabled ? 'active' : 'disabled'; return structuredClone(data); },
+        getSettings: async () => settingsSnapshot(), updateSettings: async (_id, input) => { Object.assign(preferences, input.patch); calls.push(['settings', input.patch]); return settingsSnapshot(); }
       } });
     await panel.refresh(); box.querySelector('.plugin-manage').click();
-    window.contentFixture = { data, panel, box, calls, target, ref };
+    window.contentFixture = { data, panel, box, calls, target, ref, schema, preferences };
     return { selectors: box.querySelectorAll('.plugin-content-choice').length,
       redundantAction: [...box.querySelectorAll('button')].some(node => /使用此內容|恢復原生內容/.test(node.textContent)),
       rawTarget: box.textContent.includes(target), enabled: box.querySelector('.plugin-enable').checked,
@@ -53,15 +57,70 @@ async function main() {
     data.plugins[0].views.push({ ...data.plugins[0].views[0], ref: 'tool-details/compact', title: 'Compact details' });
     await panel.refresh();
     const group = box.querySelector('.plugin-content-choice');
-    const result = { label: group.querySelector('legend').textContent, value: group.querySelector('input:checked').value,
-      options: [...group.querySelectorAll('input')].map(option => option.value), rawTarget: box.textContent.includes(target) };
-    [...group.querySelectorAll('input')].find(input => input.value === 'tool-details/compact').click();
+    const result = { providerControls: group.querySelectorAll(':scope > label input').length, enabled: group.querySelector(':scope > label input').checked,
+      rawTarget: box.textContent.includes(target) };
+    group.querySelector(':scope > label input').click(); await new Promise(resolve => setTimeout(resolve, 30));
+    box.querySelector('.plugin-content-variants').open = true;
+    [...box.querySelectorAll('.plugin-content-variants input')].find(input => input.value === 'tool-details/compact').click();
     await new Promise(resolve => setTimeout(resolve, 30));
-    return { ...result, calls: contentFixture.calls, selected: box.querySelector('.plugin-content-choice input:checked').value };
+    return { ...result, calls: contentFixture.calls, selected: box.querySelector('.plugin-content-variants input:checked').value,
+      summary: box.querySelector('.plugin-content-variants summary').textContent };
   })()`);
   fs.writeFileSync(path.join(evidence, 'content-choices.png'), (await win.webContents.capturePage()).toPNG());
-  assert.deepEqual(multiple, { label: '主頁顯示內容', value: '', options: ['', 'tool-details/details', 'tool-details/compact'], rawTarget: false,
-    calls: [['main.home.content', null], ['main.home.content', 'tool-details/compact']], selected: 'tool-details/compact' });
+  assert.deepEqual(multiple, { providerControls: 1, enabled: false, rawTarget: false,
+    calls: [['main.home.content', null], ['main.home.content', 'tool-details/details'], ['main.home.content', 'tool-details/compact']], selected: 'tool-details/compact', summary: '顯示樣式：Compact details' });
+  const providers = await win.webContents.executeJavaScript(`(async () => {
+    const { data, panel, box, target } = contentFixture;
+    data.plugins.push({ id: 'other', name: 'Other dashboard', status: 'active', enabled: true, trusted: true,
+      views: [{ ref: 'other/home', title: 'Dashboard', mode: 'replace', targets: [target], surfaces: [] }] });
+    await panel.refresh(); const group = box.querySelector('.plugin-content-choice');
+    const options = [...group.querySelectorAll(':scope > label')].map(label => label.textContent);
+    [...group.querySelectorAll(':scope > label input')].find(input => input.value === 'other/home').click();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return { options, selected: contentFixture.calls.at(-1), layouts: box.querySelectorAll('.plugin-content-variants').length };
+  })()`);
+  assert.deepEqual(providers, { options: ['內建內容', '使用 Tool details', '使用 Other dashboard'], selected: ['main.home.content', 'other/home'], layouts: 0 });
+  const configured = await win.webContents.executeJavaScript(`(async () => {
+    const { data, panel, box, target, ref, schema, preferences, calls } = contentFixture;
+    data.plugins[0].settings = schema;
+    data.plugins[0].background = { supported: true, enabled: true, description: '定期更新用量資料。' };
+    await panel.refresh(); await new Promise(resolve => setTimeout(resolve, 40));
+    const before = data.contentSelections[target];
+    box.querySelector('[data-control-key="author-tools"]').click();
+    box.querySelector('[data-control-key="author-save"]').click(); await new Promise(resolve => setTimeout(resolve, 30));
+    const combined = { ...preferences };
+    box.querySelector('[data-control-key="author-usage"]').click();
+    box.querySelector('[data-control-key="author-save"]').click(); await new Promise(resolve => setTimeout(resolve, 30));
+    const result = { combined, preferences: { ...preferences }, provider: data.contentSelections[target], before,
+      purpose: box.querySelector('.plugin-background .settings-item-desc').textContent,
+      generic: box.querySelector('.plugin-background-help p').textContent,
+      helpCollapsed: !box.querySelector('.plugin-background-help').open };
+    [...box.querySelectorAll('.plugin-content-choice > label input')].find(input => input.value.startsWith('tool-details/')).click();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return result;
+  })()`);
+  assert.deepEqual(configured, { combined: { usage: true, tools: true }, preferences: { usage: false, tools: true }, provider: 'other/home', before: 'other/home', purpose: '定期更新用量資料。',
+    generic: '沒有顯示插件畫面時，仍允許插件繼續工作。', helpCollapsed: true });
+  await win.webContents.executeJavaScript("document.querySelector('.plugin-content-variants').open = false; window.scrollTo(0, 0); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+  fs.writeFileSync(path.join(evidence, 'content-modules.png'), (await win.webContents.capturePage()).toPNG());
+  const configurationBounds = await win.webContents.executeJavaScript(`(() => {
+    const rect = document.querySelector('.plugin-content-choice').getBoundingClientRect();
+    const bottom = document.querySelector('.plugin-background-help').getBoundingClientRect().bottom;
+    return { x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(bottom - rect.y) };
+  })()`);
+  fs.writeFileSync(path.join(evidence, 'content-configuration.png'), (await win.webContents.capturePage(configurationBounds)).toPNG());
+  const backgroundBounds = await win.webContents.executeJavaScript(`(() => {
+    const label = document.querySelector('.plugin-background'), help = document.querySelector('.plugin-background-help');
+    label.scrollIntoView({ block: 'center' });
+    const rect = label.getBoundingClientRect(), bottom = help.getBoundingClientRect().bottom;
+    return { x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(bottom - rect.y) };
+  })()`);
+  fs.writeFileSync(path.join(evidence, 'background-purpose.png'), (await win.webContents.capturePage(backgroundBounds)).toPNG());
+  const fallback = await win.webContents.executeJavaScript(`(async () => {
+    const { data, panel, box } = contentFixture; delete data.plugins[0].background.description;
+    await panel.refresh(); return { note: box.querySelector('.plugin-background .settings-item-desc').textContent, help: Boolean(box.querySelector('.plugin-background-help')) };
+  })()`);
+  assert.deepEqual(fallback, { note: '沒有顯示插件畫面時，仍允許插件繼續工作。', help: false });
   const disabled = await win.webContents.executeJavaScript(`(async () => {
     const { box } = contentFixture;
     const toggle = box.querySelector('.plugin-enable'); toggle.checked = false; toggle.dispatchEvent(new Event('change', { bubbles: true }));
@@ -71,7 +130,10 @@ async function main() {
   assert.deepEqual(disabled, { selectors: 0, enabled: false });
   console.log('PASS single replacement uses a clearly named independent checkbox');
   console.log('PASS restoring native content keeps the plugin enabled');
-  console.log('PASS multiple replacements list radio choices and persist changes');
+  console.log('PASS layouts from one plugin remain under one provider and persist changes');
+  console.log('PASS content source choices list providers rather than every layout');
+  console.log('PASS plugin module choices combine independently of the selected content provider');
+  console.log('PASS author background purpose takes precedence with collapsed generic help and a plain fallback');
   console.log('PASS disabling removes replacement controls');
   console.log('Evidence:', evidence);
   win.destroy(); app.exit(0);
