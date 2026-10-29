@@ -377,9 +377,8 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 
 .notch-panel.is-reduced-motion *, .notch-panel.is-reduced-motion *::before { animation: none !important; transition: none !important; }
 
-/* Plugin pages: the plugin's view fills the page under a kicker row. */
-.notch-page-plugin { display: flex; flex-direction: column; gap: 10px; }
-.notch-plugin-owner { font-size: 10px; color: var(--notch-faint); }
+/* Plugin pages use the whole page; their selected tab already names the view. */
+.notch-page-plugin { display: flex; flex-direction: column; }
 .notch-plugin-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .notch-plugin-body .pv-root { height: 100%; }
 .notch-tab-plugin-icon { display: grid; place-items: center; width: 15px; height: 15px; }
@@ -403,3 +402,11 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-tab-step:hover:not(:disabled) { color: var(--notch-ink); }
 .notch-tab-step:disabled { opacity: .25; cursor: default; }
 .notch-tab-step svg { width: 9px; height: 9px; }
+
+/* Page-owned tools occupy the native status position, within the safe shoulder.
+   Empty/loading/failed mounts leave native TPS and refresh available. */
+.notch-plugin-header-actions { display: flex; align-items: center; justify-content: flex-end; margin-left: auto; min-width: 0; max-width: 100%; overflow: hidden; }
+.notch-plugin-header-actions .plugin-header-actions-mount { display: flex; align-items: center; min-width: 0; max-width: 100%; }
+.notch-plugin-header-actions[hidden],
+.notch-plugin-header-actions:not(:has(> .plugin-header-actions-mount:not(:empty))) { display: none; }
+.notch-band-trailing:has(> .notch-plugin-header-actions:not([hidden]) > .plugin-header-actions-mount:not(:empty)) > .notch-status { display: none; }

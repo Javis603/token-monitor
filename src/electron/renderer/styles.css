@@ -8600,14 +8600,35 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .shell.plugin-page-mode > .total-panel,
 .shell.plugin-page-mode .title-controls > .tabs,
 .shell.plugin-page-mode #liveTokenRate { display: none; }
+
 .plugin-main-panel { flex: 1; min-height: 0; overflow: hidden; }
-.plugin-main-page { height: 100%; display: flex; flex-direction: column; gap: 14px; padding-top: 8px; }
-.plugin-main-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.plugin-main-heading h2 { margin: 0; font-size: 1.12em; font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
-.plugin-main-detach { flex-shrink: 0; color: var(--muted); font: inherit; border: 0; background: transparent; padding: 6px 0 6px 6px; cursor: pointer; }
+.plugin-main-page:focus { outline: none; }
+.plugin-main-page { height: 100%; display: flex; flex-direction: column; gap: 8px; }
+.shell.plugin-page-mode .app-title-text, .shell.plugin-page-mode #tokenRateReveal { display: none; }
+.shell.plugin-page-mode .app-title { align-items: baseline; }
+.shell.plugin-page-mode .plugin-page-heading { margin-left: 8px; }
+.shell.plugin-page-mode .app-title-mark { display: inline; flex-shrink: 0; }
+.plugin-page-heading { display: flex; align-items: center; min-width: 0; overflow: hidden; }
+.plugin-main-heading { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+.plugin-main-heading h2 { margin: 0; font-size: 13px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shell.plugin-page-mode .title-controls { flex: 0 1 auto; width: auto; min-width: 114px; max-width: calc(100% - 64px); }
+.plugin-page-actions, .plugin-main-actions, .plugin-header-actions, .plugin-header-actions-mount { display: flex; align-items: center; justify-content: flex-end; min-width: 0; gap: 6px; }
+.plugin-page-actions { height: 30px; transition: opacity 160ms ease 140ms; }
+.plugin-page-actions .plugin-header-actions { flex: 1 1 auto; overflow: auto; max-height: 30px; justify-content: flex-start; }
+.plugin-page-actions .plugin-header-actions-mount { flex: 0 0 auto; }
+.plugin-header-actions:empty { display: none; }
+.shell.plugin-page-mode .plugin-page-actions button:focus-visible { outline-offset: -2px; }
+.title-controls:has(.actions-hotspot:hover) .plugin-page-actions,
+.title-controls:has(.window-actions:hover) .plugin-page-actions,
+.title-controls:has(.window-actions:focus-within) .plugin-page-actions,
+.shell.settings-open .plugin-page-actions { visibility: hidden; pointer-events: none; transition-delay: 0ms; }
+.plugin-main-detach { flex-shrink: 0; color: var(--muted); font: inherit; border: 0; background: transparent; padding: 4px; cursor: pointer; -webkit-app-region: no-drag; display: grid; place-items: center; }
+.plugin-main-detach svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.plugin-main-page > .plugin-action-error { order: -1; margin: 0; }
 .plugin-main-detach:hover { color: var(--text); }
 .plugin-main-content { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 2px; }
 .plugin-main-heading h2:focus-visible, .plugin-main-detach:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
 
 /* Plugin identity and task-specific tools share the compact settings scale. */
 .plugin-identity { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }

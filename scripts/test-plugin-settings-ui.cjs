@@ -17,6 +17,7 @@ async function main() {
   fs.writeFileSync(path.join(scratch, 'ui.mjs'), "export function mount(container){const input=document.createElement('input');input.value='saved';container.append(input);return {dispose(){input.remove()}}}");
   win = new BrowserWindow({ show: false, width: 361, height: 799, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   const appHtml=fs.readFileSync(path.join(root,'src/electron/renderer/index.html'),'utf8');
+  const appHeader=appHtml.slice(appHtml.indexOf('<header class="titlebar">'),appHtml.indexOf('</header>')+9);
   assert.ok(!appHtml.includes('id="pluginsEnabledInput"')&&!appHtml.includes('data-i18n="settings.plugins.intro"'));
   const i18n=require(path.join(root,'src/electron/renderer/i18n.js'));
   for (const locale of i18n.LANGUAGE_OPTIONS.filter(item=>item.value!=='auto').map(item=>item.value)) assert.ok(!i18n.translate(locale,'plugins.package.import').includes('…'));
@@ -247,19 +248,23 @@ async function main() {
     const rapidAligned=box.querySelector('.plugin-version-picker select').value==='3.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='3.0.0';
     box.querySelector('.plugin-allow').click();await tick();previewMode='success';
     check('rapid-version-changes-align-selection-preview-and-installed-token',rapidAligned&&calls.filter(c=>c[0]==='install').at(-1)?.[1]==='token-3.0.0',{lastInstall:calls.filter(c=>c[0]==='install').at(-1)});
-    const pageBox=document.createElement('div');document.body.append(pageBox);
+    const pageShell=document.createElement('main');pageShell.className='shell plugin-page-mode title-icon-only';
+    pageShell.innerHTML=${JSON.stringify(appHeader)};
+    const pageBox=document.createElement('section');pageBox.id='pluginMainPanel';pageBox.className='plugin-main-panel';pageShell.append(pageBox);document.body.append(pageShell);
     window.tokenMonitorTrustedPlugins={views:async()=>({views:{}}),subscribe:()=>()=>{}};
     const demands=[], pageHost=TokenMonitorPluginViews.createPluginViewHost({document,window,t:k=>k,onDemand:(s,r)=>demands.push([s,r])});
-    const pages=TokenMonitorPluginMainPages.create({document,container:pageBox,host:pageHost,t:k=>k,openWindow:()=>{}});
+    const headingContainer=pageShell.querySelector('#pluginPageHeading'),actionsContainer=pageShell.querySelector('#pluginPageActions');
+    const pages=TokenMonitorPluginMainPages.create({document,container:pageBox,headingContainer,actionsContainer,host:pageHost,t:k=>k,openWindow:()=>{}});
     const routes=[{id:'plugin:alpha/view',ref:'alpha/view',title:'Alpha'},{id:'plugin:beta/view',ref:'beta/view',title:'Beta'}];
     const payload={surface:'page',views:Object.fromEntries(routes.map(route=>[route.ref,{id:'view',ref:route.ref,pluginId:route.ref.split('/')[0],revision:'test',status:'active',entry:'file://${scratch}/ui.mjs',css:[]}]))};
     pageHost.update(payload);pages.render(routes,'plugin:alpha/view');await tick();
+    check('main-page-title-and-detach-use-native-header',headingContainer.querySelector('h2')?.textContent==='Alpha'&&Boolean(actionsContainer.querySelector('.plugin-main-detach'))&&!pageBox.querySelector('.plugin-main-detach'));
     const draft=pageBox.querySelector('input');draft.value='unsubmitted';
     pages.render(routes,'plugin:beta/view');await tick();pages.render(routes,'plugin:alpha/view');pageHost.update(payload);await tick();
     check('main-page-draft-survives-ordinary-page-switch-and-context-update',draft.isConnected&&draft.value==='unsubmitted'&&draft===pageBox.querySelector('input'));
     pages.render(routes.filter(p=>p.ref!=='alpha/view'),'home');
     check('removed-page-releases-retained-dom',!draft.isConnected&&pageBox.classList.contains('hidden'));
-    await pageHost.dispose();
+    await pageHost.dispose();pageShell.remove();
     // Network freshness must never hold the management UI or its drafts.
     const backgroundBox=document.createElement('div');document.body.append(backgroundBox);
     const backgroundCatalog={github:{enabled:true},entries:[{...catalog.entries[0],version:'1.0.0',status:'available'}],sources:Array.from({length:16},(_,i)=>({id:'source-'+i,kind:'community',label:'Source '+i}))};
@@ -303,6 +308,17 @@ async function main() {
     backgroundTab('installed').click();await tick();backgroundTab('discover').click();await tick();
     backgroundPanel.dispose();const disposedContent=backgroundBox.innerHTML;finishDiscovery();await tick();
     check('disposed-panel-ignores-late-catalog-completion',backgroundBox.innerHTML===disposedContent);backgroundBox.remove();
+    const presetBox=document.createElement('div');document.body.append(presetBox);let presetDiscoverCalls=[];
+    const presetData={entries:[],sources:[{id:'maintainer-fixture',kind:'maintainer',cached:false}],github:{enabled:false,entries:[]}};
+    const presetPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:presetBox,t:key=>key,api:{
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>presetData,
+      discoverCatalog:async force=>{presetDiscoverCalls.push(force);presetData.sources[0].cached=true;return presetData}
+    }});
+    await presetPanel.refresh();presetBox.querySelector('[data-tab="discover"]').click();await tick();
+    check('maintainer-source-bootstraps-with-public-github-disabled',presetDiscoverCalls.length===1&&presetDiscoverCalls[0]===false);
+    presetBox.querySelector('.plugin-catalog-refresh button').click();await tick();
+    check('maintainer-only-refresh-checks-preset-source',presetDiscoverCalls.length===2&&presetDiscoverCalls[1]===true);
+    presetPanel.dispose();presetBox.remove();
     const officialBox=document.createElement('div');document.body.append(officialBox);
     let officialPreview={id:'official-fixture',name:'Official fixture',version:'1.0.0',token:'official-token',operation:'install',origin:{id:'bundled',kind:'official'},sha256:'abc'};
     const officialList={enabled:true,plugins:[]};const officialActions=[];
@@ -329,6 +345,9 @@ async function main() {
     officialList.enabled=true;officialPreview.origin={id:'custom',kind:'community'};await officialPanel.refresh();officialClick('plugins.package.import');await tick();
     check('community-package-retains-trust-warning-and-action',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.trustInstall'&&officialBox.querySelector('.plugin-package-preview .plugin-risk')?.textContent==='plugins.trusted.warning');
     officialClick('settings.plugins.cancel');await tick();
+    officialPreview.origin={id:'maintainer-fixture',kind:'maintainer'};await officialPanel.refresh();officialClick('plugins.package.import');await tick();
+    check('maintainer-package-uses-simple-action-and-shield',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.installEnable'&&!officialBox.querySelector('.plugin-package-preview .plugin-risk')&&Boolean(officialBox.querySelector('.plugin-package-preview .plugin-shield')));
+    officialClick('settings.plugins.cancel');await tick();
     officialList.plugins=[{id:'official-fixture',name:'Official fixture',version:'1.0.0',source:'user',status:'needsApproval',enabled:false,trusted:false,installation:{origin:{kind:'official'}},views:[]}];await officialPanel.refresh();
     check('official-pending-revision-uses-enable-labels',officialBox.querySelector('.plugin-manage').textContent==='settings.plugins.enable'&&officialBox.querySelector('.plugin-status').textContent==='plugins.package.enableRequired');
     officialBox.querySelector('.plugin-enable').click();await tick();
@@ -341,13 +360,15 @@ async function main() {
     const detailsBox=document.createElement('div');document.body.append(detailsBox);
     const shot=canvas.toDataURL('image/png');
     const officialEntry={...catalog.entries[0],id:'official-detail',name:'Official detail',author:'Hidden credit',origin:{id:'official',kind:'official'},repository:'https://github.com/owner/repo'};
+    const maintainerEntry={...officialEntry,id:'maintainer-detail',name:'Maintainer detail',origin:{id:'maintainer-fixture',kind:'maintainer'},installedVersion:'0.9.0'};
+    const customEntry={...officialEntry,id:'custom-detail',author:'Token Monitor 社群',origin:{id:'custom-fixture',kind:'community',label:'Token Monitor 官方'},featured:true,official:true};
     const repoEntry={id:'owner/repo',name:'Community repo',author:'owner',description:'Repository',origin:{id:'github-discovery',kind:'community'},status:'repository',stars:42};
-    let shotCalls=0,readmeCalls=0,closeCalls=0;
+    let shotCalls=0,readmeCalls=0,closeCalls=0,longReadme=false;
     const detailsPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:detailsBox,t:key=>key,api:{
-      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[officialEntry],github:{enabled:true,entries:[repoEntry],lastFetched:1700000000000},sources:[]}),
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[maintainerEntry,customEntry,officialEntry],github:{enabled:true,entries:[repoEntry],lastFetched:1700000000000},sources:[]}),
       closeCatalogDetails:async()=>{closeCalls++},
       catalogReadmeImage:()=>{shotCalls++;return new Promise(resolve=>{imageResolve=resolve})},
-      catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',imageCount:1,html:'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
+      catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',imageCount:longReadme?3:1,html:longReadme?'<p><span data-readme-image="0">First</span></p><div style="height:2000px"></div><p><span data-readme-image="1">Second</span></p><p><span data-readme-image="2">Third</span></p>':'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
     }});
     await detailsPanel.refresh();detailsBox.querySelector('[data-tab="discover"]').click();await tick();
     const refreshButton=detailsBox.querySelector('.plugin-catalog-refresh button').getBoundingClientRect(),refreshTime=detailsBox.querySelector('.plugin-catalog-refresh .settings-note').getBoundingClientRect();
@@ -355,13 +376,15 @@ async function main() {
     check('details-media-is-lazy-and-official-credit-hidden',shotCalls===0&&!detailsBox.textContent.includes('Hidden credit'));
     check('official-card-shows-host-publisher-community-card-shows-owner-only',detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-shield'))&&detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-source')?.textContent==='owner');
     check('github-stars-only-on-community-card',detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-stars')?.textContent.includes('42')&&!detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-stars'));
+    check('featured-group-official-first-and-installed-maintainer-keeps-position',JSON.stringify([...detailsBox.querySelector('.plugin-catalog-group').querySelectorAll('[data-catalog-id]')].map(n=>n.dataset.catalogId))===JSON.stringify(['official-detail','maintainer-detail'])&&detailsBox.querySelector('.plugin-catalog-group h3').textContent==='plugins.catalog.featured');
+    check('maintainer-shield-brand-hides-personal-credit',detailsBox.querySelector('[data-catalog-id="maintainer-detail"] .plugin-source')?.textContent==='Token Monitor plugins.origin.maintainer'&&Boolean(detailsBox.querySelector('[data-catalog-id="maintainer-detail"] .plugin-shield')));
+    check('custom-title-author-flags-cannot-get-shield-or-featured-group',!detailsBox.querySelector('[data-catalog-id="custom-detail"] .plugin-shield')&&detailsBox.querySelector('[data-catalog-id="custom-detail"]').closest('section').querySelector('h3').textContent==='plugins.catalog.custom');
     const title=detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-catalog-title');title.focus();title.click();await tick();
     const dialog=detailsBox.querySelector('dialog');
     check('official-detail-shows-same-host-publisher',dialog.querySelector('.plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(dialog.querySelector('.plugin-shield')));
-    check('details-opens-with-version-before-types',dialog.open&&dialog.querySelector('.plugin-card-meta').firstChild.className==='plugin-version'&&shotCalls===0);
-    check('readme-images-require-explicit-load',Boolean(dialog.querySelector('.plugin-readme-load'))&&shotCalls===0);
-    dialog.querySelector('.plugin-readme-load').click();await tick();
-    check('readme-image-load-starts-once',shotCalls===1&&dialog.querySelector('.plugin-readme-load').disabled);
+    check('details-opens-with-version-before-types',dialog.open&&dialog.querySelector('.plugin-card-meta').firstChild.className==='plugin-version');
+    await new Promise(r=>setTimeout(r,80));
+    check('official-visible-readme-images-load-automatically-once',!dialog.querySelector('.plugin-readme-load')&&shotCalls===1);
     imageResolve(shot);await tick();
     check('small-readme-image-keeps-intrinsic-width',dialog.querySelector('.plugin-screenshot img')?.getBoundingClientRect().width===32);
     dialog.querySelector('.plugin-screenshot').click();await tick();
@@ -372,13 +395,31 @@ async function main() {
     check('narrow-details-header-footer-fit',rect.left>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight&&dialog.querySelector('footer').getBoundingClientRect().bottom<=innerHeight);
     dialog.dispatchEvent(new PointerEvent('pointerdown',{clientX:0,clientY:0}));dialog.dispatchEvent(new MouseEvent('click',{clientX:0,clientY:0}));await tick();
     check('outside-dismiss-restores-title-focus',!dialog.isConnected&&document.activeElement===title&&closeCalls===1);
-    title.click();await tick();detailsBox.querySelector('.plugin-readme-load').click();await tick();detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
+    title.click();await new Promise(r=>setTimeout(r,80));detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
     check('late-image-cannot-resurrect-closed-details',!detailsBox.querySelector('dialog'));
+    detailsBox.querySelector('[data-catalog-id="maintainer-detail"] .plugin-catalog-title').click();await new Promise(r=>setTimeout(r,80));
+    check('maintainer-images-also-load-automatically',shotCalls===3&&!detailsBox.querySelector('.plugin-readme-load'));
+    imageResolve(shot);await tick();detailsBox.querySelector('.plugin-dialog-close').click();await tick();
     detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-catalog-title').click();await tick();
     check('github-detail-name-only-shows-owner',detailsBox.querySelector('dialog .plugin-source')?.textContent==='owner'&&!detailsBox.querySelector('dialog .plugin-shield'));
-    check('repository-readme-preserves-markdown-order-and-inert-html',readmeCalls===3&&detailsBox.querySelector('.plugin-catalog-readme h1')?.textContent==='README heading'&&detailsBox.querySelector('.plugin-catalog-readme').textContent.includes('<script>untrusted</script>')&&!detailsBox.querySelector('.plugin-catalog-readme script'));
+    check('repository-readme-preserves-markdown-order-and-inert-html',readmeCalls===4&&detailsBox.querySelector('.plugin-catalog-readme h1')?.textContent==='README heading'&&detailsBox.querySelector('.plugin-catalog-readme').textContent.includes('<script>untrusted</script>')&&!detailsBox.querySelector('.plugin-catalog-readme script'));
+    check('third-party-images-still-require-explicit-load',Boolean(detailsBox.querySelector('.plugin-readme-load'))&&shotCalls===3);
+    detailsBox.querySelector('.plugin-readme-load').click();await tick();
+    check('third-party-click-starts-image-load',shotCalls===4);imageResolve(shot);await tick();
     detailsBox.querySelector('.plugin-dialog-close').click();await tick();
-    title.click();await tick();detailsBox.querySelector('.plugin-readme-load').click();await tick();imageResolve(shot);await tick();detailsBox.querySelector('.plugin-screenshot').click();await tick();
+    detailsBox.querySelector('[data-catalog-id="custom-detail"] .plugin-catalog-title').click();await tick();
+    check('spoofed-custom-author-still-needs-explicit-images',shotCalls===4&&Boolean(detailsBox.querySelector('.plugin-readme-load')));
+    detailsBox.querySelector('.plugin-dialog-close').click();await tick();
+    longReadme=true;title.click();await new Promise(r=>setTimeout(r,80));
+    check('featured-offscreen-images-wait-for-scroll',shotCalls===5);
+    imageResolve(shot);await new Promise(r=>setTimeout(r,80));
+    check('featured-below-fold-not-fetched-after-first-image',shotCalls===5);
+    const scrollBody=detailsBox.querySelector('.plugin-catalog-dialog-body');scrollBody.scrollTop=scrollBody.scrollHeight;await new Promise(r=>setTimeout(r,80));
+    check('featured-scroll-starts-next-image-serially',shotCalls===6);
+    detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
+    check('closing-featured-details-cancels-queued-offscreen-image',shotCalls===6&&!detailsBox.querySelector('dialog'));
+    longReadme=false;
+    title.click();await new Promise(r=>setTimeout(r,80));imageResolve(shot);await tick();detailsBox.querySelector('.plugin-screenshot').click();await tick();
     window.finishDetailsTest=()=>{detailsPanel.dispose();detailsBox.remove()};
     return {checks};
   })()`);

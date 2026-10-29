@@ -333,7 +333,14 @@ function normalizeClientName(value) {
   if (raw === 'mcode' || /^minimax[\s_-]*code$/.test(raw)) return 'mcode';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
-  return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
+  const slug = raw.replace(/[^a-z0-9_-]+/g, '-');
+  // Trim edge dashes by index: /^-+|-+$/ is quadratic on long dash runs, and
+  // client names arrive in device payloads.
+  let start = 0;
+  let end = slug.length;
+  while (start < end && slug[start] === '-') start += 1;
+  while (end > start && slug[end - 1] === '-') end -= 1;
+  return slug.slice(start, end) || null;
 }
 
 function detectClient(obj) {

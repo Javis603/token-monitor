@@ -425,3 +425,46 @@ test('main navigation uses the named icon even without identity artwork', () => 
   assert.ok(context.icon.querySelector('path'));
   assert.deepEqual(context.icon.querySelector('path').attributes, views.navigationIcon(document, page, 14).querySelector('path').attributes);
 });
+
+test('header slots isolate late mounts and release actions on update failure', async () => {
+  const document = dom(), node = document.createElement('div'), actions = document.createElement('div');
+  document.body.append(node, actions);
+  let finish;
+  const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(_node, context) {
+    if (context.ref === descriptor.ref) return new Promise(resolve => { finish = () => {
+      context.headerActions.append(document.createElement('button')); resolve({});
+    }; });
+    context.headerActions.append(document.createElement('button'));
+    return { update() { throw Error('header update failed'); } };
+  } }) });
+  const pending = host.mount(node, descriptor, { headerActions: actions }); await new Promise(setImmediate);
+  host.unmount(node); assert.equal(actions.children.length, 0);
+  const next = { ...descriptor, ref: 'fixture/next' };
+  await host.mount(node, next, { headerActions: actions }); const owned = actions.children[0];
+  finish(); await pending;
+  assert.equal(actions.children.length, 1); assert.equal(actions.children[0], owned);
+  await host.mount(node, next, {}); assert.equal(actions.children.length, 0);
+  await host.dispose();
+});
+
+test('reused mounts move header controls without replacing drafts and remove omitted slots', async () => {
+  const document = dom(), node = document.createElement('div'), a = document.createElement('div'), b = document.createElement('div');
+  document.body.append(node, a, b);
+  let latest;
+  const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(container, context) {
+    latest = context;
+    context.headerActions.append(document.createElement('button'));
+    container.append(document.createElement('input'));
+    return { update(value) { latest = value; } };
+  } }) });
+  await host.mount(node, descriptor, { headerActions: a });
+  const mount = latest.headerActions, button = mount.children[0], input = node.children[0]; input.value = 'draft';
+  await host.mount(node, descriptor, { headerActions: b });
+  assert.equal(a.children.length, 0); assert.equal(b.children[0], mount); assert.equal(mount.children[0], button);
+  assert.equal(latest.headerActions, mount); assert.equal(node.children[0], input); assert.equal(input.value, 'draft');
+  await host.mount(node, descriptor, {});
+  assert.equal(b.children.length, 0); assert.equal(latest.headerActions, undefined);
+  await host.mount(node, descriptor, { headerActions: a });
+  assert.equal(a.children[0], latest.headerActions); assert.notEqual(latest.headerActions, mount);
+  await host.dispose(); assert.equal(a.children.length, 0);
+});

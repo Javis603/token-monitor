@@ -55,7 +55,11 @@ const pluginViewHost={mount(){},refreshDemand(){}};let pluginMainPages;${mainSet
 const pages=TokenMonitorPluginMainPages.entries(state.pluginCatalog);
 const tick=async()=>{await new Promise(r=>setTimeout(r,30));await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));};
 const checks=[];const check=(name,ok)=>checks.push({name,ok:!!ok});
-function show(which){for(const name of ['skin','notch','appearance'])document.getElementById(name+'Fixture').hidden=name!==which;const standalone=which==='main';document.querySelector('.settings-panel').style.display=standalone?'none':'block';document.querySelector('.shell').classList.toggle('settings-open',!standalone);document.getElementById('pluginMainPanel').classList.toggle('hidden',!standalone);setStatus('');}
+// Frozen baselines may use either header layout; feedback belongs to the selected page in both.
+const selectedPage=()=>document.querySelector('#pluginMainPanel .plugin-main-page:not(.hidden)');
+const detachButton=()=>document.querySelector('#pluginPageActions .plugin-main-actions:not(.hidden) .plugin-main-detach')||selectedPage()?.querySelector('.plugin-main-detach');
+const detachError=()=>selectedPage()?.querySelector('.plugin-action-error');
+function show(which){for(const name of ['skin','notch','appearance'])document.getElementById(name+'Fixture').hidden=name!==which;const standalone=which==='main';document.querySelector('.settings-panel').style.display=standalone?'none':'block';document.querySelector('.shell').classList.toggle('settings-open',!standalone);document.querySelector('.shell').classList.toggle('plugin-page-mode',standalone);document.getElementById('pluginMainPanel').classList.toggle('hidden',!standalone);setStatus('');}
 </script></body></html>`);
 app.whenReady().then(async () => {
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: /^(https?|wss?):/.test(details.url) }));
@@ -109,16 +113,16 @@ app.whenReady().then(async () => {
     check('reset retry clears association and error',!document.getElementById('resetNotchPageOrderButton').hasAttribute('aria-describedby')&&!document.querySelector('#notchPageChoices > .plugin-action-error'));
     check('successful reset focuses first page',document.activeElement?.dataset.page==='home');failure=true;
     locale='zh-TW';TokenMonitorI18n.applyTranslations(document,locale);
-    show('main');pluginMainPages.render(pages,pages[0].id);let button=document.querySelector('.plugin-main-detach');button.focus();button.click();await tick();
-    check('detach failure stays in page heading',!!document.querySelector('.plugin-main-heading > .plugin-action-error'));
+    show('main');pluginMainPages.render(pages,pages[0].id);let button=detachButton();if(!${Boolean(baseline)})check('detach uses native header outside page body',!!button&&document.getElementById('pluginPageActions').contains(button)&&!selectedPage().contains(button));else check('detach belongs to selected renderer header',!!button?.closest('.plugin-main-heading,.plugin-main-actions'));button.focus();button.click();await tick();
+    check('detach failure stays with selected page',!!detachError());
     check('detach failure leaves status untouched',!els.status.textContent);
-    check('detach error is accessible and focused',!!button.getAttribute('aria-describedby')&&document.activeElement===button&&document.querySelector('.plugin-main-heading > .plugin-action-error')?.getAttribute('role')==='alert');`);
+    check('detach error is accessible and focused',button.getAttribute('aria-describedby')===detachError()?.id&&document.activeElement===button&&detachError()?.getAttribute('role')==='alert');`);
   await capture('detach-zh-TW');win.setSize(420,760);await capture('detach-narrow-zh-TW');win.setSize(680,760);
-  await run(`locale='en';TokenMonitorI18n.applyTranslations(document,locale);pluginMainPages.render(pages,pages[0].id);check('detach error retranslates',document.querySelector('.plugin-main-heading > .plugin-action-error')?.textContent===t('settings.plugins.actionFailed',{error:'fixture-write-failed'}));`);
+  await run(`locale='en';TokenMonitorI18n.applyTranslations(document,locale);pluginMainPages.render(pages,pages[0].id);check('detach error retranslates',detachError()?.textContent===t('settings.plugins.actionFailed',{error:'fixture-write-failed'}));`);
   await capture('detach-en');
-  await run(`failure=false;document.querySelector('.plugin-main-detach').click();await tick();check('detach retry clears error',!document.querySelector('.plugin-main-heading > .plugin-action-error'));
-    hold=true;const previous=calls;document.querySelector('.plugin-main-detach').click();document.querySelector('.plugin-main-detach').click();check('detach prevents duplicate submission',calls===previous+1);
-    pluginMainPages.render(pages,'home');pending.reject(Error('stale'));await tick();pluginMainPages.render(pages,pages[0].id);check('late detach rejection discarded after navigation',!document.querySelector('.plugin-main-heading > .plugin-action-error'));hold=false;
+  await run(`failure=false;detachButton().click();await tick();check('detach retry clears error',!detachError());
+    hold=true;const previous=calls;detachButton().click();detachButton().click();check('detach prevents duplicate submission',calls===previous+1);
+    pluginMainPages.render(pages,'home');pending.reject(Error('stale'));await tick();pluginMainPages.render(pages,pages[0].id);check('late detach rejection discarded after navigation',!detachError());hold=false;
     show('appearance');renderThemePresetChips();const count=calls;hold=true;document.querySelector('.theme-preset-chip-plugin').click();document.querySelector('.theme-preset-chip-plugin').click();check('appearance prevents duplicate submission',calls===count+1);state.pluginCatalog.plugins=[];renderThemePresetChips();pending.reject(Error('stale'));await tick();check('removed appearance skin ignores late failure',!els.themePresetChips.querySelector('.plugin-action-error'));hold=false;
   `);
   const checks = await run('return checks;');

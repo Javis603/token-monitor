@@ -278,7 +278,7 @@ const {
   HUB_RESPONSE_MINIMAL,
   HUB_STREAM_HEADER,
   HUB_STREAM_VERSION,
-  applyFreshnessEvent
+  createStatsStreamReceiver
 } = require('../shared/hubProtocol');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
@@ -5331,6 +5331,7 @@ async function startStatsStream(options = {}) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const blocks = createSseBlockReader();
+    const streamSnapshot = createStatsStreamReceiver();
     for (;;) {
       if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       const { value, done } = await reader.read();
@@ -5339,13 +5340,13 @@ async function startStatsStream(options = {}) {
       for (const block of blocks.push(decoder.decode(value, { stream: true }))) {
         const parsed = parseSseBlock(block);
         if (parsed) {
-          if ((parsed.event === 'stats' || parsed.event === 'snapshot') && parsed.data?.stats) {
-            setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
-            requestSyncDisplayStats({ reason: parsed.data.reason, at: parsed.data.at, generation, widgetProducerOwner });
-          } else if (parsed.event === 'freshness') {
-            const refreshed = applyFreshnessEvent(latestHubStats, parsed.data);
+          if (['snapshot', 'stats', 'freshness', 'delta'].includes(parsed.event)) {
+            const refreshed = streamSnapshot.receive(parsed.event, parsed.data);
             if (!refreshed) continue;
-            setLatestHubStatsCache(refreshed, 'client', generation, cacheIdentity);
+            // Presentation overlays mutate root/device metadata. The delta base
+            // belongs to the connection, so keep those containers private.
+            const displayCache = { ...refreshed, devices: refreshed.devices.map(device => ({ ...device })) };
+            setLatestHubStatsCache(displayCache, 'client', generation, cacheIdentity);
             requestSyncDisplayStats({ reason: parsed.data?.reason || 'ingest', at: parsed.data?.at, generation, widgetProducerOwner });
           } else {
             sendPush(parsed, { widgetProducerOwner });
@@ -5358,6 +5359,7 @@ async function startStatsStream(options = {}) {
     scheduleStreamRetry();
   } catch (error) {
     if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    controller.abort();
     sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
   }
@@ -6300,10 +6302,13 @@ function handleWindowToggleShortcut() {
   else focusExistingWindow();
 }
 
-function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
+function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false, pointerActivation = false) {
   const action = trayToggleAction(settings);
   if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
   else if (action === 'focusWindow') focusExistingWindow();
+  // A paired native press/release is evidence of pointer activation. OS app
+  // switching and accessibility tray clicks must not reset keyboard focus.
+  if (pointerActivation && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:pointerActivation');
 }
 
 function trayMenuLocale() {
@@ -7908,7 +7913,19 @@ app.whenReady().then(() => {
   regenerateTokscalePricing();
   if (widgetRuntimeSupported) ensureMacWidgetDemand();
   startMode();
-  void widgetRecovery.finally(() => {
+  void widgetRecovery.then((result) => {
+    if (result.status !== 'completed' || widgetRecoveryAbort?.signal.aborted) return;
+    const config = macWidgetConfiguration();
+    if (!config) return;
+    // The retained snapshot may be unchanged after an update, so publication
+    // deduplication alone cannot wake the newly registered extension. Do not
+    // require a recent demand heartbeat from the extension we just retired.
+    requestMacWidgetReload({
+      widgetKind: config.widgetKind,
+      isCurrent: () => !widgetRecoveryAbort?.signal.aborted,
+      logger: (message) => console.warn(message)
+    });
+  }).finally(() => {
     if (widgetRecoveryAbort) app.removeListener('before-quit', abortWidgetRecovery);
     if (!widgetRecoveryAbort?.signal.aborted) {
       macWidgetPublicationReady = true;
