@@ -549,3 +549,24 @@ test('retain releases an inactive detached replacement while an append view uses
   assert.equal(appendNode.isConnected, true);
   content.dispose(); assert.deepEqual(removed, [replacementNode, appendNode]);
 });
+
+for (const initiallyHidden of [true, false]) {
+  test(`replacement captures App visibility after an append-only outlet starts hidden=${initiallyHidden}`, () => {
+    const document = dom(), native = document.createElement('div'); native.hidden = initiallyHidden; document.body.append(native);
+    const append = { ...descriptor, ref: 'other/append', mode: 'append' };
+    let selected = null, status;
+    const content = create({ document, getViews: () => [append, descriptor], selection: () => selected,
+      host: { mount(_node, view, context) { if (view.mode === 'replace') status = context.onMountStatus; }, unmount() {} } });
+    content.render('main.home.content', native);
+    native.hidden = !initiallyHidden; selected = descriptor.ref;
+    content.render('main.home.content', native);
+    assert.equal(native.hidden, !initiallyHidden, 'pending replacement preserves current App visibility');
+    status(false);
+    assert.equal(native.hidden, !initiallyHidden, 'failed mount restores current App visibility');
+    content.render('main.home.content', native); status(true);
+    assert.equal(native.hidden, true);
+    selected = null; content.render('main.home.content', native);
+    assert.equal(native.hidden, !initiallyHidden, 'deselection restores the replacement-start snapshot');
+    content.dispose();
+  });
+}

@@ -52,6 +52,7 @@
       for (const [ref, node] of record.nodes) if (!wanted.has(ref)) { host.unmount(node); node.remove(); record.nodes.delete(ref); }
       const generation = record.generation = (record.generation || 0) + 1;
       const replaces = views.some(view => view.mode === 'replace');
+      if (!record.replaces && replaces) record.wasHidden = native.hidden;
       if (record.replaces && !replaces) native.hidden = record.wasHidden;
       record.replaces = replaces;
       const replacement = views.find(view => view.mode === 'replace');
