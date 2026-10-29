@@ -370,7 +370,6 @@
           input.addEventListener('change', () => { source.initialChoices[field.key] = input.checked; });
           row.append(input, el(document, 'span', '', field.kind === 'background' ? t('settings.plugins.background') : t(`plugins.initial.place.${field.surface}`, { name: field.title })));
           group.append(row);
-          if (field.kind === 'background') group.append(el(document, 'p', 'settings-note', t('settings.plugins.backgroundNote')));
         } else {
           const content = field.kind === 'content', own = field.options.filter(option => !option.current);
           const current = field.options.find(option => option.current), target = content ? contentTargetLabel(field.target, t) : '';
