@@ -1298,31 +1298,48 @@ async function collectUsageOnce(options) {
   // Account contributions come from the scanner's existing client partitions,
   // before local archives add identity-free residue. No extra token scan runs.
   const cursorAfter = cursorOwnership && readCursorUsageOwnership(options);
+  // Delta reconstruction copies arbitrary metadata too. Re-admit ownership per
+  // period below; a failed fence or changed account must leave no old scope.
+  for (const [name, period] of Object.entries({ today, month, allTime })) {
+    delete period.cursorAccountUsage;
+    delete windowsPeriods[name].cursorAccountUsage;
+  }
   if (cursorAfter?.signature === cursorOwnership?.signature && cursorAfter
     && !['today', 'month', 'allTime'].some(name => wslBundle[name]?.clients?.cursor > 0)) {
     const anchorToday = anchor?.today?.cursorAccountUsage;
-    let cursorObservedAt = cursorAfter.observedAt;
+    const scannedPeriods = new Set(Object.keys(cursorPartitions));
+    const observedAt = {};
+    for (const name of Object.keys(cursorPartitions)) observedAt[name] = cursorAfter.observedAt;
     if (anchorUsed && anchorToday?.accountKey === cursorAfter.accountKey) {
-      // A different client's targeted tick did not observe this cache's usage.
-      if (!cursorPartitions.today) cursorObservedAt = anchorToday.observedAt;
-      cursorPartitions.today ||= anchorToday.usage;
+      // Another client's targeted tick did not scan Cursor. Never share mutable
+      // counter containers with the anchor or promote its observation time.
+      if (!cursorPartitions.today) {
+        cursorPartitions.today = { ...anchorToday.usage };
+        observedAt.today = anchorToday.observedAt;
+      }
       for (const name of ['month', 'allTime']) {
         const prior = anchor[name]?.cursorAccountUsage;
         if (prior?.accountKey === cursorAfter.accountKey) {
           cursorPartitions[name] = applyPeriodDelta(prior.usage, cursorPartitions.today, anchorToday.usage);
+          // Today deltas cannot observe older-day corrections in these windows.
+          // Only a complete scan may advance their full-window freshness.
+          observedAt[name] = prior.observedAt;
         }
       }
     }
     for (const [name, period] of Object.entries({ today, month, allTime })) {
       const partition = cursorPartitions[name];
       if (!partition) continue;
-      partition.projects = projectsEnabled ? projectRollupFromSessions(Object.fromEntries(
+      const projects = projectsEnabled ? projectRollupFromSessions(Object.fromEntries(
         Object.entries(windowsPeriods[name].sessions || {}).filter(([, row]) => row.client === 'cursor')
       )) : {};
       const range = name === 'allTime' ? `since:${allTimeSince}`
         : `${name}:${computePeriodWindows(collectedAt)[name].key}:${collectedAt.getTimezoneOffset()}`;
-      const scope = { accountKey: cursorAfter.accountKey, observedAt: cursorObservedAt, range,
-        usage: accountingCounters(partition) };
+      const prior = anchor?.[name]?.cursorAccountUsage;
+      if (anchorUsed && !scannedPeriods.has(name)
+        && prior?.range !== range) continue;
+      const scope = { accountKey: cursorAfter.accountKey, observedAt: observedAt[name], range,
+        usage: { ...accountingCounters(partition), projects } };
       period.cursorAccountUsage = scope;
       windowsPeriods[name].cursorAccountUsage = scope;
     }

@@ -254,25 +254,31 @@ function buildSyncPayload(summary, {
       if (payload[period]) delete payload[period].modelThroughput;
     }
   }
-  for (const name of ['today', 'month', 'allTime']) {
-    const period = payload[name];
-    if (!period?.cursorAccountUsage) continue;
-    const usage = { ...period.cursorAccountUsage.usage };
-    if (!projectsEnabled || (name === 'allTime' && omitAllTimeProjects)) delete usage.projects;
-    if (omitModelThroughput) delete usage.modelThroughput;
-    payload[name] = { ...period, cursorAccountUsage: { ...period.cursorAccountUsage, usage } };
+  // Both accepted period shapes can coexist and share the same period object.
+  // Clone each edited container so reductions never mutate the input snapshot.
+  const containers = [payload];
+  if (payload.periods && typeof payload.periods === 'object') {
+    payload.periods = { ...payload.periods };
+    containers.push(payload.periods);
   }
-  if (omitAccountUsage) {
+  for (const container of containers) {
     for (const name of ['today', 'month', 'allTime']) {
-      if (payload[name]?.cursorAccountUsage) {
-        payload[name] = { ...payload[name] };
-        delete payload[name].cursorAccountUsage;
+      const period = container[name];
+      if (!period?.cursorAccountUsage) continue;
+      const next = { ...period };
+      if (omitAccountUsage) delete next.cursorAccountUsage;
+      else {
+        const usage = { ...period.cursorAccountUsage.usage };
+        if (!projectsEnabled || (name === 'allTime' && omitAllTimeProjects)) delete usage.projects;
+        if (omitModelThroughput) delete usage.modelThroughput;
+        next.cursorAccountUsage = { ...period.cursorAccountUsage, usage };
       }
+      container[name] = next;
     }
-    if (payload.history?.cursorAccountUsage) {
-      payload.history = { ...payload.history };
-      delete payload.history.cursorAccountUsage;
-    }
+  }
+  if (omitAccountUsage && payload.history?.cursorAccountUsage) {
+    payload.history = { ...payload.history };
+    delete payload.history.cursorAccountUsage;
   }
   return payload;
 }
@@ -357,6 +363,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
         ...syncOptions,
+        omitAccountUsage: true,
         omitHistoryTokenComponents: true,
         omitAllTimeProjects: true,
         omitModelThroughput: true
@@ -368,7 +375,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
     try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
     serialized = retrySerialized;
     if (typeof logger === 'function') {
-      logger('hub rejected the payload; retrying once without model timing detail, additive History components or all-time projects');
+      logger('hub rejected the payload; retrying once without account usage evidence, model timing detail, additive History components or all-time projects');
     }
     response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   }

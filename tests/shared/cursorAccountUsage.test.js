@@ -238,3 +238,107 @@ test('History ownership survives old-day component reduction without classifying
   assert.equal(history.daily[0].perClient.codex.tokens, 200);
   assert.equal(history.daily[0].unclassifiedTokens, 1200);
 });
+
+async function watchFixture(t) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-review-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const dir = path.join(home, '.config/tokscale/cursor-cache');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'usage.json');
+  const writeOwner = (id, age) => {
+    fs.writeFileSync(file, JSON.stringify({ _tokscale: { version: 1, accountId: id }, usageEventsDisplay: [] }));
+    const time = new Date(Date.now() - age);
+    fs.utimesSync(file, time, time);
+  };
+  writeOwner('user_fixture', 10000);
+  t.mock.method(require('../../src/shared/providers/cursor/auth'), 'runCursorSync', async () => ({ synced: true }));
+  const { collectUsageOnce } = require('../../src/shared/collector');
+  let captured;
+  let broadTokens = 1000;
+  let onScan = () => {};
+  const options = { clients: 'cursor,codex', homeDir: home, env: {}, osInfo: {}, deviceId: 'A',
+    allTimeSince: '2024-01-01', historyEnabled: false,
+    runTokscale: async input => {
+      onScan();
+      if (input.clients === 'codex') return { entries: [] };
+      const tokens = input.flags.includes('--today') ? 100 : broadTokens;
+      return { entries: [{ client: 'cursor', sessionId: 's', model: 'shared', totalTokens: tokens, costUsd: tokens / 1000 }] };
+    }, onAnchorComputed: value => { captured = value; } };
+  const first = await collectUsageOnce(options);
+  const anchor = { ...captured.windowsPeriods, dateKey: new Date().toLocaleDateString('en-CA'),
+    todayPartitions: { ...captured.todayPartitions, codex: normalizePeriod({}) } };
+  return { first, anchor, writeOwner, file, collect: extra => collectUsageOnce({ ...options, ...extra }),
+    setBroad: value => { broadTokens = value; }, setOnScan: value => { onScan = value; } };
+}
+
+test('Today-only cache refresh cannot outrank a newer complete Month or All Time scan', async t => {
+  const f = await watchFixture(t);
+  f.writeOwner('user_fixture', 6000);
+  f.setBroad(1200);
+  const b = { ...await f.collect({ deviceId: 'B' }) };
+  f.writeOwner('user_fixture', 2000);
+  const a = await f.collect({ todayOnlyAnchor: f.anchor });
+  for (const name of ['month', 'allTime']) {
+    assert.equal(a[name].totalTokens, 1000);
+    assert.equal(aggregateDevices([a, b], 0).periods[name].clients.cursor, 1200);
+    assert.equal(a[name].cursorAccountUsage.observedAt, f.first[name].cursorAccountUsage.observedAt);
+  }
+  assert.notEqual(a.today.cursorAccountUsage.observedAt, f.first.today.cursorAccountUsage.observedAt);
+  f.setBroad(900);
+  const corrected = await f.collect({ deviceId: 'A' });
+  assert.equal(aggregateDevices([corrected, b], 0).periods.month.clients.cursor, 900);
+});
+
+test('ownership switch, invalidation and scan-time cache change clear inherited broad scopes', async t => {
+  const f = await watchFixture(t);
+  f.writeOwner('user_other', 2000);
+  const switched = await f.collect({ todayOnlyAnchor: f.anchor });
+  assert.notEqual(switched.today.cursorAccountUsage.accountKey, key);
+  for (const name of ['month', 'allTime']) assert.equal(switched[name].cursorAccountUsage, undefined);
+  fs.writeFileSync(f.file, '{"usageEventsDisplay":[]}');
+  const invalid = await f.collect({ todayOnlyAnchor: f.anchor });
+  for (const name of ['today', 'month', 'allTime']) assert.equal(invalid[name].cursorAccountUsage, undefined);
+  f.writeOwner('user_fixture', 2000);
+  f.setOnScan(() => f.writeOwner('user_other', 1000));
+  const changed = await f.collect({ todayOnlyAnchor: f.anchor });
+  for (const name of ['today', 'month', 'allTime']) assert.equal(changed[name].cursorAccountUsage, undefined);
+});
+
+test('targeted ticks never mutate shared account counters or the original anchor', async t => {
+  const f = await watchFixture(t);
+  const before = JSON.stringify(f.anchor);
+  Object.freeze(f.anchor.today.cursorAccountUsage.usage);
+  for (let index = 0; index < 2; index++) {
+    await f.collect({ todayOnlyAnchor: f.anchor, targetClients: ['codex'] });
+    assert.equal(JSON.stringify(f.anchor), before);
+  }
+});
+
+test('account evidence omission covers top-level and nested periods without mutating input', () => {
+  const source = record('A', 1000, 2000);
+  source.periods = { today: source.today, month: source.month, allTime: source.allTime };
+  const before = JSON.stringify(source);
+  const payload = buildSyncPayload(source, { omitAccountUsage: true });
+  for (const name of ['today', 'month', 'allTime']) {
+    assert.equal(payload[name].cursorAccountUsage, undefined);
+    assert.equal(payload.periods[name].cursorAccountUsage, undefined);
+    assert.equal(payload.periods[name].totalTokens, 1100);
+  }
+  assert.equal(JSON.stringify(source), before);
+});
+
+test('HTTP 413 retries once without account evidence even below the local size budget', async () => {
+  const { postSyncPayload } = require('../../src/shared/syncPayload');
+  const source = record('A', 1000, 2000);
+  source.periods = { today: source.today, month: source.month, allTime: source.allTime };
+  const bodies = [];
+  const result = await postSyncPayload(async (_url, options) => {
+    bodies.push(options.body);
+    return { status: bodies.length === 1 ? 413 : 200, async arrayBuffer() {} };
+  }, 'https://fixture.invalid/api/ingest', { summary: source });
+  assert.equal(result.retried, true);
+  assert.equal(bodies.length, 2);
+  assert.ok(Buffer.byteLength(bodies[1]) < Buffer.byteLength(bodies[0]));
+  assert.doesNotMatch(bodies[1], /cursorAccountUsage/);
+  assert.equal(JSON.parse(bodies[1]).today.totalTokens, 1100);
+});
