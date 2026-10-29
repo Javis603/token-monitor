@@ -332,6 +332,14 @@
       });
     }
 
+    function choiceLabel(row, input, name, purpose) {
+      row.append(input, el(document, 'span', 'plugin-choice-name', name));
+      if (purpose) {
+        row.classList.add('plugin-tagged-choice');
+        row.append(document.createTextNode(' '), el(document, 'span', 'plugin-purpose-tag', purpose));
+      }
+    }
+
     function choiceControls({ key, title, options, value, change, toggle = null }) {
       const group = el(document, 'fieldset', 'plugin-choice-group');
       group.dataset.choiceKey = key;
@@ -340,7 +348,7 @@
         const input = el(document, 'input'); input.type = 'checkbox'; input.value = toggle.value;
         input.checked = value === toggle.value; input.dataset.controlKey = key;
         input.addEventListener('change', () => change(input.checked ? toggle.value : toggle.offValue));
-        row.append(input, el(document, 'span', '', toggle.label)); group.append(row);
+        choiceLabel(row, input, toggle.label, toggle.purpose); group.append(row);
       } else {
         group.append(el(document, 'legend', '', title));
         const name = `plugin-choice-${++menuId}`;
@@ -349,7 +357,7 @@
           const input = el(document, 'input'); input.type = 'radio'; input.name = name; input.value = option.value ?? '';
           input.checked = value === option.value; input.dataset.controlKey = `${key}/${option.value ?? 'native'}`;
           input.addEventListener('change', () => { if (input.checked) change(option.value); });
-          row.append(input, el(document, 'span', '', option.label)); group.append(row);
+          choiceLabel(row, input, option.label, option.purpose); group.append(row);
         }
       }
       return group;
@@ -369,7 +377,8 @@
           const input = el(document, 'input'); input.type = 'checkbox'; input.checked = source.initialChoices[field.key] === true;
           input.dataset.controlKey = `initial/${field.key}`;
           input.addEventListener('change', () => { source.initialChoices[field.key] = input.checked; });
-          row.append(input, el(document, 'span', '', field.kind === 'background' ? t('settings.plugins.background') : t(`plugins.initial.place.${field.surface}`, { name: field.title })));
+          choiceLabel(row, input, field.kind === 'background' ? t('settings.plugins.background') : field.title,
+            field.kind === 'placement' ? t(`plugins.initial.purpose.${field.surface}`) : null);
           rows.append(row);
         } else {
           if (field.kind === 'content') {
@@ -377,27 +386,29 @@
             const choices = field.options.filter(option => !option.current).map(option => ({ ref: option.value, pluginName: source.name }));
             rows.append(contentControls({ key: `initial/${field.key}`, target: field.target, choices, value: source.initialChoices[field.key],
               current: current ? { value: current.value, label: t('plugins.initial.keepCurrent') } : null,
-              change: value => { source.initialChoices[field.key] = value; render(); } }));
+              change: value => { source.initialChoices[field.key] = value; render(); }, tagged: true }));
             continue;
           }
           const options = [{ value: null, label: t('plugins.initial.keepAppearance') },
-            ...field.options.map(option => ({ value: option.value, label: t('plugins.initial.applyAppearance', { name: option.label }) }))];
+            ...field.options.map(option => ({ value: option.value, label: option.label, purpose: t('plugins.initial.appearance') }))];
           rows.append(choiceControls({ key: `initial/${field.key}`, title: t('plugins.initial.appearance'),
             options, value: source.initialChoices[field.key], change: value => { source.initialChoices[field.key] = value; },
             toggle: field.options.length === 1 ? { value: field.options[0].value, offValue: null,
-              label: t('plugins.initial.applyAppearance', { name: field.options[0].label }) } : null }));
+              label: field.options[0].label, purpose: t('plugins.initial.appearance') } : null }));
         }
       }
       return group;
     }
 
-    function contentControls({ key, target, choices, value, change, current = null }) {
+    function contentControls({ key, target, choices, value, change, current = null, tagged = false }) {
       const label = contentTargetLabel(target, t);
+      const purpose = tagged ? t('plugins.initial.purpose.content', { target: label }) : null;
       const options = [{ value: null, label: t('plugins.content.native') },
-        ...(current ? [current] : []), ...choices.map(view => ({ value: view.ref, label: t('plugins.content.use', { name: view.pluginName }) }))];
+        ...(current ? [current] : []), ...choices.map(view => ({ value: view.ref,
+          label: tagged ? view.pluginName : t('plugins.content.use', { name: view.pluginName }), purpose }))];
       const row = choiceControls({ key, title: t('plugins.content.source', { target: label }), options, value, change,
         toggle: choices.length === 1 && !current ? { value: choices[0].ref, offValue: null,
-          label: t('plugins.content.replace', { name: choices[0].pluginName, target: label }) } : null });
+          label: tagged ? choices[0].pluginName : t('plugins.content.replace', { name: choices[0].pluginName, target: label }), purpose } : null });
       row.classList.add('plugin-content-choice');
       return row;
     }

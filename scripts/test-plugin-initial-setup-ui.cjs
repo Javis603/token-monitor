@@ -29,7 +29,8 @@ async function main() {
   const initial = await win.webContents.executeJavaScript(`(async () => {
     const preview = ${JSON.stringify(preview)}, box = document.getElementById('settings'), data = { enabled: true, plugins: [] }, calls = [];
     const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({ document, container: box,
-      t: (key, params) => TokenMonitorI18n.translate('zh-TW', key, params), api: {
+      getLocale: () => window.initialLocale || 'zh-TW',
+      t: (key, params) => TokenMonitorI18n.translate(window.initialLocale || 'zh-TW', key, params), api: {
         list: async () => structuredClone(data), catalog: async () => ({ entries: [], sources: [] }),
         importPackage: async () => structuredClone(preview), cancelInstall: async () => {},
         install: async (token, options) => { calls.push({ token, options }); return structuredClone(data); },
@@ -42,12 +43,16 @@ async function main() {
     const inputs = [...box.querySelectorAll('.plugin-initial-setup input,.plugin-initial-setup select')];
     const rows = [...box.querySelectorAll('.plugin-initial-setup label')].map(node => node.getBoundingClientRect());
     return { fields: inputs.map(node => node.dataset.controlKey), values: inputs.map(node => node.checked),
-      actions: [...box.querySelectorAll('.plugin-initial-setup label')].map(node => node.textContent),
+      names: [...box.querySelectorAll('.plugin-initial-setup label')].map(node => node.querySelector('.plugin-choice-name').textContent),
+      purposes: [...box.querySelectorAll('.plugin-initial-setup label')].map(node => node.querySelector('.plugin-purpose-tag')?.textContent || null),
+      tagRights: [...box.querySelectorAll('.plugin-initial-setup .plugin-purpose-tag')].map(node => node.getBoundingClientRect().right),
       gaps: rows.slice(1).map((rect, index) => rect.top - rows[index].bottom), heights: rows.map(rect => rect.height), lefts: inputs.map(node => node.getBoundingClientRect().left),
       dropdowns: box.querySelectorAll('.plugin-initial-setup select').length, fits: document.documentElement.scrollWidth <= innerWidth };
   })()`);
   assert.deepEqual(initial.values, [true, true, true, true]); assert.equal(initial.fits, true); assert.equal(initial.dropdowns, 0);
-  assert.deepEqual(initial.actions, ['新增 Dashboard 分頁', '用 Custom Dashboard 替換主頁內容', '背景執行', '套用 Blue 外觀']);
+  assert.deepEqual(initial.names, ['Dashboard', 'Custom Dashboard', '背景執行', 'Blue']);
+  assert.deepEqual(initial.purposes, ['獨立分頁', '替換主頁', null, '外觀']);
+  assert.ok(initial.tagRights.every(right => Math.abs(right - initial.tagRights[0]) < 0.5), 'Purpose tags must align on the right');
   assert.ok(initial.gaps.length === 3 && initial.gaps.every(gap => Math.abs(gap - 8) < 0.5), `Uneven initial-choice gaps: ${initial.gaps}`);
   assert.ok(initial.heights.every(height => height < 24), `Initial choices should keep the original compact row height: ${initial.heights}`);
   assert.ok(initial.lefts.every(left => Math.abs(left - initial.lefts[0]) < 0.5), 'Initial checkboxes must align');
@@ -99,17 +104,48 @@ async function main() {
     Object.assign(data.plugins[0], { enabled: false, status: 'disabled', initialSetup: review });
     await panel.refresh(); box.querySelector('.plugin-enable').click(); await new Promise(resolve => setTimeout(resolve, 30));
     const group = box.querySelector('[data-choice-key="initial/content:main.home.content"]');
-    const labels = [...group.querySelectorAll(':scope > label')].map(node => node.textContent);
+    const labels = [...group.querySelectorAll(':scope > label')].map(node => node.querySelector('.plugin-choice-name').textContent);
     [...group.querySelectorAll('input')].find(node => node.value === 'other/home').click();
     box.querySelector('.plugin-allow').click(); await new Promise(resolve => setTimeout(resolve, 30));
     return { labels, selected: calls.at(-1).initialSetup['content:main.home.content'] };
   })()`);
-  assert.deepEqual(existingSource, { labels: ['內建內容', '保留已選內容', '使用 Custom Dashboard'], selected: 'other/home' });
+  assert.deepEqual(existingSource, { labels: ['內建內容', '保留已選內容', 'Custom Dashboard'], selected: 'other/home' });
+  win.setContentSize(320, 880);
+  const longNames = await win.webContents.executeJavaScript(`(async () => {
+    const { box, panel, preview, data } = initialFixture, results = [];
+    for (const locale of ['zh-TW', 'en', 'pt-BR']) {
+      window.initialLocale = locale;
+      const review = structuredClone(preview.initialSetup);
+      review.fields.find(field => field.kind === 'placement').title = 'Dashboard with detailed usage and activity';
+      review.fields.find(field => field.kind === 'skin').options[0].label = 'Blue with custom interface appearance';
+      Object.assign(data.plugins[0], { name: 'Custom Dashboard for all usage and activity', enabled: false, status: 'disabled', initialSetup: review });
+      await panel.refresh(); box.querySelector('.plugin-enable').click(); await new Promise(resolve => setTimeout(resolve, 30));
+      const rows = [...box.querySelectorAll('.plugin-initial-setup .plugin-tagged-choice')];
+      const rects = rows.map(row => ({ name: row.querySelector('.plugin-choice-name').getBoundingClientRect(), tag: row.querySelector('.plugin-purpose-tag').getBoundingClientRect() }));
+      const panelBounds = box.querySelector('.plugin-consent').getBoundingClientRect();
+      results.push({ locale, fits: document.documentElement.scrollWidth <= innerWidth,
+        aligned: rects.every(rect => Math.abs(rect.tag.right - rects[0].tag.right) < 0.5),
+        separate: rects.every(rect => rect.name.right <= rect.tag.left - 7.5),
+        wraps: rects.some(rect => rect.name.height > 24), tagText: rows.map(row => row.querySelector('.plugin-purpose-tag').textContent),
+        actionsFit: [...box.querySelectorAll('.plugin-consent-actions button')].every(button => {
+          const rect = button.getBoundingClientRect(); return rect.left >= panelBounds.left && rect.right <= panelBounds.right + 0.5;
+        }) });
+    }
+    return results;
+  })()`);
+  for (const result of longNames) {
+    assert.ok(result.fits && result.aligned && result.separate && result.wraps && result.actionsFit, JSON.stringify(result));
+    assert.ok(result.tagText.every(text => text && !text.startsWith('plugins.')), JSON.stringify(result));
+  }
+  assert.deepEqual(longNames.map(result => result.tagText[0]), ['獨立分頁', 'Separate page', 'Página independente']);
+  await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+  fs.writeFileSync(path.join(evidence, 'initial-long-names.png'), (await win.webContents.capturePage()).toPNG());
   console.log('PASS install review renders all four author recommendations without overflow');
   console.log('PASS install-only submits explicit empty, false and native choices together');
   console.log('PASS first-enable review reuses the same fields and submits user overrides');
   console.log('PASS pending setup for trusted code does not ask for trust again');
   console.log('PASS first-use review can keep the existing provider without offering layout controls');
+  console.log('PASS right-aligned purpose tags keep compact spacing and fit long names at 320px in three locales');
   console.log('Evidence:', evidence); win.destroy(); app.exit(0);
 }
 app.whenReady().then(main).catch(error => { console.error(error); app.exit(1); });
