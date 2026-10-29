@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const { create } = require('../../src/electron/renderer/windowActivationFocus');
 
 function fixture() {
-  const events = {}, windowEvents = {}, frames = [];
+  const events = {}, windowEvents = {}, frames = [], timers = new Map();
+  let timerId = 0;
   const shell = { focus() { document.activeElement = shell; } };
   const native = { tagName: 'BUTTON' }, plugin = { tagName: 'BUTTON' };
   const editor = { tagName: 'INPUT' }, content = { tagName: 'BUTTON' };
@@ -15,14 +16,18 @@ function fixture() {
     addEventListener: (name, fn) => { events[name] = fn; },
     defaultView: {
       addEventListener: (name, fn) => { windowEvents[name] = fn; },
-      requestAnimationFrame: fn => frames.push(fn)
+      requestAnimationFrame: fn => frames.push(fn),
+      setTimeout(fn) { const id = ++timerId; timers.set(id, fn); return id; },
+      clearTimeout: id => timers.delete(id)
     }
   };
   const controller = create({ document, shell, header: { contains: node => [native, plugin].includes(node) } });
   return { document, shell, native, plugin, editor, content, events,
     focus(target) { document.activeElement = target; events.focusin({ target }); },
-    blur() { focused = false; windowEvents.blur(); },
-    reopen() { focused = true; },
+    blur() { focused = false; windowEvents.blur?.(); },
+    reopen() { focused = true; windowEvents.focus?.(); },
+    cancel: () => controller.cancel(),
+    expire() { const pending = [...timers.values()]; timers.clear(); pending.forEach(fn => fn()); },
     summon: controller.summon,
     flush() { frames.splice(0).forEach(fn => fn()); }
   };
@@ -64,7 +69,7 @@ test('Tab consumes navigation after a transient Chromium blur, not before focusi
   assert.equal(f.document.activeElement, f.plugin);
 });
 
-test('a late native focus restore is parked until new input or window blur', () => {
+test('a late native focus restore is parked before the one-shot completion', () => {
   const f = fixture();
   f.focus(f.shell); f.summon(); f.flush();
   f.focus(f.plugin); f.flush(); assert.equal(f.document.activeElement, f.shell);
@@ -83,4 +88,41 @@ test('editors, content controls, new input and lost native focus win over queued
   }
   f.focus(f.plugin); f.summon(); f.blur(); f.flush();
   assert.equal(f.document.activeElement, f.plugin);
+});
+
+
+test('summon survives transient blur and body focus before restoring the header', () => {
+  const f = fixture();
+  f.focus(f.plugin); f.summon(); f.blur(); f.flush();
+  f.reopen(); f.focus(f.document.body); f.flush();
+  f.focus(f.plugin); f.flush();
+  assert.equal(f.document.activeElement, f.shell);
+});
+
+test('completed header, keyboard or editor resolution permits later programmatic focus', () => {
+  for (const target of ['plugin', 'native', 'editor', 'content']) {
+    const f = fixture();
+    f.focus(f[target]); f.summon(); f.flush();
+    f.focus(f.plugin); f.flush();
+    assert.equal(f.document.activeElement, f.plugin);
+  }
+  const f = fixture();
+  f.events.keydown({ key: 'Tab' }); f.focus(f.plugin); f.summon(); f.flush();
+  f.focus(f.native); f.flush(); assert.equal(f.document.activeElement, f.native);
+});
+
+test('native departure, hide and expiry prevent deferred resets after returning', () => {
+  for (const end of ['cancel', 'expire']) {
+    const f = fixture();
+    f.focus(f.document.body); f.summon(); f.blur(); f[end]();
+    f.reopen(); f.focus(f.plugin); f.flush();
+    assert.equal(f.document.activeElement, f.plugin);
+  }
+});
+
+test('a newer summon invalidates frames from the previous transaction', () => {
+  const f = fixture();
+  f.focus(f.plugin); f.summon(); f.cancel(); f.summon(); f.flush();
+  assert.equal(f.document.activeElement, f.shell);
+  f.focus(f.native); f.flush(); assert.equal(f.document.activeElement, f.native);
 });

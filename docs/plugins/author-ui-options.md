@@ -39,6 +39,8 @@ Page, Notch and full Edge Dock card mounts receive a `context.headerActions` DOM
 
 Use `update(context)` for source/period/data/geometry changes. Honor `visible:false`; release work when hidden and clean up per-mount resources in `dispose`. Same-plugin backends are shared across all windows. Background execution is a separate explicit setting.
 
+Main-window summon focus handling is one-shot: it completes after resolving a retained control, and cancels on new input, native departure, hiding or expiry. A renderer blur alone can be part of activation, so the host uses the main process's existing popover blur suppression to distinguish it from native departure. The host never moves DOM focus while the document is unfocused.
+
 Use any bundled CSS, DOM and canvas implementation. Optional host variables include `--plugin-default`, `--plugin-muted`, `--plugin-accent`, `--plugin-chart`, `--pv-font`, `--pv-padding` and `--pv-radius`. Skin presets remain a convenience for App colors and default author appearance; built-in theme selection/reset clears the applied author preset. They do not constrain author layouts. Respect reduced motion, keyboard access, readable contrast and narrow surfaces yourself.
 
 The renderer has no Node integration. Use `ctx.backend.call` for network/files/compute. The backend has the OS user's authority; moving a request there is not an isolation guarantee. Bundle dependencies ahead of time, include every asset in `files`, and use CSS files rather than inline script execution. See [package limits and installation](distribution-design.md#package-format).

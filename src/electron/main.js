@@ -7596,6 +7596,7 @@ function createWindow(boundsOverride, options = {}) {
   });
   win.on('blur', () => {
     nudgeTaskbarZOrder();
+    if (!suppressNextBlurHide) sendMainWindowEvent('window:summonCancelled');
     if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) {
       const wasVisible = win.isVisible();
       const point = wasVisible && process.platform === 'darwin' ? screen.getCursorScreenPoint() : null;

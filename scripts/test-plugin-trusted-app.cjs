@@ -299,6 +299,43 @@ app.whenReady().then(async () => {
       assert.equal(await js('document.activeElement===focusButton'),true);
       fs.writeFileSync(path.join(evidence,'focus-baseline.png'),(await capture()).toPNG());
     } else {
+      // This is an injected renderer activation sequence, not a claim that the
+      // OS menu-bar race has been reproduced. The real Chromium focus is used.
+      const reviewSource = fs.readFileSync(process.env.TM_FOCUS_CONTROLLER_SOURCE || path.join(root,'src/electron/renderer/windowActivationFocus.js'),'utf8');
+      await js(reviewSource);
+      await js(`globalThis.reviewFocus=TokenMonitorWindowActivationFocus.create({document,shell:els.shell,header:document.querySelector('.titlebar')});
+        focusButton.focus();reviewFocus.summon();window.dispatchEvent(new Event('blur'));
+        document.body.tabIndex=-1;document.body.focus()`);
+      await capture();
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===els.shell'),true,'transient blur must retain pending summon');
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===focusButton'),true,'completed summon permits programmatic focus');
+      // A second native window supplies a genuine departure. Cancellation uses
+      // the production main blur callback, not the renderer blur event.
+      context.win=win;context.suppressNextBlurHide=false;context.quitRequested=false;
+      context.nudgeTaskbarZOrder=()=>{};context.scheduleFloatingBubbleAutoCollapse=()=>{};
+      vm.runInContext(source.slice(source.indexOf("  win.on('blur', () => {"),source.indexOf("  win.on('resized',",source.indexOf("  win.on('blur', () => {"))),context);
+      const other = new BrowserWindow({show:false,width:240,height:140,webPreferences:{sandbox:true}});
+      try {
+        await other.loadURL('data:text/html,<p>Isolated focus departure</p>');
+        await js('document.body.focus();windowActivationFocus.summon()');
+        other.show();other.focus();await pause(70);
+        assert.equal(await js('document.hasFocus()'),false,'other native window owns focus');
+        await js('focusButton.focus()');await pause(40);
+        assert.equal(await js('document.activeElement===focusButton'),true,'no DOM focus move while away');
+        other.hide();win.show();win.focus();await pause(60);await capture();
+        assert.equal(await js('document.activeElement===focusButton'),true,'native departure cancelled stale summon');
+      } finally { other.destroy(); }
+      await js('document.body.focus();reviewFocus.summon()');await pause(300);
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===focusButton'),true,'body-only summon expires');
+      await js('document.body.focus();windowActivationFocus.summon()');
+      win.webContents.send('window:visibility',false);await pause(40);
+      win.webContents.send('window:visibility',true);await pause(40);
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===focusButton'),true,'native hidden notification cancels summon');
+      await reopen();
       fs.writeFileSync(path.join(evidence,'focus-plugin-neutral.png'),(await capture()).toPNG());
       win.webContents.sendInputEvent({type:'keyDown',keyCode:'Return'});
       win.webContents.sendInputEvent({type:'char',keyCode:'Return'});
@@ -331,7 +368,7 @@ app.whenReady().then(async () => {
     }
     fs.writeFileSync(path.join(evidence,'window-focus-results.json'),JSON.stringify({baseline,parked,electron:process.versions.electron,
       scope:'production renderer/preload/plugin runtime and main shortcut callback; native hide/show and Chromium Tab/Enter; OS global shortcut registration not driven'},null,2));
-    assertConsoleClean();console.log(baseline?'PASS baseline reproduces retained header focus':'PASS shortcut focus, keyboard navigation/Enter, native parity and retained draft');
+    assertConsoleClean();console.log(baseline?'PASS baseline reproduces retained header focus':'PASS shortcut focus, injected transient blur, one-shot completion, native departure, expiry, keyboard navigation/Enter, native parity and retained draft');
     await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
   }
   if (process.env.TM_PACKAGE_RECOVERY_ONLY === '1') {
