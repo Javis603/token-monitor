@@ -418,7 +418,7 @@ function createPluginRuntime({
     return result;
   }
 
-  async function changePackage(event, change, ids) {
+  async function changePackage(event, change, ids, beforeRelease) {
     requireMain(event);
     const affected = await inspectHosts(ids);
     for (const [host, failedIds] of failedCleanup) {
@@ -431,6 +431,7 @@ function createPluginRuntime({
     const unsaved = affected.some(item => item.unsaved);
     if (reload.length) await confirm(event, 'plugins.trusted.reloadNote', unsaved ? 'plugins.trusted.packageUnsavedNote' : null);
     else if (unsaved) await confirm(event, 'plugins.trusted.packageUnsavedNote');
+    await beforeRelease?.();
     const released = [], recovery = [];
     try {
       for (const item of affected.filter(item => !item.error)) {
@@ -473,9 +474,9 @@ function createPluginRuntime({
     return listWithPlacements();
   }
 
-  async function protectContentSwitch(event, next) {
+  async function protectContentSwitch(event, next, excludePluginId) {
     const current = contentSelections();
-    const active = manager.list().plugins.filter(plugin => plugin.status === 'active');
+    const active = manager.list().plugins.filter(plugin => plugin.status === 'active' && plugin.id !== excludePluginId);
     const content = Object.entries(current).filter(([target, ref]) => next[target] !== ref
       && active.some(plugin => plugin.views.some(view => view.ref === ref && view.mode === 'replace' && view.targets.includes(target))))
       .map(([target, ref]) => ({ target, ref }));
@@ -487,7 +488,7 @@ function createPluginRuntime({
     if (content.some(item => contentSelections()[item.target] !== item.ref)) throw new Error('Content selection changed; try again');
   }
 
-  async function confirmContentSwitch(event, plugin, plan) {
+  async function confirmContentSwitch(event, plugin, plan, { packageChange = false } = {}) {
     const current = contentSelections();
     const next = { ...(plan.patch.pluginContentSelections || current) };
     const displaced = manager.list().plugins.filter(item => item.id !== plugin.id && item.status === 'active'
@@ -510,7 +511,7 @@ function createPluginRuntime({
         }
       }
     }
-    await protectContentSwitch(event, next);
+    await protectContentSwitch(event, next, packageChange ? plugin.id : null);
     return plan.values;
   }
 
@@ -613,10 +614,15 @@ function createPluginRuntime({
       if (selection.canceled || !selection.filePaths.length) return null;
       return kind === 'directory' ? managed.previewDirectory(selection.filePaths[0]) : managed.previewFile(selection.filePaths[0]);
     });
-    handle('plugins:install', (event, token, options) => changePackage(event, () => managed.install(token, {
-      trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true, initialSetup: options?.initialSetup,
-      beforeEnable: (plugin, plan) => confirmContentSwitch(event, plugin, plan)
-    }), [managed.previewId(token)]));
+    handle('plugins:install', (event, token, options) => {
+      requireMain(event);
+      const id = managed.previewId(token);
+      return managed.install(token, {
+        trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true, initialSetup: options?.initialSetup,
+        beforeEnable: (plugin, plan) => confirmContentSwitch(event, plugin, plan, { packageChange: true }),
+        withLifecycle: (change, beforeRelease) => changePackage(event, change, [id], beforeRelease)
+      });
+    });
     handle('plugins:cancelInstall', (event, token) => { requireMain(event); managed.cancel(token); });
     handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id), [id]));
     handle('plugins:uninstall', (event, id, options) => changePackage(event, () => managed.uninstall(id, options), [id]));

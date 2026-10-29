@@ -24,6 +24,10 @@ manifest.views.push(
   { id: 'navigation-second', targets: ['main.navigation.content'], selector: '.view-switcher-label' }
 );
 if (process.env.TM_DEFAULT_PLACEMENTS === '1') manifest.views.find(view => view.id === 'panel').defaultSurfaces = ['page','notch'];
+if (process.env.TM_UPDATE_CONSENT === '1') {
+  manifest.views = manifest.views.filter(view => view.id !== 'content');
+  manifest.background = true;
+}
 if (process.env.TM_FIRST_USE_CHOICES === '1') {
   manifest.views.find(view => view.id === 'panel').defaultSurfaces = ['page', 'notch'];
   manifest.background = true;
@@ -125,7 +129,7 @@ app.whenReady().then(async () => {
   let settings = { ...defaults(), language: 'zh-TW', systemGlass: false, reduceMotion: 'on', tokenNumberAnimation: 'off', refreshMs: 3600000 };
   const period = { totalTokens: 125000, costUsd: 4.25, inputTokens: 100000, outputTokens: 25000, cachedInputTokens: 0, sessions: [], models: { 'gpt-5': 100000, 'claude-sonnet': 25000 }, modelCosts: { 'gpt-5': 3.25, 'claude-sonnet': 1 }, clients: { codex: 125000 }, clientCosts: { codex: 4.25 }, devices: [], projects: { fixture: { label: 'Synthetic project', tokens: 125000, costUsd: 4.25, clients: { codex: 125000 } } } };
   const stats = { updatedAt: new Date().toISOString(), periods: { today: period, month: { ...period, totalTokens: 750000 }, allTime: period }, devices: [], limits: { providers: [] } };
-  win = new BrowserWindow({ show: true, width: 400, height: 820, backgroundColor: '#17181a', webPreferences: { preload: path.join(root, 'src/electron/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  win = new BrowserWindow({ show: true, width: 400, height: 820, backgroundColor: '#17181a', webPreferences: { preload: path.join(root, 'src/electron/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, ...(process.env.TM_UPDATE_CONSENT === '1' ? { backgroundThrottling: false, offscreen: true } : {}) } });
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) { errors.push(message); console.log('RENDERER', message); } });
   win.webContents.on('render-process-gone', (_event, details) => { console.error(details); app.exit(1); });
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }));
@@ -309,6 +313,45 @@ app.whenReady().then(async () => {
     assert.equal(settings.pluginStates['trusted-fixture'].background, false);
     assert.equal(settings.pluginAuthorSkin, null);
     assertConsoleClean(); console.log('PASS actual App first-use choices: placements, native content, background and skin survive adapter, IPC, reload and re-enable');
+    await runtime.dispose(); runtime = null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
+  }
+  if (process.env.TM_UPDATE_CONSENT === '1') {
+    await js("pluginApi.setEnabled('trusted-fixture',true)");
+    // Keep backend lifetime independent of offscreen window visibility.
+    await js("pluginApi.setBackground('trusted-fixture',true)");
+    await js("pluginApi.place('trusted-fixture/panel','page',true)");
+    await js("openViewFromTray('plugin:trusted-fixture/panel')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'original plugin page');
+    await js("globalThis.originalUpdateInput=document.querySelector('[aria-label=\"Fixture draft\"]');originalUpdateInput.value='UNSAVED UPDATE DRAFT'");
+    const otherDir = path.join(scratch, 'other-source');
+    fs.cpSync(fixtureDir, otherDir, { recursive: true });
+    const contentView = { id: 'content', mode: 'replace', targets: ['main.home.content'] };
+    fs.writeFileSync(path.join(otherDir, 'manifest.json'), JSON.stringify({ ...manifest, id: 'other-fixture', name: 'Other fixture', views: [...manifest.views, contentView] }));
+    selectedDirectory = otherDir;
+    const other = await js("pluginApi.importPackage('directory')");
+    await js(`pluginApi.install(${JSON.stringify(other.token)},{trustInstall:true})`);
+    fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({ ...manifest, version: '2.0.0', views: [...manifest.views, contentView] }));
+    selectedDirectory = fixtureDir;
+    const update = await js("pluginApi.importPackage('directory')");
+    await pause(100);
+    const pid = (await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','before')")).pid;
+    const install = `pluginApi.install(${JSON.stringify(update.token)},{trustUpdate:true,initialSetup:{'content:main.home.content':'trusted-fixture/content'}})`;
+    for (const responses of [[0], [1, 0]]) {
+      toggleResponses.push(...responses);
+      assert.match(await js(`${install}.then(()=>'',error=>error.message)`), /cancelled/);
+      assert.deepEqual(await js("({same:document.querySelector('[aria-label=\"Fixture draft\"]')===originalUpdateInput,draft:document.querySelector('[aria-label=\"Fixture draft\"]')?.value})"), { same: true, draft: 'UNSAVED UPDATE DRAFT' });
+      assert.equal((await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','after')")).pid, pid);
+      assert.equal(runtime.manager.list().plugins.find(plugin => plugin.id === 'trusted-fixture').version, '1.0.0');
+      assert.equal(settings.pluginContentSelections['main.home.content'], 'other-fixture/content');
+    }
+    toggleResponses.push(1, 1);
+    await js(install);
+    await waitFor("state.pluginCatalog?.plugins?.find(plugin=>plugin.id==='trusted-fixture')?.version==='2.0.0'", 'same preview update succeeds after both cancellations');
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]') && document.querySelector('[aria-label=\"Fixture draft\"]')!==originalUpdateInput", 'updated plugin UI remount');
+    await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    assert.equal(settings.pluginContentSelections['main.home.content'], 'trusted-fixture/content');
+    assert.equal(runtime.manager.active('other-fixture'), true);
+    assertConsoleClean(); console.log('PASS actual App update consent: conflict and package cancellation retain original DOM, draft, backend PID and version; same preview retry succeeds');
     await runtime.dispose(); runtime = null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
   }
   if (process.env.TM_CONTENT_SAFETY === '1') {

@@ -95,6 +95,63 @@ test('trust-and-install selects content; cancelled conflicts leave no installed 
   assert.equal(f.runtime.manager.active('other-fixture'), true);
 });
 
+for (const cancelAt of ['conflict', 'displaced-draft', 'package', 'expired-preview']) test(`update cancellation at ${cancelAt} preserves both original drafts before cleanup`, async t => {
+  const { f, file, manifest } = await setup(t, { competitor: true });
+  manifest.views = manifest.views.filter(view => view.id !== 'content');
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  const first = await f.invoke('plugins:import', 'directory');
+  await f.invoke('plugins:install', first.token, { trustInstall: true });
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  const document = { createElement: tag => new Element(tag, document) };
+  document.head = document.createElement('head');
+  let lifecycle, disposals = 0;
+  const host = createHost({ document, window: {}, bridge: { onLifecycle(fn) { lifecycle = fn; } },
+    importModule: async () => ({ mount(container) {
+      const input = document.createElement('input'); container.append(input);
+      return { hasUnsavedChanges: () => Boolean(input.value), dispose() { disposals++; input.remove(); } };
+    } }) });
+  t.after(() => host.dispose());
+  const container = document.createElement('div');
+  await host.mount(container, { pluginId: 'trusted-fixture', revision: 'one', ref: 'trusted-fixture/panel', id: 'panel', entry: 'tm-plugin://trusted-fixture/one/ui.mjs' }, { surface: 'page' });
+  const original = container.children[0]; original.value = 'UNSAVED UPDATE DRAFT';
+  const otherContainer = document.createElement('div');
+  await host.mount(otherContainer, { pluginId: 'other-fixture', revision: 'one', ref: 'other-fixture/content', id: 'content', entry: 'tm-plugin://other-fixture/one/ui.mjs' }, { target: TARGET });
+  const otherInput = otherContainer.children[0]; otherInput.value = 'UNSAVED OTHER DRAFT';
+  const actions = [];
+  f.lifecycle(f.main, request => { actions.push(request.action); return lifecycle(request); }, ['trusted-fixture', 'other-fixture']);
+  f.send(f.main, 'home');
+  const child = f.children[0]; assert.ok(child);
+  manifest.version = '2.0.0'; manifest.views.push({ id: 'content', mode: 'replace', targets: [TARGET] });
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  const preview = await f.invoke('plugins:import', 'directory'), before = structuredClone(f.settings);
+  // Decisions follow each dialog's purpose, independent of its presentation order.
+  const show = f.dialogs.push.bind(f.dialogs);
+  f.dialogs.push = options => {
+    const kind = options.type === 'question' ? 'conflict' : options.message.startsWith('The content you are replacing') ? 'displaced-draft' : 'package';
+    if (cancelAt === 'expired-preview' && kind === 'package') f.invoke('plugins:cancelInstall', preview.token);
+    f.respond(kind === cancelAt ? 0 : 1); return show(options);
+  };
+  await assert.rejects(f.invoke('plugins:install', preview.token, { trustUpdate: true, initialSetup: { [contentKey(TARGET)]: REF } }), cancelAt === 'expired-preview' ? /preview expired/ : /cancelled/);
+  assert.equal(disposals, 0);
+  assert.equal(container.children[0], original);
+  assert.equal(original.value, 'UNSAVED UPDATE DRAFT');
+  assert.equal(otherContainer.children[0], otherInput); assert.equal(otherInput.value, 'UNSAVED OTHER DRAFT');
+  assert.equal(child.exited, undefined, 'cancellation must not pause the original backend');
+  assert.equal(actions.includes('release'), false);
+  assert.deepEqual(f.settings, before);
+  assert.equal(f.invoke('plugins:list').plugins.find(plugin => plugin.id === 'trusted-fixture').version, '1.0.0');
+  assert.equal(f.runtime.manager.active('trusted-fixture'), true);
+  assert.equal(f.runtime.manager.active('other-fixture'), true);
+  if (cancelAt === 'conflict') {
+    f.dialogs.push = show;
+    await f.invoke('plugins:install', preview.token, { trustUpdate: true, initialSetup: { [contentKey(TARGET)]: REF } });
+    assert.equal(f.invoke('plugins:list').plugins.find(plugin => plugin.id === 'trusted-fixture').version, '2.0.0');
+    assert.equal(f.settings.pluginContentSelections[TARGET], REF);
+    assert.equal(disposals, 1, 'only the updated plugin UI is released');
+    assert.equal(otherContainer.children[0], otherInput);
+  }
+});
+
 for (const operation of ['enable', 'install', 'native', 'provider']) test(`cancelling the draft warning preserves the selected content during ${operation}`, async t => {
   const { f } = await setup(t, { competitor: true });
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });

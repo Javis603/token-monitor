@@ -62,6 +62,21 @@ for (const invalidate of ['cancel', 'expire']) test(`a preview ${invalidate}d wh
   } }), /preview expired/);
   assert.deepEqual(snapshot(f), before);
 });
+
+for (const keepPlacements of [false, true]) for (const hasSetup of [false, true]) {
+  test(`constructor plugin uninstalls with keepPlacements=${keepPlacements}, own setup=${hasSetup}`, async t => {
+    const f = fixture(t);
+    await f.install('1.0.0', { id: 'constructor', views: [] });
+    if (hasSetup) f.settings.pluginInitialSetup.constructor = { values: { background: true, skin: null, 'content:main.home.content': null }, applied: ['background', 'skin', 'content:main.home.content'] };
+    await f.api.uninstall('constructor', { keepPlacements });
+    assert.equal(f.api.describe('constructor'), null);
+    assert.equal(fs.existsSync(path.join(f.args.userDir, 'constructor')), false);
+    assert.equal(Object.hasOwn(f.settings.pluginInitialSetup, 'constructor'), keepPlacements && hasSetup);
+    if (keepPlacements && hasSetup) assert.deepEqual(f.settings.pluginInitialSetup.constructor, {
+      values: { 'content:main.home.content': null }, applied: ['content:main.home.content']
+    });
+  });
+}
 async function operation(api, name, token) {
   if (name === 'preview') return api.preview(parsePackage(bytes('3.0.0', {})));
   if (name === 'update') return await api.install(token);
