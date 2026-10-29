@@ -26,7 +26,7 @@ Uninstall can retain plugin data/preferences and display locations independently
 
 ## Catalogs
 
-Discover shows one Featured plugins group: official packages first, then App-designated maintainer catalogs branded Token Monitor Community. Both brands show a shield identifying distribution provenance, not a safety audit. Their package actions use the simplified Install and enable / Update flow with the same exact-revision approval underneath. Other HTTPS catalogs stay in Custom sources and retain the third-party trust warning. Public GitHub topic discovery remains disabled; when reopened, its separate Unofficial plugins · GitHub group shows repository owners without a shield.
+Discover shows one Featured plugins group: official packages first, then App-designated maintainer catalogs branded Token Monitor Community. Both brands show a shield identifying distribution provenance, not a safety audit. Their package actions use the simplified Install and enable / Update flow with the same exact-revision approval underneath. Other HTTPS catalogs stay in Custom sources and retain the third-party trust warning. In-app GitHub discovery is not yet available; when available, its separate Unofficial plugins · GitHub group shows repository owners without a shield.
 
 Featured placement and official attribution are host-assigned, not catalog fields authors can request. Custom URLs, author/title metadata and signing keys do not grant featured status. Official package updates currently arrive with an App update; App-designated community catalogs and user-added catalogs provide compatible updates through their existing sources.
 
@@ -36,7 +36,7 @@ Catalogs use bounded downloads, source pins, package hashes and optional Ed25519
 
 ## Repository details and README
 
-Public GitHub topic discovery is not yet open. A repository topic does not register an installable package. Use local import or an HTTPS catalog and document that route in your README.
+In-app GitHub discovery is not yet available. A repository topic does not register an installable package. Use local import or an HTTPS catalog and document that route in your README.
 
 Catalog entries may set a GitHub `repository` URL and an optional `readmePaths` locale-to-path map, for example `{"en":"plugins/example/README.md","zh-TW":"plugins/example/README.zh-TW.md"}`. Paths must be repository-relative Markdown files, with no traversal, URL/query syntax or encoded separators. The host selects the current locale, then its language, English, or the first declared path. Without a map, it uses the repository default README without guessing localized filenames. Relative links and images resolve from the selected file's directory. Without a repository, basic description and package actions remain available.
 

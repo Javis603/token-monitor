@@ -6,19 +6,19 @@ Use this guide when sharing a plugin with users. Start with the [development gui
 
 | Route | What the author provides | What users can do |
 | --- | --- | --- |
-| GitHub discovery (not yet open) | A public repository with the `token-monitor-plugin` topic and a README | Public topic discovery is temporarily disabled; a topic does not currently list the plugin in the App |
+| In-app GitHub discovery (not yet available) | A public repository with the `token-monitor-plugin` topic and a README | In-app GitHub discovery is not yet available; a topic does not currently list the plugin in the App |
 | File or folder | A built `.tmplugin` file or a complete plugin source folder | Import it through Settings → Plugins |
 | HTTPS catalog | A catalog index and package files at direct HTTPS URLs | Preview and install a package, then discover compatible updates from the same source |
 
-Use file/folder import or a user-configured HTTPS catalog for now. GitHub discovery is retained for a later launch; it is not restricted to the maintainer's account and is not an official publishing route. A GitHub topic does not register a package or define how to install it. Discovery does not infer a version, compatibility or a downloadable asset from repository names, tags or GitHub Releases. Authors must describe an actual installation route in their README.
+Use file/folder import or a user-configured HTTPS catalog for now. In-app GitHub discovery is planned for a later launch; it is not restricted to the maintainer's account and is not an official publishing route. A GitHub topic does not register a package or define how to install it. Discovery does not infer a version, compatibility or a downloadable asset from repository names, tags or GitHub Releases. Authors must describe an actual installation route in their README.
 
-GitHub discovery is nonofficial and unreviewed. Adding a topic, serving a catalog, providing a hash or signing an index does not grant official attribution or a safety review. Official attribution is assigned by Token Monitor's distribution mechanism, not by author metadata. See [distribution and trust](distribution-design.md).
+In-app GitHub discovery listings are nonofficial and unreviewed. Adding a topic, serving a catalog, providing a hash or signing an index does not grant official attribution or a safety review. Official attribution is assigned by Token Monitor's distribution mechanism, not by author metadata. See [distribution and trust](distribution-design.md).
 
 ## Naming and identity
 
 The App requires a stable manifest `id` of 2–40 characters matching `^[a-z0-9][a-z0-9-]{1,39}$`, a valid SemVer `version`, and `tmApi: 1`. See the [manifest contract](README.md#manifest) for the manifest contract.
 
-Choose any repository name; no Token Monitor prefix is required. The planned GitHub discovery matches the `token-monitor-plugin` topic, not the repository name. The repository name, display name and manifest id may differ.
+Choose any repository name; no Token Monitor prefix is required. The planned in-app GitHub discovery matches the `token-monitor-plugin` topic, not the repository name. The repository name, display name and manifest id may differ.
 
 Recommended conventions:
 
