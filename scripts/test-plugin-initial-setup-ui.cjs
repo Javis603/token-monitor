@@ -20,6 +20,10 @@ async function main() {
     skins: [{ id: 'blue', name: 'Blue', colors: { accent: '#abcdef' } }], defaults: { background: true, skin: 'blue' } }).manifest;
   const dto = describePackage({ manifest, hash: 'fixture' });
   const preview = { ...dto, token: 'initial-token', operation: 'install', origin: { kind: 'official' }, initialSetup: initialSetupReview({}, dto) };
+  const locationManifest = normalizeManifest({ tmApi: 1, id: 'locations-demo', name: 'Locations demo', version: '1.0.0', ui: 'ui.mjs', files: ['ui.mjs'],
+    views: [{ id: 'dashboard', title: 'Dashboard', surfaces: ['page', 'edgeDock', 'notch'], defaultSurfaces: ['page', 'edgeDock', 'notch'] }] }).manifest;
+  const locationDto = describePackage({ manifest: locationManifest, hash: 'locations' });
+  locationDto.initialSetup = initialSetupReview({}, locationDto);
   const css = ['styles.css', 'pluginViews.css'].map(file => `<link rel="stylesheet" href="${pathToFileURL(path.join(root, 'src/electron/renderer', file))}">`).join('');
   const scripts = ['i18n.js', 'pluginUi.js', 'pluginViews.js', 'selectControl.js', 'pluginSettings.js'].map(file => `<script src="${pathToFileURL(path.join(root, 'src/electron/renderer', file))}"></script>`).join('');
   const html = path.join(scratch, 'index.html');
@@ -140,12 +144,42 @@ async function main() {
   assert.deepEqual(longNames.map(result => result.tagText[0]), ['獨立分頁', 'Separate page', 'Página independente']);
   await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   fs.writeFileSync(path.join(evidence, 'initial-long-names.png'), (await win.webContents.capturePage()).toPNG());
+  win.setContentSize(390, 880);
+  const locations = await win.webContents.executeJavaScript(`(async () => {
+    const { box, panel, data } = initialFixture, source = ${JSON.stringify(locationDto)}, results = [];
+    const configure = async locale => {
+      window.initialLocale = locale;
+      data.plugins = [{ ...structuredClone(source), source: 'user', trusted: true, enabled: false, status: 'disabled' }];
+      await panel.refresh(); box.querySelector('.plugin-enable').click(); await new Promise(resolve => setTimeout(resolve, 30));
+    };
+    for (const locale of ['zh-TW', 'zh-CN', 'en', 'ja', 'ko', 'pt-BR']) {
+      await configure(locale);
+      const labels = [...box.querySelectorAll('.plugin-initial-setup .plugin-purpose-tag')].map(node => node.textContent);
+      const expected = ['plugins.initial.purpose.page', 'settings.display.edgeDock', 'settings.notch.title'].map(key => TokenMonitorI18n.translate(locale, key));
+      box.querySelector('.plugin-allow').click(); await new Promise(resolve => setTimeout(resolve, 30));
+      const detailLabels = [...box.querySelectorAll('.plugin-surface-chip')].map(node => node.textContent);
+      results.push({ locale, labels, expected, detailLabels });
+    }
+    await configure('zh-TW'); return results;
+  })()`);
+  for (const result of locations) {
+    assert.deepEqual(result.labels, result.expected, result.locale);
+    assert.deepEqual(result.detailLabels, result.expected, result.locale);
+  }
+  assert.deepEqual(locations[0].labels, ['獨立分頁', '側邊欄', '瀏海面板']);
+  await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+  const locationBounds = await win.webContents.executeJavaScript(`(() => {
+    const rect = document.querySelector('.plugin-initial-setup').getBoundingClientRect();
+    return { x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
+  })()`);
+  fs.writeFileSync(path.join(evidence, 'initial-location-names.png'), (await win.webContents.capturePage(locationBounds)).toPNG());
   console.log('PASS install review renders all four author recommendations without overflow');
   console.log('PASS install-only submits explicit empty, false and native choices together');
   console.log('PASS first-enable review reuses the same fields and submits user overrides');
   console.log('PASS pending setup for trusted code does not ask for trust again');
   console.log('PASS first-use review can keep the existing provider without offering layout controls');
   console.log('PASS right-aligned purpose tags keep compact spacing and fit long names at 320px in three locales');
+  console.log('PASS placement tags and detail controls reuse the App display names in all six locales');
   console.log('Evidence:', evidence); win.destroy(); app.exit(0);
 }
 app.whenReady().then(main).catch(error => { console.error(error); app.exit(1); });

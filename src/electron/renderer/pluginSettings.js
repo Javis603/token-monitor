@@ -13,14 +13,16 @@
 })(typeof window !== 'undefined' ? window : null, function createPluginSettingsApi(positionApi) {
   const isFeatured = origin => origin?.kind === 'official' || origin?.kind === 'maintainer';
   const SURFACE_ORDER = ['home', 'page', 'tray', 'edgeDock', 'notch'];
+  const SURFACE_LABEL_KEYS = { home: 'views.home', page: 'plugins.initial.purpose.page', tray: 'settings.plugins.surface.tray',
+    edgeDock: 'settings.display.edgeDock', notch: 'settings.notch.title' };
+  const surfaceLabel = (surface, t) => t(SURFACE_LABEL_KEYS[surface] || `settings.plugins.surface.${surface}`);
 
   function contentTargetLabel(target, t) {
     const [surface, page, kind] = target.split('.');
-    const location = t(`settings.plugins.surface.${surface === 'main' ? 'page' : surface}`);
     const name = surface === 'edgeDock' && page === 'rail' ? kind : page;
     const key = ['home', 'limits', 'model', 'tool', 'device', 'project', 'session', 'sessions', 'trends', 'status'].includes(name)
       ? `views.${name === 'sessions' ? 'session' : name}` : `plugins.content.${name}`;
-    return surface === 'main' ? t(key) : `${location} · ${t(key)}${page === 'rail' ? ` · ${t('plugins.content.rail')}` : ''}`;
+    return surface === 'main' ? t(key) : `${surfaceLabel(surface, t)} · ${t(key)}${page === 'rail' ? ` · ${t('plugins.content.rail')}` : ''}`;
   }
 
   function el(document, tag, className, text) {
@@ -378,7 +380,8 @@
           input.dataset.controlKey = `initial/${field.key}`;
           input.addEventListener('change', () => { source.initialChoices[field.key] = input.checked; });
           choiceLabel(row, input, field.kind === 'background' ? t('settings.plugins.background') : field.title,
-            field.kind === 'placement' ? t(`plugins.initial.purpose.${field.surface}`) : null);
+            field.kind === 'placement' ? field.surface === 'home'
+              ? t('plugins.initial.purpose.home', { name: surfaceLabel('home', t) }) : surfaceLabel(field.surface, t) : null);
           rows.append(row);
         } else {
           if (field.kind === 'content') {
@@ -824,11 +827,11 @@
         const chips = el(document, 'div', 'plugin-surface-chips');
         for (const surface of SURFACE_ORDER.filter((name) => view.surfaces.includes(name))) {
           const placed = view.placements?.[surface] === true;
-          const chip = el(document, 'button', `plugin-surface-chip${placed ? ' is-on' : ''}`, t(`settings.plugins.surface.${surface}`));
+          const chip = el(document, 'button', `plugin-surface-chip${placed ? ' is-on' : ''}`, surfaceLabel(surface, t));
           chip.type = 'button';
           chip.dataset.controlKey = `place/${view.ref}/${surface}`;
           chip.setAttribute('aria-pressed', String(placed));
-          chip.setAttribute('aria-label', t(placed ? 'settings.plugins.unplace' : 'settings.plugins.place', { view: view.title, surface: t(`settings.plugins.surface.${surface}`) }));
+          chip.setAttribute('aria-label', t(placed ? 'settings.plugins.unplace' : 'settings.plugins.place', { view: view.title, surface: surfaceLabel(surface, t) }));
           chip.addEventListener('click', () => void run(async () => {
             const next = await api.place(view.ref, surface, !placed);
             onPlaced(surface, view.ref, !placed);
@@ -918,7 +921,7 @@
         const count = button(t('plugins.ui.locationCount', { count: surfaces.length }), () => openPlugin(plugin.id, true), 'plugin-location-count');
         count.dataset.controlKey = 'placements';
         const details = surfaces.length
-          ? [{ full: t('plugins.ui.selectedLocations'), heading: true }, ...surfaces.map(surface => ({ full: t(`settings.plugins.surface.${surface}`) }))]
+          ? [{ full: t('plugins.ui.selectedLocations'), heading: true }, ...surfaces.map(surface => ({ full: surfaceLabel(surface, t) }))]
           : [{ full: t('plugins.ui.noPlacements') }];
         if (setDetailTooltip) {
           setDetailTooltip(count, details, { centered: true });
@@ -1131,7 +1134,7 @@
         const selected = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
         const placements = el(document, 'div', 'plugin-views');
         placements.append(el(document, 'div', 'plugin-subhead', t('plugins.ui.selectedLocations')));
-        for (const surface of selected) placements.append(el(document, 'span', 'settings-note', t(`settings.plugins.surface.${surface}`)));
+        for (const surface of selected) placements.append(el(document, 'span', 'settings-note', surfaceLabel(surface, t)));
         if (!selected.length) placements.append(el(document, 'span', 'settings-note', t('plugins.ui.noPlacements')));
         wrap.append(placements);
       }
