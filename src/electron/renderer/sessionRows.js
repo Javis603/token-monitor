@@ -176,9 +176,12 @@
   }
 
   function sessionModelLabel(session) {
-    const models = Object.entries(session?.models || {})
+    const models = [...new Set([
+      ...Object.entries(session?.models || {}),
+      ...Object.entries(session?.modelCosts || {})
+    ]
       .filter(([, value]) => finiteNumber(value) > 0)
-      .map(([model]) => model)
+      .map(([model]) => model))]
       .sort();
     if (models.length === 0) return '';
     if (models.length === 1) return models[0];
@@ -194,7 +197,11 @@
     const entries = Object.entries(session?.models || {})
       .map(([model, tokens]) => ({ model: String(model || ''), tokens: finiteNumber(tokens) }))
       .filter((entry) => entry.tokens > 0);
-    if (entries.length < 2) return [];
+    const measuredModels = new Set(entries.map(entry => entry.model));
+    const costOnlyModels = Object.entries(session?.modelCosts || {})
+      .filter(([model, cost]) => model && finiteNumber(cost) > 0 && !measuredModels.has(model))
+      .map(([model]) => model).sort();
+    if (entries.length + costOnlyModels.length < 2) return [];
     entries.sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model));
     const total = finiteNumber(session?.totalTokens);
     const attributed = entries.reduce((sum, entry) => sum + entry.tokens, 0);
@@ -220,6 +227,8 @@
         percentLabel(unattributed / denominator * 100)
       ]);
     }
+    // A known model name does not imply measured token counts or a share.
+    rows.push(...costOnlyModels.map(model => [model, '', '']));
     return rows;
   }
 
@@ -550,7 +559,7 @@
         }
         if (isReasonixSyntheticSession(session, key)) return null;
         const value = finiteNumber(session?.totalTokens);
-        if (value <= 0) return null;
+        if (value <= 0 && finiteNumber(session?.costUsd) <= 0) return null;
         const { client, titleParts, clientLabel, modelLabel } = sessionTitleParts(session, labels);
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
@@ -612,6 +621,7 @@
           // Raw per-model tokens, so a group row can rebuild its model label and
           // tooltip from every member rather than from one of them.
           modelTokens: session?.models,
+          modelCosts: session?.modelCosts,
           backgroundReview: backgroundReview || undefined,
           subagent: subagent || undefined,
           subagentLabel: subagent ? subagentLabel : undefined,
@@ -745,12 +755,16 @@
     // The model label and its tooltip describe the tokens the row shows, which
     // are the whole group's, so they are rebuilt from every member's models.
     const models = {};
+    const modelCosts = {};
     for (const row of groupRows) {
       for (const [model, tokens] of Object.entries(row.modelTokens || {})) {
         models[model] = (models[model] || 0) + finiteNumber(tokens);
       }
+      for (const [model, cost] of Object.entries(row.modelCosts || {})) {
+        modelCosts[model] = (modelCosts[model] || 0) + finiteNumber(cost);
+      }
     }
-    const group = { client: parent.client, models, totalTokens: value };
+    const group = { client: parent.client, models, modelCosts, totalTokens: value };
     const modelLabel = sessionModelLabel(group);
     const display = main[0];
     const titleParts = [display.clientLabel || display.client, modelLabel, sessionReasoningEffortForRow(display)].filter(Boolean).join(' · ');
@@ -791,6 +805,7 @@
       modelTooltipEntries: options.includeModelTooltip === false ? []
         : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
       modelTokens: models,
+      modelCosts,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.
       subtitle: [display.titled ? titleParts : activity, countLabel].filter(Boolean).join(' · '),

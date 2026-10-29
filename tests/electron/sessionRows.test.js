@@ -40,6 +40,48 @@ test('archived usage joins only matching active native state while retaining its
 const clientLabels = { claude: 'Claude Code', codex: 'Codex' };
 const clientColors = { claude: '#cc7c5e', codex: '#49a3b0', default: '#6ab4f0' };
 
+test('credit-only sessions render their existing cost and model without inventing tokens', () => {
+  const { extractUsageFromTokscale } = require('../../src/shared/usage');
+  const period = extractUsageFromTokscale({ entries: [{ client: 'qodercn', sessionId: 'credits',
+    model: 'qfmodel', input: 0, output: 0, cost: 0.25, messageCount: 1 }] });
+  const [row, ...others] = sessionRowsForPeriod(period, { clientLabels: { qodercn: 'Qoder CN' } });
+  assert.ok(row);
+  assert.equal(others.length, 0);
+  assert.equal(row.value, 0);
+  assert.equal(row.cost, 0.25);
+  assert.equal(row.modelLabel, 'qwen3.8-flash');
+  assert.match(row.name, /Qoder CN.*qwen3\.8-flash/);
+  assert.equal(row.usageMetrics.outputTokens, 0);
+  assert.equal(row.usageMetrics.timedDurationMs, 0);
+  period.sessions[Object.keys(period.sessions)[0]].costUsd = 0;
+  assert.deepEqual(sessionRowsForPeriod(period), []);
+});
+
+test('session model labels and tooltips include positive cost-only model names', () => {
+  const { sessionModelLabel } = require('../../src/electron/renderer/sessionRows');
+  const session = { totalTokens: 10, models: { measured: 10 }, modelCosts: { measured: 1, masked: 0.25, empty: 0 } };
+  assert.equal(sessionModelLabel(session), '2 models');
+  const tooltip = sessionModelTooltipEntries(session);
+  assert.ok(tooltip.some(row => row[0] === 'masked'));
+  assert.ok(!tooltip.some(row => row[0] === 'empty'));
+});
+
+test('grouped cost-only sessions retain every member model and the ordinary cost total', () => {
+  const period = { sessions: {
+    'qodercn:parent': { client: 'qodercn', sessionId: 'parent', totalTokens: 0, costUsd: 0.1,
+      models: {}, modelCosts: { first: 0.1 } },
+    'qodercn:child': { client: 'qodercn', sessionId: 'child', parentSessionId: 'parent',
+      totalTokens: 0, costUsd: 0.2, models: {}, modelCosts: { second: 0.2 } }
+  } };
+  const [row, ...others] = groupSessionRows(sessionRowsForPeriod(period));
+  assert.equal(others.length, 0);
+  assert.equal(row.value, 0);
+  assert.ok(Math.abs(row.cost - 0.3) < 1e-12);
+  assert.deepEqual(row.modelCosts, { first: 0.1, second: 0.2 });
+  assert.equal(row.modelLabel, '2 models');
+  assert.deepEqual(row.modelTooltipEntries, [['first', '', ''], ['second', '', '']]);
+});
+
 function localIso(year, month, day, hour, minute) {
   return new Date(year, month - 1, day, hour, minute).toISOString();
 }

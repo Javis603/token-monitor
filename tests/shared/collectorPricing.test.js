@@ -199,3 +199,128 @@ test('a pricing replay preserves independently queued tick waiters', async t => 
   assert.deepEqual(await Promise.all([initiating, queued]), [true, true]);
   assert.equal(calls, 12, 'initial, discarded manual, replay, and independently queued full scan');
 });
+
+test('Qoder CN credits use effective CNY FX and invalidate anchors when that rate changes', t => {
+  const { configureRates } = require('../../src/shared/currency');
+  const { tokscaleCommand } = require('../../src/shared/collector');
+  const f = fixture(t);
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  t.after(() => {
+    configureRates({});
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+  });
+  const options = { pricingPath: f.pricingPath, binaryRevision: 'test-build' };
+  configureRates({ CNY: 8 });
+  const revision = pricingFingerprint(options);
+  assert.equal(Number(tokscaleCommand().env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.005);
+  configureRates({ CNY: 4 });
+  assert.equal(Number(tokscaleCommand().env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.01);
+  assert.notEqual(pricingFingerprint(options), revision, 'FX reprices every window through the existing pricing replay');
+  process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = '0.02';
+  assert.equal(Number(tokscaleCommand().env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.02);
+});
+
+
+test('worker scalar FX reaches native command and pricing identity without shared module state', () => {
+  const { tokscaleCommand } = require('../../src/shared/collector');
+  const options = { qoderCnUsdPerCredit: 0.007, binaryRevision: 'test-build' };
+  assert.equal(Number(tokscaleCommand(structuredClone(options)).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.007);
+  assert.notEqual(pricingFingerprint(options), pricingFingerprint({ ...options, qoderCnUsdPerCredit: 0.008 }));
+});
+
+test('invalid Qoder CN environment rates preserve valid worker FX before using the default', t => {
+  const { configureRates } = require('../../src/shared/currency');
+  const { tokscaleCommand } = require('../../src/shared/collector');
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  t.after(() => {
+    configureRates({});
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+  });
+  configureRates({ CNY: 8 });
+  const options = { qoderCnUsdPerCredit: 0.007, binaryRevision: 'test-build' };
+  delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  const revision = pricingFingerprint(options);
+  for (const invalid of ['', ' ', 'invalid', '0', '-1', 'NaN', 'Infinity']) {
+    process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = invalid;
+    assert.equal(Number(tokscaleCommand(options).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.007,
+      `invalid environment rate ${JSON.stringify(invalid)} preserves the supplied rate`);
+    assert.equal(pricingFingerprint(options), revision, 'the selected rate also controls anchor identity');
+    for (const supplied of [undefined, null, '', 0, -1, NaN, Infinity]) {
+      assert.equal(Number(tokscaleCommand({ qoderCnUsdPerCredit: supplied })
+        .env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.005);
+    }
+  }
+  process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = '0.02';
+  assert.equal(Number(tokscaleCommand(options).env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT), 0.02);
+  assert.notEqual(pricingFingerprint(options), revision, 'a valid override takes precedence');
+});
+
+test('Qoder FX pricing fingerprints follow the tracked client scope', t => {
+  const f = fixture(t);
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+  });
+  for (const clients of ['claude', 'codex', 'claude,codex', 'qodercn', 'claude,qodercn', undefined, '']) {
+    const options = { clients, pricingPath: f.pricingPath, binaryRevision: 'test-build', qoderCnUsdPerCredit: 0.007 };
+    const before = pricingFingerprint(options);
+    const after = pricingFingerprint({ ...options, qoderCnUsdPerCredit: 0.008 });
+    if (!clients || clients.includes('qodercn')) assert.notEqual(after, before, String(clients));
+    else assert.equal(after, before, `${clients} excludes Qoder CN pricing`);
+  }
+});
+
+for (const clients of ['claude', 'qodercn']) {
+  test(`Qoder FX changes preserve the correct watch and History scope for ${clients}`, async t => {
+    const { configureRates } = require('../../src/shared/currency');
+    const f = fixture(t);
+    const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    configureRates({ CNY: 8 });
+    t.after(() => {
+      configureRates({});
+      if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+      else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+    });
+    let scans = 0;
+    let graphs = 0;
+    const handle = startCollector({
+      clients, allTimeSince: '2024-01-01', deviceId: 'test-device', homeDir: f.dir,
+      pricingPath: f.pricingPath, binaryRevision: 'test-build', intervalMs: 3600000,
+      anchorPersistenceEnabled: false, watchEnabled: false, wslScanEnabled: false,
+      projectsEnabled: false, historyEnabled: true, historyIntervalMs: 3600000,
+      dailyHistoryArchiveEnabled: false, dailyHistoryArchiveWriteEnabled: false,
+      runTokscale: async () => {
+        scans += 1;
+        return { entries: [{ client: clients, sessionId: 's', model: 'test', input: 100, output: 0, cost: 1 }] };
+      },
+      runGraph: async () => {
+        graphs += 1;
+        return { contributions: [{ date: localTodayKey(), clients: [{ client: clients, modelId: 'test', tokens: { input: 100 }, cost: 1 }] }] };
+      },
+      onUpdate() {}
+    });
+    t.after(() => handle.stop());
+    await handle.whenIdle();
+    assert.equal(scans, 3);
+    assert.equal(graphs, 1);
+    const configBefore = configFingerprint(clients, '2024-01-01');
+    configureRates({ CNY: 4 });
+    const configAfter = configFingerprint(clients, '2024-01-01');
+    await handle.tick('watch:test', { todayOnly: true });
+    if (clients === 'qodercn') {
+      assert.equal(scans, 6, 'Qoder FX still reprices all three periods');
+      assert.equal(graphs, 2, 'Qoder FX still bypasses the History interval');
+      assert.notEqual(configAfter, configBefore);
+    } else {
+      assert.equal(scans, 4, 'non-Qoder usage keeps its single Today delta');
+      assert.equal(graphs, 1, 'non-Qoder History is not rescanned');
+      assert.equal(configAfter, configBefore);
+    }
+  });
+}

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   USAGE_STRUCTURAL_KEYS,
@@ -614,4 +615,57 @@ test('WorkBuddy managed field is private and owned by the managed service', () =
   assert.equal(Object.hasOwn(normalized, 'workbuddyManagedAccounts'), false);
   assert.ok(rendererOmittedAccountKeys().includes('workbuddyManagedAccounts'));
   assert.equal(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.workbuddy.includes('workbuddyManagedAccounts'), false);
+});
+
+
+test('effective credit FX is serializable and participates in worker runtime replacement', () => {
+  const first = usageConfigFromSettings({ clients: 'qodercn' }, { qoderCnUsdPerCredit: 0.006 });
+  const second = usageConfigFromSettings({ clients: 'qodercn' }, { qoderCnUsdPerCredit: 0.007 });
+  assert.equal(JSON.parse(JSON.stringify(first)).qoderCnUsdPerCredit, 0.006);
+  assert.notEqual(usageConfigFingerprint(first), usageConfigFingerprint(second));
+});
+
+test('credit FX does not replace a usage runtime that excludes Qoder CN', () => {
+  for (const clients of [undefined, null, 'claude', 'codex', 'claude,codex']) {
+    const first = usageConfigFromSettings({ clients }, { qoderCnUsdPerCredit: 0.006 });
+    const second = usageConfigFromSettings({ clients }, { qoderCnUsdPerCredit: 0.007 });
+    assert.equal(first.qoderCnUsdPerCredit, undefined, String(clients));
+    assert.equal(usageConfigFingerprint(first), usageConfigFingerprint(second), String(clients));
+  }
+  for (const clients of ['', 'qodercn', 'claude,qodercn', ' QODERCN ']) {
+    const first = usageConfigFromSettings({ clients }, { qoderCnUsdPerCredit: 0.006 });
+    const second = usageConfigFromSettings({ clients }, { qoderCnUsdPerCredit: 0.007 });
+    assert.notEqual(usageConfigFingerprint(first), usageConfigFingerprint(second), String(clients));
+  }
+});
+
+test('session detail IPC scopes its price revision to the requested client', t => {
+  const { pricingFingerprint } = require('../../src/shared/collector');
+  const previous = process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT;
+    else process.env.TOKEN_MONITOR_QODER_CN_USD_PER_CREDIT = previous;
+  });
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = main.indexOf("ipcMain.handle('session:getDetail'");
+  const end = main.indexOf("ipcMain.handle('stream:status'", start);
+  assert.ok(start >= 0 && end > start);
+  let handler;
+  let rate = 0.006;
+  vm.runInNewContext(main.slice(start, end), {
+    ipcMain: { handle(_name, callback) { handler = callback; } },
+    readSessionDetailForPlatform: (_args, deps) => deps.getPricingRevision(),
+    lookupModelPricing() {},
+    customPricingPath: () => path.join(__dirname, 'missing-pricing-fixture.json'),
+    pricingFingerprint: options => pricingFingerprint({
+      ...options, qoderCnUsdPerCredit: rate, binaryRevision: 'fixture'
+    })
+  });
+  for (const client of ['codex', 'claude', 'cursor']) {
+    rate = 0.006;
+    const before = handler(null, { client, sessionId: 'fixture' });
+    rate = 0.007;
+    assert.equal(handler(null, { client, sessionId: 'fixture' }), before, client);
+  }
 });

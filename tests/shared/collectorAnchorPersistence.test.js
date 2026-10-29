@@ -394,6 +394,7 @@ test('full anchors persist local-only Reasonix native views alongside aggregate 
     await waitForCondition(() => updates.length === 1);
     const saved = JSON.parse(fs.readFileSync(path.join(tmpShared, 'collector-anchor.json'), 'utf8'));
     assert.equal(saved.cursorAutoModelVersion, 1);
+    assert.equal(saved.qoderCnModelVersion, 2);
     assert.deepEqual(saved.nativeSessions, nativeView.sessions);
     assert.deepEqual(saved.nativeProjects, nativeView.projects);
   } finally {
@@ -826,6 +827,23 @@ test('Cursor anchors from before the Auto model rename require a full scan', () 
   };
   assert.equal(collectorAnchorTrust(anchor, options), null);
   assert.equal(collectorAnchorTrust({ ...anchor, cursorAutoModelVersion: 1 }, options).capturedAtMs, now.getTime() - 60_000);
+});
+
+test('Qoder CN anchors from before the app-side model mapping require a full scan', () => {
+  const { collectorAnchorTrust, configFingerprint } = freshCollector();
+  const now = new Date(2026, 7, 8, 10, 0, 0);
+  const options = { clients: 'qodercn', allTimeSince: '2024-01-01', now };
+  const anchor = {
+    dateKey: '2026-08-08', today: {}, month: {}, allTime: {},
+    configFingerprint: configFingerprint('qodercn', '2024-01-01'),
+    fullScanAt: new Date(now.getTime() - 60_000).toISOString()
+  };
+  assert.equal(collectorAnchorTrust(anchor, options), null);
+  assert.equal(collectorAnchorTrust({ ...anchor, qoderCnModelVersion: 1 }, options), null);
+  assert.equal(collectorAnchorTrust({ ...anchor, qoderCnModelVersion: 2 }, options).capturedAtMs, now.getTime() - 60_000);
+  // Other clients do not need the Qoder CN stamp.
+  const codex = { ...anchor, configFingerprint: configFingerprint('codex', '2024-01-01') };
+  assert.equal(collectorAnchorTrust(codex, { ...options, clients: 'codex' }).capturedAtMs, now.getTime() - 60_000);
 });
 
 test('flat catalog project provenance requires a full scan instead of guessing period sources', () => {

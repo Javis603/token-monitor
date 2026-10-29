@@ -952,3 +952,35 @@ test('still preserves Cursor conversation sessions after the live source drops t
   assert.equal(visible.allTime.clients.cursor, 1000);
   assert.equal(visible.allTime.sessions[`cursor:${CURSOR_UUID}`].archived, true);
 });
+
+
+test('Qoder JSONL copies share a logical session across live scans and persisted aliases', () => {
+  const now = new Date('2026-10-15T10:02:00Z');
+  const id = source => `qodercn:jsonl:${source}:session:with:colon`;
+  const snapshot = (source, costUsd = 0.25) => {
+    const session = { client: 'qodercn', sessionId: id(source), totalTokens: 150, costUsd,
+      models: { qfmodel: 150 }, modelCosts: { qfmodel: costUsd } };
+    const period = normalizePeriod({ totalTokens: 150, costUsd, sessions: { raw: session } });
+    return { today: period, month: period, allTime: period };
+  };
+  const first = snapshot('aaaaaaaaaaaa');
+  const second = snapshot('bbbbbbbbbbbb');
+  const archive = captureSessionUsageArchive({}, first, now);
+  const restored = applySessionUsageArchive(second, archive, { now });
+  assert.equal(restored.allTime.costUsd, 0.25);
+  assert.equal(Object.keys(restored.allTime.sessions).length, 1);
+  // SQLite readers can retain old database keys even after normalizing entries.
+  const entry = Object.values(archive.sessions)[0];
+  const aliases = { version: 1, sessions: {
+    'qodercn:old-a': structuredClone(entry), 'qodercn:old-b': structuredClone(entry)
+  } };
+  const empty = { today: normalizePeriod({}), month: normalizePeriod({}), allTime: normalizePeriod({}) };
+  const replayed = applySessionUsageArchive(empty, aliases, { now, canonical: true });
+  assert.equal(replayed.allTime.costUsd, 0.25);
+  const latestZero = captureSessionUsageArchive(archive, snapshot('bbbbbbbbbbbb', 0), new Date(now.getTime() + 1000));
+  assert.equal(applySessionUsageArchive(empty, latestZero, { now }).allTime.costUsd, 0);
+  for (const sourceId of ['qodercn:jsonl:aaaaaaaaaaaa:unknown', 'qodercn:aaaaaaaaaaaa:legacy']) {
+    const p = normalizePeriod({ sessions: { old: { client: 'qodercn', sessionId: sourceId, totalTokens: 1 } } });
+    assert.equal(Object.values(p.sessions)[0].sessionId, sourceId);
+  }
+});

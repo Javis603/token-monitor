@@ -47,9 +47,10 @@ const EXPECTED = { client: FIXTURE_CLIENT, model: 'deepseek-reasoner', input: 28
 const MUSE_SESSION_ID = 'b1111111-2222-4333-8444-555555555555';
 const MUSE_MODEL = 'muse-spark-1.3-contributor';
 const FX_SESSION_ID = 'fxsess-0001-aaaa-bbbb-ccccdddddddd';
-// Qoder CN session ids embed a hash of the transcript path, and the fixture
-// home is a fresh temp dir, so its sessions are matched by pattern.
-const QODER_CN_SESSION_ID = /^qodercn:qodercn:jsonl:[0-9a-f]{12}:qsess-1$/;
+// Proma session ids retain the transcript-path hash from the fresh fixture
+// home. Qoder CN conversations are canonicalized by the App after parsing.
+const PROMA_SESSION_ID = /^proma:tm-contract@[0-9a-f]{12}$/;
+const QODER_CN_SESSION_ID = 'qodercn:jsonl:session:qsess-1';
 const MCODE_SESSION_ID = 'mvs_0123456789abcdef0123456789abcdef';
 const DSH_MODEL_CONTRACT_CASES = Object.freeze([
   { responseModel: 'keepalive', sourceModel: 'deepseek-reasoner', expectedModel: 'deepseek-reasoner' },
