@@ -468,3 +468,55 @@ test('reused mounts move header controls without replacing drafts and remove omi
   assert.equal(a.children[0], latest.headerActions); assert.notEqual(latest.headerActions, mount);
   await host.dispose(); assert.equal(a.children.length, 0);
 });
+
+for (const target of ['main.home.content', 'main.tools.content', 'edgeDock.rail.stat.content', 'edgeDock.stat.content', 'notch.home.content', 'notch.summary.content']) {
+  test(`${target} keeps successful replacement hidden throughout a delayed same-view update`, async () => {
+    const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+    const view = { ...descriptor, targets: [target] }; let finish;
+    const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(container) {
+      container.append(document.createElement('input'));
+      return { update: () => new Promise(resolve => { finish = resolve; }) };
+    } }) });
+    const content = create({ document, host, getViews: () => [view], selection: () => view.ref });
+    content.render(target, native); await new Promise(setImmediate);
+    assert.equal(native.hidden, true);
+    const container = native.nextSibling, input = container.children[0]; input.value = 'retained draft';
+    content.render(target, native);
+    assert.equal(native.hidden, true, 'native rows must not reappear while the update awaits');
+    assert.equal(container.children[0], input); assert.equal(input.value, 'retained draft');
+    finish(); await new Promise(setImmediate); assert.equal(native.hidden, true);
+    const rebuilt = document.createElement('div'); rebuilt.hidden = false; native.parentNode.insertBefore(rebuilt, native); native.remove();
+    content.retain([target]);
+    content.render(target, rebuilt);
+    assert.equal(rebuilt.hidden, true, 'rebuilt Dock/Notch anchors retain the successful same-revision replacement');
+    assert.equal(rebuilt.nextSibling, container); assert.equal(container.children[0], input);
+    finish(); await new Promise(setImmediate); assert.equal(rebuilt.hidden, true);
+    content.dispose(); assert.equal(rebuilt.hidden, false); await host.dispose();
+  });
+}
+test('pending replacement update restores native on failure or deselection and cannot hide it after removal', async () => {
+  for (const outcome of ['failure', 'deselection']) {
+    const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+    let finish, fail, selected = descriptor.ref;
+    const host = createHost({ document, window: {}, bridge: {}, onError() {}, importModule: async () => ({ mount() {
+      return { update: () => new Promise((resolve, reject) => { finish = resolve; fail = reject; }) };
+    } }) });
+    const content = create({ document, host, getViews: () => [descriptor], selection: () => selected });
+    content.render('main.home.content', native); await new Promise(setImmediate);
+    content.render('main.home.content', native); assert.equal(native.hidden, true);
+    if (outcome === 'failure') fail(Error('update failed'));
+    else { selected = null; content.render('main.home.content', native); assert.equal(native.hidden, false); finish(); }
+    await new Promise(setImmediate); assert.equal(native.hidden, false);
+    content.dispose(); await host.dispose();
+  }
+});
+
+test('retain releases detached replacement mounts when their view is no longer selected', () => {
+  const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+  let selected = descriptor.ref, removed = 0;
+  const content = create({ document, getViews: () => [descriptor], selection: () => selected,
+    host: { mount(_node, _view, context) { context.onMountStatus(true); }, unmount() { removed++; } } });
+  content.render('main.home.content', native); native.remove(); selected = null;
+  content.retain(['main.home.content']); assert.equal(removed, 1); assert.equal(document.body.children.length, 0);
+  content.dispose();
+});
