@@ -6343,7 +6343,8 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   // A content outlet sits beside its native anchor. Keep that connected shell
   // while refreshing the native fallback; retaining only author children after
   // removing their ancestor is too late to preserve focus and scroll anchoring.
-  const retained = [...els.homePanel.children].find(node => node.classList.contains(`home-module-${kind}`)
+  // Standalone plugin modules already retain their own shell by view ref.
+  const retained = kind === 'plugin' ? null : [...els.homePanel.children].find(node => node.classList.contains(`home-module-${kind}`)
     && [node, ...node.children].some(anchor => pluginContent?.hasAnchor(anchor)));
   const module = retained || document.createElement('section');
   module.className = `home-module home-module-${kind}`;

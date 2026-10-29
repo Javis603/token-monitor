@@ -9,14 +9,16 @@ const assert = require('node:assert/strict');
 const espree = require('espree');
 const { Element } = require('../helpers/notchPanel');
 const { create } = require('../../src/electron/renderer/pluginContent');
+const placements = require('../../src/shared/plugins/placements');
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 const ast = espree.parse(source, { ecmaVersion: 'latest' });
 function extract(name) {
   const node = ast.body.find(n => n.type === 'FunctionDeclaration' && n.id.name === name);
   assert.ok(node, name); return source.slice(node.start, node.end);
 }
-function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-module-body') {
+function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-module-body', standaloneRefs = []) {
   const instances = new Map(), trace = [], mutations = [];
+  const standalone = new Map();
   let input, container, mounts = 0, disposals = 0, ready = true, latest;
   const disconnected = node => {
     if (input?.isConnected && node.contains(input)) mutations.push('author-disconnect');
@@ -84,10 +86,15 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
   let context, modules = ['tool', 'model', 'trends'];
   const navigations = [];
   context = vm.createContext({ document, state, els: { homePanel: home }, pluginContent: composition,
-    pluginViewHost: { refreshContext() {} }, homeSessionRenderPending: false,
+    pluginViewHost: { refreshContext() {}, mount(node, ref) {
+      const control = document.createElement('input'); control.value = ref + ' draft'; node.append(control);
+      standalone.set(ref, { node, control });
+    } }, homeSessionRenderPending: false,
     sessionTooltipShouldHoldRender: () => false, hideHomeActivityTooltip() {},
     homeModuleIds: () => modules, loadHomeHistory() {},
-    homeModulePreferencesApi: { homeModuleCount: () => 5, isPluginModuleId: () => false },
+    homeModulePreferencesApi: { homeModuleCount: () => 5, isPluginModuleId: placements.isHomeToken },
+    pluginPlacementsApi: placements,
+    homeModuleOptions: () => standaloneRefs.map(ref => ({ id: placements.homeToken(ref), label: ref, pluginName: ref.split('/')[0] })),
     homeToolSourceRows: p => Object.entries(p.clients).map(([key, value]) => ({ key, name: key, value })),
     homeOverviewApi: { homeToolRows: rows => rows.map(row => ({ ...row, share: 1 })), homeActivityScrollTarget: () => 0 },
     applyHomeListMark() {}, iconKindFor: () => 'dot', formatCompact: String, formatPercent: String,
@@ -106,8 +113,8 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
     visibleStatsSurface: () => 'main', openViewFromTray() {}, isSettingsPanelOpen: () => false,
     isRendererWindowHidden: () => false
   });
-  vm.runInContext(['homeModuleShell', 'renderHomeToolModule', 'applyHomeActivityScroll', 'renderHome', 'render'].map(extract).join('\n'), context);
-  return { render: () => context.render(), home, state, document, trace, mutations, navigations,
+  vm.runInContext(['homeModuleShell', 'renderHomeToolModule', 'renderHomePluginModule', 'applyHomeActivityScroll', 'renderHome', 'render'].map(extract).join('\n'), context);
+  return { render: () => context.render(), home, state, document, trace, mutations, navigations, standalone,
     get input() { return input; }, get container() { return container; }, get mounts() { return mounts; },
     get disposals() { return disposals; }, get latest() { return latest; },
     set ready(value) { ready = value; }, set views(value) { views = value; },
@@ -136,6 +143,25 @@ for (const selector of ['.home-module-tool > .home-module-body', '.home-module-t
   assert.equal(shell.listeners.click.length, 1);
   shell.fire('click', { target: shell }); assert.deepEqual(f.navigations, ['tool']);
   assert.equal(native.hidden === true, mode === 'replace');
+});
+
+test('a broad content selector cannot make a new standalone plugin reuse another plugin shell', t => {
+  const refs = ['fixture-a/panel', 'fixture-b/panel'];
+  const f = fixture(t, 'append', '.home-module', refs);
+  f.modules = [placements.homeToken(refs[0])]; f.render();
+  const firstShell = f.home.querySelector('.home-module-plugin');
+  const firstView = f.standalone.get(refs[0]); firstView.control.focus();
+  f.modules = refs.map(placements.homeToken); f.render();
+  assert.equal(f.home.querySelectorAll('.home-module-plugin').length, 2);
+  assert.equal(firstShell.dataset.pluginRef, refs[0], 'existing plugin ref must not be overwritten');
+  assert.ok(firstView.node.isConnected, 'the original author mount remains attached');
+  assert.equal(firstView.control.value, refs[0] + ' draft');
+  assert.equal(f.document.activeElement, firstView.control);
+  const secondView = f.standalone.get(refs[1]);
+  assert.ok(secondView.node.isConnected); assert.notEqual(secondView.node, firstView.node);
+  f.render();
+  assert.equal(f.standalone.get(refs[0]), firstView, 'each existing view follows ref-keyed retention');
+  assert.equal(f.standalone.get(refs[1]), secondView);
 });
 
 test('period/source changes reach retained controls; deselection reveals current native rows', t => {
