@@ -91,25 +91,24 @@ async function main() {
       expected: TokenMonitorI18n.translate('zh-TW', 'settings.plugins.enable', { name: preview.name }) };
   })()`);
   assert.equal(trustedReview.title, trustedReview.expected); assert.equal(trustedReview.warning, false);
-  const alternatives = await win.webContents.executeJavaScript(`(async () => {
+  const existingSource = await win.webContents.executeJavaScript(`(async () => {
     const { box, panel, preview, data, calls } = initialFixture;
     const review = structuredClone(preview.initialSetup);
-    review.fields.find(field => field.kind === 'content').options.push({ value: 'setup-demo/compact', label: 'Compact' });
+    review.fields.find(field => field.kind === 'content').options.push({ value: 'other/home', label: 'Other dashboard', current: true });
     Object.assign(data.plugins[0], { enabled: false, status: 'disabled', initialSetup: review });
     await panel.refresh(); box.querySelector('.plugin-enable').click(); await new Promise(resolve => setTimeout(resolve, 30));
     const group = box.querySelector('[data-choice-key="initial/content:main.home.content"]');
     const labels = [...group.querySelectorAll(':scope > label')].map(node => node.textContent);
-    group.querySelector('.plugin-content-variants').open = true;
-    [...group.querySelectorAll('.plugin-content-variants input')].find(node => node.value === 'setup-demo/compact').click();
+    [...group.querySelectorAll('input')].find(node => node.value === 'other/home').click();
     box.querySelector('.plugin-allow').click(); await new Promise(resolve => setTimeout(resolve, 30));
     return { labels, selected: calls.at(-1).initialSetup['content:main.home.content'] };
   })()`);
-  assert.deepEqual(alternatives, { labels: ['用 Custom Dashboard 替換主頁內容'], selected: 'setup-demo/compact' });
+  assert.deepEqual(existingSource, { labels: ['內建內容', '保留已選內容', '使用 Custom Dashboard'], selected: 'other/home' });
   console.log('PASS install review renders all four author recommendations without overflow');
   console.log('PASS install-only submits explicit empty, false and native choices together');
   console.log('PASS first-enable review reuses the same fields and submits user overrides');
   console.log('PASS pending setup for trusted code does not ask for trust again');
-  console.log('PASS first-use source and optional layout choices remain separate and submit the selected view');
+  console.log('PASS first-use review can keep the existing provider without offering layout controls');
   console.log('Evidence:', evidence); win.destroy(); app.exit(0);
 }
 app.whenReady().then(main).catch(error => { console.error(error); app.exit(1); });

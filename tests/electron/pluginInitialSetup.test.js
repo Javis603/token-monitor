@@ -12,7 +12,6 @@ function raw() {
   return { tmApi: 1, id: 'setup-fixture', name: 'Setup fixture', version: '1.0.0', ui: 'ui.mjs', backend: 'backend.cjs', files: ['ui.mjs', 'backend.cjs'], background: true,
     backgroundDescription: { en: 'Refresh usage periodically.', 'zh-TW': '定期更新用量資料。' },
     views: [{ id: 'page', title: 'Page', surfaces: ['page', 'notch'], defaultSurfaces: ['page'] },
-      { id: 'details', title: 'Details', targets: ['main.home.content'], mode: 'replace' },
       { id: 'compact', title: 'Compact', targets: ['main.home.content'], mode: 'replace' }],
     skins: [{ id: 'blue', name: 'Blue', colors: { accent: '#abcdef' }, appearance: { font: 'mono' } }],
     defaults: { content: { 'main.home.content': 'compact' }, background: true, skin: 'blue' } };
@@ -120,6 +119,6 @@ test('repairing a removed replacement does not restore a different target explic
     { id: 'other', title: 'Other', targets: ['main.model.content'], mode: 'replace' }] }).manifest;
   const settings = { pluginInitialSetup: {}, pluginContentSelections: { 'main.home.content': 'setup-fixture/removed', 'main.model.content': 'setup-fixture/other' } };
   const plan = initialSetupPlan(settings, plugin, { 'content:main.model.content': null }, { updating: true });
-  assert.equal(plan.patch.pluginContentSelections['main.home.content'], 'setup-fixture/details');
+  assert.equal(plan.patch.pluginContentSelections['main.home.content'], 'setup-fixture/compact');
   assert.equal(plan.patch.pluginContentSelections['main.model.content'], undefined);
 });

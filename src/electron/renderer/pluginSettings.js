@@ -372,56 +372,33 @@
           row.append(input, el(document, 'span', '', field.kind === 'background' ? t('settings.plugins.background') : t(`plugins.initial.place.${field.surface}`, { name: field.title })));
           rows.append(row);
         } else {
-          const content = field.kind === 'content', own = field.options.filter(option => !option.current);
-          const current = field.options.find(option => option.current), target = content ? contentTargetLabel(field.target, t) : '';
-          if (content) {
-            const choices = own.map(option => ({ ref: option.value, title: option.label, pluginId: source.id, pluginName: source.name,
-              preferred: option.value === `${source.id}/${source.defaults?.content?.[field.target]}` }));
+          if (field.kind === 'content') {
+            const current = field.options.find(option => option.current);
+            const choices = field.options.filter(option => !option.current).map(option => ({ ref: option.value, pluginName: source.name }));
             rows.append(contentControls({ key: `initial/${field.key}`, target: field.target, choices, value: source.initialChoices[field.key],
               current: current ? { value: current.value, label: t('plugins.initial.keepCurrent') } : null,
               change: value => { source.initialChoices[field.key] = value; render(); } }));
             continue;
           }
-          const options = [{ value: null, label: t(content ? 'plugins.content.native' : 'plugins.initial.keepAppearance') },
-            ...field.options.map(option => ({ value: option.value, label: option.current ? t('plugins.initial.keepCurrent') : t(content ? 'plugins.content.use' : 'plugins.initial.applyAppearance', { name: option.label }) }))];
-          rows.append(choiceControls({ key: `initial/${field.key}`, title: content ? t('plugins.content.title', { target }) : t('plugins.initial.appearance'),
+          const options = [{ value: null, label: t('plugins.initial.keepAppearance') },
+            ...field.options.map(option => ({ value: option.value, label: t('plugins.initial.applyAppearance', { name: option.label }) }))];
+          rows.append(choiceControls({ key: `initial/${field.key}`, title: t('plugins.initial.appearance'),
             options, value: source.initialChoices[field.key], change: value => { source.initialChoices[field.key] = value; },
-            toggle: own.length === 1 && !current ? { value: own[0].value, offValue: null,
-              label: t(content ? 'plugins.content.replace' : 'plugins.initial.applyAppearance', { name: own[0].label, target }) } : null }));
+            toggle: field.options.length === 1 ? { value: field.options[0].value, offValue: null,
+              label: t('plugins.initial.applyAppearance', { name: field.options[0].label }) } : null }));
         }
       }
       return group;
     }
 
     function contentControls({ key, target, choices, value, change, current = null }) {
-      const providers = new Map();
-      for (const view of choices) {
-        const id = view.pluginId || view.ref.split('/')[0];
-        if (!providers.has(id)) providers.set(id, { name: view.pluginName, views: [] });
-        providers.get(id).views.push(view);
-      }
-      const groups = [...providers.values()].map(provider => {
-        const selected = provider.views.find(view => view.ref === value);
-        const id = provider.views[0].ref.split('/')[0];
-        const preferred = list.plugins?.find(plugin => plugin.id === id)?.defaults?.content[target];
-        return { ...provider, selected, ref: selected?.ref || provider.views.find(view => view.preferred || view.ref === `${id}/${preferred}`)?.ref || provider.views[0].ref };
-      });
       const label = contentTargetLabel(target, t);
       const options = [{ value: null, label: t('plugins.content.native') },
-        ...(current ? [current] : []), ...groups.map(provider => ({ value: provider.ref, label: t('plugins.content.use', { name: provider.name }) }))];
+        ...(current ? [current] : []), ...choices.map(view => ({ value: view.ref, label: t('plugins.content.use', { name: view.pluginName }) }))];
       const row = choiceControls({ key, title: t('plugins.content.source', { target: label }), options, value, change,
-        toggle: groups.length === 1 && !current ? { value: groups[0].ref, offValue: null,
-          label: t('plugins.content.replace', { name: groups[0].name, target: label }) } : null });
+        toggle: choices.length === 1 && !current ? { value: choices[0].ref, offValue: null,
+          label: t('plugins.content.replace', { name: choices[0].pluginName, target: label }) } : null });
       row.classList.add('plugin-content-choice');
-      const selected = groups.find(provider => provider.selected);
-      if (selected?.views.length > 1) {
-        const details = el(document, 'details', 'plugin-content-variants');
-        details.dataset.detailKey = `${key}/variants`;
-        details.append(el(document, 'summary', '', t('plugins.content.variant', { name: selected.selected.title })),
-          choiceControls({ key: `${key}/variant`, title: t('plugins.content.variantTitle'), value,
-            options: selected.views.map(view => ({ value: view.ref, label: view.title })), change }));
-        row.append(details);
-      }
       return row;
     }
 
@@ -1161,11 +1138,6 @@
           input.addEventListener('change', () => void run(() => api.setBackground(plugin.id, input.checked)));
           input.setAttribute('aria-description', t('settings.plugins.backgroundNote'));
           label.append(text, input, el(document, 'span', 'settings-note settings-item-desc', plugin.background.description || t('settings.plugins.backgroundNote'))); wrap.append(label);
-          if (plugin.background.description) {
-            const help = el(document, 'details', 'plugin-background-help');
-            help.append(el(document, 'summary', '', t('plugins.background.help')), el(document, 'p', 'settings-note', t('settings.plugins.backgroundNote')));
-            wrap.append(help);
-          }
         }
         if (plugin.skins?.length) {
           const skins = el(document, 'div', 'plugin-skins');

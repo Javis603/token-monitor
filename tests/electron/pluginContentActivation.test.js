@@ -10,14 +10,13 @@ const { normalizeInitialSetup, contentKey } = require('../../src/electron/plugin
 const TARGET = 'main.home.content';
 const REF = 'trusted-fixture/content';
 
-async function setup(t, { competitor = false, alternatives = false } = {}) {
+async function setup(t, { competitor = false } = {}) {
   const source = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-content-source-'));
   t.after(() => fs.rmSync(source, { recursive: true, force: true }));
   fs.cpSync(path.resolve(__dirname, '../fixtures/trusted-plugin'), source, { recursive: true });
   const file = path.join(source, 'manifest.json');
   const manifest = JSON.parse(fs.readFileSync(file));
   manifest.views.find(view => view.id === 'content').targets = [TARGET];
-  if (alternatives) manifest.views.push({ id: 'alternative', title: 'Alternative', mode: 'replace', targets: [TARGET] });
   fs.writeFileSync(file, JSON.stringify(manifest));
   const f = await runtimeFixture(t, { sourceDirectory: source, beforeStart(dir) {
     if (!competitor) return;
@@ -30,20 +29,21 @@ async function setup(t, { competitor = false, alternatives = false } = {}) {
   return { f, file, manifest };
 }
 
-test('enabling selects replacements without another action; off/on restores the saved choice', async t => {
-  const { f } = await setup(t, { alternatives: true });
+test('enabling selects replacements without another action; off/on preserves the chosen provider', async t => {
+  const { f } = await setup(t, { competitor: true });
   await f.install();
   assert.equal(f.settings.pluginContentSelections, undefined, 'install-only must not select content');
   let list = await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
   assert.equal(list.contentSelections[TARGET], REF);
   assert.equal(f.dialogs.length, 0);
-  f.invoke('plugins:selectContent', TARGET, 'trusted-fixture/alternative');
+  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
-  assert.deepEqual(f.runtime.payload('page').views, {}, 'disabled content cannot mount');
+  assert.equal(f.runtime.payload('page').views[REF], undefined, 'disabled content cannot mount');
+  assert.ok(f.runtime.payload('page').views['other-fixture/content'], 'the chosen provider stays active');
   list = await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
-  assert.equal(list.contentSelections[TARGET], 'trusted-fixture/alternative');
+  assert.equal(list.contentSelections[TARGET], 'other-fixture/content');
   await f.runtime.manager.reload();
-  assert.equal(f.invoke('plugins:list').contentSelections[TARGET], 'trusted-fixture/alternative');
+  assert.equal(f.invoke('plugins:list').contentSelections[TARGET], 'other-fixture/content');
 });
 
 test('a conflicting enable can be cancelled; accepting switches only the shared target', async t => {
@@ -166,14 +166,13 @@ test('updating an enabled plugin does not reclaim content selected from another 
 });
 
 test('updates replace a removed selected view but retain an explicit built-in content choice', async t => {
-  const { f, file, manifest } = await setup(t, { alternatives: true });
+  const { f, file, manifest } = await setup(t);
   let preview = await f.invoke('plugins:import', 'directory');
   await f.invoke('plugins:install', preview.token, { trustInstall: true });
-  f.invoke('plugins:selectContent', TARGET, 'trusted-fixture/alternative');
-  manifest.views = manifest.views.filter(view => view.id !== 'alternative'); manifest.version = '2.0.0';
+  manifest.views.find(view => view.id === 'content').id = 'alternative'; manifest.version = '2.0.0';
   fs.writeFileSync(file, JSON.stringify(manifest)); preview = await f.invoke('plugins:import', 'directory');
   await f.invoke('plugins:install', preview.token, { trustUpdate: true });
-  assert.equal(f.settings.pluginContentSelections[TARGET], REF);
+  assert.equal(f.settings.pluginContentSelections[TARGET], 'trusted-fixture/alternative');
   f.invoke('plugins:selectContent', TARGET, null);
   manifest.version = '3.0.0'; fs.writeFileSync(file, JSON.stringify(manifest));
   preview = await f.invoke('plugins:import', 'directory');

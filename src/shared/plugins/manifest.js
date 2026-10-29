@@ -112,12 +112,12 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
   const content = {};
   const replacements = new Map();
   for (const view of views.filter(view => view.mode === 'replace')) for (const target of view.targets) {
-    if (!replacements.has(target)) replacements.set(target, []);
-    replacements.get(target).push(view.id);
+    if (replacements.has(target)) fail(`only one replacement view per target is allowed: ${target}`);
+    else replacements.set(target, view.id);
   }
   if (initial.content !== undefined && !isObject(initial.content)) fail('defaults.content must be an object');
-  for (const [target, ids] of replacements) content[target] = Object.hasOwn(initial.content || {}, target) ? initial.content[target] : ids[0];
-  if (Object.entries(initial.content || {}).some(([target, id]) => !replacements.has(target) || id !== null && !replacements.get(target).includes(id))) fail('invalid defaults.content selection');
+  for (const [target, id] of replacements) content[target] = Object.hasOwn(initial.content || {}, target) ? initial.content[target] : id;
+  if (Object.entries(initial.content || {}).some(([target, id]) => !replacements.has(target) || id !== null && replacements.get(target) !== id)) fail('invalid defaults.content selection');
   if (initial.background !== undefined && (typeof initial.background !== 'boolean' || initial.background && (!backend || raw.background !== true))) fail('defaults.background requires background support');
   if (initial.skin !== undefined && initial.skin !== null && !skins.some(skin => skin.id === initial.skin)) fail('invalid defaults.skin selection');
   const defaults = Object.freeze({ content: Object.freeze(content), background: initial.background === true, skin: initial.skin ?? null });

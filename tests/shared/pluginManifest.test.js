@@ -24,6 +24,14 @@ test('background purpose is author-supplied localized text and requires declared
     assert.equal(normalizeManifest({ ...fixture, background: true, backgroundDescription, ...patch }).ok, false);
   }
 });
+
+test('one plugin provides one replacement per target; composition uses plugin settings', () => {
+  const view = { id: 'main', mode: 'replace', targets: ['main.home.content'] };
+  const duplicate = normalizeManifest({ ...fixture, views: [view, { ...view, id: 'compact' }] });
+  assert.equal(duplicate.ok, false);
+  assert.match(duplicate.errors.join(' '), /only one replacement view per target/);
+  assert.equal(normalizeManifest({ ...fixture, views: [view, { ...view, id: 'model', targets: ['main.model.content'] }] }).ok, true);
+});
 test('content selectors and backend Tray menu are explicit contracts; navigation replacement is rejected', () => {
   const view = { id: 'metric', targets: ['main.model.content'], selector: '.row-value' };
   const manifest = { ...fixture, views: [view], trayMenu: [{ id: 'refresh', label: 'Refresh' }] };

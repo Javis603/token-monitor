@@ -54,7 +54,7 @@ Authors suggest first-use settings; the user reviews them before enabling. These
 | Declaration | Initial suggestion when omitted | Allowed values |
 | --- | --- | --- |
 | View `defaultSurfaces` | No placements | Duplicate-free subset of that view's `surfaces`, excluding `settings` |
-| `defaults.content` | First declared replacement for each target | Map of a declared replacement target to a matching view ID, or `null` for native content |
+| `defaults.content` | The plugin's replacement for each target | Map of a declared replacement target to its view ID, or `null` for native content |
 | `defaults.background` | `false` | Boolean; `true` requires a backend and `background: true` |
 | `defaults.skin` | Keep current appearance | Declared skin ID, or `null` to keep current appearance |
 
@@ -101,7 +101,7 @@ exports.activate = async ({ dataDirectory, publish, host, log }) => {
 
 The backend is optional and starts on visible demand, an explicit pending call, or separately opted-in background execution. All locations of the same plugin share one process. The final demand disappearing stops it; teardown receives a cooperative grace period before termination. Startup and calls have finite deadlines. Failures remain visible until explicit restart; there is no automatic crash loop. A hidden UI can still have active JS because it shares the renderer: authors must honor visibility and dispose their own work. The host cannot promise that arbitrary trusted code stops all work merely because its mount is hidden.
 
-With a backend and `background: true`, optional `backgroundDescription` explains what the plugin does in the background, such as periodic data updates. It accepts the same localized string format as `description`. Plugin details show this author-supplied purpose; the App keeps the background switch's general meaning available in a separate explanation. Without author text, the App shows a short generic explanation. This text does not change execution behavior or grant trust.
+With a backend and `background: true`, optional `backgroundDescription` explains what the plugin does in the background, such as periodic data updates. It accepts the same localized string format as `description`. Plugin details show this author-supplied purpose. Without author text, the App shows a short generic explanation. This text does not change execution behavior or grant trust.
 
 `dataDirectory` is an App-managed plugin directory. Store private plugin preferences/files there; it is not a filesystem jail. `publish(value)` broadcasts structured data to UI instances. `host.call` uses the same formal host operations as UI. Backend dependencies and native modules are the author's responsibility. No host system-monitoring sampler is provided; plugins implement and share their own sampling.
 
