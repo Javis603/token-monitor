@@ -20,7 +20,7 @@
     const name = surface === 'edgeDock' && page === 'rail' ? kind : page;
     const key = ['home', 'limits', 'model', 'tool', 'device', 'project', 'session', 'sessions', 'trends', 'status'].includes(name)
       ? `views.${name === 'sessions' ? 'session' : name}` : `plugins.content.${name}`;
-    return `${location} · ${t(key)}${page === 'rail' ? ` · ${t('plugins.content.rail')}` : ''}`;
+    return surface === 'main' ? t(key) : `${location} · ${t(key)}${page === 'rail' ? ` · ${t('plugins.content.rail')}` : ''}`;
   }
 
   function el(document, tag, className, text) {
@@ -332,6 +332,29 @@
       });
     }
 
+    function choiceControls({ key, title, options, value, change, toggle = null }) {
+      const group = el(document, 'fieldset', 'plugin-choice-group');
+      group.dataset.choiceKey = key;
+      if (toggle) {
+        const row = el(document, 'label', 'plugin-placement-choice');
+        const input = el(document, 'input'); input.type = 'checkbox'; input.value = toggle.value;
+        input.checked = value === toggle.value; input.dataset.controlKey = key;
+        input.addEventListener('change', () => change(input.checked ? toggle.value : toggle.offValue));
+        row.append(input, el(document, 'span', '', toggle.label)); group.append(row);
+      } else {
+        group.append(el(document, 'legend', '', title));
+        const name = `plugin-choice-${++menuId}`;
+        for (const option of options) {
+          const row = el(document, 'label', 'plugin-placement-choice');
+          const input = el(document, 'input'); input.type = 'radio'; input.name = name; input.value = option.value ?? '';
+          input.checked = value === option.value; input.dataset.controlKey = `${key}/${option.value ?? 'native'}`;
+          input.addEventListener('change', () => { if (input.checked) change(option.value); });
+          row.append(input, el(document, 'span', '', option.label)); group.append(row);
+        }
+      }
+      return group;
+    }
+
     function initialSetupControls(source) {
       const review = source.initialSetup;
       if (!review?.fields?.length) return null;
@@ -340,26 +363,24 @@
       group.append(el(document, 'legend', '', t('plugins.initial.title')),
         el(document, 'p', 'settings-note', t('plugins.initial.note')));
       for (const field of review.fields) {
-        const row = el(document, 'label', field.kind === 'placement' || field.kind === 'background' ? 'plugin-placement-choice' : 'plugin-version-picker');
-        let input;
         if (field.kind === 'placement' || field.kind === 'background') {
-          input = el(document, 'input'); input.type = 'checkbox'; input.checked = source.initialChoices[field.key] === true;
-          row.append(input, el(document, 'span', '', field.kind === 'background' ? t('settings.plugins.background') : `${field.title} · ${t(`settings.plugins.surface.${field.surface}`)}`));
+          const row = el(document, 'label', 'plugin-placement-choice');
+          const input = el(document, 'input'); input.type = 'checkbox'; input.checked = source.initialChoices[field.key] === true;
+          input.dataset.controlKey = `initial/${field.key}`;
+          input.addEventListener('change', () => { source.initialChoices[field.key] = input.checked; });
+          row.append(input, el(document, 'span', '', field.kind === 'background' ? t('settings.plugins.background') : t(`plugins.initial.place.${field.surface}`, { name: field.title })));
+          group.append(row);
+          if (field.kind === 'background') group.append(el(document, 'p', 'settings-note', t('settings.plugins.backgroundNote')));
         } else {
-          row.append(el(document, 'span', '', field.kind === 'content' ? contentTargetLabel(field.target, t) : t('plugins.initial.appearance')));
-          input = el(document, 'select');
-          const original = el(document, 'option', '', t(field.kind === 'content' ? 'plugins.content.native' : 'plugins.initial.keepAppearance'));
-          original.value = ''; input.append(original);
-          for (const option of field.options) {
-            const node = el(document, 'option', '', option.current ? t('plugins.initial.keepCurrent') : option.label);
-            node.value = option.value; input.append(node);
-          }
-          input.value = source.initialChoices[field.key] ?? ''; row.append(input);
+          const content = field.kind === 'content', own = field.options.filter(option => !option.current);
+          const current = field.options.find(option => option.current), target = content ? contentTargetLabel(field.target, t) : '';
+          const options = [{ value: null, label: t(content ? 'plugins.content.native' : 'plugins.initial.keepAppearance') },
+            ...field.options.map(option => ({ value: option.value, label: option.current ? t('plugins.initial.keepCurrent') : t(content ? 'plugins.content.use' : 'plugins.initial.applyAppearance', { name: option.label }) }))];
+          group.append(choiceControls({ key: `initial/${field.key}`, title: content ? t('plugins.content.title', { target }) : t('plugins.initial.appearance'),
+            options, value: source.initialChoices[field.key], change: value => { source.initialChoices[field.key] = value; },
+            toggle: own.length === 1 && !current ? { value: own[0].value, offValue: null,
+              label: t(content ? 'plugins.content.replace' : 'plugins.initial.applyAppearance', { name: own[0].label, target }) } : null }));
         }
-        input.dataset.controlKey = `initial/${field.key}`;
-        input.addEventListener('change', () => { source.initialChoices[field.key] = input.type === 'checkbox' ? input.checked : input.value || null; });
-        group.append(row);
-        if (field.kind === 'background') group.append(el(document, 'p', 'settings-note', t('settings.plugins.backgroundNote')));
       }
       return group;
     }
@@ -1115,17 +1136,14 @@
       for (const target of replacementTargets) {
         const choices = (list.plugins || []).filter(item => item.status === 'active').flatMap(item => (item.views || [])
           .filter(view => view.mode === 'replace' && view.targets.includes(target)).map(view => ({ ...view, pluginName: item.name })));
-        const row = el(document, 'label', 'plugin-version-picker plugin-content-choice', contentTargetLabel(target, t));
-        const select = el(document, 'select'); select.dataset.controlKey = `content/${target}`;
-        select.setAttribute('aria-label', contentTargetLabel(target, t));
-        const native = el(document, 'option', '', t('plugins.content.native')); native.value = ''; select.append(native);
-        for (const view of choices) {
-          const option = el(document, 'option', '', view.pluginName === view.title ? view.title : `${view.pluginName} · ${view.title}`);
-          option.value = view.ref; select.append(option);
-        }
-        select.value = choices.some(view => view.ref === list.contentSelections?.[target]) ? list.contentSelections[target] : '';
-        select.addEventListener('change', () => void run(() => api.selectContent(target, select.value || null)));
-        row.append(select); wrap.append(row);
+        const name = view => view.pluginName === view.title ? view.title : `${view.pluginName} · ${view.title}`;
+        const label = contentTargetLabel(target, t);
+        const row = choiceControls({ key: `content/${target}`, title: t('plugins.content.title', { target: label }),
+          options: [{ value: null, label: t('plugins.content.native') }, ...choices.map(view => ({ value: view.ref, label: t('plugins.content.use', { name: name(view) }) }))],
+          value: choices.some(view => view.ref === list.contentSelections?.[target]) ? list.contentSelections[target] : null,
+          change: value => void run(() => api.selectContent(target, value)),
+          toggle: choices.length === 1 ? { value: choices[0].ref, offValue: null, label: t('plugins.content.replace', { name: name(choices[0]), target: label }) } : null });
+        row.classList.add('plugin-content-choice'); wrap.append(row);
       }
       for (const target of new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode !== 'replace').flatMap(view => view.targets || []))) {
         const views = (list.plugins || []).flatMap(item => (item.views || []).filter(view => view.mode !== 'replace' && view.targets?.includes(target)))

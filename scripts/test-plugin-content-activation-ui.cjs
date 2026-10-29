@@ -34,33 +34,33 @@ async function main() {
     window.contentFixture = { data, panel, box, calls, target, ref };
     return { selectors: box.querySelectorAll('.plugin-content-choice').length,
       redundantAction: [...box.querySelectorAll('button')].some(node => /使用此內容|恢復原生內容/.test(node.textContent)),
-      rawTarget: box.textContent.includes(target), enabled: box.querySelector('.plugin-enable').checked };
+      rawTarget: box.textContent.includes(target), enabled: box.querySelector('.plugin-enable').checked,
+      action: box.querySelector('.plugin-content-choice label').textContent, dropdowns: box.querySelectorAll('.plugin-content-choice select').length };
   })()`);
   fs.writeFileSync(path.join(evidence, 'content-single.png'), (await win.webContents.capturePage()).toPNG());
-  assert.deepEqual(single, { selectors: 1, redundantAction: false, rawTarget: false, enabled: true });
+  assert.deepEqual(single, { selectors: 1, redundantAction: false, rawTarget: false, enabled: true, action: '用 Tool details 替換主頁內容', dropdowns: 0 });
   const native = await win.webContents.executeJavaScript(`(async () => {
     const { box } = contentFixture;
-    const select = box.querySelector('.plugin-content-choice select');
-    const options = [...select.options].map(option => option.value);
-    select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true }));
+    const toggle = box.querySelector('.plugin-content-choice input');
+    toggle.click();
     await new Promise(resolve => setTimeout(resolve, 30));
-    return { options, selected: box.querySelector('.plugin-content-choice select').value, enabled: box.querySelector('.plugin-enable').checked };
+    return { selected: box.querySelector('.plugin-content-choice input').checked, enabled: box.querySelector('.plugin-enable').checked };
   })()`);
   fs.writeFileSync(path.join(evidence, 'content-native.png'), (await win.webContents.capturePage()).toPNG());
-  assert.deepEqual(native, { options: ['', 'tool-details/details'], selected: '', enabled: true });
+  assert.deepEqual(native, { selected: false, enabled: true });
   const multiple = await win.webContents.executeJavaScript(`(async () => {
     const { data, panel, box, target, ref } = contentFixture;
     data.plugins[0].views.push({ ...data.plugins[0].views[0], ref: 'tool-details/compact', title: 'Compact details' });
     await panel.refresh();
-    const select = box.querySelector('.plugin-content-choice select');
-    const result = { label: select.getAttribute('aria-label'), value: select.value,
-      options: [...select.options].map(option => option.value), rawTarget: box.textContent.includes(target) };
-    select.value = 'tool-details/compact'; select.dispatchEvent(new Event('change', { bubbles: true }));
+    const group = box.querySelector('.plugin-content-choice');
+    const result = { label: group.querySelector('legend').textContent, value: group.querySelector('input:checked').value,
+      options: [...group.querySelectorAll('input')].map(option => option.value), rawTarget: box.textContent.includes(target) };
+    [...group.querySelectorAll('input')].find(input => input.value === 'tool-details/compact').click();
     await new Promise(resolve => setTimeout(resolve, 30));
-    return { ...result, calls: contentFixture.calls, selected: box.querySelector('.plugin-content-choice select').value };
+    return { ...result, calls: contentFixture.calls, selected: box.querySelector('.plugin-content-choice input:checked').value };
   })()`);
   fs.writeFileSync(path.join(evidence, 'content-choices.png'), (await win.webContents.capturePage()).toPNG());
-  assert.deepEqual(multiple, { label: '主 App 分頁 · 主頁', value: '', options: ['', 'tool-details/details', 'tool-details/compact'], rawTarget: false,
+  assert.deepEqual(multiple, { label: '主頁顯示內容', value: '', options: ['', 'tool-details/details', 'tool-details/compact'], rawTarget: false,
     calls: [['main.home.content', null], ['main.home.content', 'tool-details/compact']], selected: 'tool-details/compact' });
   const disabled = await win.webContents.executeJavaScript(`(async () => {
     const { box } = contentFixture;
@@ -69,9 +69,9 @@ async function main() {
     return { selectors: box.querySelectorAll('.plugin-content-choice').length, enabled: box.querySelector('.plugin-enable').checked };
   })()`);
   assert.deepEqual(disabled, { selectors: 0, enabled: false });
-  console.log('PASS single replacement offers native content independently of the enable switch');
+  console.log('PASS single replacement uses a clearly named independent checkbox');
   console.log('PASS restoring native content keeps the plugin enabled');
-  console.log('PASS multiple replacements use a named selector and persist changes');
+  console.log('PASS multiple replacements list radio choices and persist changes');
   console.log('PASS disabling removes replacement controls');
   console.log('Evidence:', evidence);
   win.destroy(); app.exit(0);
