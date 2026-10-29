@@ -45,14 +45,23 @@
       let record = outlets.get(key);
       if (record?.native !== native) {
         if (record?.replaces) record.native.hidden = record.wasHidden;
-        record = { target, scope, native, wasHidden: native.hidden, nodes: record?.nodes || new Map() };
+        record = { target, scope, native, wasHidden: native.hidden, replacement: record?.replacement, nodes: record?.nodes || new Map() };
         outlets.set(key, record);
       }
       const wanted = new Set(views.map(view => view.ref));
       for (const [ref, node] of record.nodes) if (!wanted.has(ref)) { host.unmount(node); node.remove(); record.nodes.delete(ref); }
       const generation = record.generation = (record.generation || 0) + 1;
-      if (record.replaces) native.hidden = record.wasHidden;
-      record.replaces = views.some(view => view.mode === 'replace');
+      const replaces = views.some(view => view.mode === 'replace');
+      if (!record.replaces && replaces) record.wasHidden = native.hidden;
+      if (record.replaces && !replaces) native.hidden = record.wasHidden;
+      record.replaces = replaces;
+      const replacement = views.find(view => view.mode === 'replace');
+      if (replacement && (record.replacement?.ref !== replacement.ref || record.replacement?.revision !== replacement.revision)) {
+        native.hidden = record.wasHidden;
+        record.replacement = { ref: replacement.ref, revision: replacement.revision, ready: false };
+      }
+      if (!replacement) record.replacement = null;
+      if (record.replacement?.ready) native.hidden = true;
       for (const view of views) {
         let container = record.nodes.get(view.ref);
         if (!container) {
@@ -62,7 +71,10 @@
         pendingMounts.push(() => host.mount(container, view, { ...context, target, native, mode: view.mode, descriptor: view,
           onMountStatus(ok) {
             if (outlets.get(key) !== record || generation !== record.generation) return;
-            if (view.mode === 'replace') native.hidden = ok || record.wasHidden;
+            if (view.mode === 'replace') {
+              record.replacement.ready = ok;
+              native.hidden = ok || record.wasHidden;
+            }
           }
         }));
       }
@@ -107,11 +119,21 @@
       for (const mount of pendingMounts) void mount();
       watch(scope, target, native, context, selectors);
     }
-    return { render,
-      hasTarget(target) { return getViews().some(view => view.targets?.includes(target) && (view.mode !== 'replace' || selection(target) === view.ref)); },
+    function hasTarget(target) { return getViews().some(view => view.targets?.includes(target) && (view.mode !== 'replace' || selection(target) === view.ref)); }
+    return { render, hasTarget,
       retain(targets) {
         for (const [scope, watcher] of watchers) if (!targets.includes(watcher.target) || !watcher.native.isConnected) unwatch(scope);
-        for (const [target, record] of outlets) if (!targets.includes(record.target) || !record.native.isConnected) { clear(record); outlets.delete(target); }
+        for (const [key, record] of outlets) {
+          if (!targets.includes(record.target)) { clear(record); outlets.delete(key); continue; }
+          if (record.native.isConnected) continue;
+          const eligible = new Set(getViews().filter(view => view.targets?.includes(record.target) && (view.mode !== 'replace' || selection(record.target) === view.ref)).map(view => view.ref));
+          for (const [ref, node] of record.nodes) if (!eligible.has(ref)) { host.unmount(node); node.remove(); record.nodes.delete(ref); }
+          if (record.replacement && !eligible.has(record.replacement.ref)) {
+            record.native.hidden = record.wasHidden;
+            record.replaces = false; record.replacement = null;
+          }
+          if (!record.nodes.size) { clear(record); outlets.delete(key); }
+        }
       },
       dispose() { for (const scope of watchers.keys()) unwatch(scope); for (const record of outlets.values()) clear(record); outlets.clear(); }
     };

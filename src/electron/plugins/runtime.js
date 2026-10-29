@@ -12,6 +12,7 @@ const { createPluginPages } = require('./pages');
 const { createManagedPlugins } = require('./managed');
 const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
+const maintainerSources = require('./maintainerSources');
 const { createPluginManager } = require('./manager');
 const { translate } = require('../renderer/i18n');
 const { initializePlacementPatch, placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
@@ -153,7 +154,27 @@ function createPluginRuntime({
     dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), manager, getSettings, saveSettings: persistManagementSettings, getLocale, placementContext });
   try { managed.recover(); }
   catch (error) { log(`[plugins] Plugin management unavailable: ${error.message}`); }
-  const catalog = createPluginCatalog({ nativeImage: electron.nativeImage, manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch });
+  const catalog = createPluginCatalog({ nativeImage: electron.nativeImage, manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch, maintainerSources });
+  let catalogRefreshTimer = null;
+  const refreshCatalog = async () => {
+    try {
+      await catalog.discover();
+      if (!disposed) for (const webContents of [...listListeners]) {
+        if (webContents.isDestroyed()) listListeners.delete(webContents);
+        else webContents.send('plugins:changed');
+      }
+    } finally {
+      // Cache timestamps are recorded after download; a fixed interval started
+      // before that download can miss expiry and defer another six hours.
+      const delay = catalog.nextRefreshDelay();
+      if (!disposed && delay !== null) {
+        catalogRefreshTimer = setTimeout(() => {
+          void refreshCatalog().catch(error => log(`[plugins] Catalog refresh failed: ${error.message}`));
+        }, delay);
+        catalogRefreshTimer.unref?.();
+      }
+    }
+  };
   const demand = createSurfaceDemand((surface, refs) => manager.setSurfaceDemand(surface, refs));
   const detachedPageOwner = Symbol('detached-pages');
   pages = createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLocale,
@@ -663,6 +684,8 @@ function createPluginRuntime({
       if (started) return;
       started = true;
       registerIpc();
+      // Index-only refresh never installs or enables code and does not block startup.
+      void refreshCatalog().catch(error => log(`[plugins] Catalog refresh failed: ${error.message}`));
       return manager.reload();
     },
     publishStats(stats, businessStats = stats, extras = {}) {
@@ -695,6 +718,7 @@ function createPluginRuntime({
       lifecycleHosts.clear(); lifecyclePlugins.clear(); failedCleanup.clear();
       subscribers.clear(); listListeners.clear();
       if (changedTimer) clearTimeout(changedTimer);
+      clearTimeout(catalogRefreshTimer);
       catalog.dispose();
       managed.dispose();
       pages.dispose();

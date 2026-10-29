@@ -11,6 +11,7 @@ const { createPluginRuntime, registerPluginScheme } = require('../src/electron/p
 const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trusted-app-'));
 const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
+if (process.env.TM_WINDOW_FOCUS_ONLY === '1') app.setPath('userData', scratch);
 const pageKeys = ['home', 'tool', 'device', 'model', 'project', 'session', 'status', 'limits', 'trends'];
 const fixtureDir = path.join(scratch, 'author-source');
 fs.cpSync(path.join(root, 'tests/fixtures/trusted-plugin'), fixtureDir, { recursive: true });
@@ -269,6 +270,131 @@ app.whenReady().then(async () => {
     await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
   }
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
+  if (process.env.TM_WINDOW_FOCUS_ONLY === '1') {
+    await js("pluginApi.setEnabled('trusted-fixture',true)");
+    await js("pluginApi.place('trusted-fixture/panel','page',true).then(applyPluginCatalog)");
+    await js("openViewFromTray('plugin:trusted-fixture/panel')");
+    await waitFor("document.querySelector('.plugin-header-actions') && document.querySelector('[aria-label=\"Fixture draft\"]')", 'focus fixture page');
+    // Synthetic author action in the production header slot, with an observable
+    // Enter action. The real App renderer/preload and native window stay in use.
+    await js(`globalThis.focusClicks=0;globalThis.focusButton=document.createElement('button');
+      focusButton.textContent='Privacy';focusButton.className='plugin-main-detach';
+      focusButton.onclick=()=>focusClicks++;document.querySelector('.plugin-header-actions').append(focusButton)`);
+    const source = fs.readFileSync(process.env.TM_FOCUS_MAIN_SOURCE || path.join(root,'src/electron/main.js'),'utf8');
+    const handler = source.slice(source.indexOf('function handleWindowToggleShortcut('),source.indexOf('function handleTrayToggle('));
+    const context = vm.createContext({ mainWindow:win,settings:{trayMode:false},floatingBubbleState:{collapsed:false},
+      windowToggleShortcutAction:require('../src/electron/windowShortcut').windowToggleShortcutAction,
+      pluginWindowActions:{hide:target=>target.hide()},focusExistingWindow:()=>win.show(),
+      sendMainWindowEvent:channel=>win.webContents.send(channel) });
+    vm.runInContext(handler,context);
+    const reopen = async () => {
+      context.handleWindowToggleShortcut(); await pause(60);
+      context.handleWindowToggleShortcut(); win.focus(); await pause(120); await capture();
+    };
+    const baseline = Boolean(process.env.TM_FOCUS_MAIN_SOURCE);
+    await js('focusButton.focus()'); await reopen();
+    const parked = await js('document.activeElement===els.shell');
+    assert.equal(parked,!baseline,'shortcut parks accidental header focus');
+    if (baseline) {
+      assert.equal(await js('document.activeElement===focusButton'),true);
+      fs.writeFileSync(path.join(evidence,'focus-baseline.png'),(await capture()).toPNG());
+    } else {
+      // This is an injected renderer activation sequence, not a claim that the
+      // OS menu-bar race has been reproduced. The real Chromium focus is used.
+      const reviewSource = fs.readFileSync(process.env.TM_FOCUS_CONTROLLER_SOURCE || path.join(root,'src/electron/renderer/windowActivationFocus.js'),'utf8');
+      await js(reviewSource);
+      await js(`globalThis.reviewFocus=TokenMonitorWindowActivationFocus.create({document,shell:els.shell,header:document.querySelector('.titlebar')});
+        focusButton.focus();reviewFocus.summon();window.dispatchEvent(new Event('blur'));
+        document.body.tabIndex=-1;document.body.focus()`);
+      await capture();
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===els.shell'),true,'transient blur must retain pending summon');
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===focusButton'),true,'completed summon permits programmatic focus');
+      // A second native window supplies a genuine departure. Cancellation uses
+      // the production main blur callback, not the renderer blur event.
+      context.win=win;context.suppressNextBlurHide=false;context.quitRequested=false;
+      context.nudgeTaskbarZOrder=()=>{};context.scheduleFloatingBubbleAutoCollapse=()=>{};
+      vm.runInContext(source.slice(source.indexOf("  win.on('blur', () => {"),source.indexOf("  win.on('resized',",source.indexOf("  win.on('blur', () => {"))),context);
+      const other = new BrowserWindow({show:false,width:240,height:140,webPreferences:{sandbox:true}});
+      try {
+        await other.loadURL('data:text/html,<p>Isolated focus departure</p>');
+        await js('document.body.focus();windowActivationFocus.summon()');
+        other.show();other.focus();await pause(70);
+        assert.equal(await js('document.hasFocus()'),false,'other native window owns focus');
+        await js('focusButton.focus()');await pause(40);
+        assert.equal(await js('document.activeElement===focusButton'),true,'no DOM focus move while away');
+        other.hide();win.show();win.focus();await pause(60);await capture();
+        assert.equal(await js('document.activeElement===focusButton'),true,'native departure cancelled stale summon');
+      } finally { other.destroy(); }
+      await js('document.body.focus();reviewFocus.summon()');await pause(300);
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===focusButton'),true,'body-only summon expires');
+      await js('document.body.focus();windowActivationFocus.summon()');
+      win.webContents.send('window:visibility',false);await pause(40);
+      win.webContents.send('window:visibility',true);await pause(40);
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===focusButton'),true,'native hidden notification cancels summon');
+      await reopen();
+      fs.writeFileSync(path.join(evidence,'focus-plugin-neutral.png'),(await capture()).toPNG());
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Return'});
+      win.webContents.sendInputEvent({type:'char',keyCode:'Return'});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:'Return'});
+      await pause(50);assert.equal(await js('focusClicks'),0,'summoning must not arm the privacy action');
+      // Hold only the controller's scheduled frames so trusted Chromium input
+      // deterministically reaches it before the first focus check.
+      app.focus({steal:true});win.focus();win.webContents.focus();await pause(60);
+      for (const keyCode of ['Return','Space']) {
+        await js(`globalThis.earlyKeyRaf=window.requestAnimationFrame;globalThis.earlyKeyFrames=[];
+          window.requestAnimationFrame=fn=>{earlyKeyFrames.push(fn);return 0};
+          focusButton.focus();reviewFocus.summon()`);
+        win.webContents.sendInputEvent({type:'keyDown',keyCode});
+        win.webContents.sendInputEvent({type:'char',keyCode});
+        win.webContents.sendInputEvent({type:'keyUp',keyCode});
+        await js('window.requestAnimationFrame=earlyKeyRaf;for(const fn of earlyKeyFrames.splice(0))fn(performance.now())');
+        await capture();
+        assert.equal(await js('focusClicks'),0,`${keyCode} before first frame must not activate incidental header`);
+        assert.equal(await js('document.activeElement===els.shell'),true);
+      }
+      // Tab is delivered through Chromium, not dispatched as a synthetic DOM event.
+      app.focus({steal:true});win.show();win.focus();win.webContents.focus();await pause(100);
+      await js('focusButton.focus()');
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab',modifiers:['shift']});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab',modifiers:['shift']});
+      await pause(60);
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab'});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab'});
+      await pause(80);
+      assert.equal(await js('document.activeElement===focusButton'),true,'Tab reaches the author action');
+      assert.equal(await js("focusButton.matches(':focus-visible')"),true);
+      fs.writeFileSync(path.join(evidence,'focus-plugin-keyboard.png'),(await capture()).toPNG());
+      await reopen();await waitFor('document.activeElement===focusButton','restored keyboard focus');
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Return'});
+      win.webContents.sendInputEvent({type:'char',keyCode:'Return'});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:'Return'});
+      await pause(50);assert.equal(await js('focusClicks'),1);
+      // Deliberately selected keyboard targets still activate during pending.
+      for (const keyCode of ['Return','Space']) {
+        await js('windowActivationFocus.summon()');
+        win.webContents.sendInputEvent({type:'keyDown',keyCode});
+        win.webContents.sendInputEvent({type:'char',keyCode});
+        win.webContents.sendInputEvent({type:'keyUp',keyCode});
+        await pause(50);
+      }
+      assert.equal(await js('focusClicks'),3,'pending summon preserves intentional Enter/Space activation');
+      await js("document.querySelector('[aria-label=\"Fixture draft\"]').focus()");
+      await win.webContents.insertText('Unsubmitted draft'); await reopen();
+      assert.equal(await js("document.activeElement.getAttribute('aria-label')"),'Fixture draft');
+      assert.equal(await js('document.activeElement.value'),'Unsubmitted draft');
+      await js("openViewFromTray('model');document.querySelector('.tab').focus()");
+      await reopen();assert.equal(await js('document.activeElement===els.shell'),true,'native header uses the same policy');
+      fs.writeFileSync(path.join(evidence,'focus-native.png'),(await capture()).toPNG());
+    }
+    fs.writeFileSync(path.join(evidence,'window-focus-results.json'),JSON.stringify({baseline,parked,electron:process.versions.electron,
+      scope:'production renderer/preload/plugin runtime and main shortcut callback; native hide/show and Chromium Tab/Enter; OS global shortcut registration not driven'},null,2));
+    assertConsoleClean();console.log(baseline?'PASS baseline reproduces retained header focus':'PASS shortcut focus, injected transient blur, one-shot completion, native departure, expiry, keyboard navigation/Enter, native parity and retained draft');
+    await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
+  }
   if (process.env.TM_PACKAGE_RECOVERY_ONLY === '1') {
     let loads = 0; win.webContents.on('did-finish-load', () => loads++);
     await js("pluginApi.setEnabled('trusted-fixture',true)");

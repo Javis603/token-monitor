@@ -451,3 +451,45 @@ for (const proceed of [false, true]) {
     if (!proceed) assert.equal(f.runtime.manager.active('trusted-fixture'), true);
   });
 }
+
+test('runtime refreshes only the curated index at startup and six hours, notifying update listeners', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const sources = require('../../src/electron/plugins/maintainerSources'); let calls = 0, offline = false;
+  const f = await runtimeFixture(t, { catalogFetch: async url => {
+    calls++; assert.equal(url, sources[0].url); if (offline) throw Error('offline');
+    return new Response(JSON.stringify({ format: 1, title: 'Community', plugins: [{ id: 'remote-plugin', name: 'Remote',
+      versions: [{ version: '1.0.0', url: 'https://example.test/plugin.tmplugin', sha256: 'a'.repeat(64) }] }] }));
+  } });
+  f.invoke('plugins:list');
+  for (let i = 0; i < 10; i++) await tick();
+  assert.equal(calls, 1); assert.equal(f.invoke('plugins:catalog').entries[0].origin.kind, 'maintainer');
+  assert.equal(f.runtime.manager.list().plugins.length, 0);
+  assert.ok(f.main.webContents.sent.some(event => event.channel === 'plugins:changed'));
+  offline = true;
+  t.mock.timers.tick(6 * 60 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
+  assert.equal(calls, 2); assert.equal(f.invoke('plugins:catalog').entries.length, 1);
+  t.mock.timers.tick(5 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
+  assert.equal(calls, 3);
+  await f.runtime.dispose(); t.mock.timers.tick(6 * 60 * 60 * 1000); assert.equal(calls, 3);
+});
+
+test('background refresh uses completion time and rechecks the deadline after manual refresh', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const sixHours = 6 * 60 * 60 * 1000; let calls = 0, finish;
+  const raw = { format: 1, title: 'Fixture', plugins: [] };
+  const f = await runtimeFixture(t, { catalogFetch: async () => {
+    calls++;
+    if (calls === 1) return new Promise(resolve => { finish = () => resolve(new Response(JSON.stringify(raw))); });
+    return new Response(JSON.stringify(raw));
+  } });
+  const settle = async () => { for (let i = 0; i < 10; i++) await tick(); };
+  assert.equal(calls, 1);
+  t.mock.timers.tick(1000); finish(); await settle();
+  t.mock.timers.tick(sixHours - 1000); await settle(); assert.equal(calls, 1);
+  t.mock.timers.tick(1000); await settle(); assert.equal(calls, 2);
+  // Manual refresh moves the expiry past the timer already scheduled by runtime.
+  t.mock.timers.tick(sixHours - 60000); await f.invoke('plugins:discoverCatalog', true); assert.equal(calls, 3);
+  t.mock.timers.tick(60000); await settle(); assert.equal(calls, 3);
+  t.mock.timers.tick(sixHours - 60000); await settle(); assert.equal(calls, 4);
+  await f.runtime.dispose(); t.mock.timers.tick(sixHours); await settle(); assert.equal(calls, 4);
+});

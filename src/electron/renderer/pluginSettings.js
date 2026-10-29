@@ -290,7 +290,16 @@
         });
         row.append(select); wrap.append(row);
         const selected = entry.versions.find(v => v.version === version);
-        if (selected?.changelog) wrap.append(el(document, 'p', 'plugin-description', selected.changelog));
+        if (entry.installedVersion && selected?.updateNotes.length) {
+          const notes = el(document, 'section', 'plugin-update-notes plugin-detail-section');
+          notes.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.updateRange', { from: entry.installedVersion, to: version })));
+          for (const change of selected.updateNotes) {
+            const release = el(document, 'div', 'plugin-update-note');
+            release.append(el(document, 'h4', 'plugin-detail-heading', `v${change.version}`), el(document, 'p', 'plugin-description', change.changelog));
+            notes.append(release);
+          }
+          wrap.append(notes);
+        }
       }
       if (packagePreview) wrap.append(packagePanel());
       else wrap.append(button(t('plugins.ui.previewPackage'), () => void run(async () => { await previewCatalog(entry, version); return null; })));
@@ -434,8 +443,6 @@
       body.append(meta);
       if (entry.repository) body.append(button(t('plugins.catalog.openRepository'), () => void onOpenExternal(entry.repository), 'plugin-inline-action'));
       if (!isFeatured(entry.origin)) body.append(el(document, 'p', 'settings-note', t('plugins.catalog.unreviewed')));
-      const selected = entry.versions?.find(v => v.version === entry.version);
-      if (selected?.changelog) body.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.changelog')), el(document, 'p', 'plugin-description', selected.changelog));
       const readme = el(document, 'div', 'plugin-catalog-readme', t('plugins.view.loading'));
       body.append(readme);
       void api.catalogDetails(entry.origin.id, entry.id).then(result => {
@@ -494,6 +501,7 @@
         }
       }).catch(() => { if (dialog.isConnected) readme.textContent = t('plugins.catalog.noReadme'); });
       const footer = el(document, 'footer', 'plugin-catalog-dialog-footer');
+      const selected = entry.versions?.find(v => v.version === entry.version);
       if (selected ? selected.installable : ['available', 'update'].includes(entry.status)) {
         footer.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => {
           dialog.close();
@@ -571,7 +579,10 @@
             const actions = el(document, 'div', 'settings-actions');
             const available = entry.versions?.find(v => v.version === entry.version)?.installable ?? ['available', 'update'].includes(entry.status);
             if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => { catalogReview = entry; await previewCatalog(entry, catalogVersion(entry)); return null; })));
-            else actions.append(button(t('plugins.catalog.details'), () => catalogDialog(entry)));
+            else if (entry.versions?.length || entry.status === 'incompatible' || entry.status === 'installed') {
+              const install = button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => {});
+              install.disabled = true; actions.append(install);
+            }
             if (entry.installedVersion) actions.append(button(t('plugins.catalog.installed'), () => { activeTab = 'installed'; selectedPluginId = ''; diagnostics = false; render(); container.querySelector(`[data-plugin-id="${entry.id}"]`)?.scrollIntoView({ block: 'nearest' }); }, 'plugin-installed-link plugin-installed-check'));
             head.append(actions);
             card.append(head, el(document, 'p', 'plugin-description', entry.description));
@@ -1242,7 +1253,10 @@
           experimentalBadge.before(trigger);
           trigger.append(experimentalBadge);
           // The disclosure remains the sole keyboard stop; only the badge is a hover target.
-          sectionToggle.addEventListener('focus', () => trigger.dispatchEvent(new Event('focusin')));
+          sectionToggle.addEventListener('focus', () => {
+            if (sectionToggle.matches(':focus-visible')) trigger.dispatchEvent(new Event('focusin'));
+          });
+          sectionToggle.addEventListener('pointerdown', () => trigger.dispatchEvent(new Event('focusout')));
           sectionToggle.addEventListener('blur', () => trigger.dispatchEvent(new Event('focusout')));
           sectionToggle.addEventListener('keydown', (event) => {
             if (event.key === 'Escape') trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));

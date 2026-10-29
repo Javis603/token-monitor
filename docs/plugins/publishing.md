@@ -6,22 +6,23 @@ Use this guide when sharing a plugin with users. Start with the [development gui
 
 | Route | What the author provides | What users can do |
 | --- | --- | --- |
-| GitHub discovery (not yet open) | A public repository with the `token-monitor-plugin` topic and a README | Public topic discovery is temporarily disabled; a topic does not currently list the plugin in the App |
+| In-app GitHub discovery (not yet available) | A public repository with the `token-monitor-plugin` topic and a README | In-app GitHub discovery is not yet available; a topic does not currently list the plugin in the App |
 | File or folder | A built `.tmplugin` file or a complete plugin source folder | Import it through Settings → Plugins |
 | HTTPS catalog | A catalog index and package files at direct HTTPS URLs | Preview and install a package, then discover compatible updates from the same source |
 
-Use file/folder import or a user-configured HTTPS catalog for now. GitHub discovery is retained for a later launch; it is not restricted to the maintainer's account and is not an official publishing route. A GitHub topic does not register a package or define how to install it. Discovery does not infer a version, compatibility or a downloadable asset from repository names, tags or GitHub Releases. Authors must describe an actual installation route in their README.
+Use file/folder import or a user-configured HTTPS catalog for now. In-app GitHub discovery is planned for a later launch; it is not restricted to the maintainer's account and is not an official publishing route. A GitHub topic does not register a package or define how to install it. Discovery does not infer a version, compatibility or a downloadable asset from repository names, tags or GitHub Releases. Authors must describe an actual installation route in their README.
 
-GitHub discovery is nonofficial and unreviewed. Adding a topic, serving a catalog, providing a hash or signing an index does not grant official attribution or a safety review. Official attribution is assigned by Token Monitor's distribution mechanism, not by author metadata. See [distribution and trust](distribution-design.md).
+In-app GitHub discovery listings are nonofficial and unreviewed. Adding a topic, serving a catalog, providing a hash or signing an index does not grant official attribution or a safety review. Official attribution is assigned by Token Monitor's distribution mechanism, not by author metadata. See [distribution and trust](distribution-design.md).
 
 ## Naming and identity
 
-The App requires a stable manifest `id` of 2–40 characters matching `^[a-z0-9][a-z0-9-]{1,39}$`, a valid SemVer `version`, and `tmApi: 1`. See the [manifest contract](README.md#manifest) for the complete schema.
+The App requires a stable manifest `id` of 2–40 characters matching `^[a-z0-9][a-z0-9-]{1,39}$`, a valid SemVer `version`, and `tmApi: 1`. See the [manifest contract](README.md#manifest) for the manifest contract.
 
-Choose any repository name; no Token Monitor prefix is required. The planned GitHub discovery matches the `token-monitor-plugin` topic, not the repository name. The repository name, display name and manifest id may differ.
+Choose any repository name; no Token Monitor prefix is required. The planned in-app GitHub discovery matches the `token-monitor-plugin` topic, not the repository name. The repository name, display name and manifest id may differ.
 
 Recommended conventions:
 
+- Add the `token-monitor-plugin` topic to your public GitHub plugin repository to help people find it on GitHub and prepare for Token Monitor's planned in-app discovery. In-app GitHub discovery is not yet available; adding the topic does not list or install your plugin in the App. Continue to provide file/folder import or HTTPS catalog installation instructions in your README.
 - Keep the manifest id stable across releases. Do not change it to include a version or release channel; the id identifies installed data, settings and placements.
 - Use a readable display name and a short repository description explaining the plugin's purpose. Keep compatibility and installation details in the README.
 - Set manifest `author` and an HTTPS `homepage` pointing to the project. When public discovery opens, its GitHub listings use the repository owner's login; this may differ from the manifest author of an installed package.
@@ -30,7 +31,7 @@ Do not identify a community plugin as official. Document original authors, artwo
 
 ## README content and images
 
-The App reads the repository's default README when details open. Maintain the detailed introduction and screenshots there rather than duplicating them in catalog fields. A catalog entry can set `repository` to its GitHub repository URL to use the same details. The README is the current project description, not a history of screenshots for individual releases.
+The App reads the repository's default README when details open, or a plugin-specific Markdown file selected from the catalog entry's optional `readmePaths` locale map. Maintain the detailed introduction and screenshots in that README rather than duplicating them in catalog fields. A catalog entry can set `repository` to its GitHub repository URL to use the same details. The README is the current project description, not a history of screenshots for individual releases.
 
 Include the plugin's purpose, supported App versions and platforms, installation steps, usage, local/network/data access, and a license. Add screenshots when they help explain the UI. The template below is a recommended structure, not a parser requirement; headings do not need exact names or a fixed order.
 
@@ -40,9 +41,15 @@ Use standard Markdown for headings, lists, links, tables, code and images:
 ![Plugin overview](docs/images/overview.png)
 ```
 
-Image paths are resolved relative to the README's actual directory. Use README-relative paths such as `docs/images/overview.png` or `../images/overview.png`, according to your directory layout. Do not start an image path with `/`: GitHub treats that form as relative to the repository root, but the App does not preview it. Commit images to the same repository. App previews accept only direct HTTPS URLs on `raw.githubusercontent.com` in that repository, on the standard HTTPS port, without credentials, query strings or fragments. Other hosts (including external screenshot services and GitHub attachment links) are not fetched by the App; users can view them on the GitHub project page. Place each image where it helps explain the surrounding text; there is no separate gallery field. For third-party sources, users explicitly choose Load README images before downloads start. App-designated featured sources load eligible images automatically as they approach the detail viewport. Users can open each preview larger; all sources have the same image validation and resource limits. At most eight eligible image occurrences can be previewed per README; other images retain their alt text.
+### Image checklist
 
-Use PNG or JPEG, at most 4 MiB per image, no larger than 8192 pixels on either side or 16 million pixels in total. Each opened README also has cumulative limits of 8 MiB downloaded image data, 8 MiB preview output and 16 million decoded pixels. A failed attempt consumes its reserved budget; closing and reopening is required to start a fresh document. An image that exceeds the remaining budget is unavailable in the App. Keep screenshots focused and remove credentials or personal data before committing them. The App resizes previews to at most 1600 pixels. Images keep their intrinsic size when they fit and shrink proportionally when wider than the detail body; small images are not stretched to fill it. Raw HTML (including `<img>`, `<picture>` and `<details>`), WebP and SVG images, embedded video and animated playback are not supported. Use Markdown images rather than HTML layout or GitHub-only presentation features. Only HTTPS links and image URLs are active. An unsupported or unavailable image does not block installation; essential instructions should remain readable as text.
+- Use Markdown images at the relevant point in the README; there is no gallery field. Paths resolve relative to the selected README's actual directory, including nested/localized READMEs. Use `docs/images/overview.png` or `../images/overview.png` as appropriate, not a leading `/`.
+- Commit images to the same repository. Absolute URLs must be direct HTTPS URLs on `raw.githubusercontent.com` in that repository, on the standard port, without credentials, query strings or fragments. Redirects, external screenshot services and GitHub attachment URLs are not previewed.
+- Use PNG or JPEG. Raw HTML (including `<img>`, `<picture>` and `<details>`), WebP, SVG, embedded video and animated playback are unsupported. Only HTTPS links and image URLs are active.
+- Keep each image within 4 MiB and 8192 pixels per side. Each opened README has cumulative budgets of 8 MiB downloaded image data, 8 MiB preview output and 16 million decoded pixels. At most eight eligible image occurrences receive previews. Keep screenshots small enough to fit together; a failed image can reduce the remaining budget.
+- Previews are resized to at most 1600 pixels and shrink proportionally to fit the detail body; small images are not stretched. Remove credentials and personal data before committing screenshots.
+
+For third-party sources, users choose **Load README images** before downloads start. App-designated featured sources load eligible images as they approach the viewport. Users can enlarge previews. All sources share the same validation and limits. Blocked/excess images keep their alt text and do not prevent installation; keep essential instructions in text and link to GitHub for the full README.
 
 ### Copyable README template
 
@@ -102,7 +109,7 @@ The output must not already exist. The builder validates the package and prints 
 
 For each release:
 
-1. Bump the manifest version, complete the build, and test the exact package in a disposable profile. Check installation, explicit trust, views/settings, disablement, and update from the previous release. Use the [validation guide](validation.md) for relevant checks.
+1. Bump the manifest version, complete the build, and test the exact package in a disposable profile. Check installation, explicit trust, views/settings, disablement, and update from the previous release. Use the [author self-check](validation.md#author-self-check) for relevant checks.
 2. Publish the source revision and the tested artifact together. A Git tag `v<version>` and asset `<manifest-id>-<version>.tmplugin` are recommended naming conventions, not auto-discovery rules. The asset should be identifiable from the README's installation instructions.
 3. Include release notes covering visible changes, compatibility changes and any newly used local or network access. Never replace the bytes of an already published version; publish a new version instead.
 4. If distributing through a catalog, add that exact version, package URL and SHA-256 under the same plugin id. Keep catalog and manifest compatibility ranges aligned. Refreshing the catalog exposes the update; it does not silently install or trust it.
@@ -110,3 +117,5 @@ For each release:
 GitHub Release assets are suitable for manual download and import. Do not assume their browser download URLs work as catalog package URLs: the App rejects redirects. Catalogs need URLs that directly return the actual file bytes over HTTPS. See [creating a community catalog](distribution-design.md#create-a-community-catalog) for the index format, hosting limits and optional signing.
 
 Keep users on the same catalog source for updates; changing sources is not a silent migration. Explain breaking settings/data changes and rollback limitations in the release notes. A rollback restores code, not arbitrary data migrations or external side effects.
+
+For multiple plugins in one repository, set each entry’s `readmePaths` to its own README files. This works for both curated and custom catalogs. The App selects a matching locale/language, then English; a root README can remain a repository overview. Version-specific `changelog` values come from the catalog, independently of the README. They appear in update previews for the versions between the installed and selected target, rather than in general details or first-install previews. Retain version entries and their notes in the catalog so users who skip releases can read the intervening changes.

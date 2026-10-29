@@ -7,8 +7,28 @@ on:
       - 'site/**'
       # Canonical plugin references are rendered by the site build.
       - 'docs/plugins/README.md'
+      - 'docs/plugins/author-quickstart.md'
       - 'docs/plugins/author-ui-options.md'
       - 'docs/plugins/distribution-design.md'
+      - 'docs/plugins/author-data-settings.md'
+      - 'docs/plugins/publishing.md'
+      - 'docs/plugins/validation.md'
+      # site/scripts/islands.jsx imports this module, so the islands bundle
+      # embeds it. Without this path a change here would deploy nothing and the
+      # live site would keep rolling with the old animation.
+      - 'src/electron/tokenNumberAnimation.js'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    paths:
+      - 'site/**'
+      # Canonical plugin references are rendered by the site build.
+      - 'docs/plugins/README.md'
+      - 'docs/plugins/author-quickstart.md'
+      - 'docs/plugins/author-ui-options.md'
+      - 'docs/plugins/distribution-design.md'
+      - 'docs/plugins/author-data-settings.md'
+      - 'docs/plugins/publishing.md'
+      - 'docs/plugins/validation.md'
       # site/scripts/islands.jsx imports this module, so the islands bundle
       # embeds it. Without this path a change here would deploy nothing and the
       # live site would keep rolling with the old animation.
@@ -20,7 +40,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -49,6 +69,7 @@ jobs:
       - name: Check generated documentation
         run: npm test --prefix site
       - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
           path: _site
@@ -56,7 +77,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       pages: write

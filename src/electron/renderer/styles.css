@@ -77,6 +77,7 @@ input, textarea, [contenteditable="true"] {
   user-select: text;
   -webkit-user-select: text;
 }
+.shell:focus { outline: none; }
 .shell {
   position: relative;
   display: flex;
@@ -3175,6 +3176,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .view-switcher-menu,
 .select-control-popup,
 .sync-content-dialog,
+.plugin-catalog-dialog,
 .settings-help-popover,
 .app-update-popover {
   border: 1px solid rgba(var(--line-rgb), 0.22);
@@ -3210,6 +3212,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   .view-switcher-menu,
   .select-control-popup,
   .sync-content-dialog,
+  .plugin-catalog-dialog,
   .settings-help-popover { background: rgb(var(--glass-rgb)); }
 }
 /* Chromium delegates an open <select> popup to a platform-specific surface.
@@ -6163,6 +6166,7 @@ html.native-liquid-glass .plugin-menu,
 html.native-liquid-glass .select-control-popup,
 html.native-liquid-glass .view-switcher-menu,
 html.native-liquid-glass .sync-content-dialog,
+html.native-liquid-glass .plugin-catalog-dialog,
 html.native-liquid-glass .settings-help-popover,
 html.native-liquid-glass .app-update-popover {
   border-color: rgba(var(--line-rgb), 0.16);
@@ -8465,6 +8469,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-detail-toolbar { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .plugin-detail-section { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
 .plugin-detail-heading { margin: 0; font-size: .6875rem; font-weight: 600; }
+.plugin-update-note { display: flex; flex-direction: column; gap: 4px; }
 .plugin-detail .settings-note { margin: 0; }
 .plugin-detail .plugin-views { gap: 10px; }
 .plugin-detail-utilities { border-top: 1px solid var(--line); padding-top: 14px; }
@@ -8785,7 +8790,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-catalog-title { display: block; padding: 0; min-width: 0; text-align: start; border: 0; background: none; color: var(--text); font: inherit; cursor: pointer; }
 .plugin-catalog-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 .plugin-stars { margin-inline-start: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.plugin-catalog-dialog { width: min(620px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; margin: auto; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: rgb(var(--panel-rgb)); overflow: hidden; -webkit-app-region: no-drag; }
+.plugin-catalog-dialog { width: min(620px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; margin: auto; border-radius: 12px; color: var(--text); overflow: hidden; -webkit-app-region: no-drag; }
 .plugin-catalog-dialog[open] { display: flex; flex-direction: column; }
 .plugin-catalog-dialog::backdrop { background: rgba(0, 0, 0, .48); }
 .plugin-catalog-dialog-head, .plugin-catalog-dialog-footer { display: flex; align-items: center; gap: 12px; padding: 12px 16px; flex: 0 0 auto; }

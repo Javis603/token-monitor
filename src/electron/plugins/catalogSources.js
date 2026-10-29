@@ -10,6 +10,18 @@ const { ID_RE, readBounded, digest } = require('./package');
 const { normalizeLocalized, localize, cleanText } = require('../../shared/plugins/localized');
 const MAX_INDEX_BYTES = 1024 * 1024;
 const HOST_VERSION = require('../../../package.json').version;
+function normalizeReadmePaths(value) {
+  if (value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 16) throw new Error('README paths must be a locale map');
+  const paths = {};
+  for (const [locale, file] of Object.entries(value)) {
+    if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(locale) || typeof file !== 'string' || file.length > 240 ||
+      !file.split('/').every(part => /^[A-Za-z0-9_.-]+$/.test(part) && part !== '.' && part !== '..') || !/\.md$/.test(file)) throw new Error('invalid repository README path');
+    paths[locale] = file;
+  }
+  if (!Object.keys(paths).length) throw new Error('README paths cannot be empty');
+  return paths;
+}
 function httpsUrl(value) {
   if (typeof value !== 'string' || value.length > 2048) throw new Error('source must be an HTTPS URL');
   const url = new URL(value);
@@ -43,6 +55,8 @@ function parseIndex(bytes, publicKey) {
     if (!name || !Array.isArray(entry.versions) || !entry.versions.length || entry.versions.length > 32) throw new Error(`${entry.id}: name and 1–32 versions are required`);
     const repository = entry.repository === undefined ? '' : httpsUrl(entry.repository);
     if (repository && !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(repository)) throw new Error('repository must be a GitHub repository URL');
+    const readmePaths = normalizeReadmePaths(entry.readmePaths);
+    if (readmePaths && !repository) throw new Error('README paths require a repository');
     const versionsSeen = new Set();
     const versions = entry.versions.map(v => {
       if (typeof v?.version !== 'string' || !semver.valid(v.version) || versionsSeen.has(v.version)) throw new Error(`${entry.id}: invalid or duplicate version`);
@@ -53,7 +67,7 @@ function parseIndex(bytes, publicKey) {
       return { types: normalizeTypes(v.types), version: v.version, sha256: v.sha256, url: httpsUrl(v.url), compatible: !range || semver.satisfies(HOST_VERSION, range),
         changelog: normalizeLocalized(v.changelog, 2000), engines: range || '*' };
     }).sort((a, b) => semver.rcompare(a.version, b.version));
-    return { id: entry.id, name, repository, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), versions };
+    return { id: entry.id, name, repository, readmePaths, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), versions };
   });
   return { title, plugins };
 }
@@ -88,7 +102,8 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
       const saved = JSON.parse(readBounded(cacheFile(source.id), MAX_INDEX_BYTES * 2));
       if (saved.url !== source.url) throw new Error('cached source does not match');
       const index = parseIndex(Buffer.from(saved.bytes, 'base64'), source.publicKey);
-      cache.set(source.id, index); source.lastFetched = saved.at;
+      cache.set(source.id, index);
+      source.lastFetched = Number.isSafeInteger(saved.at) && saved.at >= 0 && saved.at <= now() ? saved.at : null;
     } catch (error) { source.error = `cached catalog unavailable: ${error.message}`; }
   }
   try {

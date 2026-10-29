@@ -468,3 +468,105 @@ test('reused mounts move header controls without replacing drafts and remove omi
   assert.equal(a.children[0], latest.headerActions); assert.notEqual(latest.headerActions, mount);
   await host.dispose(); assert.equal(a.children.length, 0);
 });
+
+for (const target of ['main.home.content', 'main.tools.content', 'edgeDock.rail.stat.content', 'edgeDock.stat.content', 'notch.home.content', 'notch.summary.content']) {
+  test(`${target} keeps successful replacement hidden throughout a delayed same-view update`, async () => {
+    const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+    const view = { ...descriptor, targets: [target] }; let finish;
+    const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(container) {
+      container.append(document.createElement('input'));
+      return { update: () => new Promise(resolve => { finish = resolve; }) };
+    } }) });
+    const content = create({ document, host, getViews: () => [view], selection: () => view.ref });
+    content.render(target, native); await new Promise(setImmediate);
+    assert.equal(native.hidden, true);
+    const container = native.nextSibling, input = container.children[0]; input.value = 'retained draft';
+    content.render(target, native);
+    assert.equal(native.hidden, true, 'native rows must not reappear while the update awaits');
+    assert.equal(container.children[0], input); assert.equal(input.value, 'retained draft');
+    finish(); await new Promise(setImmediate); assert.equal(native.hidden, true);
+    const rebuilt = document.createElement('div'); rebuilt.hidden = false; native.parentNode.insertBefore(rebuilt, native); native.remove();
+    content.retain([target]);
+    content.render(target, rebuilt);
+    assert.equal(rebuilt.hidden, true, 'rebuilt Dock/Notch anchors retain the successful same-revision replacement');
+    assert.equal(rebuilt.nextSibling, container); assert.equal(container.children[0], input);
+    finish(); await new Promise(setImmediate); assert.equal(rebuilt.hidden, true);
+    content.dispose(); assert.equal(rebuilt.hidden, false); await host.dispose();
+  });
+}
+test('pending replacement update restores native on failure or deselection and cannot hide it after removal', async () => {
+  for (const outcome of ['failure', 'deselection']) {
+    const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+    let finish, fail, selected = descriptor.ref;
+    const host = createHost({ document, window: {}, bridge: {}, onError() {}, importModule: async () => ({ mount() {
+      return { update: () => new Promise((resolve, reject) => { finish = resolve; fail = reject; }) };
+    } }) });
+    const content = create({ document, host, getViews: () => [descriptor], selection: () => selected });
+    content.render('main.home.content', native); await new Promise(setImmediate);
+    content.render('main.home.content', native); assert.equal(native.hidden, true);
+    if (outcome === 'failure') fail(Error('update failed'));
+    else { selected = null; content.render('main.home.content', native); assert.equal(native.hidden, false); finish(); }
+    await new Promise(setImmediate); assert.equal(native.hidden, false);
+    content.dispose(); await host.dispose();
+  }
+});
+
+test('retain releases detached replacement mounts when their view is no longer selected', () => {
+  const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+  let selected = descriptor.ref, removed = 0;
+  const content = create({ document, getViews: () => [descriptor], selection: () => selected,
+    host: { mount(_node, _view, context) { context.onMountStatus(true); }, unmount() { removed++; } } });
+  content.render('main.home.content', native); native.remove(); selected = null;
+  content.retain(['main.home.content']); assert.equal(removed, 1); assert.equal(document.body.children.length, 0);
+  content.dispose();
+});
+
+for (const mode of ['append', 'decorate']) {
+  test(`${mode} preserves native visibility changed by the App between renders`, () => {
+    const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+    const view = { ...descriptor, mode };
+    const content = create({ document, getViews: () => [view], host: { mount() {}, unmount() {} } });
+    content.render('main.home.content', native);
+    native.hidden = true; content.render('main.home.content', native);
+    assert.equal(native.hidden, true);
+    native.hidden = false; content.render('main.home.content', native);
+    assert.equal(native.hidden, false);
+    content.dispose();
+  });
+}
+
+test('retain releases an inactive detached replacement while an append view uses the same target', () => {
+  const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+  const append = { ...descriptor, ref: 'other/append', mode: 'append' };
+  let selected = descriptor.ref; const removed = [];
+  const content = create({ document, getViews: () => [descriptor, append], selection: () => selected,
+    host: { mount(_node, _view, context) { context.onMountStatus(true); }, unmount(node) { removed.push(node); } } });
+  content.render('main.home.content', native);
+  const replacementNode = native.nextSibling, appendNode = replacementNode.nextSibling;
+  native.remove(); selected = null;
+  content.retain(['main.home.content']);
+  assert.deepEqual(removed, [replacementNode]);
+  assert.equal(appendNode.isConnected, true);
+  content.dispose(); assert.deepEqual(removed, [replacementNode, appendNode]);
+});
+
+for (const initiallyHidden of [true, false]) {
+  test(`replacement captures App visibility after an append-only outlet starts hidden=${initiallyHidden}`, () => {
+    const document = dom(), native = document.createElement('div'); native.hidden = initiallyHidden; document.body.append(native);
+    const append = { ...descriptor, ref: 'other/append', mode: 'append' };
+    let selected = null, status;
+    const content = create({ document, getViews: () => [append, descriptor], selection: () => selected,
+      host: { mount(_node, view, context) { if (view.mode === 'replace') status = context.onMountStatus; }, unmount() {} } });
+    content.render('main.home.content', native);
+    native.hidden = !initiallyHidden; selected = descriptor.ref;
+    content.render('main.home.content', native);
+    assert.equal(native.hidden, !initiallyHidden, 'pending replacement preserves current App visibility');
+    status(false);
+    assert.equal(native.hidden, !initiallyHidden, 'failed mount restores current App visibility');
+    content.render('main.home.content', native); status(true);
+    assert.equal(native.hidden, true);
+    selected = null; content.render('main.home.content', native);
+    assert.equal(native.hidden, !initiallyHidden, 'deselection restores the replacement-start snapshot');
+    content.dispose();
+  });
+}
