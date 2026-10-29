@@ -21,7 +21,7 @@ const test = require('node:test');
 const ROOT = path.resolve(__dirname, '../..');
 const OUT = path.join(ROOT, 'node_modules/electron-updater/out');
 const ELECTRON_TYPES = path.join(ROOT, 'node_modules/electron/electron.d.ts');
-const PINNED = '6.8.9';
+const PINNED = '6.8.11';
 
 function upstream(file) {
   try {

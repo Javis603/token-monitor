@@ -8735,8 +8735,8 @@ app.whenReady().then(() => {
   ipcMain.handle('usage:revealClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.revealClientSyncLock(clientId));
   ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
   ipcMain.handle('usage:repairClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.repairClientSyncLock(clientId));
-  ipcMain.handle('clipboard:write', (_event, text) => {
-    clipboard.writeText(String(text || ''));
+  ipcMain.handle('clipboard:write', async (_event, text) => {
+    await clipboard.writeText(String(text || ''));
     return true;
   });
   ipcMain.handle('app:openExternal', (_event, url) => {
