@@ -336,22 +336,17 @@ function addSessionBreakdown(period, session) {
     .filter(([, tokens]) => tokens > 0);
   const totalModelTokens = modelTokens.reduce((sum, [, tokens]) => sum + tokens, 0);
   if (totalModelTokens === 0) return;
-  if (modelTokens.length > 1) {
-    for (const [model, tokens] of modelTokens) {
-      period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + tokens;
-    }
-    period.capabilities.tokenComponents = false;
-    return;
-  }
-
   for (const [model, tokens] of modelTokens) {
-    const cr = Math.min(tokens, cacheRead);
-    const cw = Math.min(tokens - cr, cacheWrite);
-    const ou = Math.min(tokens - cr - cw, output);
+    const single = modelTokens.length === 1;
+    const observed = single ? null : session.modelTokenComponents?.[model];
+    const cr = observed ? observed.cacheReadTokens : single ? Math.min(tokens, cacheRead) : 0;
+    const cw = observed ? observed.cacheWriteTokens : single ? Math.min(tokens - cr, cacheWrite) : 0;
+    const ou = observed ? observed.outputTokens : single ? Math.min(tokens - cr - cw, output) : 0;
+    const input = observed ? observed.inputTokens : single ? archivedSessionInput(session) : 0;
     if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
     if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
     if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
-    const unclassified = Math.max(0, tokens - cr - cw - ou - archivedSessionInput(session));
+    const unclassified = Math.max(0, tokens - cr - cw - ou - input);
     if (unclassified > 0) {
       period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + unclassified;
       period.capabilities.tokenComponents = false;

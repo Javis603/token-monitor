@@ -291,6 +291,10 @@ function addClientUsage(period, client, usage) {
       const remaining = Math.max(0, numberValue(count) - numberValue(session.cacheReadTokens)
         - numberValue(session.cacheWriteTokens) - numberValue(session.outputTokens));
       modelInputs[model] = (modelInputs[model] || 0) + Math.min(input, remaining);
+    } else if (session.modelTokenComponents) {
+      for (const [model, row] of Object.entries(session.modelTokenComponents)) {
+        modelInputs[model] = (modelInputs[model] || 0) + row.inputTokens;
+      }
     }
   }
   const known = Math.min(tokens,
@@ -327,7 +331,7 @@ function addSessionBreakdown(period, client, session) {
   const cacheRead = Math.max(0, Math.round(numberValue(session?.cacheReadTokens)));
   const cacheWrite = Math.max(0, Math.round(numberValue(session?.cacheWriteTokens)));
   const output = Math.max(0, Math.round(numberValue(session?.outputTokens)));
-  if (cacheRead === 0 && cacheWrite === 0 && output === 0) return;
+  if (cacheRead === 0 && cacheWrite === 0 && output === 0 && !session.modelTokenComponents) return;
 
   if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
   if (cacheWrite > 0) period.clientCacheWrites[client] = (period.clientCacheWrites[client] || 0) + cacheWrite;
@@ -341,16 +345,16 @@ function addSessionBreakdown(period, client, session) {
     .filter(([, tokens]) => tokens > 0);
   const totalModelTokens = modelTokens.reduce((sum, [, tokens]) => sum + tokens, 0);
   if (totalModelTokens === 0) return;
-  // Session-level components have no client×model provenance. They are exact
-  // only when the session has one model; a multi-model split would be a guess.
-  if (modelTokens.length > 1) return;
-  const [[model, tokens]] = modelTokens;
-  const cr = Math.min(tokens, cacheRead);
-  const cw = Math.min(tokens - cr, cacheWrite);
-  const ou = Math.min(tokens - cr - cw, output);
-  if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
-  if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
-  if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
+  for (const [model, tokens] of modelTokens) {
+    const observed = modelTokens.length === 1 ? null : session.modelTokenComponents?.[model];
+    if (!observed && modelTokens.length > 1) continue;
+    const cr = observed ? observed.cacheReadTokens : Math.min(tokens, cacheRead);
+    const cw = observed ? observed.cacheWriteTokens : Math.min(tokens - cr, cacheWrite);
+    const ou = observed ? observed.outputTokens : Math.min(tokens - cr - cw, output);
+    if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
+    if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
+    if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
+  }
 }
 
 function shouldApplyPeriod(periodName, entry, now) {
