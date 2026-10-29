@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const { normalizeManifest } = require('../../src/shared/plugins/manifest');
-const { initialSetupReview, initialSetupPlan } = require('../../src/electron/plugins/initialSetup');
+const { normalizeInitialSetup, recordSetupChoice, initialSetupReview, initialSetupPlan } = require('../../src/electron/plugins/initialSetup');
 const { runtimeFixture } = require('../helpers/trustedPlugin');
 
 function raw() {
@@ -159,4 +159,167 @@ test('repairing a removed replacement does not restore a different target explic
   const plan = initialSetupPlan(settings, plugin, { 'content:main.model.content': null }, { updating: true });
   assert.equal(plan.patch.pluginContentSelections['main.home.content'], 'setup-fixture/compact');
   assert.equal(plan.patch.pluginContentSelections['main.model.content'], undefined);
+});
+
+test('persisted setup accepts only typed choices and applies only retained, unique keys', () => {
+  const values = {
+    background: false, skin: null, 'content:main.home.content': 'other/view',
+    'placement:setup-fixture/page:page': false,
+    'placement:setup-fixture/page:settings': true,
+    'placement:setup-fixture/page:notch': 'true',
+    'placement:../page:page': true, 'content:bad target': null,
+    'content:main.model.content': false, unknown: true
+  };
+  const input = { 'setup-fixture': { values, applied: [...Object.keys(values), 'background', 'missing'] },
+    'bad id': { values: {}, applied: [] }, missingValues: { applied: [] },
+    'bad-values': { values: [], applied: [] }, 'bad-applied': { values: {}, applied: {} } };
+  const before = structuredClone(input);
+  const normalized = normalizeInitialSetup(input);
+  assert.deepEqual(normalized, { 'setup-fixture': { values: {
+    background: false, skin: null, 'content:main.home.content': 'other/view',
+    'placement:setup-fixture/page:page': false
+  }, applied: ['background', 'skin', 'content:main.home.content', 'placement:setup-fixture/page:page'] } });
+  assert.deepEqual(input, before);
+  assert.deepEqual(normalizeInitialSetup(normalized), normalized);
+});
+
+test('persisted setup bounds valid choices and removes applied keys discarded by that bound', () => {
+  const entries = Array.from({ length: 1025 }, (_, i) => [`content:main.target${i}.content`, null]);
+  const normalized = normalizeInitialSetup({ 'setup-fixture': {
+    values: Object.fromEntries([['invalid', true], ...entries]),
+    applied: [...entries.map(([key]) => key).reverse(), entries[0][0]]
+  } })['setup-fixture'];
+  assert.deepEqual(Object.keys(normalized.values), entries.slice(0, 1024).map(([key]) => key));
+  assert.deepEqual(normalized.applied, entries.slice(0, 1024).map(([key]) => key).reverse());
+});
+
+test('recording a choice preserves pending values, other plugins and input objects', () => {
+  const settings = { pluginInitialSetup: {
+    'setup-fixture': { values: { background: true, skin: null }, applied: ['background'] },
+    other: { values: { background: true }, applied: [] }
+  } };
+  const before = structuredClone(settings);
+  const recorded = recordSetupChoice(settings, 'setup-fixture', 'background', false);
+  assert.deepEqual(recorded['setup-fixture'], { values: { background: false, skin: null }, applied: ['background'] });
+  assert.deepEqual(recorded.other, before.pluginInitialSetup.other);
+  assert.deepEqual(settings, before);
+  const constructor = recordSetupChoice({}, 'constructor', 'background', false);
+  assert.ok(Object.hasOwn(constructor, 'constructor'));
+  assert.deepEqual(constructor.constructor, { values: { background: false }, applied: ['background'] });
+});
+
+test('at the setup storage limit an existing decision can change but a new decision is rejected', () => {
+  const values = Object.fromEntries(Array.from({ length: 1024 }, (_, i) => [`content:main.target${i}.content`, null]));
+  const settings = { pluginInitialSetup: { 'setup-fixture': { values, applied: Object.keys(values) } } };
+  const before = structuredClone(settings);
+  const updated = recordSetupChoice(settings, 'setup-fixture', 'content:main.target0.content', 'other/view');
+  assert.equal(updated['setup-fixture'].values['content:main.target0.content'], 'other/view');
+  assert.equal(updated['setup-fixture'].applied.length, 1024);
+  assert.throws(() => recordSetupChoice(settings, 'setup-fixture', 'background', false), /Too many initial settings/);
+  assert.deepEqual(settings, before);
+});
+
+test('review preserves pending opt-outs while newly declared choices use author suggestions', () => {
+  const plugin = normalizeManifest(raw()).manifest;
+  const settings = { pluginInitialSetup: { 'setup-fixture': {
+    values: { background: false, skin: null, 'content:main.home.content': null,
+      'placement:setup-fixture/page:page': false, 'placement:setup-fixture/removed:page': true },
+    applied: ['placement:setup-fixture/page:page']
+  } } };
+  const before = structuredClone(settings);
+  assert.deepEqual(initialSetupReview(settings, plugin).values, {
+    'placement:setup-fixture/page:notch': false, 'content:main.home.content': null, background: false, skin: null
+  });
+  assert.deepEqual(settings, before);
+});
+
+test('pending content and skin suggestions removed by an update fall back to native and current appearance', () => {
+  const plugin = normalizeManifest(raw()).manifest;
+  const settings = { pluginInitialSetup: { 'setup-fixture': { values: {
+    skin: 'setup-fixture/removed', 'content:main.home.content': 'setup-fixture/removed'
+  }, applied: [] } } };
+  const review = initialSetupReview(settings, plugin, { updating: true });
+  assert.equal(review.values.skin, null);
+  assert.equal(review.values['content:main.home.content'], null);
+});
+
+test('install-only planning records all choices without applying effects or marking them applied', () => {
+  const plugin = normalizeManifest(raw()).manifest;
+  const settings = { pluginInitialSetup: { other: { values: { background: false }, applied: ['background'] } },
+    pluginContentSelections: { 'main.home.content': 'other/view' },
+    pluginStates: { 'setup-fixture': { enabled: false, background: false } },
+    themeColors: { accent: '#112233' }, pluginMainPages: [] };
+  const before = structuredClone(settings);
+  const review = initialSetupReview(settings, plugin);
+  const plan = initialSetupPlan(settings, plugin, undefined, { activate: false });
+  assert.deepEqual(plan.patch, { pluginInitialSetup: {
+    ...settings.pluginInitialSetup, 'setup-fixture': { values: review.values, applied: [] }
+  } });
+  assert.deepEqual(plan.values, review.values);
+  assert.deepEqual(settings, before);
+});
+
+for (const [label, input] of [['null', null], ['array', []], ['boolean', false], ['string', 'defaults'],
+  ['number', 1], ['oversized object', Object.fromEntries(Array.from({ length: 1025 }, (_, i) => [`choice${i}`, true]))]]) {
+  test(`initial planning rejects a ${label} payload without mutating settings`, () => {
+    const settings = { pluginInitialSetup: {} }, before = structuredClone(settings);
+    assert.throws(() => initialSetupPlan(settings, normalizeManifest(raw()).manifest, input), /Invalid initial plugin settings/);
+    assert.deepEqual(settings, before);
+  });
+}
+
+test('applied decisions cannot be resubmitted as first-use settings', () => {
+  const plugin = normalizeManifest(raw()).manifest;
+  const settings = { pluginInitialSetup: { 'setup-fixture': { values: { background: false }, applied: ['background'] } } };
+  assert.throws(() => initialSetupPlan(settings, plugin, { background: true }), /Invalid initial plugin settings/);
+  assert.equal(settings.pluginInitialSetup['setup-fixture'].values.background, false);
+});
+
+test('activating defaults preserves other state and produces no setup effects on a second plan', () => {
+  const plugin = normalizeManifest(raw()).manifest;
+  const settings = { pluginStates: { 'setup-fixture': { enabled: true, trustedRevision: 'revision' }, other: { enabled: false } },
+    themeColors: { accent: '#112233', text: '#ffffff' }, vendorColors: { claude: '#123456' },
+    pluginContentSelections: { 'main.model.content': 'other/view' }, pluginMainPages: ['other/page'],
+    notchEnabled: false, edgeDockEnabled: false };
+  const before = structuredClone(settings);
+  const { patch } = initialSetupPlan(settings, plugin);
+  assert.deepEqual(patch.pluginStates, { 'setup-fixture': { enabled: true, trustedRevision: 'revision', background: true }, other: { enabled: false } });
+  assert.deepEqual(patch.pluginMainPages, ['other/page', 'setup-fixture/page']);
+  assert.deepEqual(patch.pluginContentSelections, { 'main.model.content': 'other/view', 'main.home.content': 'setup-fixture/compact' });
+  assert.deepEqual(patch.themeColors, { accent: '#abcdef', text: '#ffffff' });
+  assert.deepEqual(patch.vendorColors, { claude: '#123456' });
+  assert.equal(patch.pluginAuthorSkin.ref, 'setup-fixture/blue');
+  assert.equal(patch.pluginAuthorSkin.appearance.font, 'mono');
+  assert.equal(Object.hasOwn(patch, 'notchEnabled'), false);
+  assert.equal(Object.hasOwn(patch, 'edgeDockEnabled'), false);
+  const applied = patch.pluginInitialSetup['setup-fixture'];
+  assert.deepEqual(new Set(applied.applied), new Set(Object.keys(applied.values)));
+  assert.deepEqual(initialSetupPlan({ ...settings, ...patch }, plugin), { patch: {}, values: {} });
+  assert.deepEqual(settings, before);
+});
+
+test('full page locations skip the suggestion without eviction and still apply independent choices', () => {
+  const plugin = normalizeManifest(raw()).manifest;
+  const pages = Array.from({ length: 32 }, (_, i) => `other/page-${i}`);
+  const settings = { pluginMainPages: pages };
+  const before = structuredClone(settings);
+  const { patch } = initialSetupPlan(settings, plugin);
+  assert.equal(Object.hasOwn(patch, 'pluginMainPages'), false);
+  assert.equal(patch.pluginContentSelections['main.home.content'], 'setup-fixture/compact');
+  assert.equal(patch.pluginStates['setup-fixture'].background, true);
+  assert.equal(patch.pluginAuthorSkin.ref, 'setup-fixture/blue');
+  assert.ok(patch.pluginInitialSetup['setup-fixture'].applied.includes('placement:setup-fixture/page:page'));
+  assert.deepEqual(settings, before);
+});
+
+for (const count of [127, 128]) test(`activating a new target with ${count} existing content choices respects the 128-selection limit`, () => {
+  const plugin = normalizeManifest(raw()).manifest;
+  const settings = { pluginContentSelections: Object.fromEntries(Array.from({ length: count }, (_, i) => [`main.kept${i}.content`, 'other/view'])) };
+  const before = structuredClone(settings);
+  if (count === 128) assert.throws(() => initialSetupPlan(settings, plugin), /Too many content selections/);
+  else {
+    const { patch } = initialSetupPlan(settings, plugin);
+    assert.deepEqual(patch.pluginContentSelections, { ...settings.pluginContentSelections, 'main.home.content': 'setup-fixture/compact' });
+  }
+  assert.deepEqual(settings, before);
 });
