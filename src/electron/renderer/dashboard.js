@@ -313,22 +313,36 @@ function normalizeDashDateKey(value) {
   return key;
 }
 
+function dashDateKeyBefore(key) {
+  const normalized = normalizeDashDateKey(key);
+  if (!normalized) return '';
+  const previous = new Date(Date.parse(`${normalized}T00:00:00Z`) - 86400000);
+  if (Number.isNaN(previous.getTime())) return '';
+  return normalizeDashDateKey(previous.toISOString().slice(0, 10));
+}
+
 function syncCustomRangeInputs() {
   if (!els.dashCustomRangeBar) return;
   const isCustom = state.range === 'custom';
   els.dashCustomRangeBar.classList.toggle('hidden', !isCustom);
-  if (isCustom) {
-    const daily = state.history?.daily || [];
-    const today = todayKey();
-    const defaultStart = daily[0]?.date ? String(daily[0].date).slice(0, 10) : today;
-    const defaultEnd = daily.length ? String(daily[daily.length - 1].date).slice(0, 10) : today;
-    const start = normalizeDashDateKey(state.customStart) || normalizeDashDateKey(els.dashCustomStart?.value) || defaultStart;
-    const end = normalizeDashDateKey(state.customEnd) || normalizeDashDateKey(els.dashCustomEnd?.value) || defaultEnd;
-    if (els.dashCustomStart && !els.dashCustomStart.value) els.dashCustomStart.value = start;
-    if (els.dashCustomEnd && !els.dashCustomEnd.value) els.dashCustomEnd.value = end;
-    state.customStart = normalizeDashDateKey(els.dashCustomStart?.value) || start;
-    state.customEnd = normalizeDashDateKey(els.dashCustomEnd?.value) || end;
-  }
+  if (!isCustom) return;
+  const daily = state.history?.daily || [];
+  const today = todayKey();
+  const startInput = normalizeDashDateKey(els.dashCustomStart?.value);
+  const endInput = normalizeDashDateKey(els.dashCustomEnd?.value);
+  const startState = normalizeDashDateKey(state.customStart);
+  const endState = normalizeDashDateKey(state.customEnd);
+  // Without History there is nothing to default to yet: pinning today's date
+  // now would hide the history's own first and last day once it arrives.
+  if (!state.history && !startState && !endState && !startInput && !endInput) return;
+  const defaultStart = daily[0]?.date ? String(daily[0].date).slice(0, 10) : today;
+  const defaultEnd = daily.length ? String(daily[daily.length - 1].date).slice(0, 10) : today;
+  const start = startState || startInput || defaultStart;
+  const end = endState || endInput || defaultEnd;
+  if (els.dashCustomStart && !els.dashCustomStart.value) els.dashCustomStart.value = start;
+  if (els.dashCustomEnd && !els.dashCustomEnd.value) els.dashCustomEnd.value = end;
+  state.customStart = normalizeDashDateKey(els.dashCustomStart?.value) || start;
+  state.customEnd = normalizeDashDateKey(els.dashCustomEnd?.value) || end;
 }
 
 function getEffectiveRange() {
@@ -376,6 +390,7 @@ function onDashCustomDateChange() {
   state.customEnd = end;
   state.motion = 'update';
   render();
+  void window.tokenMonitor.updateSettings({ customPeriodStart: start, customPeriodEnd: end });
 }
 
 let dashCustomInputsWired = false;
@@ -386,7 +401,7 @@ function wireCustomRangeInputs() {
   if (els.dashCustomEnd) els.dashCustomEnd.addEventListener('change', onDashCustomDateChange);
 }
 
-function summaryForDaily(daily) {
+function summaryForDaily(daily, endDate = todayKey()) {
   let totalTokens = 0;
   let totalCost = 0;
   let unpricedTokens = 0;
@@ -404,7 +419,8 @@ function summaryForDaily(daily) {
     unpricedTokens += Number(d.unpricedTokens || 0);
     activeTimeMs += Number(d.activeTimeMs || 0);
     if (tokens > 0) {
-      activeDaysSet.add(d.date);
+      const date = String(d.date || '').slice(0, 10);
+      if (date) activeDaysSet.add(date);
       if (tokens > peakDayTokens) peakDayTokens = tokens;
     }
     if (d.perClient) {
@@ -420,9 +436,13 @@ function summaryForDaily(daily) {
     }
   }
 
+  // History omits days without usage, so the streak has to walk the calendar
+  // instead of the rows: a day missing from the history ends the run.
   let currentStreak = 0;
-  for (let i = daily.length - 1; i >= 0 && Number(daily[i]?.tokens || 0) > 0; i--) {
+  let cursor = normalizeDashDateKey(endDate);
+  while (cursor && activeDaysSet.has(cursor)) {
     currentStreak++;
+    cursor = dashDateKeyBefore(cursor);
   }
 
   let favoriteModel = '';
@@ -675,7 +695,8 @@ function renderActivity() {
     : '';
   animateHeatmapEntry();
   state.dayMap = new Map((daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0), unpricedTokens: Number(d.unpricedTokens || 0) }]));
-  const summary = state.range === 'all' ? (state.history?.summary || summaryForDaily(filtered)) : summaryForDaily(filtered);
+  const streakEnd = state.range === 'custom' ? (getEffectiveRange()?.end || todayKey()) : todayKey();
+  const summary = state.range === 'all' ? (state.history?.summary || summaryForDaily(filtered, streakEnd)) : summaryForDaily(filtered, streakEnd);
   const cards = charts.statsCards(summary);
   const LABELS = {
     totalTokens: 'dashboard.stat.totalTokens', totalCost: 'dashboard.stat.totalCost',
@@ -812,6 +833,7 @@ async function refresh() {
   try {
     state.motion = state.history ? 'update' : 'entry';
     state.history = await window.tokenMonitor.getDashboardHistory();
+    syncCustomRangeInputs();
     render();
   } catch (error) {
     state.motion = 'none';
@@ -854,6 +876,8 @@ async function boot() {
   }
   state.flat = settings.dashboardFlat === true;
   state.heatmapMetric = settings.heatmapMetric || 'cost';
+  state.customStart = normalizeDashDateKey(settings.customPeriodStart);
+  state.customEnd = normalizeDashDateKey(settings.customPeriodEnd);
   applyAppearance(settings);
   applyTranslations();
   populateRangeSelect();
@@ -906,6 +930,21 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   if (state.heatmapMetric !== nextMetric) {
     state.heatmapMetric = nextMetric;
     needsRender = true;
+  }
+  if ('customPeriodStart' in next || 'customPeriodEnd' in next) {
+    const nextStart = normalizeDashDateKey(next.customPeriodStart);
+    const nextEnd = normalizeDashDateKey(next.customPeriodEnd);
+    if (nextStart !== state.customStart || nextEnd !== state.customEnd) {
+      state.customStart = nextStart;
+      state.customEnd = nextEnd;
+      if (els.dashCustomStart && document.activeElement !== els.dashCustomStart) {
+        els.dashCustomStart.value = nextStart;
+      }
+      if (els.dashCustomEnd && document.activeElement !== els.dashCustomEnd) {
+        els.dashCustomEnd.value = nextEnd;
+      }
+      needsRender = true;
+    }
   }
   if (needsRender) render();
 });

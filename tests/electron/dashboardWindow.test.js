@@ -390,3 +390,113 @@ test('renderer removes Trends from available views when history is disabled', ()
   assert.match(app, /state\.settings\?\.historyEnabled === false/);
   assert.match(app, /order\.filter\(\(id\) => id !== 'trends'\)/);
 });
+
+test('the dashboard streak counts calendar days, not adjacent history rows', () => {
+  const context = { todayKey: () => '2026-10-10' };
+  context.normalizeDashDateKey = dashboardFunction('normalizeDashDateKey', '\nfunction dashDateKeyBefore', context);
+  context.dashDateKeyBefore = dashboardFunction('dashDateKeyBefore', '\nfunction syncCustomRangeInputs', context);
+  const summaryForDaily = dashboardFunction('summaryForDaily', '\nfunction populateRangeSelect', context);
+
+  const consecutive = summaryForDaily([
+    { date: '2026-10-08', tokens: 100, cost: 1 },
+    { date: '2026-10-09', tokens: 200, cost: 2 },
+    { date: '2026-10-10', tokens: 300, cost: 3 }
+  ], '2026-10-10');
+  assert.equal(consecutive.currentStreak, 3);
+  assert.equal(consecutive.activeDays, 3);
+
+  const gapped = summaryForDaily([
+    { date: '2026-10-08', tokens: 100, cost: 1 },
+    { date: '2026-10-10', tokens: 300, cost: 3 }
+  ], '2026-10-10');
+  assert.equal(gapped.currentStreak, 1, 'a day missing from History ends the streak');
+
+  const endedBeforeToday = summaryForDaily([
+    { date: '2026-10-08', tokens: 100, cost: 1 },
+    { date: '2026-10-09', tokens: 200, cost: 2 }
+  ], '2026-10-10');
+  assert.equal(endedBeforeToday.currentStreak, 0, 'an inactive range end has no streak');
+});
+
+test('the dashboard waits for History before defaulting the custom range', () => {
+  const context = {
+    state: { range: 'custom', customStart: '', customEnd: '', history: null },
+    els: {
+      dashCustomRangeBar: { classList: { toggle() {} } },
+      dashCustomStart: { value: '' },
+      dashCustomEnd: { value: '' }
+    },
+    todayKey: () => '2026-10-10'
+  };
+  context.normalizeDashDateKey = dashboardFunction('normalizeDashDateKey', '\nfunction dashDateKeyBefore', context);
+  const syncCustomRangeInputs = dashboardFunction('syncCustomRangeInputs', '\nfunction getEffectiveRange', context);
+  context.syncCustomRangeInputs = syncCustomRangeInputs;
+
+  syncCustomRangeInputs();
+  assert.equal(context.state.customStart, '', 'no default is pinned before History arrives');
+  assert.equal(context.state.customEnd, '');
+  assert.equal(context.els.dashCustomStart.value, '');
+  assert.equal(context.els.dashCustomEnd.value, '');
+
+  context.state.history = {
+    daily: [{ date: '2026-09-01', tokens: 10 }, { date: '2026-10-05', tokens: 20 }]
+  };
+  syncCustomRangeInputs();
+  assert.equal(context.state.customStart, '2026-09-01');
+  assert.equal(context.state.customEnd, '2026-10-05');
+  assert.equal(context.els.dashCustomStart.value, '2026-09-01');
+  assert.equal(context.els.dashCustomEnd.value, '2026-10-05');
+});
+
+test('changing the dashboard custom dates persists them to settings', () => {
+  const persisted = [];
+  const context = {
+    state: { range: 'custom', customStart: '2026-10-01', customEnd: '2026-10-10', motion: 'none' },
+    els: {
+      dashCustomStart: { value: '2026-10-02' },
+      dashCustomEnd: { value: '2026-10-09' }
+    },
+    todayKey: () => '2026-10-10',
+    render() {},
+    window: {
+      tokenMonitor: {
+        updateSettings: (patch) => {
+          persisted.push(patch);
+          return Promise.resolve();
+        }
+      }
+    }
+  };
+  context.normalizeDashDateKey = dashboardFunction('normalizeDashDateKey', '\nfunction dashDateKeyBefore', context);
+  const onDashCustomDateChange = dashboardFunction('onDashCustomDateChange', '\nlet dashCustomInputsWired', context);
+
+  onDashCustomDateChange();
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].customPeriodStart, '2026-10-02');
+  assert.equal(persisted[0].customPeriodEnd, '2026-10-09');
+  assert.equal(context.state.customStart, '2026-10-02');
+  assert.equal(context.state.customEnd, '2026-10-09');
+});
+
+test('the dashboard restores, persists and re-syncs the custom period dates', () => {
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const boot = /async function boot\(\)\s*\{([\s\S]*?)\n\}/.exec(js);
+  assert.ok(boot, 'dashboard should have a boot function');
+  const restore = boot[1].indexOf('state.customStart = normalizeDashDateKey(settings.customPeriodStart)');
+  const populate = boot[1].indexOf('populateRangeSelect()');
+  assert.ok(restore >= 0, 'boot restores the persisted custom start date');
+  assert.ok(populate > restore, 'the persisted dates load before the range inputs are populated');
+  assert.match(boot[1], /state\.customEnd = normalizeDashDateKey\(settings\.customPeriodEnd\)/);
+
+  assert.match(js, /void window\.tokenMonitor\.updateSettings\(\{ customPeriodStart: start, customPeriodEnd: end \}\)/);
+
+  const refresh = /async function refresh\(\)\s*\{([\s\S]*?)\n\}/.exec(js);
+  assert.ok(refresh, 'dashboard should have a refresh function');
+  assert.match(refresh[1], /syncCustomRangeInputs\(\)/);
+
+  const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
+  assert.ok(handler, 'dashboard should subscribe to settings pushes');
+  assert.match(handler[1], /'customPeriodStart' in next \|\| 'customPeriodEnd' in next/);
+  assert.match(handler[1], /state\.customStart = nextStart/);
+  assert.match(handler[1], /state\.customEnd = nextEnd/);
+});
