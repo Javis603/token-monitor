@@ -112,7 +112,7 @@ test('Antigravity quota presentation parses grouped period labels once', () => {
   assert.equal(antigravityQuotaWindow({ kind: 'weekly', label: 'Gemini Pro' }), null);
 });
 
-test('compact Antigravity windows surface critical weekly quotas per model group', () => {
+test('compact Antigravity windows surface critical weekly quotas per model group by default', () => {
   const windows = [
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 100 },
     { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 0 },
@@ -124,9 +124,17 @@ test('compact Antigravity windows surface critical weekly quotas per model group
   const selected = limitProviderCompactWindows('antigravity', windows);
   assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', selected[0], selected), 'Weekly');
   assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', selected[1], selected), '5-hour');
+
+  // Opt-in canonical periods: paired 5-hour and weekly across models
+  assert.deepEqual(limitProviderCompactWindows('antigravity', windows, { canonicalPeriods: true }), [windows[2], windows[1]]);
+  const canonicalSelected = limitProviderCompactWindows('antigravity', windows, { canonicalPeriods: true });
+  assert.equal(limitProviderCompactWindowLabel('antigravity', canonicalSelected[0], canonicalSelected), '');
+  assert.equal(limitProviderCompactWindowLabel('antigravity', canonicalSelected[1], canonicalSelected), '');
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', canonicalSelected[0], canonicalSelected), 'Claude/GPT');
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', canonicalSelected[1], canonicalSelected), '');
 });
 
-test('compact Antigravity windows keep 5-hour primary until weekly is critical', () => {
+test('compact Antigravity windows keep 5-hour primary until weekly is critical by default', () => {
   const aboveCritical = [
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 60 },
     { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 30 }
@@ -138,9 +146,13 @@ test('compact Antigravity windows keep 5-hour primary until weekly is critical',
 
   assert.deepEqual(limitProviderCompactWindows('antigravity', aboveCritical), [aboveCritical[0]]);
   assert.deepEqual(limitProviderCompactWindows('antigravity', critical), [critical[1]]);
+
+  // Opt-in canonical periods keeps 5-hour and weekly paired regardless of critical threshold
+  assert.deepEqual(limitProviderCompactWindows('antigravity', aboveCritical, { canonicalPeriods: true }), [aboveCritical[0], aboveCritical[1]]);
+  assert.deepEqual(limitProviderCompactWindows('antigravity', critical, { canonicalPeriods: true }), [critical[0], critical[1]]);
 });
 
-test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pools', () => {
+test('compact Antigravity windows prefer 5-hour on ties by default and Gemini 5h+weekly with canonicalPeriods', () => {
   const grouped = [
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 100 },
     { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 100 },
@@ -154,6 +166,24 @@ test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pool
 
   assert.deepEqual(limitProviderCompactWindows('antigravity', grouped), [grouped[0], grouped[2]]);
   assert.equal(limitProviderCompactWindows('antigravity', legacy), legacy);
+
+  assert.deepEqual(limitProviderCompactWindows('antigravity', grouped, { canonicalPeriods: true }), [grouped[0], grouped[1]]);
+  assert.equal(limitProviderCompactWindows('antigravity', legacy, { canonicalPeriods: true }), legacy);
+});
+
+test('Antigravity exposes optional canonical 5-hour and weekly Home limits setting', () => {
+  const main = readRendererFile('../main.js');
+  const app = readRendererFile('app.js');
+  const i18n = readRendererFile('i18n.js');
+  const homeRows = functionBody(app, 'homeLimitRows', 'homeLimitWindowLabel');
+
+  assert.match(main, /antigravityCanonicalPeriods: false/);
+  assert.match(main, /antigravityCanonicalPeriods = parseBoolean\(merged\.antigravityCanonicalPeriods, false\)/);
+  assert.match(main, /antigravityCanonicalPeriods: parseBoolean\(patch\.antigravityCanonicalPeriods \?\? settings\.antigravityCanonicalPeriods, false\)/);
+  assert.match(app, /key: 'antigravityCanonicalPeriods',[\s\S]*?defaultValue: false/);
+  assert.match(homeRows, /limitProviderCompactWindows\(provider, provider\.windows, \{\s*settings: state\.settings\s*\}\)/);
+  assert.equal((i18n.match(/'settings\.limits\.antigravityCanonicalPeriods':/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.limits\.antigravityCanonicalPeriodsDesc':/g) || []).length, 5);
 });
 
 test('compact Codex windows never backfill canonical lanes with additional quotas', () => {
@@ -1520,7 +1550,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
-  assert.match(homeRows, /limitProviderCompactWindows\(provider, provider\.windows\)/);
+  assert.match(homeRows, /limitProviderCompactWindows\(provider, provider\.windows/);
   assert.match(homeLabel, /const label = String\(window\?\.label \|\| ''\)\.trim\(\);/);
   assert.match(homeLabel, /if \(label\) return label;/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);

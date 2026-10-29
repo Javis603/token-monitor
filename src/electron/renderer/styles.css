@@ -5805,6 +5805,10 @@ html.is-windows .limit-live-badge {
 .home-limit-provider-row {
   grid-template-columns: minmax(0, 1fr) repeat(2, 22px);
 }
+.home-limit-provider-row.has-subgroup,
+.home-limit-provider-row:has(.view-subgroup-toggle) {
+  grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
+}
 .status-provider-header { margin-bottom: 2px; }
 .status-provider-row {
   display: flex;

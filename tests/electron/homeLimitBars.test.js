@@ -113,3 +113,25 @@ test('Home account display count setting is translated in every locale', () => {
     assert.ok(messages['settings.home.limitAccountCount'], `${locale} should translate the Home account count setting`);
   }
 });
+
+test('Home Antigravity canonical periods setting is translated in every locale', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    assert.ok(messages['settings.home.antigravityCanonicalPeriods'], `${locale} should translate the Home Antigravity canonical periods setting`);
+    assert.ok(messages['settings.home.configureLimitProvider'], `${locale} should translate the Home configure limit provider setting`);
+  }
+});
+
+test('Home Limit provider list nests Antigravity settings inside an accordion subgroup', () => {
+  const app = read('src/electron/renderer/app.js');
+  const css = read('src/electron/renderer/styles.css');
+
+  assert.match(app, /HOME_LIMIT_PROVIDER_SUBGROUPS = \{\s*antigravity: \['homeAntigravitySettingsExpanded', 'homeAntigravitySettingsContainer'\]\s*\}/);
+  assert.match(app, /if \(id === 'antigravity'\) \{\s*row\.classList\.add\('has-subgroup'\);/);
+  assert.match(app, /togglePreferenceSubgroup\(HOME_LIMIT_PROVIDER_SUBGROUPS, '\.home-limit-provider-row', id\)/);
+  assert.match(app, /listContainer\.id = 'homeAntigravitySettingsContainer'/);
+  assert.match(app, /inner\.appendChild\(renderHomeLimitAntigravitySettings\(\)\)/);
+  assert.match(app, /function renderHomeLimitAntigravitySettings\(\)/);
+  assert.match(app, /id = 'antigravityCanonicalPeriodsHomeInput'/);
+  assert.match(css, /\.home-limit-provider-row:has\(\.view-subgroup-toggle\)\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*repeat\(3,\s*22px\)/s);
+});

@@ -303,6 +303,7 @@ test('Main Screen drag keeps expandable rows and their panels together', () => {
   assert.match(apply, /home: 'homeSettingsContainer'/);
   assert.match(apply, /status: 'serviceProvidersContainer'/);
   assert.match(apply, /limits: 'homeLimitProviderContainer'/);
+  assert.match(apply, /antigravity: 'homeAntigravitySettingsContainer'/);
   assert.match(apply, /if \(companion\) list\.appendChild\(companion\)/);
 
   const expand = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
@@ -310,6 +311,7 @@ test('Main Screen drag keeps expandable rows and their panels together', () => {
   assert.match(expand, /classList\.toggle\('hidden', !open\)/);
   assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(VIEW_PREFERENCE_SUBGROUPS\)/);
   assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(HOME_MODULE_SUBGROUPS\)/);
+  assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(HOME_LIMIT_PROVIDER_SUBGROUPS\)/);
 });
 
 test('view preferences place compact actions beside the note without duplicate headers', () => {
