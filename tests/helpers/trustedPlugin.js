@@ -16,10 +16,10 @@ function fakeFork(children, { delayedExit = false } = {}) {
     children.push(child); queueMicrotask(() => child.emit('message', { type: 'ready' })); return child;
   };
 }
-async function runtimeFixture(t, { catalogFetch = async () => { throw Error('fixture offline'); }, Notification, safeMode = false, delayedExit = false, businessAdapters = {}, surfaceContext, beforeStart = () => {}, sourceDirectory = path.resolve(__dirname, '../fixtures/trusted-plugin') } = {}) {
+async function runtimeFixture(t, { initialSettings = {}, catalogFetch = async () => { throw Error('fixture offline'); }, Notification, safeMode = false, delayedExit = false, businessAdapters = {}, surfaceContext, beforeStart = () => {}, sourceDirectory = path.resolve(__dirname, '../fixtures/trusted-plugin') } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trusted-test-'));
   const handlers = new Map(), events = new Map(), children = [], windows = [];
-  let settings = { pluginPlacementDefaults: {}, pluginsEnabled: true, pluginStates: {}, homeModuleOrder: 'plugin:trusted-fixture/panel', pluginMainPages: ['trusted-fixture/panel'], notchPluginPages: ['trusted-fixture/panel'] };
+  let settings = { pluginPlacementDefaults: {}, pluginsEnabled: true, pluginStates: {}, homeModuleOrder: 'plugin:trusted-fixture/panel', pluginMainPages: ['trusted-fixture/panel'], notchPluginPages: ['trusted-fixture/panel'], ...initialSettings };
   let confirmation = 1; const confirmations = [], dialogs = [];
   class BrowserWindow extends EventEmitter {
     constructor() {

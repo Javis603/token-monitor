@@ -6,7 +6,7 @@ const semver = require('semver');
 const { ID_RE, MAX_PACKAGE_BYTES, contentDigest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage } = require('./package');
 const { removePluginPlacements, initialPlacements, initializePlacementPatch } = require('./placementSettings');
 const { enableContentPatch, updateContentPatch } = require('./contentSelections');
-const SETTING_KEYS = ['pluginStates', 'pluginPlacementDefaults', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
+const SETTING_KEYS = ['pluginStates', 'pluginPlacementDefaults', 'pluginContentDefaults', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const MAX_JOURNAL_BYTES = 2 * 1024 * 1024;
 function boundedJson(value, limit) {
@@ -193,9 +193,9 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       const enabling = manager.list().enabled && ((operation === 'install' && options.trustInstall)
         || (operation === 'update' && options.trustUpdate && getSettings().pluginStates?.[id]?.enabled));
       const contentPatch = () => operation === 'update'
-        ? updateContentPatch(getSettings(), id, pkg.manifest.views, current?.manifest.views || [])
+        ? updateContentPatch(getSettings(), id, pkg.manifest.views)
         : enableContentPatch(getSettings(), id, pkg.manifest.views);
-      if (enabling) await options.beforeEnable?.(describePackage(pkg, { locale: getLocale() }), contentPatch());
+      const confirmedContent = enabling ? await options.beforeEnable?.(describePackage(pkg, { locale: getLocale() }), contentPatch()) : null;
       fs.rmSync(txDir, { recursive: true, force: true }); fs.mkdirSync(txDir, { mode: 0o700 });
       if (pkg) unpackPackage(pkg, stage);
       const previous = path.join(historyDir, `${id}.tmplugin`), hadPrevious = fs.existsSync(previous);
@@ -219,6 +219,9 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
         if (!options.keepPlacements) {
           Object.assign(patch, removePluginPlacements(getSettings(), id));
           patch.pluginPlacementDefaults = { ...patch.pluginPlacementDefaults }; delete patch.pluginPlacementDefaults[id];
+          if (Object.hasOwn(patch, 'pluginContentDefaults')) {
+            patch.pluginContentDefaults = { ...patch.pluginContentDefaults }; delete patch.pluginContentDefaults[id];
+          }
         }
         if (!options.keepData && fs.existsSync(path.join(dataDir, id))) fs.renameSync(path.join(dataDir, id), path.join(txDir, 'plugin-data'));
         if (!options.keepData && settingsDir && fs.existsSync(path.join(settingsDir, `${id}.json`))) fs.renameSync(path.join(settingsDir, `${id}.json`), path.join(txDir, 'author-settings.json'));
@@ -238,7 +241,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
         }
         if (patch.pluginStates[id]?.enabled && patch.pluginStates[id].trustedRevision === contentDigest(pkg)
           && (operation === 'install' || operation === 'update')) {
-          Object.assign(patch, contentPatch());
+          Object.assign(patch, confirmedContent || contentPatch());
         }
       }
       atomicJson(registryFile, next, MAX_REGISTRY_BYTES); fault('registry-written');

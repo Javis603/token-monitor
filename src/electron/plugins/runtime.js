@@ -14,7 +14,7 @@ const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const maintainerSources = require('./maintainerSources');
 const { createPluginManager } = require('./manager');
-const { enableContentPatch } = require('./contentSelections');
+const { enableContentPatch, markContentTargets } = require('./contentSelections');
 const { translate } = require('../renderer/i18n');
 const { initializePlacementPatch, placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
 const { trayLayoutPluginRefs } = require('../../shared/trayLayout');
@@ -477,14 +477,20 @@ function createPluginRuntime({
     const current = contentSelections();
     const displaced = manager.list().plugins.filter(item => item.id !== plugin.id && item.status === 'active'
       && item.views.some(view => view.mode === 'replace' && view.targets.some(target => current[target] === view.ref && next[target] && next[target] !== view.ref)));
-    if (!displaced.length) return;
+    if (!displaced.length) return patch;
     const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
       type: 'question', title: translate(getLocale(), 'plugins.content.switchTitle', { name: plugin.name }),
       message: translate(getLocale(), 'plugins.content.switchNote', { names: displaced.map(item => item.name).join(', ') }),
-      buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.content.switch')],
-      defaultId: 0, cancelId: 0
+      buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.content.switch'), translate(getLocale(), 'plugins.content.keep')],
+      defaultId: 2, cancelId: 0
     });
-    if (response.response !== 1) throw new Error('Plugin change cancelled');
+    if (response.response === 0) throw new Error('Plugin change cancelled');
+    if (response.response === 2) {
+      for (const plugin of displaced) for (const view of plugin.views) {
+        for (const target of view.targets) if (current[target] === view.ref) next[target] = view.ref;
+      }
+    }
+    return patch;
   }
 
   function registerIpc() {
@@ -504,7 +510,12 @@ function createPluginRuntime({
       const next = { ...contentSelections() };
       if (ref === null) delete next[target]; else next[target] = ref;
       if (Object.keys(next).length > 128) throw new Error('Too many content selections');
-      persistManagementSettings({ pluginContentSelections: next });
+      const patch = { pluginContentSelections: next };
+      for (const plugin of manager.list().plugins.filter(plugin => plugin.status === 'active'
+        && plugin.views.some(view => view.mode === 'replace' && view.targets.includes(target)))) {
+        patch.pluginContentDefaults = markContentTargets({ ...getSettings(), ...patch }, plugin.id, [target]);
+      }
+      persistManagementSettings(patch);
       manager.settingsChanged(); return listWithPlacements();
     });
     handle('plugins:contentSelections', event => { requireHost(event); registerSubscriber(event.sender); return { ...contentSelections() }; });
@@ -518,11 +529,11 @@ function createPluginRuntime({
       requireMain(event); id = String(id);
       const plugin = manager.list().plugins.find(item => item.id === id);
       if (!plugin?.revision) throw new Error('Plugin is unavailable');
-      if (enabled === true) await confirmContentSwitch(event, plugin);
+      const contentPatch = enabled === true ? await confirmContentSwitch(event, plugin) : {};
       const finish = enabled ? await resumeHosts(event, [id]) : await prepareDisable(event, [id]);
       if (enabled === true) {
         const patch = { ...initializePlacementPatch(getSettings(), id, placementContext(), plugin.views),
-          ...enableContentPatch(getSettings(), id, plugin.views) };
+          ...contentPatch };
         if (Object.keys(patch).length) persistManagementSettings(patch);
       }
       manager.setEnabled(id, enabled === true);

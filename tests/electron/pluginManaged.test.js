@@ -485,9 +485,10 @@ for (const keepPlacements of [false, true]) test(`compact placement transaction 
       throw new Error('compact placement interruption');
     }
   });
+  f.settings.pluginContentDefaults = { 'test-plugin': ['main.home.content'], other: ['main.model.content'] };
   const before = snapshot(f); armed = true;
   await assert.rejects(f.api.uninstall('test-plugin', { keepData: true, keepPlacements }), /compact placement interruption/);
-  for (const key of ['floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder']) assert.deepEqual(journal.settings[key], before.settings[key]);
+  for (const key of ['floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'pluginContentDefaults']) assert.deepEqual(journal.settings[key], before.settings[key]);
   assert.deepEqual(snapshot(f), before);
   const restarted = createManagedPlugins(f.args); restarted.recover();
   assert.deepEqual(snapshot(f), before);

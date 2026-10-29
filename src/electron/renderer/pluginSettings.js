@@ -1097,13 +1097,12 @@
       for (const target of replacementTargets) {
         const choices = (list.plugins || []).filter(item => item.status === 'active').flatMap(item => (item.views || [])
           .filter(view => view.mode === 'replace' && view.targets.includes(target)).map(view => ({ ...view, pluginName: item.name })));
-        if (choices.length < 2) continue;
         const row = el(document, 'label', 'plugin-version-picker plugin-content-choice', contentTargetLabel(target, t));
         const select = el(document, 'select'); select.dataset.controlKey = `content/${target}`;
         select.setAttribute('aria-label', contentTargetLabel(target, t));
         const native = el(document, 'option', '', t('plugins.content.native')); native.value = ''; select.append(native);
         for (const view of choices) {
-          const option = el(document, 'option', '', `${view.pluginName} · ${view.title}`);
+          const option = el(document, 'option', '', view.pluginName === view.title ? view.title : `${view.pluginName} · ${view.title}`);
           option.value = view.ref; select.append(option);
         }
         select.value = choices.some(view => view.ref === list.contentSelections?.[target]) ? list.contentSelections[target] : '';

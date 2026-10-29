@@ -666,6 +666,7 @@ function defaultSettings() {
     pluginsEnabled: true,
     pluginStates: {},
     pluginPlacementDefaults: {},
+    pluginContentDefaults: {},
     pluginAuthorSkin: null,
     notchPluginPages: [],
     notchPageOrder: [],
@@ -2820,6 +2821,7 @@ function readSettings() {
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
     merged.pluginPlacementDefaults = require('./plugins/placementSettings').normalizePlacementDefaults(merged.pluginPlacementDefaults);
+    merged.pluginContentDefaults = require('./plugins/contentSelections').normalizeContentDefaults(merged.pluginContentDefaults);
     merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
     merged.pluginContentSelections = pluginPlacements.normalizeContentSelections(merged.pluginContentSelections);
     merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
@@ -8092,6 +8094,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.syncContentBase;
     delete normalizedPatch.pluginStates;
     delete normalizedPatch.pluginPlacementDefaults;
+    delete normalizedPatch.pluginContentDefaults;
     delete normalizedPatch.pluginContentSelections;
     delete normalizedPatch.pluginContentOrder;
     // Account fields declared persist:'never' (managed account lists, profile
@@ -9741,7 +9744,7 @@ app.whenReady().then(() => {
         },
         persistManagementSettings: (patch) => {
           // Main-owned transaction state only; never exposed as generic renderer settings.
-          const allowed = ['pluginStates', 'pluginPlacementDefaults', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
+          const allowed = ['pluginStates', 'pluginPlacementDefaults', 'pluginContentDefaults', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
           settings = { ...settings, ...Object.fromEntries(allowed.filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]])) };
           settings.pluginStates = normalizePluginStates(settings.pluginStates);
           saveSettings({ throwOnError: true });

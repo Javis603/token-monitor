@@ -27,7 +27,7 @@ async function main() {
     const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({ document, container: box,
       t: (key, params) => TokenMonitorI18n.translate('zh-TW', key, params), api: {
         list: async () => structuredClone(data), catalog: async () => ({ entries: [], sources: [] }),
-        selectContent: async (target, ref) => { calls.push([target, ref]); data.contentSelections[target] = ref; return structuredClone(data); },
+        selectContent: async (target, ref) => { calls.push([target, ref]); if (ref === null) delete data.contentSelections[target]; else data.contentSelections[target] = ref; return structuredClone(data); },
         setEnabled: async (_id, enabled) => { data.plugins[0].enabled = enabled; data.plugins[0].status = enabled ? 'active' : 'disabled'; return structuredClone(data); }
       } });
     await panel.refresh(); box.querySelector('.plugin-manage').click();
@@ -37,7 +37,17 @@ async function main() {
       rawTarget: box.textContent.includes(target), enabled: box.querySelector('.plugin-enable').checked };
   })()`);
   fs.writeFileSync(path.join(evidence, 'content-single.png'), (await win.webContents.capturePage()).toPNG());
-  assert.deepEqual(single, { selectors: 0, redundantAction: false, rawTarget: false, enabled: true });
+  assert.deepEqual(single, { selectors: 1, redundantAction: false, rawTarget: false, enabled: true });
+  const native = await win.webContents.executeJavaScript(`(async () => {
+    const { box } = contentFixture;
+    const select = box.querySelector('.plugin-content-choice select');
+    const options = [...select.options].map(option => option.value);
+    select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 30));
+    return { options, selected: box.querySelector('.plugin-content-choice select').value, enabled: box.querySelector('.plugin-enable').checked };
+  })()`);
+  fs.writeFileSync(path.join(evidence, 'content-native.png'), (await win.webContents.capturePage()).toPNG());
+  assert.deepEqual(native, { options: ['', 'tool-details/details'], selected: '', enabled: true });
   const multiple = await win.webContents.executeJavaScript(`(async () => {
     const { data, panel, box, target, ref } = contentFixture;
     data.plugins[0].views.push({ ...data.plugins[0].views[0], ref: 'tool-details/compact', title: 'Compact details' });
@@ -50,8 +60,8 @@ async function main() {
     return { ...result, calls: contentFixture.calls, selected: box.querySelector('.plugin-content-choice select').value };
   })()`);
   fs.writeFileSync(path.join(evidence, 'content-choices.png'), (await win.webContents.capturePage()).toPNG());
-  assert.deepEqual(multiple, { label: '主 App 分頁 · 主頁', value: 'tool-details/details', options: ['', 'tool-details/details', 'tool-details/compact'], rawTarget: false,
-    calls: [['main.home.content', 'tool-details/compact']], selected: 'tool-details/compact' });
+  assert.deepEqual(multiple, { label: '主 App 分頁 · 主頁', value: '', options: ['', 'tool-details/details', 'tool-details/compact'], rawTarget: false,
+    calls: [['main.home.content', null], ['main.home.content', 'tool-details/compact']], selected: 'tool-details/compact' });
   const disabled = await win.webContents.executeJavaScript(`(async () => {
     const { box } = contentFixture;
     const toggle = box.querySelector('.plugin-enable'); toggle.checked = false; toggle.dispatchEvent(new Event('change', { bubbles: true }));
@@ -59,7 +69,8 @@ async function main() {
     return { selectors: box.querySelectorAll('.plugin-content-choice').length, enabled: box.querySelector('.plugin-enable').checked };
   })()`);
   assert.deepEqual(disabled, { selectors: 0, enabled: false });
-  console.log('PASS single replacement uses only the enable switch');
+  console.log('PASS single replacement offers native content independently of the enable switch');
+  console.log('PASS restoring native content keeps the plugin enabled');
   console.log('PASS multiple replacements use a named selector and persist changes');
   console.log('PASS disabling removes replacement controls');
   console.log('Evidence:', evidence);
