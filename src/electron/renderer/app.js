@@ -14491,7 +14491,8 @@ window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
   state.windowVisible = visible;
   handleWindowVisibilityChange();
 });
-window.tokenMonitor.onWindowPointerActivation(() => pluginMainPages?.pointerActivate());
+const windowActivationFocus = window.TokenMonitorWindowActivationFocus.create({ document, shell: els.shell, header: document.querySelector('.titlebar') });
+window.tokenMonitor.onWindowSummoned(() => windowActivationFocus.summon());
 
 window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;

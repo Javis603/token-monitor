@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="pluginViews.css" />
   </head>
   <body>
-    <main class="shell">
+    <main class="shell" tabindex="-1">
       <header class="titlebar">
         <div>
           <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" aria-label="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><div id="pluginPageHeading" class="plugin-page-heading hidden"></div><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
@@ -1827,6 +1827,7 @@
     <script src="pluginSettings.js"></script>
 
     <script src="pluginMainPages.js"></script>
+    <script src="windowActivationFocus.js"></script>
 
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>

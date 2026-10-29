@@ -84,10 +84,10 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('window:visibility', listener);
     return () => ipcRenderer.removeListener('window:visibility', listener);
   },
-  onWindowPointerActivation: (callback) => {
+  onWindowSummoned: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
-    ipcRenderer.on('window:pointerActivation', listener);
-    return () => ipcRenderer.removeListener('window:pointerActivation', listener);
+    ipcRenderer.on('window:summoned', listener);
+    return () => ipcRenderer.removeListener('window:summoned', listener);
   },
   onSettingsPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };

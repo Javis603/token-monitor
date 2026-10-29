@@ -77,6 +77,7 @@ input, textarea, [contenteditable="true"] {
   user-select: text;
   -webkit-user-select: text;
 }
+.shell:focus { outline: none; }
 .shell {
   position: relative;
   display: flex;

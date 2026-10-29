@@ -6289,15 +6289,16 @@ function handleWindowToggleShortcut() {
   else if (action === 'expandFloatingBubble') expandFloatingBubble();
   else if (action === 'hideWindow') pluginWindowActions.hide(mainWindow);
   else focusExistingWindow();
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
 }
 
 function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false, pointerActivation = false) {
   const action = trayToggleAction(settings);
   if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
   else if (action === 'focusWindow') focusExistingWindow();
-  // A paired native press/release is evidence of pointer activation. OS app
-  // switching and accessibility tray clicks must not reset keyboard focus.
-  if (pointerActivation && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:pointerActivation');
+  // Explicit summons share one focus policy. OS app switching and accessibility
+  // activation preserve their existing focus without requesting a reset.
+  if (pointerActivation && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
 }
 
 function trayMenuLocale() {
