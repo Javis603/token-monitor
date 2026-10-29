@@ -15,15 +15,14 @@ Create `ui.mjs`:
 ```js
 export function activate(ctx) {
   return {
-    async mount(container, context) {
+    mount(container, context) {
       const contextLabel = document.createElement('p');
-      const output = document.createElement('p');
-      container.append(contextLabel, output);
+      container.append(contextLabel);
       function update(next) {
         contextLabel.textContent = `My view: ${next.period || next.surface}`;
       }
       update(context);
-      return { update, dispose() { contextLabel.remove(); output.remove(); } };
+      return { update, dispose() { contextLabel.remove(); } };
     }
   };
 }
@@ -37,20 +36,24 @@ Add a CSS file to both `files` and `css` for your own design. Add `targets` and 
 
 ## Data and settings
 
-Paste this inside the async `mount` above, after `update(context)` and before its `return`, to read a captured App snapshot:
+This standalone helper demonstrates one query and returns a labelled string. It does not mount or retain data in the first UI:
 
 ```js
-try {
-  const result = await ctx.data.query({ resource: 'usage', period: 'today' });
-  output.textContent = result.availability === 'available'
-    ? result.rows.map(row => row.totalTokens ?? 'Unknown').join(', ')
-    : `Data: ${result.availability}`;
-} catch (error) {
-  output.textContent = `Could not read data: ${error.message}`;
+async function describeToday(ctx) {
+  try {
+    const result = await ctx.data.query({ resource: 'usage', period: 'today' });
+    return result.availability === 'available'
+      ? `Today snapshot: ${result.rows.map(row => row.totalTokens ?? 'Unknown').join(', ')} tokens`
+      : `Today snapshot: ${result.availability}`;
+  } catch (error) {
+    return `Today snapshot: could not read data: ${error.message}`;
+  }
 }
 ```
 
-Here `output` is the separate query-result element; `update()` only changes `contextLabel`, so host geometry updates cannot overwrite a result or error. This is a one-shot today snapshot, not a query that follows later source/period changes. This reads existing data; it does not trigger collection. The host supplies query version 1. An empty or unavailable result is not proof of zero usage or zero cost.
+Call `await describeToday(ctx)` from an async function with the plugin context. This reads existing data without triggering collection; the host supplies query version 1. It is a one-shot **today** snapshot, not a live value for the currently selected period or source. An empty or unavailable result is not proof of zero usage or zero cost.
+
+For a mounted data display, use the [complete live UI example](author-data-settings.md#live-updates-with-cleanup) instead of copying this helper into the first mount. Its subscription clears old output on source/privacy resets, refetches, and unsubscribes on disposal. A one-shot query has no reset callback: do not retain its returned data across source/privacy changes.
 
 For a complete replacement `ui.mjs` with live updates and unsubscribe cleanup, plus a copyable manifest settings schema and update example, see [Data and settings API](author-data-settings.md). That reference covers query options, result metadata, cursor recovery and save conflicts. You do not need a backend for these operations.
 
