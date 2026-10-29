@@ -8776,7 +8776,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   overflow: visible;
 }
 
-.plugin-default-placements { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; }
+.plugin-initial-setup { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; }
+.plugin-initial-setup .plugin-version-picker { flex-direction: column; align-items: stretch; gap: 4px; margin-top: 10px; }
+.plugin-initial-setup .plugin-version-picker select { width: 100%; }
 .settings-panel label.plugin-placement-choice { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .plugin-placement-choice > input[type="checkbox"] { flex: 0 0 14px; width: 14px; height: 14px; margin: 0; }
 

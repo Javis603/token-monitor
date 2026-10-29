@@ -4,9 +4,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const semver = require('semver');
 const { ID_RE, MAX_PACKAGE_BYTES, contentDigest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage } = require('./package');
-const { removePluginPlacements, initialPlacements, initializePlacementPatch } = require('./placementSettings');
-const { enableContentPatch, updateContentPatch } = require('./contentSelections');
-const SETTING_KEYS = ['pluginStates', 'pluginPlacementDefaults', 'pluginContentDefaults', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
+const { removePluginPlacements } = require('./placementSettings');
+const { initialSetupReview, initialSetupPlan } = require('./initialSetup');
+const SETTING_KEYS = ['pluginStates', 'pluginInitialSetup', 'themeColors', 'vendorColors', 'pluginAuthorSkin', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const MAX_JOURNAL_BYTES = 2 * 1024 * 1024;
 function boundedJson(value, limit) {
@@ -164,7 +164,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     if (previews.size >= 8) previews.delete(previews.keys().next().value);
     previews.set(token, { pkg, origin: structuredClone(origin), expires: now() + 10 * 60 * 1000, baseline: JSON.stringify(registry[pkg.manifest.id] || null) });
     return { ...describePackage(pkg, { locale: getLocale() }), token,
-      placementsRetained: Object.hasOwn(getSettings().pluginPlacementDefaults || {}, pkg.manifest.id),
+      initialSetup: initialSetupReview(getSettings(), describePackage(pkg, { locale: getLocale() }), { updating: Boolean(registry[pkg.manifest.id]) }),
       operation: registry[pkg.manifest.id] ? 'update' : 'install', installedVersion: registry[pkg.manifest.id]?.version || null, origin };
   }
   async function transact(id, operation, pkg, origin, options = {}) {
@@ -192,10 +192,9 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       }
       const enabling = manager.list().enabled && ((operation === 'install' && options.trustInstall)
         || (operation === 'update' && options.trustUpdate && getSettings().pluginStates?.[id]?.enabled));
-      const contentPatch = () => operation === 'update'
-        ? updateContentPatch(getSettings(), id, pkg.manifest.views)
-        : enableContentPatch(getSettings(), id, pkg.manifest.views);
-      const confirmedContent = enabling ? await options.beforeEnable?.(describePackage(pkg, { locale: getLocale() }), contentPatch()) : null;
+      const setupOptions = { activate: enabling, context: placementContext(), updating: operation === 'update' };
+      const setup = pkg && operation !== 'rollback' ? initialSetupPlan(getSettings(), pkg.manifest, options.initialSetup, setupOptions) : null;
+      const confirmed = enabling ? await options.beforeEnable?.(describePackage(pkg, { locale: getLocale() }), setup) : null;
       fs.rmSync(txDir, { recursive: true, force: true }); fs.mkdirSync(txDir, { mode: 0o700 });
       if (pkg) unpackPackage(pkg, stage);
       const previous = path.join(historyDir, `${id}.tmplugin`), hadPrevious = fs.existsSync(previous);
@@ -218,10 +217,12 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
         delete patch.pluginStates[id];
         if (!options.keepPlacements) {
           Object.assign(patch, removePluginPlacements(getSettings(), id));
-          patch.pluginPlacementDefaults = { ...patch.pluginPlacementDefaults }; delete patch.pluginPlacementDefaults[id];
-          if (Object.hasOwn(patch, 'pluginContentDefaults')) {
-            patch.pluginContentDefaults = { ...patch.pluginContentDefaults }; delete patch.pluginContentDefaults[id];
-          }
+          if (Object.hasOwn(patch, 'pluginInitialSetup')) { patch.pluginInitialSetup = { ...patch.pluginInitialSetup }; delete patch.pluginInitialSetup[id]; }
+        }
+        if (patch.pluginInitialSetup?.[id]) {
+          const previous = patch.pluginInitialSetup[id];
+          patch.pluginInitialSetup = { ...patch.pluginInitialSetup, [id]: { values: Object.fromEntries(Object.entries(previous.values).filter(([key]) => key !== 'background' && key !== 'skin')),
+            applied: previous.applied.filter(key => key !== 'background' && key !== 'skin') } };
         }
         if (!options.keepData && fs.existsSync(path.join(dataDir, id))) fs.renameSync(path.join(dataDir, id), path.join(txDir, 'plugin-data'));
         if (!options.keepData && settingsDir && fs.existsSync(path.join(settingsDir, `${id}.json`))) fs.renameSync(path.join(settingsDir, `${id}.json`), path.join(txDir, 'author-settings.json'));
@@ -232,17 +233,12 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
         if (operation === 'install') {
           const enabled = options.trustInstall === true && manager.list().enabled === true;
           patch.pluginStates[id] = { enabled, background: false, trustedRevision: enabled ? contentDigest(pkg) : null };
-          if (!Object.hasOwn(patch.pluginPlacementDefaults || {}, id)) patch.pluginPlacementDefaults = { ...patch.pluginPlacementDefaults, [id]: { applied: false, placements: initialPlacements(pkg.manifest, options.placements) } };
-          if (enabled) Object.assign(patch, initializePlacementPatch({ ...getSettings(), ...patch }, id, placementContext(), pkg.manifest.views));
         }
         // Consent applies only to the exact package held by this preview token.
         if (operation === 'update' && options.trustUpdate) {
           patch.pluginStates[id] = { ...patch.pluginStates[id], trustedRevision: contentDigest(pkg) };
         }
-        if (patch.pluginStates[id]?.enabled && patch.pluginStates[id].trustedRevision === contentDigest(pkg)
-          && (operation === 'install' || operation === 'update')) {
-          Object.assign(patch, confirmedContent || contentPatch());
-        }
+        if (setup) Object.assign(patch, initialSetupPlan({ ...getSettings(), ...patch }, pkg.manifest, confirmed || setup.values, setupOptions).patch);
       }
       atomicJson(registryFile, next, MAX_REGISTRY_BYTES); fault('registry-written');
       saveSettings(patch); fault('settings-written');
@@ -275,7 +271,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       if (!item || item.expires < now()) throw new Error('package preview expired; select the package again');
       if (item.baseline !== JSON.stringify(registry[item.pkg.manifest.id] || null)) throw new Error('installed version changed; preview again');
       assertInstallable(item.pkg, item.origin);
-      return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin, { trustUpdate: options.trustUpdate === true, trustInstall: options.trustInstall === true, placements: options.placements, beforeEnable: options.beforeEnable });
+      return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin, { trustUpdate: options.trustUpdate === true, trustInstall: options.trustInstall === true, initialSetup: options.initialSetup, beforeEnable: options.beforeEnable });
     },
     async rollback(id) {
       const old = managed(id);

@@ -441,6 +441,7 @@ const {
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const edgeDockPresentationApi = require('./renderer/edgeDock/presentation');
 const { createPluginRuntime, registerPluginScheme, normalizePluginAuthorSkin } = require('./plugins/runtime');
+const { prepareSkinSettings } = require('./plugins/skinSettings');
 const { normalizePluginStates } = require('./plugins/manager');
 const pluginPlacements = require('../shared/plugins/placements');
 // Created after 'ready' by startPluginRuntime(); null in safe paths and tests.
@@ -665,8 +666,7 @@ function defaultSettings() {
     edgeDockItems: null,
     pluginsEnabled: true,
     pluginStates: {},
-    pluginPlacementDefaults: {},
-    pluginContentDefaults: {},
+    pluginInitialSetup: {},
     pluginAuthorSkin: null,
     notchPluginPages: [],
     notchPageOrder: [],
@@ -2820,8 +2820,7 @@ function readSettings() {
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
-    merged.pluginPlacementDefaults = require('./plugins/placementSettings').normalizePlacementDefaults(merged.pluginPlacementDefaults);
-    merged.pluginContentDefaults = require('./plugins/contentSelections').normalizeContentDefaults(merged.pluginContentDefaults);
+    merged.pluginInitialSetup = require('./plugins/initialSetup').normalizeInitialSetup(merged.pluginInitialSetup);
     merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
     merged.pluginContentSelections = pluginPlacements.normalizeContentSelections(merged.pluginContentSelections);
     merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
@@ -5519,13 +5518,7 @@ function preparePluginSkinSettings(patch, current, runtime) {
   if (!skin) throw new Error('plugin skin is unavailable');
   const authorSkin = normalizePluginAuthorSkin({ ref: skin.ref, appearance: skin.appearance || {} });
   if (!authorSkin) throw new Error('invalid author skin');
-  return {
-    authorSkin,
-    patch: {
-      themeColors: { ...current.themeColors, ...skin.colors },
-      vendorColors: { ...current.vendorColors, ...skin.vendorColors }
-    }
-  };
+  return prepareSkinSettings(current, { ...skin, appearance: authorSkin.appearance });
 }
 
 function assertPluginSkinRequest(event, patch) {
@@ -8093,8 +8086,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.syncContentStatus;
     delete normalizedPatch.syncContentBase;
     delete normalizedPatch.pluginStates;
-    delete normalizedPatch.pluginPlacementDefaults;
-    delete normalizedPatch.pluginContentDefaults;
+    delete normalizedPatch.pluginInitialSetup;
     delete normalizedPatch.pluginContentSelections;
     delete normalizedPatch.pluginContentOrder;
     // Account fields declared persist:'never' (managed account lists, profile
@@ -9744,7 +9736,7 @@ app.whenReady().then(() => {
         },
         persistManagementSettings: (patch) => {
           // Main-owned transaction state only; never exposed as generic renderer settings.
-          const allowed = ['pluginStates', 'pluginPlacementDefaults', 'pluginContentDefaults', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
+          const allowed = ['pluginStates', 'pluginInitialSetup', 'themeColors', 'vendorColors', 'pluginAuthorSkin', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
           settings = { ...settings, ...Object.fromEntries(allowed.filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]])) };
           settings.pluginStates = normalizePluginStates(settings.pluginStates);
           saveSettings({ throwOnError: true });

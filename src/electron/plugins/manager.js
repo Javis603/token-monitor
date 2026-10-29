@@ -116,7 +116,7 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
     return { ...base, name: localize(m.name, getLocale()), version: m.version, description: localize(m.description, getLocale()),
       author: m.author, homepage: m.homepage, identityIcon: m.identityIcon, types: pluginTypes(m), trustedCode: true, trusted: state?.trustedRevision === plugin.revision,
       hasCode: Boolean(m.ui || m.backend), hasBackend: Boolean(m.backend), settings: m.settings, settingsIdentity: plugin.revision,
-      revision: plugin.revision, views: m.views.map(view => descriptor(plugin, view)),
+      revision: plugin.revision, defaults: m.defaults, views: m.views.map(view => descriptor(plugin, view)),
       skins: m.skins.map(skin => ({ ...skin, ref: `${plugin.id}/${skin.id}`, name: localize(skin.name, getLocale()) })),
       background: { supported: Boolean(m.backend && m.background), enabled: state?.background === true },
       runtime: m.backend ? { state: plugin.failure ? 'error' : backends.has(plugin.id) ? 'running' : 'idle', mode: selected(plugin) ? 'visible' : 'background',

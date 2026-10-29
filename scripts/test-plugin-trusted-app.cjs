@@ -247,12 +247,12 @@ app.whenReady().then(async () => {
     await pause(200);
     fs.writeFileSync(path.join(evidence,'initial-locations-consent.png'),(await capture()).toPNG());
     if (process.env.TM_EXPECT_BASELINE === '1') {
-      assert.equal(await js("!!document.querySelector('.plugin-default-placements')"),false);
+      assert.equal(await js("!!document.querySelector('.plugin-initial-setup')"),false);
     } else {
-      assert.equal(await js("document.querySelector('.plugin-default-placements input[data-surface=page]').checked"),true);
-      assert.equal(await js("document.querySelector('.plugin-default-placements input[data-surface=notch]').checked"),true);
-      assert.equal(await js("document.querySelector('.plugin-default-placements input[data-surface=edgeDock]').checked"),false);
-      await js("document.querySelector('.plugin-default-placements input[data-surface=notch]').click()");
+      assert.equal(await js("document.querySelector('[data-control-key=\"initial/placement:trusted-fixture/panel:page\"]').checked"),true);
+      assert.equal(await js("document.querySelector('[data-control-key=\"initial/placement:trusted-fixture/panel:notch\"]').checked"),true);
+      assert.equal(await js("document.querySelector('[data-control-key=\"initial/placement:trusted-fixture/panel:edgeDock\"]').checked"),false);
+      await js("document.querySelector('[data-control-key=\"initial/placement:trusted-fixture/panel:notch\"]').click()");
       await js("document.querySelector('.plugin-package-preview .plugin-allow').click()");
       await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'",'installed with choices');
       assert.deepEqual(settings.pluginMainPages,['trusted-fixture/panel']);
@@ -264,7 +264,7 @@ app.whenReady().then(async () => {
       await js("openViewFromTray('plugin:trusted-fixture/panel')");
       await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')",'default page author UI');
       fs.writeFileSync(path.join(evidence,'initial-locations-installed.png'),(await capture()).toPNG());
-      assert.equal(settings.pluginPlacementDefaults['trusted-fixture'].applied,true);
+      assert.ok(settings.pluginInitialSetup['trusted-fixture'].applied.includes('placement:trusted-fixture/panel:page'));
     }
     assertConsoleClean();console.log('PASS actual renderer initial placement consent and selected page after reload');
     await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;

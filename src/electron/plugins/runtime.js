@@ -14,9 +14,9 @@ const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const maintainerSources = require('./maintainerSources');
 const { createPluginManager } = require('./manager');
-const { enableContentPatch, markContentTargets } = require('./contentSelections');
+const { initialSetupReview, initialSetupPlan, recordSetupChoice, placementKey, contentKey } = require('./initialSetup');
 const { translate } = require('../renderer/i18n');
-const { initializePlacementPatch, placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
+const { placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
 const { trayLayoutPluginRefs } = require('../../shared/trayLayout');
 const { createElectronNetFetch } = require('../limits/fetch');
 const { createOutboundFetch, resolveProxyConfig } = require('../../shared/outboundFetch');
@@ -290,6 +290,7 @@ function createPluginRuntime({
         views: [], skins: [], errors: [] });
     }
     for (const plugin of list.plugins) {
+      plugin.initialSetup = initialSetupReview(settings, plugin);
       plugin.installation = managed.describe(plugin.id);
       if (plugin.installation) plugin.settingsIdentity = `${plugin.installation.sha256}:${plugin.installation.installedAt}`;
       for (const view of plugin.views || []) view.placements = placementsFor(settings, view.ref);
@@ -472,12 +473,13 @@ function createPluginRuntime({
     return listWithPlacements();
   }
 
-  async function confirmContentSwitch(event, plugin, patch = enableContentPatch(getSettings(), plugin.id, plugin.views)) {
-    const next = patch.pluginContentSelections || {};
+  async function confirmContentSwitch(event, plugin, plan) {
+    const next = plan.patch.pluginContentSelections || {};
     const current = contentSelections();
     const displaced = manager.list().plugins.filter(item => item.id !== plugin.id && item.status === 'active'
-      && item.views.some(view => view.mode === 'replace' && view.targets.some(target => current[target] === view.ref && next[target] && next[target] !== view.ref)));
-    if (!displaced.length) return patch;
+      && item.views.some(view => view.mode === 'replace' && view.targets.some(target => current[target] === view.ref
+        && Object.hasOwn(plan.values, contentKey(target)) && next[target] !== view.ref)));
+    if (!displaced.length) return plan.values;
     const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
       type: 'question', title: translate(getLocale(), 'plugins.content.switchTitle', { name: plugin.name }),
       message: translate(getLocale(), 'plugins.content.switchNote', { names: displaced.map(item => item.name).join(', ') }),
@@ -487,10 +489,10 @@ function createPluginRuntime({
     if (response.response === 0) throw new Error('Plugin change cancelled');
     if (response.response === 2) {
       for (const plugin of displaced) for (const view of plugin.views) {
-        for (const target of view.targets) if (current[target] === view.ref) next[target] = view.ref;
+        for (const target of view.targets) if (current[target] === view.ref && Object.hasOwn(plan.values, contentKey(target))) plan.values[contentKey(target)] = view.ref;
       }
     }
-    return patch;
+    return plan.values;
   }
 
   function registerIpc() {
@@ -511,9 +513,8 @@ function createPluginRuntime({
       if (ref === null) delete next[target]; else next[target] = ref;
       if (Object.keys(next).length > 128) throw new Error('Too many content selections');
       const patch = { pluginContentSelections: next };
-      for (const plugin of manager.list().plugins.filter(plugin => plugin.status === 'active'
-        && plugin.views.some(view => view.mode === 'replace' && view.targets.includes(target)))) {
-        patch.pluginContentDefaults = markContentTargets({ ...getSettings(), ...patch }, plugin.id, [target]);
+      for (const plugin of manager.list().plugins.filter(plugin => plugin.views?.some(view => view.mode === 'replace' && view.targets.includes(target)))) {
+        patch.pluginInitialSetup = recordSetupChoice({ ...getSettings(), ...patch }, plugin.id, contentKey(target), ref);
       }
       persistManagementSettings(patch);
       manager.settingsChanged(); return listWithPlacements();
@@ -525,15 +526,15 @@ function createPluginRuntime({
     });
     handle('plugins:getSettings', (event, id) => { requireMain(event); return settingsResult(() => manager.getAuthorSettings(id)); });
     handle('plugins:updateSettings', (event, id, input) => { requireMain(event); return settingsResult(() => manager.updateAuthorSettings(id, input)); });
-    handle('plugins:setEnabled', async (event, { id, enabled } = {}) => {
+    handle('plugins:setEnabled', async (event, { id, enabled, initialSetup } = {}) => {
       requireMain(event); id = String(id);
       const plugin = manager.list().plugins.find(item => item.id === id);
       if (!plugin?.revision) throw new Error('Plugin is unavailable');
-      const contentPatch = enabled === true ? await confirmContentSwitch(event, plugin) : {};
+      const plan = enabled === true ? initialSetupPlan(getSettings(), plugin, initialSetup, { context: placementContext() }) : null;
+      const choices = plan ? await confirmContentSwitch(event, plugin, plan) : null;
       const finish = enabled ? await resumeHosts(event, [id]) : await prepareDisable(event, [id]);
       if (enabled === true) {
-        const patch = { ...initializePlacementPatch(getSettings(), id, placementContext(), plugin.views),
-          ...contentPatch };
+        const patch = initialSetupPlan(getSettings(), plugin, choices, { context: placementContext() }).patch;
         if (Object.keys(patch).length) persistManagementSettings(patch);
       }
       manager.setEnabled(id, enabled === true);
@@ -542,6 +543,9 @@ function createPluginRuntime({
     });
     handle('plugins:setBackground', (event, { id, enabled } = {}) => {
       requireMain(event);
+      const plugin = manager.list().plugins.find(plugin => plugin.id === String(id));
+      if (!plugin?.background.supported) throw new Error('Plugin does not support background execution');
+      persistManagementSettings({ pluginInitialSetup: recordSetupChoice(getSettings(), String(id), 'background', enabled === true) });
       manager.setBackground(String(id), enabled === true);
       return listWithPlacements();
     });
@@ -581,8 +585,8 @@ function createPluginRuntime({
       return kind === 'directory' ? managed.previewDirectory(selection.filePaths[0]) : managed.previewFile(selection.filePaths[0]);
     });
     handle('plugins:install', (event, token, options) => changePackage(event, () => managed.install(token, {
-      trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true, placements: options?.placements,
-      beforeEnable: (plugin, patch) => confirmContentSwitch(event, plugin, patch)
+      trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true, initialSetup: options?.initialSetup,
+      beforeEnable: (plugin, plan) => confirmContentSwitch(event, plugin, plan)
     }), [managed.previewId(token)]));
     handle('plugins:cancelInstall', (event, token) => { requireMain(event); managed.cancel(token); });
     handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id), [id]));
@@ -601,9 +605,7 @@ function createPluginRuntime({
       const patch = placementPatch(getSettings() || {}, { ref: String(ref || ''), surface: String(surface || ''), placed: placed === true }, placementContext());
       const id = view.pluginId;
       applySettingsPatch(patch);
-      const preferences = getSettings().pluginPlacementDefaults;
-      const preference = preferences && Object.hasOwn(preferences, id) ? preferences[id] : null;
-      if (preference && !preference.applied) persistManagementSettings({ pluginPlacementDefaults: { ...getSettings().pluginPlacementDefaults, [id]: { ...preference, applied: true } } });
+      persistManagementSettings({ pluginInitialSetup: recordSetupChoice(getSettings(), id, placementKey(view.ref, surface), placed === true) });
       return listWithPlacements();
     });
     handle('plugins:skins', (event) => {

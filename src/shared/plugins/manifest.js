@@ -105,11 +105,25 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
   const skins = normalizeSkins(raw.skins, errors);
   if (!ui && !backend && !skins.length) fail('plugin must provide ui, backend or skins');
   if (raw.background !== undefined && typeof raw.background !== 'boolean') fail('background must be boolean');
+  const initial = raw.defaults ?? {};
+  if (!isObject(initial) || Object.keys(initial).some(key => !['content', 'background', 'skin'].includes(key))) fail('invalid plugin defaults');
+  const content = {};
+  const replacements = new Map();
+  for (const view of views.filter(view => view.mode === 'replace')) for (const target of view.targets) {
+    if (!replacements.has(target)) replacements.set(target, []);
+    replacements.get(target).push(view.id);
+  }
+  if (initial.content !== undefined && !isObject(initial.content)) fail('defaults.content must be an object');
+  for (const [target, ids] of replacements) content[target] = Object.hasOwn(initial.content || {}, target) ? initial.content[target] : ids[0];
+  if (Object.entries(initial.content || {}).some(([target, id]) => !replacements.has(target) || id !== null && !replacements.get(target).includes(id))) fail('invalid defaults.content selection');
+  if (initial.background !== undefined && (typeof initial.background !== 'boolean' || initial.background && (!backend || raw.background !== true))) fail('defaults.background requires background support');
+  if (initial.skin !== undefined && initial.skin !== null && !skins.some(skin => skin.id === initial.skin)) fail('invalid defaults.skin selection');
+  const defaults = Object.freeze({ content: Object.freeze(content), background: initial.background === true, skin: initial.skin ?? null });
   if (errors.length) return { ok: false, manifest: null, errors };
   return { ok: true, errors, manifest: Object.freeze({ id: raw.id, version: raw.version, apiMajor: API_MAJOR, source,
     name, description: normalizeLocalized(raw.description, 240), author: cleanText(raw.author, 80),
     homepage: typeof raw.homepage === 'string' && /^https:\/\//.test(raw.homepage) ? raw.homepage.slice(0, 300) : '',
     ui, backend, files: Object.freeze([...files]), css: Object.freeze([...css]), views: Object.freeze(views),
-    skins: Object.freeze(skins), trayMenu: Object.freeze(trayMenu), settings, identityIcon, background: raw.background === true }) };
+    skins: Object.freeze(skins), trayMenu: Object.freeze(trayMenu), settings, identityIcon, defaults, background: raw.background === true }) };
 }
 module.exports = { API_MAJOR, ID_RE, SURFACES, SKIN_COLOR_KEYS, apiMajor, filePath, normalizeManifest };
