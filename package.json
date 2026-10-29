@@ -164,7 +164,7 @@
     "@xhayper/discord-rpc": "^1.5.1",
     "chokidar": "^4.0.3",
     "dotenv": "^17.4.2",
-    "electron-updater": "6.8.11",
+    "electron-updater": "6.8.12",
     "image-size": "^2.0.4",
     "koffi": "^3.3.5",
     "markdown-it": "^15.0.3",
@@ -179,7 +179,7 @@
     "@eslint/js": "^10.0.1",
     "c8": "^12.0.0",
     "electron": "45.1.0",
-    "electron-builder": "26.18.0",
+    "electron-builder": "26.18.1",
     "eslint": "^10.13.0",
     "espree": "^11.2.0",
     "globals": "^17.13.0"

@@ -12,7 +12,7 @@ const installerInclude = fs.readFileSync(
   'utf8'
 );
 const mainProcess = fs.readFileSync(path.join(ROOT, 'src', 'electron', 'main.js'), 'utf8');
-const PINNED_BUILDER = '26.18.0';
+const PINNED_BUILDER = '26.18.1';
 
 function readBuilderFile(relativePath) {
   try {
