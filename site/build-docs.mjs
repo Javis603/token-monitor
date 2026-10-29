@@ -79,5 +79,8 @@ export async function buildReferences({ siteRoot, outputRoot, rewrite }) {
     const markdown = await readFile(new URL("../" + reference.source, siteRoot), "utf8");
     const html = referencePage(template, reference, renderReference(markdown, reference.source));
     await writeFile(new URL(`docs/${reference.page}.html`, outputRoot), rewrite(html));
+    // Keep published agent bookmarks without relocating source-relative links.
+    const moved = `# ${reference.title}\n\nThis document has moved to the [canonical Markdown](https://raw.githubusercontent.com/Javis603/token-monitor/main/${reference.source}).\n`;
+    await writeFile(new URL(`docs/${reference.page}.md`, outputRoot), moved);
   }
 }

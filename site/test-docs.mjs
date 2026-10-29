@@ -39,8 +39,18 @@ test("built references contain current canonical content and source-context Mark
   }
 });
 
+test("published Markdown bookmarks remain small canonical-source pointers", async () => {
+  for (const reference of references) {
+    const markdown = await readFile(new URL(`_site/docs/${reference.page}.md`, root), 'utf8');
+    assert.ok(markdown.includes(`[canonical Markdown](https://raw.githubusercontent.com/Javis603/token-monitor/main/${reference.source})`));
+    assert.ok(markdown.length < 512, reference.page);
+    assert.equal([...markdown.matchAll(/\]\(([^)]+)\)/g)].length, 1);
+  }
+});
+
 test("canonical reference edits trigger Pages and each reference has a navigation entry", async () => {
   const workflow = await readFile(new URL('.github/workflows/pages.yml', root), 'utf8');
+  assert.match(workflow, /concurrency:\n  group: pages-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false/);
   for (const event of ['push', 'pull_request']) {
     const section = workflow.split(`  ${event}:`)[1].split(/\n  [a-z_]+:/)[0];
     assert.ok(section.includes("'docs/plugins/author-quickstart.md'"), `${event}: quickstart parity trigger missing`);
