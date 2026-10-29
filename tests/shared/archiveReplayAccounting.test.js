@@ -77,6 +77,29 @@ test('client replay replaces matched historical sessions with lower native obser
     assert.equal(result[name].clientUnclassifiedTokens.claude || 0, 0);
   }
 });
+test('zero-valued archived identity never overwrites a newer native session while unmatched usage remains', () => {
+  const source = record(sample({ input: 0, cacheRead: 0, cacheWrite: 0, output: 0, cost: 0 }),
+    sample({ sessionId: 'b', input: 50, cacheRead: 0, cacheWrite: 0, output: 0, cost: 0 }));
+  const native = record(sample({ input: 10, cacheRead: 0, cacheWrite: 0, output: 10, cost: 0 }));
+  // Scanner extraction omits zero-only rows; persisted normalized archives can
+  // still contain this identity alongside another session with usage.
+  for (const name of periods) {
+    source[name].sessions['claude:a'] = normalizePeriod({ sessions: {
+      'claude:a': { client: 'claude', sessionId: 'a', totalTokens: 0, costUsd: 0 }
+    } }).sessions['claude:a'];
+  }
+  const result = project('client', source, native);
+  for (const name of periods) {
+    const p = result[name];
+    assert.equal(p.totalTokens, 70);
+    assert.equal(p.costUsd, 0);
+    assert.equal(p.sessions['claude:a'].totalTokens, 20);
+    assert.equal(p.sessions['claude:a'].inputTokens, 10);
+    assert.equal(p.sessions['claude:a'].outputTokens, 10);
+    assert.equal(p.sessions['claude:b'].totalTokens, 50);
+    assert.equal(Object.values(p.sessions).reduce((sum, session) => sum + session.totalTokens, 0), p.totalTokens);
+  }
+});
 test('equal aggregate totals with disjoint session identities are not deduplicated', () => {
   const source = record(sample({ sessionId: 'old' })), native = record(sample({ sessionId: 'different' }));
   const p = project('client', source, native).allTime;

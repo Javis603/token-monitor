@@ -451,9 +451,11 @@ function netOutLiveUsage(usage, livePeriod, splitDef) {
   const modelCosts = { ...(usage?.modelCosts || {}) };
   let removedTokens = 0;
   let removedCost = 0;
+  let matchedSession = false;
   for (const [key, session] of archivedSessions) {
     const sessionId = sessionIdFromKey(key, session);
     if (sessionId && liveSessionIds.has(sessionId)) {
+      matchedSession = true;
       removedTokens += Math.max(0, Math.round(numberValue(session?.totalTokens)));
       removedCost += numberValue(session?.costUsd);
       // Removing the session but not its model rows would leave the breakdown
@@ -473,7 +475,7 @@ function netOutLiveUsage(usage, livePeriod, splitDef) {
     }
     sessions[key] = session;
   }
-  if (removedTokens === 0 && removedCost === 0) return usage;
+  if (!matchedSession) return usage;
   return {
     ...usage,
     totalTokens: Math.max(0, Math.round(numberValue(usage?.totalTokens)) - removedTokens),
