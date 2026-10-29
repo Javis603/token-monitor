@@ -8,7 +8,7 @@
   if (root) root.TokenMonitorPluginUi = api;
 })(typeof window !== 'undefined' ? window : null, function createApi() {
   function createHost({ document, window, bridge, services = {}, importModule = url => import(url), onError = () => {}, onLoaded = () => {} }) {
-    const owners = new WeakMap();
+    const owners = new WeakMap(), drains = new WeakMap(), requests = new WeakMap();
     const modules = new Map(), mounts = new Map(), blocked = new Set(), jobs = new Map(), failures = new Map();
     let disposed = false;
     function report(error, record) {
@@ -133,23 +133,36 @@
       })();
       return pending;
     }
-    function unmount(container) {
+    function retire(container) {
       const record = mounts.get(container);
-      if (!record) return;
+      if (!record) return drains.get(container);
       mounts.delete(container); record.observer?.disconnect();
-      record.headerActions?.remove();
-      record.context.onMountStatus?.(false);
-      if (record.instance) cleanup(record.descriptor.pluginId, async () => {
+      const prior = drains.get(container);
+      const pending = cleanup(record.descriptor.pluginId, async () => {
         try {
+          if (prior) await prior;
+          // A superseded initial mount may still write before returning its
+          // instance. It must settle before disposal and container handover.
+          await record.initializing;
           if (record.updates?.size) await Promise.all([...record.updates]);
-          await record.instance.dispose?.();
+          await record.instance?.dispose?.();
         } finally {
-          // A settled redraw may have repopulated this now-unmounted container.
-          // Never clear a newer mount that has since taken ownership.
           if (owners.get(container) === record) container.replaceChildren();
+          record.headerActions?.remove();
         }
       });
+      // Register before notifying author callbacks, which may request another
+      // mount synchronously. Replacement is serialized per container only.
+      drains.set(container, pending);
+      void pending.then(() => { if (drains.get(container) === pending) drains.delete(container); });
+      record.headerActions?.remove();
       container.replaceChildren();
+      record.context.onMountStatus?.(false);
+      return pending;
+    }
+    function unmount(container) {
+      requests.delete(container);
+      return retire(container);
     }
     function syncHeaderActions(record, parent) {
       if (!parent) { record.headerActions?.remove(); record.headerActions = undefined; return; }
@@ -170,21 +183,28 @@
         if (mounts.get(container) === previous && previous.instance && !previous.failed) previous.context.onMountStatus?.(true);
         return;
       }
-      unmount(container);
+      const request = {};
+      requests.set(container, request);
+      const prior = retire(container);
+      if (requests.get(container) !== request) return;
       const record = { container, descriptor, context: value };
-      syncHeaderActions(record, value.headerActions);
-      mounts.set(container, record); owners.set(container, record);
+      let initialized;
+      record.initializing = new Promise(resolve => { initialized = resolve; });
+      mounts.set(container, record);
       try {
+        if (prior) await prior;
+        if (disposed || blocked.has(descriptor.pluginId) || mounts.get(container) !== record) return;
+        owners.set(container, record);
+        syncHeaderActions(record, record.context.headerActions);
         const loaded = await load(descriptor);
         if (disposed || blocked.has(descriptor.pluginId) || mounts.get(container) !== record) return;
         if (typeof loaded.instance.mount !== 'function') throw new Error('This plugin has no content mount');
         const initialContext = record.context;
         record.instance = (await loaded.instance.mount(container, context(record))) || {};
-        if (disposed || mounts.get(container) !== record) { await cleanup(descriptor.pluginId, () => record.instance?.dispose?.()); return; }
+        if (disposed || mounts.get(container) !== record) return;
         if (blocked.has(descriptor.pluginId)) return;
         if (record.context !== initialContext) await update(record);
         if (disposed || blocked.has(descriptor.pluginId) || mounts.get(container) !== record || record.failed) return;
-        record.context.onMountStatus?.(true);
         if (window.ResizeObserver) {
           record.observer = new window.ResizeObserver(entries => {
             const bounds = entries[0]?.contentRect;
@@ -194,11 +214,10 @@
           });
           record.observer.observe(container);
         }
+        record.context.onMountStatus?.(true);
       } catch (error) { report(error, record); }
       finally {
-        // A pending mount can append after unmount, even before rejecting.
-        // Its cleanup must not clear a newer mount in the same container.
-        if (mounts.get(container) !== record && owners.get(container) === record) container.replaceChildren();
+        initialized();
       }
     }
     function mount(container, descriptor, value) {

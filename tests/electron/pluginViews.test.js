@@ -310,7 +310,7 @@ test('unmounted async redraw is cleared after release, including a connected pag
   assert.equal(node.isConnected, true); assert.equal(disposals, 1); assert.equal(node.children.length, 0);
   await host.dispose();
 });
-test('old asynchronous disposal never clears a newer mount in the same container', async () => {
+test('old asynchronous disposal settles before a newer mount owns the same container', async () => {
   const document = dom(), node = document.createElement('div'); document.body.append(node);
   let finish;
   const host = createHost({ document, window: {}, bridge: {}, importModule: async url => ({ mount(container) {
@@ -318,8 +318,10 @@ test('old asynchronous disposal never clears a newer mount in the same container
     return url.includes('/one/') ? { dispose: () => new Promise(resolve => { finish = resolve; }) } : {};
   } }) });
   await host.mount(node, descriptor); host.unmount(node);
-  await host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
-  const replacement = node.children[0]; finish(); await new Promise(setImmediate);
+  const next = host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
+  await new Promise(setImmediate); assert.equal(node.children.length, 0);
+  finish(); await next;
+  const replacement = node.children[0]; await new Promise(setImmediate);
   assert.equal(node.children[0], replacement); assert.equal(node.children.length, 1); await host.dispose();
 });
 test('host announces plugin ownership before import and again after release/resume', async () => {
@@ -357,7 +359,7 @@ for (const outcome of ['resolve', 'reject', 'dispose-reject']) test(`removed pen
   assert.equal((await lifecycle({ action: 'inspect', ids: ['fixture'] })).loaded, false);
   await host.dispose();
 });
-for (const rejected of [false, true]) test(`stale pending mount ${rejected ? 'rejection' : 'disposal'} preserves newer owner`, async () => {
+for (const rejected of [false, true]) test(`stale pending mount ${rejected ? 'rejection' : 'disposal'} drains before newer owner`, async () => {
   const document = dom(), node = document.createElement('div'); document.body.append(node);
   let finish, entered;
   const started = new Promise(resolve => { entered = resolve; });
@@ -370,9 +372,11 @@ for (const rejected of [false, true]) test(`stale pending mount ${rejected ? 're
     container.append(document.createElement('input')); return {};
   } }) });
   const old = host.mount(node, descriptor); await started; host.unmount(node);
-  await host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
+  const next = host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
+  await new Promise(setImmediate); assert.equal(node.children.length, 0);
+  finish(); await Promise.all([old, next]);
   const replacement = node.children[0]; replacement.value = 'new draft';
-  finish(); await old;
+  await new Promise(setImmediate);
   assert.equal(node.children.length, 1); assert.equal(node.children[0], replacement); assert.equal(replacement.value, 'new draft');
   await host.dispose();
 });
@@ -440,8 +444,9 @@ test('header slots isolate late mounts and release actions on update failure', a
   const pending = host.mount(node, descriptor, { headerActions: actions }); await new Promise(setImmediate);
   host.unmount(node); assert.equal(actions.children.length, 0);
   const next = { ...descriptor, ref: 'fixture/next' };
-  await host.mount(node, next, { headerActions: actions }); const owned = actions.children[0];
-  finish(); await pending;
+  const replacement = host.mount(node, next, { headerActions: actions });
+  await new Promise(setImmediate); assert.equal(actions.children.length, 0);
+  finish(); await Promise.all([pending, replacement]); const owned = actions.children[0];
   assert.equal(actions.children.length, 1); assert.equal(actions.children[0], owned);
   await host.mount(node, next, {}); assert.equal(actions.children.length, 0);
   await host.dispose();
