@@ -336,18 +336,21 @@
     return rows;
   }
 
-  function summaryForDaily(rows) {
+  // `rows` is the presented series: it is zero filled and capped for the
+  // display. `fullRows` holds every stored day of the range, so the totals
+  // cover the whole range while the streak still walks the filled tail.
+  function summaryForDaily(rows, fullRows = rows) {
     const daily = Array.isArray(rows) ? rows : [];
-    const active = daily.filter((row) => finiteNumber(row?.tokens) > 0);
+    const matched = Array.isArray(fullRows) ? fullRows : daily;
     let currentStreak = 0;
     for (let index = daily.length - 1; index >= 0 && finiteNumber(daily[index]?.tokens) > 0; index -= 1) {
       currentStreak += 1;
     }
-    const peakDayTokens = Math.max(0, ...daily.map((row) => finiteNumber(row?.tokens)));
+    const peakDayTokens = Math.max(0, ...matched.map((row) => finiteNumber(row?.tokens)));
     return {
-      activeDays: active.length,
+      activeDays: matched.filter((row) => finiteNumber(row?.tokens) > 0).length,
       currentStreak,
-      activeTimeMs: daily.reduce((sum, row) => sum + finiteNumber(row?.activeTimeMs), 0),
+      activeTimeMs: matched.reduce((sum, row) => sum + finiteNumber(row?.activeTimeMs), 0),
       peakDayTokens
     };
   }
@@ -626,7 +629,7 @@
       reason: '',
       range,
       daily,
-      summary: summaryForDaily(daily),
+      summary: summaryForDaily(daily, fullDaily),
       period: derivePeriod(fullDaily, range, options),
       devices: snapshots.map((snapshot) => ({
         ...snapshot,
@@ -734,14 +737,15 @@
     const range = rangeForSelection(selection, options);
     if (!range) return { status: 'unavailable', selection, reason: 'historyUnavailable', period: null, range: null };
     const daily = dailyForRange(options.daily, range, options);
+    const fullDaily = matchedDailyForRange(options.daily, range, options);
     return {
       status: 'ready',
       selection,
       reason: '',
       range,
       daily,
-      fullDaily: matchedDailyForRange(options.daily, range, options),
-      summary: summaryForDaily(daily),
+      fullDaily,
+      summary: summaryForDaily(daily, fullDaily),
       period: derivePeriod(options.daily, range, options)
     };
   }

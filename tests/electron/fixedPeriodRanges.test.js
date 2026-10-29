@@ -856,12 +856,14 @@ test('dailyForRange terminates at 9999-12-31 and caps extreme multi-millennium s
 test('a custom range longer than the presentation cap still totals every stored day', () => {
   // 2016-01-01 → 2026-10-10 spans more than the 3660-day presentation cap, so
   // the oldest day falls outside the shown series but still belongs to the range.
+  const oldest = { ...day('2016-01-05', 200, 'codex', 'gpt'), activeTimeMs: 60000 };
+  const newest = { ...day('2026-10-10', 100, 'claude', 'opus'), activeTimeMs: 30000 };
   const snapshot = ranges.fixedPeriodSnapshot('custom', {
     historyAvailable: true,
     historyEnabled: true,
     todayKey: '2026-10-10',
     customRange: { start: '2016-01-01', end: '2026-10-10' },
-    daily: [day('2016-01-05', 100, 'codex', 'gpt'), day('2026-10-10', 200, 'claude', 'opus')]
+    daily: [oldest, newest]
   });
 
   assert.equal(snapshot.status, 'ready');
@@ -871,8 +873,13 @@ test('a custom range longer than the presentation cap still totals every stored 
   assert.equal(snapshot.daily.some((row) => row.date === '2016-01-05'), false);
   assert.equal(snapshot.period.totalTokens, 300);
   assert.equal(snapshot.period.costUsd, 3);
-  assert.deepEqual(snapshot.period.clients, { codex: 100, claude: 200 });
-  assert.deepEqual(snapshot.period.models, { gpt: 100, opus: 200 });
+  assert.deepEqual(snapshot.period.clients, { codex: 200, claude: 100 });
+  assert.deepEqual(snapshot.period.models, { gpt: 200, opus: 100 });
+  // The summary counts the whole range, not just the days the series shows.
+  assert.equal(snapshot.summary.activeDays, 2);
+  assert.equal(snapshot.summary.activeTimeMs, 90000);
+  assert.equal(snapshot.summary.peakDayTokens, 200);
+  assert.equal(snapshot.summary.currentStreak, 1, 'the streak still walks the filled tail');
 });
 
 test('device aggregation totals every stored day of a long custom range', () => {
@@ -880,7 +887,10 @@ test('device aggregation totals every stored day of a long custom range', () => 
     deviceId: 'mac',
     date: '2026-10-10',
     endsAt: '2026-10-11T00:00:00.000Z',
-    history: [day('2016-01-05', 100, 'codex', 'gpt'), day('2026-10-10', 200, 'claude', 'opus')]
+    history: [
+      { ...day('2016-01-05', 200, 'codex', 'gpt'), activeTimeMs: 60000 },
+      { ...day('2026-10-10', 100, 'claude', 'opus'), activeTimeMs: 30000 }
+    ]
   });
 
   const result = ranges.fixedPeriodSnapshotFromDevices('custom', [source], {
@@ -897,6 +907,9 @@ test('device aggregation totals every stored day of a long custom range', () => 
   assert.equal(result.daily.length, 3660, 'the shown series stays capped');
   assert.equal(result.period.totalTokens, 300);
   assert.equal(result.period.costUsd, 3);
-  assert.deepEqual(result.period.clients, { codex: 100, claude: 200 });
+  assert.deepEqual(result.period.clients, { codex: 200, claude: 100 });
+  assert.equal(result.summary.activeDays, 2);
+  assert.equal(result.summary.activeTimeMs, 90000);
+  assert.equal(result.summary.peakDayTokens, 200);
   assert.equal(result.devices[0].period.totalTokens, 300);
 });
