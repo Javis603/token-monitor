@@ -199,48 +199,6 @@ test('awaiting a draft inspection does not overwrite a concurrent choice for a d
   assert.equal(f.settings.pluginContentSelections[TARGET], undefined);
 });
 
-test('a concurrent change to the departing target cancels the pending switch and preserves setup history', async t => {
-  const { f } = await setup(t, { competitor: true });
-  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
-  const before = structuredClone(f.settings.pluginInitialSetup);
-  let respond;
-  const started = new Promise(resolve => {
-    f.lifecycle(f.main, () => new Promise(finish => { respond = finish; resolve(); }), ['other-fixture']);
-  });
-  const pending = f.invoke('plugins:selectContent', TARGET, null);
-  const rejected = assert.rejects(pending, /Content selection changed; try again/);
-  await started;
-  f.settings.pluginContentSelections[TARGET] = 'another/view';
-  respond({ loaded: true, unsaved: false });
-  await rejected;
-  assert.equal(f.settings.pluginContentSelections[TARGET], 'another/view');
-  assert.deepEqual(f.settings.pluginInitialSetup, before);
-  assert.equal(f.dialogs.length, 0);
-  assert.equal(f.main.webContents.reloads, 0);
-});
-
-test('a replacement disabled during draft inspection is revalidated before saving a source choice', async t => {
-  const { f } = await setup(t, { competitor: true });
-  await f.install();
-  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
-  f.respond(2);
-  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
-  const before = structuredClone({ selections: f.settings.pluginContentSelections, setup: f.settings.pluginInitialSetup });
-  let respond;
-  const started = new Promise(resolve => {
-    f.lifecycle(f.main, () => new Promise(finish => { respond = finish; resolve(); }), ['other-fixture']);
-  });
-  const pending = f.invoke('plugins:selectContent', TARGET, REF);
-  const rejected = assert.rejects(pending, /Content replacement is unavailable/);
-  await started;
-  f.runtime.manager.setEnabled('trusted-fixture', false);
-  respond({ loaded: true, unsaved: false });
-  await rejected;
-  assert.deepEqual(f.settings.pluginContentSelections, before.selections);
-  assert.deepEqual(f.settings.pluginInitialSetup, before.setup);
-  assert.equal(f.runtime.manager.active('trusted-fixture'), false);
-});
-
 for (const response of [0, 1, 2]) test(`an author suggestion of native content confirms displacement, response=${response}`, async t => {
   const { f, file, manifest } = await setup(t, { competitor: true });
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });

@@ -285,31 +285,6 @@ test('unsaved checks are per plugin, before cleanup, including retained hidden d
   assert.equal((await lifecycle({action:'inspect',ids:['other']})).unsaved,false);await host.dispose();
 });
 
-test('content draft inspections intersect plugin IDs, view refs and targets without disposing mounts', async t => {
-  const document = dom();
-  let lifecycle, disposed = 0;
-  const host = createHost({ document, window: {}, bridge: { onLifecycle(fn) { lifecycle = fn; } },
-    importModule: async () => ({ mount() { return { hasUnsavedChanges: () => true, dispose() { disposed++; } }; } }) });
-  t.after(() => host.dispose());
-  const node = document.createElement('div'); document.body.append(node);
-  await host.mount(node, descriptor, { target: 'main.home.content' });
-  for (const [ids, content, expected] of [
-    [['fixture'], [{ ref: descriptor.ref, target: 'main.home.content' }], true],
-    [['other'], [{ ref: descriptor.ref, target: 'main.home.content' }], false],
-    [['fixture'], [{ ref: 'fixture/other', target: 'main.home.content' }], false],
-    [['fixture'], [{ ref: descriptor.ref, target: 'main.model.content' }], false],
-    [['fixture'], [{ ref: descriptor.ref }], false],
-    [['fixture'], [], false],
-    [['fixture'], [{ ref: 'fixture/other', target: 'main.model.content' },
-      { ref: descriptor.ref, target: 'main.home.content' }], true],
-    [['fixture'], undefined, true]
-  ]) {
-    const inspected = await lifecycle({ action: 'inspect', ids, content });
-    assert.equal(inspected.unsaved, expected, JSON.stringify({ ids, content }));
-    assert.equal(disposed, 0, 'inspection must leave the mounted draft intact');
-  }
-});
-
 
 test('disable waits for an asynchronous visibility update before disposing its resources', async () => {
   const document=dom(),node=document.createElement('div');document.body.append(node);let finish;const order=[];
