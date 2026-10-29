@@ -78,6 +78,9 @@
   function accountWindows(account) {
     const providerId = String(account?.providerId || '').trim().toLowerCase();
     const windows = Array.isArray(account?.windows) ? [...account.windows] : [];
+    if (account?.windows?.canonicalPeriods) {
+      Object.defineProperty(windows, 'canonicalPeriods', { value: true, configurable: true, writable: true });
+    }
     if (providerId === 'mimo' && account?.balance?.planStatus === 'expired') {
       const withoutStalePlan = windows.filter((window) => !isPlanWindow(window));
       // Keep the plan ahead of the balance, matching the live-plan ordering.
@@ -151,6 +154,9 @@
           .sort((a, b) => compactWindowRank(providerId, a) - compactWindowRank(providerId, b) || a.index - b.index);
         const compactWindows = compactAccountWindows(providerId, windows)
           .map(({ index: _index, ...window }) => window);
+        if (windows?.canonicalPeriods || account?.windows?.canonicalPeriods) {
+          Object.defineProperty(compactWindows, 'canonicalPeriods', { value: true, configurable: true, writable: true });
+        }
         if (compactWindows.length === 0) return null;
         return {
           key: account.key || String(index),
