@@ -6,7 +6,10 @@ import { Marked, Renderer } from "marked";
 export const references = [
   { source: "docs/plugins/README.md", page: "plugin-reference", title: "Plugin API reference" },
   { source: "docs/plugins/author-ui-options.md", page: "plugin-ui-reference", title: "UI integration reference" },
-  { source: "docs/plugins/distribution-design.md", page: "plugin-distribution-reference", title: "Package and catalog reference" }
+  { source: "docs/plugins/distribution-design.md", page: "plugin-distribution-reference", title: "Package and catalog reference" },
+  { source: "docs/plugins/author-data-settings.md", page: "plugin-data-reference", title: "Data and settings reference" },
+  { source: "docs/plugins/publishing.md", page: "plugin-publishing-reference", title: "Publishing guide" },
+  { source: "docs/plugins/validation.md", page: "plugin-testing-reference", title: "Author testing and platform acceptance" }
 ];
 const repository = "https://github.com/Javis603/token-monitor/blob/main/";
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);

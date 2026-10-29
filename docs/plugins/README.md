@@ -2,7 +2,15 @@
 
 Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review. No official plugins ship with the platform; the repository's minimal fixtures are tests, not a store.
 
-For author workflows, see the [development guide](author-quickstart.md) and [publishing guide](publishing.md), including current publishing routes and a README template. Public GitHub topic discovery is not yet open.
+Choose a guide for your next step:
+
+- [First UI and local import](author-quickstart.md)
+- [Data queries, live updates and plugin settings](author-data-settings.md)
+- [UI surfaces and composition](author-ui-options.md)
+- [Publishing and README template](publishing.md)
+- [Author self-check](validation.md#author-self-check)
+
+This is the plugin `ctx` API. [`docs/API.md`](../API.md) documents the separate Hub HTTP API, not plugin context methods.
 
 ## Execution and trust
 
@@ -45,7 +53,7 @@ Export `activate(ctx)` returning `{mount, renderTray?, dispose?}`, or export `mo
 
 `context` includes `viewId`, `ref`, `surface`, `container`, current backend `data`, and surface-specific values. Updates can include `visible`, width/height, selected period/source, native data and native content nodes. Do not start a new sampler for every mount. `ctx.onDispose(fn)` registers module cleanup; instance disposal owns mount-specific cleanup. CSS is loaded once per renderer/revision. Author CSS is free to choose its own look; host theme tokens are conveniences.
 
-Context services:
+Context services (see [data/settings parameters, results and examples](author-data-settings.md)):
 
 - `ctx.backend.call(method, args)` returns the backend handler result or rejection.
 - `ctx.backend.subscribe(callback)` observes published backend values and returns an unsubscribe function; the latest known value is replayed.
@@ -86,7 +94,7 @@ Business queries use `{resource, period, filter?, sort?, page?}`. Resources incl
 
 Subscriptions deliver `{type:'snapshot', value, sequence}` then coalesced invalidations with `refetch` and `reset`. Source/privacy changes require discarding the old traversal. Ordinary updates preserve admitted immutable cursors until expiration or eviction. Use the returned cursor with the same query; restart on `snapshotExpired`/`invalidCursor`. Query work and retained memory remain bounded to protect the App's data service; these bounds do not restrict a plugin's own Node work. Large sessions use yielding indexed pagination.
 
-`manifest.settings` uses the existing versioned field schema and host form. `settings.get` returns values, schema and revision; `settings.update` submits `{schemaVersion, expectedRevision, patch}` and reports conflicts/field errors. The native form works while code is disabled. A custom `settings` view executes trusted UI and requires enablement. This plain JSON preference store is not a dedicated secret vault. A plugin may implement its own credential handling through its trusted backend; the platform does not advertise encryption it does not provide.
+`manifest.settings` declares the [versioned field schema](author-data-settings.md#plugin-settings) and host form. `settings.get` returns values, schema and revision; `settings.update` submits `{schemaVersion, expectedRevision, patch}` and reports conflicts/field errors. The native form works while code is disabled. A custom `settings` view executes trusted UI and requires enablement. This plain JSON preference store is not a dedicated secret vault. A plugin may implement its own credential handling through its trusted backend; the platform does not advertise encryption it does not provide.
 
 ## Installation and recovery
 

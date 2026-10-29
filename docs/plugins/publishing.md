@@ -16,7 +16,7 @@ GitHub discovery is nonofficial and unreviewed. Adding a topic, serving a catalo
 
 ## Naming and identity
 
-The App requires a stable manifest `id` of 2–40 characters matching `^[a-z0-9][a-z0-9-]{1,39}$`, a valid SemVer `version`, and `tmApi: 1`. See the [manifest contract](README.md#manifest) for the complete schema.
+The App requires a stable manifest `id` of 2–40 characters matching `^[a-z0-9][a-z0-9-]{1,39}$`, a valid SemVer `version`, and `tmApi: 1`. See the [manifest contract](README.md#manifest) for the manifest contract.
 
 Choose any repository name; no Token Monitor prefix is required. The planned GitHub discovery matches the `token-monitor-plugin` topic, not the repository name. The repository name, display name and manifest id may differ.
 
@@ -40,9 +40,15 @@ Use standard Markdown for headings, lists, links, tables, code and images:
 ![Plugin overview](docs/images/overview.png)
 ```
 
-Image paths are resolved relative to the README's actual directory. Use README-relative paths such as `docs/images/overview.png` or `../images/overview.png`, according to your directory layout. Do not start an image path with `/`: GitHub treats that form as relative to the repository root, but the App does not preview it. Commit images to the same repository. App previews accept only direct HTTPS URLs on `raw.githubusercontent.com` in that repository, on the standard HTTPS port, without credentials, query strings or fragments. Other hosts (including external screenshot services and GitHub attachment links) are not fetched by the App; users can view them on the GitHub project page. Place each image where it helps explain the surrounding text; there is no separate gallery field. For third-party sources, users explicitly choose Load README images before downloads start. App-designated featured sources load eligible images automatically as they approach the detail viewport. Users can open each preview larger; all sources have the same image validation and resource limits. At most eight eligible image occurrences can be previewed per README; other images retain their alt text.
+### Image checklist
 
-Use PNG or JPEG, at most 4 MiB per image, no larger than 8192 pixels on either side or 16 million pixels in total. Each opened README also has cumulative limits of 8 MiB downloaded image data, 8 MiB preview output and 16 million decoded pixels. A failed attempt consumes its reserved budget; closing and reopening is required to start a fresh document. An image that exceeds the remaining budget is unavailable in the App. Keep screenshots focused and remove credentials or personal data before committing them. The App resizes previews to at most 1600 pixels. Images keep their intrinsic size when they fit and shrink proportionally when wider than the detail body; small images are not stretched to fill it. Raw HTML (including `<img>`, `<picture>` and `<details>`), WebP and SVG images, embedded video and animated playback are not supported. Use Markdown images rather than HTML layout or GitHub-only presentation features. Only HTTPS links and image URLs are active. An unsupported or unavailable image does not block installation; essential instructions should remain readable as text.
+- Use Markdown images at the relevant point in the README; there is no gallery field. Paths resolve relative to the selected README's actual directory, including nested/localized READMEs. Use `docs/images/overview.png` or `../images/overview.png` as appropriate, not a leading `/`.
+- Commit images to the same repository. Absolute URLs must be direct HTTPS URLs on `raw.githubusercontent.com` in that repository, on the standard port, without credentials, query strings or fragments. Redirects, external screenshot services and GitHub attachment URLs are not previewed.
+- Use PNG or JPEG. Raw HTML (including `<img>`, `<picture>` and `<details>`), WebP, SVG, embedded video and animated playback are unsupported. Only HTTPS links and image URLs are active.
+- Keep each image within 4 MiB and 8192 pixels per side. Each opened README has cumulative budgets of 8 MiB downloaded image data, 8 MiB preview output and 16 million decoded pixels. At most eight eligible image occurrences receive previews. Keep screenshots small enough to fit together; a failed image can reduce the remaining budget.
+- Previews are resized to at most 1600 pixels and shrink proportionally to fit the detail body; small images are not stretched. Remove credentials and personal data before committing screenshots.
+
+For third-party sources, users choose **Load README images** before downloads start. App-designated featured sources load eligible images as they approach the viewport. Users can enlarge previews. All sources share the same validation and limits. Blocked/excess images keep their alt text and do not prevent installation; keep essential instructions in text and link to GitHub for the full README.
 
 ### Copyable README template
 
@@ -102,7 +108,7 @@ The output must not already exist. The builder validates the package and prints 
 
 For each release:
 
-1. Bump the manifest version, complete the build, and test the exact package in a disposable profile. Check installation, explicit trust, views/settings, disablement, and update from the previous release. Use the [validation guide](validation.md) for relevant checks.
+1. Bump the manifest version, complete the build, and test the exact package in a disposable profile. Check installation, explicit trust, views/settings, disablement, and update from the previous release. Use the [author self-check](validation.md#author-self-check) for relevant checks.
 2. Publish the source revision and the tested artifact together. A Git tag `v<version>` and asset `<manifest-id>-<version>.tmplugin` are recommended naming conventions, not auto-discovery rules. The asset should be identifiable from the README's installation instructions.
 3. Include release notes covering visible changes, compatibility changes and any newly used local or network access. Never replace the bytes of an already published version; publish a new version instead.
 4. If distributing through a catalog, add that exact version, package URL and SHA-256 under the same plugin id. Keep catalog and manifest compatibility ranges aligned. Refreshing the catalog exposes the update; it does not silently install or trust it.

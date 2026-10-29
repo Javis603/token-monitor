@@ -10,10 +10,12 @@ App usage, plugin usage and plugin development are separate topics. The author g
 
 ## Canonical plugin references
 
-`build-docs.mjs` renders `docs/plugins/README.md`, `author-ui-options.md` and `distribution-design.md` directly into the API, same-page UI integration and distribution reference pages. Edit those Markdown sources, not generated `_site` files. Their English content is intentionally labelled as canonical; translated guide prose and navigation do not imply translated API specifications. Each generated page also exports the exact source Markdown for agent consumption.
+`build-docs.mjs` maps canonical documents under `docs/plugins/` to reference pages, including data/settings examples, publishing and testing. Its `references` array is the source-to-route registry. Edit those Markdown sources, not generated `_site` files. Their English content is intentionally labelled as canonical; translated guide prose and navigation do not imply translated API specifications. Each generated page also exports the exact source Markdown for agent consumption.
 
-Marked is a pinned **build-only** dev dependency; it is not bundled into the website or the App. Rendering escapes raw HTML, keeps code literal and allows only HTTP(S), fragment or repository-relative links. Relative links between the three reference documents remain on the website; implementation/example links retain their repository context. The site tests verify source/output parity, cross-reference anchors and rendering boundaries.
+Marked is a pinned **build-only** dev dependency; it is not bundled into the website or the App. Rendering escapes raw HTML, keeps code literal and allows only HTTP(S), fragment or repository-relative links. Relative links between mapped reference documents remain on the website; implementation/example links retain their repository context. The site tests verify source/output parity, cross-reference anchors and rendering boundaries.
 
-The Pages workflow watches all three canonical sources as well as `site/**`. When adding a canonical reference, update the source mapping and workflow triggers together. Build tests should fail before upload when a mapped section link no longer resolves.
+The Pages workflow watches all mapped canonical sources as well as `site/**`. When adding a canonical reference, update the source mapping and workflow triggers together. Build tests should fail before upload when a mapped section link no longer resolves.
 
 Published source links use `main`. Document actual API and App-version compatibility requirements rather than pull-request numbers or development-branch availability. Previewing this site locally does not publish it.
+
+Keep translated author chapters concise and link to the canonical data/settings examples, publishing checklist and author self-check. The testing reference separates author checks from maintainer platform acceptance; do not present the host fixture matrix as an onboarding requirement. Preserve existing guide routes and section redirects.

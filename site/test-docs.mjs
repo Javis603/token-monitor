@@ -17,6 +17,9 @@ test("canonical document links stay local while implementation links keep reposi
   assert.equal(referenceHref('README.md#ui-lifecycle', references[1].source), 'plugin-reference.html#ui-lifecycle');
   assert.equal(referenceHref('author-ui-options.md#original-content-targets', references[0].source), 'plugin-ui-reference.html#original-content-targets');
   assert.equal(referenceHref('../../src/shared/plugins/manifest.js', references[0].source), 'https://github.com/Javis603/token-monitor/blob/main/src/shared/plugins/manifest.js');
+  assert.equal(referenceHref('author-data-settings.md#plugin-settings', references[0].source), 'plugin-data-reference.html#plugin-settings');
+  assert.equal(referenceHref('publishing.md', references[0].source), 'plugin-publishing-reference.html');
+  assert.equal(referenceHref('validation.md#author-self-check', references[0].source), 'plugin-testing-reference.html#author-self-check');
   assert.equal(referenceHref('//external.test', references[0].source), null);
   assert.equal(referenceHref('data:text/html,example', references[0].source), null);
   assert.equal(referenceHref('../../../escape', references[0].source), null);
@@ -33,6 +36,16 @@ test("built references contain current canonical content and byte-identical agen
     assert.ok(html.includes('data-docs-shared lang="en"'));
     assert.ok(!html.includes('src="../islands.js'));
     assert.ok(html.includes('href="../docs.css'));
+  }
+});
+
+test("canonical reference edits trigger Pages and each reference has a navigation entry", async () => {
+  const workflow = await readFile(new URL('.github/workflows/pages.yml', root), 'utf8');
+  const output = new URL('_site/docs/', root);
+  for (const reference of references) {
+    assert.ok(workflow.includes(`'${reference.source}'`), `Pages does not watch ${reference.source}`);
+    const html = await readFile(new URL(reference.page + '.html', output), 'utf8');
+    assert.ok(html.includes(`<a href="${reference.page}.html" aria-current="page"`), reference.page);
   }
 });
 
@@ -214,6 +227,11 @@ test("legacy tutorial redirects reach real sections for every supported language
       const html = await readFile(new URL(`site/docs/${page}.html`, root), 'utf8');
       const article = html.match(new RegExp(`<article[^>]*lang="${lang}"[^>]*>([\\s\\S]*?)</article>`))[1];
       assert.ok(article.includes('plugin-distribution-reference.html#create-a-community-catalog'));
+      if (page === 'plugin-quickstart') {
+        for (const link of ['plugin-data-reference.html#live-updates-with-cleanup', 'plugin-data-reference.html#plugin-settings', 'plugin-testing-reference.html#author-self-check', 'plugin-publishing-reference.html']) {
+          assert.ok(article.includes(`href="${link}"`), `${lang}: ${link}`);
+        }
+      }
     }
   }
 });
@@ -286,6 +304,12 @@ test("six-language plugin guides use the first API and packageable manifest exam
       const encoded = article.match(/<code>({&quot;tmApi&quot;[\s\S]*?)<\/code>/)?.[1];
       assert.ok(encoded, language);
       const manifest = JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&amp;', '&'));
+      const quickstart = await readFile(new URL('docs/plugins/author-quickstart.md', root), 'utf8');
+      const canonicalUI = quickstart.match(/```js\n([\s\S]*?)```/)[1].trim();
+      const encodedUI = article.match(/<code>(export function activate[\s\S]*?)<\/code>/)?.[1];
+      assert.ok(encodedUI, `${language}: complete activate(ctx) example missing`);
+      const decodedUI = encodedUI.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
+      assert.equal(decodedUI.trim(), canonicalUI, `${language}: first UI differs from canonical quickstart`);
       assert.equal(manifest.tmApi, 1);
       const files = Object.fromEntries(manifest.files.map(name => [name, Buffer.from('// author fixture').toString('base64')]));
       const bytes = Buffer.from(JSON.stringify({ format: 2, manifest, files }));

@@ -9,6 +9,9 @@ on:
       - 'docs/plugins/README.md'
       - 'docs/plugins/author-ui-options.md'
       - 'docs/plugins/distribution-design.md'
+      - 'docs/plugins/author-data-settings.md'
+      - 'docs/plugins/publishing.md'
+      - 'docs/plugins/validation.md'
       # site/scripts/islands.jsx imports this module, so the islands bundle
       # embeds it. Without this path a change here would deploy nothing and the
       # live site would keep rolling with the old animation.
