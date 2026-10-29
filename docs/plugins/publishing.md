@@ -22,6 +22,7 @@ Choose any repository name; no Token Monitor prefix is required. The planned Git
 
 Recommended conventions:
 
+- Add the `token-monitor-plugin` topic to your public plugin repository now to prepare for future GitHub discovery. Topic discovery is currently disabled; adding the topic does not list or install your plugin in the App today.
 - Keep the manifest id stable across releases. Do not change it to include a version or release channel; the id identifies installed data, settings and placements.
 - Use a readable display name and a short repository description explaining the plugin's purpose. Keep compatibility and installation details in the README.
 - Set manifest `author` and an HTTPS `homepage` pointing to the project. When public discovery opens, its GitHub listings use the repository owner's login; this may differ from the manifest author of an installed package.
