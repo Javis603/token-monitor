@@ -200,7 +200,7 @@ brew install --cask token-monitor
 
 デスクトップのページに独自のコンテンツを追加し、プラグインのページや設定を作成できます。Notch、Edge Dock、メニューバー／システムトレイ、フローティングバブルにもコンテンツを配置できます。作者は独自の UI と、データ取得や計算用の任意のローカル Node バックエンドを開発できます。
 
-「設定 → プラグイン」で管理します。[利用ガイド](https://javis-ai.com/token-monitor/docs/plugins.html?lang=ja)、[開発ガイド](docs/plugins/author-quickstart.md)、[プラグイン API](docs/plugins/README.md)をご覧ください。プラグイン API は実験的で、今後の変更によりプラグインの更新が必要になる場合があります。信頼できるコードのみ有効にしてください。プラグインはサンドボックスで隔離されず、Node バックエンドは OS ユーザーの権限で実行されます。
+「設定 → プラグイン」で管理します。[利用ガイド](https://javis-ai.com/token-monitor/docs/plugins.html?lang=ja)、[コミュニティプラグイン](https://github.com/Javis603/token-monitor-plugins)、[開発ガイド](docs/plugins/author-quickstart.md)、[プラグイン API](docs/plugins/README.md)をご覧ください。プラグイン API は実験的で、今後の変更によりプラグインの更新が必要になる場合があります。信頼できるコードのみ有効にしてください。プラグインはサンドボックスで隔離されず、Node バックエンドは OS ユーザーの権限で実行されます。
 
 ## 対応ツールの詳細
 

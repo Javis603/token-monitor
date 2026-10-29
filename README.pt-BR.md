@@ -200,7 +200,7 @@ Abra o app para começar a acompanhar o uso local deste dispositivo, sem configu
 
 Estenda as páginas do desktop com conteúdo personalizado, adicione páginas e configurações de plugins e exiba conteúdo no Notch, Edge Dock, barra de menus/bandeja do sistema ou bolhas flutuantes. Autores podem criar interfaces próprias e backends Node locais opcionais para fontes de dados e cálculos.
 
-Gerencie os plugins em Configurações → Plugins. Consulte o [guia de uso](https://javis-ai.com/token-monitor/docs/plugins.html?lang=pt-BR), o [guia de desenvolvimento](docs/plugins/author-quickstart.md) e a [API de plugins](docs/plugins/README.md). A API é experimental e pode mudar; os plugins podem precisar de atualização. Ative apenas código em que você confia: plugins não são isolados em sandbox, e os backends Node executam com as permissões do seu usuário do sistema operacional.
+Gerencie os plugins em Configurações → Plugins. Consulte o [guia de uso](https://javis-ai.com/token-monitor/docs/plugins.html?lang=pt-BR), os [plugins da comunidade](https://github.com/Javis603/token-monitor-plugins), o [guia de desenvolvimento](docs/plugins/author-quickstart.md) e a [API de plugins](docs/plugins/README.md). A API é experimental e pode mudar; os plugins podem precisar de atualização. Ative apenas código em que você confia: plugins não são isolados em sandbox, e os backends Node executam com as permissões do seu usuário do sistema operacional.
 
 ## Ferramentas suportadas em detalhe
 

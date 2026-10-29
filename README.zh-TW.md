@@ -200,7 +200,7 @@ brew install --cask token-monitor
 
 以自訂內容擴展桌面頁面、新增外掛頁面與設定，並將內容放到瀏海、Edge Dock、選單列／系統匣或懸浮小窗。作者可設計自己的介面，並選用本機 Node 後端接駁資料來源及執行運算。
 
-在「設定 → 外掛」管理外掛。參閱[使用指南](https://javis-ai.com/token-monitor/docs/plugins.html?lang=zh-TW)、[開發指南](docs/plugins/author-quickstart.md)及[外掛 API](docs/plugins/README.md)。外掛 API 屬實驗性，日後可能變更，外掛可能需要更新。只啟用你信任的程式碼：外掛並非沙盒隔離，Node 後端以你的作業系統使用者權限執行。
+在「設定 → 外掛」管理外掛。參閱[使用指南](https://javis-ai.com/token-monitor/docs/plugins.html?lang=zh-TW)、[社群外掛](https://github.com/Javis603/token-monitor-plugins)、[開發指南](docs/plugins/author-quickstart.md)及[外掛 API](docs/plugins/README.md)。外掛 API 屬實驗性，日後可能變更，外掛可能需要更新。只啟用你信任的程式碼：外掛並非沙盒隔離，Node 後端以你的作業系統使用者權限執行。
 
 ## 支援工具詳情
 

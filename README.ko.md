@@ -200,7 +200,7 @@ brew install --cask token-monitor
 
 데스크톱 페이지에 맞춤 콘텐츠를 추가하고 플러그인 페이지와 설정을 만들 수 있습니다. Notch, Edge Dock, 메뉴 막대/시스템 트레이, 플로팅 버블에도 콘텐츠를 배치할 수 있습니다. 제작자는 자체 UI와 데이터 수집 및 계산을 위한 선택적 로컬 Node 백엔드를 개발할 수 있습니다.
 
-설정 → 플러그인에서 관리하세요. [사용 가이드](https://javis-ai.com/token-monitor/docs/plugins.html?lang=ko), [개발 가이드](docs/plugins/author-quickstart.md), [플러그인 API](docs/plugins/README.md)를 참고하세요. 플러그인 API는 실험적이며 향후 변경으로 플러그인 업데이트가 필요할 수 있습니다. 신뢰하는 코드만 활성화하세요. 플러그인은 샌드박스로 격리되지 않으며 Node 백엔드는 OS 사용자 권한으로 실행됩니다.
+설정 → 플러그인에서 관리하세요. [사용 가이드](https://javis-ai.com/token-monitor/docs/plugins.html?lang=ko), [커뮤니티 플러그인](https://github.com/Javis603/token-monitor-plugins), [개발 가이드](docs/plugins/author-quickstart.md), [플러그인 API](docs/plugins/README.md)를 참고하세요. 플러그인 API는 실험적이며 향후 변경으로 플러그인 업데이트가 필요할 수 있습니다. 신뢰하는 코드만 활성화하세요. 플러그인은 샌드박스로 격리되지 않으며 Node 백엔드는 OS 사용자 권한으로 실행됩니다.
 
 ## 지원 도구 상세
 

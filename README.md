@@ -200,7 +200,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 
 Extend desktop pages with custom content, add plugin pages and settings, and place content in Notch, Edge Dock, the menu bar/system tray or floating bubbles. Authors can build their own interfaces and optional local Node backends for data sources and computation.
 
-Manage plugins in Settings → Plugins. See the [user guide](https://javis-ai.com/token-monitor/docs/plugins.html?lang=en), [development guide](docs/plugins/author-quickstart.md) and [Plugin API](docs/plugins/README.md). The plugin API is experimental and may change; plugins may need updates. Enable only code you trust: plugins are not sandboxed, and Node backends run with your OS user’s permissions.
+Manage plugins in Settings → Plugins. See the [user guide](https://javis-ai.com/token-monitor/docs/plugins.html?lang=en), [community plugins](https://github.com/Javis603/token-monitor-plugins), [development guide](docs/plugins/author-quickstart.md) and [Plugin API](docs/plugins/README.md). The plugin API is experimental and may change; plugins may need updates. Enable only code you trust: plugins are not sandboxed, and Node backends run with your OS user’s permissions.
 
 ## Supported Tools in Detail
 
