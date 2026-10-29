@@ -14,6 +14,7 @@ const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const maintainerSources = require('./maintainerSources');
 const { createPluginManager } = require('./manager');
+const { enableContentPatch } = require('./contentSelections');
 const { translate } = require('../renderer/i18n');
 const { initializePlacementPatch, placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
 const { trayLayoutPluginRefs } = require('../../shared/trayLayout');
@@ -471,6 +472,21 @@ function createPluginRuntime({
     return listWithPlacements();
   }
 
+  async function confirmContentSwitch(event, plugin, patch = enableContentPatch(getSettings(), plugin.id, plugin.views)) {
+    const next = patch.pluginContentSelections || {};
+    const current = contentSelections();
+    const displaced = manager.list().plugins.filter(item => item.id !== plugin.id && item.status === 'active'
+      && item.views.some(view => view.mode === 'replace' && view.targets.some(target => current[target] === view.ref && next[target] && next[target] !== view.ref)));
+    if (!displaced.length) return;
+    const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
+      type: 'question', title: translate(getLocale(), 'plugins.content.switchTitle', { name: plugin.name }),
+      message: translate(getLocale(), 'plugins.content.switchNote', { names: displaced.map(item => item.name).join(', ') }),
+      buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.content.switch')],
+      defaultId: 0, cancelId: 0
+    });
+    if (response.response !== 1) throw new Error('Plugin change cancelled');
+  }
+
   function registerIpc() {
     handle('plugins:orderContent', (event, target, refs) => {
       requireMain(event);
@@ -500,9 +516,13 @@ function createPluginRuntime({
     handle('plugins:updateSettings', (event, id, input) => { requireMain(event); return settingsResult(() => manager.updateAuthorSettings(id, input)); });
     handle('plugins:setEnabled', async (event, { id, enabled } = {}) => {
       requireMain(event); id = String(id);
+      const plugin = manager.list().plugins.find(item => item.id === id);
+      if (!plugin?.revision) throw new Error('Plugin is unavailable');
+      if (enabled === true) await confirmContentSwitch(event, plugin);
       const finish = enabled ? await resumeHosts(event, [id]) : await prepareDisable(event, [id]);
       if (enabled === true) {
-        const patch = initializePlacementPatch(getSettings(), id, placementContext(), manager.list().plugins.find(plugin => plugin.id === id)?.views || []);
+        const patch = { ...initializePlacementPatch(getSettings(), id, placementContext(), plugin.views),
+          ...enableContentPatch(getSettings(), id, plugin.views) };
         if (Object.keys(patch).length) persistManagementSettings(patch);
       }
       manager.setEnabled(id, enabled === true);
@@ -549,7 +569,10 @@ function createPluginRuntime({
       if (selection.canceled || !selection.filePaths.length) return null;
       return kind === 'directory' ? managed.previewDirectory(selection.filePaths[0]) : managed.previewFile(selection.filePaths[0]);
     });
-    handle('plugins:install', (event, token, options) => changePackage(event, () => managed.install(token, { trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true, placements: options?.placements }), [managed.previewId(token)]));
+    handle('plugins:install', (event, token, options) => changePackage(event, () => managed.install(token, {
+      trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true, placements: options?.placements,
+      beforeEnable: (plugin, patch) => confirmContentSwitch(event, plugin, patch)
+    }), [managed.previewId(token)]));
     handle('plugins:cancelInstall', (event, token) => { requireMain(event); managed.cancel(token); });
     handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id), [id]));
     handle('plugins:uninstall', (event, id, options) => changePackage(event, () => managed.uninstall(id, options), [id]));

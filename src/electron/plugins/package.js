@@ -92,7 +92,7 @@ function unpackPackage(pkg, dir) {
 function describePackage(pkg, { locale = 'en' } = {}) {
   const m = pkg.manifest;
   return { id: m.id, version: m.version, name: localize(m.name, locale), description: localize(m.description, locale), author: m.author,
-    views: m.views.map(view => ({ ref: `${m.id}/${view.id}`, title: localize(view.title, locale), surfaces: view.surfaces, defaultSurfaces: view.defaultSurfaces })),
+    views: m.views.map(view => ({ ref: `${m.id}/${view.id}`, title: localize(view.title, locale), surfaces: view.surfaces, defaultSurfaces: view.defaultSurfaces, targets: view.targets, mode: view.mode })),
     types: pluginTypes(m), identityIcon: m.identityIcon, icon: m.views[0]?.icon || 'dot',
     trustedCode: true, hasCode: Boolean(m.ui || m.backend), hasBackend: Boolean(m.backend), sha256: pkg.hash };
 }

@@ -245,7 +245,8 @@ test('ownership of another plugin does not join lifecycle operations; navigation
   const folder = path.join(f.dir, 'plugins', 'other-fixture');
   fs.cpSync(path.join(f.dir, 'plugins', 'trusted-fixture'), folder, { recursive: true });
   const file = path.join(folder, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file));
-  manifest.id = 'other-fixture'; fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
+  manifest.id = 'other-fixture'; manifest.views.find(view => view.mode === 'replace').targets = ['main.status.content'];
+  fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
   f.events.get('plugins:lifecycleHost')(f.event(f.notch), true);
   f.events.get('plugins:uiLoading')?.(f.event(f.notch), 'other-fixture');

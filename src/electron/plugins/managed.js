@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const semver = require('semver');
 const { ID_RE, MAX_PACKAGE_BYTES, contentDigest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage } = require('./package');
 const { removePluginPlacements, initialPlacements, initializePlacementPatch } = require('./placementSettings');
+const { enableContentPatch, updateContentPatch } = require('./contentSelections');
 const SETTING_KEYS = ['pluginStates', 'pluginPlacementDefaults', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const MAX_JOURNAL_BYTES = 2 * 1024 * 1024;
@@ -189,6 +190,12 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
           current = null;
         }
       }
+      const enabling = manager.list().enabled && ((operation === 'install' && options.trustInstall)
+        || (operation === 'update' && options.trustUpdate && getSettings().pluginStates?.[id]?.enabled));
+      const contentPatch = () => operation === 'update'
+        ? updateContentPatch(getSettings(), id, pkg.manifest.views, current?.manifest.views || [])
+        : enableContentPatch(getSettings(), id, pkg.manifest.views);
+      if (enabling) await options.beforeEnable?.(describePackage(pkg, { locale: getLocale() }), contentPatch());
       fs.rmSync(txDir, { recursive: true, force: true }); fs.mkdirSync(txDir, { mode: 0o700 });
       if (pkg) unpackPackage(pkg, stage);
       const previous = path.join(historyDir, `${id}.tmplugin`), hadPrevious = fs.existsSync(previous);
@@ -229,6 +236,10 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
         if (operation === 'update' && options.trustUpdate) {
           patch.pluginStates[id] = { ...patch.pluginStates[id], trustedRevision: contentDigest(pkg) };
         }
+        if (patch.pluginStates[id]?.enabled && patch.pluginStates[id].trustedRevision === contentDigest(pkg)
+          && (operation === 'install' || operation === 'update')) {
+          Object.assign(patch, contentPatch());
+        }
       }
       atomicJson(registryFile, next, MAX_REGISTRY_BYTES); fault('registry-written');
       saveSettings(patch); fault('settings-written');
@@ -261,7 +272,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       if (!item || item.expires < now()) throw new Error('package preview expired; select the package again');
       if (item.baseline !== JSON.stringify(registry[item.pkg.manifest.id] || null)) throw new Error('installed version changed; preview again');
       assertInstallable(item.pkg, item.origin);
-      return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin, { trustUpdate: options.trustUpdate === true, trustInstall: options.trustInstall === true, placements: options.placements });
+      return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin, { trustUpdate: options.trustUpdate === true, trustInstall: options.trustInstall === true, placements: options.placements, beforeEnable: options.beforeEnable });
     },
     async rollback(id) {
       const old = managed(id);

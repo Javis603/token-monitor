@@ -14,6 +14,15 @@
   const isFeatured = origin => origin?.kind === 'official' || origin?.kind === 'maintainer';
   const SURFACE_ORDER = ['home', 'page', 'tray', 'edgeDock', 'notch'];
 
+  function contentTargetLabel(target, t) {
+    const [surface, page, kind] = target.split('.');
+    const location = t(`settings.plugins.surface.${surface === 'main' ? 'page' : surface}`);
+    const name = surface === 'edgeDock' && page === 'rail' ? kind : page;
+    const key = ['home', 'limits', 'model', 'tool', 'device', 'project', 'session', 'sessions', 'trends', 'status'].includes(name)
+      ? `views.${name === 'sessions' ? 'session' : name}` : `plugins.content.${name}`;
+    return `${location} · ${t(key)}${page === 'rail' ? ` · ${t('plugins.content.rail')}` : ''}`;
+  }
+
   function el(document, tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -1084,13 +1093,22 @@
           wrap.append(detailSection(t('plugins.ui.pages'), el(document, 'p', 'settings-note', t('plugins.ui.pagesNote')), actions));
         }
       }
-      for (const view of plugin.status === 'active' ? plugin.views || [] : []) {
-        for (const target of view.mode === 'replace' ? view.targets || [] : []) {
-          const selected = list.contentSelections?.[target] === view.ref;
-          const row = el(document, 'div', 'settings-actions');
-          row.append(el(document, 'span', 'settings-note', target), button(t(selected ? 'plugins.trusted.restore' : 'plugins.trusted.useContent'), () => void run(() => api.selectContent(target, selected ? null : view.ref))));
-          wrap.append(row);
+      const replacementTargets = new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode === 'replace').flatMap(view => view.targets));
+      for (const target of replacementTargets) {
+        const choices = (list.plugins || []).filter(item => item.status === 'active').flatMap(item => (item.views || [])
+          .filter(view => view.mode === 'replace' && view.targets.includes(target)).map(view => ({ ...view, pluginName: item.name })));
+        if (choices.length < 2) continue;
+        const row = el(document, 'label', 'plugin-version-picker plugin-content-choice', contentTargetLabel(target, t));
+        const select = el(document, 'select'); select.dataset.controlKey = `content/${target}`;
+        select.setAttribute('aria-label', contentTargetLabel(target, t));
+        const native = el(document, 'option', '', t('plugins.content.native')); native.value = ''; select.append(native);
+        for (const view of choices) {
+          const option = el(document, 'option', '', `${view.pluginName} · ${view.title}`);
+          option.value = view.ref; select.append(option);
         }
+        select.value = choices.some(view => view.ref === list.contentSelections?.[target]) ? list.contentSelections[target] : '';
+        select.addEventListener('change', () => void run(() => api.selectContent(target, select.value || null)));
+        row.append(select); wrap.append(row);
       }
       for (const target of new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode !== 'replace').flatMap(view => view.targets || []))) {
         const views = (list.plugins || []).flatMap(item => (item.views || []).filter(view => view.mode !== 'replace' && view.targets?.includes(target)))
