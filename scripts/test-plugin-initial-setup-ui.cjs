@@ -43,12 +43,13 @@ async function main() {
     const rows = [...box.querySelectorAll('.plugin-initial-setup label')].map(node => node.getBoundingClientRect());
     return { fields: inputs.map(node => node.dataset.controlKey), values: inputs.map(node => node.checked),
       actions: [...box.querySelectorAll('.plugin-initial-setup label')].map(node => node.textContent),
-      gaps: rows.slice(1).map((rect, index) => rect.top - rows[index].bottom), lefts: inputs.map(node => node.getBoundingClientRect().left),
+      gaps: rows.slice(1).map((rect, index) => rect.top - rows[index].bottom), heights: rows.map(rect => rect.height), lefts: inputs.map(node => node.getBoundingClientRect().left),
       dropdowns: box.querySelectorAll('.plugin-initial-setup select').length, fits: document.documentElement.scrollWidth <= innerWidth };
   })()`);
   assert.deepEqual(initial.values, [true, true, true, true]); assert.equal(initial.fits, true); assert.equal(initial.dropdowns, 0);
   assert.deepEqual(initial.actions, ['新增 Dashboard 分頁', '用 Custom Dashboard 替換主頁內容', '背景執行', '套用 Blue 外觀']);
-  assert.ok(initial.gaps.length === 3 && initial.gaps.every(gap => Math.abs(gap - 12) < 0.5), `Uneven initial-choice gaps: ${initial.gaps}`);
+  assert.ok(initial.gaps.length === 3 && initial.gaps.every(gap => Math.abs(gap - 8) < 0.5), `Uneven initial-choice gaps: ${initial.gaps}`);
+  assert.ok(initial.heights.every(height => height < 24), `Initial choices should keep the original compact row height: ${initial.heights}`);
   assert.ok(initial.lefts.every(left => Math.abs(left - initial.lefts[0]) < 0.5), 'Initial checkboxes must align');
   fs.writeFileSync(path.join(evidence, 'initial-install-defaults.png'), (await win.webContents.capturePage()).toPNG());
   const reviewBounds = await win.webContents.executeJavaScript(`(() => {
