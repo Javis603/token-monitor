@@ -28,6 +28,17 @@
       });
     }
     document.addEventListener('keydown', event => {
+      const active = document.activeElement;
+      // Activation can beat the queued frame. Do not arm an incidental header
+      // action while completing the summon; intentional keyboard targets win.
+      if (pending && document.hasFocus() && ['Enter', ' '].includes(event.key)
+        && active?.tagName === 'BUTTON' && header.contains(active) && active !== keyboardTarget) {
+        cancel(); navigating = false;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        shell.focus({ preventScroll: true });
+        return;
+      }
       cancel();
       // Global summons and OS app switching are not in-document navigation.
       navigating = !event.metaKey && !event.ctrlKey && !event.altKey

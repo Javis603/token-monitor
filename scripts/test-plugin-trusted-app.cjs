@@ -341,6 +341,21 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({type:'char',keyCode:'Return'});
       win.webContents.sendInputEvent({type:'keyUp',keyCode:'Return'});
       await pause(50);assert.equal(await js('focusClicks'),0,'summoning must not arm the privacy action');
+      // Hold only the controller's scheduled frames so trusted Chromium input
+      // deterministically reaches it before the first focus check.
+      app.focus({steal:true});win.focus();win.webContents.focus();await pause(60);
+      for (const keyCode of ['Return','Space']) {
+        await js(`globalThis.earlyKeyRaf=window.requestAnimationFrame;globalThis.earlyKeyFrames=[];
+          window.requestAnimationFrame=fn=>{earlyKeyFrames.push(fn);return 0};
+          focusButton.focus();reviewFocus.summon()`);
+        win.webContents.sendInputEvent({type:'keyDown',keyCode});
+        win.webContents.sendInputEvent({type:'char',keyCode});
+        win.webContents.sendInputEvent({type:'keyUp',keyCode});
+        await js('window.requestAnimationFrame=earlyKeyRaf;for(const fn of earlyKeyFrames.splice(0))fn(performance.now())');
+        await capture();
+        assert.equal(await js('focusClicks'),0,`${keyCode} before first frame must not activate incidental header`);
+        assert.equal(await js('document.activeElement===els.shell'),true);
+      }
       // Tab is delivered through Chromium, not dispatched as a synthetic DOM event.
       app.focus({steal:true});win.show();win.focus();win.webContents.focus();await pause(100);
       await js('focusButton.focus()');
@@ -358,6 +373,15 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({type:'char',keyCode:'Return'});
       win.webContents.sendInputEvent({type:'keyUp',keyCode:'Return'});
       await pause(50);assert.equal(await js('focusClicks'),1);
+      // Deliberately selected keyboard targets still activate during pending.
+      for (const keyCode of ['Return','Space']) {
+        await js('windowActivationFocus.summon()');
+        win.webContents.sendInputEvent({type:'keyDown',keyCode});
+        win.webContents.sendInputEvent({type:'char',keyCode});
+        win.webContents.sendInputEvent({type:'keyUp',keyCode});
+        await pause(50);
+      }
+      assert.equal(await js('focusClicks'),3,'pending summon preserves intentional Enter/Space activation');
       await js("document.querySelector('[aria-label=\"Fixture draft\"]').focus()");
       await win.webContents.insertText('Unsubmitted draft'); await reopen();
       assert.equal(await js("document.activeElement.getAttribute('aria-label')"),'Fixture draft');

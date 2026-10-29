@@ -126,3 +126,35 @@ test('a newer summon invalidates frames from the previous transaction', () => {
   assert.equal(f.document.activeElement, f.shell);
   f.focus(f.native); f.flush(); assert.equal(f.document.activeElement, f.native);
 });
+
+
+test('Enter and Space before the first frame cannot activate incidental header focus', () => {
+  for (const key of ['Enter', ' ']) for (const target of ['native', 'plugin']) {
+    const f = fixture();
+    let prevented = false, stopped = false;
+    f.focus(f[target]); f.summon();
+    f.events.keydown({ key, preventDefault() { prevented = true; }, stopImmediatePropagation() { stopped = true; } });
+    assert.equal(prevented, true);
+    assert.equal(stopped, true);
+    assert.equal(f.document.activeElement, f.shell);
+    f.flush(); assert.equal(f.document.activeElement, f.shell);
+  }
+});
+
+test('early activation keys preserve deliberate keyboard targets, editors and content controls', () => {
+  for (const key of ['Enter', ' ']) for (const target of ['native', 'plugin', 'editor', 'content']) {
+    const f = fixture();
+    const event = { key, preventDefault() { assert.fail('intentional input was prevented'); }, stopImmediatePropagation() { assert.fail('intentional input was stopped'); } };
+    if (['native', 'plugin'].includes(target)) f.events.keydown({ key: 'Tab' });
+    f.focus(f[target]); f.summon(); f.events.keydown(event); f.flush();
+    assert.equal(f.document.activeElement, f[target]);
+  }
+});
+
+test('cancelled or unfocused summons do not intercept activation keys', () => {
+  for (const end of ['cancel', 'blur']) {
+    const f = fixture(); f.focus(f.plugin); f.summon(); f[end]();
+    f.events.keydown({ key: 'Enter', preventDefault() { assert.fail('inactive summon intercepted input'); } });
+    f.flush(); assert.equal(f.document.activeElement, f.plugin);
+  }
+});
