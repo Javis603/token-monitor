@@ -30,6 +30,7 @@ const {
   readSessionUsageArchiveSnapshot
 } = require('../shared/usage/sessionUsageArchiveStore');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
+const { createLocalTokenLedgerReader, applyLocalTokenLedgers } = require('../shared/usage/localTokenLedgers');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
@@ -116,9 +117,12 @@ const limitsOptions = {
 let sessionUsageArchive;
 const cursorUsageEvents = createCursorUsageEventIndex();
 const sessionUsageArchiveStore = dryRun ? null : createSessionUsageArchiveStore({ cursorUsageEvents });
+const readTokenLedgers = createLocalTokenLedgerReader({
+  onError: (error) => console.error(`[token-ledger] ${error.message}`)
+});
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
-  let visibleSummary = summary;
+  let visibleSummary = sessionUsageArchiveEnabled ? summary : JSON.parse(JSON.stringify(summary));
   if (sessionUsageArchiveEnabled) {
     const archiveDate = sessionUsageArchiveDate(summary, now);
     if (dryRun) {
@@ -142,6 +146,7 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
     });
   }
   delete visibleSummary.sessionUsageArchiveFullScan;
+  applyLocalTokenLedgers(visibleSummary, readTokenLedgers(clients), { allTimeSince });
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 

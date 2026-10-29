@@ -270,6 +270,7 @@ const {
   sessionUsageArchiveDatabasePath
 } = require('../shared/usage/sessionUsageArchiveStore');
 const { createUsageTransform, usageTransformSettings } = require('../shared/usage/usageTransform');
+const { createLocalTokenLedgerReader } = require('../shared/usage/localTokenLedgers');
 const { createUsageHost, terminateUsageHostSubprocesses, whenUsageHostsIdle } = require('../shared/usage/usageHost');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory } = require('../shared/usage');
@@ -2956,6 +2957,9 @@ function updateArchivedClientUsage(previousClients, nextClients) {
 
 const usageTransform = createUsageTransform({
   store: sessionUsageArchiveStore,
+  readTokenLedgers: createLocalTokenLedgerReader({
+    onError: (error) => console.warn(`[token-ledger] ${error.message}`)
+  }),
   getSettings: () => settings,
   isExternalAgentActive,
   onCaptureFailure: () => diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' })
