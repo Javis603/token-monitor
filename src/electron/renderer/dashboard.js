@@ -308,7 +308,7 @@ function syncCustomRangeInputs() {
   els.dashCustomRangeBar.classList.toggle('hidden', !isCustom);
   if (isCustom) {
     const daily = state.history?.daily || [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayKey();
     const start = state.customStart || (daily[0]?.date ? String(daily[0].date).slice(0, 10) : today);
     const end = state.customEnd || (daily.length ? String(daily[daily.length - 1].date).slice(0, 10) : today);
     if (els.dashCustomStart && !els.dashCustomStart.value) els.dashCustomStart.value = start;
@@ -320,7 +320,7 @@ function syncCustomRangeInputs() {
 
 function getEffectiveRange() {
   if (state.range !== 'custom') return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayKey();
   let start = state.customStart || els.dashCustomStart?.value || today;
   let end = state.customEnd || els.dashCustomEnd?.value || today;
   if (start > end) {
