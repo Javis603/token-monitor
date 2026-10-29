@@ -4,7 +4,7 @@ ids: [codebuddy]
 read_when:
   - Changing or debugging CodeBuddy session discovery, titles or Session Detail
   - Investigating CodeBuddy usage that is missing from the widget
-  - Touching providers/codebuddy/transcript.js, providers/codebuddy/sessionMetadata.js or paths.js
+  - Touching providers/codebuddy/transcript.js, providers/codebuddy/sessionMetadata.js, providers/codebuddy/turnThroughput.js or paths.js
   - Considering CODEBUDDY_CONFIG_DIR or a custom scan path for relocated CodeBuddy data
 ---
 
@@ -91,6 +91,32 @@ Two properties of the format drive the readers:
   `<teammate-message>`, …). `providers/codebuddy/transcript.js` owns both
   predicates, because the metadata scanner and the Session Detail parser must
   agree on what a prompt is.
+
+## Live token rate
+
+tokscale reports an empty `performance` block for every `codebuddy` row: unlike
+Codex, whose transcripts carry measured timing (`item_completed.started_at_ms` /
+`completed_at_ms`, `task_complete.duration_ms`), a CodeBuddy record only states
+the instant it was written. A device whose usage is CodeBuddy-only therefore
+never produced a live-rate sample and the footer kept its `—` placeholder
+(#1256). `providers/codebuddy/turnThroughput.js` derives the day from the
+transcripts instead:
+
+- a response's window is the gap between the record that fed it (prompt, tool
+  result) and the record that reports its `rawUsage`; `reasoning`, `summary`,
+  `ai-title`, `file-history-snapshot` and `session-meta` records are written
+  inside a response and never reset the window;
+- `turn-metrics` closes a window but contributes no duration — its `durationMs`
+  spans the whole turn, tool execution included, and divides to a rate an order
+  of magnitude below the real one;
+- windows longer than 15 minutes or ending before local midnight are dropped, and
+  a transcript whose mtime predates today is skipped without being read. Files
+  are cached by mtime and size, so only the session being written is re-parsed.
+
+The collector folds these totals into `today`'s
+`timedTokens`/`timedOutputTokens`/`timedDurationMs` — never into totals, cost or
+`modelThroughput` — only when tokscale reported no duration for the client, and
+scaled so `timedOutputTokens` cannot exceed the output tokscale already counted.
 
 ## Titles and the turn boundary
 

@@ -34,6 +34,7 @@ const {
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { createWatcherHost } = require('./watcherHost');
+const { codebuddyTurnThroughput } = require('./providers/codebuddy/turnThroughput');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
@@ -543,6 +544,36 @@ function applyKnownCapabilityFilter(clientFilter, identity) {
 function runCursorAwareTokscale(clientFilter, operation, signal) {
   const includesCursor = String(clientFilter || '').split(',').includes('cursor');
   return includesCursor ? withCursorLifecycle(operation, { signal }) : operation();
+}
+
+// Tokscale reports no duration for codebuddy rows, so a device whose usage is
+// CodeBuddy-only never produces a live-rate sample and the footer keeps its
+// empty placeholder. The transcripts do carry timestamps, so the day's
+// generation windows are derived locally and folded into the today counters the
+// rate reads. Totals, cost and attribution stay exactly as tokscale reported
+// them: only the timed counters move, and only when tokscale supplied none.
+const CODEBUDDY_CLIENT_ID = 'codebuddy';
+
+function supplementCodebuddyThroughput(period, partition, options = {}) {
+  if (!period || !partition || period.capabilities?.throughput === false) return;
+  // A tokscale build that times this client owns the field.
+  if (partition.timedDurationMs > 0) return;
+  const totals = codebuddyTurnThroughput({
+    homeDir: options.homeDir || os.homedir(),
+    now: options.now
+  });
+  if (!totals) return;
+  // The derived windows can only cover output tokscale already counted for the
+  // client, so a stale or partial transcript cannot invent extra generation.
+  const budget = Math.max(0, Math.round(partition.outputTokens || 0) - Math.round(partition.timedOutputTokens || 0));
+  const output = Math.min(totals.timedOutputTokens, budget);
+  if (!(output > 0)) return;
+  const share = output / totals.timedOutputTokens;
+  const durationMs = Math.round(totals.timedDurationMs * share);
+  if (!(durationMs > 0)) return;
+  period.timedTokens += Math.round(totals.timedTokens * share);
+  period.timedOutputTokens += output;
+  period.timedDurationMs += durationMs;
 }
 
 function runTokscale({
@@ -1059,6 +1090,7 @@ async function collectUsageOnce(options) {
         ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
         : completeTodayPartitions(freshPartitions, normalizedClients);
       today = mergeTodayPartitions(todayPartitions);
+      supplementCodebuddyThroughput(today, todayPartitions[CODEBUDDY_CLIENT_ID], { homeDir: options.homeDir, now: collectedAt.getTime() });
       if (useTargetedPartitions) {
         for (const [key, session] of Object.entries(today.sessions || {})) {
           if (!targetClientSet.has(session.client) && session.projectId === localSessionMetadataDeps.catalogProjects.today[key]) {
@@ -1076,6 +1108,7 @@ async function collectUsageOnce(options) {
       const todayBundle = extractUsageBundleFromTokscale(todayJson);
       today = todayBundle.period;
       todayPartitions = todayBundle.byClient;
+      supplementCodebuddyThroughput(today, todayPartitions[CODEBUDDY_CLIENT_ID], { homeDir: options.homeDir, now: collectedAt.getTime() });
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
       emitProgress({ today });
       const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs, signal: options.signal });
