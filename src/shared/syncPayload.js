@@ -41,6 +41,10 @@ function historyForSync(history, periodWindows) {
   if (!componentStart) return history;
   return {
     ...history,
+    ...(history.cursorAccountUsage ? { cursorAccountUsage: {
+      ...history.cursorAccountUsage,
+      usage: historyForSync(history.cursorAccountUsage.usage, periodWindows)
+    } } : {}),
     daily: history.daily.map((row) => {
       const date = String(row?.date || '').slice(0, 10);
       if (date >= componentStart && date <= todayKey) return row;
@@ -58,6 +62,10 @@ function historyWithoutTokenComponents(history) {
   if (!history || typeof history !== 'object' || !Array.isArray(history.daily)) return history;
   return {
     ...history,
+    ...(history.cursorAccountUsage ? { cursorAccountUsage: {
+      ...history.cursorAccountUsage,
+      usage: historyWithoutTokenComponents(history.cursorAccountUsage.usage)
+    } } : {}),
     daily: history.daily.map((row) => {
       const stripped = stripTokenComponents(row);
       stripped.perClient = Object.fromEntries(Object.entries(row?.perClient || {})
@@ -180,6 +188,7 @@ function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
   omitModelThroughput = false,
+  omitAccountUsage = false,
   syncSessionTitles = false,
   sessionTitleSyncGeneration
 } = {}) {
@@ -245,6 +254,26 @@ function buildSyncPayload(summary, {
       if (payload[period]) delete payload[period].modelThroughput;
     }
   }
+  for (const name of ['today', 'month', 'allTime']) {
+    const period = payload[name];
+    if (!period?.cursorAccountUsage) continue;
+    const usage = { ...period.cursorAccountUsage.usage };
+    if (!projectsEnabled || (name === 'allTime' && omitAllTimeProjects)) delete usage.projects;
+    if (omitModelThroughput) delete usage.modelThroughput;
+    payload[name] = { ...period, cursorAccountUsage: { ...period.cursorAccountUsage, usage } };
+  }
+  if (omitAccountUsage) {
+    for (const name of ['today', 'month', 'allTime']) {
+      if (payload[name]?.cursorAccountUsage) {
+        payload[name] = { ...payload[name] };
+        delete payload[name].cursorAccountUsage;
+      }
+    }
+    if (payload.history?.cursorAccountUsage) {
+      payload.history = { ...payload.history };
+      delete payload.history.cursorAccountUsage;
+    }
+  }
   return payload;
 }
 
@@ -261,6 +290,11 @@ function serializeSyncPayload(summary, options = {}) {
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes) {
+    buildOptions.omitAccountUsage = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
   if (Buffer.byteLength(body, 'utf8') > maxBytes
     && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
     // Optional live attribution must never evict aggregate usage or session detail.

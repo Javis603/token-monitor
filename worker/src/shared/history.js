@@ -3,6 +3,8 @@
 
 'use strict';
 
+const { cursorUsageIdentity, fitsHistory } = require('./cursorAccountUsage');
+
 // Portable (Node-free) usage-history core. Mirrors usage.js conventions so the
 // Cloudflare Worker can import it. Pure functions only — no I/O.
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
@@ -552,11 +554,27 @@ function mergeHistories(histories, options = {}) {
 // Defensively normalize arbitrary wire JSON to the { daily, monthly, summary } shape.
 function coerceHistory(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  return {
+  const result = {
     daily: Array.isArray(src.daily) ? src.daily : [],
     monthly: Array.isArray(src.monthly) ? src.monthly : [],
     summary: src.summary && typeof src.summary === 'object' ? src.summary : {}
   };
+  const identity = cursorUsageIdentity(src.cursorAccountUsage);
+  if (identity && src.cursorAccountUsage.usage) {
+    // Re-establish the existing unknown-component semantics after wire detail
+    // reduction, using the producer's latest day rather than this Hub's zone.
+    const todayKey = result.daily.reduce((latest, row) => String(row?.date || '') > latest ? String(row.date) : latest, '') || localDayKey();
+    const whole = mergeHistories([result], { todayKey });
+    const usage = mergeHistories([src.cursorAccountUsage.usage], { todayKey });
+    if (['daily', 'monthly'].every(tier => usage[tier].every(row =>
+      Object.keys(row.perClient || {}).every(client => client === 'cursor')
+      && num(row.tokens) === num(row.perClient?.cursor?.tokens))) && fitsHistory(usage, whole)) {
+      result.daily = whole.daily;
+      result.monthly = whole.monthly;
+      result.cursorAccountUsage = { ...identity, usage };
+    }
+  }
+  return result;
 }
 
 // Trim a full History to a compact, per-client-free payload for /api/stats.

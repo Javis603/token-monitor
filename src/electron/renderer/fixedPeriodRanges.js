@@ -1,8 +1,10 @@
 (function exposeFixedPeriodRanges(root, factory) {
-  const api = factory();
+  const accounts = typeof module === 'object' && module.exports
+    ? require('../../shared/cursorAccountUsage') : root.TokenMonitorCursorAccountUsage;
+  const api = factory(accounts);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorFixedPeriodRanges = api;
-})(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi() {
+})(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi(accounts) {
   const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30']);
   const LABELS = Object.freeze({
     today: 'DAY',
@@ -509,6 +511,38 @@
     return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
   }
 
+  function accountAdjustedDaily(snapshots) {
+    if (!snapshots.some(source => source.history?.cursorAccountUsage || sourcePeriod(source, 'today')?.cursorAccountUsage)) return snapshots;
+    const rowsByDate = new Map();
+    for (const snapshot of snapshots) {
+      const today = sourcePeriod(snapshot, 'today');
+      const todayKey = snapshot.periodWindows?.today?.key;
+      const historyRows = new Map((snapshot.history?.daily || []).map(row => [row.date, row]));
+      const accountRows = new Map((snapshot.history?.cursorAccountUsage?.usage?.daily || []).map(row => [row.date, row]));
+      for (const row of snapshot.daily) {
+        const previous = historyRows.get(row.date);
+        const usesToday = row.date === todayKey && today
+          && finiteNumber(today.totalTokens) >= finiteNumber(previous?.tokens);
+        const scope = usesToday ? today.cursorAccountUsage : snapshot.history?.cursorAccountUsage;
+        const usage = usesToday && scope
+          ? rowFromLivePeriod(scope.usage, row.date)
+          : accountRows.get(row.date);
+        const entry = { deviceId: snapshot.deviceId, row, usage,
+          scope: usage && scope ? { ...scope,
+            range: `day:${row.date}:${snapshot.periodWindows?.timeZone || scope.range}` } : null };
+        if (!rowsByDate.has(row.date)) rowsByDate.set(row.date, []);
+        rowsByDate.get(row.date).push(entry);
+      }
+    }
+    const adjusted = [];
+    for (const entries of rowsByDate.values()) {
+      const duplicate = accounts.accountUsageWinners(entries, entry => entry.scope);
+      for (const entry of entries) adjusted.push(duplicate(entry)
+        ? accounts.subtractCounters(entry.row, entry.usage) : entry.row);
+    }
+    return [{ daily: adjusted }];
+  }
+
   function fixedPeriodSnapshotFromDevices(selection, sources, options = {}) {
     if (!isDerived(selection)) return { status: 'native', period: null, range: null, devices: [] };
     if (options.historyEnabled === false) {
@@ -554,7 +588,7 @@
       snapshots.push({ ...source, ...snapshot });
     }
 
-    const daily = mergeSelectedDaily(snapshots);
+    const daily = mergeSelectedDaily(accountAdjustedDaily(snapshots));
     const range = {
       start: snapshots.reduce((value, snapshot) => !value || snapshot.range.start < value ? snapshot.range.start : value, ''),
       end: snapshots.reduce((value, snapshot) => !value || snapshot.range.end > value ? snapshot.range.end : value, '')

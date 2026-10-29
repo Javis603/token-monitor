@@ -629,6 +629,7 @@ function publicPeriods(periods) {
   return Object.fromEntries(Object.entries(periods || {}).map(([name, period]) => {
     const safePeriod = { ...(period || {}) };
     delete safePeriod.projects;
+    delete safePeriod.cursorAccountUsage;
     return [name, {
       ...safePeriod,
       sessions: Object.fromEntries(Object.entries(period?.sessions || {}).map(([key, session]) => {

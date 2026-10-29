@@ -9,6 +9,7 @@ const PERIODS = ['today', 'month', 'allTime'];
 const { normalizeLiveActivity, normalizeReasoningEffort, isSessionReasoningEffortClient, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
+const { cursorUsageIdentity, accountingCounters, fitsCounters, subtractCounters, accountUsageWinners, subtractHistory } = require('./cursorAccountUsage');
 const {
   coerceHistory, dayKeyAddDays, hasDisjointReasoning, localDayKey, mergeHistories,
   normalizeTokscaleClientName, normalizeTokscaleModelNameForClient
@@ -1190,6 +1191,24 @@ function normalizePeriod(input, options = {}) {
   ) {
     period.capabilities.tokenComponents = false;
   }
+  const identity = cursorUsageIdentity(input.cursorAccountUsage);
+  if (identity && input.cursorAccountUsage.usage && typeof input.cursorAccountUsage.usage === 'object') {
+    const usage = normalizePeriod({ ...input.cursorAccountUsage.usage, sessions: {}, cursorAccountUsage: undefined }, options);
+    const counters = accountingCounters(usage);
+    const clientOnly = Object.entries(usage).filter(([name]) => name.startsWith('client'))
+      .every(([, map]) => Object.keys(map || {}).every(client => client === 'cursor'));
+    const clientBounds = [
+      ['totalTokens', 'clients'], ['costUsd', 'clientCosts'],
+      ['cacheReadTokens', 'clientCacheReads'], ['cacheWriteTokens', 'clientCacheWrites'],
+      ['outputTokens', 'clientOutputs'], ['unclassifiedTokens', 'clientUnclassifiedTokens'],
+      ['unpricedTokens', 'clientUnpricedTokens']
+    ].every(([field, map]) => asNumber(usage[field]) <= asNumber(period[map]?.cursor) + 1e-8);
+    if (clientOnly && clientBounds
+      && usage.totalTokens === (usage.clients.cursor || 0)
+      && fitsCounters(usage.models, usage.clientModels.cursor)
+      && fitsCounters(usage.modelCosts, usage.clientModelCosts.cursor)
+      && fitsCounters(counters, period)) period.cursorAccountUsage = { ...identity, usage: counters };
+  }
   return period;
 }
 
@@ -1790,11 +1809,15 @@ function aggregateHistory(devices, options = {}) {
   const nowMs = now.getTime();
   const clockToday = localDayKey(now);
   const histories = [];
+  const historyRecords = devices.map(record => ({ ...record, ...normalizeRecordHistoryFields(record) }));
+  const duplicateHistory = accountUsageWinners(historyRecords, record => record.history?.cursorAccountUsage);
   let reportedToday = '';
-  for (const record of devices) {
-    const normalized = normalizeRecordHistoryFields(record);
+  for (const record of historyRecords) {
+    const normalized = record;
     if (!hasOwn(normalized, 'history') || normalized.history === null) continue;
-    histories.push(normalized.history);
+    histories.push(duplicateHistory(record)
+      ? subtractHistory(normalized.history, normalized.history.cursorAccountUsage.usage)
+      : normalized.history);
     if (!normalized.history.daily.length) continue;
     const reported = calendarDayKey(normalized.periodWindows?.today?.key);
     if (!reported) continue;
@@ -1908,8 +1931,12 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
   const periodProjectsOmitted = {};
   for (const periodName of PERIODS) aggregate.periods[periodName] = emptyPeriod();
   const now = nowMs;
-  for (const record of devices) {
-    const normalized = normalizeRecord(record);
+  const records = devices.map(normalizeRecord);
+  const duplicates = Object.fromEntries(PERIODS.map(name => [name, accountUsageWinners(
+    records.filter(record => !isPeriodExpired(record, name, now)),
+    record => record.periods[name].cursorAccountUsage
+  )]));
+  for (const normalized of records) {
     const ageMs = now - Date.parse(normalized.receivedAt || normalized.updatedAt || 0);
     const deviceStaleAfterMs = staleAfterMsForSyncUpload(normalized.syncUploadIntervalMs, staleAfterMs);
     const stale = Number.isFinite(ageMs) && deviceStaleAfterMs > 0 ? ageMs > deviceStaleAfterMs : false;
@@ -1961,7 +1988,14 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
     // pass here only re-walked every session again.
     for (const periodName of PERIODS) {
       if (isPeriodExpired(normalized, periodName, now)) continue;
-      addPeriodInto(aggregate.periods[periodName], normalized.periods[periodName]);
+      let period = normalized.periods[periodName];
+      if (duplicates[periodName](normalized)) {
+        const scope = period.cursorAccountUsage;
+        period = subtractCounters(period, scope.usage);
+        period.sessions = Object.fromEntries(Object.entries(period.sessions).filter(([, row]) =>
+          row.client !== 'cursor' || row.archived === true));
+      }
+      addPeriodInto(aggregate.periods[periodName], period);
     }
   }
   aggregate.limits = aggregateLimits(aggregate.devices, staleAfterMs, now);

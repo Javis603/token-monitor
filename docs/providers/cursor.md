@@ -11,6 +11,14 @@ read_when:
 
 Cursor has one Token Monitor-managed account list used by both tokscale self-sync and dashboard limits. Limits identity and local token history still remain separate outputs.
 
+## Cross-device usage
+
+Login and desktop discovery already supply canonical Cursor user ids. Usage ownership follows the scanned caches' `_tokscale.accountId`, checked against the owner envelope when present, rather than whichever account currently appears in Limits. Modern owner envelopes are read from bounded file regions; legacy owned JSON is parsed once per file signature. Missing ownership, CSV and unreadable inputs remain unscoped. A complete inventory of owned caches identifies one account or an identical set of accounts across devices, including retained cache files after logout. Partially overlapping account sets cannot be split from the scanner's client-level report and remain independent.
+
+The collector attaches `cursorAccountUsage` contributions from its existing Cursor partitions and graph rows. It does not run another scan or parse token events itself. Node, Worker and other shared aggregation callers count each compatible account contribution once, selecting the latest cache observation with a deterministic device-id tie break. Lower corrections are valid; this is not a maximum of token counts. Other tools and identity-free local archive residue remain additive. Per-device cards retain the reported account-wide numbers; they do not establish which device generated the usage. Limits retain their separate account aggregation.
+
+Today/Month contributions require matching calendar windows; All Time requires matching configured start dates. History carries its own observation and timezone scope. Fixed-range views select the account contribution for each daily row after choosing its History or live-Today observation, while keeping device rows intact. Watch deltas retain the account contribution alongside the existing full-scan anchor. Mixed Windows/WSL Cursor sources remain unscoped. Older producers, unowned archives and omitted contributions cannot be deduplicated by guessing from Limits or matching amounts. Payload bounding discards these optional contributions before ordinary session detail, and Worker public stats omit them. All participating producers and the Hub need the updated wire support for deduplication.
+
 ## Accounts and lifecycle
 
 The credential store tracks multiple Cursor accounts and one active account. Desktop discovery can import the local access token without triggering a usage sync. Manually added session tokens and local access-token JWTs are normalized into the canonical form before storage.

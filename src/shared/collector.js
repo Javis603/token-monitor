@@ -30,6 +30,7 @@ const {
   extractUsageFromTokscale,
   mergePeriods,
   normalizeClientName,
+  projectRollupFromSessions,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
@@ -47,6 +48,8 @@ const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
+const { readCursorUsageOwnership } = require('./providers/cursor/usageOwnership');
+const { accountingCounters } = require('./cursorAccountUsage');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const {
   applySessionMetadata,
@@ -840,9 +843,23 @@ async function collectHistoryOnce(options) {
     // A failed native scan without retained history is no update, not a new
     // Dots-only replacement for the device's last successful full history.
     if (!history && failureCode === 'history-graph-failed') return null;
-    return options.codexLocalGraph
+    const result = options.codexLocalGraph
       ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
       : history;
+    const owner = options.cursorOwnership;
+    if (result && owner && rawGraphs.length === 1
+      && readCursorUsageOwnership(options)?.signature === owner.signature) {
+      const graph = rawGraphs[0];
+      const cursorGraph = { contributions: (graph.contributions || []).map(row => ({
+        ...row, activeTimeMs: 0,
+        clients: (row.clients || []).filter(client => normalizeClientName(client.client) === 'cursor'),
+        tokenComponentSummary: undefined
+      })) };
+      result.cursorAccountUsage = { accountKey: owner.accountKey, observedAt: owner.observedAt,
+        range: `history:${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
+        usage: normalizeHistory(parseGraphResult(cursorGraph), { capDays, todayKey }) };
+    }
+    return result;
   };
   if (options.dailyHistoryArchiveEnabled) {
     try {
@@ -906,9 +923,16 @@ async function collectUsageOnce(options) {
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
+  let cursorOwnership = null;
+  let captureCursorPartitions = true;
+  const cursorPartitions = {};
   const runTokscaleFn = async (input) => {
     const json = await runTokscaleScan(input);
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
+    if (captureCursorPartitions && normalizeClientsCsv(input.clients).split(',').includes('cursor')) {
+      const name = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
+      cursorPartitions[name] = extractUsageBundleFromTokscale(json).byClient.cursor || emptyPeriod();
+    }
     return json;
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
@@ -1011,7 +1035,11 @@ async function collectUsageOnce(options) {
       onFailure: options.onSelfSyncFailed
     });
     throwIfAborted(options.signal);
-    throwIfAborted(options.signal);
+    // An injected scanner must declare its source home before local ownership
+    // can describe its output. This also keeps fixture scans off ambient data.
+    if (trackedClientSet.has('cursor') && (!options.runTokscale || options.homeDir)) {
+      cursorOwnership = readCursorUsageOwnership(options);
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -1134,6 +1162,7 @@ async function collectUsageOnce(options) {
   // 2. wslAnchor (watch anchored tick): reuse the frozen snapshot — WSL is heavy
   //    and watch ticks fire every few seconds.
   // 3. !anchorUsed (full scan): scan WSL as part of the complete rescan.
+  captureCursorPartitions = false;
   const windowsPeriods = { today, month, allTime };
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
@@ -1266,6 +1295,39 @@ async function collectUsageOnce(options) {
     wslDetected: wslStatus?.detected
   });
 
+  // Account contributions come from the scanner's existing client partitions,
+  // before local archives add identity-free residue. No extra token scan runs.
+  const cursorAfter = cursorOwnership && readCursorUsageOwnership(options);
+  if (cursorAfter?.signature === cursorOwnership?.signature && cursorAfter
+    && !['today', 'month', 'allTime'].some(name => wslBundle[name]?.clients?.cursor > 0)) {
+    const anchorToday = anchor?.today?.cursorAccountUsage;
+    let cursorObservedAt = cursorAfter.observedAt;
+    if (anchorUsed && anchorToday?.accountKey === cursorAfter.accountKey) {
+      // A different client's targeted tick did not observe this cache's usage.
+      if (!cursorPartitions.today) cursorObservedAt = anchorToday.observedAt;
+      cursorPartitions.today ||= anchorToday.usage;
+      for (const name of ['month', 'allTime']) {
+        const prior = anchor[name]?.cursorAccountUsage;
+        if (prior?.accountKey === cursorAfter.accountKey) {
+          cursorPartitions[name] = applyPeriodDelta(prior.usage, cursorPartitions.today, anchorToday.usage);
+        }
+      }
+    }
+    for (const [name, period] of Object.entries({ today, month, allTime })) {
+      const partition = cursorPartitions[name];
+      if (!partition) continue;
+      partition.projects = projectsEnabled ? projectRollupFromSessions(Object.fromEntries(
+        Object.entries(windowsPeriods[name].sessions || {}).filter(([, row]) => row.client === 'cursor')
+      )) : {};
+      const range = name === 'allTime' ? `since:${allTimeSince}`
+        : `${name}:${computePeriodWindows(collectedAt)[name].key}:${collectedAt.getTimezoneOffset()}`;
+      const scope = { accountKey: cursorAfter.accountKey, observedAt: cursorObservedAt, range,
+        usage: accountingCounters(partition) };
+      period.cursorAccountUsage = scope;
+      windowsPeriods[name].cursorAccountUsage = scope;
+    }
+  }
+
   const summary = {
     deviceId,
     hostname: os.hostname(),
@@ -1347,6 +1409,10 @@ async function collectUsageOnce(options) {
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: normalizedClients,
+      cursorOwnership: cursorAfter?.signature === cursorOwnership?.signature ? cursorAfter : null,
+      homeDir: options.homeDir,
+      env: options.env,
+      platform: platformValue,
       codexLocalGraph: codexLocalView?.graph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
