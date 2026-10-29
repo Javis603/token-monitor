@@ -169,7 +169,7 @@ test('release workflow uses the package Electron version on every platform', () 
   );
 
   const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'), 'utf8');
-  assert.doesNotMatch(workflow, /TOKEN_MONITOR_LINUX_ELECTRON_VERSION=43\.2\.0/);
+  assert.doesNotMatch(workflow, /TOKEN_MONITOR_LINUX_ELECTRON_VERSION\s*[:=]/);
   assert.match(workflow, /- name: Verify Electron packaging version\s+run: \|\s+node -e /);
   assert.match(workflow, /require\('\.\/scripts\/electron-builder\.config\.js'\)/);
   assert.match(workflow, /npm run \$\{\{ matrix\.dist_script \}\}/);
