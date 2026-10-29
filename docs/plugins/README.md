@@ -53,6 +53,8 @@ Export `activate(ctx)` returning `{mount, renderTray?, dispose?}`, or export `mo
 
 `context` includes `viewId`, `ref`, `surface`, `container`, current backend `data`, and surface-specific values. Updates can include `visible`, width/height, selected period/source, native data and native content nodes. Do not start a new sampler for every mount. `ctx.onDispose(fn)` registers module cleanup; instance disposal owns mount-specific cleanup. CSS is loaded once per renderer/revision. Author CSS is free to choose its own look; host theme tokens are conveniences.
 
+The host waits for each mounted instance's `update()` promise before invoking its next update. Updates received while one is running are coalesced to the latest context; do not depend on receiving every intermediate snapshot. Return asynchronous rendering work from `update()` so the host can order it and drain it before disposal. Independently scheduled work still needs author-owned cancellation or generation checks. Live host period/source/stats take precedence over cached mount context; an explicit slot `surfaceVariant` remains specific to that slot.
+
 Context services (see [data/settings parameters, results and examples](author-data-settings.md)):
 
 - `ctx.backend.call(method, args)` returns the backend handler result or rejection.

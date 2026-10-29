@@ -109,13 +109,28 @@
         data: record.descriptor.data, container: record.container, headerActions: record.headerActions };
     }
     function update(record) {
-      if (record.failed || disposed || blocked.has(record.descriptor.pluginId) || mounts.get(record.container) !== record) return;
-      const pending = track(record.descriptor.pluginId, (async () => {
-        try { await record.instance?.update?.(context(record)); }
-        catch (error) { report(error, record); }
-      })());
+      if (record.failed || disposed || blocked.has(record.descriptor.pluginId) || mounts.get(record.container) !== record || !record.instance) return;
+      record.needsUpdate = true;
+      if (record.updating) return record.updating;
+      let settle;
+      const pending = track(record.descriptor.pluginId, new Promise(resolve => { settle = resolve; }));
+      // Register before entering author code, including a synchronous reentrant
+      // update. While busy, retain only the latest context rather than invoking
+      // overlapping callbacks which can paint stale data after a newer result.
+      record.updating = pending;
       (record.updates ||= new Set()).add(pending);
-      void pending.finally(() => record.updates.delete(pending));
+      void (async () => {
+        try {
+          while (record.needsUpdate && !record.failed && !disposed
+            && !blocked.has(record.descriptor.pluginId) && mounts.get(record.container) === record) {
+            record.needsUpdate = false;
+            try { await record.instance.update?.(context(record)); }
+            catch (error) { report(error, record); }
+          }
+        } finally {
+          record.updating = null; record.updates.delete(pending); settle();
+        }
+      })();
       return pending;
     }
     function unmount(container) {
@@ -167,7 +182,8 @@
         record.instance = (await loaded.instance.mount(container, context(record))) || {};
         if (disposed || mounts.get(container) !== record) { await cleanup(descriptor.pluginId, () => record.instance?.dispose?.()); return; }
         if (blocked.has(descriptor.pluginId)) return;
-        if (record.context !== initialContext) await record.instance.update?.(context(record));
+        if (record.context !== initialContext) await update(record);
+        if (disposed || blocked.has(descriptor.pluginId) || mounts.get(container) !== record || record.failed) return;
         record.context.onMountStatus?.(true);
         if (window.ResizeObserver) {
           record.observer = new window.ResizeObserver(entries => {
