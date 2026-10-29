@@ -166,12 +166,12 @@ function renderStatusGroup(group, metric = 'used') {
   const contextSource = app.slice(app.indexOf('function homeSessionContext('), app.indexOf('function stopHomeSessionRepaint('));
   const homeSource = app.slice(app.indexOf('function renderHomeSessionModule('), app.indexOf('function renderHomeDeviceModule()'));
   const tooltip = { setDetailTooltip() {} };
-  const home = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
+  const home = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
     'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
     'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView',
     `${shellSource}; ${contextSource}; ${homeSource}; return renderHomeSessionModule;`)(
     document, { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
-    state, { homePanel: { querySelector: () => null } }, () => false,
+    state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
     () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip
   )([group]);
   const dockContext = dock.slice(dock.indexOf('function contextNode('), dock.indexOf('// Last activity seen'));
@@ -285,13 +285,13 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     const state = { stats, period: 'today', breakdown: 'home', openSession: null, settings: { periodMonthMode: periodMode } };
     const routes = [];
     const readingTargets = [];
-    const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
+    const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
       'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
       'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeSessionContext',
       'sessionPresentationOptions', 'homeModulePreferencesApi', `${shellSource}; ${source}; return renderHomeSessionModule;`)(
       { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) },
       { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
-      state, { homePanel: { querySelector: () => null } }, () => false,
+      state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
       (view, options) => { routes.push([view, options]); state.breakdown = view; }, {}, translate,
       () => {}, () => '', {}, () => '', [], node => readingTargets.push(node), String, () => 'just now',
       rowApi, { setDetailTooltip() {} }, () => assert.fail('group context must be absent'), () => opts, require('../../src/electron/renderer/homeModulePreferences')
@@ -413,8 +413,8 @@ test('resumed archived child preserves its accounting parent unless native metad
 test('Home session navigation uses the incumbent module action without a second heading or row action', () => {
   const source = app.slice(app.indexOf('function homeModuleShell('), app.indexOf('function homeLimitRows('));
   const routes = [];
-  const shell = Function('document', 'renderBreakdownChange', 'VIEW_ICON_CLASSES', `${source}; return homeModuleShell;`)(
-    { createElement: tag => new Node(tag) }, (...args) => routes.push(args), {}
+  const shell = Function('document', 'els', 'pluginContent', 'renderBreakdownChange', 'VIEW_ICON_CLASSES', `${source}; return homeModuleShell;`)(
+    { createElement: tag => new Node(tag) }, { homePanel: { children: [] } }, null, (...args) => routes.push(args), {}
   );
   const { module } = shell('session', 'Sessions', 'session');
   const head = module.children[0];

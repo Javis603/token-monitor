@@ -112,7 +112,11 @@
       for (const [anchor, nodes] of anchors) {
         let previous = anchor;
         for (const [, node] of nodes.sort((a, b) => ranks.get(a[0]) - ranks.get(b[0]))) {
-          if (node !== previous.nextSibling) anchor.parentNode.insertBefore(node, previous.nextSibling);
+          if (node !== previous.nextSibling) {
+            const parent = anchor.parentNode;
+            if (parent.moveBefore && parent.isConnected && node.isConnected) parent.moveBefore(node, previous.nextSibling);
+            else parent.insertBefore(node, previous.nextSibling);
+          }
           previous = node;
         }
       }
@@ -121,6 +125,12 @@
     }
     function hasTarget(target) { return getViews().some(view => view.targets?.includes(target) && (view.mode !== 'replace' || selection(target) === view.ref)); }
     return { render, hasTarget,
+      hasAnchor(native) { return [...outlets.values()].some(record => record.native === native && record.nodes.size > 0); },
+      nodesFor(native) {
+        if (!native.parentNode) return [];
+        const owned = new Set([...outlets.values()].filter(record => record.native === native).flatMap(record => [...record.nodes.values()]));
+        return [...native.parentNode.children].filter(node => owned.has(node));
+      },
       retain(targets) {
         for (const [scope, watcher] of watchers) if (!targets.includes(watcher.target) || !watcher.native.isConnected) unwatch(scope);
         for (const [key, record] of outlets) {

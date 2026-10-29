@@ -15,7 +15,7 @@ function extract(name) {
   const node = ast.body.find(n => n.type === 'FunctionDeclaration' && n.id.name === name);
   assert.ok(node, name); return source.slice(node.start, node.end);
 }
-function fixture(t, mode = 'replace') {
+function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-module-body') {
   const instances = new Map(), trace = [], mutations = [];
   let input, container, mounts = 0, disposals = 0, ready = true, latest;
   const disconnected = node => {
@@ -61,8 +61,7 @@ function fixture(t, mode = 'replace') {
   home.querySelectorAll = selector => selector === '.home-module-tool > .home-module-body'
     ? originalQuery('.home-module-tool').map(module => module.querySelector('.home-module-body'))
     : originalQuery(selector);
-  const descriptor = { ref: 'fixture/cards', revision: 'one', targets: ['main.home.content'],
-    selector: '.home-module-tool > .home-module-body', mode };
+  const descriptor = { ref: 'fixture/cards', revision: 'one', targets: ['main.home.content'], selector, mode };
   let views = mode === 'native' ? [] : [descriptor];
   const composition = create({ document, getViews: () => views, selection: () => descriptor.ref,
     host: {
@@ -116,18 +115,20 @@ function fixture(t, mode = 'replace') {
   };
 }
 
-for (const mode of ['replace', 'append', 'decorate']) test(`Home ${mode} controls remain connected/focused across numeric pushes and module reorder`, t => {
-  const f = fixture(t, mode); f.render();
-  const shell = f.home.querySelector('.home-module-tool'), native = shell.querySelector('.home-module-body');
+for (const selector of ['.home-module-tool > .home-module-body', '.home-module-tool'])
+  for (const mode of ['replace', 'append', 'decorate']) test(`Home ${mode} at ${selector} stays connected/focused across numeric pushes and module reorder`, t => {
+  const f = fixture(t, mode, selector); f.render();
+  const shell = f.home.querySelector('.home-module-tool'), body = shell.querySelector('.home-module-body');
+  const native = selector === '.home-module-tool' ? shell : body;
   const control = f.input; control.focus(); f.trace.length = 0;
   for (let value = 101; value <= 105; value++) {
     f.state.stats.periods.today.totalTokens = f.state.stats.periods.today.clients.codex = value;
     if (value === 103) f.modules = ['model', 'tool', 'trends'];
     f.render();
     assert.ok(f.home.querySelector('.home-module-tool') === shell, 'native shell identity retained');
-    assert.ok(shell.querySelector('.home-module-body') === native, 'native anchor identity retained');
+    assert.ok(shell.querySelector('.home-module-body') === body, 'native body identity retained');
     assert.equal(f.input, control); assert.equal(f.document.activeElement, control);
-    assert.equal(control.value, 'draft'); assert.match(native.textContent, new RegExp(String(value)));
+    assert.equal(control.value, 'draft'); assert.match(body.textContent, new RegExp(String(value)));
   }
   assert.equal(f.mounts, 1); assert.equal(f.disposals, 0);
   assert.deepEqual(f.mutations, []);

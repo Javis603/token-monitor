@@ -6344,7 +6344,7 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   // while refreshing the native fallback; retaining only author children after
   // removing their ancestor is too late to preserve focus and scroll anchoring.
   const retained = [...els.homePanel.children].find(node => node.classList.contains(`home-module-${kind}`)
-    && [...node.children].some(child => child.classList.contains('plugin-content')));
+    && [node, ...node.children].some(anchor => pluginContent?.hasAnchor(anchor)));
   const module = retained || document.createElement('section');
   module.className = `home-module home-module-${kind}`;
   module.setAttribute('aria-label', title);
@@ -7332,7 +7332,10 @@ function renderHome() {
   });
   // Reconcile siblings without detaching retained plugin controls. Collector
   // pushes must not discard focused drafts or cancel captured drawing gestures.
-  nodes.forEach((node, index) => {
+  // A module-level selector places author controls beside the module. Reorder
+  // those outlets with their anchor instead of moving them back after rendering.
+  const ordered = nodes.flatMap(node => [node, ...pluginContent?.nodesFor(node) || []]);
+  ordered.forEach((node, index) => {
     const current = els.homePanel.children[index];
     if (node === current) return;
     if (node.parentNode === els.homePanel && els.homePanel.moveBefore) els.homePanel.moveBefore(node, current || null);
@@ -7341,7 +7344,7 @@ function renderHome() {
   // Attach replacements before removing obsolete siblings: a synchronous layout
   // must never observe the page with its retained content/scroll range missing.
   for (const child of [...els.homePanel.children]) {
-    if (!nodes.includes(child) && !child.classList.contains('plugin-content')) child.remove();
+    if (!ordered.includes(child)) child.remove();
   }
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   // setupHomeActivityScroller first runs while its module is detached, where
