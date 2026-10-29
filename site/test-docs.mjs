@@ -83,19 +83,29 @@ test("agent Markdown relative links resolve to repository files in their origina
   }
 });
 
-test("quickstart query can be pasted into its first mount without changing async context", async () => {
+for (const scenario of [
+  { name: 'success', query: async () => ({ availability: 'available', rows: [{totalTokens: 42}] }), expected: '42' },
+  { name: 'not collected', query: async () => ({ availability: 'notCollected', rows: [] }), expected: 'Data: notCollected' },
+  { name: 'rejection', query: async () => { throw new Error('Plugin is disabled'); }, expected: 'Could not read data: Plugin is disabled' }
+]) test(`pasted quickstart query preserves ${scenario.name} across host updates`, async () => {
   const markdown = await readFile(new URL('docs/plugins/author-quickstart.md', root), 'utf8');
   const blocks = [...markdown.matchAll(/```js\n([\s\S]*?)```/g)].map(match => match[1]);
   const combined = blocks[0].replace('      return { update,', blocks[1] + '\n      return { update,');
   const module = await import('data:text/javascript,' + encodeURIComponent(combined));
-  const output = { remove() {} };
+  const nodes = [];
   const savedDocument = globalThis.document;
-  globalThis.document = { createElement: () => output };
+  globalThis.document = { createElement: () => ({ remove() { this.removed = true; } }) };
   try {
-    const ctx = { data: { query: async () => ({availability: 'available', rows: [{totalTokens: 42}]}) } };
-    const mount = await module.activate(ctx).mount({ append() {} }, {surface: 'page'});
-    assert.equal(output.textContent, '42');
+    const ctx = { data: { query: scenario.query } };
+    const mount = await module.activate(ctx).mount({ append(...children) { nodes.push(...children); } }, {surface: 'page'});
+    const result = nodes.at(-1);
+    assert.equal(result.textContent, scenario.expected);
+    mount.update({surface: 'page', width: 600, height: 400});
+    assert.equal(result.textContent, scenario.expected, 'initial geometry update must not overwrite query state');
+    mount.update({surface: 'page', period: 'month', width: 800, height: 500});
+    assert.equal(result.textContent, scenario.expected, 'later context updates must not overwrite the captured query');
     mount.dispose();
+    assert.ok(nodes.every(node => node.removed), 'all owned output nodes are removed');
   } finally { globalThis.document = savedDocument; }
 });
 

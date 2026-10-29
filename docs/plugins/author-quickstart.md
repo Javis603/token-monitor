@@ -16,13 +16,14 @@ Create `ui.mjs`:
 export function activate(ctx) {
   return {
     async mount(container, context) {
+      const contextLabel = document.createElement('p');
       const output = document.createElement('p');
-      container.append(output);
+      container.append(contextLabel, output);
       function update(next) {
-        output.textContent = `My view: ${next.period || next.surface}`;
+        contextLabel.textContent = `My view: ${next.period || next.surface}`;
       }
       update(context);
-      return { update, dispose() { output.remove(); } };
+      return { update, dispose() { contextLabel.remove(); output.remove(); } };
     }
   };
 }
@@ -49,7 +50,7 @@ try {
 }
 ```
 
-Here `output` is the element from the first UI example. This reads existing data; it does not trigger collection. The host supplies query version 1. An empty or unavailable result is not proof of zero usage or zero cost.
+Here `output` is the separate query-result element; `update()` only changes `contextLabel`, so host geometry updates cannot overwrite a result or error. This is a one-shot today snapshot, not a query that follows later source/period changes. This reads existing data; it does not trigger collection. The host supplies query version 1. An empty or unavailable result is not proof of zero usage or zero cost.
 
 For a complete replacement `ui.mjs` with live updates and unsubscribe cleanup, plus a copyable manifest settings schema and update example, see [Data and settings API](author-data-settings.md). That reference covers query options, result metadata, cursor recovery and save conflicts. You do not need a backend for these operations.
 
