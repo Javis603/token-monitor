@@ -12,8 +12,8 @@ const { createCatalogSources } = require('./catalogSources');
 const OFFICIAL = Object.freeze({ id: 'bundled', kind: 'official', label: 'Token Monitor' });
 const { createGitHubDiscovery } = require('./githubDiscovery');
 const { createCatalogMedia } = require('./catalogMedia');
-function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog'), githubDiscoveryEnabled = false }) {
-  const sources = createCatalogSources({ root, fetchImpl, getLocale, cancelPreviews: id => managed.cancelSource(id) });
+function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog'), githubDiscoveryEnabled = false, maintainerSources = [] }) {
+  const sources = createCatalogSources({ root, fetchImpl, getLocale, maintainerSources, cancelPreviews: id => managed.cancelSource(id) });
   const github = createGitHubDiscovery({ root, fetchImpl, enabled: githubDiscoveryEnabled });
   const media = createCatalogMedia({ fetchImpl, nativeImage });
   let readmeDocument = null, detailRevision = 0;
@@ -44,7 +44,9 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
     const entries = [];
     for (const { pkg, compatible } of packages.values()) {
       const installed = installation(pkg.manifest.id);
+      const homepage = pkg.manifest.homepage;
       entries.push({ ...describePackage(pkg, { locale: getLocale() }), origin: OFFICIAL,
+        repository: /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(homepage) ? homepage : '',
         status: !compatible ? 'incompatible' : !installed.exists ? 'available'
           : installed.version && installed.record?.origin.id === OFFICIAL.id && semver.gt(pkg.manifest.version, installed.version) ? 'update' : 'installed',
         installedVersion: installed.version });
@@ -67,7 +69,14 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
   return {
     list,
     closeDetails,
-    async discover(force = false) { await github.refresh(force); return list(); },
+    async discover(force = false) {
+      // No production maintainer endpoint is configured yet. When supplied by
+      // the App, bootstrap its cache on first discovery; explicit refresh also
+      // checks cached sources. Local list() never starts network requests.
+      await Promise.all([github.refresh(force), ...sources.list().sources
+        .filter(s => s.kind === 'maintainer' && (force || !s.cached)).map(s => sources.refresh(s.id))]);
+      return list();
+    },
     async details(sourceId, id) {
       closeDetails();
       const revision = detailRevision;

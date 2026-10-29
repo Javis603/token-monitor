@@ -1366,3 +1366,58 @@ test('plugin navigation artwork arrives from metadata before page mount and refr
   assert.equal(icon.querySelector('img'), null);
   assert.ok(icon.querySelector('svg'));
 });
+
+test('plugin tools use the top status lane without a second title row and unmount on exit', t => {
+  const mounts = [], unmounted = [];
+  const f = panelFixture(t, {}, { pluginHost: {
+    state: () => ({ title: 'Author page' }),
+    mount(...args) { mounts.push(args); },
+    unmount(container) { unmounted.push(container); },
+    refreshDemand() {}
+  } });
+  const data = payload(); data.panel.pluginPages = ['demo/panel'];
+  f.panel.render(data); f.panel.selectPage('plugin:demo/panel');
+  const mount = mounts.find(args => args[1] === 'demo/panel');
+  assert.ok(mount);
+  assert.equal(mount[2], 'notch');
+  const slot = mount[3].headerActions;
+  assert.equal(slot.className, 'notch-plugin-header-actions');
+  assert.equal(slot.parentNode, f.find('notch-band-trailing'));
+  assert.equal(slot.parentNode.querySelector('.notch-status'), f.find('notch-status'));
+  assert.equal(slot.hidden, false);
+  assert.equal(f.find('notch-page-plugin').children.length, 1, 'full page body, no duplicate heading');
+  assert.notEqual(slot.parentNode, mount[0]);
+  f.panel.render(data);
+  assert.equal(mounts.length, 1, 'ordinary pushes retain tools and focus');
+  f.panel.selectPage('home');
+  assert.equal(slot.parentNode, null);
+  assert.deepEqual(unmounted, [mount[0]]);
+  assert.equal(f.all('notch-page-plugin')[0].children.length, 0);
+  f.panel.selectPage('plugin:demo/panel');
+  const next = mounts.at(-1)[3].headerActions;
+  assert.notEqual(next, slot);
+  f.panel.suspend();
+  assert.equal(next.parentNode, null);
+  f.panel.render(data, { opening: true });
+  assert.equal(mounts.at(-1)[3].headerActions.hidden, false);
+  data.panel.pluginPages = [];
+  f.panel.render(data);
+  assert.equal(f.all('notch-plugin-header-actions').length, 0);
+  assert.equal(f.panel.view.page, 'home');
+});
+
+test('swipe previews keep plugin header tools hidden until the page is selected', t => {
+  const mounts = [];
+  const f = panelFixture(t, {}, { pluginHost: {
+    state: () => ({ title: 'Preview' }), mount(...args) { mounts.push(args); }, refreshDemand() {}
+  } });
+  const data = payload(); data.panel.builtinPages = ['home']; data.panel.pluginPages = ['demo/panel'];
+  f.panel.render(data);
+  swipe(f, 1, 'began', 0.4);
+  assert.equal(mounts.length, 1);
+  assert.equal(mounts[0][3].headerActions.hidden, true);
+  f.scroll({ id: 1, phase: 'cancelled', amount: 0, complete: true });
+  assert.equal(mounts[0][3].headerActions.parentNode, null);
+  f.panel.selectPage('plugin:demo/panel');
+  assert.equal(mounts.at(-1)[3].headerActions.hidden, false);
+});

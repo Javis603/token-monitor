@@ -753,8 +753,9 @@ app.whenReady().then(async () => {
   await waitFor('!els.limitsPanel.hidden', 'native fallback');
   await js("pluginApi.place('trusted-fixture/panel','page',true)");
   await js("pluginApi.openPage('trusted-fixture/panel')");
-  await waitFor("document.querySelector('#pluginMainPanel .plugin-main-detach')", 'main plugin page');
-  await js("document.querySelector('#pluginMainPanel .plugin-main-detach').click()");
+  await waitFor("document.querySelector('#pluginMainPanel .plugin-main-page:not(.hidden)') && document.querySelector('#pluginPageActions .plugin-main-actions:not(.hidden) .plugin-main-detach')", 'main plugin page and native header action');
+  assert.equal(await js("Boolean(document.querySelector('#pluginMainPanel .plugin-main-detach'))"), false);
+  await js("document.querySelector('#pluginPageActions .plugin-main-actions:not(.hidden) .plugin-main-detach').click()");
   for (let i = 0; i < 150 && BrowserWindow.getAllWindows().length === 1; i++) await pause(40);
   const detached = BrowserWindow.getAllWindows().find(candidate => candidate !== win);
   assert.ok(detached);
