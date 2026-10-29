@@ -520,3 +520,32 @@ test('retain releases detached replacement mounts when their view is no longer s
   content.retain(['main.home.content']); assert.equal(removed, 1); assert.equal(document.body.children.length, 0);
   content.dispose();
 });
+
+for (const mode of ['append', 'decorate']) {
+  test(`${mode} preserves native visibility changed by the App between renders`, () => {
+    const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+    const view = { ...descriptor, mode };
+    const content = create({ document, getViews: () => [view], host: { mount() {}, unmount() {} } });
+    content.render('main.home.content', native);
+    native.hidden = true; content.render('main.home.content', native);
+    assert.equal(native.hidden, true);
+    native.hidden = false; content.render('main.home.content', native);
+    assert.equal(native.hidden, false);
+    content.dispose();
+  });
+}
+
+test('retain releases an inactive detached replacement while an append view uses the same target', () => {
+  const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+  const append = { ...descriptor, ref: 'other/append', mode: 'append' };
+  let selected = descriptor.ref; const removed = [];
+  const content = create({ document, getViews: () => [descriptor, append], selection: () => selected,
+    host: { mount(_node, _view, context) { context.onMountStatus(true); }, unmount(node) { removed.push(node); } } });
+  content.render('main.home.content', native);
+  const replacementNode = native.nextSibling, appendNode = replacementNode.nextSibling;
+  native.remove(); selected = null;
+  content.retain(['main.home.content']);
+  assert.deepEqual(removed, [replacementNode]);
+  assert.equal(appendNode.isConnected, true);
+  content.dispose(); assert.deepEqual(removed, [replacementNode, appendNode]);
+});

@@ -55,10 +55,11 @@
       if (record.replaces && !replaces) native.hidden = record.wasHidden;
       record.replaces = replaces;
       const replacement = views.find(view => view.mode === 'replace');
-      if (!replacement || record.replacement?.ref !== replacement.ref || record.replacement?.revision !== replacement.revision) {
+      if (replacement && (record.replacement?.ref !== replacement.ref || record.replacement?.revision !== replacement.revision)) {
         native.hidden = record.wasHidden;
-        record.replacement = replacement ? { ref: replacement.ref, revision: replacement.revision, ready: false } : null;
+        record.replacement = { ref: replacement.ref, revision: replacement.revision, ready: false };
       }
+      if (!replacement) record.replacement = null;
       if (record.replacement?.ready) native.hidden = true;
       for (const view of views) {
         let container = record.nodes.get(view.ref);
@@ -121,7 +122,17 @@
     return { render, hasTarget,
       retain(targets) {
         for (const [scope, watcher] of watchers) if (!targets.includes(watcher.target) || !watcher.native.isConnected) unwatch(scope);
-        for (const [target, record] of outlets) if (!targets.includes(record.target) || (!record.native.isConnected && !hasTarget(record.target))) { clear(record); outlets.delete(target); }
+        for (const [key, record] of outlets) {
+          if (!targets.includes(record.target)) { clear(record); outlets.delete(key); continue; }
+          if (record.native.isConnected) continue;
+          const eligible = new Set(getViews().filter(view => view.targets?.includes(record.target) && (view.mode !== 'replace' || selection(record.target) === view.ref)).map(view => view.ref));
+          for (const [ref, node] of record.nodes) if (!eligible.has(ref)) { host.unmount(node); node.remove(); record.nodes.delete(ref); }
+          if (record.replacement && !eligible.has(record.replacement.ref)) {
+            record.native.hidden = record.wasHidden;
+            record.replaces = false; record.replacement = null;
+          }
+          if (!record.nodes.size) { clear(record); outlets.delete(key); }
+        }
       },
       dispose() { for (const scope of watchers.keys()) unwatch(scope); for (const record of outlets.values()) clear(record); outlets.clear(); }
     };
