@@ -8,6 +8,7 @@
   // conflict convention, not a DOM security boundary.
   function create({ document, host, getViews, selection = () => null }) {
     const outlets = new Map(), watchers = new Map();
+    let nextOutlet = 0;
     const MutationObserver = document.defaultView?.MutationObserver;
     const findAnchors = (native, selector) => [...native.querySelectorAll(selector)].filter(node => !node.closest('.plugin-content'));
     function unwatch(scope) { watchers.get(scope)?.observer.disconnect(); watchers.delete(scope); }
@@ -95,10 +96,28 @@
         try { anchors = selector ? findAnchors(native, selector) : [native]; }
         catch (error) { console.error('[plugins] Invalid content selector:', selector, error.message); continue; }
         if (selector) selectors.push(selector);
+        const current = new Set(anchors);
+        const previous = [...outlets].filter(([, record]) => record.scope === scope && record.selector === selector);
+        const byNative = new Map(previous.map(([key, record]) => [record.native, { key, record }]));
+        const bySlot = new Map(previous.map(([key, record]) => [JSON.stringify([record.anchorKey, record.anchorIndex]), { key, record }]));
         anchors.forEach((anchor, index) => {
-          const key = JSON.stringify([scope, selector, anchor.dataset?.key || anchor.id || '', index]);
+          const anchorKey = anchor.dataset?.key || anchor.id || '';
+          const existing = byNative.get(anchor);
+          const same = existing?.record.anchorKey === anchorKey ? existing : null;
+          if (existing && !same) {
+            // Reset this logical identity before a new record captures native
+            // visibility; the old replacement may currently be hiding it.
+            clear(existing.record); outlets.delete(existing.key);
+          }
+          const slot = bySlot.get(JSON.stringify([anchorKey, index]));
+          // A surviving native anchor keeps its outlet even after a reorder.
+          // Reuse a rebuilt slot only if its former anchor is not still present;
+          // otherwise an insertion/removal could steal another anchor's draft.
+          const retained = same || (slot && !current.has(slot.record.native) ? slot : null);
+          const key = retained?.key || JSON.stringify([scope, selector, ++nextOutlet]);
           wanted.add(key);
           renderOne(target, anchor, { ...context, root: native, anchorIndex: index }, key, scope, views, pendingMounts);
+          Object.assign(outlets.get(key), { selector, anchorKey, anchorIndex: index });
         });
       }
       for (const [key, record] of outlets) if (record.scope === scope && !wanted.has(key)) { clear(record); outlets.delete(key); }

@@ -164,6 +164,29 @@ test('a broad content selector cannot make a new standalone plugin reuse another
   assert.equal(f.standalone.get(refs[1]), secondView);
 });
 
+for (const mode of ['append', 'decorate', 'replace']) test(`Home multi-anchor ${mode} drafts follow their native modules through reorder/removal`, t => {
+  const f = fixture(t, mode, '.home-module'); f.modules = ['tool', 'model']; f.render();
+  const tool = f.home.querySelector('.home-module-tool'), model = f.home.querySelector('.home-module-model');
+  const toolOutlet = tool.nextSibling, modelOutlet = model.nextSibling;
+  const toolInput = toolOutlet.children[0], modelInput = modelOutlet.children[0];
+  toolInput.value = 'Tools draft A'; modelInput.value = 'Models draft B'; toolInput.focus();
+  for (const order of [['model', 'tool'], ['tool', 'model'], ['model', 'tool']]) {
+    f.modules = order; f.render();
+    assert.ok(f.home.querySelector('.home-module-tool') === tool);
+    assert.ok(f.home.querySelector('.home-module-model') === model);
+    assert.ok(tool.nextSibling === toolOutlet, 'Tools retains its own author controls');
+    assert.ok(model.nextSibling === modelOutlet, 'Models retains its own author controls');
+    assert.equal(toolInput.value, 'Tools draft A'); assert.equal(modelInput.value, 'Models draft B');
+    assert.equal(f.document.activeElement, toolInput);
+  }
+  f.modules = ['tool']; f.render();
+  assert.ok(tool.nextSibling === toolOutlet); assert.equal(toolInput.value, 'Tools draft A');
+  assert.equal(f.mounts, 2); assert.equal(f.disposals, 1);
+  assert.equal(modelOutlet.isConnected, false); assert.equal(f.document.activeElement, toolInput);
+  f.views = []; f.render();
+  assert.equal(f.disposals, 2); assert.equal(tool.hidden, undefined, 'deselection restores native Tools');
+});
+
 test('period/source changes reach retained controls; deselection reveals current native rows', t => {
   const f = fixture(t); f.render();
   const native = f.home.querySelector('.home-module-body');
