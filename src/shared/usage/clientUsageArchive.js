@@ -6,6 +6,7 @@ const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
 } = require('../clientIdentitySplits');
 const {
+  archivedSessionInput,
   cloneJson,
   hasSummaryPeriod,
   localDay,
@@ -276,14 +277,27 @@ function addClientUsage(period, client, usage) {
     period.clientModelCosts[client][model] = (period.clientModelCosts[client][model] || 0) + numberValue(modelCost);
   }
   const normalizedSessions = normalizePeriod({ sessions: usage?.sessions }).sessions;
+  let inputTokens = 0;
+  const modelInputs = Object.create(null);
   for (const [key, session] of Object.entries(normalizedSessions)) {
     period.sessions[key] = session;
     addSessionBreakdown(period, client, session);
+    const input = archivedSessionInput(session);
+    inputTokens += input;
+    // Session input is attributable to a model only with a single model bucket.
+    const models = Object.entries(session.models || {}).filter(([, count]) => numberValue(count) > 0);
+    if (models.length === 1) {
+      const [model, count] = models[0];
+      const remaining = Math.max(0, numberValue(count) - numberValue(session.cacheReadTokens)
+        - numberValue(session.cacheWriteTokens) - numberValue(session.outputTokens));
+      modelInputs[model] = (modelInputs[model] || 0) + Math.min(input, remaining);
+    }
   }
   const known = Math.min(tokens,
     period.cacheReadTokens - beforeComponents.cacheRead
     + period.cacheWriteTokens - beforeComponents.cacheWrite
-    + period.outputTokens - beforeComponents.output);
+    + period.outputTokens - beforeComponents.output
+    + inputTokens);
   const unclassified = Math.max(0, tokens - known);
   if (unclassified > 0) {
     period.unclassifiedTokens += unclassified;
@@ -295,7 +309,8 @@ function addClientUsage(period, client, usage) {
     const modelKnown = Math.min(Math.max(0, Math.round(numberValue(modelTokens))),
       numberValue(period.modelCacheReads?.[model]) - numberValue(before.cacheRead)
       + numberValue(period.modelCacheWrites?.[model]) - numberValue(before.cacheWrite)
-      + numberValue(period.modelOutputs?.[model]) - numberValue(before.output));
+      + numberValue(period.modelOutputs?.[model]) - numberValue(before.output)
+      + numberValue(modelInputs[model]));
     const modelUnclassified = Math.max(0, Math.round(numberValue(modelTokens)) - modelKnown);
     if (modelUnclassified > 0) {
       period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + modelUnclassified;
@@ -497,9 +512,17 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
       const usage = entry.periods?.[periodName];
       if (!hasUsage(usage) || !shouldApplyPeriod(periodName, entry, now)) continue;
       if (!hasSummaryPeriod(next, periodName)) continue;
+      const livePeriod = periodFor(next, periodName);
+      // Native observations (including explicit zero/lower corrections) win by
+      // identity even if the caller's tracked-client selection has changed.
+      // Aggregate-only legacy snapshots cannot prove overlap and stay retained.
+      const hasClientSessions = Object.values(usage.sessions || {}).length > 0
+        && Object.values(livePeriod.sessions || {}).some(session => session.client === client);
       const effective = splitDef
-        ? netOutLiveUsage(usage, periodFor(next, periodName), splitDef)
-        : usage;
+        ? netOutLiveUsage(usage, livePeriod, splitDef)
+        : hasClientSessions
+          ? netOutLiveUsage(usage, livePeriod, { merged: client, split: client })
+          : usage;
       if (!hasUsage(effective)) continue;
       addClientUsage(targetPeriod(next, periodName), client, effective);
     }

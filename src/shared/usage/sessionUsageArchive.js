@@ -6,6 +6,7 @@ const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('../usage');
 const { isSessionReasoningEffortClient } = require('../sessionLive');
 const {
+  archivedSessionInput,
   cloneJson,
   hasSummaryPeriod,
   localDay,
@@ -350,7 +351,7 @@ function addSessionBreakdown(period, session) {
     if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
     if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
     if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
-    const unclassified = Math.max(0, tokens - cr - cw - ou);
+    const unclassified = Math.max(0, tokens - cr - cw - ou - archivedSessionInput(session));
     if (unclassified > 0) {
       period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + unclassified;
       period.capabilities.tokenComponents = false;
@@ -376,7 +377,7 @@ function addArchivedSession(period, session, archiveKey = null) {
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
-  const unclassified = Math.max(0, tokens - cacheRead - cacheWrite - output);
+  const unclassified = Math.max(0, tokens - cacheRead - cacheWrite - output - archivedSessionInput(archived));
   if (unclassified > 0) {
     period.unclassifiedTokens += unclassified;
     period.clientUnclassifiedTokens[archived.client] = (period.clientUnclassifiedTokens[archived.client] || 0) + unclassified;
