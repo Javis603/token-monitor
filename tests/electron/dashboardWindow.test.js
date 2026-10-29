@@ -295,7 +295,7 @@ test('heatmap metric preserves the legacy cost default and normalizes settings',
   assert.match(main, /heatmapMetric:\s*'cost'/);
   assert.match(main, /merged\.heatmapMetric = normalizeHeatmapMetric\(merged\.heatmapMetric\)/);
   assert.match(main, /normalizedPatch\.heatmapMetric = normalizeHeatmapMetric\(patch\.heatmapMetric, settings\.heatmapMetric\)/);
-  assert.match(js, /const heatmapRows = state\.range === 'all' \? \(state\.history\?\.daily \|\| \[\]\) : filtered;/);
+  assert.match(js, /const heatmapRows = state\.range === 'custom' \? filtered : \(state\.history\?\.daily \|\| \[\]\);/);
   assert.match(js, /charts\.computeHeatmapIntensities\(heatmapRows\)/);
   assert.match(js, /heatmapMetric:\s*'cost'/);
   assert.match(html, /class="seg-btn active" data-val="cost" aria-pressed="true"/);

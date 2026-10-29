@@ -642,7 +642,7 @@ function balanceStatCards() {
 
 function renderActivity() {
   const filtered = getFilteredDaily();
-  const heatmapRows = state.range === 'all' ? (state.history?.daily || []) : filtered;
+  const heatmapRows = state.range === 'custom' ? filtered : (state.history?.daily || []);
   const daily = charts.computeHeatmapIntensities(heatmapRows);
   let end = todayKey();
   const now = new Date(`${end}T00:00:00Z`);
