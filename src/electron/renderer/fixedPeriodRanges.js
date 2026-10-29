@@ -286,6 +286,26 @@
   // A user-picked range can span millennia, so cap the generated series.
   const MAX_RANGE_DAYS = 3660;
 
+  // Every stored day that falls inside the range, without the per-day zero fill
+  // and without the presentation cap: totals must cover the whole range.
+  function matchedDailyForRange(daily, range, options = {}) {
+    const start = normalizeDateKey(range?.start);
+    const end = normalizeDateKey(range?.end);
+    if (!start || !end || start > end) return [];
+    const byDate = new Map();
+    for (const row of dailyWithLiveToday(
+      daily,
+      options.liveTodayKey || options.todayKey,
+      options.todayPeriod
+    )) {
+      const date = normalizeDateKey(row?.date);
+      if (date && date >= start && date <= end) byDate.set(date, row);
+    }
+    return Array.from(byDate.values()).sort((left, right) => (
+      String(left?.date || '').localeCompare(String(right?.date || ''))
+    ));
+  }
+
   function dailyForRange(daily, range, options = {}) {
     const start = normalizeDateKey(range?.start);
     const end = normalizeDateKey(range?.end);
@@ -295,13 +315,9 @@
       ? (dayKeyAddDays(end, -(MAX_RANGE_DAYS - 1)) || start)
       : start;
     const byDate = new Map();
-    for (const row of dailyWithLiveToday(
-      daily,
-      options.liveTodayKey || options.todayKey,
-      options.todayPeriod
-    )) {
+    for (const row of matchedDailyForRange(daily, range, options)) {
       const date = normalizeDateKey(row?.date);
-      if (date && date >= loopStart && date <= end) byDate.set(date, row);
+      if (date && date >= loopStart) byDate.set(date, row);
     }
     const rows = [];
     for (let date = loopStart; date && date <= end && rows.length < MAX_RANGE_DAYS;) {
@@ -598,6 +614,8 @@
     }
 
     const daily = mergeSelectedDaily(snapshots);
+    // The presented series is capped, so totals come from the uncapped rows.
+    const fullDaily = mergeSelectedDaily(snapshots.map((snapshot) => ({ daily: snapshot.fullDaily || [] })));
     const range = {
       start: snapshots.reduce((value, snapshot) => !value || snapshot.range.start < value ? snapshot.range.start : value, ''),
       end: snapshots.reduce((value, snapshot) => !value || snapshot.range.end > value ? snapshot.range.end : value, '')
@@ -609,7 +627,7 @@
       range,
       daily,
       summary: summaryForDaily(daily),
-      period: derivePeriod(daily, range),
+      period: derivePeriod(fullDaily, range, options),
       devices: snapshots.map((snapshot) => ({
         ...snapshot,
         period: snapshot.period,
@@ -644,7 +662,7 @@
       capabilities: { tokenComponents: false, attribution: true, clientModels: false },
       derivedFixedRange: true
     };
-    const rows = dailyForRange(daily, range, options);
+    const rows = matchedDailyForRange(daily, range, options);
     period.capabilities.tokenComponents = rows.every((row) => row?.tokenComponentsAvailable === true);
     for (const row of rows) {
       period.totalTokens += finiteNumber(row?.tokens);
@@ -722,8 +740,9 @@
       reason: '',
       range,
       daily,
+      fullDaily: matchedDailyForRange(options.daily, range, options),
       summary: summaryForDaily(daily),
-      period: derivePeriod(daily, range)
+      period: derivePeriod(options.daily, range, options)
     };
   }
 

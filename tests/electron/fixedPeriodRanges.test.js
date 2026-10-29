@@ -852,3 +852,51 @@ test('dailyForRange terminates at 9999-12-31 and caps extreme multi-millennium s
   assert.equal(extreme[extreme.length - 1].date, '9999-12-31');
   assert.equal(extreme[extreme.length - 1].tokens, 10);
 });
+
+test('a custom range longer than the presentation cap still totals every stored day', () => {
+  // 2016-01-01 → 2026-10-10 spans more than the 3660-day presentation cap, so
+  // the oldest day falls outside the shown series but still belongs to the range.
+  const snapshot = ranges.fixedPeriodSnapshot('custom', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-10-10',
+    customRange: { start: '2016-01-01', end: '2026-10-10' },
+    daily: [day('2016-01-05', 100, 'codex', 'gpt'), day('2026-10-10', 200, 'claude', 'opus')]
+  });
+
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.range.start, '2016-01-01');
+  assert.equal(snapshot.range.end, '2026-10-10');
+  assert.equal(snapshot.daily.length, 3660, 'the shown series stays capped');
+  assert.equal(snapshot.daily.some((row) => row.date === '2016-01-05'), false);
+  assert.equal(snapshot.period.totalTokens, 300);
+  assert.equal(snapshot.period.costUsd, 3);
+  assert.deepEqual(snapshot.period.clients, { codex: 100, claude: 200 });
+  assert.deepEqual(snapshot.period.models, { gpt: 100, opus: 200 });
+});
+
+test('device aggregation totals every stored day of a long custom range', () => {
+  const source = deviceSource({
+    deviceId: 'mac',
+    date: '2026-10-10',
+    endsAt: '2026-10-11T00:00:00.000Z',
+    history: [day('2016-01-05', 100, 'codex', 'gpt'), day('2026-10-10', 200, 'claude', 'opus')]
+  });
+
+  const result = ranges.fixedPeriodSnapshotFromDevices('custom', [source], {
+    historyEnabled: true,
+    historyAvailable: true,
+    todayKey: '2026-10-10',
+    now: Date.parse('2026-10-10T12:00:00.000Z'),
+    customRange: { start: '2016-01-01', end: '2026-10-10' }
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.equal(result.range.start, '2016-01-01');
+  assert.equal(result.range.end, '2026-10-10');
+  assert.equal(result.daily.length, 3660, 'the shown series stays capped');
+  assert.equal(result.period.totalTokens, 300);
+  assert.equal(result.period.costUsd, 3);
+  assert.deepEqual(result.period.clients, { codex: 100, claude: 200 });
+  assert.equal(result.devices[0].period.totalTokens, 300);
+});
