@@ -90,18 +90,19 @@ function createUsageTransform(options = {}) {
   // argument because capturing into it is a separate decision, see below.
   function project(summary, archive, now) {
     const settings = getSettings() || {};
-    const withArchivedClients = applyArchivedClientUsage(summary, settings.archivedClientUsage, {
+    // Replay split session identities before netting legacy merged client
+    // snapshots against them. Keep the collector summary caller-owned.
+    const withArchivedSessions = settings.sessionUsageArchiveEnabled === false
+      ? summary
+      : applySessionUsageArchive(summary, archive, {
+          now,
+          canonical: true,
+          canonicalSummary: true
+        });
+    const visibleSummary = applyArchivedClientUsage(withArchivedSessions, settings.archivedClientUsage, {
       activeClients: settings.clients,
       now
     });
-    const visibleSummary = settings.sessionUsageArchiveEnabled === false
-      ? withArchivedClients
-      : applySessionUsageArchive(withArchivedClients, archive, {
-          now,
-          canonical: true,
-          canonicalSummary: true,
-          mutate: true
-        });
     delete visibleSummary.sessionUsageArchiveFullScan;
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }
