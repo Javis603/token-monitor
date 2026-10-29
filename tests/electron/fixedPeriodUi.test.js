@@ -100,6 +100,29 @@ test('the Settings default uses the standard title-control-description row', () 
   assert.match(i18n, /'periodRange\.settingsNote': '選擇主畫面預設顯示的統計範圍。也可在主畫面再次點擊上方目前選取的時段，開啟選單快速切換。'/);
 });
 
+test('the widget custom range only trusts a custom snapshot and rolls back a failed save', () => {
+  const app = read('app.js');
+  assert.match(app, /const customSnapshotRange = state\.fixedPeriodSnapshot\?\.selection === 'custom'\s*\?\s*state\.fixedPeriodSnapshot\.range\s*:\s*null;/);
+  const customChange = app.slice(
+    app.indexOf('async function onCustomPeriodDateChange'),
+    app.indexOf("els.customPeriodStartDate?.addEventListener('change'")
+  );
+  assert.match(customChange, /catch \(_\) \{\s*state\.customPeriodRange = null;/);
+  assert.match(customChange, /els\.customPeriodStartDate\.value = state\.settings\?\.customPeriodStart \|\| today;/);
+  assert.match(customChange, /els\.customPeriodEndDate\.value = state\.settings\?\.customPeriodEnd \|\| today;/);
+});
+
+test('the dashboard custom range reads the live inputs and translates their accessible names', () => {
+  const dash = read('dashboard.js');
+  assert.match(dash, /querySelectorAll\('\[data-i18n-aria-label\]'\)\.forEach\(\(node\) => \{\s*node\.setAttribute\('aria-label', t\(node\.getAttribute\('data-i18n-aria-label'\)\)\);/);
+  const effectiveRange = dash.slice(dash.indexOf('function getEffectiveRange'), dash.indexOf('function getFilteredDaily'));
+  assert.match(effectiveRange, /normalizeDashDateKey\(els\.dashCustomStart\?\.value\) \|\| normalizeDashDateKey\(state\.customStart\)/);
+  assert.match(effectiveRange, /normalizeDashDateKey\(els\.dashCustomEnd\?\.value\) \|\| normalizeDashDateKey\(state\.customEnd\)/);
+  const dashChange = dash.slice(dash.indexOf('function onDashCustomDateChange'), dash.indexOf('let dashCustomInputsWired'));
+  assert.match(dashChange, /normalizeDashDateKey\(els\.dashCustomStart\?\.value\) \|\| normalizeDashDateKey\(state\.customStart\)/);
+  assert.match(dashChange, /normalizeDashDateKey\(els\.dashCustomEnd\?\.value\) \|\| normalizeDashDateKey\(state\.customEnd\)/);
+});
+
 test('cold-start boot restores every fixed middle-slot selection', () => {
   const boot = read('floatingBubbleBoot.js');
   for (const period of ['week', 'last7', 'last30']) {

@@ -9314,12 +9314,15 @@ function syncPeriodTabs() {
     tab.classList.toggle('active', active);
     tab.setAttribute('aria-pressed', String(active));
   }
+  const customSnapshotRange = state.fixedPeriodSnapshot?.selection === 'custom'
+    ? state.fixedPeriodSnapshot.range
+    : null;
   if (els.monthPeriodTab) {
     const mode = activeSlot === 'month'
       ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
       : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
     els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode, {
-      range: state.fixedPeriodSnapshot?.range || state.customPeriodRange || {
+      range: customSnapshotRange || state.customPeriodRange || {
         start: state.settings?.customPeriodStart,
         end: state.settings?.customPeriodEnd
       }
@@ -9331,7 +9334,7 @@ function syncPeriodTabs() {
     els.customPeriodBar.classList.toggle('hidden', !isCustom);
     if (isCustom) {
       const today = fixedPeriodRangesApi.localDayKey();
-      const currentRange = state.fixedPeriodSnapshot?.range || state.customPeriodRange || {};
+      const currentRange = customSnapshotRange || state.customPeriodRange || {};
       const start = currentRange.start || state.settings?.customPeriodStart || today;
       const end = currentRange.end || state.settings?.customPeriodEnd || today;
       if (els.customPeriodStartDate && document.activeElement !== els.customPeriodStartDate && !els.customPeriodStartDate.value) {
@@ -13353,7 +13356,16 @@ async function onCustomPeriodDateChange() {
   state.fixedPeriodSnapshot = buildFixedPeriodSourcesSnapshot();
   syncPeriodTabs();
   render();
-  await saveSettings({ customPeriodStart: start, customPeriodEnd: end });
+  try {
+    await saveSettings({ customPeriodStart: start, customPeriodEnd: end });
+  } catch (_) {
+    state.customPeriodRange = null;
+    if (els.customPeriodStartDate) els.customPeriodStartDate.value = state.settings?.customPeriodStart || today;
+    if (els.customPeriodEndDate) els.customPeriodEndDate.value = state.settings?.customPeriodEnd || today;
+    state.fixedPeriodSnapshot = buildFixedPeriodSourcesSnapshot();
+    syncPeriodTabs();
+    render();
+  }
 }
 
 els.customPeriodStartDate?.addEventListener('change', onCustomPeriodDateChange);

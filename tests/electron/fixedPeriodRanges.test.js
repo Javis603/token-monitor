@@ -833,3 +833,22 @@ test('dailyForRange and fixedPeriodSnapshot aggregate custom ranges with live to
   assert.equal(snapshot.period.totalTokens, 650);
   assert.equal(snapshot.period.costUsd, 6.5);
 });
+
+test('dailyForRange terminates at 9999-12-31 and caps extreme multi-millennium spans', () => {
+  const nearMax = ranges.dailyForRange(
+    [day('9999-12-31', 42)],
+    { start: '9999-12-30', end: '9999-12-31' }
+  );
+  assert.deepEqual(nearMax.map((row) => ({ date: row.date, tokens: row.tokens })), [
+    { date: '9999-12-30', tokens: 0 },
+    { date: '9999-12-31', tokens: 42 }
+  ]);
+
+  const extreme = ranges.dailyForRange(
+    [day('9999-12-31', 10)],
+    { start: '0001-01-01', end: '9999-12-31' }
+  );
+  assert.equal(extreme.length, 3660);
+  assert.equal(extreme[extreme.length - 1].date, '9999-12-31');
+  assert.equal(extreme[extreme.length - 1].tokens, 10);
+});

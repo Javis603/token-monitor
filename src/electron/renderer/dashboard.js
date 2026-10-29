@@ -215,6 +215,9 @@ function effectiveCompactTokenUnits() {
 
 function applyTranslations() {
   document.querySelectorAll('[data-i18n]').forEach((node) => { node.textContent = t(node.getAttribute('data-i18n')); });
+  document.querySelectorAll('[data-i18n-aria-label]').forEach((node) => {
+    node.setAttribute('aria-label', t(node.getAttribute('data-i18n-aria-label')));
+  });
   document.documentElement.lang = state.locale;
 }
 
@@ -302,6 +305,14 @@ function chartSize() {
   return { w: Math.max(320, els.chart.clientWidth || 800), h: Math.max(200, els.chart.clientHeight || 360) };
 }
 
+function normalizeDashDateKey(value) {
+  const key = String(value || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
+  const parsed = new Date(`${key}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== key) return '';
+  return key;
+}
+
 function syncCustomRangeInputs() {
   if (!els.dashCustomRangeBar) return;
   const isCustom = state.range === 'custom';
@@ -309,20 +320,22 @@ function syncCustomRangeInputs() {
   if (isCustom) {
     const daily = state.history?.daily || [];
     const today = todayKey();
-    const start = state.customStart || (daily[0]?.date ? String(daily[0].date).slice(0, 10) : today);
-    const end = state.customEnd || (daily.length ? String(daily[daily.length - 1].date).slice(0, 10) : today);
+    const defaultStart = daily[0]?.date ? String(daily[0].date).slice(0, 10) : today;
+    const defaultEnd = daily.length ? String(daily[daily.length - 1].date).slice(0, 10) : today;
+    const start = normalizeDashDateKey(state.customStart) || normalizeDashDateKey(els.dashCustomStart?.value) || defaultStart;
+    const end = normalizeDashDateKey(state.customEnd) || normalizeDashDateKey(els.dashCustomEnd?.value) || defaultEnd;
     if (els.dashCustomStart && !els.dashCustomStart.value) els.dashCustomStart.value = start;
     if (els.dashCustomEnd && !els.dashCustomEnd.value) els.dashCustomEnd.value = end;
-    state.customStart = els.dashCustomStart?.value || start;
-    state.customEnd = els.dashCustomEnd?.value || end;
+    state.customStart = normalizeDashDateKey(els.dashCustomStart?.value) || start;
+    state.customEnd = normalizeDashDateKey(els.dashCustomEnd?.value) || end;
   }
 }
 
 function getEffectiveRange() {
   if (state.range !== 'custom') return null;
   const today = todayKey();
-  let start = state.customStart || els.dashCustomStart?.value || today;
-  let end = state.customEnd || els.dashCustomEnd?.value || today;
+  let start = normalizeDashDateKey(els.dashCustomStart?.value) || normalizeDashDateKey(state.customStart) || today;
+  let end = normalizeDashDateKey(els.dashCustomEnd?.value) || normalizeDashDateKey(state.customEnd) || today;
   if (start > end) {
     const temp = start;
     start = end;
@@ -330,6 +343,8 @@ function getEffectiveRange() {
     if (els.dashCustomStart) els.dashCustomStart.value = start;
     if (els.dashCustomEnd) els.dashCustomEnd.value = end;
   }
+  state.customStart = start;
+  state.customEnd = end;
   return { start, end };
 }
 
@@ -347,11 +362,18 @@ function getFilteredDaily() {
 }
 
 function onDashCustomDateChange() {
-  const r = getEffectiveRange();
-  if (r) {
-    state.customStart = r.start;
-    state.customEnd = r.end;
+  const today = todayKey();
+  let start = normalizeDashDateKey(els.dashCustomStart?.value) || normalizeDashDateKey(state.customStart) || today;
+  let end = normalizeDashDateKey(els.dashCustomEnd?.value) || normalizeDashDateKey(state.customEnd) || today;
+  if (start > end) {
+    const temp = start;
+    start = end;
+    end = temp;
   }
+  if (els.dashCustomStart) els.dashCustomStart.value = start;
+  if (els.dashCustomEnd) els.dashCustomEnd.value = end;
+  state.customStart = start;
+  state.customEnd = end;
   state.motion = 'update';
   render();
 }
@@ -620,16 +642,22 @@ function balanceStatCards() {
 
 function renderActivity() {
   const filtered = getFilteredDaily();
-  const allDaily = charts.computeHeatmapIntensities(state.history?.daily || []);
-  const daily = state.range === 'all' ? allDaily : filtered;
+  const heatmapRows = state.range === 'all' ? (state.history?.daily || []) : filtered;
+  const daily = charts.computeHeatmapIntensities(heatmapRows);
   let end = todayKey();
   const now = new Date(`${end}T00:00:00Z`);
   let start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
   if (state.range === 'custom') {
     const r = getEffectiveRange();
     if (r) {
-      start = r.start;
-      end = r.end;
+      // The heatmap grid holds at most a year of days, and its date math breaks past year 9999.
+      end = r.end > '9999-12-24' ? '9999-12-24' : r.end;
+      start = r.start > end ? end : r.start;
+      if (daysBetween(start, end) > 366) {
+        const endUtc = new Date(`${end}T00:00:00Z`);
+        endUtc.setUTCDate(endUtc.getUTCDate() - 365);
+        start = endUtc.toISOString().slice(0, 10);
+      }
     }
   }
   const intensityKey = state.heatmapMetric === 'cost' ? 'costIntensity' : 'tokenIntensity';

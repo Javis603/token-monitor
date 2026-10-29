@@ -41,7 +41,7 @@
     if (!normalized) return '';
     const date = new Date(`${normalized}T00:00:00Z`);
     date.setUTCDate(date.getUTCDate() + Number(delta || 0));
-    return date.toISOString().slice(0, 10);
+    return normalizeDateKey(date.toISOString().slice(0, 10));
   }
 
   function localDayKey(value = new Date()) {
@@ -283,7 +283,17 @@
     return rows.sort((left, right) => String(left?.date || '').localeCompare(String(right?.date || '')));
   }
 
+  // A user-picked range can span millennia, so cap the generated series.
+  const MAX_RANGE_DAYS = 3660;
+
   function dailyForRange(daily, range, options = {}) {
+    const start = normalizeDateKey(range?.start);
+    const end = normalizeDateKey(range?.end);
+    if (!start || !end || start > end) return [];
+    const spanDays = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000) + 1;
+    const loopStart = spanDays > MAX_RANGE_DAYS
+      ? (dayKeyAddDays(end, -(MAX_RANGE_DAYS - 1)) || start)
+      : start;
     const byDate = new Map();
     for (const row of dailyWithLiveToday(
       daily,
@@ -291,10 +301,10 @@
       options.todayPeriod
     )) {
       const date = normalizeDateKey(row?.date);
-      if (date && date >= range.start && date <= range.end) byDate.set(date, row);
+      if (date && date >= loopStart && date <= end) byDate.set(date, row);
     }
     const rows = [];
-    for (let date = range.start; date <= range.end; date = dayKeyAddDays(date, 1)) {
+    for (let date = loopStart; date && date <= end && rows.length < MAX_RANGE_DAYS;) {
       rows.push(byDate.get(date) || {
         date, tokens: 0, cost: 0,
         cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0,
@@ -302,6 +312,10 @@
         tokenComponentsAvailable: true,
         perClient: {}, perModel: {}
       });
+      if (date >= end) break;
+      const next = dayKeyAddDays(date, 1);
+      if (!next || next <= date) break; // dayKeyAddDays cannot advance past year 9999
+      date = next;
     }
     return rows;
   }
