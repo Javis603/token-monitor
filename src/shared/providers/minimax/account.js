@@ -16,6 +16,7 @@ module.exports = {
     {
       key: 'minimaxApiRegion',
       kind: 'setting',
+      invalidationSource: 'api',
       normalize: { fn: 'normalizeMinimaxRegionSetting', style: 'value' },
       envFallback: ['TOKEN_MONITOR_MINIMAX_API_REGION', 'MINIMAX_API_REGION', 'MINIMAX_API_HOST'],
       configDefault: 'auto',
@@ -77,7 +78,8 @@ module.exports = {
       { key: 'minimaxApiKey', input: 'password', placeholderKey: 'settings.minimax.apiKeyPlaceholder', required: true }
     ],
     top: [
-      { field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }
+      { field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' },
+      { note: 'settings.minimax.spendNote', when: { field: 'minimaxBillingMode', values: ['api'] } }
     ],
     manual: [{ note: 'settings.minimax.note' }, { field: 'minimaxApiKey' }],
     // Explicit choices follow the select even before the first probe. Auto

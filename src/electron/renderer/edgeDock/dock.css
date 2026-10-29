@@ -468,7 +468,8 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
    for the same Claude card). The card's sections already separate themselves with
    the feathered hairline above (see `.edge-dock-sessions::before`), so nothing is
    lost by dropping them at the edge. */
-.edge-dock-accounts > .limit-row:last-child {
+.edge-dock-accounts > .limit-row:last-child,
+.edge-dock-accounts > .limit-row-group > .limit-row:last-child {
   border-bottom: 0;
   padding-bottom: 0;
 }

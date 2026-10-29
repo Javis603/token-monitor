@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { normalizeLimitProvider } = require('../../src/shared/limits/core');
 const vm = require('node:vm');
 
 const {
@@ -436,16 +437,18 @@ for (const { name, settings, expected } of [
   });
 }
 
-test('Home falls back to the provider name when verified lanes omit redundant account titles', () => {
+test('Home keeps both verified MiniMax readings named and in their own units', () => {
   const presentation = require('../../src/electron/renderer/limits/providerPresentation');
   const settings = { homeLimitAccountCount: 12 };
   const view = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({ presentation, settings: () => settings });
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const apiKey = `sha256:${'b'.repeat(64)}`;
   const providers = [
-    { provider: 'minimax', source: 'oauth', status: 'ok', region: 'cn', accountKey: 'code', accountLabel: 'MiniMax Code',
+    { provider: 'minimax', source: 'oauth', status: 'ok', region: 'cn', accountKey: codeKey, accountLabel: 'MiniMax Code',
       windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
-    { provider: 'minimax', source: 'api', status: 'ok', region: 'cn', accountKey: 'api', relatedAccountKey: 'code', accountLabel: 'Pay-as-you-go',
+    { provider: 'minimax', source: 'api', status: 'ok', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey, accountLabel: 'Pay-as-you-go',
       windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
-  ];
+  ].map(normalizeLimitProvider);
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const start = source.indexOf('function homeLimitRows(');
   const fn = source.slice(start, source.indexOf('\n}\n', start) + 2);
@@ -460,7 +463,11 @@ test('Home falls back to the provider name when verified lanes omit redundant ac
       limitAccountTitle: (...args) => view.limitAccountTitle(...args),
       homeOverviewApi: { homeLimitAccountsForProviders }
     });
-    assert.deepEqual(Array.from(rows, row => row.name), ['Minimax', 'Minimax']);
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every(row => row.name.trim()));
+    assert.ok(rows.every(row => !/\bAccount [12]\b/.test(row.name)));
+    assert.deepEqual(new Set(Array.from(rows, row => `${row.windows[0].remaining}:${row.windows[0].currency}`)),
+      new Set(['4624:CREDITS', '14.97:CNY']));
   }
 });
 

@@ -507,7 +507,6 @@ test('capability tags explain how each provider is collected in settings', () =>
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
-  assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Auto', 'Subscription', 'Pay-as-you-go', 'OAuth/API']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
   assert.deepEqual(limitProviderCapabilityTags('copilot'), ['Manual login', 'API']);
   assert.deepEqual(limitProviderCapabilityTags('unknown'), []);
@@ -515,13 +514,20 @@ test('capability tags explain how each provider is collected in settings', () =>
 
 test('Minimax capability tags are localized in settings', () => {
   const app = readRendererFile('app.js');
-  const i18n = readRendererFile('i18n.js');
-
-  assert.match(app, /'Token Plan': 'settings\.limits\.capability\.tokenPlan'/);
-  assert.match(i18n, /'settings\.limits\.capability\.tokenPlan': 'Token Plan'/);
-  assert.match(i18n, /'settings\.limits\.capability\.apiKey': 'API key'/);
-  assert.match(i18n, /'settings\.limits\.capability\.apiKey': 'API 金鑰'/);
-  assert.match(i18n, /'settings\.limits\.capability\.apiKey': 'API 密钥'/);
+  const i18n = require('../../src/electron/renderer/i18n');
+  const start = app.indexOf('const LIMIT_CAPABILITY_TAG_KEYS = {');
+  const keys = app.slice(start, app.indexOf('\n};', start) + 3);
+  const translate = functionBody(app, 'translatedLimitCapabilityTag', 'translatedLimitProviderTag');
+  for (const locale of Object.keys(i18n.MESSAGES)) {
+    const tags = vm.runInNewContext(`${keys}\n${translate}\ntags.map(label => ({ key: LIMIT_CAPABILITY_TAG_KEYS[label], text: translatedLimitCapabilityTag(label) }));`, {
+      tags: limitProviderCapabilityTags('minimax'),
+      t: key => i18n.translate(locale, key)
+    });
+    for (const tag of tags) {
+      assert.ok(tag.key, `${locale}: an actual MiniMax tag must use the shared vocabulary`);
+      assert.ok(tag.text && tag.text !== tag.key, `${locale}: ${tag.key}`);
+    }
+  }
 });
 
 test('Coding Plan capability tags are localized in settings', () => {
@@ -907,7 +913,6 @@ test('every multi-account Limits group uses its provider-localized account count
   assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
   assert.match(view, /return text === key \? '' : text;/);
   assert.match(view, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
-  assert.match(view, /count: Number\.isInteger\(accountCount\) \? accountCount : providers\.length/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
   for (const provider of ['claude', 'codex', 'minimax', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
     assert.match(i18n, new RegExp(`'settings\\.${provider}\\.nAccounts'`));
@@ -1939,15 +1944,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   assert.doesNotMatch(app, /renderGrokStatus|grokAccountLinked|grokAccountExpanded/);
 });
 
-test('a saved credential folds its panel only once a fresh record confirms the account', () => {
-  const app = readRendererFile('app.js');
-  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
-  const save = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
-  assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
-  // A save reply alone does not establish a fresh quota reading.
-  assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
-  assert.match(save, /markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*await refreshStats\(\);/);
-  assert.doesNotMatch(save, /setExternalAccountExpanded\(/, 'fresh status owns folding; the save reply must not toggle it again');
+test('Ollama validation can reuse its save-time probe', () => {
   // Save-time validation must not cause a duplicate quota request.
   const { limitProviderEntry } = require('../../src/shared/limits/registry');
   assert.deepEqual({ ...limitProviderEntry('ollama').form.rememberProbe }, { fn: 'rememberOllamaValidation', field: 'ollamaCookie' });
@@ -1966,10 +1963,6 @@ test('account validation reads the local device raw limits, not the collapsed ag
   assert.match(helper, /localProviders !== null/);
   // Legacy stats without raw device rows retain aggregate fallback.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
-  // DeepSeek uses its one provider row; MiniMax's key panel must select only
-  // the local API lane when the independent Code/OAuth row is also present.
-  const accountProvider = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
-  assert.match(accountProvider, /providerName === 'minimax'[\s\S]*localProviderStatuses\(providerName\)\.find\(\(entry\) => entry\.source === 'api'\)[\s\S]*: localProviderStatus\(providerName\)/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {

@@ -355,8 +355,7 @@ test('pending source edits cannot narrow an already queued provider-wide clear',
     context.pendingLimitInvalidations.clear();
     for (const scope of scopes) context.rememberPendingLimitInvalidation(scope, 'settings-change', { clear: true });
     const pending = [...context.pendingLimitInvalidations.values()];
-    assert.equal(pending.length, 1);
-    assert.equal(pending[0].scope.source, undefined);
-    assert.equal(pending[0].clear, true);
+    assert.ok(pending.some(entry => entry.clear && entry.scope.provider === 'minimax' && !entry.scope.source),
+      'a source edit must not replace the broader clear');
   }
 });

@@ -16638,8 +16638,8 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  // Pending refreshes must not reopen an already linked credential form.
-  const readingPending = pending || (configured && !provider);
+  // Only an active check may keep a previously linked credential form closed.
+  const readingPending = pending || (enabled && !settled && configured && !provider);
   if (!readingPending) {
     manualPanel.classList.toggle('hidden', linked);
     openBtn.classList.toggle('hidden', linked);

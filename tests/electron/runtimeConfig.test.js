@@ -616,13 +616,12 @@ test('WorkBuddy managed field is private and owned by the managed service', () =
   assert.equal(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.workbuddy.includes('workbuddyManagedAccounts'), false);
 });
 
-test('settings edits invalidate the declared source unless a shared field changes too', () => {
+test('MiniMax key, billing and API region edits invalidate only API readings', () => {
   const previous = { minimaxApiKey: 'key-A', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' };
-  for (const [patch, expected] of [
-    [{ minimaxApiKey: 'key-B' }, { provider: 'minimax', source: 'api' }],
-    [{ minimaxBillingMode: 'token-plan' }, { provider: 'minimax', source: 'api' }],
-    [{ minimaxApiKey: 'key-B', minimaxBillingMode: 'token-plan' }, { provider: 'minimax', source: 'api' }],
-    [{ minimaxApiRegion: 'intl' }, { provider: 'minimax' }],
-    [{ minimaxApiKey: 'key-B', minimaxApiRegion: 'intl' }, { provider: 'minimax' }]
-  ]) assert.deepEqual(classifySettingsChange(previous, { ...previous, ...patch }).limitScopes, [expected]);
+  for (const patch of [
+    { minimaxApiKey: 'key-B' },
+    { minimaxBillingMode: 'token-plan' },
+    { minimaxApiRegion: 'intl' },
+    { minimaxApiKey: 'key-B', minimaxBillingMode: 'token-plan', minimaxApiRegion: 'intl' }
+  ]) assert.deepEqual(classifySettingsChange(previous, { ...previous, ...patch }).limitScopes, [{ provider: 'minimax', source: 'api' }]);
 });

@@ -130,7 +130,7 @@ function minimaxCodeCredits(value) {
   return /^\d+(?:\.\d+)?$/.test(raw) ? parseNumberOrNull(raw) : null;
 }
 
-// Code's current M Plan endpoint reports used/total percentages, unlike the
+// Code's quota endpoint reports used/total percentages, unlike the
 // API-key Token Plan endpoint. Status 3 here explicitly means unlimited.
 function parseMinimaxCodePlan(body) {
   const rows = readMinimaxRows(body);
@@ -348,13 +348,11 @@ function minimaxCodeRecordKey(dataDir, regionDir) {
   return `com.minimax.mcode.oauth.prod.${regionDir}\0${account}`;
 }
 
-function minimaxCodeAuthFiles(options = {}, deps = {}) {
+function minimaxCodeAuthFiles(deps = {}) {
   const env = deps.env || process.env;
-  const regionSetting = minimaxRegion(options, env);
-  const regions = regionSetting === 'cn' ? ['cn'] : regionSetting === 'intl' ? ['en'] : ['cn', 'en'];
   let unreadable = false;
   for (const base of mcodeDataDirs({ env, homeDir: deps.homeDir || os.homedir() })) {
-    for (const regionDir of regions) {
+    for (const regionDir of ['cn', 'en']) {
       const directory = path.join(base, 'auth', 'prod', regionDir, 'mcode-public');
       const authPath = path.join(directory, 'auth.json');
       let auth;
@@ -496,8 +494,8 @@ async function minimaxCodeCreditMeter(membershipUrl, headers, credits, deps) {
 }
 
 // The membership total includes purchased and gifted points, not API cash.
-// M Plan quota is independent; a plan outage must not discard fresh credits.
-async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
+// A plan outage must not discard fresh credits.
+async function fetchMinimaxCodeLimits(deps = {}, context = {}) {
   const { now, updatedAt } = context;
   let session;
   let accountKey = '';
@@ -510,7 +508,7 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
   const env = deps.env || process.env;
   if (['MCODE_OAUTH_DEVICE_AUTHORIZATION_ENDPOINT', 'MCODE_OAUTH_TOKEN_ENDPOINT', 'MCODE_OAUTH_REVOCATION_ENDPOINT']
     .some(key => cleanSecret(env[key]))) return row('unavailable');
-  try { session = minimaxCodeAuthFiles(options, deps); }
+  try { session = minimaxCodeAuthFiles(deps); }
   catch (error) { return row(error.status || 'unavailable'); }
   if (!session) return row('notConfigured');
   const region = session.regionDir;
@@ -624,7 +622,7 @@ async function fetchMinimaxCodeLimits(options = {}, deps = {}, context = {}) {
 }
 
 async function fetchMinimaxCodeRows(options, deps, context) {
-  const current = await fetchMinimaxCodeLimits(options, deps, context);
+  const current = await fetchMinimaxCodeLimits(deps, context);
   const scope = options.limitRefreshScope;
   if (scope?.provider === 'minimax' && scope.accountKey) {
     // A scoped attempt keeps its target identity; unidentified or different

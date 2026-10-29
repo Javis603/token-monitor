@@ -2270,8 +2270,7 @@
     },
     // A Codex group's forecast describes the account set, not one account, so it
     // is appended once below the rows instead of on each of them.
-    codex: () => ({ forecastOnGroup: true }),
-    minimax: (providers) => ({ accountCount: minimaxParallelLanes(providers) ? 0 : undefined })
+    codex: () => ({ forecastOnGroup: true })
   };
 
   function limitAccountRowPolicy(id, provider, color, context) {
@@ -2499,11 +2498,17 @@
   // passing a different set.
   function renderLimitProviderGroup(providerId, label, providers, color) {
     if (providerId === 'mimo') return renderMimoProviderGroup(label, providers, color);
+    if (providerId === 'minimax' && minimaxParallelLanes(providers)) {
+      const rows = document.createElement('div');
+      rows.className = 'limit-row-group';
+      rows.append(...providers.map(provider => renderLimitProviderSolo(providerId, label, provider, color)));
+      return rows;
+    }
     const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
-    const { markId, sharedFamily, forecastOnGroup, accountCount } = policy(providers);
+    const { markId, sharedFamily, forecastOnGroup } = policy(providers);
     const { row, list: accountList } = renderLimitProviderGroupFrame(
       providerId, label, providers, color, {
-        count: Number.isInteger(accountCount) ? accountCount : providers.length,
+        count: providers.length,
         markId
       }
     );

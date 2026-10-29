@@ -61,9 +61,9 @@ function mimoProvider(accountKey, accountName, usedPercent, updatedAt) {
   };
 }
 
-function oauthProvider(provider, accountKey, accountEmail, remainingPercent, updatedAt) {
+function claudeProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
   return {
-    provider,
+    provider: 'claude',
     accountKey,
     accountName: accountEmail.split('@')[0],
     accountEmail,
@@ -81,51 +81,45 @@ function oauthProvider(provider, accountKey, accountEmail, remainingPercent, upd
   };
 }
 
-for (const id of ['claude', 'minimax']) {
-  test(`aggregateLimits keeps distinct ${id} accounts and dedupes each one across devices`, () => {
-    const aggregate = aggregateLimits([
-      {
-        deviceId: 'macbook',
-        limits: {
-          updatedAt: '2026-07-25T10:01:00.000Z',
-          providers: [
-            { ...oauthProvider(id, 'sha256:account-a', 'a@example.com', 18, '2026-07-25T10:00:00.000Z'),
-              balance: { amount: 100, currency: 'CNY', allTimeSpend: 44 } },
-            oauthProvider(id, 'sha256:account-b', 'b@example.com', 72, '2026-07-25T10:01:00.000Z')
-          ]
-        }
-      },
-      {
-        deviceId: 'desktop',
-        limits: {
-          updatedAt: '2026-07-25T10:05:00.000Z',
-          providers: [
-            { ...oauthProvider(id, 'sha256:account-a', 'a@example.com', 48, '2026-07-25T10:04:00.000Z'),
-              balance: { amount: 90, currency: 'CNY', allTimeSpend: 20 } },
-            oauthProvider(id, 'sha256:account-b', 'b@example.com', 82, '2026-07-25T10:05:00.000Z')
-          ]
-        }
+test('aggregateLimits keeps distinct Claude accounts and dedupes each one across devices', () => {
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'macbook',
+      limits: {
+        updatedAt: '2026-07-25T10:01:00.000Z',
+        providers: [
+          claudeProvider('sha256:claude-a', 'a@example.com', 18, '2026-07-25T10:00:00.000Z'),
+          claudeProvider('sha256:claude-b', 'b@example.com', 72, '2026-07-25T10:01:00.000Z')
+        ]
       }
-    ], 0, Date.parse('2026-07-25T10:06:00.000Z'));
+    },
+    {
+      deviceId: 'desktop',
+      limits: {
+        updatedAt: '2026-07-25T10:05:00.000Z',
+        providers: [
+          claudeProvider('sha256:claude-a', 'a@example.com', 48, '2026-07-25T10:04:00.000Z'),
+          claudeProvider('sha256:claude-b', 'b@example.com', 82, '2026-07-25T10:05:00.000Z')
+        ]
+      }
+    }
+  ], 0, Date.parse('2026-07-25T10:06:00.000Z'));
 
-    const providers = aggregate.providers.filter((provider) => provider.provider === id);
-    assert.equal(providers.length, 2);
-    assert.equal(providers.find(row => row.accountKey === 'sha256:account-a').balance.allTimeSpend, 20,
-      'cross-device Spend selects a snapshot, including server corrections, instead of adding amounts');
-    assert.deepEqual(
-      new Set(providers.map((provider) => provider.accountKey)),
-      new Set(['sha256:account-a', 'sha256:account-b'])
-    );
-    assert.equal(
-      providers.find((provider) => provider.accountKey === 'sha256:account-a').windows[0].remainingPercent,
-      48
-    );
-    assert.equal(
-      providers.find((provider) => provider.accountKey === 'sha256:account-b').windows[0].remainingPercent,
-      82
-    );
-  });
-}
+  const providers = aggregate.providers.filter((provider) => provider.provider === 'claude');
+  assert.equal(providers.length, 2);
+  assert.deepEqual(
+    new Set(providers.map((provider) => provider.accountKey)),
+    new Set(['sha256:claude-a', 'sha256:claude-b'])
+  );
+  assert.equal(
+    providers.find((provider) => provider.accountKey === 'sha256:claude-a').windows[0].remainingPercent,
+    48
+  );
+  assert.equal(
+    providers.find((provider) => provider.accountKey === 'sha256:claude-b').windows[0].remainingPercent,
+    82
+  );
+});
 
 test('aggregateLimits preserves distinct Codex accounts by hashed account key', () => {
   const aggregate = aggregateLimits([

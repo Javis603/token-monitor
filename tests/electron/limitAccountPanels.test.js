@@ -81,7 +81,7 @@ function appSource(from, to) {
   return app.slice(start, end);
 }
 
-function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, providerSource = 'api', providerRows, keyConfigured = false } = {}) {
+function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, providerSource = 'api', providerRows, keyConfigured = false, enabledProviders = new Set(['minimax']) } = {}) {
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
   const { group, document } = renderPanel(form);
   group.byId('minimaxSettingsDetails').classList.remove('hidden');
@@ -101,25 +101,30 @@ function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, provider
     document,
     externalLimitAccountConfig: {},
     externalProviderCheckSettled: new Set(),
+    cancelExternalProviderCheckSettle: () => {},
     localProviderStatus: (name) => state.stats.limits.providers.find((provider) => provider.provider === name) || null,
     localProviderStatuses: (name) => state.stats.limits.providers.filter((provider) => provider.provider === name),
     limitAccountForm: (name) => state.settings.limitAccountForms.find((entry) => entry.id === name),
-    limitProviderEnabled: () => true,
+    limitProviderEnabled: name => enabledProviders.has(name),
     limitAccountPanelsApi: require('../../src/electron/renderer/limits/accountPanels'),
     limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
     setCursorStatusText: (element, text) => { element.textContent = text; element.setAttribute('aria-label', text); },
     renderSettingsSummaries: () => {},
-    setExternalAccountExpanded: () => {},
+    accountShellApi: require('../../src/electron/renderer/limits/accountShell'),
+    limitProviderAccountGroup: () => group,
+    syncLimitProviderAccountExpansion: () => {},
     t: (key, params) => translated(key, params)
   };
   vm.runInNewContext(
     appSource('function externalProviderForAccount(', '\nfunction setAccountPanelMessage(')
       + appSource('function apiKeyAccountStatusText(', '\nfunction setExternalAccountExpanded(')
+      + appSource('function setExternalAccountExpanded(', '\nfunction volcenginePlatformUrl(')
       + appSource('function renderExternalProviderStatus(', '\n// The override inputs'),
     context
   );
   context.renderExternalProviderStatus('minimax');
-  return { group, state, render: () => context.renderExternalProviderStatus('minimax'), linked: context.externalProviderAccountLinked('minimax') };
+  return { group, state, enabledProviders, settled: context.externalProviderCheckSettled,
+    render: () => context.renderExternalProviderStatus('minimax'), linked: context.externalProviderAccountLinked('minimax') };
 }
 
 function isVisible(root, target) {
@@ -660,9 +665,10 @@ test('a rejected or incomplete draft keeps the draft and the current status', as
 test('a confirmed credential is cleared from the draft and re-checked', async () => {
   const save = accountFormSave({ result: { saved: true, verdict: 'valid', status: 'ok', settings: { next: true } } });
   assert.equal(await save.run({ deepseekApiKey: 'sk-test' }), true);
-  assert.deepEqual(save.calls.map(([name]) => name), [
-    'render', 'saveCredential', 'applyPersistedSettings', 'markPending', 'render', 'refreshStats', 'render'
-  ]);
+  assert.deepEqual(save.calls.find(([name]) => name === 'saveCredential'), ['saveCredential', 'deepseek', { deepseekApiKey: 'sk-test' }]);
+  assert.deepEqual(save.calls.find(([name]) => name === 'applyPersistedSettings'), ['applyPersistedSettings', { next: true }]);
+  assert.ok(save.calls.some(([name]) => name === 'markPending'));
+  assert.ok(save.calls.some(([name]) => name === 'refreshStats'));
   assert.equal(save.message(), null);
 });
 
@@ -706,12 +712,27 @@ test('every shared account message exists in each locale with its placeholders',
   }
 });
 
-test('MiniMax key hints cover both billing types in every locale', () => {
+test('MiniMax hints cover both key types and keep cash Spend scope outside the draft', () => {
   for (const locale of Object.keys(i18n.MESSAGES)) {
     const hint = i18n.translate(locale, 'settings.minimax.apiKeyPlaceholder');
     assert.match(hint, /sk-cp-/, locale);
     assert.match(hint, /sk-api-/, locale);
+    assert.notEqual(i18n.translate(locale, 'settings.minimax.spendNote'), 'settings.minimax.spendNote', locale);
   }
+  const { syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'minimax');
+  const { group, document } = renderPanel(form);
+  const note = [...group.walk()].find(node => node.dataset.i18n === 'settings.minimax.spendNote');
+  assert.ok(note);
+  const draft = group.byId('minimaxManualPanel');
+  draft.classList.add('hidden');
+  assert.equal([...draft.walk()].includes(note), false, 'a linked key hides the draft, not the Spend scope');
+  syncCredentialFields(form, { document, settings: { minimaxBillingMode: 'api', minimaxApiKeyConfigured: true } });
+  assert.equal(note.classList.contains('hidden'), false);
+  group.byId('minimaxBillingModeInput').change('token-plan');
+  assert.equal(note.classList.contains('hidden'), true, 'subscription keys do not report cash Spend');
+  group.byId('minimaxBillingModeInput').change('api');
+  assert.equal(note.classList.contains('hidden'), false);
 });
 
 test('MiniMax explicit regions drive Open before a probe and override stale status', async () => {
@@ -810,7 +831,16 @@ test('MiniMax key status reads only the API row and defaults to not configured w
   render();
   assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), true);
 
-  const { group: gap, state: gapState, render: renderGap } = minimaxAppStatus({
+  const { group: fresh, state: freshState, render: renderFresh } = withApiRow({ status: 'ok', updatedAt: '2026-10-26T00:00:00.000Z' });
+  freshState.minimaxPendingCheckSince = Date.parse('2026-10-26T00:00:01.000Z');
+  renderFresh();
+  assert.equal(fresh.byId('minimaxSettingsDetails').classList.contains('hidden'), false, 'old quota cannot fold a pending credential form');
+  freshState.stats.limits.providers.find(row => row.source === 'api').updatedAt = '2026-10-26T00:00:02.000Z';
+  renderFresh();
+  assert.equal(fresh.byId('minimaxSettingsDetails').classList.contains('hidden'), true, 'fresh confirmed quota folds the form');
+  assert.equal(fresh.byId('minimaxSettingsToggle').attributes['aria-expanded'], 'false');
+
+  const { group: gap, state: gapState, enabledProviders, settled, render: renderGap } = minimaxAppStatus({
     providerRows: [{ provider: 'minimax', status: 'ok', source: 'api' }],
     keyConfigured: true
   });
@@ -818,6 +848,17 @@ test('MiniMax key status reads only the API row and defaults to not configured w
   gapState.stats.limits.providers = [{ provider: 'minimax', status: 'ok', source: 'oauth' }];
   renderGap();
   assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), false);
+  settled.add('minimax');
+  renderGap();
+  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), true, 'a completed check without a reading must leave key repair available');
+  settled.clear();
+  gapState.stats.limits.providers.push({ provider: 'minimax', status: 'ok', source: 'api' });
+  renderGap();
+  gapState.stats.limits.providers = [];
+  enabledProviders.delete('minimax');
+  renderGap();
+  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), true, 'disabling collection must not leave the paste form hidden as if a check were pending');
+  assert.equal(isVisible(gap, gap.byId('minimaxOpenBrowser')), true);
 });
 
 test('MiniMax API-key rechecks leave the independent Code row in place', () => {

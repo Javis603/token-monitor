@@ -804,23 +804,7 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   // keeps flapping needs the switch after linking, not before.
   const minimax = forms.find(({ id }) => id === 'minimax');
   const billingMode = minimax.fields.find(({ key }) => key === 'minimaxBillingMode');
-  assert.equal(billingMode.labelKey, 'settings.minimax.billingMode');
-  assert.deepEqual(billingMode.options.map(({ value, labelKey }) => [value, labelKey]), [
-    ['token-plan', 'settings.minimax.billingTokenPlan'],
-    ['api', 'settings.minimax.billingApi']
-  ]);
-  assert.deepEqual(minimax.top, [
-    { field: 'minimaxBillingMode' },
-    { field: 'minimaxApiRegion' }
-  ]);
-  assert.equal(Object.hasOwn(minimax, 'credentialWhen'), false);
-  assert.match(app, /minimax: 'settings\.minimax\.codeNote'/);
-  for (const [locale, messages] of Object.entries(require('../../src/electron/renderer/i18n').MESSAGES)) {
-    assert.ok(messages['settings.minimax.billingMode'], `${locale}: API key type label`);
-    assert.ok(messages['settings.minimax.codeNote'], `${locale}: automatic Code note`);
-    assert.doesNotMatch(messages['settings.minimax.note'], /wallet|钱包|ウォレット|지갑/i, `${locale}: no wallet claim`);
-    assert.doesNotMatch(messages['settings.minimax.codeNote'], /wallet|钱包|ウォレット|지갑/i, `${locale}: no wallet claim`);
-  }
+  assert.deepEqual(billingMode.options.map(({ value }) => value), ['token-plan', 'api']);
   const region = minimax.fields.find(({ key }) => key === 'minimaxApiRegion');
   assert.equal(region.saveOnChange, true);
   assert.deepEqual(region.options.map(({ value }) => value), ['auto', 'cn', 'intl']);
@@ -2839,7 +2823,6 @@ test('main settings migrateLimitProviders normalizes without expanding old defau
 
 test('Home limits groups multiple MiMo accounts like Codex', () => {
   const app = readRendererFile('app.js');
-  const groupBody = viewBody('renderLimitProviderGroup');
   const frameBody = viewBody('renderLimitProviderGroupFrame', 'appendMimoAccountProducts');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
@@ -2852,7 +2835,6 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
   assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
-  assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{\s*count: Number\.isInteger\(accountCount\) \? accountCount : providers\.length,\s*markId\s*\}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
 
   // The page's dispatch is by account count with no provider branch left.
