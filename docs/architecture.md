@@ -105,7 +105,9 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 
 ### Outbound transport
 
-`src/electron/limits/fetch.js` injects the same transport into collection and credential probes: env-proxy-aware `outboundFetch.js` when configured, otherwise Electron `net.fetch` for OS proxy support. Providers must preserve an injected fetch; custom transports do not inherit these guarantees and must be documented in the provider note.
+`src/electron/limits/fetch.js` injects the same transport into collection and credential probes, with app settings taking precedence over environment proxies, then OS routing. `src/electron/networkProxy.js` owns the app proxy policy: while set, it replaces environment proxy and bypass settings with consistent Node/Chromium routes, preserving native local-host bypasses and supported app bypass entries. Empty settings preserve existing env/OS routing. Providers must preserve the injected transport; custom transports must document their exceptions in the provider note.
+
+Routes are read per request, including MiMo exchange hops. Protected Chromium requests wait for proxy changes and connection cleanup; failed applies block those requests and remain retryable, and waits must support cancellation. Invalid persisted proxy URLs block traffic except for the retained bypasses. This setting does not cover external browser/CLI sign-ins, usage collection, Hub sync or GitHub release checks.
 
 Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies cannot shadow provider-managed cookies, and expect cross-origin `Referer` paths to be cancelled without a suitable `referrerPolicy`.
 
