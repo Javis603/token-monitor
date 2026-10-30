@@ -64,17 +64,35 @@ struct SessionUsageTests {
 
     @Test func promptCacheFollowsDesktopExpiryArchiveClientAndClockRules() throws {
         let now = try #require(Date.hubTimestamp(from: "2026-10-09T00:00:00Z"))
-        let active = try decode(#"{"client":"codex","lastUsedAt":"2026-10-08T23:40:00Z","promptCache":{"observedAt":"2026-10-08T23:40:30Z","ttlSeconds":1800}}"#)
+        let active = try decode(#"{"client":"claude","lastUsedAt":"2026-10-08T23:40:00Z","promptCache":{"observedAt":"2026-10-08T23:40:30Z","ttlSeconds":3600}}"#)
         #expect(active.contextUsedPercent(at: now) == nil)
-        #expect(active.cacheMinutesRemaining(at: now) == 11)
-        #expect(active.cacheMinutesRemaining(at: now.addingTimeInterval(630)) == nil)
+        #expect(active.cacheMinutesRemaining(at: now) == 41)
+        #expect(active.cacheMinutesRemaining(at: now.addingTimeInterval(2430)) == nil)
         var archived = active; archived.archived = true
         #expect(archived.cacheMinutesRemaining(at: now) == nil)
-        #expect(try decode(#"{"client":"codex","promptCache":{"observedAt":"2026-10-09T00:00:01Z","ttlSeconds":1800}}"#).cacheMinutesRemaining(at: now) == nil)
+        #expect(try decode(#"{"client":"claude","promptCache":{"observedAt":"2026-10-09T00:00:01Z","ttlSeconds":3600}}"#).cacheMinutesRemaining(at: now) == nil)
         #expect(try decode(#"{"client":"cursor","promptCache":{"observedAt":"2026-10-08T23:59:00Z","ttlSeconds":300}}"#).cacheMinutesRemaining(at: now) == nil)
         #expect(try decode(#"{"client":"claude","promptCache":{"observedAt":"2026-10-08T23:59:00Z","ttlSeconds":300}}"#).cacheMinutesRemaining(at: now) == 4)
-        #expect(try decode(#"{"client":"codex","promptCache":{"observedAt":"2026-10-08T23:59:00Z","ttlSeconds":999}}"#).cacheMinutesRemaining(at: now) == nil)
-        #expect(try decode(#"{"client":"codex","promptCache":null}"#).cacheMinutesRemaining(at: now) == nil)
+        #expect(try decode(#"{"client":"claude","promptCache":{"observedAt":"2026-10-08T23:59:00Z","ttlSeconds":999}}"#).cacheMinutesRemaining(at: now) == nil)
+        #expect(try decode(#"{"client":"claude","promptCache":null}"#).cacheMinutesRemaining(at: now) == nil)
+    }
+
+    @Test func legacyCodexCacheEstimatesStayHiddenWithoutLosingAccountingOrContext() throws {
+        let now = try #require(Date.hubTimestamp(from: "2026-10-09T00:00:00Z"))
+        for ttl in [300, 1800, 3600] {
+            let data: [String: Any] = [
+                "client": "codex", "totalTokens": 100, "inputTokens": 20,
+                "cacheReadTokens": 60, "cacheWriteTokens": 20,
+                "lastUsedAt": "2026-10-08T23:59:00Z", "contextTokens": 20, "contextWindow": 100,
+                "promptCache": ["observedAt": "2026-10-08T23:59:00Z", "ttlSeconds": ttl]
+            ]
+            let session = try JSONDecoder().decode(SessionUsage.self, from: JSONSerialization.data(withJSONObject: data))
+            #expect(session.cacheMinutesRemaining(at: now) == nil)
+            #expect(session.cacheHitPercent == 60)
+            #expect(session.cacheReadTokens == 60)
+            #expect(session.cacheWriteTokens == 20)
+            #expect(session.contextUsedPercent(at: now) == 20)
+        }
     }
 
     @Test func backgroundReviewGroupsSortByActivityWithoutGuessingFromTitles() throws {

@@ -172,7 +172,8 @@ nonisolated struct SessionUsage: Decodable, Sendable {
     }
 
     func cacheMinutesRemaining(at now: Date) -> Int? {
-        guard !isArchived, client == "codex" || client == "claude", let promptCache,
+        // Ignore legacy Codex estimates from older Hubs, devices and archives.
+        guard !isArchived, client == "claude", let promptCache,
               [300, 1800, 3600].contains(promptCache.ttlSeconds),
               let observed = Date.hubTimestamp(from: promptCache.observedAt), observed <= now else { return nil }
         let remaining = observed.addingTimeInterval(Double(promptCache.ttlSeconds)).timeIntervalSince(now)
