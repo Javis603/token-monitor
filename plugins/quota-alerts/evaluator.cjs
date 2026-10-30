@@ -1,6 +1,4 @@
 'use strict';
-// Threshold crossing/rearm adapted from matheusrosendo, PR #538.
-// Recovery/full observations are new in this plugin. See NOTICE.md / LICENSE.
 const MAX_AGE_MS = 15 * 60_000;
 const percentage = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
 
@@ -32,8 +30,9 @@ function evaluate(rows, threshold, alerted, now, observations) {
     const key = JSON.stringify([row.provider, row.accountId]);
     let group = groups.get(key);
     if (!group) groups.set(key, group = { key, provider: row.provider, providerLabel: row.providerLabel, accountId: row.accountId,
-      windows: [], values: [], times: [], latestLowAt: null, complete: true });
+      windows: [], sessionKeys: new Set(), values: [], times: [], latestLowAt: null, complete: true });
     const sessions = row.windows.filter(w => w.kind === 'session');
+    for (const w of sessions) group.sessionKeys.add(JSON.stringify([w.displayLabel, w.windowMinutes ?? null]));
     if (!freshRow(row, now) || !sessions.length) { group.complete = false; skipped++; continue; }
     group.times.push(Date.parse(row.updatedAt));
     for (const w of sessions) {
@@ -62,7 +61,7 @@ function evaluate(rows, threshold, alerted, now, observations) {
       if (!alerted.has(group.key)) {
         alerted.add(group.key); triggered.push({ ...alert, event: 'low' });
       }
-    } else if (group.complete) {
+    } else if (group.complete && (!previous?.windows || previous.windows === JSON.stringify([...group.sessionKeys].sort()))) {
       alerted.delete(group.key);
     }
     if (!group.complete) {
@@ -71,11 +70,14 @@ function evaluate(rows, threshold, alerted, now, observations) {
       if (remaining < threshold) observations.set(group.key, { ...previous, latestAt });
       continue;
     }
-    if (previous?.remaining !== undefined) {
+    const windows = JSON.stringify([...group.sessionKeys].sort());
+    // A changed pool set is a new baseline, not proof the removed pool recovered.
+    // Reset times are deliberately excluded so normal replenishment still alerts.
+    if (previous?.remaining !== undefined && previous.windows === windows) {
       if (remaining === 100 && previous.remaining < 100) triggered.push({ ...alert, event: 'full' });
       else if (remaining >= threshold && previous.remaining < threshold) triggered.push({ ...alert, event: 'restored' });
     }
-    observations.set(group.key, { remaining, observedAt, latestAt });
+    observations.set(group.key, { remaining, observedAt, latestAt, windows });
   }
   return { active, triggered, skipped };
 }

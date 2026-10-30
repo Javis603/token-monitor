@@ -54,7 +54,9 @@ function createBackend({ dataDirectory, host, publish }, { now = Date.now, inter
     for (let page = 0; page < 20; page++) {
       envelope = await host.call('data.query', { resource: 'limits', period: 'today', page: { limit: 200, ...(cursor ? { cursor } : {}) } });
       if (!current()) return;
-      if (envelope.availability !== 'available' || envelope.freshness?.state !== 'fresh'
+      // Envelope freshness follows usage collection; quota rows carry their own
+      // observation timestamps, checked by the evaluator even when usage is idle.
+      if (envelope.availability !== 'available'
           || envelope.aggregateCoverage?.kind !== 'authorizedCollection') {
         emit({ state: 'unavailable', settings: s, active: [], skipped: 0 }); return;
       }

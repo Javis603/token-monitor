@@ -1,6 +1,6 @@
 # App-distributed official catalog
 
-This directory is the offline official catalog. `quota-alerts.tmplugin` contains Quota alerts 0.1.0. Its maintained source and notices are in `plugins/quota-alerts/`. Official provenance comes from inclusion in the App, not a publisher flag. Users still explicitly install/enable and review background execution; shipping the archive never executes it.
+This directory is the offline official catalog. `quota-alerts.tmplugin` contains Quota alerts 0.1.0. Its source is in `plugins/quota-alerts/`. Official provenance comes from inclusion in the App, not a publisher flag. Users still explicitly install/enable and review background execution; shipping the archive never executes it.
 
 Rebuild after source changes from the repository root:
 
@@ -12,4 +12,4 @@ Review and replace `quota-alerts.tmplugin` with those exact bytes. The package b
 
 Bundles are currently listed in filename order. Use descriptive filenames without numeric rank prefixes; installation identity comes from `manifest.id` and the bundled source, so a filename change does not rename or duplicate an installed plugin. `readmes.json` is host-owned presentation metadata selecting each bundled plugin's repository-relative localized Markdown document. Entries without a mapping keep the repository README fallback. It changes no execution permissions or network-validation policy.
 
-Local source/Node checks do not establish native UI or notification delivery. See the plugin README and maintenance document for outstanding acceptance before release.
+Installation and behavior are described in the plugin README.

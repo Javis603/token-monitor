@@ -117,7 +117,7 @@ test('backend consumes all pages atomically and discards stale/unavailable trave
   const h = harness(t), backend = h.create(); h.settings({ lowQuota: true });
   h.data(q => q.page.cursor ? envelope([row(5)]) : { ...envelope([row(90)]), pageInfo: { hasMore: true, nextCursor: 'second' } });
   await backend.start(); assert.equal(h.sent.length, 1); assert.equal(h.queries[1].page.cursor, 'second');
-  h.data({ ...envelope([row(90)]), freshness: { state: 'stale' } }); await backend.call('refresh');
+  h.data({ ...envelope([row(90, { updatedAt: new Date(now - 16 * 60000).toISOString() })]), freshness: { state: 'stale' } }); await backend.call('refresh');
   h.data(envelope([row(5)])); await backend.call('refresh'); assert.equal(h.sent.length, 1, 'stale recovery did not rearm');
   h.settings({ threshold: 20 });
   h.data(q => q.page.cursor ? { availability: 'snapshotExpired' } : { ...envelope([row(1)]), pageInfo: { hasMore: true, nextCursor: 'expired' } });

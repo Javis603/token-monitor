@@ -63,7 +63,7 @@ test('official details use localized plugin README instead of repository overvie
     locale = language; file = filename;
     const details = await catalog.details('bundled', 'quota-alerts');
     assert.ok(details.html.includes(title), `${language} README title`);
-    assert.equal(details.imageCount, 1, `${language} PNG icon`);
+    assert.equal(details.imageCount, 0, `${language} README omits the catalog icon`);
   }
   assert.equal(calls.length, cases.length);
 });

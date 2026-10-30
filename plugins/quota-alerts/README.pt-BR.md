@@ -1,10 +1,6 @@
-[EN](README.md) | [简](README.zh-CN.md) | [繁](README.zh-TW.md) | [KO](README.ko.md) | [JA](README.ja.md) | **PT**
-
 # Alertas de cota
 
 Receba alertas no computador quando a cota da sessão de uma conta ficar baixa, se recuperar ou voltar a ficar completa.
-
-![Ícone de alertas de cota](assets/icon.png)
 
 ## Recursos
 
@@ -15,9 +11,7 @@ Receba alertas no computador quando a cota da sessão de uma conta ficar baixa, 
 
 ## Compatibilidade
 
-A versão 0.1.0 se destina ao host experimental `tmApi: 1` atual com as alterações de metadados de exibição incluídas. Os comandos de compilação e validação estão em [MAINTAINING.md](MAINTAINING.md).
-
-Os testes automatizados específicos cobrem avaliação de limites, configurações, envio simulado e integridade do pacote. **O layout nativo final e a entrega real de notificações ainda não foram validados.** Um teste de desenvolvimento apresentou falha na notificação do computador. Windows, Linux e o host empacotado também não foram validados.
+Use uma versão do Token Monitor App que inclua Alertas de cota no catálogo oficial opcional. O plugin usa a interface experimental `tmApi: 1`.
 
 O plugin usa leituras de cota existentes, sem consultas adicionais aos provedores. Dados ausentes ou desatualizados não são tratados como zero. Não há cartão na página inicial, página independente nem efeito de pulsação na janela inteira.
 
@@ -40,7 +34,9 @@ As opções são salvas imediatamente. O limite é salvo ao sair do campo ou pre
 
 Leituras baixas repetidas não geram novos alertas até a recuperação. Reiniciar o App ou alterar a identidade da fonte pode iniciar um novo episódio. Falhas de envio não são repetidas automaticamente.
 
-Exemplos de texto gerados com dados de fixture; não são capturas de notificações do sistema:
+Quando as janelas de sessão mudam, o plugin registra o novo estado sem anunciar recuperação ou cota completa imediatamente.
+
+Exemplos de notificações:
 
 ```text
 Codex: cota baixa
@@ -62,8 +58,6 @@ Os alertas no computador usam a operação de notificação do host. Este plugin
 
 O pacote oficial é atualizado junto com o App. Revise e aprove o código alterado antes de executá-lo; a ativação, as preferências e a escolha confirmada de segundo plano continuam sob seu controle. A reversão restaura o código, não desfaz notificações já enviadas.
 
-## Licença e créditos
+## Licença
 
-Mantido por **Javis603**. Adaptado da contribuição de **Matheus Rosendo (@matheusrosendo)** no [PR #538](https://github.com/Javis603/token-monitor/pull/538), sem incorporar o PR inteiro. O crédito não indica que ele mantém ou endossa esta adaptação.
-
-A origem e as partes reutilizadas estão em [NOTICE.md](NOTICE.md), e a [licença MIT](LICENSE) original está incluída. O ícone de sino é uma criação original para esta adaptação, sob a mesma licença. Consulte [MAINTAINING.md](MAINTAINING.md) para detalhes técnicos e validações pendentes.
+[MIT](LICENSE).

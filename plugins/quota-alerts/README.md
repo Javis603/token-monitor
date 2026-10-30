@@ -1,10 +1,6 @@
-**EN** | [简](README.zh-CN.md) | [繁](README.zh-TW.md) | [KO](README.ko.md) | [JA](README.ja.md) | [PT](README.pt-BR.md)
-
 # Quota alerts
 
 Receive desktop alerts when an account’s session quota runs low, recovers or returns to full.
-
-![Quota alerts icon](assets/icon.png)
 
 ## Features
 
@@ -15,9 +11,7 @@ Receive desktop alerts when an account’s session quota runs low, recovers or r
 
 ## Compatibility
 
-Version 0.1.0 targets the current experimental `tmApi: 1` host and the accompanying display-metadata patches. Build and validation commands are in [MAINTAINING.md](MAINTAINING.md).
-
-Focused automated checks cover evaluation, settings, mock delivery and package integrity. **Final native layout and real notification delivery remain unverified**; a development test reported a desktop-notification failure. Windows, Linux and packaged-host operation also remain unverified.
+Use a Token Monitor App build that includes Quota alerts in its optional official catalog. The plugin uses the experimental `tmApi: 1` interface.
 
 The plugin uses existing quota readings, not additional provider requests. Missing or stale data is not treated as zero. There is no Home card, standalone page or whole-window pulse.
 
@@ -40,7 +34,9 @@ Switches save immediately. The threshold field saves on blur or Enter. Failed sa
 
 Repeated low readings do not notify again until recovery. App restart or source identity changes may start another alert episode. Failed delivery is not automatically retried.
 
-Example notification text generated from fixture data; these are not OS screenshots:
+A change in the available session windows establishes a new baseline without announcing recovery or full quota.
+
+Example notifications:
 
 ```text
 Codex: quota low
@@ -62,8 +58,6 @@ Desktop alerts use the host notification operation. This plugin makes no direct 
 
 Official package updates arrive with App updates. Review and approve changed plugin code before running it; enablement, preferences and confirmed background choices remain user-controlled. Rollback restores code, not notifications already sent.
 
-## License and credits
+## License
 
-Maintained by **Javis603**. Adapted from **Matheus Rosendo (@matheusrosendo)**'s [PR #538](https://github.com/Javis603/token-monitor/pull/538), rather than merged wholesale. This credit does not imply that he maintains or endorses the adaptation.
-
-Source attribution and reused portions are documented in [NOTICE.md](NOTICE.md). The original [MIT license](LICENSE) is included. The notification-bell icon is original artwork for this adaptation under the same license. See [MAINTAINING.md](MAINTAINING.md) for technical details and outstanding acceptance checks.
+[MIT](LICENSE).

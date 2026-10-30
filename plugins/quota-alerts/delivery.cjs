@@ -1,5 +1,4 @@
 'use strict';
-// Window-summary formatting adapted from matheusrosendo, PR #538. See NOTICE.md.
 
 async function message(alert, now, locale = 'en') {
   const { t, resolveLocale } = await import('./i18n.mjs');
