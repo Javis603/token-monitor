@@ -54,11 +54,11 @@ The App displays labels beside the version to describe the plugin's interfaces a
 | Label | Manifest declaration |
 | --- | --- |
 | Widgets | A view supports `home`, `tray`, `edgeDock` or `notch` |
-| Pages | A view supports `page` or declares content replacement `targets` |
+| Pages | A view supports `page` or declares content `targets` |
 | Appearance | At least one skin is declared in `skins` |
 | Automation | `category: "automation"` for monitoring, reminders or scheduled tasks |
 
-A plugin can have more than one label. Omit `category` (or use `null`) when Automation does not apply; background support alone does not imply automation. Labels are display metadata and do not enable features or grant execution permissions. See [catalog metadata](distribution-design.md#create-a-community-catalog) for remote catalog display hints.
+A plugin can have more than one label. `category` is optional. See [catalog metadata](distribution-design.md#create-a-community-catalog) for discovery type hints.
 
 ### First-use settings
 
