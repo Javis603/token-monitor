@@ -186,3 +186,117 @@ test('fetchTraeLimits aborts a hung request and keeps body reads within the dead
   });
   assert.equal(body.status, 'unavailable');
 });
+
+test('Trae Cookie resolves independently from legacy JWT and rejects header injection', () => {
+  const { traeCookie } = require('../../src/shared/providers/trae/limits');
+  assert.equal(traeCookie({ TRAE_COOKIE: 'sessionid=env' }, { traeCookie: 'Cookie: sessionid=saved' }), 'sessionid=saved');
+  assert.equal(traeCookie({ TOKEN_MONITOR_TRAE_COOKIE: 'sessionid=alias' }), 'sessionid=alias');
+  assert.equal(traeCookie({}, { traeCookie: 'sessionid=x\r\nHost: other.example' }), '');
+});
+
+test('Trae CN web session exchanges JWT then reads authoritative credit summary instead of the 401 IDE route', async () => {
+  const calls = [];
+  const provider = await fetchTraeLimits({ traeCookie: 'sessionid=web-account', traeAccessToken: 'legacy', traeDeviceId: 'telemetry' }, {
+    env: {},
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith('/GetUserToken')) return response({ Result: { Token: 'web-jwt' } });
+      if (url.endsWith('/user_current_entitlement_list')) return response({
+        is_credits_billing: true, usage_summary: { total_amount: 15800, consumed_amount: 2455.51 },
+        // Pack sums need not describe the currently spendable summary.
+        user_entitlement_pack_list: [pack(99999, 0)]
+      });
+      return response({ code: 1001 }, 401);
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows[0].limit, 15800);
+  assert.equal(provider.windows[0].used, 2455.51);
+  assert.equal(provider.windows[0].resetsAt, null);
+  assert.equal(provider.balance.amount, 13344.49);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].init.headers.Authorization, undefined);
+  assert.equal(calls[0].init.body, '{}');
+  assert.equal(calls[1].init.headers.Authorization, ['Cloud', 'IDE', 'JWT'].join('-') + ' web-jwt');
+  assert.deepEqual(JSON.parse(calls[1].init.body), { require_usage: true, full_data: true });
+  for (const { url, init } of calls) {
+    assert.equal(new URL(url).origin, 'https://api.trae.cn');
+    assert.equal(init.headers.Cookie, 'sessionid=web-account');
+    assert.equal(init.headers.Origin, 'https://www.trae.cn');
+    assert.equal(init.headers.Referer, 'https://www.trae.cn/');
+    assert.equal(init.headers['X-Device-Id'], undefined);
+    assert.equal(init.headers.Host, undefined);
+    assert.equal(init.redirect, 'error');
+    assert.equal(init.credentials, 'omit');
+  }
+  assert.doesNotMatch(JSON.stringify(provider), /web-account|web-jwt|legacy|telemetry/);
+});
+
+test('Trae web rejects expired sessions and malformed token/summary without falling back to IDE credentials', async () => {
+  for (const [tokenResponse, usageResponse, status] of [
+    [response(null, 401), null, 'unauthorized'],
+    [response({ code: 1001 }), null, 'unauthorized'],
+    [response(null, 429), null, 'sourceRateLimited'],
+    [response({ Result: {} }), null, 'unavailable'],
+    [response({ Result: { Token: 'bad\r\ntoken' } }), null, 'unavailable'],
+    [response({ Result: { Token: 'jwt' } }), response({ code: 1001 }), 'unauthorized'],
+    [response({ Result: { Token: 'jwt' } }), response(null, 403), 'unauthorized'],
+    [response({ Result: { Token: 'jwt' } }), response(null, 429), 'sourceRateLimited'],
+    [response({ Result: { Token: 'jwt' } }), response({ user_entitlement_pack_list: [pack(100, 0)] }), 'unavailable'],
+    [response({ Result: { Token: 'jwt' } }), response({ is_credits_billing: true, usage_summary: { total_amount: 100, consumed_amount: '20' } }), 'unavailable']
+  ]) {
+    const calls = [];
+    const result = await fetchTraeLimits({ traeCookie: 'sessionid=x', traeAccessToken: 'legacy' }, {
+      env: {}, fetch: async (url) => { calls.push(url); return calls.length === 1 ? tokenResponse : usageResponse; }
+    });
+    assert.equal(result.status, status);
+    assert.deepEqual(result.windows, []);
+    assert.equal(calls.some((url) => url.endsWith('/ide_user_ent_usage')), false);
+  }
+});
+
+test('Trae web handles zero and overdrawn credits without inventing a reset', async () => {
+  for (const [total, used] of [[0, 0], [0, 5], [100, 125]]) {
+    const result = await fetchTraeLimits({ traeCookie: 'sessionid=x' }, {
+      env: {}, fetch: async (url) => url.endsWith('/GetUserToken')
+        ? response({ Result: { Token: 'jwt' } })
+        : response({ is_credits_billing: true, usage_summary: { total_amount: total, consumed_amount: used } })
+    });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.balance.amount, 0);
+    assert.equal(result.windows[0].used, used);
+    assert.equal(result.windows[0].resetsAt, null);
+    assert.equal(result.windows[0].showMeter, total > 0);
+  }
+});
+
+test('Trae web refresh and account swaps always exchange the current Cookie and never share JWTs', async () => {
+  const seen = [];
+  const deps = { env: {}, fetch: async (url, init) => {
+    seen.push({ url, cookie: init.headers.Cookie, auth: init.headers.Authorization });
+    return url.endsWith('/GetUserToken')
+      ? response({ Result: { Token: `jwt-${init.headers.Cookie}` } })
+      : response({ is_credits_billing: true, usage_summary: { total_amount: 100, consumed_amount: 10 } });
+  } };
+  const a = await fetchTraeLimits({ traeCookie: 'sessionid=a' }, deps);
+  const b = await fetchTraeLimits({ traeCookie: 'sessionid=b' }, deps);
+  await fetchTraeLimits({ traeCookie: 'sessionid=b' }, deps);
+  assert.notEqual(a.accountKey, b.accountKey);
+  assert.equal(seen.length, 6);
+  for (let i = 0; i < seen.length; i += 2) {
+    assert.equal(seen[i].auth, undefined);
+    assert.equal(seen[i + 1].auth, ['Cloud', 'IDE', 'JWT'].join('-') + ' jwt-' + seen[i].cookie);
+  }
+});
+
+test('Trae web exchange and entitlement body reads honor the injected deadline', async () => {
+  for (const hungStage of ['token', 'usage']) {
+    const result = await fetchTraeLimits({ traeCookie: 'sessionid=x' }, {
+      env: {}, traeFetchTimeoutMs: 5,
+      fetch: async (url) => url.endsWith('/GetUserToken') && hungStage === 'usage'
+        ? response({ Result: { Token: 'jwt' } })
+        : { ok: true, status: 200, json: async () => new Promise(() => {}) }
+    });
+    assert.equal(result.status, 'unavailable');
+  }
+});
