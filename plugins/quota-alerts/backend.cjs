@@ -116,7 +116,7 @@ function createBackend({ dataDirectory, host, publish }, { now = Date.now, inter
       if (method === 'preferences.update') {
         const saved = preferences.update(args);
         generation++; controller.abort(); controller = new AbortController();
-        emit({ state: saved.values.lowQuota || saved.values.recovery ? status.state : 'off', active: [], settings: saved.values });
+        emit({ state: saved.values.lowQuota || saved.values.recovery ? 'starting' : 'off', active: [], settings: saved.values });
         return refresh().then(() => saved);
       }
       if (method === 'refresh') return refresh();

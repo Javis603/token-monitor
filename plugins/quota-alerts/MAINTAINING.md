@@ -11,7 +11,7 @@ node --test --test-concurrency=2 tests/plugin-quota-alerts/*.test.js
 node scripts/build-plugin-package.js plugins/quota-alerts /tmp/quota-alerts-0.1.0.tmplugin
 ```
 
-The output archive must not already exist. List every distributed file in the manifest. `identityIcon` embeds the static 128 × 128 PNG in `assets/icon.png`; retain the editable `assets/icon.svg`. The original icon and source notices use the bundled MIT license.
+The output archive must not already exist. List every distributed file in the manifest. `identityIcon` embeds the static 128 × 128 PNG in `assets/icon.png`; use `assets/icon.svg` as the editable source and export it at 128 × 128 to regenerate the PNG. Refresh the manifest data URL from those exact PNG bytes. The original icon and source notices use the bundled MIT license.
 
 ## Host display dependencies
 
@@ -23,7 +23,7 @@ Formal limits rows provide `providerLabel` from the canonical App tool-name cata
 
 The backend queries captured limits every five seconds while demanded and at least one alert type is selected. It performs no provider probes or direct network requests and reads no credentials. Snapshot freshness/coverage must be complete and fresh. Row status must be ok with a public account identity; missing percentages, readings older than 15 minutes and elapsed/invalid reset times cannot prove recovery. A reset countdown alone is never evidence of full quota.
 
-Group duplicate provider/account rows before evaluating; use the lowest session percentage. Incomplete duplicates may warn about known low readings but cannot confirm recovery. Fresh complete observations must advance their timestamps; reordered/replayed observations cannot rearm or notify. Weekly/billing values supplement low notifications; recovery/full messages describe session windows only.
+Group duplicate provider/account rows before evaluating; use the lowest session percentage. Incomplete duplicates may warn about known low readings but cannot confirm recovery. Fresh complete observations must advance their timestamps; reordered/replayed observations cannot rearm or notify. A known low reading in an incomplete group still advances the low-reading timestamp fence, independently of the complete recovery baseline, so an older high cannot rearm that warning. Weekly/billing values supplement low notifications; recovery/full messages describe session windows only.
 
 The two independent opt-ins are `lowQuota` and `recovery`, both off by default. Below-threshold crossings produce low events. A complete session reading crossing from below the threshold back to it or above produces restored; a reading rising from below 100 to exactly 100 produces full instead. Unrounded values decide the event. Notification percentages truncate to at most two decimals, so 99.999 cannot be described as 100%.
 

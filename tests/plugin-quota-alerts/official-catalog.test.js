@@ -28,7 +28,7 @@ test('official archive matches source and installs offline without executing or 
   const entry = catalog.list().entries.find(entry => entry.id === 'quota-alerts');
   assert.deepEqual(entry.types, ['automation']);
   assert.equal(entry.origin.kind, 'official'); assert.equal(entry.author, 'Javis603');
-  assert.ok(entry.identityIcon.startsWith('data:image/png;base64,'));
+  assert.equal(entry.identityIcon, 'data:image/png;base64,' + fs.readFileSync(path.join(source, 'assets/icon.png')).toString('base64'));
   const preview = await catalog.preview('bundled', 'quota-alerts', '0.1.0');
   assert.deepEqual(preview.types, ['automation']);
   await managed.install(preview.token);

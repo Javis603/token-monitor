@@ -77,6 +77,23 @@ test('manual notification test works with both alerts off without querying quota
   assert.equal(fs.existsSync(path.join(dir, 'crossings.json')), false);
   assert.equal(notices.length, 1);
 });
+test('enabling recovery publishes starting while its first quota query is pending', async t => {
+  const dir = directory(t); let release, entered;
+  const queried = new Promise(resolve => { entered = resolve; });
+  const backend = createBackend({ dataDirectory: dir, publish() {}, host: { async call(method) {
+    if (method === 'app.settings') return { language: 'en' };
+    assert.equal(method, 'data.query');
+    entered(); return new Promise(resolve => { release = resolve; });
+  } } }, { intervalMs: 0 });
+  t.after(() => backend.dispose());
+  await backend.start(); assert.equal(backend.call('status').state, 'off');
+  const before = backend.call('preferences.get');
+  const update = backend.call('preferences.update', { expectedRevision: before.revision, patch: { recovery: true } });
+  await queried;
+  try { assert.equal(backend.call('status').state, 'starting'); }
+  finally { release({ availability: 'available', freshness: { state: 'fresh' }, aggregateCoverage: { kind: 'authorizedCollection' }, rows: [], pageInfo: { hasMore: false } }); }
+  await update; assert.equal(backend.call('status').state, 'monitoring');
+});
 test('source changes clear old alerts and receipts before awaited replacement quota arrives', async t => {
   const dir = directory(t), prefs = createPreferences(dir);
   prefs.update({ expectedRevision: 0, patch: { lowQuota: true } });

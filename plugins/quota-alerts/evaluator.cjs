@@ -32,7 +32,7 @@ function evaluate(rows, threshold, alerted, now, observations) {
     const key = JSON.stringify([row.provider, row.accountId]);
     let group = groups.get(key);
     if (!group) groups.set(key, group = { key, provider: row.provider, providerLabel: row.providerLabel, accountId: row.accountId,
-      windows: [], values: [], times: [], complete: true });
+      windows: [], values: [], times: [], latestLowAt: null, complete: true });
     const sessions = row.windows.filter(w => w.kind === 'session');
     if (!freshRow(row, now) || !sessions.length) { group.complete = false; skipped++; continue; }
     group.times.push(Date.parse(row.updatedAt));
@@ -42,6 +42,7 @@ function evaluate(rows, threshold, alerted, now, observations) {
         group.complete = false; skipped++; continue;
       }
       group.values.push(w.remainingPercent);
+      if (w.remainingPercent < threshold) group.latestLowAt = Math.max(group.latestLowAt ?? 0, Date.parse(row.updatedAt));
     }
     group.windows.push(...row.windows.filter(w => percentage(w.remainingPercent)).map(w => ({
       kind: w.kind, displayLabel: w.displayLabel, remainingPercent: w.remainingPercent, resetsAt: w.resetsAt
@@ -55,7 +56,8 @@ function evaluate(rows, threshold, alerted, now, observations) {
     const alert = { key: group.key, provider: group.provider, providerLabel: group.providerLabel, accountId: group.accountId, remaining,
       windows: [...new Map(group.windows.map(w => [JSON.stringify(w), w])).values()] };
     if (remaining < threshold) active.push({ ...alert, event: 'low' });
-    if (previous && observedAt <= previous.observedAt) continue;
+    const latestAt = remaining < threshold ? group.latestLowAt : observedAt;
+    if (previous && latestAt <= previous.latestAt) continue;
     if (remaining < threshold) {
       if (!alerted.has(group.key)) {
         alerted.add(group.key); triggered.push({ ...alert, event: 'low' });
@@ -63,12 +65,17 @@ function evaluate(rows, threshold, alerted, now, observations) {
     } else if (group.complete) {
       alerted.delete(group.key);
     }
-    if (!group.complete) continue;
-    if (previous) {
+    if (!group.complete) {
+      // A known low can warn without establishing a complete recovery baseline.
+      // Fence older highs and replay using the low reading's own timestamp.
+      if (remaining < threshold) observations.set(group.key, { ...previous, latestAt });
+      continue;
+    }
+    if (previous?.remaining !== undefined) {
       if (remaining === 100 && previous.remaining < 100) triggered.push({ ...alert, event: 'full' });
       else if (remaining >= threshold && previous.remaining < threshold) triggered.push({ ...alert, event: 'restored' });
     }
-    observations.set(group.key, { remaining, observedAt });
+    observations.set(group.key, { remaining, observedAt, latestAt });
   }
   return { active, triggered, skipped };
 }

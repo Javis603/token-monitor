@@ -47,6 +47,21 @@ test('duplicates and incomplete readings cannot prove recovery or full quota', (
   assert.equal(scan(s, [row(100, 5, { accountId: 'new-account' })], 5).triggered.length, 0);
 });
 
+for (const baseline of [false, true]) for (const unknownAt of [5, 20]) {
+  test(`incomplete low readings fence older recovery and replay (baseline=${baseline}, unknownAt=${unknownAt})`, () => {
+    const s = state();
+    if (baseline) scan(s, [row(100)], 0);
+    const incomplete = [row(5, 20), row(null, unknownAt)];
+    assert.deepEqual(scan(s, incomplete, 20).triggered.map(a => a.event), ['low']);
+    assert.equal(scan(s, [row(100, 10)], 21).triggered.length, 0);
+    assert.equal(s.low.size, 1, 'a high reading older than the known low must not rearm');
+    assert.equal(scan(s, incomplete, 22).triggered.length, 0, 'the same low snapshot must not notify twice');
+    scan(s, [row(100, 30)], 30);
+    assert.equal(s.low.size, 0, 'a genuinely newer complete reading can rearm');
+    assert.deepEqual(scan(s, [row(5, 40)], 40).triggered.map(a => a.event), ['low']);
+  });
+}
+
 test('stale, unavailable, elapsed and out-of-order observations never fabricate recovery', () => {
   const s = state(); scan(s, [row(7, 10)], 10);
   for (const value of [row(100, 9), row(100, 10), row(100, 11, { status: 'unavailable' }), row(100, 11, { updatedAt: new Date(now - 16 * 60_000).toISOString() }),
