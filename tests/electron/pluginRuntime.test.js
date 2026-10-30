@@ -219,10 +219,8 @@ test('master pause checks drafts before mutation and disposes after persistence;
   const actions=[]; f.lifecycle(f.main, request=>{actions.push(request.action);return {loaded:true,unsaved:true};});
   f.cancel(); await assert.rejects(f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:false}),/cancelled/);
   assert.equal(f.settings.pluginsEnabled,true); assert.ok(!actions.includes('release'));
-  f.accept(); const finish=await f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:false});
-  f.settings.pluginsEnabled=false;f.runtime.settingsChanged();await finish();assert.ok(actions.includes('release'));
-  const resume=await f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:true});
-  f.settings.pluginsEnabled=true;f.runtime.settingsChanged();await resume();
+  f.accept(); await f.setMasterEnabled(false); assert.ok(actions.includes('release'));
+  await f.setMasterEnabled(true);
   assert.equal(f.runtime.manager.active('trusted-fixture'),true);assert.equal(f.main.webContents.reloads,0);
 });
 
@@ -283,10 +281,8 @@ test('master pause and resume send only each hosts loaded plugin ids', async t =
   const file = path.join(folder, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file)); manifest.id = 'other-fixture'; fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
   const calls = []; f.lifecycle(f.main, request => { calls.push(request); return { loaded: true }; });
-  const finish = await f.runtime.beforeSettingsChange(f.event(f.main), { pluginsEnabled: false });
-  f.settings.pluginsEnabled = false; f.runtime.settingsChanged(); await finish();
-  const resume = await f.runtime.beforeSettingsChange(f.event(f.main), { pluginsEnabled: true });
-  f.settings.pluginsEnabled = true; f.runtime.settingsChanged(); await resume();
+  await f.setMasterEnabled(false);
+  await f.setMasterEnabled(true);
   assert.deepEqual(calls.map(request => request.ids), [['trusted-fixture'], ['trusted-fixture'], ['trusted-fixture']]);
 });
 

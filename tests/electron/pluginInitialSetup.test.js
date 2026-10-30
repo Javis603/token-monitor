@@ -17,14 +17,14 @@ function raw() {
     skins: [{ id: 'blue', name: 'Blue', colors: { accent: '#abcdef' }, appearance: { font: 'mono' } }],
     defaults: { content: { 'main.home.content': 'compact' }, background: true, skin: 'blue' } };
 }
-async function fixture(t) {
+async function fixture(t, { manifest = raw(), safeMode = false } = {}) {
   const sourceDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-setup-test-'));
   t.after(() => fs.rmSync(sourceDirectory, { recursive: true, force: true }));
-  const manifest = raw(), file = path.join(sourceDirectory, 'manifest.json');
+  const file = path.join(sourceDirectory, 'manifest.json');
   fs.writeFileSync(file, JSON.stringify(manifest));
   fs.writeFileSync(path.join(sourceDirectory, 'ui.mjs'), 'export function mount(){}');
   fs.writeFileSync(path.join(sourceDirectory, 'backend.cjs'), 'exports.activate=()=>({});');
-  const f = await runtimeFixture(t, { sourceDirectory, initialSettings: { pluginMainPages: [], notchPluginPages: [], notchEnabled: false, edgeDockEnabled: false, themeColors: { accent: '#112233' }, vendorColors: {} } });
+  const f = await runtimeFixture(t, { sourceDirectory, safeMode, initialSettings: { pluginMainPages: [], notchPluginPages: [], notchEnabled: false, edgeDockEnabled: false, themeColors: { accent: '#112233' }, vendorColors: {} } });
   return { f, manifest, file };
 }
 
@@ -111,6 +111,60 @@ test('install-only persists explicit opt-outs and applies them only on first ena
   assert.deepEqual(f.settings.pluginMainPages, []); assert.equal(f.settings.pluginContentSelections['main.home.content'], undefined);
   assert.equal(f.settings.pluginStates['setup-fixture'].background, false); assert.equal(f.settings.pluginAuthorSkin, null);
   assert.equal(f.settings.themeColors.accent, '#112233');
+});
+
+for (const mode of ['running', 'paused', 'safe-mode', 'disabled']) for (const optOut of [false, true]) {
+  test(`reviewed update choices apply once in ${mode}, optOut=${optOut}`, async t => {
+    const original = { ...raw(), background: false, backgroundDescription: undefined, defaults: {}, skins: [],
+      views: [{ id: 'old-page', surfaces: ['page'], defaultSurfaces: [] }] };
+    const { f, file } = await fixture(t, { manifest: original, safeMode: mode === 'safe-mode' });
+    await f.install(); await f.invoke('plugins:setEnabled', { id: 'setup-fixture', enabled: true });
+    if (mode === 'paused') await f.setMasterEnabled(false);
+    if (mode === 'disabled') await f.invoke('plugins:setEnabled', { id: 'setup-fixture', enabled: false });
+    fs.writeFileSync(file, JSON.stringify({ ...raw(), version: '2.0.0', views: [...original.views, ...raw().views] }));
+    const preview = await f.invoke('plugins:import', 'directory');
+    const choices = Object.fromEntries(preview.initialSetup.fields.map(field => [field.key, optOut
+      ? field.kind === 'placement' || field.kind === 'background' ? false : null : field.value]));
+    assert.equal(Object.keys(choices).length, 5);
+    await f.invoke('plugins:install', preview.token, { trustUpdate: true, initialSetup: choices });
+    if (mode === 'disabled') {
+      assert.equal(f.runtime.manager.active('setup-fixture'), false);
+      assert.equal(f.invoke('plugins:list').plugins[0].initialSetup.fields.length, 5);
+      assert.deepEqual(f.settings.pluginMainPages, []); assert.equal(f.settings.themeColors.accent, '#112233');
+      await f.invoke('plugins:setEnabled', { id: 'setup-fixture', enabled: true });
+    }
+    assert.deepEqual(f.settings.pluginMainPages, optOut ? [] : ['setup-fixture/page']);
+    assert.equal(f.settings.pluginContentSelections?.['main.home.content'], optOut ? undefined : 'setup-fixture/compact');
+    assert.equal(f.settings.pluginStates['setup-fixture'].background, !optOut);
+    assert.equal(f.settings.themeColors.accent, optOut ? '#112233' : '#abcdef');
+    assert.equal(f.settings.pluginStates['setup-fixture'].enabled, true);
+    assert.equal(f.invoke('plugins:list').plugins[0].initialSetup.fields.length, 0);
+    if (mode === 'paused' || mode === 'safe-mode') {
+      assert.equal(f.runtime.manager.active('setup-fixture'), false);
+      assert.equal(f.children.length, 0, 'settings must not execute paused code');
+    }
+    if (mode === 'paused') await f.setMasterEnabled(true);
+    if (mode !== 'safe-mode') {
+      assert.equal(f.runtime.manager.active('setup-fixture'), true);
+      f.settings.themeColors.accent = '#445566';
+      await f.setMasterEnabled(false); await f.setMasterEnabled(true);
+      assert.equal(f.settings.themeColors.accent, '#445566', 'master resume must not reapply author defaults');
+    }
+  });
+}
+
+test('new installation while paused stays disabled with pending choices until individual enable', async t => {
+  const { f } = await fixture(t); await f.setMasterEnabled(false);
+  const preview = await f.invoke('plugins:import', 'directory');
+  await f.invoke('plugins:install', preview.token, { trustInstall: true, initialSetup: preview.initialSetup.values });
+  await f.setMasterEnabled(true);
+  assert.equal(f.runtime.manager.active('setup-fixture'), false);
+  assert.equal(f.invoke('plugins:list').plugins[0].trusted, false);
+  assert.deepEqual(f.settings.pluginInitialSetup['setup-fixture'].applied, []);
+  assert.deepEqual(f.settings.pluginMainPages, []); assert.equal(f.settings.themeColors.accent, '#112233');
+  await f.invoke('plugins:setEnabled', { id: 'setup-fixture', enabled: true });
+  assert.equal(f.runtime.manager.active('setup-fixture'), true);
+  assert.deepEqual(f.settings.pluginMainPages, ['setup-fixture/page']);
 });
 
 test('first enable can revise pending choices, and later enables and updates leave those decisions alone', async t => {

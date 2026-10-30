@@ -344,14 +344,22 @@ app.whenReady().then(async () => {
       assert.equal(runtime.manager.list().plugins.find(plugin => plugin.id === 'trusted-fixture').version, '1.0.0');
       assert.equal(settings.pluginContentSelections['main.home.content'], 'other-fixture/content');
     }
-    toggleResponses.push(1, 1);
+    await js("tokenMonitor.updateSettings({pluginsEnabled:false})");
+    assert.equal(runtime.manager.active('trusted-fixture'), false);
+    assert.equal(runtime.manager.backendCount(), 0);
+    toggleResponses.push(1);
     await js(install);
     await waitFor("state.pluginCatalog?.plugins?.find(plugin=>plugin.id==='trusted-fixture')?.version==='2.0.0'", 'same preview update succeeds after both cancellations');
+    assert.equal(settings.pluginContentSelections['main.home.content'], 'trusted-fixture/content');
+    assert.equal(runtime.manager.active('trusted-fixture'), false);
+    assert.equal(runtime.manager.backendCount(), 0);
+    assert.equal(await js("state.pluginCatalog.plugins.find(plugin=>plugin.id==='trusted-fixture').initialSetup.fields.length"), 0);
+    await js("tokenMonitor.updateSettings({pluginsEnabled:true})");
     await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]') && document.querySelector('[aria-label=\"Fixture draft\"]')!==originalUpdateInput", 'updated plugin UI remount');
     await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     assert.equal(settings.pluginContentSelections['main.home.content'], 'trusted-fixture/content');
     assert.equal(runtime.manager.active('other-fixture'), true);
-    assertConsoleClean(); console.log('PASS actual App update consent: conflict and package cancellation retain original DOM, draft, backend PID and version; same preview retry succeeds');
+    assertConsoleClean(); console.log('PASS actual App update consent: cancellations retain drafts and backend; paused retry applies reviewed settings without execution; master resume uses the chosen source');
     await runtime.dispose(); runtime = null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
   }
   if (process.env.TM_CONTENT_SAFETY === '1') {

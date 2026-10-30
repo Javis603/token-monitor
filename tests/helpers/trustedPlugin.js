@@ -52,7 +52,11 @@ async function runtimeFixture(t, { initialSettings = {}, catalogFetch = async ()
   const invoke = (name, ...args) => handlers.get(name)(event(main), ...args);
   const send = (win, surface, refs = ['trusted-fixture/panel']) => events.get(win === main ? 'plugins:demand' : 'topNotch:pluginDemand')(event(win), { surface, refs });
   async function install() { const preview = await invoke('plugins:import', 'directory'); await invoke('plugins:install', preview.token); }
-  return { dir, runtime, children, handlers, events, main, notch, windows, invoke, send, install, event,
+  async function setMasterEnabled(enabled) {
+    const finish = await runtime.beforeSettingsChange(event(main), { pluginsEnabled: enabled });
+    settings = { ...settings, pluginsEnabled: enabled }; runtime.settingsChanged(); await finish();
+  }
+  return { dir, runtime, children, handlers, events, main, notch, windows, invoke, send, install, setMasterEnabled, event,
     get settings() { return settings; }, dialogs, respond(...responses) { confirmations.push(...responses); }, cancel() { confirmation = 0; }, accept() { confirmation = 1; },
     lifecycle(win, callback, ids = ['trusted-fixture']) {
       const original = win.webContents.send;

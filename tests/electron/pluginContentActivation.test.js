@@ -31,6 +31,16 @@ async function setup(t, { competitor = false } = {}) {
   return { f, file, manifest };
 }
 
+async function setupUpdate(t) {
+  const value = await setup(t, { competitor: true });
+  value.manifest.views = value.manifest.views.filter(view => view.id !== 'content');
+  fs.writeFileSync(value.file, JSON.stringify(value.manifest));
+  const first = await value.f.invoke('plugins:import', 'directory');
+  await value.f.invoke('plugins:install', first.token, { trustInstall: true });
+  await value.f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  return value;
+}
+
 test('enabling selects replacements without another action; off/on preserves the chosen provider', async t => {
   const { f } = await setup(t, { competitor: true });
   await f.install();
@@ -96,12 +106,7 @@ test('trust-and-install selects content; cancelled conflicts leave no installed 
 });
 
 for (const cancelAt of ['conflict', 'displaced-draft', 'package', 'expired-preview']) test(`update cancellation at ${cancelAt} preserves both original drafts before cleanup`, async t => {
-  const { f, file, manifest } = await setup(t, { competitor: true });
-  manifest.views = manifest.views.filter(view => view.id !== 'content');
-  fs.writeFileSync(file, JSON.stringify(manifest));
-  const first = await f.invoke('plugins:import', 'directory');
-  await f.invoke('plugins:install', first.token, { trustInstall: true });
-  await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
+  const { f, file, manifest } = await setupUpdate(t);
   const document = { createElement: tag => new Element(tag, document) };
   document.head = document.createElement('head');
   let lifecycle, disposals = 0;
@@ -150,6 +155,33 @@ for (const cancelAt of ['conflict', 'displaced-draft', 'package', 'expired-previ
     assert.equal(disposals, 1, 'only the updated plugin UI is released');
     assert.equal(otherContainer.children[0], otherInput);
   }
+});
+
+for (const response of [0, 1, 2]) test(`paused update confirms an enabled provider's content choice, response=${response}`, async t => {
+  const { f, file, manifest } = await setupUpdate(t);
+  await f.setMasterEnabled(false);
+  manifest.version = '2.0.0'; manifest.views.push({ id: 'content', mode: 'replace', targets: [TARGET] });
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  const preview = await f.invoke('plugins:import', 'directory'), before = structuredClone(f.settings);
+  f.respond(response);
+  const update = f.invoke('plugins:install', preview.token, { trustUpdate: true, initialSetup: { [contentKey(TARGET)]: REF } });
+  if (response === 0) {
+    await assert.rejects(update, /cancelled/);
+    assert.deepEqual(f.settings, before);
+    assert.equal(f.invoke('plugins:list').plugins.find(plugin => plugin.id === 'trusted-fixture').version, '1.0.0');
+  } else {
+    await update;
+    assert.equal(f.settings.pluginContentSelections[TARGET], response === 1 ? REF : 'other-fixture/content');
+    assert.equal(f.invoke('plugins:list').plugins.find(plugin => plugin.id === 'trusted-fixture').initialSetup.fields.length, 0);
+  }
+  assert.equal(f.dialogs.length, 1);
+  assert.equal(f.children.length, 0);
+  assert.equal(f.runtime.manager.active('trusted-fixture'), false);
+  const selected = f.settings.pluginContentSelections[TARGET];
+  await f.setMasterEnabled(true);
+  assert.equal(f.settings.pluginContentSelections[TARGET], selected);
+  assert.equal(f.runtime.manager.active('trusted-fixture'), true);
+  assert.equal(f.runtime.manager.active('other-fixture'), true);
 });
 
 for (const operation of ['enable', 'install', 'native', 'provider']) test(`cancelling the draft warning preserves the selected content during ${operation}`, async t => {

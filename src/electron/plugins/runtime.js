@@ -491,7 +491,7 @@ function createPluginRuntime({
   async function confirmContentSwitch(event, plugin, plan, { packageChange = false } = {}) {
     const current = contentSelections();
     const next = { ...(plan.patch.pluginContentSelections || current) };
-    const displaced = manager.list().plugins.filter(item => item.id !== plugin.id && item.status === 'active'
+    const displaced = manager.list().plugins.filter(item => item.id !== plugin.id && item.enabled && item.trusted
       && item.views.some(view => view.mode === 'replace' && view.targets.some(target => current[target] === view.ref
         && Object.hasOwn(plan.values, contentKey(target)) && next[target] !== view.ref)));
     if (displaced.length) {
