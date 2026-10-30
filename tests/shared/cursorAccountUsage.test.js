@@ -448,3 +448,82 @@ test('collector calendar ranges survive DST and separate zones with different mo
     assert.equal(after.today.cursorAccountUsage.range, other.today.cursorAccountUsage.range);
   });
 });
+
+function calendarRecord(deviceId, timeZone, date, live = false, rawModel = 'shared') {
+  const day = '2026-10-30';
+  const row = record(deviceId, 1000, deviceId === 'A' ? 2000 : 1000);
+  row.periodWindows = { timeZone, today: { key: day, endsAt: '2026-10-31T00:00:00.000Z' } };
+  row.historyAvailable = true;
+  row.history = normalizeHistory(parseGraphResult({ contributions: [{ date, clients: [
+    { client: 'cursor', modelId: rawModel, tokens: { input: 1000 }, cost: 1 }
+  ] }] }), { todayKey: day });
+  row.history.cursorAccountUsage = { ...row.today.cursorAccountUsage, range: `history:${timeZone}`, usage: structuredClone(row.history) };
+  row.today = live ? normalizePeriod({ totalTokens: 1000, costUsd: 1, clients: { cursor: 1000 }, clientCosts: { cursor: 1 },
+    models: { [rawModel]: 1000 }, modelCosts: { [rawModel]: 1 },
+    clientModels: { cursor: { [rawModel]: 1000 } }, clientModelCosts: { cursor: { [rawModel]: 1 } } }) : normalizePeriod({});
+  if (live) row.today.cursorAccountUsage = { ...row.month.cursorAccountUsage,
+    range: 'today:2026-10-30T00:00:00.000Z:2026-10-31T00:00:00.000Z', usage: accountingCounters(row.today) };
+  return row;
+}
+
+test('fixed ranges compare actual daily boundaries across timezone names and DST', () => {
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  const clock = new Date('2026-10-30T12:00:00Z');
+  for (const live of [false, true]) {
+    for (const selection of ['week', 'last7', 'last30']) {
+      const a = calendarRecord('A', 'Europe/London', '2026-10-30', live);
+      const b = calendarRecord('B', 'Africa/Abidjan', '2026-10-30', live);
+      const result = ranges.fixedPeriodSnapshotFromDevices(selection, [a, b], { now: clock, historyAvailable: true });
+      assert.equal(result.period.totalTokens, 1000);
+      assert.equal(result.period.costUsd, 1);
+      assert.deepEqual(result.devices.map(device => device.period.totalTokens), [1000, 1000]);
+    }
+  }
+  for (const [date, otherZone, expected] of [
+    ['2026-10-25', 'Africa/Abidjan', 2000], // London has a 25-hour day.
+    ['2026-10-25', 'Europe/Belfast', 1000],
+    ['2026-03-29', 'Africa/Abidjan', 2000], // London has a 23-hour day.
+    ['2026-03-29', 'Europe/Belfast', 1000],
+    ['2026-10-29', 'Asia/Tokyo', 2000],
+    ['2026-10-29', 'Invalid/Zone', 2000],
+    ['2026-10-29', '', 2000]
+  ]) {
+    const a = calendarRecord('A', 'Europe/London', date);
+    const b = calendarRecord('B', otherZone, date);
+    // Keep the tested historical day inside all three selected ranges.
+    const today = new Date(`${date}T12:00:00Z`);
+    for (const row of [a, b]) row.periodWindows.today = { key: date, endsAt: new Date(today.getTime() + 86400000).toISOString() };
+    for (const selection of ['week', 'last7', 'last30']) {
+      const result = ranges.fixedPeriodSnapshotFromDevices(selection, [a, b], { now: today, historyAvailable: true });
+      assert.equal(result.period.totalTokens, expected, `${date} ${otherZone} ${selection}`);
+    }
+  }
+});
+
+test('model alias projection keeps fixed-range account model contributions aligned without mutating raw records', () => {
+  const { projectModelAliasStats, projectModelAliasHistory } = require('../../src/electron/modelAliasPresentation');
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  for (const live of [false, true]) {
+    for (const [rawModel, aliases, options, display] of [
+      ['shared', { shared: 'display-model' }, {}, 'display-model'],
+      ['anthropic/claude-opus-5', {}, { grouping: 'prefix' }, 'claude-opus-5']
+    ]) {
+      const records = ['A', 'B'].map(id => calendarRecord(id, 'Europe/London', '2026-10-30', live, rawModel));
+      const raw = JSON.stringify(records);
+      const stats = projectModelAliasStats({ devices: records }, aliases, options);
+      const histories = projectModelAliasHistory({ deviceHistories: records.map(row => ({
+        ...row, periods: { today: row.today }
+      })) }, aliases, options);
+      for (const devices of [stats.devices, histories.deviceHistories]) {
+        for (const selection of ['week', 'last7', 'last30']) {
+          const result = ranges.fixedPeriodSnapshotFromDevices(selection, devices, { now: new Date('2026-10-30T12:00:00Z'), historyAvailable: true });
+          assert.equal(result.period.totalTokens, 1000);
+          assert.equal(result.period.models[display], 1000);
+          assert.equal(result.period.modelCosts[display], 1);
+        }
+      }
+      assert.equal(JSON.stringify(records), raw);
+      assert.strictEqual(projectModelAliasStats({ devices: records }, { absent: 'other' }).devices, records);
+    }
+  }
+});

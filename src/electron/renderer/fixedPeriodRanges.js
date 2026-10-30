@@ -514,9 +514,40 @@
     return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
   }
 
+  function dayRangeInTimeZone(date, timeZone) {
+    if (!timeZone) return null;
+    try {
+      const formatter = new Intl.DateTimeFormat('en', {
+        timeZone, year: 'numeric', month: '2-digit', day: '2-digit'
+      });
+      const keyAt = value => {
+        const parts = Object.fromEntries(formatter.formatToParts(value).map(part => [part.type, part.value]));
+        return `${parts.year}-${parts.month}-${parts.day}`;
+      };
+      // Find the first instant of each local date. Looking up the date itself
+      // handles midnight transitions and 23/25-hour days without today's offset.
+      const boundary = key => {
+        const midnight = Date.parse(`${key}T00:00:00Z`);
+        let low = midnight - 36 * 3600000;
+        let high = midnight + 36 * 3600000;
+        while (low < high) {
+          const middle = Math.floor((low + high) / 2);
+          if (keyAt(middle) < key) low = middle + 1;
+          else high = middle;
+        }
+        return low;
+      };
+      const start = boundary(date);
+      const end = boundary(dayKeyAddDays(date, 1));
+      if (keyAt(start) !== date || keyAt(end - 1) !== date) return null;
+      return `day:${new Date(start).toISOString()}:${new Date(end).toISOString()}`;
+    } catch (_) { return null; }
+  }
+
   function accountAdjustedDaily(snapshots) {
     if (!snapshots.some(source => source.history?.cursorAccountUsage || sourcePeriod(source, 'today')?.cursorAccountUsage)) return snapshots;
     const rowsByDate = new Map();
+    const dayRanges = new Map();
     for (const snapshot of snapshots) {
       const today = sourcePeriod(snapshot, 'today');
       const todayKey = snapshot.periodWindows?.today?.key;
@@ -532,9 +563,19 @@
           // A compatible History snapshot covers zero-usage days too. Keep
           // its scope in winner selection when a removed day has no bucket.
           : scope ? accountRows.get(row.date) || {} : undefined;
+        let range = null;
+        if (scope) {
+          const liveRange = usesToday && /^today:(\d{4}-[\dT:.-]+Z):(\d{4}-[\dT:.-]+Z)$/.exec(scope.range);
+          if (liveRange && Date.parse(liveRange[1]) < Date.parse(liveRange[2])) {
+            range = `day:${new Date(liveRange[1]).toISOString()}:${new Date(liveRange[2]).toISOString()}`;
+          } else {
+            const key = `${snapshot.periodWindows?.timeZone}:${row.date}`;
+            if (!dayRanges.has(key)) dayRanges.set(key, dayRangeInTimeZone(row.date, snapshot.periodWindows?.timeZone));
+            range = dayRanges.get(key);
+          }
+        }
         const entry = { deviceId: snapshot.deviceId, row, usage,
-          scope: usage && scope ? { ...scope,
-            range: `day:${row.date}:${snapshot.periodWindows?.timeZone || scope.range}` } : null };
+          scope: usage && scope && range ? { ...scope, range } : null };
         if (!rowsByDate.has(row.date)) rowsByDate.set(row.date, []);
         rowsByDate.get(row.date).push(entry);
       }
