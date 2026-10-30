@@ -89,7 +89,7 @@ async function download(fetchImpl, url, limit, signal, accept = 'application/jso
   } catch (error) { try { await reader.cancel(); } catch {} throw error; }
   return Buffer.concat(chunks);
 }
-function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getLocale = () => 'en', now = Date.now, maintainerSources = [] }) {
+function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getLocale = () => 'en', now = Date.now, maintainerSources = [], officialSources = [] }) {
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   const configFile = path.join(root, 'sources.json');
   const sources = new Map(), cache = new Map(), activeRefreshes = new Map(), activePackages = new Map();
@@ -119,16 +119,17 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
   } catch (error) { loadError = `catalog sources could not be loaded: ${error.message}`; sources.clear(); cache.clear(); }
   // Only the host constructor supplies these definitions. Persisted config,
   // index titles, manifest authors and add-source IPC cannot opt into this role.
-  for (const s of maintainerSources) {
-    if (!/^maintainer-[a-z0-9-]+$/.test(s.id) || sources.has(s.id)) throw new Error('invalid maintainer source id');
+  for (const [kind, definitions] of [['official', officialSources], ['maintainer', maintainerSources]]) for (const s of definitions) {
+    if (!new RegExp(`^${kind}-[a-z0-9-]+$`).test(s.id) || sources.has(s.id)) throw new Error(`invalid ${kind} source id`);
+    if (kind === 'official' && !cleanText(s.label, 80)) throw new Error('official source requires a host label');
     const key = s.publicKey ? signingKey(s.publicKey) : null;
-    const source = { id: s.id, url: httpsUrl(s.url), publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null, preset: true };
+    const source = { id: s.id, url: httpsUrl(s.url), publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null, preset: true, kind, label: kind === 'official' ? cleanText(s.label, 80) : '' };
     sources.set(s.id, source); loadCache(source);
   }
   function requireWritable() { if (loadError) throw new Error(loadError); }
   function list() {
-    return { error: loadError, sources: [...sources.values()].map(s => ({ id: s.id, kind: s.preset ? 'maintainer' : 'community', url: s.url,
-      label: localize(cache.get(s.id)?.title, getLocale()) || new URL(s.url).hostname,
+    return { error: loadError, sources: [...sources.values()].map(s => ({ id: s.id, kind: s.kind || 'community', url: s.url,
+      label: s.label || localize(cache.get(s.id)?.title, getLocale()) || new URL(s.url).hostname,
       fingerprint: s.fingerprint, signed: Boolean(s.publicKey && cache.has(s.id)), lastFetched: s.lastFetched,
       cached: cache.has(s.id), error: s.error, refreshing: activeRefreshes.has(s.id) })) };
   }
@@ -161,7 +162,7 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
     // one request per source, with independent deadlines and cancellation.
     request: (id, url, limit) => request(id, url, limit, activePackages),
     entries() { return [...sources.values()].flatMap(s => (cache.get(s.id)?.plugins || []).map(p => ({ ...p, origin: {
-      id: s.id, kind: s.preset ? 'maintainer' : 'community', label: localize(cache.get(s.id).title, getLocale()), url: s.url, fingerprint: s.fingerprint,
+      id: s.id, kind: s.kind || 'community', label: s.label || localize(cache.get(s.id).title, getLocale()), url: s.url, fingerprint: s.fingerprint,
       signed: Boolean(s.publicKey), cached: true, lastFetched: s.lastFetched, error: s.error } }))); },
     async add({ url, publicKey = '' } = {}) {
       requireWritable(); const normalized = httpsUrl(url);

@@ -6,6 +6,9 @@ const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+// Fixture-only host model; package.json on disk and production checks stay unchanged.
+const fixtureApp = require('../package.json');
+fixtureApp.version = '0.82.0';
 const { createPluginRuntime, registerPluginScheme } = require('../src/electron/plugins/runtime');
 const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-quota-alerts-ui-'));
@@ -39,7 +42,10 @@ app.whenReady().then(async () => {
   app.on('web-contents-created', (_event, contents) => contents.on('console-message', (_e, level, message) => {
     if (level >= 2 && !message.includes('Electron Security Warning') && !message.includes('Autofill.')) errors.push(message);
   }));
-  runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain, session, utilityProcess,
+  const fixtureSession = { defaultSession: session.defaultSession, fromPartition: () => ({
+    fetch: async () => new Response(JSON.stringify({ format: 1, title: 'Fixture catalog', plugins: [] }))
+  }) };
+  runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain, session: fixtureSession, utilityProcess,
     Notification: class extends EventEmitter { static isSupported() { return true; } constructor(value) { super(); this.value = value; } show() { notices.push(this.value); queueMicrotask(() => this.emit('show')); } },
     dialog: { showMessageBox: async () => ({ response: 1 }), showOpenDialog: async () => ({ canceled: false, filePaths: [archive] }) } },
     userDataDir: scratch, getSettings: () => settings, getAppSettings: () => settings, getLocale: () => settings.language, getContext: () => ({ source: 'synthetic-fixture' }),
@@ -136,6 +142,6 @@ app.whenReady().then(async () => {
   assert.equal(runtime.manager.backendCount(), 0);
   assert.deepEqual(errors, []);
   record('background is host-controlled; settings adapter disposal and final demand stop');
-  fs.writeFileSync(path.join(evidence, 'ui-checks.json'), JSON.stringify({ fixture: 'production runtime and author adapter in a synthetic settings shell', checks, mockedOsNotifications: notices.length, realOutboundNotifications: 0 }, null, 2));
+  fs.writeFileSync(path.join(evidence, 'ui-checks.json'), JSON.stringify({ fixture: 'production runtime and author adapter in a synthetic settings shell', fixtureAppVersion: fixtureApp.version, checks, mockedOsNotifications: notices.length, realOutboundNotifications: 0 }, null, 2));
   await finish(0);
 }).catch(async error => { console.error(error); await finish(1); });

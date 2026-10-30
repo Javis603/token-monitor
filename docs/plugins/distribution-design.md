@@ -26,13 +26,30 @@ Uninstall can retain plugin data/preferences and display locations independently
 
 ## Catalogs
 
-Discover shows one Featured plugins group: official packages first, then App-designated maintainer catalogs branded Token Monitor Community. Both brands show a shield identifying distribution provenance, not a safety audit. Their package actions use the simplified Install and enable / Update flow with the same exact-revision approval underneath. Other HTTPS catalogs stay in Custom sources and retain the third-party trust warning. In-app GitHub discovery is not yet available; when available, its separate Unofficial plugins · GitHub group shows repository owners without a shield.
+Discover shows one Featured plugins group: official catalogs/packages first, then App-designated maintainer catalogs branded Token Monitor Community. Both brands show a shield identifying distribution provenance, not a safety audit. Their package actions use the simplified Install and enable / Update flow with the same exact-revision approval underneath. Other HTTPS catalogs stay in Custom sources and retain the third-party trust warning. In-app GitHub discovery is not yet available; when available, its separate Unofficial plugins · GitHub group shows repository owners without a shield.
 
-Featured placement and official attribution are host-assigned, not catalog fields authors can request. Custom URLs, author/title metadata and signing keys do not grant featured status. Official package updates currently arrive with an App update; App-designated community catalogs and user-added catalogs provide compatible updates through their existing sources.
+Featured placement and official attribution are host-assigned, not catalog fields authors can request. Custom URLs, author/title metadata and signing keys do not grant featured status. The App designates its official remote catalog separately from the community catalog. Both use the same package validation, compatibility, preview and same-source update checks. Compatible official plugin updates do not require an App update; users still explicitly choose and approve installation. Offline bundled packages, when present, update with the App.
 
 Install from file and folder remains available for private unpublished plugins. Catalog refresh and update preview do not execute code; installation is always explicit. The collapsed Plugins settings summary shows compatible updates from the installation's existing source, even while plugins are disabled. It reads local catalog state at startup and after catalog changes; it does not install updates automatically or introduce remote polling.
 
 Catalogs use bounded downloads, source pins, package hashes and optional Ed25519 signatures. A source is a configured catalog URL, not a GitHub repository crawler. Source changes cannot silently replace another installation's origin. Community labels and author descriptions are publisher claims, never an audit badge. Experimental API compatibility is checked against the downloaded package before installation.
+
+## Official catalog releases
+
+Official plugin source stays in this repository under `plugins/`. The App's designated catalog is `https://raw.githubusercontent.com/Javis603/token-monitor/dist/catalog.json`; the community catalog remains in `token-monitor-plugins`.
+
+The [Publish official plugins workflow](../../.github/workflows/publish-official-plugins.yml) validates packages on pull requests and publishes the catalog and packages to `dist` from `main`.
+
+To prepare local artifacts with dependencies installed, use fresh output directories:
+
+```sh
+node scripts/official-plugin-distribution.cjs build /tmp/token-monitor-official-plugins
+node scripts/official-plugin-distribution.cjs stage /tmp/token-monitor-official-plugins /tmp/token-monitor-plugin-dist
+```
+
+These commands only write local files. Building can target a newer App version than the checkout; installation still enforces the package's compatibility range.
+
+To publish an update, increase the plugin version and add matching localized CHANGELOG entries; these supply the catalog release notes. Keep the package's compatibility range and localized READMEs current. Published package bytes are immutable. The catalog retains the newest 32 versions by SemVer. Releases outside this range are rejected; previously published package files remain in `dist`. Full release history stays in the source CHANGELOG files.
 
 ## Repository details and README
 
@@ -139,5 +156,3 @@ Use a disposable profile and self-authored data. Check unsigned and pinned-sourc
 ## Recovery outside the renderer
 
 Use the native tray menu **Restart without plugins**, `--plugins-safe-mode`, or `TOKEN_MONITOR_PLUGINS_SAFE_MODE=1`. Safe mode enumerates and manages packages without loading their UI or backend. This is necessary because trusted same-page code can block its entire renderer. A package cannot be individually killed out of that shared JavaScript realm while preserving the rest of it. Safe mode does not undo arbitrary local changes previously made by code.
-
-App-bundled official packages use the host-owned `src/electron/plugins/catalog/readmes.json` map when the repository contains multiple plugin READMEs. It selects the plugin-specific locale path using the same README fetching and image-validation contracts; publisher metadata does not grant official provenance.

@@ -30,6 +30,8 @@ Business data reads reuse selected-source snapshots and existing history resolut
 
 Package transactions release only their target plugin, after content-conflict and unsaved-work confirmations complete and the preview is revalidated. Cancellation before cleanup must preserve existing UI instances, drafts and backends. Recheck affected content selections after asynchronous lifecycle waits so an older confirmation cannot overwrite a newer choice. Content-source changes inspect only the departing replacement refs and targets; they must not release the provider's other mounts. Unrelated mounts, drafts and backends stay live, including during rollback. Preserve existing App data and credential contracts. Renderer-independent safe mode must remain available for recovery; it cannot undo arbitrary plugin filesystem effects. See [management and recovery](plugins/distribution-design.md).
 
+Official and community remote plugin sources are separate host-owned definitions. Remote official provenance comes only from `electron/plugins/officialSources.js`; catalog titles, authors and user-added source metadata cannot grant it. See [official catalog releases](plugins/distribution-design.md#official-catalog-releases) for distribution.
+
 ## Generated and registered state
 
 Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Never edit generated Worker metadata directly.

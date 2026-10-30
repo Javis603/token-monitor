@@ -10,23 +10,22 @@ const { assertHostCompatibility } = require('./contracts');
 const { localize } = require('../../shared/plugins/localized');
 const { createCatalogSources } = require('./catalogSources');
 const OFFICIAL = Object.freeze({ id: 'bundled', kind: 'official', label: 'Token Monitor' });
-const BUNDLED_READMES = require('./catalog/readmes.json');
 const { createGitHubDiscovery } = require('./githubDiscovery');
 const { createCatalogMedia } = require('./catalogMedia');
 const CATALOG_REFRESH_MS = 6 * 60 * 60 * 1000;
 const CATALOG_RETRY_MS = 5 * 60 * 1000;
-function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog'), githubDiscoveryEnabled = false, maintainerSources = [], now = Date.now }) {
-  const sources = createCatalogSources({ root, fetchImpl, getLocale, maintainerSources, now, cancelPreviews: id => managed.cancelSource(id) });
+function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 'en', root, fetchImpl, catalogDirectory = path.join(__dirname, 'catalog'), githubDiscoveryEnabled = false, maintainerSources = [], officialSources = [], now = Date.now }) {
+  const sources = createCatalogSources({ root, fetchImpl, getLocale, maintainerSources, officialSources, now, cancelPreviews: id => managed.cancelSource(id) });
   const github = createGitHubDiscovery({ root, fetchImpl, enabled: githubDiscoveryEnabled });
   const media = createCatalogMedia({ fetchImpl, nativeImage });
   let readmeDocument = null, detailRevision = 0, discoveryPending = null;
   const attempts = new Map();
-  const maintainerCatalogs = () => sources.list().sources.filter(s => s.kind === 'maintainer');
+  const presetCatalogs = () => sources.list().sources.filter(s => s.kind === 'maintainer' || s.kind === 'official');
   const refreshAt = source => Math.max(source.lastFetched === null ? 0 : source.lastFetched + CATALOG_REFRESH_MS,
     attempts.has(source.id) ? attempts.get(source.id) + CATALOG_RETRY_MS : 0);
   const packages = new Map(), errors = [];
-  // Only App-distributed files receive official attribution. Discovery never
-  // executes them, and a broken entry must not disable package management.
+  // Optional offline bundles remain host-owned. Discovery never executes them,
+  // and a broken entry must not disable package management.
   try {
     for (const name of fs.readdirSync(catalogDirectory).filter(name => name.endsWith('.tmplugin')).sort()) {
       try {
@@ -53,7 +52,6 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
       const installed = installation(pkg.manifest.id);
       const homepage = pkg.manifest.homepage;
       entries.push({ ...describePackage(pkg, { locale: getLocale() }), origin: OFFICIAL,
-        readmePaths: BUNDLED_READMES[pkg.manifest.id] || null,
         repository: /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(homepage) ? homepage : '',
         status: !compatible ? 'incompatible' : !installed.exists ? 'available'
           : installed.version && installed.record?.origin.id === OFFICIAL.id && semver.gt(pkg.manifest.version, installed.version) ? 'update' : 'installed',
@@ -84,13 +82,13 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
     list,
     closeDetails,
     nextRefreshDelay() {
-      const deadlines = maintainerCatalogs().map(refreshAt);
+      const deadlines = presetCatalogs().map(refreshAt);
       return deadlines.length ? Math.max(0, Math.min(...deadlines) - now()) : null;
     },
     async discover(force = false) {
       if (discoveryPending) return discoveryPending;
       discoveryPending = (async () => {
-        await Promise.all([github.refresh(force), ...maintainerCatalogs()
+        await Promise.all([github.refresh(force), ...presetCatalogs()
           .filter(s => force || now() >= refreshAt(s)).map(s => {
             // Cache-only discovery must not consume a source's retry window.
             attempts.set(s.id, now());

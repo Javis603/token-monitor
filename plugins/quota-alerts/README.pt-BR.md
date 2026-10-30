@@ -11,15 +11,15 @@ Receba alertas no computador quando a cota da sessão de uma conta ficar baixa, 
 
 ## Compatibilidade
 
-Use uma versão do Token Monitor App que inclua Alertas de cota no catálogo oficial opcional. O plugin usa a interface experimental `tmApi: 1`.
+Use o Token Monitor 0.82.0 ou posterior com o catálogo oficial de plugins. O plugin usa a interface experimental `tmApi: 1`.
 
 O plugin usa leituras de cota existentes, sem consultas adicionais aos provedores. Dados ausentes ou desatualizados não são tratados como zero. Não há cartão na página inicial, página independente nem efeito de pulsação na janela inteira.
 
 ## Instalação
 
-Nas versões do App que incluem este plugin oficial opcional, abra **Configurações → Plugins → Descobrir**, selecione **Alertas de cota** no grupo oficial Token Monitor e escolha **Instalar e ativar**. Escolha **Apenas instalar** para mantê-lo desativado. Revise a sugestão de execução em segundo plano; a opção global de plugins e o modo de segurança continuam valendo.
+Abra **Configurações → Plugins → Descobrir**, selecione **Alertas de cota** no grupo oficial Token Monitor e escolha **Instalar e ativar**. Escolha **Apenas instalar** para mantê-lo desativado. Revise a sugestão de execução em segundo plano; a opção global de plugins e o modo de segurança continuam valendo.
 
-Não é necessário adicionar uma URL de catálogo. Também é possível importar `quota-alerts-0.1.0.tmplugin` ou a pasta completa do código em Configurações → Plugins. Uma importação local tem origem local; a identificação oficial se aplica ao pacote incluído no App.
+Não é necessário adicionar uma URL de catálogo. Também é possível importar `quota-alerts-0.1.0.tmplugin` ou a pasta completa do código em Configurações → Plugins. Importações locais têm origem local; a identificação oficial vem do catálogo oficial designado pelo App.
 
 ## Uso
 
@@ -56,7 +56,7 @@ Os alertas no computador usam a operação de notificação do host. Este plugin
 
 ## Atualizações
 
-O pacote oficial é atualizado junto com o App. Revise e aprove o código alterado antes de executá-lo; a ativação, as preferências e a escolha confirmada de segundo plano continuam sob seu controle. A reversão restaura o código, não desfaz notificações já enviadas.
+Os plugins oficiais recebem atualizações independentemente do App. Atualize o catálogo e escolha Atualizar para revisar e aprovar uma versão compatível; nada é instalado automaticamente. Ativação, preferências e escolhas confirmadas de execução em segundo plano permanecem sob controle do usuário. A descoberta e os downloads exigem internet. O rollback restaura o código, não as notificações já enviadas.
 
 ## Licença
 

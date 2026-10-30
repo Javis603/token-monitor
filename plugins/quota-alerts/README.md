@@ -11,15 +11,15 @@ Receive desktop alerts when an account’s session quota runs low, recovers or r
 
 ## Compatibility
 
-Use a Token Monitor App build that includes Quota alerts in its optional official catalog. The plugin uses the experimental `tmApi: 1` interface.
+Use Token Monitor 0.82.0 or later with the official plugin catalog. The plugin uses the experimental `tmApi: 1` interface.
 
 The plugin uses existing quota readings, not additional provider requests. Missing or stale data is not treated as zero. There is no Home card, standalone page or whole-window pulse.
 
 ## Install
 
-In App builds that include this optional official plugin, open **Settings → Plugins → Discover**, select **Quota alerts** from the Token Monitor official group and choose **Install and enable**. Choose **Install only** to leave it disabled. Review the suggested background setting; the global plugin switch and safe mode still apply.
+Open **Settings → Plugins → Discover**, select **Quota alerts** from the Token Monitor official group and choose **Install and enable**. Choose **Install only** to leave it disabled. Review the suggested background setting; the global plugin switch and safe mode still apply.
 
-No catalog URL is needed. You can also import `quota-alerts-0.1.0.tmplugin` or this complete source folder through Settings → Plugins. A local import has local provenance; official branding belongs to the App-bundled package.
+No catalog URL is needed. You can also import `quota-alerts-0.1.0.tmplugin` or this complete source folder through Settings → Plugins. Local imports have local provenance; official identity comes from the App-designated official catalog.
 
 ## Usage
 
@@ -56,7 +56,7 @@ Desktop alerts use the host notification operation. This plugin makes no direct 
 
 ## Updates
 
-Official package updates arrive with App updates. Review and approve changed plugin code before running it; enablement, preferences and confirmed background choices remain user-controlled. Rollback restores code, not notifications already sent.
+Official plugin updates are published independently of App releases. Refresh the catalog and choose Update to review and approve a compatible version; nothing installs automatically. Enablement, preferences and confirmed background choices remain user-controlled. Discovery and downloads require an internet connection. Rollback restores code, not notifications already sent.
 
 ## License
 

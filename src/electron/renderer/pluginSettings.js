@@ -684,12 +684,12 @@
       search.addEventListener('input', () => { query = search.value; renderResults(); });
       wrap.append(errors, search, results);
       const refresh = el(document, 'div', 'settings-actions plugin-catalog-refresh');
-      const canRefresh = catalogData.github?.enabled || catalogData.sources.some(source => source.kind !== 'official');
+      const canRefresh = catalogData.github?.enabled || catalogData.sources.some(source => Boolean(source.url));
       if (canRefresh) refresh.append(button(t('plugins.catalog.refresh'), () => void refreshCatalog(true)));
       const lastChecked = el(document, 'span', 'settings-note'); refresh.append(lastChecked);
       updateCatalog = () => {
         errors.replaceChildren();
-        for (const error of [catalogData.error, catalogRefreshError, ...catalogData.sources.filter(source => source.kind !== 'official' && source.error).map(source => `${source.label}: ${source.error}`)].filter(Boolean)) {
+        for (const error of [catalogData.error, catalogRefreshError, ...catalogData.sources.filter(source => source.url && source.error).map(source => `${source.label}: ${source.error}`)].filter(Boolean)) {
           errors.append(el(document, 'p', 'plugin-risk', error));
         }
         lastChecked.textContent = catalogData.github?.lastFetched ? t('plugins.catalog.lastChecked', { time: new Date(catalogData.github.lastFetched).toLocaleString(getLocale()) }) : '';
@@ -716,7 +716,7 @@
     }
 
     function refreshCatalog(force = false) {
-      const discover = catalogData.github?.enabled || catalogData.sources.some(source => source.kind === 'maintainer');
+      const discover = catalogData.github?.enabled || catalogData.sources.some(source => source.kind === 'maintainer' || (source.kind === 'official' && source.url));
       if (disposed || catalogRefreshPending || (!force && !discover)) return catalogRefreshPending;
       catalogRefreshing = true; catalogRefreshError = ''; catalogRefreshControls();
       catalogRefreshPending = (async () => {
