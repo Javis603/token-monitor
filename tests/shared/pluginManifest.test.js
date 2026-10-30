@@ -41,3 +41,18 @@ test('content selectors and backend Tray menu are explicit contracts; navigation
   for (const trayMenu of [[{ id: true, label: 'Bad' }], [{ id: 'a', label: 'A' }, { id: 'a', label: 'B' }], new Array(33).fill({ id: 'a', label: 'A' })]) assert.equal(normalizeManifest({ ...manifest, trayMenu }).ok, false);
   assert.equal(normalizeManifest({ ...manifest, backend: null }).ok, false);
 });
+
+test('automation is explicit display metadata and grants no background defaults', () => {
+  const original = normalizeManifest(fixture).manifest;
+  const result = normalizeManifest({ ...fixture, category: 'automation' });
+  assert.equal(result.ok, true);
+  assert.equal(result.manifest.category, 'automation');
+  assert.deepEqual(result.manifest.defaults, original.defaults);
+  assert.equal(result.manifest.background, original.background);
+  assert.equal(normalizeManifest({ ...fixture, category: null }).manifest.category, null);
+  for (const category of ['widget', 'background', 'official', '', true, [], {}]) {
+    const invalid = normalizeManifest({ ...fixture, category });
+    assert.equal(invalid.ok, false);
+    assert.match(invalid.errors.join(' '), /category must be automation/);
+  }
+});

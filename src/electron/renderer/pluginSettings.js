@@ -319,7 +319,7 @@
 
     function typeLabels(plugin) {
       const labels = el(document, 'span', 'plugin-types');
-      for (const type of ['widget', 'page', 'appearance']) {
+      for (const type of ['widget', 'page', 'appearance', 'automation']) {
         if (!plugin.types?.includes(type)) continue;
         labels.append(el(document, 'span', `plugin-type plugin-type-${type}`, t(`plugins.type.${type}`)));
       }

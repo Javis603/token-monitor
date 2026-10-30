@@ -1,6 +1,6 @@
 # Plugin API
 
-Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review. No official plugins ship with the platform; the repository's minimal fixtures are tests, not a store.
+Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review.
 
 Choose a guide for your next step:
 
@@ -46,6 +46,8 @@ Module-private variables and another process's memory are not automatically avai
 `ui`, `backend`, `css`, `views`, `trayMenu`, `settings`, `skins`, `background` and `defaults` are optional; at least UI, backend or skins is required. UI views require `ui`. List every distributed file explicitly. Paths are package-relative, portable and cannot traverse parents or symlinks. Dependencies must be bundled beforehand; installation never runs npm or lifecycle scripts. Native addons require compatible OS/architecture/Electron ABI, and utility-process loading must be tested in a packaged build; arbitrary addons are not universally supported.
 
 `name`, `description` and view titles support localized strings. Optional `author`, HTTPS `homepage` and validated `identityIcon` provide attribution, not trust. The App uses `identityIcon` in main-page navigation and Notch tabs (and their settings choices) before loading the plugin UI. Without artwork, navigation keeps its built-in fallback; image decode failures also fall back. Do not rely on UI CSS loading to supply navigation artwork. `engines.tokenMonitor` can constrain the App version. `tmApi` identifies the plugin API contract, not the plugin release or package format. Only `tmApi: 1` is accepted; other values fail with `incompatible-plugin-api` and are not converted. This experimental API can break; authors must follow release changes.
+
+Optional `category: "automation"` identifies monitoring, conditional reminders or scheduled tasks with an Automation label beside the version. Omit it (or use `null`) when it does not describe the plugin. This is author-supplied display metadata: it does not grant trust, start code, choose locations or allow background execution. The App does not infer automation from `background: true`. Widget, page and appearance labels continue to derive from declared views and skins. Remote catalog versions can include `automation` in their `types` display hints; the downloaded manifest determines package and installed labels.
 
 ### First-use settings
 
