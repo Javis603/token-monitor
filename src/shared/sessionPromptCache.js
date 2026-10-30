@@ -45,10 +45,6 @@ function applyPromptCacheEntry(state, entry, client) {
     // through a billing/configuration change that this record cannot prove.
     const ttlSeconds = short > 0 ? 300 : long > 0 ? 3600 : 0;
     state.observation = ttlSeconds ? { observedAt: new Date(at).toISOString(), ttlSeconds } : null;
-  } else if (client === 'codex') {
-    // Usage reports cache reuse, not a server-side expiration time. Clear the
-    // former fixed estimate instead of manufacturing a deadline for any route.
-    state.observation = null;
   }
 }
 

@@ -99,21 +99,20 @@ test('Codex long-turn tails do not produce cache expiry estimates', (t) => {
   const os = require('node:os');
   const path = require('node:path');
   const { readCodexSessionState } = require('../../src/shared/providers/codex/sessionContext');
-  const readSessionPromptCache = (file) => readCodexSessionState(file).promptCacheState?.observation ?? null;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-cache-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const context = { timestamp: at, type: 'turn_context', payload: { model: 'gpt-6.1-sol' } };
   const padding = { timestamp: at, type: 'response_item', payload: { text: 'x'.repeat(1200_000) } };
   const cases = [
-    { name: 'long', rows: [context, padding, codex(at)], expected: null },
-    { name: 'switched', rows: [context, { ...context, payload: { model: 'custom-model' } }, padding, codex(at)], expected: null },
-    { name: 'missing', rows: [padding, codex(at)], expected: null },
-    { name: 'cold', rows: [context, padding, codex(at, { info: { last_token_usage: { cached_input_tokens: 0 } } })], expected: null }
+    { name: 'long', rows: [context, padding, codex(at)] },
+    { name: 'switched', rows: [context, { ...context, payload: { model: 'custom-model' } }, padding, codex(at)] },
+    { name: 'missing', rows: [padding, codex(at)] },
+    { name: 'cold', rows: [context, padding, codex(at, { info: { last_token_usage: { cached_input_tokens: 0 } } })] }
   ];
   for (const item of cases) {
     const file = path.join(dir, `${item.name}.jsonl`);
     fs.writeFileSync(file, jsonl(item.rows));
-    assert.deepEqual(readSessionPromptCache(file, 'codex', Date.parse(at)), item.expected, item.name);
+    assert.equal(Object.hasOwn(readCodexSessionState(file), 'promptCacheState'), false, item.name);
   }
 });
 
@@ -138,12 +137,12 @@ test('Codex shares one read for context and turn without generating cache deadli
     return result;
   } } };
   const first = readCodexSessionState(file, deps);
-  assert.deepEqual(first.promptCacheState.observation, null);
+  assert.equal(Object.hasOwn(first, 'promptCacheState'), false);
   assert.equal(bytesRead, fs.statSync(file).size);
   assert.equal(reads, 1);
   assert.deepEqual(readCodexSessionContext(file, deps), { contextTokens: 123_000, contextWindow: 200_000 });
   assert.equal(readCodexTurnEnded(file, deps), true);
-  assert.equal(reads, 1, 'context and boundary reuse the decoded cache observation');
+  assert.equal(reads, 1, 'context and boundary reuse the decoded session state');
 
   const padding = `${JSON.stringify({ type: 'response_item', payload: { text: 'x'.repeat(1200_000) } })}\n`;
   fs.appendFileSync(file, padding);
@@ -151,18 +150,18 @@ test('Codex shares one read for context and turn without generating cache deadli
   assert.equal(bytesRead, fs.statSync(file).size, 'append reads only new bytes');
   const duplicate = { ...usage, timestamp: later };
   fs.appendFileSync(file, `${JSON.stringify(duplicate)}\n`);
-  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, null);
+  assert.equal(Object.hasOwn(readCodexSessionState(file, deps), 'promptCacheState'), false);
   assert.equal(bytesRead, fs.statSync(file).size);
   const next = structuredClone(duplicate);
   next.payload.info.total_token_usage.input_tokens += 100;
   fs.appendFileSync(file, `${JSON.stringify(next)}\n`);
-  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, null);
+  assert.equal(Object.hasOwn(readCodexSessionState(file, deps), 'promptCacheState'), false);
 
   fs.writeFileSync(file, `${JSON.stringify(duplicate)}\n`);
-  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, null, 'truncation resets identity');
+  assert.equal(Object.hasOwn(readCodexSessionState(file, deps), 'promptCacheState'), false);
   const compact = { timestamp: later, type: 'event_msg', payload: { type: 'context_compacted' } };
   fs.appendFileSync(file, `${JSON.stringify(compact)}\n`);
-  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation, null);
+  assert.equal(Object.hasOwn(readCodexSessionState(file, deps), 'promptCacheState'), false);
 });
 
 test('Claude cache reuses the title/context scan, including oversized records and append deduplication', (t) => {
