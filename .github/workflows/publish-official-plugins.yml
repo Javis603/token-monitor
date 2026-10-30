@@ -6,11 +6,13 @@ on:
     paths:
       - 'plugins/**'
       - 'scripts/official-plugin-distribution.cjs'
+      - 'scripts/test-quota-alerts.cjs'
       - 'src/electron/plugins/**'
       - 'src/shared/plugins/**'
       - 'tests/plugin-quota-alerts/**'
       - 'tests/electron/pluginDistribution.test.js'
       - 'tests/electron/pluginOfficialSource.test.js'
+      - 'tests/electron/pluginQuotaFixture.test.js'
       - '.github/workflows/publish-official-plugins.yml'
       - 'package.json'
       - 'package-lock.json'
@@ -36,7 +38,7 @@ jobs:
         env:
           PLUGIN_REPOSITORY: ${{ github.repository }}
         run: |
-          node --test --test-concurrency=2 tests/plugin-quota-alerts/*.test.js tests/electron/pluginDistribution.test.js tests/electron/pluginOfficialSource.test.js
+          node --test --test-concurrency=2 tests/plugin-quota-alerts/*.test.js tests/electron/pluginDistribution.test.js tests/electron/pluginOfficialSource.test.js tests/electron/pluginQuotaFixture.test.js
           node scripts/official-plugin-distribution.cjs build "$RUNNER_TEMP/official-plugins"
       - uses: actions/upload-artifact@v4
         with:

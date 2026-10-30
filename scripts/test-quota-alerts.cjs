@@ -6,6 +6,9 @@ const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+// Fixture-only host model; package.json on disk and production checks stay unchanged.
+const fixtureApp = require('../package.json');
+fixtureApp.version = '0.82.0';
 const { createPluginRuntime, registerPluginScheme } = require('../src/electron/plugins/runtime');
 const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-quota-alerts-ui-'));
@@ -139,6 +142,6 @@ app.whenReady().then(async () => {
   assert.equal(runtime.manager.backendCount(), 0);
   assert.deepEqual(errors, []);
   record('background is host-controlled; settings adapter disposal and final demand stop');
-  fs.writeFileSync(path.join(evidence, 'ui-checks.json'), JSON.stringify({ fixture: 'production runtime and author adapter in a synthetic settings shell', checks, mockedOsNotifications: notices.length, realOutboundNotifications: 0 }, null, 2));
+  fs.writeFileSync(path.join(evidence, 'ui-checks.json'), JSON.stringify({ fixture: 'production runtime and author adapter in a synthetic settings shell', fixtureAppVersion: fixtureApp.version, checks, mockedOsNotifications: notices.length, realOutboundNotifications: 0 }, null, 2));
   await finish(0);
 }).catch(async error => { console.error(error); await finish(1); });
