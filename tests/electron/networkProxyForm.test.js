@@ -136,7 +136,7 @@ test('an overlong bypass save through renderer and preload leaves persisted sett
   let bridge;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/electron/preload.js'), 'utf8'), {
     require: () => ({
-      contextBridge: { exposeInMainWorld: (_name, api) => { bridge = api; } },
+      contextBridge: { exposeInMainWorld: (name, api) => { if (name === 'tokenMonitor') bridge = api; } },
       ipcRenderer: { invoke: async (channel, patch) => {
         assert.equal(channel, 'settings:update');
         return context.update(patch);
