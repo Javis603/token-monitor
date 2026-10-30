@@ -23,6 +23,8 @@ const { macWidgetRuntimeSupport } = require('../shared/macSystemRequirements');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
+const loginItemApi = require('./loginItem');
+const APP_USER_MODEL_ID = 'com.javis.tokenmonitor';
 const motionPreferenceApi = require('./motionPreference');
 const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
@@ -584,7 +586,7 @@ const diagnosticJournal = createDiagnosticJournal();
 const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServicesRecovery();
 
 app.setName(APP_NAME);
-if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
+if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.exit(0);
@@ -2937,17 +2939,41 @@ function loginItemEnabledHere() {
   return true;
 }
 
+function loginItemPath() {
+  return loginItemApi.loginItemExecutablePath(process.env, process.execPath);
+}
+
 function currentLoginItemState() {
   if (!loginItemEnabledHere()) return false;
   if (process.platform === 'linux') return linuxAutostart.isAutostartEnabled();
-  try { return Boolean(app.getLoginItemSettings().openAtLogin); }
+  try { return Boolean(app.getLoginItemSettings({ path: loginItemPath() }).openAtLogin); }
   catch (_) { return false; }
 }
 
-function applyLoginItem(startAtLogin) {
+const STARTUP_APPROVED_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run';
+
+// A Run entry the user disabled from the Startup tab keeps a StartupApproved value.
+// Rewriting the entry without that flag clears it, which would start the app at the
+// next login against the user's choice.
+function startupEntryApproval() {
+  try {
+    const output = require('node:child_process').execFileSync(
+      'reg',
+      ['query', STARTUP_APPROVED_KEY],
+      { encoding: 'utf8', windowsHide: true, timeout: 2000 }
+    );
+    return loginItemApi.startupApprovalState(output, APP_USER_MODEL_ID);
+  } catch (_) {
+    // The key itself could not be read, so the Startup-tab state is unknown. Writing
+    // an "enabled" entry here would clear an opt-out we cannot see.
+    return 'unknown';
+  }
+}
+
+function applyLoginItem(startAtLogin, { enabled } = {}) {
   if (!loginItemEnabledHere()) return false;
   if (process.platform === 'linux') return linuxAutostart.setAutostartEnabled(Boolean(startAtLogin));
-  app.setLoginItemSettings({ openAtLogin: Boolean(startAtLogin) });
+  app.setLoginItemSettings(loginItemApi.loginItemSettingsFor(Boolean(startAtLogin), loginItemPath(), enabled));
   return currentLoginItemState();
 }
 
@@ -7925,7 +7951,28 @@ app.whenReady().then(() => {
   });
   applyMacActivationPolicy();
   createWindow();
-  syncLoginItemSettingFromOs();
+  let skipLoginItemSync = false;
+  if (process.platform === 'win32' && loginItemEnabledHere() && loginItemApi.shouldRepinLoginItem({
+    startAtLogin: settings.startAtLogin,
+    openAtLogin: currentLoginItemState()
+  })) {
+    // An update that installed the new build into another directory leaves the Run
+    // value written by the previous build. Rewrite it instead of silently turning
+    // startAtLogin off and letting the old build keep starting.
+    const approval = startupEntryApproval();
+    if (approval === 'unknown') {
+      // Cannot tell whether the user opted out of the Startup tab; leave the entry
+      // untouched and keep the preference so a later launch can retry.
+      skipLoginItemSync = true;
+    } else {
+      const repaired = applyLoginItem(true, { enabled: approval !== 'disabled' });
+      skipLoginItemSync = !repaired;
+      if (repaired) console.log(`[login-item] re-pointed the startup entry to ${loginItemPath()}`);
+    }
+  }
+  // A failed or deferred repair leaves the OS state at "off"; syncing it back would
+  // drop the preference and stop later launches from retrying.
+  if (!skipLoginItemSync) syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
   // The retired in-app npm updater kept upstream tokscale builds here; the
   // collector no longer reads them, so drop the leftovers.
