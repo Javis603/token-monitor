@@ -17,6 +17,24 @@ test('fixed periods reuse the existing three-slot control', () => {
   assert.doesNotMatch(html, /id="monthPeriodTab"[^>]*>[^<]*(?:▼|▾|⌄)/);
 });
 
+test('the middle tab discloses its menu with a chevron like the view switcher', () => {
+  const html = read('index.html');
+  const css = read('styles.css');
+  assert.match(html, /id="monthPeriodTab"[^>]*aria-haspopup="menu"/);
+  // The pseudo-element is a flex item, so the tab must lay out as a flex row.
+  assert.match(css, /#monthPeriodTab\s*\{[^}]*display:\s*inline-flex;[^}]*gap:\s*4px;/s);
+  // The chevron is drawn, never a text glyph: `syncPeriodTabs()` rewrites the
+  // label with `textContent`, which would wipe an inline arrow.
+  assert.match(
+    css,
+    /#monthPeriodTab::after\s*\{[^}]*content:\s*'';[^}]*border-right:\s*1\.5px solid currentColor;[^}]*border-bottom:\s*1\.5px solid currentColor;[^}]*transform:\s*translateY\(-2px\) rotate\(45deg\);[^}]*transition:\s*transform/s
+  );
+  assert.match(css, /\.titlebar\.period-menu-open #monthPeriodTab::after\s*\{\s*transform:\s*translateY\(2px\) rotate\(225deg\);/);
+  // The tab indicator is sized as an exact third, so the chevron must not widen
+  // the middle track.
+  assert.match(css, /#monthPeriodTab\s*\{[^}]*padding-inline:\s*2px;/s);
+});
+
 test('the middle-slot menu and Settings expose the same four fixed choices', () => {
   const html = read('index.html');
   const menu = html.slice(html.indexOf('id="monthPeriodMenu"'), html.indexOf('class="actions-hotspot"'));

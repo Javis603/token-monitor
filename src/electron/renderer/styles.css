@@ -3374,6 +3374,31 @@ html.is-windows .settings-panel select option {
   background: transparent;
   box-shadow: none;
 }
+/* The middle tab opens a menu instead of toggling a range, and its label is
+   rewritten per range, so the only stable signifier is the chevron. Same
+   geometry as `.view-switcher-disclosure`; it inherits the tab's colour, so it
+   turns accent while that tab is the selected range. */
+#monthPeriodTab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  /* The chevron must not widen this column: the tab indicator is sized as an
+     exact third, so a wider middle track would visibly offset it. */
+  padding-inline: 2px;
+}
+#monthPeriodTab::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 140ms ease;
+}
+.titlebar.period-menu-open #monthPeriodTab::after {
+  transform: translateY(2px) rotate(225deg);
+}
 .fixed-period-message {
   position: relative;
   z-index: 1;
