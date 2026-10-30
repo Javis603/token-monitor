@@ -6,7 +6,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 
 const { normalizeLimitProvider } = require('../../limits/core');
-const { cleanSecret, numberOrNull: parseNumberOrNull, errorWithStatus, envValue, pathApiForPlatform, uniqueStrings } = require('../../limits/providerHelpers');
+const { cleanSecret, numberOrNull: parseNumberOrNull, errorWithStatus, envValue, uniqueStrings } = require('../../limits/providerHelpers');
 const { runCapturedCliProcess } = require('../../limits/cliProcess');
 const { hashKey } = require('../../hashKey');
 const { mcodeDataDirs } = require('../mcode/paths');
@@ -352,6 +352,13 @@ function minimaxCodeAuthFiles(deps = {}) {
   const env = deps.env || process.env;
   let unreadable = false;
   for (const base of mcodeDataDirs({ env, homeDir: deps.homeDir || os.homedir() })) {
+    // Windows can report a file in an ancestor position as ENOENT, not ENOTDIR.
+    try {
+      if (!fs.statSync(path.join(base, 'auth')).isDirectory()) { unreadable = true; continue; }
+    } catch (error) {
+      if (error.code !== 'ENOENT') unreadable = true;
+      continue;
+    }
     for (const regionDir of ['cn', 'en']) {
       const directory = path.join(base, 'auth', 'prod', regionDir, 'mcode-public');
       const authPath = path.join(directory, 'auth.json');
@@ -390,7 +397,7 @@ function minimaxCodeAuthState(session, deps = {}) {
 function minimaxCodeCommand(deps) {
   const env = deps.env || process.env;
   const platform = deps.platform || process.platform;
-  const paths = pathApiForPlatform(platform);
+  const paths = platform === 'win32' ? path.win32 : path.posix;
   const home = deps.homeDir || os.homedir();
   const installDir = envValue(env, 'MCODE_INSTALL_DIR') || paths.join(home, '.minimax-code');
   const dirs = uniqueStrings([
@@ -768,7 +775,7 @@ async function linkMinimaxAccounts(rows, options, deps, context, key, apiAccount
   const code = rows.find(row => !row.removed && row.source === 'oauth')
     || previous.find(row => row.source === 'oauth');
   const apiRegion = api?.region || previous.find(row => row.accountKey === apiAccountKey)?.region;
-  // The cross-account controls cover CN pay-as-you-go keys only.
+  // Pairing is considered only for a CN Code login that is not pinned to international.
   if (!key || api?.accountKey !== apiAccountKey || !code?.accountKey || code.region !== 'cn'
     || (api.region && api.region !== 'cn')
     || minimaxRegion(options, deps.env || process.env) === 'intl' || deps.signal?.aborted) return;
@@ -777,6 +784,8 @@ async function linkMinimaxAccounts(rows, options, deps, context, key, apiAccount
     || previous.some(row => row.region === 'cn' && (
       (row.accountKey === apiAccountKey && row.relatedAccountKey === code.accountKey)
       || (row.accountKey === code.accountKey && row.relatedAccountKey === apiAccountKey)));
+  // A new confirmation is one read by a CN pay-as-you-go key. Changing the
+  // billing type keeps a pair that was already verified.
   if (!linked && identity?.accountKey === code.accountKey && apiRegion === 'cn'
     && normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api' && api.status === 'ok' && code.status === 'ok') {
     try {

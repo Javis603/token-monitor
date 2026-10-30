@@ -1857,7 +1857,7 @@ except (OSError, RuntimeError):
 # Version and printed usage share the same isolated interpreter and cwd pin.
 # exec preserves the CLI exit status and pipes, without opening a terminal.
 if os.environ.get("TOKEN_MONITOR_CLAUDE_NONINTERACTIVE") == "1":
-    # execFile has no detached option: isolate ordinary wrapper descendants here.
+    # The parent spawn is not detached, so isolate wrapper descendants here.
     os.setsid()
     os.execvp(cmd, [cmd] + json.loads(os.environ["TOKEN_MONITOR_CLAUDE_PROBE_ARGS"]))
 master, slave = pty.openpty()

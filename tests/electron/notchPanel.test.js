@@ -769,7 +769,7 @@ test('verified MiniMax readings retain separate amounts without numbered account
   const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider: 'minimax' }] });
   f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
   assert.equal(f.all('notch-limit').length, 2);
-  assert.ok(f.all('notch-limit-name').every(node => node.textContent.trim()));
+  assert.ok(f.all('notch-limit').every(node => node.querySelector('.notch-limit-name')?.textContent.trim()));
   assert.ok(f.all('notch-limit-account').every(node => !/\bAccount [12]\b/.test(node.textContent)));
   assert.deepEqual(new Set(f.all('notch-limit-money').map(node => node.textContent)), new Set(['4624.00', '¥14.97']));
 });

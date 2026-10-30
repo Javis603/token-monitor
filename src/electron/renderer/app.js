@@ -17058,7 +17058,8 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  // Only an active check may keep a previously linked credential form closed.
+  // Leave the form unchanged during a check, and while a configured key still
+  // has no row and that check has not settled.
   const readingPending = pending || (enabled && !settled && configured && !provider);
   if (!readingPending) {
     manualPanel.classList.toggle('hidden', linked);

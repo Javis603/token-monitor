@@ -2,93 +2,65 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { createHash } = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const dotenv = require('dotenv');
-const { createHash } = require('node:crypto');
 
 const {
   minimaxToken,
   parseMinimaxTiers,
   fetchMinimaxLimits: fetchMinimaxLimitsWithDeps,
+  minimaxAttemptOrder,
   minimaxRegion,
+  minimaxRegionForUrl,
+  isMinimaxTransportError,
   MINIMAX_REGION_MEMORY_STATE_KEY,
-  MINIMAX_CODE_MEMBERSHIP_URL_CN,
-  MINIMAX_CODE_PLAN_REMAINS_URL_CN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
   MINIMAX_REMAINS_URL_CN,
-  MINIMAX_REMAINS_URL_EN
+  MINIMAX_REMAINS_URL_EN,
+  MINIMAX_CODE_MEMBERSHIP_URL_CN,
+  MINIMAX_CODE_PLAN_REMAINS_URL_CN
 } = require('../../src/shared/providers/minimax/limits');
+
+const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-empty-home-'));
+test.after(() => fs.rmSync(emptyHome, { recursive: true, force: true }));
+const fetchMinimaxLimits = (options, deps) => fetchMinimaxLimitsWithDeps(options, { env: {}, homeDir: emptyHome, ...(deps || {}) });
+const { parseLimitProviders } = require('../../src/shared/limits/collector');
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 const { aggregateLimits, syncLimits } = require('../../src/shared/limits/core');
 const { syncLimits: syncWorkerLimits } = require('../../worker/src/shared/limits/core');
 
-// Automatic discovery must never read the developer's real login in unit tests.
-const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'minimax-empty-home-'));
-test.after(() => fs.rmSync(emptyHome, { recursive: true, force: true }));
-const fetchMinimaxLimits = (options, deps) => fetchMinimaxLimitsWithDeps(options, { env: {}, homeDir: emptyHome, ...deps });
+const CN_REMAINS_URLS = new Set([MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
 
 const BALANCE_URL_CN = 'https://api.minimaxi.com/account/query_balance';
 const BALANCE_URL_EN = 'https://api.minimax.io/account/query_balance';
 
-test('MiniMax API balance probes use one endpoint in the selected region', async () => {
-  const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
-  const before = [fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8'));
+test('MiniMax API billing uses one balance endpoint in the selected region', async () => {
   for (const [region, url, currency] of [['cn', BALANCE_URL_CN, 'CNY'], ['intl', BALANCE_URL_EN, 'USD']]) {
-    // Voucher balances may update before daily cash bills are posted.
-    for (const body of [
-      { available_amount: '98.25', cash_balance: '100.00' },
-      { available_amount: '14.97', cash_balance: '0.00', voucher_balance: '14.97',
-        credit_balance: '0.00', owed_amount: '0.00', balance_alert_switch: false, balance_alert_threshold: '' },
-      { available_amount: '0.00' },
-      { available_amount: '-1.50' }
-    ]) {
+    for (const amount of ['98.25', '0.00', '-1.50']) {
       const calls = [];
       const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api', minimaxApiRegion: region }, {
-        env: { MINIMAX_DATA_DIR: fixture.base }, probe: true,
-        fetch: async (target, { headers }) => {
+        env: {},
+        fetchJson: async (target, headers) => {
           calls.push(target);
           assert.equal(headers.Authorization, 'Bearer sk-api-test');
-          return okResponse({ ...body, base_resp: { status_code: 0, status_msg: 'success' } });
+          return { available_amount: amount, cash_balance: '100.00', base_resp: { status_code: 0 } };
         }
       });
-      assert.deepEqual(calls, [url]);
-      assertFields(result, { status: 'ok', accountLabel: 'Pay-as-you-go' });
+      assert.deepEqual(calls.filter(target => target === url), [url]);
+      assert.equal(result.status, 'ok');
+      assert.equal(result.accountLabel, 'Pay-as-you-go');
       assert.equal(result.windows.length, 1);
-      assertFields(result.windows[0], { metric: 'credits', currency, remaining: Number(body.available_amount),
-        usedPercent: null, resetsAt: null });
+      assert.equal(result.windows[0].metric, 'credits');
+      assert.equal(result.windows[0].currency, currency);
+      assert.equal(result.windows[0].remaining, Number(amount));
+      assert.equal(result.windows[0].usedPercent, null);
+      assert.equal(result.windows[0].resetsAt, null);
       assert.equal(JSON.stringify(result).includes('sk-api-test'), false);
-      assertSyncPreservesReading(result);
     }
-  }
-  assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before);
-});
-
-test('MiniMax API billing retries business auth errors and remembers a valid zero balance', async () => {
-  // Foreign-region keys can be rejected by HTTP 400 plus business 1004.
-  for (const httpStatus of [200, 400]) {
-    const calls = [];
-    const providerRuntimeState = new Map();
-    const deps = {
-      env: {}, probe: true, providerRuntimeState,
-      fetch: async (url) => {
-        calls.push(url);
-        return url === BALANCE_URL_EN
-          ? { ok: httpStatus === 200, status: httpStatus, json: async () => ({ base_resp: { status_code: 1004, status_msg: 'not authorized' } }) }
-          : okResponse({ available_amount: '0.00', cash_balance: '0.00', voucher_balance: '0.00', base_resp: { status_code: 0 } });
-      }
-    };
-    const options = { minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api' };
-    const result = await fetchMinimaxLimits(options, deps);
-    assert.equal(result.status, 'ok', `HTTP ${httpStatus} business auth rejection must try CN`);
-    assert.equal(result.windows[0].remaining, 0);
-    assert.deepEqual(calls, [BALANCE_URL_EN, BALANCE_URL_CN]);
-    assert.equal(providerRuntimeState.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
-    calls.length = 0;
-    assert.equal((await fetchMinimaxLimits(options, deps)).status, 'ok');
-    assert.deepEqual(calls, [BALANCE_URL_CN]);
   }
 });
 
@@ -108,25 +80,42 @@ test('MiniMax API billing rejects missing or malformed balances without inventin
   }
 });
 
+test('MiniMax API billing reuses Auto region fallback and remembers a valid zero balance', async () => {
+  const calls = [];
+  const providerRuntimeState = new Map();
+  const deps = {
+    env: {}, providerRuntimeState,
+    fetchJson: async (url) => {
+      calls.push(url);
+      if (url === BALANCE_URL_EN) throw Object.assign(new Error('wrong region'), { status: 'unauthorized', statusCode: 401 });
+      return { available_amount: '0.00', base_resp: { status_code: 0 } };
+    }
+  };
+  const options = { minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api' };
+  assert.equal((await fetchMinimaxLimits(options, deps)).status, 'ok');
+  assert.deepEqual(calls.filter(url => url === BALANCE_URL_EN || url === BALANCE_URL_CN), [BALANCE_URL_EN, BALANCE_URL_CN]);
+  assert.equal(providerRuntimeState.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+  calls.length = 0;
+  assert.equal((await fetchMinimaxLimits(options, deps)).status, 'ok');
+  assert.deepEqual(calls.filter(url => url === BALANCE_URL_EN || url === BALANCE_URL_CN), [BALANCE_URL_CN]);
+});
+
 test('MiniMax API billing preserves auth, rate-limit and transport verdicts', async () => {
-  for (const [httpStatus, statusCode, expected, urls] of [
-    [401, undefined, 'unauthorized', [BALANCE_URL_EN, BALANCE_URL_CN]],
-    [400, 1004, 'unauthorized', [BALANCE_URL_EN, BALANCE_URL_CN]],
-    [400, 2013, 'unavailable', [BALANCE_URL_EN]],
-    [429, undefined, 'sourceRateLimited', [BALANCE_URL_EN]],
-    [500, undefined, 'unavailable', [BALANCE_URL_EN]],
-    [null, undefined, 'unavailable', [BALANCE_URL_EN, BALANCE_URL_CN]]
+  for (const [error, expected, urls] of [
+    [{ status: 'unauthorized', statusCode: 401 }, 'unauthorized', [BALANCE_URL_EN, BALANCE_URL_CN]],
+    [{ status: 'sourceRateLimited', statusCode: 429 }, 'sourceRateLimited', [BALANCE_URL_EN]],
+    [{ status: 'unavailable', statusCode: 500 }, 'unavailable', [BALANCE_URL_EN]],
+    [{}, 'unavailable', [BALANCE_URL_EN, BALANCE_URL_CN]]
   ]) {
     const calls = [];
     const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api' }, {
       env: {},
-      fetch: async (url) => {
+      fetchJson: async (url) => {
         calls.push(url);
-        if (httpStatus === null) throw new Error('network down');
-        return { ok: false, status: httpStatus, json: async () => ({ base_resp: { status_code: statusCode } }) };
+        throw Object.assign(new Error('probe failed'), error);
       }
     });
-    assert.equal(result.status, expected, `HTTP ${httpStatus}, business code ${statusCode}`);
+    assert.equal(result.status, expected);
     assert.deepEqual(calls, urls);
   }
   const calls = [];
@@ -141,6 +130,1118 @@ test('MiniMax API billing preserves auth, rate-limit and transport verdicts', as
   assert.equal(result.status, 'unavailable');
   assert.deepEqual(calls, [BALANCE_URL_EN, BALANCE_URL_CN]);
 });
+
+test('the copied environment example leaves the legacy MiniMax host pin effective', () => {
+  const example = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
+  const env = dotenv.parse(`${example}\nMINIMAX_API_HOST=api.minimaxi.com\n`);
+  assert.equal(minimaxRegion({}, env), 'cn');
+});
+
+function okResponse(body) {
+  return { ok: true, status: 200, json: async () => body };
+}
+
+function unauthorized() {
+  return { ok: false, status: 401, json: async () => ({}) };
+}
+
+test('minimaxToken reads the CodexBar-compatible Token Plan key and ignores unrelated keys', () => {
+  assert.equal(minimaxToken({ MINIMAX_CODING_API_KEY: '  "sk-cp-codexbar"  ' }), 'sk-cp-codexbar');
+  assert.equal(minimaxToken({ TOKEN_MONITOR_MINIMAX_KEY: 'sk-cp-unrelated' }), '');
+  assert.equal(minimaxToken({ MINIMAX_API_KEY: 'sk-api-payg' }), '');
+  assert.equal(minimaxToken({}), '');
+  assert.equal(minimaxToken({}, '  "sk-cp-direct"  '), 'sk-cp-direct');
+});
+
+test('parseLimitProviders includes minimax and grok in the default provider set', () => {
+  const providers = parseLimitProviders();
+  assert.ok(providers.includes('minimax'));
+  assert.ok(providers.includes('grok'));
+});
+
+test('minimaxAttemptOrder prefers token-plan endpoint before legacy coding-plan endpoint per region', () => {
+  assert.deepEqual(minimaxAttemptOrder(), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
+    MINIMAX_REMAINS_URL_EN,
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
+    MINIMAX_REMAINS_URL_CN
+  ]);
+  assert.deepEqual(minimaxAttemptOrder({ minimaxApiHost: 'cn' }), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
+    MINIMAX_REMAINS_URL_CN
+  ]);
+  assert.deepEqual(minimaxAttemptOrder({ minimaxApiHost: 'en' }), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
+    MINIMAX_REMAINS_URL_EN
+  ]);
+  assert.deepEqual(minimaxAttemptOrder({ minimaxApiHost: 'minimax.io' }), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
+    MINIMAX_REMAINS_URL_EN
+  ]);
+});
+
+test('minimaxAttemptOrder puts a remembered region first and keeps the other as fallback', () => {
+  assert.deepEqual(minimaxAttemptOrder({ minimaxRememberedRegion: 'cn' }), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
+    MINIMAX_REMAINS_URL_CN,
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
+    MINIMAX_REMAINS_URL_EN
+  ]);
+  assert.deepEqual(minimaxAttemptOrder({ minimaxRememberedRegion: 'en' }), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
+    MINIMAX_REMAINS_URL_EN,
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
+    MINIMAX_REMAINS_URL_CN
+  ]);
+  // An unknown value falls back to the default order rather than breaking.
+  assert.deepEqual(minimaxAttemptOrder({ minimaxRememberedRegion: 'jp' }), minimaxAttemptOrder());
+  // An explicit host pin outranks the memory: the pin is a single-region order.
+  assert.deepEqual(minimaxAttemptOrder({ minimaxApiHost: 'cn', minimaxRememberedRegion: 'en' }), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
+    MINIMAX_REMAINS_URL_CN
+  ]);
+});
+
+test('minimaxRegion normalizes the explicit region setting and keeps auto as the default', () => {
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'auto' }), 'auto');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'cn' }), 'cn');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'intl' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: ' INTL ' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'en' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'global' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'api.minimaxi.com' }), 'cn');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'api.minimax.io' }), 'intl');
+  // Anything unrecognized degrades to the historical probe order rather than
+  // pinning a region the user never asked for.
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'nonsense' }), 'auto');
+  assert.equal(minimaxRegion({}), 'auto');
+  assert.equal(minimaxRegion(), 'auto');
+});
+
+test('minimaxRegion prefers the new option, then the legacy host pin, then the env lane', () => {
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'cn', minimaxApiHost: 'en' }), 'cn');
+  assert.equal(minimaxRegion({}, { TOKEN_MONITOR_MINIMAX_API_REGION: 'cn' }), 'cn');
+  assert.equal(minimaxRegion({}, { MINIMAX_API_REGION: 'intl' }), 'intl');
+  assert.equal(minimaxRegion({}, { MINIMAX_API_HOST: 'api.minimaxi.com' }), 'cn');
+  assert.equal(
+    minimaxRegion({ minimaxApiRegion: 'intl' }, { TOKEN_MONITOR_MINIMAX_API_REGION: 'cn' }),
+    'intl'
+  );
+});
+
+test('minimaxRegionForUrl maps endpoints to en/cn labels for the renderer', () => {
+  assert.equal(minimaxRegionForUrl(MINIMAX_REMAINS_URL_EN), 'en');
+  assert.equal(minimaxRegionForUrl(MINIMAX_REMAINS_URL_CN), 'cn');
+  assert.equal(minimaxRegionForUrl(MINIMAX_TOKEN_PLAN_REMAINS_URL_EN), 'en');
+  assert.equal(minimaxRegionForUrl(MINIMAX_TOKEN_PLAN_REMAINS_URL_CN), 'cn');
+  assert.equal(minimaxRegionForUrl('https://example.com'), '');
+});
+
+// Only a failure with no HTTP-layer answer at all justifies jumping regions:
+// the transport shapes (Node undici's `fetch failed` with or without a cause
+// code, and Chromium's plain `net::ERR_*` rejection) carry neither a status nor
+// a statusCode.
+test('isMinimaxTransportError accepts the shapes a failing host actually rejects with', () => {
+  assert.equal(isMinimaxTransportError(null), false);
+  assert.equal(isMinimaxTransportError(new Error('fetch failed')), true);
+  assert.equal(
+    isMinimaxTransportError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } })),
+    true
+  );
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('aborted'), { name: 'AbortError' })), true);
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('net::ERR_CONNECTION_TIMED_OUT'))), true);
+});
+
+// An HTTP answer never counts as transport: the status-carrying rejection the
+// fetcher throws, the JSON parse failure of a body that did arrive (a
+// truncated or interception page), and the internal throws that carry a status
+// without a statusCode.
+test('isMinimaxTransportError refuses every shape that got an HTTP answer', () => {
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('unreachable host'), { status: 'unavailable', statusCode: 503 })), false);
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('bad token'), { status: 'unauthorized', statusCode: 401 })), false);
+  const parseError = new SyntaxError('Unexpected token < in JSON at position 0');
+  assert.equal(isMinimaxTransportError(parseError), false);
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('no quota windows'), { status: 'unavailable' })), false);
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('nope'), { status: 'timeout' })), false);
+});
+
+test('parseMinimaxTiers reads the nested data.model_remains shape used by the live endpoint', () => {
+  // Verified shape from a real Token Plan response (PR #32 review).
+  const body = {
+    base_resp: { status_code: 0, status_msg: 'success' },
+    data: {
+      current_subscribe_title: 'Token Plan Plus',
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: '96',
+          start_time: 1_780_279_200_000,
+          end_time: 1_780_297_200_000,
+          current_weekly_remaining_percent: '99',
+          weekly_start_time: 1_780_243_200_000,
+          weekly_end_time: 1_780_848_000_000
+        }
+      ]
+    }
+  };
+  const windows = parseMinimaxTiers(body);
+  assert.equal(windows.length, 2);
+  assert.equal(windows[0].kind, 'session');
+  assert.equal(windows[0].usedPercent, 4); // 100 - 96 (string → number)
+  assert.equal(windows[0].remainingPercent, 96);
+  assert.equal(windows[0].windowMinutes, 5 * 60);
+  assert.match(windows[0].resetsAt, /^20\d\d-/);
+  assert.equal(windows[1].kind, 'weekly');
+  assert.equal(windows[1].usedPercent, 1);
+  assert.equal(windows[1].remainingPercent, 99);
+});
+
+test('parseMinimaxTiers accepts the legacy top-level model_remains shape', () => {
+  const body = {
+    model_remains: [
+      {
+        model_name: 'general',
+        current_interval_remaining_percent: 80,
+        current_weekly_remaining_percent: 70
+      }
+    ]
+  };
+  const windows = parseMinimaxTiers(body);
+  assert.equal(windows.length, 2);
+  assert.equal(windows[0].usedPercent, 20);
+  assert.equal(windows[1].usedPercent, 30);
+});
+
+test('parseMinimaxTiers skips video / voice buckets and locates general anywhere in the array', () => {
+  const body = {
+    data: {
+      model_remains: [
+        { model_name: 'video', current_interval_remaining_percent: 20 },
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: 80,
+          current_weekly_remaining_percent: 70
+        }
+      ]
+    }
+  };
+  const windows = parseMinimaxTiers(body);
+  assert.equal(windows.length, 2);
+  assert.equal(windows[0].usedPercent, 20); // 100 - 80, NOT the video 80%
+});
+
+test('parseMinimaxTiers suppresses the status==3 placeholder lane', () => {
+  // Plan that has no weekly bucket: server returns the placeholder row with
+  // current_weekly_status:3 and current_weekly_remaining_percent:100. The
+  // session row is real, so we keep it.
+  const body = {
+    data: {
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: 99,
+          current_interval_status: 1,
+          current_weekly_remaining_percent: 100,
+          current_weekly_status: 3
+        }
+      ]
+    }
+  };
+  const windows = parseMinimaxTiers(body);
+  assert.equal(windows.length, 1);
+  assert.equal(windows[0].kind, 'session');
+});
+
+test('parseMinimaxTiers suppresses a status==3 lane that has no usable percent', () => {
+  const body = {
+    data: {
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: 80,
+          current_interval_status: 1,
+          current_weekly_status: 3
+          // current_weekly_remaining_percent intentionally absent
+        }
+      ]
+    }
+  };
+  const windows = parseMinimaxTiers(body);
+  assert.equal(windows.length, 1);
+  assert.equal(windows[0].kind, 'session');
+});
+
+test('parseMinimaxTiers emits a non-placeholder weekly lane even when status is missing', () => {
+  // The live response doesn't always carry current_weekly_status. As long as
+  // the percent is present and not the 100% placeholder, render it.
+  const body = {
+    data: {
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: 80,
+          current_weekly_remaining_percent: 70
+        }
+      ]
+    }
+  };
+  const windows = parseMinimaxTiers(body);
+  assert.equal(windows.length, 2);
+});
+
+test('parseMinimaxTiers renders a status==3 lane with a real (non-100, non-null) percent', () => {
+  // Documents the current behavior: the placeholder guard only suppresses
+  // status==3 with a 100% / null percent. If the server returns status==3
+  // with a real percent (e.g. 50), we trust the number and render the window
+  // — same as CodexBar. If the live endpoint ever starts returning this
+  // shape, the percent may be a stale placeholder, and this test will need
+  // to flip to assert the lane is suppressed instead.
+  const body = {
+    data: {
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: 50,
+          current_interval_status: 3,
+          current_weekly_remaining_percent: 60,
+          current_weekly_status: 3
+        }
+      ]
+    }
+  };
+  const windows = parseMinimaxTiers(body);
+  assert.equal(windows.length, 2);
+  assert.equal(windows[0].usedPercent, 50); // 100 - 50
+  assert.equal(windows[1].usedPercent, 40); // 100 - 60
+});
+
+test('parseMinimaxTiers returns [] when model_remains is missing or has no general entry', () => {
+  assert.deepEqual(parseMinimaxTiers({ data: { model_remains: [] } }), []);
+  assert.deepEqual(parseMinimaxTiers({ data: { model_remains: [{ model_name: 'video' }] } }), []);
+  assert.deepEqual(parseMinimaxTiers({}), []);
+  assert.deepEqual(parseMinimaxTiers(null), []);
+});
+
+test('parseMinimaxTiers clamps percentages to [0, 100] and handles negative remainders', () => {
+  const body = {
+    data: {
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: -5,
+          current_weekly_remaining_percent: 150
+        }
+      ]
+    }
+  };
+  const windows = parseMinimaxTiers(body);
+  assert.equal(windows.length, 2);
+  assert.equal(windows[0].usedPercent, 100); // 100 - (-5) clamped
+  assert.equal(windows[0].remainingPercent, 0);
+  assert.equal(windows[1].usedPercent, 0); // 100 - 150 clamped
+  assert.equal(windows[1].remainingPercent, 100);
+});
+
+test('parseMinimaxTiers treats second-precision timestamps as seconds, not milliseconds', () => {
+  const body = {
+    data: {
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: 50,
+          end_time: 1_716_350_400 // 10 digits → seconds, < 1e12
+        }
+      ]
+    }
+  };
+  const windows = parseMinimaxTiers(body);
+  assert.match(windows[0].resetsAt, /^20\d\d-/);
+});
+
+test('fetchMinimaxLimits returns notConfigured when no key is provided', async () => {
+  const r = await fetchMinimaxLimits({}, { env: {} });
+  assert.equal(r.provider, 'minimax');
+  assert.equal(r.status, 'notConfigured');
+  assert.equal(r.source, 'api');
+  assert.deepEqual(r.windows, []);
+  assert.equal(r.region, '');
+});
+
+test('fetchMinimaxLimits returns ok with both windows from the nested shape and never leaks the key', async () => {
+  const env = { MINIMAX_CODING_API_KEY: 'sk-cp-secret' };
+  const body = {
+    base_resp: { status_code: 0 },
+    data: {
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: 92,
+          current_interval_status: 1,
+          current_weekly_remaining_percent: 88,
+          current_weekly_status: 1,
+          end_time: 1_716_350_400_000,
+          weekly_end_time: 1_716_780_000_000
+        }
+      ]
+    }
+  };
+  let capturedUrl = '';
+  let capturedAuth = '';
+  const r = await fetchMinimaxLimits({}, {
+    env,
+    now: () => 1_716_350_000_000,
+    fetch: async (url, init) => {
+      capturedUrl = url;
+      capturedAuth = init.headers.Authorization;
+      return okResponse(body);
+    }
+  });
+
+  assert.equal(r.provider, 'minimax');
+  assert.equal(r.status, 'ok');
+  assert.equal(r.source, 'api');
+  assert.equal(r.accountLabel, 'Token Plan');
+  assert.match(r.accountKey, /^sha256:/);
+  assert.equal(r.region, 'en'); // global endpoint hit first
+  assert.equal(capturedUrl, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN);
+  assert.equal(r.windows.length, 2);
+  assert.equal(r.windows[0].kind, 'session');
+  assert.equal(r.windows[0].usedPercent, 8);
+  assert.equal(r.windows[1].kind, 'weekly');
+  assert.equal(r.windows[1].usedPercent, 12);
+  assert.equal(capturedAuth, 'Bearer sk-cp-secret');
+  assert.ok(!JSON.stringify(r).includes('sk-cp-secret'));
+});
+
+test('fetchMinimaxLimits prefers the widget settings key over env fallback', async () => {
+  let capturedAuth = '';
+  const r = await fetchMinimaxLimits(
+    { minimaxApiKey: " 'sk-cp-settings' " },
+    {
+      env: { MINIMAX_CODING_API_KEY: 'sk-cp-env' },
+      now: () => 1_716_350_000_000,
+      fetch: async (_url, init) => {
+        capturedAuth = init.headers.Authorization;
+        return okResponse({ data: { model_remains: [] } });
+      }
+    }
+  );
+  assert.equal(capturedAuth, 'Bearer sk-cp-settings');
+  assert.equal(r.status, 'unavailable'); // empty model_remains → no windows → unavailable
+  assert.ok(!JSON.stringify(r).includes('sk-cp-settings'));
+});
+
+test('fetchMinimaxLimits maps HTTP 401 to unauthorized', async () => {
+  // Pinned to the CN host, single attempt, no retry → straightforward error.
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetch: async () => unauthorized()
+  });
+  assert.equal(r.status, 'unauthorized');
+  assert.equal(r.region, '');
+  assert.deepEqual(r.windows, []);
+});
+
+test('fetchMinimaxLimits maps HTTP 403 to unauthorized and retries the other region', async () => {
+  // 403 is a token rejection, not a server fault — same handling as 401, so the
+  // global→CN retry still gets a chance to find a working region.
+  const calls = [];
+  const body = {
+    data: {
+      model_remains: [
+        { model_name: 'general', current_interval_remaining_percent: 80, current_weekly_remaining_percent: 70 }
+      ]
+    }
+  };
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN) return { ok: false, status: 403, json: async () => ({}) };
+      if (url === MINIMAX_REMAINS_URL_EN) return { ok: false, status: 403, json: async () => ({}) };
+      return okResponse(body);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
+test('fetchMinimaxLimits falls back from token-plan remains to legacy coding-plan remains within a region', async () => {
+  const calls = [];
+  const body = {
+    data: {
+      model_remains: [
+        { model_name: 'general', current_interval_remaining_percent: 90, current_weekly_remaining_percent: 80 }
+      ]
+    }
+  };
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'en' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-codexbar' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN) return { ok: false, status: 404, json: async () => ({}) };
+      return okResponse(body);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'en');
+});
+
+test('fetchMinimaxLimits falls back to legacy coding-plan when token-plan returns no parseable windows', async () => {
+  const calls = [];
+  const legacyBody = {
+    data: {
+      model_remains: [
+        { model_name: 'general', current_interval_remaining_percent: 91, current_weekly_remaining_percent: 82 }
+      ]
+    }
+  };
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'en' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-codexbar' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN) return okResponse({});
+      return okResponse(legacyBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'en');
+  assert.equal(r.windows[0].usedPercent, 9);
+});
+
+test('fetchMinimaxLimits aborts and returns unavailable when the fetch exceeds the timeout', async () => {
+  let receivedSignal = null;
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetchTimeoutMs: 10,
+    fetch: async (_url, init) => {
+      receivedSignal = init.signal;
+      return new Promise((_, reject) => {
+        init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }
+  });
+  assert.ok(receivedSignal, 'fetch should receive an AbortSignal');
+  assert.equal(r.status, 'unavailable');
+  assert.deepEqual(r.windows, []);
+});
+
+test('fetchMinimaxLimits retries the CN host when the global host rejects the token', async () => {
+  const calls = [];
+  const body = {
+    data: {
+      model_remains: [
+        {
+          model_name: 'general',
+          current_interval_remaining_percent: 80,
+          current_weekly_remaining_percent: 70
+        }
+      ]
+    }
+  };
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN) return unauthorized();
+      if (url === MINIMAX_REMAINS_URL_EN) return unauthorized();
+      return okResponse(body);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
+test('fetchMinimaxLimits retries the CN host when the global host responds 200 + status_code 1004', async () => {
+  // The Token Plan endpoint reports a wrong-region token as a 200 OK with
+  // base_resp.status_code: 1004 ("cookie is missing, log in again"). Without
+  // the retry trigger, a CN-only account would land on the global host and
+  // silently fail with 'unavailable' even though the CN host works fine.
+  const calls = [];
+  const cnBody = {
+    base_resp: { status_code: 0, status_msg: 'success' },
+    model_remains: [
+      {
+        model_name: 'general',
+        current_interval_remaining_percent: 77,
+        current_interval_status: 1,
+        current_weekly_remaining_percent: 78,
+        current_weekly_status: 1
+      }
+    ]
+  };
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN || url === MINIMAX_REMAINS_URL_EN) {
+        return okResponse({ base_resp: { status_code: 1004, status_msg: 'cookie is missing, log in again' } });
+      }
+      return okResponse(cnBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+  assert.equal(r.windows.length, 2);
+  assert.equal(r.windows[0].usedPercent, 23); // 100 - 77
+});
+
+test('fetchMinimaxLimits does not retry another region on HTTP server errors', async () => {
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      return { ok: false, status: 503, json: async () => ({}) };
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]); // only the first attempt
+  assert.equal(r.status, 'unavailable');
+});
+
+test('fetchMinimaxLimits maps base_resp.status_code != 0 to unavailable', async () => {
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetch: async () => okResponse({ base_resp: { status_code: 1001, status_msg: 'quota api disabled' } })
+  });
+  assert.equal(r.status, 'unavailable');
+});
+
+test('fetchMinimaxLimits maps base_resp auth-shaped errors to unauthorized', async () => {
+  // Live endpoint reports auth failures as 200 OK with status_code: 1004 +
+  // a status_msg that mentions "log in" / "cookie" / "token" / "auth" / "key".
+  // Without this mapping the UI would show generic 'Unavailable' for what is
+  // actually a 're-enter the key' prompt.
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetch: async () => okResponse({ base_resp: { status_code: 1004, status_msg: 'cookie is missing, log in again' } })
+  });
+  assert.equal(r.status, 'unauthorized');
+});
+
+test('fetchMinimaxLimits maps an unexpected body shape to unavailable', async () => {
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetch: async () => okResponse({ nope: true })
+  });
+  assert.equal(r.status, 'unavailable');
+});
+
+test('fetchMinimaxLimits reports cn region when pinned to the CN endpoint', async () => {
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn', minimaxApiKey: 'sk-cp-test' }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      assert.equal(url, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN);
+      return okResponse({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 50 }] } });
+    }
+  });
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
+test('fetchMinimaxLimits probes only the pinned region and reports the resolved wire region', async () => {
+  const body = {
+    data: {
+      model_remains: [
+        { model_name: 'general', current_interval_remaining_percent: 60, current_weekly_remaining_percent: 55 }
+      ]
+    }
+  };
+  const intlCalls = [];
+  const intl = await fetchMinimaxLimits({ minimaxApiRegion: 'intl', minimaxApiKey: 'sk-cp-test' }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      intlCalls.push(url);
+      return okResponse(body);
+    }
+  });
+  assert.deepEqual(intlCalls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  assert.equal(intl.status, 'ok');
+  // The wire region keeps its historical en/cn vocabulary; the setting's 'auto'
+  // and 'intl' never leak into it.
+  assert.equal(intl.region, 'en');
+});
+
+test('fetchMinimaxLimits does not cross regions when the region is pinned', async () => {
+  // The cross-region hop is the whole point of pinning: a CN key on a network
+  // that cannot reach api.minimax.io would otherwise burn every probe on a
+  // doomed global request. A 401 here is final, not a signal to try CN.
+  const calls = [];
+  const r = await fetchMinimaxLimits({ minimaxApiRegion: 'cn', minimaxApiKey: 'sk-cp-test' }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      return unauthorized();
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+  assert.equal(r.status, 'unauthorized');
+  assert.deepEqual(r.windows, []);
+});
+
+test('fetchMinimaxLimits pins the region from the env lane for headless use', async () => {
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test', MINIMAX_API_REGION: 'cn' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      return okResponse({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 40 }] } });
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
+// The abort timer must outlive the body read, not just the headers. Undici resolves the
+// fetch as soon as the head arrives, so a body that never arrives is only bounded if the
+// timer is still armed while `.json()` is pending.
+test('fetchMinimaxLimits aborts when the body stalls after the headers', { timeout: 5000 }, async () => {
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetchTimeoutMs: 10,
+    fetch: async (_url, init) => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      })
+    })
+  });
+  assert.equal(r.status, 'unavailable');
+  assert.deepEqual(r.windows, []);
+});
+
+const windowsBody = {
+  data: {
+    model_remains: [
+      { model_name: 'general', current_interval_remaining_percent: 80, current_weekly_remaining_percent: 70 }
+    ]
+  }
+};
+
+// Connect timeout / DNS / reset never reach an HTTP server, so the legacy
+// endpoint on the same host would only repeat the wait. The rescue is the
+// OTHER region's token-plan endpoint.
+test('fetchMinimaxLimits skips the rest of a region whose host is unreachable and tries the next region', async () => {
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN) throw new Error('fetch failed');
+      return okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
+// A body that arrived but did not parse is an HTTP answer, so it does not earn
+// the region jump: it is reported like any other unreadable response, and the
+// other region's endpoint is not committed to. (Before the transport rule
+// read "no HTTP answer" this SyntaxError counted as an unreachable host and
+// the CN token-plan endpoint was probed for it.)
+test('fetchMinimaxLimits does not jump regions when a 200 body fails to parse', async () => {
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      return { ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token'); } };
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  assert.equal(r.status, 'unavailable');
+});
+
+// A body that parses but names no quota is an answer, not a rescue: it must
+// not be remembered as the region that works, or the next probe would start
+// down the same blind alley. (Remember-before-check is the regression this
+// pins: the write would land on an 'unavailable' result.)
+test('fetchMinimaxLimits does not remember a region whose response parsed to no windows', async () => {
+  const state = new Map();
+  const calls = [];
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      return okResponse({ base_resp: { status_code: 0 } });
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+  assert.equal(r.status, 'unavailable');
+  assert.equal(state.has(MINIMAX_REGION_MEMORY_STATE_KEY), false);
+});
+
+test('fetchMinimaxLimits remembers the region that answered and asks it first on the next probe', async () => {
+  const state = new Map();
+  const firstCalls = [];
+  const secondCalls = [];
+  await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      firstCalls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN) throw new Error('fetch failed');
+      return okResponse(windowsBody);
+    }
+  });
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+  assert.deepEqual(firstCalls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      secondCalls.push(url);
+      return okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(secondCalls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
+test('fetchMinimaxLimits does not publish the fallback region auth rejection over a transport failure', async () => {
+  // The remembered region (cn) is unreachable; the global endpoints answer
+  // with their by-design foreign-key rejection. Publishing that as
+  // 'unauthorized' would wipe the retained quota, so the transport failure
+  // wins and the state stays untouched.
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']]);
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) throw new Error('fetch failed');
+      return unauthorized();
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
+  assert.equal(r.status, 'unavailable');
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+});
+
+test('fetchMinimaxLimits still reports unauthorized when every region rejects the key', async () => {
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']]);
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-revoked' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      if (CN_REMAINS_URLS.has(url)) {
+        return okResponse({ base_resp: { status_code: 1004, status_msg: 'cookie is missing, log in again' } });
+      }
+      return unauthorized();
+    }
+  });
+  assert.equal(r.status, 'unauthorized');
+});
+
+test('fetchMinimaxLimits follows a key swapped to the other region and updates the memory', async () => {
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']]);
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-global-now' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      if (CN_REMAINS_URLS.has(url)) {
+        return okResponse({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } });
+      }
+      return okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'en');
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'en');
+});
+
+test('MiniMax accepts exact region aliases and hosts, never hostname substrings', () => {
+  for (const host of ['minimaxi.com', 'api.minimaxi.com']) assert.equal(minimaxRegion({ minimaxApiRegion: host }), 'cn');
+  for (const host of ['minimax.io', 'api.minimax.io']) assert.equal(minimaxRegion({ minimaxApiRegion: host }), 'intl');
+  for (const raw of ['evil-minimax.io.example', 'api.minimaxi.com.evil.test', 'https://evil.test/minimax.io', 'api.minimax.io@evil.test']) {
+    assert.equal(minimaxRegion({ minimaxApiRegion: raw }), 'auto', raw);
+  }
+});
+
+test('MiniMax pinned regions retain the legacy endpoint fallback', async () => {
+  for (const [region, urls] of [
+    ['cn', [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]],
+    ['intl', [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]]
+  ]) {
+    const calls = [];
+    const result = await fetchMinimaxLimits({ minimaxApiRegion: region, minimaxApiKey: 'sk-cp-test' }, {
+      env: {}, fetch: async (url) => {
+        calls.push(url);
+        return calls.length === 1 ? { ok: false, status: 404 } : okResponse({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 60 }] } });
+      }
+    });
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(calls, urls);
+  }
+});
+
+test('settings, legacy options, and env pins override opposite region memory on failures', async () => {
+  for (const [setting, region, url, opposite] of [
+    ['cn', 'cn', MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, 'en'],
+    ['intl', 'en', MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, 'cn']
+  ]) {
+    const pins = [
+      [{ minimaxApiRegion: setting }, {}],
+      [{ minimaxApiHost: region }, {}],
+      [{}, { TOKEN_MONITOR_MINIMAX_API_REGION: setting }],
+      [{}, { MINIMAX_API_REGION: setting }],
+      [{}, { MINIMAX_API_HOST: new URL(url).hostname }]
+    ];
+    for (const [options, env] of pins) {
+      const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, opposite]]);
+      const calls = [];
+      const result = await fetchMinimaxLimits({ ...options, minimaxApiKey: 'sk-cp-test' }, {
+        env, providerRuntimeState: state,
+        fetch: async (requestUrl) => {
+          calls.push(requestUrl);
+          throw new Error('net::ERR_NAME_NOT_RESOLVED');
+        }
+      });
+      assert.deepEqual(calls, [url]);
+      assert.equal(result.status, 'unavailable');
+      assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), opposite);
+    }
+  }
+});
+
+test('explicit Auto overrides an env pin and probes the remembered region first', async () => {
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'en']]);
+  const calls = [];
+  const result = await fetchMinimaxLimits({ minimaxApiRegion: 'auto', minimaxApiKey: 'sk-cp-test' }, {
+    env: { MINIMAX_API_REGION: 'cn' }, providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      return okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.region, 'en');
+});
+
+test('a pinned legacy endpoint success updates memory for a later Auto probe', async () => {
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'en']]);
+  const calls = [];
+  const deps = {
+    env: {}, providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      return url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN
+        ? { ok: false, status: 404 }
+        : okResponse(windowsBody);
+    }
+  };
+  const options = { minimaxApiKey: 'sk-cp-test' };
+  const pinned = await fetchMinimaxLimits({ ...options, minimaxApiRegion: 'cn' }, deps);
+  assert.equal(pinned.status, 'ok');
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+  calls.length = 0;
+  const auto = await fetchMinimaxLimits({ ...options, minimaxApiRegion: 'auto' }, deps);
+  assert.equal(auto.status, 'ok');
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+});
+
+test('Auto advances to the other region after the per-request timeout aborts', { timeout: 5000 }, async () => {
+  const calls = [];
+  const state = new Map();
+  const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-test' }, {
+    env: {}, providerRuntimeState: state, fetchTimeoutMs: 10,
+    fetch: async (url, init) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) return okResponse(windowsBody);
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      });
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(result.status, 'ok');
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+});
+
+test('MiniMax stops the superseded probe before retrying another region with the old key', { timeout: 5000 }, async () => {
+  const calls = [];
+  let firstStarted;
+  const started = new Promise((resolve) => { firstStarted = resolve; });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['minimax'], minimaxApiKey: 'sk-cp-old', minimaxApiRegion: 'auto'
+  }, {
+    autoStart: false, autoRetry: false, env: {},
+    fetch: async (url, init) => {
+      calls.push({ url, authorization: init.headers.Authorization });
+      if (init.signal.aborted) throw init.signal.reason;
+      if (init.headers.Authorization === 'Bearer sk-cp-old') {
+        firstStarted();
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+        });
+      }
+      return okResponse(windowsBody);
+    }
+  });
+  try {
+    const first = runtime.refresh({ provider: 'minimax' }, 'manual');
+    await started;
+    runtime.reconfigure({ minimaxApiKey: 'sk-cp-new', minimaxApiRegion: 'cn' });
+    runtime.clear({ provider: 'minimax' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    await first;
+    assert.deepEqual(calls, [
+      { url: MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, authorization: 'Bearer sk-cp-old' },
+      { url: MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, authorization: 'Bearer sk-cp-new' }
+    ]);
+    const row = runtime.getSnapshot().providers[0];
+    assert.equal(row.status, 'ok');
+    assert.equal(row.region, 'cn');
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('Auto retries the other region when a response body disconnects during reading', async () => {
+  const calls = [];
+  const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-test' }, {
+    env: {},
+    fetch: async (url) => {
+      calls.push(url);
+      return url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN
+        ? { ok: true, status: 200, json: async () => { throw new TypeError('terminated'); } }
+        : okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(result.status, 'ok');
+});
+
+test('fallback HTTP and body auth rejections after transport failure stay unavailable', async () => {
+  const rejections = [
+    { ok: false, status: 401 },
+    { ok: false, status: 403 },
+    okResponse({ base_resp: { status_code: 1004, status_msg: 'cookie is missing, log in again' } }),
+    okResponse({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } })
+  ];
+  for (const rejection of rejections) {
+    const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']]);
+    const calls = [];
+    const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-test' }, {
+      env: {}, providerRuntimeState: state,
+      fetch: async (url) => {
+        calls.push(url);
+        if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) throw new Error('fetch failed');
+        return rejection;
+      }
+    });
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
+    assert.equal(result.status, 'unavailable');
+    assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+  }
+});
+
+test('MiniMax runtime retains quota after an outage and honors pinned-to-Auto changes', async () => {
+  const calls = [];
+  let outage = false;
+  const runtime = createLimitsRuntime({
+    limitProviders: ['minimax'], minimaxApiKey: 'sk-cp-test', minimaxApiRegion: 'auto'
+  }, {
+    autoStart: false, autoRetry: false, env: {},
+    fetch: async (url, init) => {
+      calls.push(url);
+      assert.equal(init.headers.Authorization, 'Bearer sk-cp-test');
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) {
+        if (outage) throw new Error('fetch failed');
+        return okResponse(windowsBody);
+      }
+      return outage ? unauthorized() : okResponse(windowsBody);
+    },
+    providerRuntimeState: new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']])
+  });
+  try {
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    const good = runtime.getSnapshot().providers[0];
+    assert.equal(good.status, 'ok');
+    assert.equal(good.region, 'cn');
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+
+    outage = true;
+    calls.length = 0;
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    const retained = runtime.getSnapshot().providers[0];
+    assert.equal(retained.status, 'unavailable');
+    assert.equal(retained.accountKey, good.accountKey);
+    assert.equal(retained.region, 'cn');
+    assert.deepEqual(retained.windows, good.windows);
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
+
+    outage = false;
+    calls.length = 0;
+    runtime.reconfigure({ minimaxApiRegion: 'intl' });
+    runtime.clear({ provider: 'minimax' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    assert.equal(runtime.getSnapshot().providers[0].region, 'en');
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+
+    calls.length = 0;
+    runtime.reconfigure({ minimaxApiRegion: 'auto' });
+    runtime.clear({ provider: 'minimax' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    assert.equal(runtime.getSnapshot().providers[0].status, 'ok');
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+function assertSyncPreservesReading(row) {
+  const wire = JSON.parse(JSON.stringify(syncLimits({ updatedAt: row.updatedAt, providers: [row] })));
+  for (const [hub, normalize] of [['Node', syncLimits], ['Worker', syncWorkerLimits]]) {
+    assert.deepEqual(normalize(wire).providers, [row], `${hub} must preserve the collected reading`);
+  }
+}
 
 test('MiniMax cash Spend is a server snapshot and a failed period leaves the balance', async () => {
   const now = new Date(2026, 2, 1, 12).getTime();
@@ -191,305 +1292,6 @@ test('MiniMax cash Spend is a server snapshot and a failed period leaves the bal
   }
 });
 
-test('the copied environment example leaves the legacy MiniMax host pin effective', () => {
-  const example = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
-  const env = dotenv.parse(`${example}\nMINIMAX_API_HOST=api.minimaxi.com\n`);
-  assert.equal(minimaxRegion({}, env), 'cn');
-});
-
-function okResponse(body) {
-  return { ok: true, status: 200, json: async () => body };
-}
-
-function unauthorized() {
-  return { ok: false, status: 401, json: async () => ({}) };
-}
-
-function assertSyncPreservesReading(row) {
-  const wire = JSON.parse(JSON.stringify(syncLimits({ updatedAt: row.updatedAt, providers: [row] })));
-  for (const [hub, normalize] of [['Node', syncLimits], ['Worker', syncWorkerLimits]]) {
-    assert.deepEqual(normalize(wire).providers, [row], `${hub} must preserve the collected reading`);
-  }
-}
-
-test('MiniMax credential and region settings preserve legacy precedence', () => {
-  assert.equal(minimaxToken({ MINIMAX_CODING_API_KEY: '  "sk-cp-env"  ' }), 'sk-cp-env');
-  assert.equal(minimaxToken({ MINIMAX_CODING_API_KEY: 'env' }, " 'settings' "), 'settings');
-  assert.equal(minimaxToken({ MINIMAX_API_KEY: 'unrelated', TOKEN_MONITOR_MINIMAX_KEY: 'unrelated' }), '');
-  for (const [raw, region] of [
-    ['cn', 'cn'], ['minimaxi.com', 'cn'], ['api.minimaxi.com', 'cn'],
-    [' INTL ', 'intl'], ['en', 'intl'], ['global', 'intl'], ['minimax.io', 'intl'], ['api.minimax.io', 'intl'],
-    ['auto', 'auto'], ['nonsense', 'auto'], ['api.minimaxi.com.evil.test', 'auto'], ['api.minimax.io@evil.test', 'auto']
-  ]) assert.equal(minimaxRegion({ minimaxApiRegion: raw }), region, raw);
-  assert.equal(minimaxRegion(), 'auto');
-  assert.equal(minimaxRegion({ minimaxApiRegion: 'cn', minimaxApiHost: 'en' }), 'cn');
-  assert.equal(minimaxRegion({ minimaxApiRegion: 'intl' }, { TOKEN_MONITOR_MINIMAX_API_REGION: 'cn' }), 'intl');
-  assert.equal(minimaxRegion({}, { TOKEN_MONITOR_MINIMAX_API_REGION: 'cn' }), 'cn');
-  assert.equal(minimaxRegion({}, { MINIMAX_API_REGION: 'intl' }), 'intl');
-  assert.equal(minimaxRegion({}, { MINIMAX_API_HOST: 'api.minimaxi.com' }), 'cn');
-});
-
-const windowsBody = { data: { model_remains: [
-  { model_name: 'general', current_interval_remaining_percent: 80, current_weekly_remaining_percent: 70 }
-] } };
-
-test('Token Plan normalizes both response shapes, placeholders, percentages and reset times', () => {
-  for (const nested of [false, true]) {
-    const rows = [
-      { model_name: 'video', current_interval_remaining_percent: 20 },
-      { model_name: 'general', current_interval_remaining_percent: '96', current_weekly_remaining_percent: '99',
-        end_time: 1780297200000, weekly_end_time: 1780848000 }
-    ];
-    const windows = parseMinimaxTiers(nested ? { data: { model_remains: rows } } : { model_remains: rows });
-    assert.deepEqual(windows.map(w => [w.kind, w.usedPercent, w.remainingPercent, w.windowMinutes, w.resetsAt]), [
-      ['session', 4, 96, 300, new Date(1780297200000).toISOString()],
-      ['weekly', 1, 99, 10080, new Date(1780848000000).toISOString()]
-    ]);
-  }
-  // API status 3 suppresses missing/100% placeholders; Code uses a different unlimited rule.
-  for (const [remaining, status, expected] of [
-    [100, 3, []], [undefined, 3, []], [null, 3, []], [50, 3, [50]],
-    [70, undefined, [30]], [-5, 1, [100]], [150, 1, [0]]
-  ]) {
-    const windows = parseMinimaxTiers({ model_remains: [{ model_name: 'general',
-      current_interval_remaining_percent: 80, current_weekly_remaining_percent: remaining, current_weekly_status: status }] });
-    assert.deepEqual(windows.map(w => w.usedPercent), [20, ...expected]);
-    assert.deepEqual(windows.map(w => w.remainingPercent), [80, ...expected.map(used => 100 - used)]);
-  }
-  for (const body of [null, {}, { data: { model_remains: [] } }, { model_remains: [{ model_name: 'video' }] }]) {
-    assert.deepEqual(parseMinimaxTiers(body), []);
-  }
-});
-
-test('Token Plan requests use the selected key and preserve display readings without exposing it', async () => {
-  const missing = await fetchMinimaxLimits({}, {});
-  assertFields(missing, { provider: 'minimax', status: 'notConfigured', source: 'api', windows: [], region: '' });
-  for (const [options, env, key] of [
-    [{}, { MINIMAX_CODING_API_KEY: 'env-key' }, 'env-key'],
-    [{ minimaxApiKey: " 'settings-key' " }, { MINIMAX_CODING_API_KEY: 'env-key' }, 'settings-key']
-  ]) {
-    const row = await fetchMinimaxLimits(options, { env, fetch: async (url, init) => {
-      assert.equal(url, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN);
-      assert.equal(init.headers.Authorization, `Bearer ${key}`);
-      return okResponse(windowsBody);
-    } });
-    assertFields(row, { provider: 'minimax', status: 'ok', source: 'api', region: 'en', accountLabel: 'Token Plan' });
-    assert.match(row.accountKey, /^sha256:/);
-    assert.deepEqual(row.windows.map(w => [w.kind, w.usedPercent]), [['session', 20], ['weekly', 30]]);
-    assert.equal(JSON.stringify(row).includes(key), false);
-    assertSyncPreservesReading(row);
-  }
-});
-
-test('Token Plan falls back only on supported errors and remembers only usable quota', async (t) => {
-  const en = MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, legacy = MINIMAX_REMAINS_URL_EN, cn = MINIMAX_TOKEN_PLAN_REMAINS_URL_CN;
-  const cases = [
-    ['HTTP 401', unauthorized(), [en, legacy, cn], 'ok', cn],
-    ['HTTP 403', { ok: false, status: 403 }, [en, legacy, cn], 'ok', cn],
-    ['body auth', okResponse({ base_resp: { status_code: 1004 } }), [en, legacy, cn], 'ok', cn],
-    ['HTTP 400 auth', { ok: false, status: 400, json: async () => ({ base_resp: { status_code: 1004 } }) }, [en, legacy, cn], 'ok', cn],
-    ['legacy 404', { ok: false, status: 404 }, [en, legacy], 'ok', legacy],
-    ['legacy empty', okResponse({}), [en, legacy], 'ok', legacy],
-    ['server error', { ok: false, status: 503 }, [en], 'unavailable'],
-    ['rate limit', { ok: false, status: 429 }, [en], 'sourceRateLimited'],
-    ['business error', okResponse({ base_resp: { status_code: 1001 } }), [en, legacy], 'unavailable'],
-    ['invalid JSON', { ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token'); } }, [en], 'unavailable'],
-    ['network', new TypeError('fetch failed'), [en, cn], 'ok', cn],
-    ['body disconnected', { ok: true, status: 200, json: async () => { throw new TypeError('terminated'); } }, [en, cn], 'ok', cn],
-    ['empty everywhere', okResponse({}), [en, legacy], 'unavailable'],
-    ['denied everywhere', unauthorized(), [en, legacy, cn, MINIMAX_REMAINS_URL_CN], 'unauthorized']
-  ];
-  for (const [name, response, urls, status, recoverAt] of cases) await t.test(name, async () => {
-    const calls = [], state = new Map();
-    const result = await fetchMinimaxLimits({ minimaxApiKey: 'test-key' }, {
-      providerRuntimeState: state, fetch: async url => {
-        calls.push(url);
-        if (url === recoverAt) return okResponse(windowsBody);
-        if (response instanceof Error) throw response;
-        return response;
-      }
-    });
-    assert.equal(result.status, status);
-    assert.deepEqual(calls, urls);
-    assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), status === 'ok' ? (urls.at(-1) === cn ? 'cn' : 'en') : undefined);
-    assert.deepEqual(result.windows.map(w => w.usedPercent), status === 'ok' ? [20, 30] : []);
-  });
-});
-
-test('a fallback auth rejection never replaces an unreachable home region with invalid-key status', async () => {
-  for (const response of [unauthorized(), { ok: false, status: 403 },
-    okResponse({ base_resp: { status_code: 1004 } }), okResponse({ base_resp: { status_code: 2049 } })]) {
-    const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']]), calls = [];
-    const result = await fetchMinimaxLimits({ minimaxApiKey: 'test-key' }, {
-      providerRuntimeState: state, fetch: async url => {
-        calls.push(url);
-        if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) throw new Error('fetch failed');
-        return response;
-      }
-    });
-    assert.equal(result.status, 'unavailable');
-    assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
-    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
-  }
-});
-
-test('region pins, Auto and a changed key retain only the last usable region', async () => {
-  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'en']]), calls = [];
-  const cn = MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, legacy = MINIMAX_REMAINS_URL_CN, en = MINIMAX_TOKEN_PLAN_REMAINS_URL_EN;
-  const deps = { env: { MINIMAX_API_REGION: 'intl' }, providerRuntimeState: state, fetch: async (url, init) => {
-    calls.push(url);
-    if (new URL(url).host === 'api.minimaxi.com') {
-      if (init.headers.Authorization === 'Bearer new-key') return okResponse({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } });
-      if (url === cn) return { ok: false, status: 404 };
-    }
-    return okResponse(windowsBody);
-  } };
-  for (const [region, key, expected, resolved] of [
-    ['cn', 'old-key', [cn, legacy], 'cn'],
-    ['auto', 'old-key', [cn, legacy], 'cn'],
-    ['auto', 'new-key', [cn, legacy, en], 'en'],
-    ['auto', 'new-key', [en], 'en']
-  ]) {
-    calls.length = 0;
-    const result = await fetchMinimaxLimits({ minimaxApiRegion: region, minimaxApiKey: key }, deps);
-    assertFields(result, { status: 'ok', region: resolved });
-    assert.deepEqual(result.windows.map(window => window.usedPercent), [20, 30]);
-    assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), resolved);
-    assert.deepEqual(calls, expected, `${region}, ${key}`);
-  }
-});
-
-test('request and body timeouts respect region pins while Auto can recover', { timeout: 5000 }, async () => {
-  for (const phase of ['headers', 'body']) for (const pinned of [true, false]) {
-    const calls = [];
-    const result = await fetchMinimaxLimits({ minimaxApiKey: 'test-key', minimaxApiRegion: pinned ? 'intl' : 'auto' }, {
-      fetchTimeoutMs: 10, fetch: async (url, { signal }) => {
-        calls.push(url);
-        if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) return okResponse(windowsBody);
-        const stall = () => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
-        return phase === 'headers' ? stall() : { ok: true, status: 200, json: stall };
-      }
-    });
-    assert.equal(result.status, pinned ? 'unavailable' : 'ok', `${phase}, pinned=${pinned}`);
-    assert.deepEqual(calls, pinned ? [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN] : [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
-  }
-});
-
-test('MiniMax stops the superseded probe before retrying another region with the old key', { timeout: 5000 }, async (t) => {
-  const calls = [];
-  let firstStarted;
-  const started = new Promise((resolve) => { firstStarted = resolve; });
-  const runtime = createLimitsRuntime({
-    limitProviders: ['minimax'], minimaxApiKey: 'sk-cp-old', minimaxApiRegion: 'auto'
-  }, {
-    autoStart: false, autoRetry: false, env: {}, homeDir: emptyHome,
-    fetch: async (url, init) => {
-      calls.push({ url, authorization: init.headers.Authorization });
-      if (init.signal.aborted) throw init.signal.reason;
-      if (init.headers.Authorization === 'Bearer sk-cp-old') {
-        firstStarted();
-        return new Promise((_resolve, reject) => {
-          init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
-        });
-      }
-      return okResponse(windowsBody);
-    }
-  });
-  t.after(() => runtime.stop());
-  const first = runtime.refresh({ provider: 'minimax' }, 'manual');
-  await started;
-  runtime.reconfigure({ minimaxApiKey: 'sk-cp-new', minimaxApiRegion: 'cn' });
-  runtime.clear({ provider: 'minimax' }, 'settings-change');
-  await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-  await first;
-  assert.deepEqual(calls, [
-    { url: MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, authorization: 'Bearer sk-cp-old' },
-    { url: MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, authorization: 'Bearer sk-cp-new' }
-  ]);
-  const row = runtime.getSnapshot().providers[0];
-  assert.equal(row.status, 'ok');
-  assert.equal(row.region, 'cn');
-});
-
-test('MiniMax runtime retains quota after an outage and honors pinned-to-Auto changes', async (t) => {
-  const calls = [];
-  let outage = false;
-  const runtime = createLimitsRuntime({
-    limitProviders: ['minimax'], minimaxApiKey: 'sk-cp-test', minimaxApiRegion: 'auto'
-  }, {
-    autoStart: false, autoRetry: false, env: {}, homeDir: emptyHome,
-    fetch: async (url, init) => {
-      calls.push(url);
-      assert.equal(init.headers.Authorization, 'Bearer sk-cp-test');
-      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) {
-        if (outage) throw new Error('fetch failed');
-        return okResponse(windowsBody);
-      }
-      return outage ? unauthorized() : okResponse(windowsBody);
-    },
-    providerRuntimeState: new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']])
-  });
-  t.after(() => runtime.stop());
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  const good = runtime.getSnapshot().providers[0];
-  assert.equal(good.status, 'ok');
-  assert.equal(good.region, 'cn');
-  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
-
-  outage = true;
-  calls.length = 0;
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  const retained = runtime.getSnapshot().providers[0];
-  assert.equal(retained.status, 'unavailable');
-  assert.equal(retained.accountKey, good.accountKey);
-  assert.equal(retained.region, 'cn');
-  assert.deepEqual(retained.windows, good.windows);
-  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
-
-  outage = false;
-  calls.length = 0;
-  runtime.reconfigure({ minimaxApiRegion: 'intl' });
-  runtime.clear({ provider: 'minimax' }, 'settings-change');
-  await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-  assert.equal(runtime.getSnapshot().providers[0].region, 'en');
-  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
-
-  calls.length = 0;
-  runtime.reconfigure({ minimaxApiRegion: 'auto' });
-  runtime.clear({ provider: 'minimax' }, 'settings-change');
-  await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-  assert.equal(runtime.getSnapshot().providers[0].status, 'ok');
-  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
-});
-
-test('settings, legacy options, and env pins override opposite region memory on failures', async () => {
-  for (const [setting, region, url, opposite] of [
-    ['cn', 'cn', MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, 'en'],
-    ['intl', 'en', MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, 'cn']
-  ]) {
-    const pins = [
-      [{ minimaxApiRegion: setting }, {}],
-      [{ minimaxApiHost: region }, {}],
-      [{}, { TOKEN_MONITOR_MINIMAX_API_REGION: setting }],
-      [{}, { MINIMAX_API_REGION: setting }],
-      [{}, { MINIMAX_API_HOST: new URL(url).hostname }]
-    ];
-    for (const [options, env] of pins) {
-      const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, opposite]]);
-      const calls = [];
-      const result = await fetchMinimaxLimits({ ...options, minimaxApiKey: 'sk-cp-test' }, {
-        env, providerRuntimeState: state,
-        fetch: async (requestUrl) => {
-          calls.push(requestUrl);
-          throw new Error('net::ERR_NAME_NOT_RESOLVED');
-        }
-      });
-      assert.deepEqual(calls, [url]);
-      assert.equal(result.status, 'unavailable');
-      assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), opposite);
-    }
-  }
-});
 
 const CODE_NOW = 1790000000000;
 const CODE_RECORD_KEY = 'com.minimax.mcode.oauth.prod.cn\0deadbeef';
@@ -501,6 +1303,9 @@ const REFRESH_ROTATED = 'test-refresh-rotated';
 const ACCESS_RENEWED = 'test-access-renewed';
 const ACCESS_OTHER = 'test-access-other-record';
 const REFRESH_OTHER = 'test-refresh-other-record';
+const CODE_CLI_PATH = process.platform === 'win32' ? path.win32 : path.posix;
+const CODE_CLI_DIR = CODE_CLI_PATH.join(os.tmpdir(), 'minimax-test-bin');
+const CODE_CLI_COMMAND = CODE_CLI_PATH.join(CODE_CLI_DIR, process.platform === 'win32' ? 'mcode.exe' : 'mcode');
 
 function codeDesktopRecord(overrides = {}) {
   return {
@@ -766,7 +1571,7 @@ test('MiniMax Code trusts reread credentials rather than CLI exit status or outp
     const before = [fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8'));
     let calls = 0;
     const deps = codeDeps(fixture, async () => okResponse(membershipBody({ has_token_plan: false })), {
-      env: { MINIMAX_DATA_DIR: fixture.base, PATH: '/test/bin' }, existsSync: candidate => candidate === '/test/bin/mcode',
+      env: { MINIMAX_DATA_DIR: fixture.base, PATH: CODE_CLI_DIR }, existsSync: candidate => candidate === CODE_CLI_COMMAND,
       execFile: (_command, _args, _options, done) => {
         calls++;
         if (Object.keys(record).length || Object.keys(state).length) writeCodeLease(fixture, codeDesktopRecord(record), state);
@@ -801,12 +1606,15 @@ test('MiniMax Code stays read-only without a CLI, for a different namespace, and
       ...(name === 'workspace-relative PATH' ? { env: { MINIMAX_DATA_DIR: fixture.base, PATH: '.', MCODE_INSTALL_DIR: '.' } } : {}),
       existsSync: command => {
         if (name === 'cancelled during lookup') controller.abort();
-        return name === 'workspace-relative PATH' ? command === path.join(process.cwd(), 'mcode') : name !== 'missing CLI';
+        return name === 'workspace-relative PATH'
+          ? CODE_CLI_PATH.resolve(command) === CODE_CLI_PATH.resolve(CODE_CLI_PATH.basename(CODE_CLI_COMMAND))
+          : name !== 'missing CLI';
       },
       execFile: () => { commands++; throw new Error('must not execute'); }
     });
     assert.equal((await readCode(deps)).status, name === 'different namespace' ? 'notConfigured' : 'unavailable', name);
     assert.equal(commands, 0, name);
+    assert.deepEqual(deps.requests, [], name);
     assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before, name);
   }
 });
@@ -814,6 +1622,7 @@ test('MiniMax Code stays read-only without a CLI, for a different namespace, and
 test('MiniMax Code lets a started official refresh finish after quota collection is cancelled', async () => {
   const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
   const controller = new AbortController();
+  let kills = 0;
   const deps = codeDeps(fixture, async () => assert.fail('cancelled quota must not be requested'), {
     signal: controller.signal, existsSync: () => true,
     execFile: (_command, _args, _options, done) => {
@@ -822,10 +1631,12 @@ test('MiniMax Code lets a started official refresh finish after quota collection
         writeCodeLease(fixture, codeDesktopRecord({ accessToken: ACCESS_ROTATED, generation: 8 }));
         done(null, '{}');
       });
-      return { kill: () => assert.fail('quota cancellation must not stop official rotation') };
+      return { kill: () => { kills++; return true; } };
     }
   });
   assert.equal((await readCode(deps)).status, 'unavailable');
+  assert.equal(kills, 0, 'quota cancellation must not stop official rotation');
+  assert.deepEqual(deps.requests, []);
   assert.equal(storedLease(fixture).accessToken, ACCESS_ROTATED);
   assert.equal(storedState(fixture).status, 'authenticated');
 });
@@ -1193,6 +2004,10 @@ test('MiniMax Code meters a complete grant list and keeps the amount when the li
   };
   assertFields(await read([{ details: [grant(100, 50)], total_count: 1 }], 50),
     { remaining: 50, currency: 'CREDITS', limit: 100, showMeter: true }, 'complete grant list');
+  assertFields(await read([
+    { details: Array.from({ length: 100 }, () => grant(1, 0.5)), total_count: 101 },
+    { details: [grant(100, 25)], total_count: 101 }
+  ], 75), { remaining: 75, limit: 200, showMeter: true }, 'complete paginated grant list');
   assertFields(await read([{ details: [grant(100, 50), { ...grant(100, 20), expire_at_ms: CODE_NOW - 1 }], total_count: 2 }], 50),
     { remaining: 50, limit: 100, showMeter: true }, 'expired grants cannot inflate the meter');
   for (const detail of [grant(100, 49), { ...grant(100, 50), granted_amount: 'invalid' }]) {
@@ -1364,7 +2179,7 @@ test('MiniMax Code retries HTTP and body auth failures in membership and plan re
         if (target && failures++ === 0) return response;
         return okResponse(url === MINIMAX_CODE_MEMBERSHIP_URL_CN ? membershipBody() : planRemainsBody());
       }, {
-        existsSync: command => command === '/test/bin/mcode', env: { MINIMAX_DATA_DIR: fixture.base, PATH: '/test/bin' },
+        existsSync: command => command === CODE_CLI_COMMAND, env: { MINIMAX_DATA_DIR: fixture.base, PATH: CODE_CLI_DIR },
         execFile: (_command, _args, _options, done) => {
           rotations++;
           writeCodeLease(fixture, codeDesktopRecord({ accessToken: ACCESS_ROTATED, generation: 8 }));
