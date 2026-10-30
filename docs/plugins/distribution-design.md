@@ -36,18 +36,20 @@ Catalogs use bounded downloads, source pins, package hashes and optional Ed25519
 
 ## Official catalog releases
 
-Official plugin source stays in this repository under `plugins/`. The App's designated source is `https://raw.githubusercontent.com/Javis603/token-monitor/dist/catalog.json`; the community catalog remains in `token-monitor-plugins`. Source branding is assigned by the App, independently of catalog titles or manifest authors.
+Official plugin source stays in this repository under `plugins/`. The App's designated catalog is `https://raw.githubusercontent.com/Javis603/token-monitor/dist/catalog.json`; the community catalog remains in `token-monitor-plugins`.
 
-The **Publish official plugins** workflow validates and packages changes on pull requests. Only its main-branch publish job has write permission and updates `dist`; it uses the same run's artifact, skips stale source revisions and publishes the catalog and packages together. All main pushes run the workflow so a newer unrelated commit cannot leave a skipped publication without a replacement run. Unchanged distributions do not create a commit. The workflow does not create GitHub Releases or release a new App.
+The [Publish official plugins workflow](../../.github/workflows/publish-official-plugins.yml) validates packages on pull requests and publishes the catalog and packages to `dist` from `main`.
 
-To prepare local artifacts from a checkout with dependencies installed, use fresh output directories:
+To prepare local artifacts with dependencies installed, use fresh output directories:
 
 ```sh
 node scripts/official-plugin-distribution.cjs build /tmp/token-monitor-official-plugins
 node scripts/official-plugin-distribution.cjs stage /tmp/token-monitor-official-plugins /tmp/token-monitor-plugin-dist
 ```
 
-These commands only write local files. The builder validates the declared target range without requiring this checkout's product version to satisfy it; installation still enforces the range on the user's App. The script's `PLUGINS` list selects maintained packages. Each package declares its own compatibility range and includes localized README and CHANGELOG files. Catalog release notes come from the matching version section in the packaged CHANGELOG bytes. To publish an update, increase the plugin version and add its localized notes. Published versions are immutable; identical reruns are allowed, while changed bytes under the same version stop publication. The catalog retains the newest 32 versions in SemVer order for selection and recovery; older package files remain in `dist` and cannot be overwritten. An incoming release outside that retained range is rejected before any distribution files change. Full release history stays in the source CHANGELOG files.
+These commands only write local files. Building can target a newer App version than the checkout; installation still enforces the package's compatibility range.
+
+To publish an update, increase the plugin version and add matching localized CHANGELOG entries; these supply the catalog release notes. Keep the package's compatibility range and localized READMEs current. Published package bytes are immutable. The catalog retains the newest 32 versions by SemVer. Releases outside this range are rejected; previously published package files remain in `dist`. Full release history stays in the source CHANGELOG files.
 
 ## Repository details and README
 
