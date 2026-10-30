@@ -21,8 +21,9 @@ const source = path.join(root, 'plugins/quota-alerts');
 function scratch(t) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-official-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir; }
 
 test('the package rejects a 0.81.0 host and accepts a 0.82.0 host', t => {
-  const output = path.join(scratch(t), 'build'); buildDistribution(output);
-  const bytes = fs.readFileSync(path.join(output, 'quota-alerts-0.1.0.tmplugin'));
+  const output = path.join(scratch(t), 'build'), index = buildDistribution(output);
+  const release = index.plugins.find(plugin => plugin.id === 'quota-alerts').versions[0];
+  const bytes = fs.readFileSync(path.join(output, path.basename(new URL(release.url).pathname)));
   try {
     app.version = '0.81.0';
     assert.throws(() => parsePackage(bytes), /incompatible Token Monitor version/);
@@ -34,7 +35,8 @@ test('the package rejects a 0.81.0 host and accepts a 0.82.0 host', t => {
 
 test('the actual published catalog installs the source-matching official package only after approval', async t => {
   const dir = scratch(t), output = path.join(dir, 'build'), index = buildDistribution(output);
-  const bytes = fs.readFileSync(path.join(output, 'quota-alerts-0.1.0.tmplugin'));
+  const release = index.plugins.find(plugin => plugin.id === 'quota-alerts').versions[0];
+  const bytes = fs.readFileSync(path.join(output, path.basename(new URL(release.url).pathname)));
   let settings = { pluginsEnabled: true, pluginStates: {} };
   const userDir = path.join(dir, 'plugins'), dataDir = path.join(dir, 'data');
   const manager = createPluginManager({ userDir, dataDir, getSettings: () => settings, saveStates: pluginStates => { settings = { ...settings, pluginStates }; }, fork: () => assert.fail('install-only must not start a backend') });
@@ -49,14 +51,14 @@ test('the actual published catalog installs the source-matching official package
   assert.equal(manager.list().plugins.length, 0, 'discovery does not install');
   const archive = parsePackage(bytes);
   assert.equal(archive.hash, packageDirectory(source).hash);
-  assert.equal(archive.manifest.version, '0.1.0');
+  assert.equal(archive.manifest.version, release.version);
   assert.equal(archive.rawManifest.defaults.background, true);
   assert.deepEqual(archive.manifest.views.map(view => view.surfaces), [['settings']]);
   const entry = catalog.list().entries.find(entry => entry.id === 'quota-alerts');
   assert.deepEqual(entry.types, ['automation']);
   assert.equal(entry.origin.kind, 'official'); assert.equal(entry.author, 'Javis603');
   assert.equal(entry.identityIcon, 'data:image/png;base64,' + fs.readFileSync(path.join(source, 'assets/icon.png')).toString('base64'));
-  const preview = await catalog.preview(definition.id, 'quota-alerts', '0.1.0');
+  const preview = await catalog.preview(definition.id, 'quota-alerts', release.version);
   assert.deepEqual(preview.types, ['automation']);
   await managed.install(preview.token);
   assert.deepEqual(manager.list().plugins.find(p => p.id === 'quota-alerts').types, ['automation']);

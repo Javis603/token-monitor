@@ -91,8 +91,14 @@ function stageDistribution(source, target) {
         if (!readBounded(file, MAX_PACKAGE_BYTES).equals(bytes)) throw Error(`${filename}: refusing to overwrite a published package`);
       } else copies.push({ file, bytes });
     }
-    plugin.versions = [...plugin.versions, ...(old?.versions || []).filter(version => !plugin.versions.some(current => current.version === version.version))]
+    const retained = [...plugin.versions, ...(old?.versions || []).filter(version => !plugin.versions.some(current => current.version === version.version))]
       .sort((a, b) => semver.rcompare(a.version, b.version)).slice(0, 32);
+    for (const version of plugin.versions) {
+      if (!retained.some(entry => entry.version === version.version)) {
+        throw Error(`${plugin.id}@${version.version}: outside the newest 32 catalog versions; refusing an undiscoverable release`);
+      }
+    }
+    plugin.versions = retained;
   }
   const bytes = Buffer.from(JSON.stringify(index, null, 2) + '\n');
   // Validate the retained history against the same limits the App enforces.

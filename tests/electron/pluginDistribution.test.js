@@ -84,6 +84,19 @@ test('the 33rd release keeps the newest 32 catalog versions and leaves evicted p
   assert.deepEqual(fs.readFileSync(oldFile), original);
 });
 
+test('a release outside the retained history is rejected before writing packages or catalog', t => {
+  const f = fixture(t);
+  for (let version = 2; version <= 33; version++) {
+    const built = f.build(`0.${version}.0`); stageDistribution(built.output, f.target);
+  }
+  const before = fs.readFileSync(path.join(f.target, 'catalog.json'));
+  const files = fs.readdirSync(f.target).sort();
+  const patch = f.build('0.1.1');
+  assert.throws(() => stageDistribution(patch.output, f.target), /outside the newest 32 catalog versions/);
+  assert.deepEqual(fs.readFileSync(path.join(f.target, 'catalog.json')), before);
+  assert.deepEqual(fs.readdirSync(f.target).sort(), files);
+});
+
 test('changed bytes under a published version fail before changing files or catalog', t => {
   const f = fixture(t), first = f.build(); stageDistribution(first.output, f.target);
   const before = fs.readFileSync(path.join(f.target, 'catalog.json'));
