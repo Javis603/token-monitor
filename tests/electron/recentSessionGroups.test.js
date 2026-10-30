@@ -166,12 +166,12 @@ function renderStatusGroup(group, metric = 'used') {
   const contextSource = app.slice(app.indexOf('function homeSessionContext('), app.indexOf('function stopHomeSessionRepaint('));
   const homeSource = app.slice(app.indexOf('function renderHomeSessionModule('), app.indexOf('function renderHomeDeviceModule()'));
   const tooltip = { setDetailTooltip() {} };
-  const home = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
+  const home = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
     'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
     'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView',
     `${shellSource}; ${contextSource}; ${homeSource}; return renderHomeSessionModule;`)(
     document, { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
-    state, { homePanel: { querySelector: () => null } }, () => false,
+    state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
     () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip
   )([group]);
   const dockContext = dock.slice(dock.indexOf('function contextNode('), dock.indexOf('// Last activity seen'));
@@ -212,17 +212,16 @@ test('Home and Dock retain the latest main gauge and cache snapshot without aggr
       assert.equal(meta.children.some(node => node.className.endsWith('-session-cache')), false);
     }
   }
-  // Child writes do not extend the main's context freshness. The same slot
-  // returns to the main's still-warm cache countdown as it did before grouping.
+  // Child writes do not extend the main's context freshness or revive a
+  // legacy Codex countdown through the child's supported Claude estimate.
   group.groupRows[0].lastUsedAt = new Date(now - sessionLive.RUNNING_WINDOW_MS - 1).toISOString();
   assert.equal(presentation.sessionActivityState(group), 'running');
-  const cache = sessionLive.sessionPromptCacheForRow(group.groupRows[0]);
+  assert.equal(sessionLive.sessionPromptCacheForRow(group.groupRows[0]), null);
   for (const [surface, row] of Object.entries(renderStatusGroup(group))) {
     const meta = row.children.find(node => node.className === `${surface === 'home' ? 'home' : 'edge-dock'}-session-meta`);
     assert.equal(meta.children.some(node => node.className.endsWith('-session-context')), false);
     const badge = meta.children.find(node => node.className.endsWith('-session-cache'));
-    assert.ok(badge, `${surface} shows the main's warm cache rather than the child's`);
-    assert.equal(badge.textContent, translate('session.cacheEstimate', { minutes: cache.minutes }));
+    assert.equal(badge, undefined, `${surface} hides the legacy Codex cache and does not borrow the child's`);
   }
   assert.equal(JSON.stringify(stats), original);
 });
@@ -285,13 +284,13 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     const state = { stats, period: 'today', breakdown: 'home', openSession: null, settings: { periodMonthMode: periodMode } };
     const routes = [];
     const readingTargets = [];
-    const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
+    const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
       'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
       'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeSessionContext',
       'sessionPresentationOptions', 'homeModulePreferencesApi', `${shellSource}; ${source}; return renderHomeSessionModule;`)(
       { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) },
       { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
-      state, { homePanel: { querySelector: () => null } }, () => false,
+      state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
       (view, options) => { routes.push([view, options]); state.breakdown = view; }, {}, translate,
       () => {}, () => '', {}, () => '', [], node => readingTargets.push(node), String, () => 'just now',
       rowApi, { setDetailTooltip() {} }, () => assert.fail('group context must be absent'), () => opts, require('../../src/electron/renderer/homeModulePreferences')
@@ -305,7 +304,8 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     assert.equal(title.children.length, 0, 'membership never consumes title width');
     const description = meta.children[0];
     const countIndex = description.children.findIndex(node => node.className === 'home-session-member-count');
-    const modelIndex = description.children.findIndex(node => node.textContent === rowApi.sessionModelLabel(group));
+    const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
+      && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
     assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
     assert.equal(description.children[countIndex].textContent, '2 subagents');
     assert.equal(description.children.at(-1).textContent, ' · just now');
@@ -352,7 +352,8 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   assert.equal(titleLine.children.some(node => node.className === 'edge-dock-session-member-count'), false);
   assert.equal(description.className, 'edge-dock-session-description');
   const countIndex = description.children.findIndex(node => node.className === 'edge-dock-session-member-count');
-  const modelIndex = description.children.findIndex(node => node.textContent === rowApi.sessionModelLabel(group));
+  const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
+    && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
   assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
   assert.equal(description.children[countIndex].textContent, '2 subagents');
   assert.equal(family.children[1].children.at(-1).children.length, 3, 'members retain individual navigable expansion rows');
@@ -411,8 +412,8 @@ test('resumed archived child preserves its accounting parent unless native metad
 test('Home session navigation uses the incumbent module action without a second heading or row action', () => {
   const source = app.slice(app.indexOf('function homeModuleShell('), app.indexOf('function homeLimitRows('));
   const routes = [];
-  const shell = Function('document', 'renderBreakdownChange', 'VIEW_ICON_CLASSES', `${source}; return homeModuleShell;`)(
-    { createElement: tag => new Node(tag) }, (...args) => routes.push(args), {}
+  const shell = Function('document', 'els', 'pluginContent', 'renderBreakdownChange', 'VIEW_ICON_CLASSES', `${source}; return homeModuleShell;`)(
+    { createElement: tag => new Node(tag) }, { homePanel: { children: [] } }, null, (...args) => routes.push(args), {}
   );
   const { module } = shell('session', 'Sessions', 'session');
   const head = module.children[0];

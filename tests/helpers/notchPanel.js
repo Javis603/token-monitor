@@ -29,8 +29,9 @@ class Element {
       node.parent = this; this.children.push(node);
     }
   }
+  remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; }
   replaceChildren(...nodes) { this.children.forEach(node => { node.parent = null; }); this.children = []; this.append(...nodes); }
-  setAttribute(key, value) { this.attributes[key] = String(value); }
+  setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'class') this.className = value; }
   getAttribute(key) { return this.attributes[key]; }
   removeAttribute(key) { delete this.attributes[key]; }
   addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); }
@@ -52,7 +53,9 @@ class Element {
     this.ownerDocument.activeElement = this; this.fire('focus');
   }
   querySelectorAll(selector) {
-    const match = node => selector[0] === '.' ? node.classes.has(selector.slice(1))
+    const match = node => selector === '[data-roll-key]:not([data-pv-roll])'
+      ? Object.hasOwn(node.dataset, 'rollKey') && !Object.hasOwn(node.dataset, 'pvRoll')
+      : selector[0] === '.' ? node.classes.has(selector.slice(1))
       : selector.startsWith('[data-') ? Object.hasOwn(node.dataset, selector.slice(6, -1).replace(/-([a-z])/g, (_, char) => char.toUpperCase()))
         : selector === 'button.is-selected' ? node.tagName === 'BUTTON' && node.classes.has('is-selected') : node.tagName.toLowerCase() === selector;
     return this.children.flatMap(node => [...(match(node) ? [node] : []), ...node.querySelectorAll(selector)]);
@@ -60,14 +63,17 @@ class Element {
   querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
 }
 
-function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
+function panelFixture(t, settings = {}, { viaRenderer = false, pluginHost = null, pluginViews = null } = {}) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.parse('2026-10-18T10:00:00Z') });
   const savedRaf = global.requestAnimationFrame, savedCancel = global.cancelAnimationFrame;
   global.requestAnimationFrame = () => 1; global.cancelAnimationFrame = () => {};
   t.after(() => { global.requestAnimationFrame = savedRaf; global.cancelAnimationFrame = savedCancel; });
-  const document = { activeElement: null };
+  const document = { activeElement: null, listeners: {} };
+  document.addEventListener = (name, fn) => { (document.listeners[name] ||= []).push(fn); };
+  document.fire = (name, event = {}) => { for (const fn of document.listeners[name] || []) fn(event); };
   document.createElementNS = (_ns, tag) => new Element(tag, document);
   document.createElement = (tag) => new Element(tag, document);
+  document.createTextNode = value => { const node = new Element('#text', document); node.textContent = value; return node; };
   const el = (tag, className = '', value) => {
     const node = new Element(tag, document); node.className = className;
     if (value !== undefined) node.textContent = value;
@@ -111,6 +117,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
       }
     }
   };
+  if (pluginViews) window.TokenMonitorPluginViews = pluginViews;
   const state = { locale: 'en', appearanceKey: 'initial' };
   const overflowText = {
     bound: [], stopped: [], preserved: [],
@@ -139,7 +146,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false } = {}) {
       limitAccountPlan: (...args) => plans.limitAccountPlan(...args),
       limitDetailInfoNode: (...args) => plans.limitDetailInfoNode(...args)
     },
-    markNode: id => el('span', 'edge-dock-mark', id), hasMask: () => true,
+    markNode: id => el('span', 'edge-dock-mark', id), hasMask: () => true, pluginHost,
     providerLabel: id => id, limitProviderColor: () => '#888',
     limitAccountTitle: (...args) => plans.limitAccountTitle(...args),
     formatTokens: value => String(value), formatCardTokens: value => String(value), formatBreakdownTokens: value => String(value), formatCost: value => `$${value}`,

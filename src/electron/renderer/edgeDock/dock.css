@@ -34,7 +34,10 @@ html, body.edge-dock {
 .edge-dock-stat-label,
 .edge-dock-stat-headline strong,
 .edge-dock-usage-tokens,
-.edge-dock-rate-figure {
+.edge-dock-rate-figure,
+.edge-dock-plugin-cell .pv-compact-label,
+.edge-dock-plugin-cell .pv-compact-value,
+.edge-dock-plugin-cell .pv-compact-caption {
   font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
 }
 
@@ -468,7 +471,12 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
    for the same Claude card). The card's sections already separate themselves with
    the feathered hairline above (see `.edge-dock-sessions::before`), so nothing is
    lost by dropping them at the edge. */
-.edge-dock-accounts > .limit-row:last-child,
+.edge-dock-accounts > .limit-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+/* Parallel lanes are wrapped in a group, so the card's last child is that group
+   and the page rule still sits on the last row inside it. */
 .edge-dock-accounts > .limit-row-group > .limit-row:last-child {
   border-bottom: 0;
   padding-bottom: 0;
@@ -1038,3 +1046,23 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
    inside details traps wheel gestures once the card hits the work-area cap. */
 .edge-dock-session-family > .edge-dock-sessions { padding: 8px 0 0 16px; }
 .edge-dock-session-family .edge-dock-session-list { overflow: visible; }
+
+/* Plugin cells read like the usage readouts: a caption over one value, both
+   supplied by the plugin's compact view and painted in place on each push. */
+.edge-dock-cell-plugin { gap: 3px; }
+.edge-dock-plugin-cell { max-width: 56px; min-width: 0; }
+.edge-dock-plugin-cell .pv-compact-label { max-width: 54px; overflow: hidden; text-overflow: ellipsis; font-size: 9px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; }
+.edge-dock-plugin-cell .pv-compact-value { max-width: 56px; overflow: hidden; font-size: 12px; font-weight: 650; letter-spacing: -0.01em; }
+.edge-dock-plugin-cell .pv-placeholder { justify-content: center; min-height: 0; }
+.edge-dock-plugin-cell .pv-placeholder span { display: none; }
+.edge-dock-card-plugin .edge-dock-card-head { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
+.edge-dock-plugin-identity { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.edge-dock-plugin-identity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edge-dock-plugin-header-actions, .edge-dock-plugin-header-actions > .plugin-header-actions-mount { display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.edge-dock-plugin-header-actions { flex: 0 1 auto; max-width: 70%; }
+.edge-dock-plugin-header-actions:not(:has(> .plugin-header-actions-mount:not(:empty))) { display: none; }
+.edge-dock-plugin-owner { font-size: 10px; color: var(--muted); }
+.edge-dock-plugin-card { margin-top: 10px; min-width: 0; }
+
+/* Like built-in readouts, rolling glyphs need room for their outgoing ink. */
+.edge-dock-plugin-cell .pv-compact-value[data-token-number-animation="roll"] { overflow: visible; }

@@ -155,7 +155,7 @@ test('Home activity tooltip survives Home rerenders and is dismissed when the vi
   assert.match(renderHome[1], /hideHomeActivityTooltip\(\{\s*preserveHover:\s*true\s*\}\)/);
   assert.match(
     renderHome[1],
-    /replaceChildren\(\.\.\.nodes\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
+    /els\.homePanel\.insertBefore\(node, current \|\| null\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
   );
   const trendsModule = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(trendsModule, 'renderHomeTrendsModule exists');
@@ -663,7 +663,7 @@ test('Home retains each account plan through quota sorting without borrowing ano
   const presentation = require('../../src/electron/renderer/limits/providerPresentation');
   const rows = homeLimitAccountsForProviders({
     providers: [
-      { provider: 'codex', accountEmail: 'pro@example.com', planLabel: 'Pro More', windows: [{ kind: 'weekly', remainingPercent: 93 }] },
+      { provider: 'codex', accountEmail: 'pro@example.com', planLabel: 'Pro 200', windows: [{ kind: 'weekly', remainingPercent: 93 }] },
       { provider: 'codex', accountEmail: 'plus@example.com', planLabel: 'Plus', windows: [{ kind: 'weekly', remainingPercent: 30 }] },
       { provider: 'zed', planLabel: 'Zed Student', windows: [{ kind: 'monthly', remainingPercent: 60 }] },
       { provider: 'claude', windows: [{ kind: 'session', remainingPercent: 70 }] }
@@ -675,7 +675,7 @@ test('Home retains each account plan through quota sorting without borrowing ano
     accountPlan: (provider) => presentation.limitProviderPlanDisplayLabel(provider, provider.planLabel)
   });
   assert.deepEqual(rows.map((row) => [row.name, row.plan]), [
-    ['plus@example.com', 'Plus'], ['zed', 'Student'], ['claude', ''], ['pro@example.com', 'Pro More']
+    ['plus@example.com', 'Plus'], ['zed', 'Student'], ['claude', ''], ['pro@example.com', 'Pro 200']
   ]);
 });
 

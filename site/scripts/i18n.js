@@ -19,6 +19,7 @@ var translations = {
     "nav.features": "Features",
     "nav.privacy": "Privacy",
     "nav.download": "Download",
+    "nav.docs": "Docs",
 
     "hero.eyebrow": "Local-first AI coding telemetry",
     "hero.title": "Token Monitor",
@@ -257,6 +258,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "Portable x64 build",
 
+    "footer.docs": "Guides",
     "footer.api": "API docs",
     "footer.worker": "Worker docs",
     "footer.license": "License"
@@ -278,6 +280,7 @@ var translations = {
     "nav.features": "功能",
     "nav.privacy": "隱私",
     "nav.download": "下載",
+    "nav.docs": "文件",
 
     "hero.eyebrow": "本地優先的 AI coding telemetry",
     "hero.title": "Token Monitor",
@@ -516,6 +519,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "可攜式 x64 版本",
 
+    "footer.docs": "使用指南",
     "footer.api": "API 文件",
     "footer.worker": "Worker 文件",
     "footer.license": "授權"
@@ -537,6 +541,7 @@ var translations = {
     "nav.features": "功能",
     "nav.privacy": "隐私",
     "nav.download": "下载",
+    "nav.docs": "文档",
 
     "hero.eyebrow": "本地优先的 AI coding telemetry",
     "hero.title": "Token Monitor",
@@ -775,6 +780,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "便携式 x64 版本",
 
+    "footer.docs": "使用指南",
     "footer.api": "API 文档",
     "footer.worker": "Worker 文档",
     "footer.license": "许可证"
@@ -796,6 +802,7 @@ var translations = {
     "nav.features": "기능",
     "nav.privacy": "개인정보",
     "nav.download": "다운로드",
+    "nav.docs": "문서",
 
     "hero.eyebrow": "로컬 우선 AI 코딩 텔레메트리",
     "hero.title": "Token Monitor",
@@ -1034,6 +1041,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "포터블 x64 빌드",
 
+    "footer.docs": "가이드",
     "footer.api": "API 문서",
     "footer.worker": "Worker 문서",
     "footer.license": "라이선스"
@@ -1055,6 +1063,7 @@ var translations = {
     "nav.features": "機能",
     "nav.privacy": "プライバシー",
     "nav.download": "ダウンロード",
+    "nav.docs": "ドキュメント",
 
     "hero.eyebrow": "ローカルファーストの AI コーディングテレメトリ",
     "hero.title": "Token Monitor",
@@ -1293,6 +1302,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "ポータブル x64 ビルド",
 
+    "footer.docs": "ガイド",
     "footer.api": "API ドキュメント",
     "footer.worker": "Worker ドキュメント",
     "footer.license": "ライセンス"
@@ -1314,6 +1324,7 @@ var translations = {
     "nav.features": "Recursos",
     "nav.privacy": "Privacidade",
     "nav.download": "Baixar",
+    "nav.docs": "Docs",
 
     "hero.eyebrow": "Telemetria de programação com IA local-first",
     "hero.title": "Token Monitor",
@@ -1552,6 +1563,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "Build x64 portátil",
 
+    "footer.docs": "Guias",
     "footer.api": "Documentação da API",
     "footer.worker": "Documentação do Worker",
     "footer.license": "Licença"

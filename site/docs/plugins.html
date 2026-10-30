@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Using plugins · Token Monitor Docs</title>
+    <meta name="description" content="Install, enable and manage experimental Token Monitor plugins.">
+    <meta property="og:title" content="Using plugins · Token Monitor Docs">
+    <meta property="og:description" content="Install, enable and manage experimental Token Monitor plugins.">
+    <meta property="og:type" content="article">
+    <meta property="og:image" content="../assets/icon.png">
+    <meta name="theme-color" content="#14171c">
+    <link rel="icon" href="../assets/icon.png">
+    <link rel="stylesheet" href="../styles/tokens.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/base.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/components.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/edgedock.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/sections.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/docs.css?v=20260929-v063">
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="nav.skip">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav shell" aria-label="Primary" data-i18n-attr="aria-label:nav.primary">
+        <a class="brand" href="../" aria-label="Token Monitor home" data-i18n-attr="aria-label:nav.home">
+          <img class="brand-mark" src="../assets/icon.png" alt="" width="36" height="36">
+          <span>Token Monitor</span>
+        </a>
+        <div class="nav-actions">
+          <a class="nav-docs-link" href="./" aria-current="page" data-i18n="nav.docs">Docs</a>
+          <details class="lang-menu" data-lang-menu>
+            <summary class="nav-icon-btn lang-btn" aria-label="Language" aria-haspopup="menu" aria-expanded="false" data-i18n-attr="aria-label:nav.language">
+              <svg class="lang-symbol" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 8 11 14"></path>
+                <path d="m4 14 6-6 2-3"></path>
+                <path d="M2 5h12"></path>
+                <path d="M7 2h1"></path>
+                <path d="m22 22-5-10-5 10"></path>
+                <path d="M14 18h6"></path>
+              </svg>
+              <span class="lang-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="lang-pop" role="menu" aria-label="Language" data-i18n-attr="aria-label:nav.language">
+              <button type="button" role="menuitemradio" data-lang="zh-TW" aria-checked="false">繁體中文</button>
+              <button type="button" role="menuitemradio" data-lang="zh-CN" aria-checked="false">简体中文</button>
+              <button type="button" role="menuitemradio" data-lang="en" aria-checked="true">English</button>
+              <button type="button" role="menuitemradio" data-lang="ko" aria-checked="false">한국어</button>
+              <button type="button" role="menuitemradio" data-lang="ja" aria-checked="false">日本語</button>
+              <button type="button" role="menuitemradio" data-lang="pt-BR" aria-checked="false">Português (Brasil)</button>
+            </div>
+          </details>
+          <a class="nav-github-link" href="https://github.com/Javis603/token-monitor" aria-label="Star Token Monitor on GitHub" data-i18n-attr="aria-label:nav.githubStar">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+            </svg>
+            <span class="nav-github-label" data-i18n="nav.star">Star</span>
+            <span class="nav-github-count" data-github-stars>1000</span>
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <button class="docs-menu-btn" type="button" aria-expanded="false" aria-controls="docs-nav"><span data-i18n="docs.menu">Docs menu</span></button>
+        <nav class="docs-nav" id="docs-nav" aria-label="Documentation" data-i18n-attr="aria-label:docs.nav">
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.start">Get started</h2>
+            <ul>
+              <li><a href="./" data-i18n="docs.page.home">Overview</a></li>
+              <li><a href="app.html" data-i18n="docs.page.app">Using the App</a></li>
+              <li><a href="plugins.html" aria-current="page" data-i18n="docs.page.plugins">Using plugins</a></li>
+              <li><a href="plugin-quickstart.html" data-i18n="docs.page.quickstart">Plugin development guide</a></li>
+            </ul>
+          </div>
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.reference">Author references</h2>
+            <ul>
+              <li><a href="plugin-reference.html" data-i18n="docs.page.reference">Plugin API reference</a></li>
+              <li><a href="plugin-ui-reference.html" data-i18n="docs.page.uiReference">UI integration reference</a></li>
+              <li><a href="plugin-distribution-reference.html" data-i18n="docs.page.distributionReference">Distribution reference</a></li>
+              <li><a href="plugin-data-reference.html" data-i18n="docs.page.dataReference">Data and settings reference</a></li>
+              <li><a href="plugin-publishing-reference.html" data-i18n="docs.page.publishingReference">Publishing guide</a></li>
+              <li><a href="plugin-testing-reference.html" data-i18n="docs.page.testingReference">Testing and acceptance</a></li>
+            </ul>
+          </div>
+        </nav>
+      </aside>
+      <main class="docs-main" id="main">
+        <ol class="docs-crumbs"><li><a href="./" data-i18n="docs.crumb">Docs</a></li><li aria-current="page" data-i18n="docs.page.plugins">Using plugins</li></ol>
+        <article class="doc-lang docs-article" lang="en">
+<h1>Token Monitor plugins</h1><p class="docs-lede">Install plugins, choose where their content appears, and manage updates or recovery. The plugin API is experimental and may change; plugins may need updates. Enable only code you trust.</p><h2 id="install" data-anchor="install">Trust before enabling</h2><p>Plugins can read local files and credentials, use the network, change data or freeze the interface. UI has no Node integration; a Node backend has the OS user’s authority. Enable only code you trust. A hash or signature is not a safety audit. Import a .tmplugin file or folder in Settings → Plugins. Review the revision and first-use settings, then choose Trust, install and enable to approve and run it, or Install only to keep it disabled and untrusted. Review initial locations, content sources, background execution and appearance together. Later enables and updates preserve your choices. The global switch and safe mode still apply. There are no bundled production plugins or automatic marketplace.</p><h2 id="placements" data-anchor="placements">Choose content and locations</h2><p>Place content on Home, pages, Notch, Edge Dock or Tray. Authors can also compose original native page content. Choose one replacement per target; additive views can coexist. App window shells remain native.</p><h2 id="recover" data-anchor="recover">Updates and recovery</h2><p>New executable content requires trust again; unchanged trusted code re-enables directly. Normal disable cleans up without a reload. Unsaved work prompts first; failed cleanup offers a recovery reload. Updating loaded code may reload affected renderers: save drafts first. Rollback restores code, not data migrations. Uninstall offers separate data and placement retention. Restart without plugins from the native tray menu, or use --plugins-safe-mode.</p><p><a href="plugin-reference.html">Plugin API</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a> · <a href="plugin-distribution-reference.html#create-a-community-catalog">Create and sign a catalog</a></p>
+</article>
+        <article class="doc-lang docs-article" lang="zh-TW">
+<h1>Token Monitor 外掛</h1><p class="docs-lede">安裝外掛、選擇內容顯示位置，以及管理更新與復原。外掛 API 屬實驗性，日後可能變更，外掛可能需要更新。只啟用你信任的程式碼。</p><h2 data-anchor="install">信任後才啟用</h2><p>外掛可能讀取本機檔案與憑證、連線、更改資料或令介面停止回應。UI 沒有 Node 整合；Node 後端具有作業系統使用者權限。只啟用你信任的程式碼；雜湊或簽章不代表安全審核。在「設定 → 外掛」匯入 .tmplugin 或資料夾，核對版本及首次設定，再選擇「信任、安裝並啟用」來執行，或「只安裝」以保持停用及未信任。首次設定一併確認顯示位置、內容來源、背景執行及外觀；重新啟用或更新會保留你的選擇。全域開關及安全模式仍然適用。平台沒有正式內建外掛或自動市集。</p><h2 data-anchor="placements">選擇內容及位置</h2><p>可放在首頁、頁面、Notch、Edge Dock 或系統匣，也可組合原有頁面的原生內容。每個目標由使用者選一個替換者，附加內容可共存；視窗外殼仍由 App 管理。</p><h2 data-anchor="recover">更新與復原</h2><p>新的程式內容須重新信任；已信任且未改變的程式可直接重新啟用。正常停用會清理外掛，不重載介面。有未儲存工作會先詢問，清理失敗則提供重載復原。更新已載入程式可能重載相關介面，請先儲存草稿。回退只恢復程式，不逆轉資料遷移；移除可分別保留資料及位置。原生系統匣選單可「不載入外掛並重新啟動」，亦可使用 --plugins-safe-mode。</p><p><a href="plugin-reference.html">外掛 API</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a> · <a href="plugin-distribution-reference.html#create-a-community-catalog">建立及簽署目錄</a></p>
+</article>
+        <article class="doc-lang docs-article" lang="zh-CN">
+<h1>Token Monitor 插件</h1><p class="docs-lede">安装插件、选择内容显示位置，以及管理更新与恢复。插件 API 为实验性，日后可能变更，插件可能需要更新。仅启用你信任的代码。</p><h2 data-anchor="install">信任后再启用</h2><p>插件可能读取本机文件和凭证、联网、修改数据或使界面停止响应。UI 没有 Node 集成；Node 后端具有操作系统用户权限。仅启用你信任的代码；哈希或签名不代表安全审核。在“设置 → 插件”导入 .tmplugin 或文件夹，核对版本及首次设置，再选择“信任、安装并启用”来运行，或“仅安装”以保持禁用和未信任。首次设置一并确认显示位置、内容来源、后台运行及外观；重新启用或更新会保留你的选择。全局开关及安全模式仍然适用。平台没有正式内置插件或自动市场。</p><h2 data-anchor="placements">选择内容和位置</h2><p>支持首页、页面、Notch、Edge Dock、托盘以及原有页面内容组合。每个目标由用户选择一个替换者，附加内容可共存；窗口外壳由 App 管理。</p><h2 data-anchor="recover">更新与恢复</h2><p>新代码需要重新信任；已信任且未改变的代码可直接重新启用。正常停用清理插件而不重载；未保存工作会先询问，清理失败则提供重载恢复。更新可能重载界面，请先保存草稿。回退不逆转数据迁移；卸载可分别保留数据和位置。通过原生托盘菜单不加载插件重启，或使用 --plugins-safe-mode。</p><p><a href="plugin-reference.html">插件 API</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a> · <a href="plugin-distribution-reference.html#create-a-community-catalog">创建和签署目录</a></p>
+</article>
+        <article class="doc-lang docs-article" lang="ko">
+<h1>Token Monitor 플러그인</h1><p class="docs-lede">플러그인을 설치하고 콘텐츠 표시 위치를 선택하며 업데이트와 복구를 관리하세요. 플러그인 API는 실험적이며 변경될 수 있어 플러그인 업데이트가 필요할 수 있습니다. 신뢰하는 코드만 활성화하세요.</p><h2 data-anchor="install">신뢰 후 활성화</h2><p>플러그인은 파일과 자격 증명에 접근하고 네트워크를 사용하며 데이터를 변경하거나 UI를 멈출 수 있습니다. UI에는 Node 통합이 없지만 Node 백엔드는 OS 사용자 권한을 가집니다. 신뢰하는 코드만 활성화하세요. 해시나 서명은 안전성 검토가 아닙니다. 설정 → 플러그인에서 .tmplugin 또는 폴더를 가져와 버전과 최초 설정을 확인하세요. 신뢰·설치·활성화를 선택하면 실행하고, 설치만 선택하면 비활성·미신뢰 상태로 보관합니다. 최초 설정에서 표시 위치, 콘텐츠 소스, 백그라운드 실행과 외관을 함께 확인합니다. 다시 활성화하거나 업데이트해도 선택을 유지합니다. 전체 스위치와 안전 모드는 계속 적용됩니다. 기본 제공 프로덕션 플러그인이나 자동 마켓은 없습니다.</p><h2 data-anchor="placements">콘텐츠와 위치</h2><p>홈, 페이지, Notch, Edge Dock, 트레이와 기존 페이지 콘텐츠를 확장합니다. 대상별 교체는 사용자가 하나를 선택하며 추가 콘텐츠는 공존합니다. 창 외형은 앱이 관리합니다.</p><h2 data-anchor="recover">업데이트와 복구</h2><p>새 코드는 다시 신뢰해야 합니다. 변경되지 않은 코드는 바로 다시 활성화됩니다. 정상 비활성화는 다시 로드하지 않고 정리합니다. 저장하지 않은 작업은 먼저 확인하며 정리 실패 시 복구용 다시 불러오기를 제공합니다. 업데이트 전에는 초안을 저장하세요. 롤백은 데이터 마이그레이션을 되돌리지 않습니다. 제거 시 데이터와 위치를 각각 보존할 수 있습니다. 기본 트레이 메뉴 또는 --plugins-safe-mode로 플러그인 없이 재시작합니다.</p><p><a href="plugin-reference.html">플러그인 API</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a> · <a href="plugin-distribution-reference.html#create-a-community-catalog">카탈로그 만들기 및 서명</a></p>
+</article>
+        <article class="doc-lang docs-article" lang="ja">
+<h1>Token Monitor プラグイン</h1><p class="docs-lede">プラグインのインストール、表示位置の選択、更新と復旧を行います。プラグイン API は実験的で、今後変更される可能性があり、プラグインの更新が必要になる場合があります。信頼するコードだけを有効にしてください。</p><h2 data-anchor="install">信頼してから有効化</h2><p>プラグインはファイルや認証情報、ネットワークにアクセスし、データを変更したり UI を停止させる可能性があります。UI に Node 統合はありませんが、Node バックエンドは OS ユーザー権限で動作します。信頼するコードだけを有効にしてください。ハッシュや署名は安全性の審査ではありません。設定 → プラグインで .tmplugin またはフォルダーを取り込み、バージョンと初回設定を確認します。「信頼してインストール・有効化」で実行するか、「インストールのみ」で無効・未信頼のまま保存します。初回設定で表示位置、コンテンツの選択、バックグラウンド実行と外観をまとめて確認します。再有効化や更新でも選択を保持します。全体スイッチと安全モードは引き続き適用されます。標準の製品プラグインや自動マーケットはありません。</p><h2 data-anchor="placements">内容と表示位置</h2><p>ホーム、ページ、Notch、Edge Dock、トレイと既存ページの内容を拡張できます。置換は対象ごとにユーザーが一つ選び、追加内容は共存できます。ウィンドウの外形は App が管理します。</p><h2 data-anchor="recover">更新と復旧</h2><p>新しいコードには再び信頼が必要です。変更のないコードは直接再有効化できます。通常の無効化は再読み込みせず後処理します。未保存の作業は先に確認し、後処理の失敗時は復旧の再読み込みを案内します。更新前に下書きを保存してください。ロールバックはデータ移行を戻しません。削除時はデータと位置を別々に保持できます。ネイティブのトレイメニューか --plugins-safe-mode でプラグインなしで再起動します。</p><p><a href="plugin-reference.html">プラグイン API</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a> · <a href="plugin-distribution-reference.html#create-a-community-catalog">カタログの作成と署名</a></p>
+</article>
+        <article class="doc-lang docs-article" lang="pt-BR">
+<h1>Plugins do Token Monitor</h1><p class="docs-lede">Instale plugins, escolha onde o conteúdo aparece e gerencie atualizações e recuperação. A API de plugins é experimental e pode mudar; os plugins podem precisar de atualizações. Ative apenas código em que você confia.</p><h2 data-anchor="install">Confie antes de ativar</h2><p>Plugins podem acessar arquivos, credenciais e rede, modificar dados ou travar a interface. A UI não tem integração com Node; o backend Node tem a autoridade do usuário do sistema. Ative apenas código confiável. Um hash ou assinatura não é uma auditoria de segurança. Importe um .tmplugin ou pasta em Configurações → Plugins e confira a versão e as configurações iniciais. Escolha confiar, instalar e ativar para executar, ou apenas instalar para manter desativado e não confiável. Revise os locais, fontes de conteúdo, execução em segundo plano e aparência juntos. Reativar ou atualizar preserva suas escolhas. O controle geral e o modo seguro continuam valendo. Não há plugins de produção incluídos nem mercado automático.</p><h2 data-anchor="placements">Conteúdo e locais</h2><p>Use Home, páginas, Notch, Edge Dock, bandeja e composição de conteúdo nativo. O usuário escolhe uma substituição por destino; adições podem coexistir. O App controla a estrutura das janelas.</p><h2 data-anchor="recover">Atualizações e recuperação</h2><p>Novo código exige confiança novamente; código já confiável e inalterado pode ser reativado diretamente. Desativar normalmente limpa o plugin sem recarregar. Trabalho não salvo exige confirmação; falhas de limpeza oferecem recarga para recuperação. Salve rascunhos antes de atualizar. Rollback não desfaz migrações de dados. A remoção pode preservar dados e locais separadamente. Reinicie sem plugins pelo menu nativo da bandeja ou --plugins-safe-mode.</p><p><a href="plugin-reference.html">API de plugins</a> · <a href="plugin-ui-reference.html">UI</a> · <a href="plugin-distribution-reference.html">Packages</a> · <a href="plugin-distribution-reference.html#create-a-community-catalog">Criar e assinar um catálogo</a></p>
+</article>
+
+      </main>
+    </div>
+
+    <footer class="footer section shell">
+      <span class="footer-copy">© 2026 Token Monitor</span>
+      <div class="footer-links">
+        <a href="https://github.com/Javis603/token-monitor">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+          </svg>
+          <span data-i18n="nav.github">GitHub</span>
+        </a>
+        <a href="./" data-i18n="footer.docs">Guides</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/docs/API.md" data-i18n="footer.api">API docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/worker/README.md" data-i18n="footer.worker">Worker docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/LICENSE" data-i18n="footer.license">License</a>
+      </div>
+    </footer>
+
+    <script src="../scripts/i18n.js?v=20260929-v063" defer></script>
+    <script src="../scripts/main.js?v=20260929-v063" defer></script>
+    <script src="../scripts/docs.js?v=20260929-v063" defer></script>
+  </body>
+</html>

@@ -1058,6 +1058,15 @@ test('normalizeClientName folds both Kilo sources together and keeps Oh My Pi se
   assert.notEqual(normalizeClientName('senpi'), 'pi');
 });
 
+test('normalizeClientName trims edge dashes without slowing down on long dash runs', () => {
+  assert.equal(normalizeClientName(' --My Tool!-- '), 'my-tool');
+  assert.equal(normalizeClientName('a--b'), 'a--b');
+  assert.equal(normalizeClientName('---'), null);
+  const started = process.hrtime.bigint();
+  assert.equal(normalizeClientName(`a${'-'.repeat(100_000)}a!`), `a${'-'.repeat(100_000)}a`);
+  assert.ok(process.hrtime.bigint() - started < 1_000_000_000n);
+});
+
 test('normalizeClientName keeps Qoder CN distinct from international Qoder', () => {
   assert.equal(normalizeClientName('Qoder CN'), 'qodercn');
   assert.equal(normalizeClientName('qoder-cn'), 'qodercn');

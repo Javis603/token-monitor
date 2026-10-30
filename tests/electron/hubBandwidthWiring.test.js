@@ -14,8 +14,10 @@ test('official producers request the optional minimal ingest response', () => {
   assert.match(agentSource, /\[HUB_RESPONSE_HEADER\]: HUB_RESPONSE_MINIMAL/);
 });
 
-test('the desktop stream negotiates and applies freshness without losing legacy events', () => {
+test('the desktop stream negotiates and receives full, freshness and delta events independently of REST', () => {
   assert.match(mainSource, /\[HUB_STREAM_HEADER\]: HUB_STREAM_VERSION/);
-  assert.match(mainSource, /parsed\.event === 'stats' \|\| parsed\.event === 'snapshot'/);
-  assert.match(mainSource, /applyFreshnessEvent\(latestHubStats, parsed\.data\)/);
+  assert.match(mainSource, /const streamSnapshot = createStatsStreamReceiver\(\);/);
+  assert.match(mainSource, /\['snapshot', 'stats', 'freshness', 'delta'\]\.includes\(parsed\.event\)/);
+  assert.match(mainSource, /streamSnapshot\.receive\(parsed\.event, parsed\.data\)/);
+  assert.match(mainSource, /devices: refreshed\.devices\.map/);
 });

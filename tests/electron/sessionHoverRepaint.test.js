@@ -127,7 +127,7 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
   const state = { breakdown: 'home', stats: { revision: 1 } };
   const context = {
     homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
-    state, prefersReducedMotion: () => false, visibleStatsSurface: () => 'main',
+    state, pluginContent: null, prefersReducedMotion: () => false, visibleStatsSurface: () => 'main',
     requestAnimationFrame: callback => frames.push(callback),
     document,
     window: {
@@ -136,7 +136,13 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
       setTimeout: () => 1, clearTimeout() {}
     },
     els: { homePanel: {
-      replaceChildren(module) { painted.push(module.revision); }, querySelector: () => null
+      children: [],
+      insertBefore(module, before) {
+        const index = before ? this.children.indexOf(before) : this.children.length;
+        this.children.splice(index, 0, module); module.parentNode = this;
+        module.remove = () => { this.children.splice(this.children.indexOf(module), 1); module.parentNode = null; };
+        painted.push(module.revision);
+      }, querySelector: () => null
     } },
     hideHomeActivityTooltip() {}, hideTrendTooltip() {}, homeModuleIds: () => ['session'], sessionPresentationOptions: () => ({}),
     renderHomeSessionModule: () => ({ revision: state.stats.revision }), scheduleHomeSessionRepaint() {}
@@ -172,7 +178,7 @@ test('Edge Dock title hover permits pushes and clock repaints while tooltip hold
   let tooltipHovered = false;
   const painted = [];
   const context = {
-    state: { payload: null }, surface: 'bubble', notchRenderer: null, limitTooltip: { active: false, pending: false },
+    state: { payload: null }, surface: 'bubble', notchRenderer: null, surfaceWeb: null, limitTooltip: { active: false, pending: false },
     contentLayer: { querySelector: selector => {
       if (selector === '.fade-overflow:hover') return {};
       if (selector === '.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within') {

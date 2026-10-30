@@ -41,14 +41,18 @@ async function claudeProviderForCredentials(oauth) {
   });
 }
 
-test('Codex plan labels show the updated Pro tiers', () => {
-  assert.equal(codexProviderForPlan('pro').accountLabel, 'Pro More');
-  assert.equal(codexProviderForPlan('Codex Pro').accountLabel, 'Pro More');
-  assert.equal(codexProviderForPlan('OpenAI Codex Pro').accountLabel, 'Pro More');
-  assert.equal(codexProviderForPlan('prolite').accountLabel, 'Pro');
-  assert.equal(codexProviderForPlan('Codex Pro Lite').accountLabel, 'Pro');
-  assert.equal(codexProviderForPlan('promax').accountLabel, 'Pro Max');
-  assert.equal(codexProviderForPlan('Codex Pro Max').accountLabel, 'Pro Max');
+test('Codex plan labels show the Pro tiers by their monthly price', () => {
+  assert.equal(codexProviderForPlan('pro').accountLabel, 'Pro 200');
+  assert.equal(codexProviderForPlan('Codex Pro').accountLabel, 'Pro 200');
+  assert.equal(codexProviderForPlan('OpenAI Codex Pro').accountLabel, 'Pro 200');
+  assert.equal(codexProviderForPlan('prolite').accountLabel, 'Pro 100');
+  assert.equal(codexProviderForPlan('pro_lite').accountLabel, 'Pro 100');
+  assert.equal(codexProviderForPlan('pro-lite').accountLabel, 'Pro 100');
+  assert.equal(codexProviderForPlan('Codex Pro Lite').accountLabel, 'Pro 100');
+  assert.equal(codexProviderForPlan('promax').accountLabel, 'Pro 500');
+  assert.equal(codexProviderForPlan('pro_max').accountLabel, 'Pro 500');
+  assert.equal(codexProviderForPlan('pro-max').accountLabel, 'Pro 500');
+  assert.equal(codexProviderForPlan('Codex Pro Max').accountLabel, 'Pro 500');
 });
 
 test('Codex plan labels compact common enterprise identifiers and humanize fallback identifiers', () => {

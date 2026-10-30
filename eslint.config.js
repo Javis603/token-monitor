@@ -25,11 +25,34 @@ module.exports = [
   },
 
   {
+    files: ['tests/fixtures/trusted-plugin/**/*.mjs', 'plugins/quota-alerts/**/*.mjs'],
+    languageOptions: { sourceType: 'module', globals: globals.browser },
+  },
+
+  {
     // Renderer runs in the browser; UMD modules also touch module/window
     files: ['src/electron/renderer/**/*.js'],
     languageOptions: {
       sourceType: 'commonjs',
       globals: { ...globals.node, ...globals.browser },
+    },
+  },
+
+  {
+    // The plugin host page and the Worker prelude run in the plugin sandbox.
+    files: ['src/electron/plugins/host/runtime.js', 'src/electron/plugins/host/prelude.js', 'src/electron/plugins/host/message.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: { ...globals.browser, ...globals.worker },
+    },
+  },
+
+  {
+    // Plugin code runs inside a Worker with the host's `tm` API as its only global.
+    files: ['src/electron/plugins/builtin/**/*.js', 'docs/plugins/examples/**/*.js', 'tests/fixtures/plugins/**/*.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: { ...globals.worker, tm: 'readonly' },
     },
   },
 

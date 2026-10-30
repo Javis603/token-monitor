@@ -94,12 +94,13 @@ test('the rail rolls its readouts on the shared setting, never on a reveal', () 
   const html = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/index.html'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
   const render = dock.slice(dock.indexOf('function renderRail('), dock.indexOf('let gesture = null;'));
-  assert.ok(render.indexOf('railNumberRoll.capture(railNode)') < render.indexOf('railNode.replaceChildren('));
-  assert.match(render, /if \(!revealing && !prefersReducedMotion\(\)\s+&& tokenNumberAnimationApi\.normalize\(appearance\(\)\.tokenNumberAnimation\) === 'roll'\)/);
+  assert.ok(render.indexOf('railNumberRoll.capture(railNode)') < render.indexOf('node.remove()'));
+  assert.match(render, /if \(!revealing && !prefersReducedMotion\(\)\)/);
+  assert.match(dock, /mode: \(\) => tokenNumberAnimationApi\.normalize\(appearance\(\)\.tokenNumberAnimation\)/);
   assert.match(render, /const refilling = animateRingResets\(ringSnapshot\);[\s\S]*skip: \(node\) => refilling\.has\(node\)/,
     'a refill count-up owns its figure from the render that starts it');
   assert.match(dock, /const hasCreditsAmount = [^\n]+;\s*if \(hasCreditsAmount\) \{/);
-  assert.match(dock, /markRoll\(value, `\$\{node\.dataset\.ringMotionKey\}:value`, hasCreditsAmount \? Number\(cell\.credits\.amount\) : shown\);/,
+  assert.match(dock, /markRoll\(value, `\$\{node\.dataset\.ringMotionKey\}:value`, hasCreditsAmount \? Number\(cell\.credits\.amount\) : shown, reading => hasCreditsAmount/,
     'a quota figure rolls on the headline identity and the reading it shows');
   assert.match(dock, /ringNumberAnimations\.clear\(\);\s*railNumberRoll\.settle\(\);/, 'reduced motion lands rolling readouts too');
   for (const key of ['value`, cell.totalTokens', 'cost`, cell.costUsd', 'rate`, cell.rate', 'value`, running']) {

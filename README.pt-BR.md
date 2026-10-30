@@ -14,7 +14,7 @@
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/v/release/Javis603/token-monitor?include_prereleases&style=flat-square&label=release&color=22c55e" alt="Latest release" /></a>
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/downloads/Javis603/token-monitor/total?style=flat-square&color=22c55e" alt="Total downloads" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 or later" />
-    <img src="https://img.shields.io/badge/macOS-12%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 12 or later" />
+    <img src="https://img.shields.io/badge/macOS-13%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 13 or later" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
     <a href="https://discord.gg/HmdNVVvw5P"><img src="https://img.shields.io/discord/1344259784219689031?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="License: MIT" /></a>
@@ -137,6 +137,18 @@ Uso de tokens, limites de ferramentas de IA e detalhes de sessão das ferramenta
 
 A maioria dos monitores de uso só é útil na máquina em que roda. O Token Monitor foi feito para o trabalho multidispositivo: cada dispositivo observa seus próprios registros locais, envia resumos ao seu hub e todos os widgets conectados veem as mudanças de tokens quase imediatamente.
 
+## Instalação rápida
+
+No macOS, instale pelo [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor) oficial:
+
+```bash
+brew install --cask token-monitor
+```
+
+Ou baixe o app para macOS, Windows ou Linux nas [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
+
+Abra o app para começar a acompanhar o uso local deste dispositivo, sem configurar um hub. Veja os detalhes em [Instalação](#instalação).
+
 ## Recursos
 
 ### Acompanhamento de uso
@@ -184,6 +196,12 @@ A maioria dos monitores de uso só é útil na máquina em que roda. O Token Mon
 - **Atalho global gravável** — mostre ou oculte a janela de qualquer lugar
 - **Discord Rich Presence** — transmita os tokens de hoje, o custo e o cliente principal (opcional)
 
+### Plugins (experimental)
+
+Estenda as páginas do desktop com conteúdo personalizado, adicione páginas e configurações de plugins e exiba conteúdo no Notch, Edge Dock, barra de menus/bandeja do sistema ou bolhas flutuantes. Autores podem criar interfaces próprias e backends Node locais opcionais para fontes de dados e cálculos.
+
+Gerencie os plugins em Configurações → Plugins. Consulte o [guia de uso](https://javis-ai.com/token-monitor/docs/plugins.html?lang=pt-BR), os [plugins da comunidade](https://github.com/Javis603/token-monitor-plugins), o [guia de desenvolvimento](docs/plugins/author-quickstart.md) e a [API de plugins](docs/plugins/README.md). A API é experimental e pode mudar; os plugins podem precisar de atualização. Ative apenas código em que você confia: plugins não são isolados em sandbox, e os backends Node executam com as permissões do seu usuário do sistema operacional.
+
 ## Ferramentas suportadas em detalhe
 
 O Token Monitor suporta uso de tokens, verificação de limites da conta e detalhes de sessão separadamente:
@@ -217,7 +235,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage & `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legado `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db` (somente CN) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
@@ -260,6 +278,27 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 - O mapeamento personalizado associa campos JSON numéricos de um único endpoint GET de saldo; compatibilidade apenas com OpenAI ou Anthropic não é suficiente.
 - O Qoder CN vem desativado por padrão; ative-o em Configurações → ferramentas. As sessões atuais são arquivos JSONL em `~/.qoder-cn/projects` (`TOKEN_MONITOR_QODER_CN_PROJECTS_PATH` e, depois, `QODERCN_CONFIG_DIR/projects`); versões mais antigas usavam um banco SQLite, sobrescrevível com `TOKEN_MONITOR_QODER_CN_DB_PATH`. Uma fonte ilegível mantém a última leitura completa. Sessões do banco legado registram apenas o nome do projeto, então aparecem sem projeto. Linhas JSONL faturadas por plano que informam créditos mas nenhuma contagem de tokens são omitidas dos totais de tokens; esses créditos permanecem nos Limites de Ferramentas de IA, e as linhas BYOK com tokens medidos são contadas. Veja as [notas da origem do Qoder](docs/providers/qodercn.md).
 </details>
+
+### Suporte a recursos adicionais
+
+| Recurso | Ferramentas/fontes suportadas | Observações |
+|---------|-------------------------|------------|
+| Títulos de sessão | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| Uso por prompt/resposta e chamadas de ferramentas | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Os detalhes são lidos localmente e não são sincronizados. |
+| Uso de contexto/espaço restante | Claude Code, Codex, DeepSeek Harness | O limite de contexto do Claude Code é estimado pelo modelo. |
+| Uso de cache/taxa de acerto do cache da sessão | Fontes com campos de cache, por exemplo: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | A taxa de acerto aparece quando há dados de uso de cache. |
+| Estimativa de tempo restante do cache | Claude Code | 5 minutos ou 1 hora, conforme o tipo de cache registrado. |
+| Velocidade de saída/taxa de consumo de tokens | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Saída em `tok/s` e consumo total de tokens em `tok/min`; o tempo pode incluir espera. |
+| Nível de esforço de raciocínio | Claude Code, Codex | Exibe apenas configurações explicitamente registradas na sessão. |
+| Contagem de tokens de raciocínio | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| Detecção de início/conclusão de turno | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | Usa sinais de turno registrados pela ferramenta. Para outras ferramentas ou sem sinais válidos, estima como em execução por cerca de 10 minutos após a última atividade. |
+| Estado nativo: em execução/aguardando entrada | Claude Code, Codex | — |
+| Agrupamento de sessões pai e subagentes | Codex, Antigravity, Oh My Pi, ZCode; sessões do T3 Code com vínculos verificáveis à sessão pai | O agrupamento do Claude Code é oferecido pelo T3 Code. |
+| Agrupamento de registros de continuação da mesma conversa | Codex; sessões do T3 Code com vínculos verificados à mesma thread | — |
+| Alternar contas locais | Codex | Alterna entre contas adicionadas ao Token Monitor. |
+| Horários de renovação de cota/contagem regressiva | Fontes que informam horários de renovação de cota, por exemplo: Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| Créditos de redefinição de cota disponíveis | Claude Code, Codex | Mostra as redefinições restantes e a expiração; apenas consulta. |
+| Previsão de redefinição de cota | Codex | Previsões opcionais de terceiros do codex-resets.com. |
 
 ## Instalação
 

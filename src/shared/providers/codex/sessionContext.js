@@ -22,7 +22,7 @@
 const fs = require('node:fs');
 const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./transcript');
 const { normalizeSessionContext } = require('../../sessionContext');
-const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
+const { normalizeReasoningEffort } = require('../../sessionLive');
 
 const TAIL_READ_BUDGETS = [256 * 1024, 1024 * 1024];
 const TURN_READ_MAX_BYTES = 8 * 1024 * 1024;
@@ -39,13 +39,22 @@ function contextFromInfo(info) {
   });
 }
 
-function applyLine(state, line, position, contextStart, cacheStart) {
+function applyLine(state, line, position, contextStart) {
+  // An unreadable new configuration cannot leave the previous turn's badge.
+  // Only inspect the bounded record prefix; never decode large tool output.
+  const configuration = /"type"\s*:\s*"turn_context"/.test(line.subarray(0, 512).toString('utf8'));
+  if (configuration && position >= contextStart) state.reasoningEffort = null;
   // Metadata records are small; never decode arbitrarily large tool output.
   if (!line.length || line.length > MAX_METADATA_LINE_BYTES) return;
   let entry;
   try { entry = JSON.parse(line.toString('utf8')); } catch (_) { return; }
   if (!entry || typeof entry !== 'object') return;
   const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : entry;
+  if (entry.type === 'turn_context' && position >= contextStart) {
+    state.reasoningEffort = normalizeReasoningEffort(
+      Object.prototype.hasOwnProperty.call(payload, 'effort') ? payload.effort : payload.reasoning_effort
+    );
+  }
   if (payload.type === 'token_count' && payload.info && position >= contextStart) {
     const context = contextFromInfo(payload.info);
     if (context) state.context = context;
@@ -54,6 +63,7 @@ function applyLine(state, line, position, contextStart, cacheStart) {
     state.turnEnded = true;
     state.pendingInputCalls.clear();
   } else if (payload.type === 'task_started') {
+    state.reasoningEffort = null;
     state.turnEnded = false;
     state.pendingInputCalls.clear();
   }
@@ -66,30 +76,29 @@ function applyLine(state, line, position, contextStart, cacheStart) {
   } else if (callId && payload.type === 'function_call_output') {
     state.pendingInputCalls.delete(callId);
   }
-  if (position >= cacheStart) applyPromptCacheEntry(state.promptCacheState, entry, 'codex');
 }
 
-function consumeBytes(state, chunk, start, contextStart, cacheStart) {
+function consumeBytes(state, chunk, start, contextStart) {
   const prefix = state.trailing;
   const bytes = prefix.length ? Buffer.concat([prefix, chunk]) : chunk;
   const base = start - prefix.length;
   let lineStart = 0;
   for (let index = 0; index < bytes.length; index += 1) {
     if (bytes[index] !== 0x0a) continue;
-    if (!state.droppingLine) applyLine(state, bytes.subarray(lineStart, index), base + lineStart, contextStart, cacheStart);
+    if (!state.droppingLine) applyLine(state, bytes.subarray(lineStart, index), base + lineStart, contextStart);
     state.droppingLine = false;
     lineStart = index + 1;
   }
   const remainder = bytes.subarray(lineStart);
   if (state.droppingLine || remainder.length > MAX_METADATA_LINE_BYTES) {
+    if (!state.droppingLine) applyLine(state, remainder, base + lineStart, contextStart);
     state.trailing = Buffer.alloc(0);
     state.droppingLine = true;
   } else state.trailing = Buffer.from(remainder);
 }
 
-// Context, boundary and cache share one decoded index. Append-only updates read
-// only new bytes and carry accounting identity across scans; a duplicate cannot
-// restart the cache clock after its original record leaves the initial tail.
+// Context, turn state and reasoning effort share one decoded index.
+// Append-only updates read only new bytes and retain the prior session state.
 function readCodexSessionState(filePath, deps = {}) {
   const cache = deps.cache || stateCache;
   const fsApi = deps.fs || fs;
@@ -101,17 +110,17 @@ function readCodexSessionState(filePath, deps = {}) {
     if (cached?.identity === identity && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached;
     const compressed = isCompressedCodexTranscript(filePath);
     const appendOnly = !compressed && cached?.identity === identity && stat.size > cached.size;
-    const state = appendOnly ? { ...cached, pendingInputCalls: new Set(cached.pendingInputCalls), promptCacheState: { ...cached.promptCacheState } }
-      : { context: null, turnEnded: undefined, pendingInputCalls: new Set(), promptCacheState: createPromptCacheState(), trailing: Buffer.alloc(0), droppingLine: false };
+    const state = appendOnly ? { ...cached, pendingInputCalls: new Set(cached.pendingInputCalls) }
+      : { context: null, turnEnded: undefined, pendingInputCalls: new Set(), trailing: Buffer.alloc(0), droppingLine: false };
     if (compressed) {
       const bytes = readCompressedCodexTranscript(filePath, deps);
       const start = Math.max(0, bytes.length - TURN_READ_MAX_BYTES);
       const contextStart = Math.max(0, bytes.length - TAIL_READ_BUDGETS[1]);
       state.droppingLine = start > 0;
       for (let position = start; position < bytes.length; position += TAIL_READ_BUDGETS[0]) {
-        consumeBytes(state, bytes.subarray(position, position + TAIL_READ_BUDGETS[0]), position, contextStart, contextStart);
+        consumeBytes(state, bytes.subarray(position, position + TAIL_READ_BUDGETS[0]), position, contextStart);
       }
-      if (!state.droppingLine) applyLine(state, state.trailing, bytes.length - state.trailing.length, contextStart, contextStart);
+      if (!state.droppingLine) applyLine(state, state.trailing, bytes.length - state.trailing.length, contextStart);
       Object.assign(state, { identity, size: stat.size, mtimeMs: stat.mtimeMs,
         waitingForInput: state.turnEnded !== true && state.pendingInputCalls.size > 0 });
       if (cache.size >= 512 && !cache.has(filePath)) cache.delete(cache.keys().next().value);
@@ -125,7 +134,7 @@ function readCodexSessionState(filePath, deps = {}) {
       start = cached.size;
     } else {
       // Widen only for an absent turn boundary. Each earlier segment is read
-      // once; occupancy and cache still use the newest 1 MiB only.
+      // once; context and effort still use the newest 1 MiB only.
       start = stat.size;
       let boundaryFound = false;
       while (start > 0 && stat.size - start < TURN_READ_MAX_BYTES) {
@@ -142,7 +151,6 @@ function readCodexSessionState(filePath, deps = {}) {
       state.droppingLine = start > 0;
     }
     const contextStart = appendOnly ? 0 : Math.max(0, stat.size - TAIL_READ_BUDGETS[1]);
-    const cacheStart = contextStart;
     let position = start;
     if (appendOnly) {
       while (position < stat.size) {
@@ -150,18 +158,18 @@ function readCodexSessionState(filePath, deps = {}) {
         const bytes = Buffer.alloc(length);
         const read = fsApi.readSync(fd, bytes, 0, length, position);
         if (read !== length) throw new Error('Incomplete transcript read');
-        consumeBytes(state, bytes, position, contextStart, cacheStart);
+        consumeBytes(state, bytes, position, contextStart);
         position += length;
       }
     } else {
       for (const bytes of chunks) {
-        consumeBytes(state, bytes, position, contextStart, cacheStart);
+        consumeBytes(state, bytes, position, contextStart);
         position += bytes.length;
       }
     }
     // A complete final record without a newline is valid. Keep its bytes so
-    // a later append can finish a partial record; accounting dedup is stateful.
-    if (!state.droppingLine) applyLine(state, state.trailing, stat.size - state.trailing.length, contextStart, cacheStart);
+    // a later append can finish a partial record.
+    if (!state.droppingLine) applyLine(state, state.trailing, stat.size - state.trailing.length, contextStart);
     Object.assign(state, { identity, size: stat.size, mtimeMs: stat.mtimeMs,
       waitingForInput: state.turnEnded !== true && state.pendingInputCalls.size > 0 });
     if (cache.size >= 512 && !cache.has(filePath)) cache.delete(cache.keys().next().value);

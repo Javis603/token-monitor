@@ -7,15 +7,17 @@
     <script src="floatingBubbleBoot.js"></script>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="edgeDock/composer.css" />
+    <link rel="stylesheet" href="pluginViews.css" />
   </head>
   <body>
-    <main class="shell">
+    <main class="shell" tabindex="-1">
       <header class="titlebar">
         <div>
-          <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" aria-label="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
+          <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" aria-label="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><div id="pluginPageHeading" class="plugin-page-heading hidden"></div><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
           <div id="status" class="status">Starting</div>
         </div>
         <div class="title-controls">
+          <div id="pluginPageActions" class="plugin-page-actions hidden"></div>
           <nav class="tabs" aria-label="Period tabs">
             <span class="tab-indicator" aria-hidden="true"></span>
             <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
@@ -344,6 +346,7 @@
                     </div>
                   </div>
                   <div id="notchCustomScaleRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="notchCustomScaleLabel" class="settings-item-title" data-i18n="settings.edgeDock.customScale">Custom size</span></span></span><input id="notchCustomScaleInput" type="range" min="75" max="150" step="5" aria-labelledby="notchCustomScaleLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+                  <div class="notch-page-settings"><div class="edge-dock-composer-heading"><span id="notchPagesLabel" data-i18n="settings.notch.pages">Pages</span><span class="edge-dock-composer-heading-actions"><span class="edge-dock-composer-heading-hint" data-i18n="settings.notch.pagesHint">Drag to reorder · Click to show or hide</span><button id="resetNotchPageOrderButton" class="edge-dock-composer-reset" type="button" aria-label="Reset order" data-i18n="settings.edgeDock.reset" data-i18n-aria-label="settings.views.resetOrder" hidden>Reset</button></span></div><div id="notchPageChoices" class="notch-page-chips" role="group" aria-labelledby="notchPagesLabel"></div><p class="settings-note" data-i18n="settings.notch.pagesNote">Use the arrows to browse when space is limited.</p></div>
                   <div id="notchMoreOptionsGroup" class="settings-group cursor-account-group">
                     <button id="notchMoreOptionsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="notchMoreOptionsDetails">
                       <span data-i18n="settings.edgeDock.moreOptions">More options</span>
@@ -1631,6 +1634,16 @@
             </div>
           </div>
         </div>
+
+        <div class="settings-group settings-collapsible-group settings-plugins-group">
+          <button class="settings-section-toggle" type="button" data-settings-section="plugins" aria-expanded="false" aria-controls="pluginsSettingsDetails">
+            <span class="settings-section-heading"><span class="settings-section-icon settings-section-icon-plugins" aria-hidden="true"></span><span data-i18n="settings.plugins.title">Plugins</span><span class="plugin-section-experimental" data-i18n="settings.plugins.experimental">Experimental</span></span>
+            <span class="settings-section-meta"><span id="pluginsSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
+          </button>
+          <div id="pluginsSettingsDetails" class="settings-section-details hidden">
+            <div id="pluginSettingsList" class="plugin-settings-list"></div>
+          </div>
+        </div>
       </section>
 
       <section class="total-panel">
@@ -1648,6 +1661,7 @@
 
       <section id="fixedPeriodMessage" class="fixed-period-message hidden" role="status" aria-live="polite"></section>
 
+      <section id="pluginMainPanel" class="plugin-main-panel hidden"></section>
       <section id="homePanel" class="home-panel hidden"></section>
       <section id="breakdown" class="breakdown"></section>
       <div id="session-detail-head" class="detail-head hidden"></div>
@@ -1800,6 +1814,7 @@
     <script src="../../shared/compactMoney.js"></script>
     <script src="../../shared/fontSettings.js"></script>
     <script src="../../shared/trayText.js"></script>
+    <script src="../../shared/plugins/placements.js"></script>
     <script src="edgeDock/items.js"></script>
     <script src="edgeDock/presentation.js"></script>
     <script src="edgeDock/composer.js"></script>
@@ -1807,6 +1822,13 @@
     <script src="tokenRatePresentation.js"></script>
     <script src="../motionPreference.js"></script>
     <script src="../tokenNumberAnimation.js"></script>
+    <script src="edgeDock/railNumberRoll.js"></script>
+    <script src="pluginUi.js"></script><script src="pluginContent.js"></script><script src="pluginViews.js"></script>
+    <script src="pluginSettings.js"></script>
+
+    <script src="pluginMainPages.js"></script>
+    <script src="windowActivationFocus.js"></script>
+
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>
     <script src="../macBackdropMode.js"></script>
@@ -1814,6 +1836,7 @@
     <script src="trayTypography.js"></script>
     <script src="trayComposer.js"></script>
     <script src="diagnosticsPanel.js"></script>
+    <script src="notch/pageSettings.js"></script>
     <script src="displaySettings.js"></script>
     <script src="displaySettingsPreview.js"></script>
     <script src="app.js"></script>
