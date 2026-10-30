@@ -299,9 +299,8 @@
     // count) and keeps this row a spending readout rather than a transcript
     // readout; Session Detail resolves the same records into "turns" and
     // Reply #N instead, because it has the boundaries to group them by.
-    // Deliberately NOT localized, matching the Limits view's fixed English
-    // wording: this is a billing unit, and a translated counter reads as a
-    // different measure in each locale (the Chinese candidates all read as
+    // Deliberately NOT localized: this is a billing unit, and a translated
+    // counter reads as a different measure in each locale (the Chinese candidates read as
     // something closer to "invocations" than to billable calls).
     return `${formatNumber(count)} ${count === 1 ? 'call' : 'calls'}`;
   }

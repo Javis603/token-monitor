@@ -206,6 +206,39 @@ function dockView(appearance = {}, overrides = {}) {
   });
 }
 
+test('Spanish limit rows translate periods, percentages, reset times and account status', () => {
+  const t = (key, params) => i18n.translate('es', key, params);
+  const view = dockView({}, { t, currentLocale: () => 'es' });
+  const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+  for (const [label, expected] of [['Session', 'Sesión'], ['Weekly', 'Semanal'], ['5-hour', '5 horas']]) {
+    const row = view.limitWindowNode(label, { label, remainingPercent: 85, resetsAt }, '#fff');
+    assert.equal(row.find('limit-window-text').children[0].textContent, expected);
+    assert.ok(row.text.includes('85% restante'), row.text);
+    assert.match(row.find('limit-reset').textContent, /^Se restablece en /);
+    assert.equal(row.find('limit-window-text').children[1].dataset.limitMotionSuffix, 'restante');
+  }
+  assert.equal(view.limitStatusLabel('notConfigured'), 'Sin sesión iniciada');
+  assert.match(view.limitProviderMeta({ status: 'ok', updatedAt: new Date().toISOString() }), /^Actualizado: /);
+  const balance = view.renderProviderWindows({
+    provider: 'openrouter', balance: { amount: 12, currency: 'USD', todaySpend: 1, monthSpend: 4 }, windows: []
+  }, '#fff');
+  for (const label of ['Saldo', 'Gasto', 'Hoy', 'Mes']) assert.ok(balance.text.includes(label), balance.text);
+  const resets = view.codexResetCreditsNode({ availableCount: 2, expirations: [resetsAt] });
+  assert.ok(resets.text.includes('2 restablecimientos'), resets.text);
+  assert.match(resets.attributes['aria-label'], /^Créditos de restablecimiento/);
+  assert.equal(view.codexAdditionalWindowLabel({ windowMinutes: 60 }), '1 hora');
+  assert.equal(view.codexAdditionalWindowLabel({ windowMinutes: 20_160 }), '2 semanas');
+
+  // Localized names must not change the keys used by saved visibility choices.
+  const { limitUsageItemId } = require('../../src/shared/limits/usageItems');
+  const quota = Object.freeze({ kind: 'weekly', label: 'Weekly', remainingPercent: 85 });
+  const provider = { provider: 'codex', windows: [quota] };
+  const itemId = limitUsageItemId(quota, 'codex');
+  assert.deepEqual(view.limitProviderUsageItems([provider]), [{ id: itemId, label: 'Semanal' }]);
+  const hiddenView = dockView({ limitProviderHiddenItems: { codex: [itemId] } }, { t });
+  assert.equal(hiddenView.renderProviderWindows(provider, '#fff').textOf('limit-window-text').length, 0);
+});
+
 function limitsSubscriptionPool(localProviders, aggregateProviders) {
   const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
   const state = { mode: 'sync', settings: { deviceId: 'local' }, stats: {

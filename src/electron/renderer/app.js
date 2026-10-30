@@ -4577,7 +4577,7 @@ function formatHomeLimitWindowValue(window, showUsed) {
     return formatCompactMoney(window.remaining, window.currency, state.settings?.compactTokenUnits, currentLocale());
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
-  return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
+  return `${formatPercent(percent)} ${limitModeSuffix(showUsed, t)}`;
 }
 
 
@@ -6452,11 +6452,11 @@ function homeLimitRows() {
 }
 
 function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
-  const compactLabel = limitProviderPresentationApi.limitProviderCompactWindowLabel(providerId, window, visibleWindows);
+  const compactLabel = limitProviderPresentationApi.limitProviderCompactWindowLabel(providerId, window, visibleWindows, t);
   if (compactLabel) return compactLabel;
   if (window?.kind === 'billing') {
     const label = String(window?.label || '').trim();
-    if (label) return label;
+    if (label) return limitProviderPresentationApi.limitDisplayLabel(label, t);
   }
   const key = {
     session: 'home.limit.session',
@@ -6552,14 +6552,14 @@ function renderHomeLimitModule() {
         }
       }
       const resetLabel = window.resetsAt
-        ? formatLimitBoundary(window) || ''
+        ? formatLimitBoundary(window, t) || ''
         : window.resetDescription
         ? t('home.reset', { value: window.resetDescription })
         : '';
       if (resetLabel) {
         const resetText = document.createElement('span');
         resetText.className = 'home-limit-reset';
-        const periodLabel = limitProviderPresentationApi.limitProviderCompactWindowPeriodLabel(row.providerId, window, row.windows);
+        const periodLabel = limitProviderPresentationApi.limitProviderCompactWindowPeriodLabel(row.providerId, window, row.windows, t);
         resetText.textContent = periodLabel ? `${periodLabel} · ${resetLabel}` : resetLabel;
         metric.append(resetText);
       }
@@ -6823,7 +6823,7 @@ function renderHomeDeviceModule() {
     if (row.isLocal) {
       const badge = document.createElement('span');
       badge.className = 'home-device-badge';
-      badge.textContent = 'you';
+      badge.textContent = t('roleYou').toLocaleLowerCase(currentLocale());
       label.append(badge);
     }
     const value = document.createElement('span');
@@ -9305,12 +9305,13 @@ function syncPeriodTabs() {
     const active = tab.dataset.periodSlot === activeSlot;
     tab.classList.toggle('active', active);
     tab.setAttribute('aria-pressed', String(active));
+    tab.textContent = fixedPeriodRangesApi.displayLabel(tab.dataset.periodSlot, t);
   }
   if (els.monthPeriodTab) {
     const mode = activeSlot === 'month'
       ? fixedPeriodRangesApi.normalizeMonthMode(state.period)
       : fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
-    els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode);
+    els.monthPeriodTab.textContent = fixedPeriodRangesApi.displayLabel(mode, t);
     els.monthPeriodTab.dataset.period = mode;
   }
   syncPeriodMenu();
@@ -12468,7 +12469,8 @@ function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
       ));
     }
     const text = document.createElement('span');
-    text.textContent = entry.available ? entry.label : t('settings.limits.usageItemUnavailable', { item: entry.label });
+    const label = limitProviderPresentationApi.limitDisplayLabel(entry.label, t);
+    text.textContent = entry.available ? label : t('settings.limits.usageItemUnavailable', { item: label });
     item.setAttribute('aria-label', text.textContent);
     item.append(input, text);
     list.append(item);

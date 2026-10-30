@@ -92,20 +92,24 @@
   // configured cap, "$12.40 spent" without one. The bare amount is ambiguous on
   // its own — Claude already said "spent" here and Cursor did not, which is the
   // kind of split this module exists to close.
-  function spendValue(window) {
+  function spendValue(window, t) {
     const used = finite(window?.used);
     if (used === null) return '';
     const limit = finite(window?.limit);
     const usedText = money(used, window?.currency);
-    return limit !== null && limit > 0 ? `${usedText} / ${money(limit, window?.currency)}` : `${usedText} spent`;
+    return limit !== null && limit > 0 ? `${usedText} / ${money(limit, window?.currency)}`
+      : t ? t('limits.spent', { amount: usedText }) : `${usedText} spent`;
   }
 
   // "12.5 credits · $3.20" — units consumed, then their estimated cost. Either
   // half may be missing.
-  function overageValue(window) {
+  function overageValue(window, t) {
     const parts = [];
     const credits = finite(window?.used);
-    if (credits !== null) parts.push(`${Number(credits.toFixed(2))} credits`);
+    if (credits !== null) {
+      const amount = Number(credits.toFixed(2));
+      parts.push(t ? t(amount === 1 ? 'limits.creditAmountOne' : 'limits.creditAmount', { amount }) : `${amount} credits`);
+    }
     const cost = finite(window?.remaining);
     if (cost !== null) parts.push(usd(cost));
     return parts.filter(Boolean).join(' · ');
@@ -121,7 +125,7 @@
     return { value: value || null, detail: detail || '', percentLeads };
   }
 
-  // options: { showLimitUsed, formatCompact }
+  // options: { showLimitUsed, formatCompact, t } — non-renderer callers retain English.
   // `formatCompact` is only consulted for token pools; a caller with none gets
   // the percentage-only look those windows fall back to anyway.
   function limitWindowText(provider, window, options = {}) {
@@ -135,7 +139,7 @@
     // A spend meter is money already consumed, whatever provider reports it.
     // Keyed on the wire marker rather than an id list, so a provider that grows
     // one does not need a line here.
-    if (metric === 'spend') return result(spendValue(window), '');
+    if (metric === 'spend') return result(spendValue(window, options.t), '');
 
     // Every rule below is scoped to the window kind its provider applies it to.
     // The scoping is not decoration: Command Code's 5-hour and weekly windows
@@ -155,7 +159,7 @@
     if (id === 'kiro') {
       if (!billing) return EMPTY;
       // Overage has no meter and no denominator: one compact line, no bar.
-      if (window.showMeter === false) return result(overageValue(window), '');
+      if (window.showMeter === false) return result(overageValue(window, options.t), '');
       return result(null, rawCount(window, showUsed));
     }
 

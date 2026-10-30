@@ -1110,7 +1110,29 @@ test('a cached offline reading says Stale with the Limits view wording and dims 
   assert.equal(codexB.querySelector('.notch-limit-stale').textContent, 'Stale');
   assert.equal(codexB.querySelector('.notch-limit-stale').attributes['aria-label'], 'Stale · 55m ago');
   f.state.locale = 'zh-TW'; f.state.appearanceKey = 'zh'; f.panel.render({ ...payload(), cells });
-  assert.equal(f.all('notch-limit')[2].querySelector('.notch-limit-stale').textContent, 'Stale', 'matches the Limits view on every locale');
+  assert.equal(f.all('notch-limit')[2].querySelector('.notch-limit-stale').textContent,
+    require('../../src/electron/renderer/i18n').translate('zh-TW', 'settings.limits.status.stale'), 'matches the localized Limits view');
+});
+
+test('Spanish Notch limits share translated labels and boundaries without changing plan names', t => {
+  const f = panelFixture(t);
+  f.state.locale = 'es';
+  const record = {
+    provider: 'codex', status: 'ok', accountLabel: 'Pro', updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'weekly', remainingPercent: 50, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }]
+  };
+  const cells = buildEdgeDockCells({ limits: { providers: [record] } }, { items: [{ type: 'limit', provider: 'codex' }] });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  assert.equal(f.find('notch-limit-label').textContent, 'Semanal');
+  assert.match(f.find('notch-limit-updated').textContent, /^Actualizado: /);
+  assert.match(f.find('notch-limit-reset').textContent, /^Se restablece en /);
+  assert.equal(f.find('notch-chip').textContent, 'Pro');
+  const antigravity = { ...record, provider: 'antigravity', windows: [{
+    kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 50
+  }] };
+  const grouped = buildEdgeDockCells({ limits: { providers: [antigravity] } }, { items: [{ type: 'limit', provider: 'antigravity' }] });
+  f.panel.render({ ...payload(), cells: grouped });
+  assert.equal(f.find('notch-limit-label').textContent, 'Claude/GPT 5 horas');
 });
 
 test('money quotas and unlimited readings keep their values without fabricated percentages', t => {

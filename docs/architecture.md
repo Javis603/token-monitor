@@ -110,6 +110,8 @@ Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies 
 
 `windows[].metric === 'credits'` identifies a money quota with `remaining` and `currency`. `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. Callers may explicitly disable balance inference for wallets without a quota denominator; `showMeter: false` alone does not change existing display-layer estimates such as Sub2API's.
 
+Limits localization is display-only. Window labels can participate in persisted visibility keys and provider-specific matching, so translate labels after deriving those identities, never on the collected or synced record. The Limits page, compact cards, Notch and settings checklist share display wording; provider-supplied plan, model and account names remain unchanged.
+
 ## Session relationships
 
 `client:sessionId` remains the accounting key. Verified `t3ThreadId` and Codex `nativeSessionId` may join runs for presentation without replacing it. `parentSessionId` and optional `parentClient` are one atomic link; absent `parentClient` means the child's client. Normalization, archives and sync retain verified identities and reject conflicting device evidence. Missing parents never create usage.

@@ -17,6 +17,27 @@ test('fixed periods reuse the existing three-slot control', () => {
   assert.doesNotMatch(html, /id="monthPeriodTab"[^>]*>[^<]*(?:▼|▾|⌄)/);
 });
 
+test('all three period tabs follow the selected language and middle-slot period', () => {
+  const app = read('app.js');
+  const source = app.slice(app.indexOf('function syncPeriodTabs()'), app.indexOf('function applyInitialBreakdownPreference()'));
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const tabs = ['today', 'month', 'allTime'].map(periodSlot => ({
+    dataset: { periodSlot }, classList: { toggle() {} }, setAttribute() {}, textContent: ''
+  }));
+  const state = { period: 'week', settings: {} };
+  const context = {
+    state, els: { monthPeriodTab: tabs[1] },
+    document: { querySelectorAll: () => tabs, querySelector: () => null },
+    fixedPeriodRangesApi: require('../../src/electron/renderer/fixedPeriodRanges'),
+    t: (key) => translate('es', key), syncPeriodMenu() {}
+  };
+  vm.runInNewContext(`${source}; syncPeriodTabs();`, context);
+  assert.deepEqual(tabs.map(tab => tab.textContent), ['DÍA', 'SEMANA', 'TOTAL']);
+  context.t = (key) => translate('en', key);
+  vm.runInNewContext('syncPeriodTabs();', context);
+  assert.deepEqual(tabs.map(tab => tab.textContent), ['DAY', 'WEEK', 'TOTAL']);
+});
+
 test('the middle-slot menu and Settings expose the same four fixed choices', () => {
   const html = read('index.html');
   const menu = html.slice(html.indexOf('id="monthPeriodMenu"'), html.indexOf('class="actions-hotspot"'));

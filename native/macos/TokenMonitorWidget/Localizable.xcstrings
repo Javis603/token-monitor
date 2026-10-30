@@ -5,6 +5,7 @@
     "Breakdown": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Breakdown" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Desglose" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "明细" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "明細" } },
         "ja": { "stringUnit": { "state": "translated", "value": "内訳" } },
@@ -15,6 +16,7 @@
     "Quota Mode": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Quota Mode" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Modo de cuota" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度模式" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度模式" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータモード" } },
@@ -25,6 +27,7 @@
     "Automatic": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Automatic" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Automático" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動" } },
         "ja": { "stringUnit": { "state": "translated", "value": "自動" } },
@@ -35,6 +38,7 @@
     "Custom": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Custom" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Personalizado" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "自定义" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "自訂" } },
         "ja": { "stringUnit": { "state": "translated", "value": "カスタム" } },
@@ -45,6 +49,7 @@
     "Quota 1": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Quota 1" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cuota 1" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 1" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 1" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータ 1" } },
@@ -55,6 +60,7 @@
     "Quota 2": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Quota 2" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cuota 2" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 2" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 2" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータ 2" } },
@@ -65,6 +71,7 @@
     "Quota Account": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Quota Account" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cuenta de cuota" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度账户" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度帳號" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウント" } },
@@ -75,6 +82,7 @@
     "Usage Summary": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Usage Summary" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Resumen de uso" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
         "ja": { "stringUnit": { "state": "translated", "value": "使用量サマリー" } },
@@ -85,6 +93,7 @@
     "Choose the usage period shown by this widget.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Choose the usage period shown by this widget." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige el periodo de uso que muestra este widget." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择此小组件显示的用量周期。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇此小工具顯示的用量週期。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "このウィジェットに表示する使用期間を選択します。" } },
@@ -95,6 +104,7 @@
     "Usage Breakdown": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Usage Breakdown" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Desglose de uso" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量明细" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量明細" } },
         "ja": { "stringUnit": { "state": "translated", "value": "使用量の内訳" } },
@@ -105,6 +115,7 @@
     "Choose a tool or model breakdown and its period.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Choose a tool or model breakdown and its period." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige un desglose por herramienta o modelo y su periodo." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择工具或模型明细及其统计周期。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇工具或模型明細及其統計週期。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "ツールまたはモデルの内訳と期間を選択します。" } },
@@ -115,6 +126,7 @@
     "Dashboard": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Dashboard" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Panel" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "仪表盘" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "儀表板" } },
         "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボード" } },
@@ -125,6 +137,7 @@
     "Choose the dashboard period, breakdown, and quota display mode.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Choose the dashboard period, breakdown, and quota display mode." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Elige el periodo, el desglose y el modo de visualización de cuotas del panel." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择仪表盘的统计周期、明细和额度显示模式。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇儀表板的統計週期、明細和額度顯示模式。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボードの期間、内訳、クォータ表示モードを選択します。" } },
@@ -135,6 +148,7 @@
     "Show quota accounts automatically or choose up to two.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Show quota accounts automatically or choose up to two." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Muestra las cuentas de cuota automáticamente o elige hasta dos." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动显示额度账户，或选择最多两个账户。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動顯示額度帳號，或選擇最多兩個帳號。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウントを自動表示するか、最大2つ選択します。" } },
@@ -145,6 +159,7 @@
     "Token Monitor Dashboard": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Dashboard" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Panel de Token Monitor" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 仪表盘" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 儀表板" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor ダッシュボード" } },
@@ -155,6 +170,7 @@
     "Usage, quota, breakdown, and activity in one dashboard.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Usage, quota, breakdown, and activity in one dashboard." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Uso, cuotas, desglose y actividad en un solo panel." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "在一个仪表盘中查看用量、额度、明细和活动。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "在一個儀表板中查看用量、額度、明細和活動。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "使用量、クォータ、内訳、アクティビティを1つのダッシュボードで確認できます。" } },
@@ -165,6 +181,7 @@
     "Token Monitor Summary": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Summary" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Resumen de Token Monitor" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor サマリー" } },
@@ -175,6 +192,7 @@
     "Tokens, cost, and a compact trend.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Tokens, cost, and a compact trend." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Tokens, coste y una tendencia compacta." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "令牌数、费用和简洁趋势。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token 數、費用和簡潔趨勢。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "トークン、コスト、コンパクトな推移。" } },
@@ -185,6 +203,7 @@
     "Token Monitor Activity": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Activity" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Actividad de Token Monitor" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 活动" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 活動" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor アクティビティ" } },
@@ -195,6 +214,7 @@
     "Your recent activity heatmap.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Your recent activity heatmap." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Tu mapa de calor de actividad reciente." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "你最近的活动热力图。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "你最近的活動熱力圖。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "最近のアクティビティヒートマップ。" } },
@@ -205,6 +225,7 @@
     "Token Monitor Breakdown": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Breakdown" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Desglose de Token Monitor" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 明细" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 明細" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor 内訳" } },
@@ -215,6 +236,7 @@
     "Compare tools or models for one period.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Compare tools or models for one period." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Compara herramientas o modelos en un periodo." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "比较一个周期内的工具或模型。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "比較一個期間內的工具或模型。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "1つの期間のツールまたはモデルを比較します。" } },
@@ -225,6 +247,7 @@
     "Token Monitor Quota": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Quota" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Cuota de Token Monitor" } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 额度" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 額度" } },
         "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor クォータ" } },
@@ -235,6 +258,7 @@
     "Subscription windows and reset times.": {
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Subscription windows and reset times." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Ventanas de suscripción y tiempos de restablecimiento." } },
         "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅窗口和重置时间。" } },
         "zh-Hant": { "stringUnit": { "state": "translated", "value": "訂閱視窗和重設時間。" } },
         "ja": { "stringUnit": { "state": "translated", "value": "サブスクリプション期間とリセット時刻。" } },
@@ -248,6 +272,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Current Account"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cuenta actual"
           }
         },
         "zh-Hans": {
@@ -290,6 +320,12 @@
             "value": "Overview"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resumen"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -328,6 +364,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Quota"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cuota"
           }
         },
         "zh-Hans": {
@@ -370,6 +412,12 @@
             "value": "Tools"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Herramientas"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -408,6 +456,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Models"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modelos"
           }
         },
         "zh-Hans": {
@@ -450,6 +504,12 @@
             "value": "Activity"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actividad"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -488,6 +548,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Not configured"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin configurar"
           }
         },
         "zh-Hans": {
@@ -530,6 +596,12 @@
             "value": "Sign in again"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vuelve a iniciar sesión"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -568,6 +640,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Unavailable"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No disponible"
           }
         },
         "zh-Hans": {
@@ -610,6 +688,12 @@
             "value": "Temporarily unavailable"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No disponible temporalmente"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -650,6 +734,12 @@
             "value": "Available"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disponible"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -685,6 +775,12 @@
     "Unlimited": {
       "localizations": {
         "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited"
+          }
+        },
+        "es": {
           "stringUnit": {
             "state": "translated",
             "value": "Unlimited"
@@ -730,6 +826,12 @@
             "value": "Disabled"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desactivado"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -768,6 +870,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Rate limited"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Límite de solicitudes alcanzado"
           }
         },
         "zh-Hans": {
@@ -810,6 +918,12 @@
             "value": "Data may be stale"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los datos pueden estar desactualizados"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -848,6 +962,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Waiting for data"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esperando datos"
           }
         },
         "zh-Hans": {
@@ -890,6 +1010,12 @@
             "value": "Open Token Monitor once"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abre Token Monitor una vez"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -928,6 +1054,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "No data"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sin datos"
           }
         },
         "zh-Hans": {
@@ -970,6 +1102,12 @@
             "value": "%lld active days"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld días activos"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1005,6 +1143,12 @@
     "%@, %lld tokens": {
       "localizations": {
         "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %lld tokens"
+          }
+        },
+        "es": {
           "stringUnit": {
             "state": "translated",
             "value": "%@, %lld tokens"
@@ -1050,6 +1194,12 @@
             "value": "Deselect"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deseleccionar"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1088,6 +1238,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Show usage for this day"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar uso de este día"
           }
         },
         "zh-Hans": {
@@ -1130,6 +1286,12 @@
             "value": "Activity heatmap"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mapa de calor de actividad"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1168,6 +1330,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Updated %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actualizado: %@"
           }
         },
         "zh-Hans": {
@@ -1210,6 +1378,12 @@
             "value": "Period"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Periodo"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1248,6 +1422,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "DAY"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DÍA"
           }
         },
         "zh-Hans": {
@@ -1290,6 +1470,12 @@
             "value": "MONTH"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MES"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1325,6 +1511,12 @@
     "TOTAL": {
       "localizations": {
         "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TOTAL"
+          }
+        },
+        "es": {
           "stringUnit": {
             "state": "translated",
             "value": "TOTAL"
@@ -1370,6 +1562,12 @@
             "value": "Today usage"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uso de hoy"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1408,6 +1606,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "This month usage"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uso de este mes"
           }
         },
         "zh-Hans": {
@@ -1450,6 +1654,12 @@
             "value": "All-time usage"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uso de todo el historial"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1488,6 +1698,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Widget Size"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tamaño del widget"
           }
         },
         "zh-Hans": {
@@ -1530,6 +1746,12 @@
             "value": "Small"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pequeño"
+          }
+        },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1570,6 +1792,7 @@
             "value": "Medium"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "Mediano" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1610,6 +1833,7 @@
             "value": "Large"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "Grande" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1650,6 +1874,7 @@
             "value": "Select Activity Date"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "Seleccionar fecha de actividad" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1690,6 +1915,7 @@
             "value": "Date"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "Fecha" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1730,6 +1956,7 @@
             "value": "%1$@ · %2$@ tokens"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "%1$@ · %2$@ tokens" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1770,6 +1997,7 @@
             "value": "%1$@ · %2$@ tokens · %3$@"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "%1$@ · %2$@ tokens · %3$@" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1810,6 +2038,7 @@
             "value": "%@ tokens · %lld active days"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "%@ tokens · %lld días activos" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1850,6 +2079,7 @@
             "value": "%@ left"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "%@ restante" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1890,6 +2120,7 @@
             "value": "%lld%% left"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "%lld%% restante" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1930,6 +2161,7 @@
             "value": "Expires in %@"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "Caduca en %@" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -1970,6 +2202,7 @@
             "value": "Changes in %@"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "Cambia en %@" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -2010,6 +2243,7 @@
             "value": "Changes now"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "Cambia ahora" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -2050,6 +2284,7 @@
             "value": "Refresh Widget"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "Actualizar widget" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
@@ -2090,6 +2325,7 @@
             "value": "Reset in %@"
           }
         },
+        "es": { "stringUnit": { "state": "translated", "value": "Se restablece en %@" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",

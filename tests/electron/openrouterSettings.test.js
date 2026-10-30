@@ -127,7 +127,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   // attacher rather than by a per-row copy.
   assert.match(limitsViewSource(), /function attachLimitDetailTooltip\(wrap, tooltip\)[\s\S]*?const close = \(\) => \{[\s\S]*?tooltipHost\.release\(\);/);
   assert.match(app, /release\(\) \{\s*requestAnimationFrame\(\(\) => \{\s*if \(limitDetailTooltipShouldHoldRender\(\)\) return;/);
-  assert.match(limitsViewSource(), /entries\.map\(\(\[entryLabel, value\]\) => \[entryLabel, formatBalanceSpendAmount\(value, balance\)\]\)/);
+  assert.match(limitsViewSource(), /entries\.map\(\(\[entryLabel, value\]\) => \[presentationApi\.limitDisplayLabel\(entryLabel, t\), formatBalanceSpendAmount\(value, balance\)\]\)/);
   assert.match(limitsViewSource(), /const spendNode = providerSpendNode\(balance\)/);
   assert.match(limitsViewSource(), /function openrouterCreditsWindow\(provider\)/);
   assert.match(limitsViewSource(), /windows\.find\(\(window\) => window\?\.metric === 'credits'\)/);

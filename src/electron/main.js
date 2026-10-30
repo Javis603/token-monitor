@@ -2168,6 +2168,7 @@ function normalizeLanguageSetting(value, fallback = 'auto') {
   if (lower === 'zh-tw' || lower.startsWith('zh-hant') || /-(tw|hk|mo)\b/i.test(raw)) return 'zh-TW';
   if (lower === 'zh-cn' || lower.startsWith('zh-hans') || /-(cn|sg|my)\b/i.test(raw)) return 'zh-CN';
   if (lower === 'pt' || lower.startsWith('pt-')) return 'pt-BR';
+  if (lower === 'es' || lower.startsWith('es-')) return 'es';
   return LANGUAGE_VALUES.has(raw) ? raw : fallback;
 }
 

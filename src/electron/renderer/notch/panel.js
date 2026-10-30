@@ -892,12 +892,10 @@
       }
       // The Limits view's freshness reading, so an offline cached row says
       // Stale rather than passing for a fresh one.
-      const freshness = record ? limitPresentation.limitProviderFreshness(record, { nowMs }) : null;
+      const freshness = record ? limitPresentation.limitProviderFreshness(record, { nowMs, t }) : null;
       if (freshness?.tone === 'stale') column.dataset.tone = 'stale';
       if (records.length > 1) {
-        // The Limits view's own word: its freshness line is English on every
-        // locale, and the translated status tag belongs to Settings.
-        if (freshness?.tone === 'stale') sub.append(text('notch-limit-stale', 'Stale', freshness.text));
+        if (freshness?.tone === 'stale') sub.append(text('notch-limit-stale', t('settings.limits.status.stale'), freshness.text));
       } else if (freshness) {
         sub.append(text('notch-limit-updated', freshness.text));
       }
@@ -919,11 +917,15 @@
         if (tone) row.dataset.tone = tone;
         // Long labels (Antigravity's "Claude/GPT 5-hour") fade and scroll into
         // view on hover, as session titles do, instead of ending in an ellipsis.
-        const label = text('notch-limit-label', windowLabels.limitWindowLabel(entry.provider, reading.window, t('notch.quota')));
+        const quota = entry.provider === 'antigravity' ? limitPresentation.antigravityQuotaWindow(reading.window) : null;
+        const windowLabel = quota
+          ? `${quota.groupLabel} ${limitPresentation.limitDisplayLabel(quota.windowLabel, t)}`
+          : limitPresentation.limitDisplayLabel(windowLabels.limitWindowLabel(entry.provider, reading.window, t('notch.quota')), t);
+        const label = text('notch-limit-label', windowLabel);
         label.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'window', windowPage, readings.indexOf(reading)]);
         overflowText.bind(label);
         const value = el('span', 'notch-limit-value');
-        const description = windowText.limitWindowText(reading.record, reading.window, { showLimitUsed: appearance().showLimitUsed, formatCompact: formatTokens });
+        const description = windowText.limitWindowText(reading.record, reading.window, { showLimitUsed: appearance().showLimitUsed, formatCompact: formatTokens, t });
         const note = String(reading.window.detail || '').toLowerCase() === 'unlimited'
           ? t('settings.thirdparty.unlimited') : description.value || (reading.remaining === null ? reading.window.detail : '');
         // Money leads only where the Limits view leads with it: a balance with
@@ -943,7 +945,7 @@
         }
         // The Limits view's own boundary line: an expiring grant says Expires
         // and a mixed one Changes in, never a Reset that implies a refill.
-        row.append(label, value, text('notch-limit-reset', limitPresentation.limitBoundaryText(reading.window)));
+        row.append(label, value, text('notch-limit-reset', limitPresentation.limitBoundaryText(reading.window, t)));
         list.append(row);
       }
       if (!readings.length) {

@@ -32,8 +32,8 @@
   // reset-credit line ('resets'). Every other row is keyed by its window.
   const USAGE_ITEM_IDS = Object.freeze(['credits', 'spend', 'resets']);
   const USAGE_ITEM_ID_SET = new Set(USAGE_ITEM_IDS);
-  // Their names on the settings checklist, in the card's own fixed English so
-  // the list reads like the rows it controls.
+  // Canonical fallback names. Renderers translate these when drawing the
+  // checklist, without changing item ids or persisted window keys.
   const USAGE_ITEM_LABELS = Object.freeze({ credits: 'Balance', spend: 'Spend', resets: 'Resets' });
   const MAX_HIDDEN_ITEMS = 64;
 

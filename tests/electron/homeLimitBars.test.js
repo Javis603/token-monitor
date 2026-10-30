@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const preferences = require('../../src/electron/renderer/homeModulePreferences');
 const { limitFillPercent } = require('../../src/electron/renderer/limits/displayMode');
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
+const { translate } = require('../../src/electron/renderer/i18n');
 
 function read(relativePath) {
   return fs.readFileSync(path.join(__dirname, '../..', relativePath), 'utf8');
@@ -21,7 +22,7 @@ function resolveHomeRows(providers, settings = {}) {
     ...windowLabels,
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
     settings: () => settings,
-    t: (key) => key
+    t: (key, params) => translate('en', key, params)
   });
   const ids = [...new Set(providers.map((provider) => provider.provider))];
   const app = read('src/electron/renderer/app.js');
@@ -256,8 +257,9 @@ test('Home Antigravity uses both periods after a model group is removed or hidde
         const rows = resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows: hidden ? windows : windows.slice(0, 2) }], settings);
         assert.deepEqual(rows[0].windows.map((window) => window.label), ['Gemini 5-hour', 'Gemini weekly']);
         const metrics = renderHomeWindows(rows[0].windows, settings, '', 'antigravity', locale);
-        assert.deepEqual(metrics.map((metric) => metric.children[0].children[0].textContent), ['Gemini 5-hour', 'Gemini Weekly']);
-        const { translate } = require('../../src/electron/renderer/i18n');
+        assert.deepEqual(metrics.map((metric) => metric.children[0].children[0].textContent), [
+          `Gemini ${translate(locale, 'limits.window.fiveHour')}`, `Gemini ${translate(locale, 'home.limit.weekly')}`
+        ]);
         assert.deepEqual(metrics.map((metric) => metric.children.at(-1).textContent), [
           translate(locale, 'home.reset', { value: '4h' }),
           translate(locale, 'home.reset', { value: '6d' })

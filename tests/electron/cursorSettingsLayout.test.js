@@ -1593,7 +1593,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-CN': '打开 Cline',
     ko: 'Cline 열기',
     ja: 'Cline を開く',
-    'pt-BR': 'Abrir o Cline'
+    'pt-BR': 'Abrir o Cline',
+    es: 'Abrir Cline'
   });
   assert.deepEqual(Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [
     locale,
@@ -1604,7 +1605,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-CN': '已连接',
     ko: '연결됨',
     ja: '接続済み',
-    'pt-BR': 'Conectado'
+    'pt-BR': 'Conectado',
+    es: 'Conectada'
   });
 });
 

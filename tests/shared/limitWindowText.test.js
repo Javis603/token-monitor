@@ -29,6 +29,10 @@ test('a spend meter reads as money for whichever provider reported it', () => {
   assert.equal(text('cursor', uncapped).value, '$2.35 spent');
   // A zero cap is not a denominator.
   assert.equal(text('cursor', { ...uncapped, limit: 0 }).value, '$2.35 spent');
+  const { translate } = require('../../src/electron/renderer/i18n');
+  assert.equal(limitWindowText({ provider: 'cursor' }, uncapped, {
+    t: (key, params) => translate('es', key, params)
+  }).value, '$2.35 gastados');
 });
 
 test('a money grant keeps the percentage headline and puts the amount underneath', () => {
@@ -54,6 +58,11 @@ test('a meterless overage is one line with no bar behind it', () => {
   assert.equal(text('kiro', { kind: 'billing', showMeter: false, remaining: 0.56 }).value, '$0.56');
   // A metered pool counts units instead.
   assert.equal(text('kiro', { kind: 'billing', used: 120, limit: 500 }).detail, '380/500');
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const t = (key, params) => translate('es', key, params);
+  for (const [used, expected] of [[1, '1 crédito'], [14, '14 créditos']]) {
+    assert.equal(limitWindowText({ provider: 'kiro' }, { kind: 'billing', showMeter: false, used }, { t }).value, expected);
+  }
 });
 
 // Each provider's rule applies to the window kind the Limits view applies it
@@ -146,7 +155,7 @@ test('both renderers paint from the shared modules, not their own copies', () =>
   // One age formatter, called by both, replacing three hand-rolled copies. The
   // limits meta line is the shared view's, so the page reaches it through the
   // view rather than formatting an age of its own.
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /presentationApi\.limitProviderFreshness\(provider\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /presentationApi\.limitProviderFreshness\(provider, \{ t \}\)/);
   // The card formats no age of its own — it renders the page's rows, so the
   // freshness wording has exactly one call site across both surfaces.
   assert.doesNotMatch(dock, /limitProviderFreshness/);

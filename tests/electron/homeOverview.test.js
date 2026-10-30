@@ -183,7 +183,7 @@ test('Home device rows keep only the local badge and mute stale devices without 
   const match = rendererSource.match(/function renderHomeDeviceModule\(\) \{([\s\S]*?)\n\}\n\nfunction dailyWithHeatIntensity/);
   assert.ok(match, 'renderHomeDeviceModule exists');
   assert.match(match[1], /home-device-badge/);
-  assert.match(match[1], /badge\.textContent = 'you'/);
+  assert.match(match[1], /badge\.textContent = t\('roleYou'\)/);
   assert.match(match[1], /if \(row\.isLocal\)/);
   assert.match(match[1], /item\.classList\.add\('is-stale'\)/);
   assert.match(match[1], /item\.append\(mark, label, value\)/);

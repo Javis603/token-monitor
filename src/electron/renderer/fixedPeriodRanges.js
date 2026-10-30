@@ -93,8 +93,9 @@
     return isDerived(value) || value === 'month' ? 'month' : value;
   }
 
-  function displayLabel(value) {
-    return LABELS[value] || LABELS.today;
+  function displayLabel(value, t) {
+    const period = Object.hasOwn(LABELS, value) ? value : 'today';
+    return t ? t(`periodRange.short.${period}`) : LABELS[period];
   }
 
   function rangeForSelection(selection, options = {}) {
