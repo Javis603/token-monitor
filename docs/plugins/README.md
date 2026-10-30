@@ -58,7 +58,7 @@ Authors suggest first-use settings; the user reviews them before enabling. These
 | `defaults.background` | `false` | Boolean; `true` requires a backend and `background: true` |
 | `defaults.skin` | Keep current appearance | Declared skin ID, or `null` to keep current appearance |
 
-Install-and-enable applies the confirmed choices together. Install-only stores them for review on first enable, including across restarts. Local packages and catalog packages use the same review. Another active replacement prompts before switching; the user can keep its content and still enable the new plugin.
+Install-and-enable applies the confirmed choices together. Install-only stores them for review on first enable, including across restarts. If another enabled, trusted plugin is the selected source, the App asks before switching; the user can keep its content and still enable the new plugin.
 
 Updates and enable/disable cycles preserve confirmed choices, including no placements, native content, background off and unchanged appearance. Newly declared locations, targets or capabilities receive their own first-use review; existing choices stay intact. Changing author defaults does not reset user decisions. Locations that are full are skipped without evicting existing items. Pending suggestions for removed views or surfaces are ignored. Defaults do not enable the host's Notch, Edge Dock or Tray master switches. The `tray` suggestion places a bitmap in the system Tray; Floating Bubble and Notch-summary custom layouts use their manual composers.
 
