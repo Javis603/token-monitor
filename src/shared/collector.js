@@ -1333,8 +1333,13 @@ async function collectUsageOnce(options) {
       const projects = projectsEnabled ? projectRollupFromSessions(Object.fromEntries(
         Object.entries(windowsPeriods[name].sessions || {}).filter(([, row]) => row.client === 'cursor')
       )) : {};
+      // The collection-time offset can change inside a day/month at DST.
+      // Compare the actual calendar boundaries, not that transient offset.
+      const start = name === 'allTime' ? null : new Date(
+        collectedAt.getFullYear(), collectedAt.getMonth(), name === 'today' ? collectedAt.getDate() : 1
+      );
       const range = name === 'allTime' ? `since:${allTimeSince}`
-        : `${name}:${computePeriodWindows(collectedAt)[name].key}:${collectedAt.getTimezoneOffset()}`;
+        : `${name}:${start.toISOString()}:${computePeriodWindows(collectedAt)[name].endsAt}`;
       const prior = anchor?.[name]?.cursorAccountUsage;
       if (anchorUsed && !scannedPeriods.has(name)
         && prior?.range !== range) continue;

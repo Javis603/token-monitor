@@ -377,3 +377,74 @@ test('fixed ranges admit a missing account day as zero while retaining unrelated
     assert.equal(result.devices[1].period.totalTokens, 1);
   }
 });
+
+test('fixed ranges admit a complete all-zero source but never treat missing evidence as a correction', () => {
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  const { computePeriodWindows } = require('../../src/shared/collector');
+  const clock = new Date(2026, 9, 27, 12);
+  const windows = computePeriodWindows(clock);
+  const history = (tokens, codex = 0) => normalizeHistory(parseGraphResult({ contributions: tokens || codex ? [{
+    date: '2026-10-26', clients: [
+      { client: 'cursor', modelId: 'shared', tokens: { input: tokens }, cost: tokens / 1000 },
+      ...(codex ? [{ client: 'codex', modelId: 'shared', tokens: { input: codex }, cost: codex / 1000 }] : [])
+    ]
+  }] : [] }), { todayKey: windows.today.key });
+  const a = { ...record('A', 101, 2000), periodWindows: windows, historyAvailable: true };
+  const b = { ...record('B', 0, 1000), periodWindows: windows, historyAvailable: true };
+  for (const row of [a, b]) {
+    for (const name of ['today', 'month', 'allTime']) row[name] = normalizePeriod({});
+  }
+  // Retain five unowned Cursor tokens plus twenty from Codex.
+  a.history = history(106, 20);
+  a.history.cursorAccountUsage = { ...record('A', 101, 2000).today.cursorAccountUsage, usage: history(101) };
+  b.history = history(0);
+  b.history.cursorAccountUsage = { ...record('B', 0, 1000).today.cursorAccountUsage, usage: history(0) };
+  for (const selection of ['week', 'last7', 'last30']) {
+    for (const sources of [[a, b], [b, a]]) {
+      const result = ranges.fixedPeriodSnapshotFromDevices(selection, sources, { now: clock, historyAvailable: true });
+      assert.equal(result.status, 'ready');
+      assert.equal(result.period.totalTokens, 25);
+      assert.ok(Math.abs(result.period.costUsd - 0.025) < 1e-8);
+      assert.equal(result.period.clients.cursor, 5);
+      assert.equal(result.period.clients.codex, 20);
+      assert.equal(result.devices.find(row => row.deviceId === 'A').period.totalTokens, 126);
+      assert.equal(result.devices.find(row => row.deviceId === 'B').period.totalTokens, 0);
+    }
+    const unowned = structuredClone(b);
+    delete unowned.history.cursorAccountUsage;
+    assert.equal(ranges.fixedPeriodSnapshotFromDevices(selection, [a, unowned], { now: clock, historyAvailable: true }).period.totalTokens, 126);
+    const incompatible = structuredClone(b);
+    incompatible.history.cursorAccountUsage.accountKey = hashKey('cursor', 'another-user');
+    assert.equal(ranges.fixedPeriodSnapshotFromDevices(selection, [a, incompatible], { now: clock, historyAvailable: true }).period.totalTokens, 126);
+    assert.equal(ranges.fixedPeriodSnapshotFromDevices(selection, [a, { ...b, historyAvailable: false }], { now: clock }).status, 'unavailable');
+  }
+});
+
+test('collector calendar ranges survive DST and separate zones with different month boundaries', async t => {
+  const original = process.env.TZ;
+  t.after(() => { if (original === undefined) delete process.env.TZ; else process.env.TZ = original; });
+  process.env.TZ = 'Europe/London';
+  const f = await watchFixture(t);
+  const before = await f.collect({ now: new Date('2026-10-22T12:00:00Z') });
+  f.writeOwner('user_fixture', 5000);
+  f.setBroad(1200);
+  const after = await f.collect({ now: new Date('2026-10-30T12:00:00Z'), deviceId: 'B' });
+  const earlyDay = await f.collect({ now: new Date('2026-10-25T00:30:00Z') });
+  const lateDay = await f.collect({ now: new Date('2026-10-25T12:00:00Z') });
+  process.env.TZ = 'Africa/Abidjan';
+  const other = await f.collect({ now: new Date('2026-10-30T12:00:00Z'), deviceId: 'C' });
+  await t.test('same month across DST still deduplicates', () => {
+    assert.equal(before.month.cursorAccountUsage.range, after.month.cursorAccountUsage.range);
+    assert.equal(aggregateDevices([before, after], 0, Date.parse('2026-10-30T12:00:00Z')).periods.month.clients.cursor, 1200);
+  });
+  await t.test('same day across DST retains one range', () => {
+    assert.equal(earlyDay.today.cursorAccountUsage.range, lateDay.today.cursorAccountUsage.range);
+  });
+  await t.test('equal current offsets with different month starts remain additive', () => {
+    assert.notEqual(after.month.cursorAccountUsage.range, other.month.cursorAccountUsage.range);
+    assert.equal(aggregateDevices([after, other], 0, Date.parse('2026-10-30T12:00:00Z')).periods.month.clients.cursor, 2400);
+  });
+  await t.test('equivalent daily boundaries in different zones remain compatible', () => {
+    assert.equal(after.today.cursorAccountUsage.range, other.today.cursorAccountUsage.range);
+  });
+});

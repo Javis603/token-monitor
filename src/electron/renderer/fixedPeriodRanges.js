@@ -394,6 +394,9 @@
   }
 
   function sourceParticipatesInUsage(source) {
+    // Complete owned zero observations can supersede another device's usage.
+    if (accounts.cursorUsageIdentity(source?.history?.cursorAccountUsage)
+      || accounts.cursorUsageIdentity(sourcePeriod(source, 'today')?.cursorAccountUsage)) return true;
     for (const periodName of ['today', 'month', 'allTime']) {
       const period = sourcePeriod(source, periodName);
       if (finiteNumber(period?.totalTokens) > 0 || finiteNumber(period?.costUsd) > 0) return true;
