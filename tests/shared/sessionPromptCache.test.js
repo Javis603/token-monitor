@@ -32,30 +32,18 @@ test('Claude mixed tiers use the shorter lifetime; absent tier and compaction cl
   assert.equal(promptCacheFromTranscript(jsonl([item, unknown]), 'claude'), null);
   assert.equal(promptCacheFromTranscript(jsonl([item, { timestamp: later, subtype: 'compact_boundary' }]), 'claude'), null);
 });
-test('Codex cache activity starts an estimate without requiring a model declaration', () => {
-  assert.deepEqual(promptCacheFromTranscript(jsonl([codex(at), codex(later)]), 'codex'), { observedAt: at, ttlSeconds: 1800 });
-  const cold = codex(later);
-  cold.payload.info.last_token_usage.cached_input_tokens = 0;
-  assert.equal(promptCacheFromTranscript(jsonl([codex(at), cold]), 'codex'), null);
-});
-test('Codex cache estimates do not depend on official, third-party or custom model names', () => {
-  for (const model of ['gpt-6-sol', 'gpt-6.1-sol', 'gpt-5.4', 'deepseek-v4.1-flash', 'custom-gpt-6-sol', '']) {
+test('Codex cache usage never creates an expiry estimate for any model or route', () => {
+  for (const model of ['gpt-6-sol', 'gpt-5.4', 'custom-model', '']) {
     const context = { timestamp: at, type: 'turn_context', payload: { model } };
-    assert.deepEqual(promptCacheFromTranscript(jsonl([context, codex(at)]), 'codex'), { observedAt: at, ttlSeconds: 1800 }, model);
+    assert.equal(promptCacheFromTranscript(jsonl([context, codex(at), codex(later)]), 'codex'), null, model);
   }
 });
-test('Codex clears a previous estimate on model changes or compaction and requires valid cache counts', () => {
-  const context = { timestamp: at, type: 'turn_context', payload: { model: 'gpt-6-sol' } };
-  const changed = { timestamp: later, type: 'turn_context', payload: { model: 'custom-model' } };
-  assert.equal(promptCacheFromTranscript(jsonl([context, codex(at), changed]), 'codex'), null);
-  const next = codex(later);
-  next.payload.info.total_token_usage.input_tokens = 2000;
-  assert.deepEqual(promptCacheFromTranscript(jsonl([context, codex(at), changed, next]), 'codex'), { observedAt: later, ttlSeconds: 1800 });
-  assert.equal(promptCacheFromTranscript(jsonl([codex(at), { timestamp: later, type: 'event_msg', payload: { type: 'context_compacted' } }]), 'codex'), null);
-  for (const invalid of [undefined, '900', -1, 0.5, null]) {
-    const item = codex(later);
-    item.payload.info.last_token_usage.cached_input_tokens = invalid;
-    assert.equal(promptCacheFromTranscript(jsonl([codex(at), item]), 'codex'), null);
+test('legacy Codex estimates neither display nor schedule countdown updates', () => {
+  const { nextPromptCacheChangeAt } = require('../../src/shared/sessionLive');
+  const session = { client: 'codex', promptCache: { observedAt: at, ttlSeconds: 1800 } };
+  for (const elapsed of [0, 600_001, 1800_000]) {
+    assert.equal(sessionPromptCacheForRow(session, Date.parse(at) + elapsed), null);
+    assert.equal(nextPromptCacheChangeAt([session], Date.parse(at) + elapsed), 0);
   }
 });
 test('cache display expires without a stats update and excludes archives and future clocks', () => {
@@ -86,27 +74,27 @@ test('newer cold observations clear a warm reading across period merges', () => 
 });
 test('cache clock wakes at the next minute and at expiry', () => {
   const { nextPromptCacheChangeAt } = require('../../src/shared/sessionLive');
-  const session = { client: 'codex', promptCache: { observedAt: at, ttlSeconds: 1800 } };
+  const session = { client: 'claude', promptCache: { observedAt: at, ttlSeconds: 300 } };
   assert.equal(nextPromptCacheChangeAt([session], Date.parse(at) + 10_000), Date.parse(at) + 60_000);
-  assert.equal(nextPromptCacheChangeAt([session], Date.parse(at) + 1799_000), Date.parse(at) + 1800_000);
+  assert.equal(nextPromptCacheChangeAt([session], Date.parse(at) + 299_000), Date.parse(at) + 300_000);
 });
 
-test('turn completion keeps cache valid and an ended row still schedules its context-to-cache handoff', () => {
+test('Codex turn completion retains recent context without a cache handoff', () => {
   const { nextSessionStatusChangeAt, sessionContextForRow } = require('../../src/shared/sessionLive');
   const context = { timestamp: at, type: 'turn_context', payload: { model: 'gpt-6.1-sol' } };
   const completed = { timestamp: later, type: 'event_msg', payload: { type: 'task_complete' } };
   const promptCache = promptCacheFromTranscript(jsonl([context, codex(at), completed]), 'codex');
-  assert.deepEqual(promptCache, { observedAt: at, ttlSeconds: 1800 });
+  assert.equal(promptCache, null);
   const session = { client: 'codex', lastUsedAt: at, turnEnded: true, contextTokens: 60, contextWindow: 100, promptCache };
   const boundary = Date.parse(at) + 600_001;
   assert.equal(sessionContextForRow(session, boundary - 1).percentUsed, 60);
   assert.equal(nextSessionStatusChangeAt([session], boundary - 1), boundary);
   assert.equal(sessionContextForRow(session, boundary), undefined);
-  assert.equal(sessionPromptCacheForRow(session, boundary).minutes, 20);
+  assert.equal(sessionPromptCacheForRow(session, boundary), null);
   assert.equal(sessionPromptCacheForRow(session, Date.parse(at) + 1800_000), null);
 });
 
-test('Codex long-turn tail estimates cache activity even when the model declaration is outside it', (t) => {
+test('Codex long-turn tails do not produce cache expiry estimates', (t) => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
@@ -117,9 +105,9 @@ test('Codex long-turn tail estimates cache activity even when the model declarat
   const context = { timestamp: at, type: 'turn_context', payload: { model: 'gpt-6.1-sol' } };
   const padding = { timestamp: at, type: 'response_item', payload: { text: 'x'.repeat(1200_000) } };
   const cases = [
-    { name: 'long', rows: [context, padding, codex(at)], expected: { observedAt: at, ttlSeconds: 1800 } },
-    { name: 'switched', rows: [context, { ...context, payload: { model: 'custom-model' } }, padding, codex(at)], expected: { observedAt: at, ttlSeconds: 1800 } },
-    { name: 'missing', rows: [padding, codex(at)], expected: { observedAt: at, ttlSeconds: 1800 } },
+    { name: 'long', rows: [context, padding, codex(at)], expected: null },
+    { name: 'switched', rows: [context, { ...context, payload: { model: 'custom-model' } }, padding, codex(at)], expected: null },
+    { name: 'missing', rows: [padding, codex(at)], expected: null },
     { name: 'cold', rows: [context, padding, codex(at, { info: { last_token_usage: { cached_input_tokens: 0 } } })], expected: null }
   ];
   for (const item of cases) {
@@ -129,7 +117,7 @@ test('Codex long-turn tail estimates cache activity even when the model declarat
   }
 });
 
-test('Codex shares one read for context, turn and cache, and duplicate accounting survives tail eviction', (t) => {
+test('Codex shares one read for context and turn without generating cache deadlines', (t) => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
@@ -150,7 +138,7 @@ test('Codex shares one read for context, turn and cache, and duplicate accountin
     return result;
   } } };
   const first = readCodexSessionState(file, deps);
-  assert.deepEqual(first.promptCacheState.observation, { observedAt: at, ttlSeconds: 1800 });
+  assert.deepEqual(first.promptCacheState.observation, null);
   assert.equal(bytesRead, fs.statSync(file).size);
   assert.equal(reads, 1);
   assert.deepEqual(readCodexSessionContext(file, deps), { contextTokens: 123_000, contextWindow: 200_000 });
@@ -163,15 +151,15 @@ test('Codex shares one read for context, turn and cache, and duplicate accountin
   assert.equal(bytesRead, fs.statSync(file).size, 'append reads only new bytes');
   const duplicate = { ...usage, timestamp: later };
   fs.appendFileSync(file, `${JSON.stringify(duplicate)}\n`);
-  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, { observedAt: at, ttlSeconds: 1800 });
+  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, null);
   assert.equal(bytesRead, fs.statSync(file).size);
   const next = structuredClone(duplicate);
   next.payload.info.total_token_usage.input_tokens += 100;
   fs.appendFileSync(file, `${JSON.stringify(next)}\n`);
-  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, { observedAt: later, ttlSeconds: 1800 });
+  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, null);
 
   fs.writeFileSync(file, `${JSON.stringify(duplicate)}\n`);
-  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, { observedAt: later, ttlSeconds: 1800 }, 'truncation resets identity');
+  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, null, 'truncation resets identity');
   const compact = { timestamp: later, type: 'event_msg', payload: { type: 'context_compacted' } };
   fs.appendFileSync(file, `${JSON.stringify(compact)}\n`);
   assert.equal(readCodexSessionState(file, deps).promptCacheState.observation, null);
@@ -216,21 +204,50 @@ test('Codex shared index completes partial records and resets state on file repl
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'session.jsonl');
   const deps = { cache: new Map() };
-  fs.writeFileSync(file, `${JSON.stringify(codex(at))}\n`);
-  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, at);
-  const next = codex(later);
+  const initial = codex(at);
+  initial.payload.info.model_context_window = 200000;
+  initial.payload.info.last_token_usage.total_tokens = 1000;
+  fs.writeFileSync(file, `${JSON.stringify(initial)}\n`);
+  assert.equal(readCodexSessionState(file, deps).context.contextTokens, 1000);
+  const next = structuredClone(initial);
+  next.timestamp = later;
+  next.payload.info.last_token_usage.total_tokens = 1100;
   next.payload.info.total_token_usage.input_tokens += 10;
   const line = JSON.stringify(next);
   const cut = line.indexOf('last_token_usage');
   fs.appendFileSync(file, line.slice(0, cut));
-  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, at);
+  assert.equal(readCodexSessionState(file, deps).context.contextTokens, 1000);
   fs.appendFileSync(file, line.slice(cut));
-  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, later);
+  assert.equal(readCodexSessionState(file, deps).context.contextTokens, 1100);
   fs.appendFileSync(file, '\n');
-  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, later);
+  assert.equal(readCodexSessionState(file, deps).context.contextTokens, 1100);
 
   const replacement = path.join(dir, 'replacement.jsonl');
-  fs.writeFileSync(replacement, `${JSON.stringify({ ...next, timestamp: at })}\n`);
+  fs.writeFileSync(replacement, `${JSON.stringify(initial)}\n`);
   fs.renameSync(replacement, file);
-  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, at, 'a new inode does not inherit dedup state');
+  assert.equal(readCodexSessionState(file, deps).context.contextTokens, 1000, 'a new inode does not inherit context state');
+});
+
+test('Codex metadata clears legacy estimates even outside the transcript-read window', t => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cache-clear-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const id = 'rollout-2026-09-30T09-00-00-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const dir = path.join(home, '.codex', 'sessions', '2026', '09', '30');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, id + '.jsonl'), jsonl([codex(at)]));
+  for (const elapsed of [0, 3600_000]) {
+    const periods = { today: { sessions: { ['codex:' + id]: {
+      client: 'codex', sessionId: id, totalTokens: 1000, lastUsedAt: at,
+      cacheReadTokens: 900, promptCache: { observedAt: at, ttlSeconds: 1800 }
+    } } } };
+    applySessionMetadata(periods, home, { now: Date.parse(at) + elapsed, env: {}, resolveProjects: false,
+      readCodexMeta: () => new Map(), readT3Meta: () => new Map() });
+    const session = periods.today.sessions['codex:' + id];
+    assert.equal(session.promptCache, null);
+    assert.equal(session.cacheReadTokens, 900, 'clearing a display estimate does not change accounting');
+  }
 });
