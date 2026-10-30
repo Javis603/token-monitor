@@ -843,12 +843,17 @@ async function collectHistoryOnce(options) {
     // A failed native scan without retained history is no update, not a new
     // Dots-only replacement for the device's last successful full history.
     if (!history && failureCode === 'history-graph-failed') return null;
+    const owner = options.cursorOwnership;
+    const ownedGraph = owner && failureCode === null && clients?.split(',').includes('cursor')
+      && rawGraphs.length === 1 && Array.isArray(rawGraphs[0]?.contributions)
+      && readCursorUsageOwnership(options)?.signature === owner.signature;
+    // A completed owned scan can explicitly correct History to zero. Missing,
+    // failed or unowned scans must keep the device's previous observation.
+    if (!history && ownedGraph) history = liveHistory;
     const result = options.codexLocalGraph
       ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
       : history;
-    const owner = options.cursorOwnership;
-    if (result && owner && rawGraphs.length === 1
-      && readCursorUsageOwnership(options)?.signature === owner.signature) {
+    if (result && ownedGraph) {
       const graph = rawGraphs[0];
       const cursorGraph = { contributions: (graph.contributions || []).map(row => ({
         ...row, activeTimeMs: 0,

@@ -527,3 +527,54 @@ test('model alias projection keeps fixed-range account model contributions align
     }
   }
 });
+
+test('collector uploads a complete owned empty graph to replace Hub History, but failures never clear it', async t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-empty-history-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const dir = path.join(home, '.config/tokscale/cursor-cache');
+  fs.mkdirSync(dir, { recursive: true });
+  const cache = path.join(dir, 'usage.json');
+  const writeOwner = (owned, age) => {
+    fs.writeFileSync(cache, JSON.stringify({ ...(owned ? { _tokscale: { version: 1, accountId: 'user_fixture' } } : {}), usageEventsDisplay: [] }));
+    const time = new Date(Date.now() - age);
+    fs.utimesSync(cache, time, time);
+  };
+  writeOwner(true, 10000);
+  t.mock.method(require('../../src/shared/providers/cursor/auth'), 'runCursorSync', async () => ({ synced: true }));
+  const { collectUsageOnce } = require('../../src/shared/collector');
+  const hub = createHub({ dataFile: path.join(home, 'hub.json'), persistIntervalMs: 0 });
+  t.after(() => hub.stop());
+  const date = new Date().toLocaleDateString('en-CA');
+  const fullGraph = { contributions: [{ date, clients: [{ client: 'cursor', modelId: 'shared', tokens: { input: 1000 }, cost: 1 }] }] };
+  const options = { clients: 'cursor', homeDir: home, env: {}, osInfo: {}, deviceId: 'A', allTimeSince: '2024-01-01',
+    includeHistory: true, dailyHistoryArchiveEnabled: false,
+    runTokscale: async () => ({ entries: [] }) };
+  const previous = await collectUsageOnce({ ...options, runGraph: async () => fullGraph });
+  hub.ingest(buildSyncPayload(previous));
+  assert.equal(hub.getHistory().summary.totalTokens, 1000);
+  for (const runGraph of [
+    async () => { throw new Error('synthetic scan failure'); },
+    async () => ({}),
+    async () => { writeOwner(false, 4000); return { contributions: [] }; }
+  ]) {
+    writeOwner(true, 5000);
+    const failed = await collectUsageOnce({ ...options, runGraph });
+    assert.equal(Object.hasOwn(failed, 'history'), false);
+    hub.ingest(buildSyncPayload(failed));
+    assert.equal(hub.getHistory().summary.totalTokens, 1000);
+  }
+  for (const archiveEnabled of [false, true]) {
+    writeOwner(true, 2000);
+    const empty = await collectUsageOnce({ ...options, dailyHistoryArchiveEnabled: archiveEnabled,
+      dailyHistoryArchiveOptions: { path: path.join(home, 'empty-history.json') },
+      runGraph: async () => ({ contributions: [] }) });
+    assert.equal(empty.history?.summary.totalTokens, 0);
+    assert.equal(empty.history.cursorAccountUsage.accountKey, key);
+    assert.equal(empty.history.cursorAccountUsage.usage.daily.length, 0);
+    // A newer zero observation also supersedes a different device's stale snapshot.
+    const other = { ...empty, deviceId: 'B' };
+    assert.equal(aggregateHistory([previous, other]).summary.totalTokens, 0);
+    hub.ingest(buildSyncPayload(empty));
+    assert.equal(hub.getHistory().summary.totalTokens, 0);
+  }
+});
