@@ -1,0 +1,57 @@
+{
+  "format": 1,
+  "title": "Token Monitor",
+  "plugins": [
+    {
+      "id": "quota-alerts",
+      "name": {
+        "en": "Quota alerts",
+        "zh-TW": "配額提醒",
+        "zh-CN": "配额提醒",
+        "ja": "クォータ通知",
+        "ko": "할당량 알림",
+        "pt-BR": "Alertas de cota"
+      },
+      "description": {
+        "en": "Desktop alerts when session quota runs low, recovers or becomes full.",
+        "zh-TW": "工作階段配額不足、恢復或回滿時發送桌面通知。",
+        "zh-CN": "会话配额不足、恢复或回满时发送桌面通知。",
+        "ja": "セッションクォータの不足・回復・全回復をデスクトップ通知でお知らせします。",
+        "ko": "세션 할당량 부족, 회복 또는 100% 복구 시 데스크톱 알림을 보냅니다.",
+        "pt-BR": "Alertas no computador quando a cota da sessão está baixa, se recupera ou fica completa."
+      },
+      "author": "Javis603",
+      "identityIcon": "data:image/png;base64,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",
+      "repository": "https://github.com/Javis603/token-monitor",
+      "readmePaths": {
+        "en": "plugins/quota-alerts/README.md",
+        "zh-CN": "plugins/quota-alerts/README.zh-CN.md",
+        "zh-TW": "plugins/quota-alerts/README.zh-TW.md",
+        "ko": "plugins/quota-alerts/README.ko.md",
+        "ja": "plugins/quota-alerts/README.ja.md",
+        "pt-BR": "plugins/quota-alerts/README.pt-BR.md"
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "url": "https://raw.githubusercontent.com/Javis603/token-monitor/dist/quota-alerts-0.1.0.tmplugin",
+          "sha256": "cbd13ad6a7badfb32c081e004c26ffab334478d15f532cef0e4d614b09816efc",
+          "engines": {
+            "tokenMonitor": ">=0.82.0"
+          },
+          "types": [
+            "automation"
+          ],
+          "changelog": {
+            "en": "Initial release: configurable low-quota desktop alerts and optional recovery/full alerts. Provider/account deduplication, immediate settings saves, a manual notification test and six interface languages. Background execution requires user approval; Token Monitor must remain running.",
+            "zh-CN": "首次发布：可设置阈值的低配额桌面提醒，以及可选的恢复／回满提醒。支持提供商与账户去重、即时保存设置、手动测试通知和六种界面语言。后台运行需用户批准，Token Monitor 必须保持运行。",
+            "zh-TW": "首次發布：可設定門檻的低配額桌面提醒，以及可選的恢復／回滿提醒。支援供應商與帳戶去重、即時儲存設定、手動測試通知和六種介面語言。背景執行需使用者批准，Token Monitor 必須保持運行。",
+            "ko": "첫 릴리스: 임계값을 설정할 수 있는 할당량 부족 데스크톱 알림과 선택적 회복/100% 복구 알림. 공급자/계정별 중복 방지, 설정 즉시 저장, 수동 알림 테스트 및 6개 언어 UI를 지원합니다. 백그라운드 실행에는 사용자 승인과 실행 중인 Token Monitor가 필요합니다.",
+            "ja": "初回リリース：しきい値を設定できるクォータ不足のデスクトップ通知と、任意の回復・全回復通知。プロバイダー／アカウント単位の重複防止、設定の即時保存、手動通知テスト、6言語の UI に対応。バックグラウンド実行には利用者の承認と Token Monitor の起動が必要です。",
+            "pt-BR": "Versão inicial: alertas de cota baixa com limite configurável e alertas opcionais de recuperação/cota completa. Deduplicação por provedor/conta, configurações salvas imediatamente, teste manual de notificação e interface em seis idiomas. A execução em segundo plano exige aprovação; o Token Monitor deve permanecer aberto."
+          }
+        }
+      ]
+    }
+  ]
+}
