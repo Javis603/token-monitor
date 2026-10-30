@@ -1,0 +1,88 @@
+name: Publish official plugins
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'plugins/**'
+      - 'scripts/official-plugin-distribution.cjs'
+      - 'src/electron/plugins/**'
+      - 'src/shared/plugins/**'
+      - 'tests/plugin-quota-alerts/**'
+      - 'tests/electron/pluginDistribution.test.js'
+      - 'tests/electron/pluginOfficialSource.test.js'
+      - '.github/workflows/publish-official-plugins.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: official-plugin-distribution-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify and build official plugins
+        env:
+          PLUGIN_REPOSITORY: ${{ github.repository }}
+        run: |
+          node --test --test-concurrency=2 tests/plugin-quota-alerts/*.test.js tests/electron/pluginDistribution.test.js tests/electron/pluginOfficialSource.test.js
+          node scripts/official-plugin-distribution.cjs build "$RUNNER_TEMP/official-plugins"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-plugin-distribution
+          path: ${{ runner.temp }}/official-plugins/
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: official-plugin-distribution
+          path: ${{ runner.temp }}/official-plugins
+      - name: Publish verified catalog and immutable packages
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          git fetch origin main
+          if [ "$(git rev-parse origin/main)" != "$SOURCE_SHA" ]; then
+            echo 'A newer source revision exists; its run will publish instead.'
+            exit 0
+          fi
+          git ls-remote --heads origin refs/heads/dist > "$RUNNER_TEMP/plugin-dist-ref"
+          if [ -s "$RUNNER_TEMP/plugin-dist-ref" ]; then
+            git fetch origin refs/heads/dist:refs/remotes/origin/dist
+            git worktree add --detach "$RUNNER_TEMP/plugin-dist" origin/dist
+          else
+            git worktree add --detach --no-checkout "$RUNNER_TEMP/plugin-dist" HEAD
+            git -C "$RUNNER_TEMP/plugin-dist" switch --orphan plugin-dist-bootstrap
+          fi
+          node scripts/official-plugin-distribution.cjs stage "$RUNNER_TEMP/official-plugins" "$RUNNER_TEMP/plugin-dist"
+          git -C "$RUNNER_TEMP/plugin-dist" add catalog.json '*.tmplugin'
+          if git -C "$RUNNER_TEMP/plugin-dist" diff --cached --quiet; then
+            echo 'Distribution already matches this source.'
+            exit 0
+          fi
+          git -C "$RUNNER_TEMP/plugin-dist" -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Publish official plugins from ${SOURCE_SHA}"
+          git -C "$RUNNER_TEMP/plugin-dist" push origin HEAD:refs/heads/dist

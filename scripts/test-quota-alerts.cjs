@@ -39,7 +39,10 @@ app.whenReady().then(async () => {
   app.on('web-contents-created', (_event, contents) => contents.on('console-message', (_e, level, message) => {
     if (level >= 2 && !message.includes('Electron Security Warning') && !message.includes('Autofill.')) errors.push(message);
   }));
-  runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain, session, utilityProcess,
+  const fixtureSession = { defaultSession: session.defaultSession, fromPartition: () => ({
+    fetch: async () => new Response(JSON.stringify({ format: 1, title: 'Fixture catalog', plugins: [] }))
+  }) };
+  runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain, session: fixtureSession, utilityProcess,
     Notification: class extends EventEmitter { static isSupported() { return true; } constructor(value) { super(); this.value = value; } show() { notices.push(this.value); queueMicrotask(() => this.emit('show')); } },
     dialog: { showMessageBox: async () => ({ response: 1 }), showOpenDialog: async () => ({ canceled: false, filePaths: [archive] }) } },
     userDataDir: scratch, getSettings: () => settings, getAppSettings: () => settings, getLocale: () => settings.language, getContext: () => ({ source: 'synthetic-fixture' }),

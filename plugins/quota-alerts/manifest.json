@@ -43,7 +43,13 @@
     "README.zh-CN.md",
     "README.ko.md",
     "README.ja.md",
-    "README.pt-BR.md"
+    "README.pt-BR.md",
+    "CHANGELOG.ja.md",
+    "CHANGELOG.md",
+    "CHANGELOG.ko.md",
+    "CHANGELOG.zh-CN.md",
+    "CHANGELOG.zh-TW.md",
+    "CHANGELOG.pt-BR.md"
   ],
   "views": [
     {
@@ -73,5 +79,8 @@
     "ko": "설정 페이지를 닫아도 수집된 세션 할당량을 확인하고 사용 설정한 알림을 보냅니다. Token Monitor가 실행 중이어야 합니다.",
     "pt-BR": "Verifica as cotas de sessão já coletadas e envia os alertas ativados com a página de configurações fechada. O Token Monitor deve continuar aberto."
   },
-  "category": "automation"
+  "category": "automation",
+  "engines": {
+    "tokenMonitor": ">=0.81.0"
+  }
 }
