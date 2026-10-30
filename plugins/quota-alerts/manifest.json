@@ -81,6 +81,6 @@
   },
   "category": "automation",
   "engines": {
-    "tokenMonitor": ">=0.81.0"
+    "tokenMonitor": ">=0.82.0"
   }
 }

@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const semver = require('semver');
 const { packageDirectory, parsePackage, digest, readBounded, MAX_PACKAGE_BYTES } = require('../src/electron/plugins/package');
 const { parseIndex } = require('../src/electron/plugins/catalogSources');
 const { pluginTypes } = require('../src/electron/plugins/types');
@@ -35,7 +36,8 @@ function buildDistribution(output, { root = ROOT, repository = REPOSITORY } = {}
   if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw Error('Invalid repository');
   const base = `https://raw.githubusercontent.com/${repository}/dist/`;
   const artifacts = PLUGINS.map(id => {
-    const pkg = packageDirectory(path.join(root, 'plugins', id));
+    // The target App can be newer than the version still carried by this checkout.
+    const pkg = packageDirectory(path.join(root, 'plugins', id), { checkCompatibility: false });
     const m = pkg.rawManifest;
     if (m.id !== id || !m.engines?.tokenMonitor) throw Error(`${id}: explicit identity and App compatibility range are required`);
     const filename = `${id}-${m.version}.tmplugin`;
@@ -89,7 +91,8 @@ function stageDistribution(source, target) {
         if (!readBounded(file, MAX_PACKAGE_BYTES).equals(bytes)) throw Error(`${filename}: refusing to overwrite a published package`);
       } else copies.push({ file, bytes });
     }
-    plugin.versions.push(...(old?.versions || []).filter(version => !plugin.versions.some(current => current.version === version.version)));
+    plugin.versions = [...plugin.versions, ...(old?.versions || []).filter(version => !plugin.versions.some(current => current.version === version.version))]
+      .sort((a, b) => semver.rcompare(a.version, b.version)).slice(0, 32);
   }
   const bytes = Buffer.from(JSON.stringify(index, null, 2) + '\n');
   // Validate the retained history against the same limits the App enforces.

@@ -32,7 +32,7 @@ function fixture(t) {
 test('build uses the actual manifest, package parser, automation label and all localized packaged notes', t => {
   const f = fixture(t), built = f.build(), entry = built.index.plugins[0], version = entry.versions[0];
   assert.equal(built.index.plugins.length, 1);
-  const bytes = fs.readFileSync(built.file), pkg = parsePackage(bytes);
+  const bytes = fs.readFileSync(built.file), pkg = parsePackage(bytes, { checkCompatibility: false });
   parseIndex(fs.readFileSync(path.join(built.output, 'catalog.json')));
   assert.equal(version.sha256, digest(bytes));
   assert.equal(version.engines.tokenMonitor, pkg.rawManifest.engines.tokenMonitor);
@@ -63,6 +63,25 @@ test('new versions retain published packages and their original release notes', 
   assert.deepEqual(versions.map(v => v.version), ['0.2.0', '0.1.0']);
   assert.deepEqual(versions[1], old);
   assert.deepEqual(fs.readFileSync(path.join(f.target, 'quota-alerts-0.1.0.tmplugin')), oldBytes);
+});
+
+test('the 33rd release keeps the newest 32 catalog versions and leaves evicted packages immutable', t => {
+  const f = fixture(t), first = f.build(); stageDistribution(first.output, f.target);
+  const original = fs.readFileSync(first.file);
+  for (let version = 2; version <= 33; version++) {
+    const built = f.build(`0.${version}.0`); stageDistribution(built.output, f.target);
+  }
+  const versions = f.index().plugins[0].versions;
+  assert.equal(versions.length, 32);
+  assert.equal(versions[0].version, '0.33.0');
+  assert.equal(versions.at(-1).version, '0.2.0');
+  parseIndex(fs.readFileSync(path.join(f.target, 'catalog.json')));
+  const oldFile = path.join(f.target, 'quota-alerts-0.1.0.tmplugin');
+  assert.deepEqual(fs.readFileSync(oldFile), original, 'old package remains downloadable');
+  const before = f.index(), republished = f.build('0.1.0');
+  assert.throws(() => stageDistribution(republished.output, f.target), /refusing to overwrite/);
+  assert.deepEqual(f.index(), before);
+  assert.deepEqual(fs.readFileSync(oldFile), original);
 });
 
 test('changed bytes under a published version fail before changing files or catalog', t => {

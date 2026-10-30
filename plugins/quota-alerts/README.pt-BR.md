@@ -11,7 +11,7 @@ Receba alertas no computador quando a cota da sessão de uma conta ficar baixa, 
 
 ## Compatibilidade
 
-Use o Token Monitor 0.81.0 ou posterior com o catálogo oficial de plugins. O plugin usa a interface experimental `tmApi: 1`.
+Use o Token Monitor 0.82.0 ou posterior com o catálogo oficial de plugins. O plugin usa a interface experimental `tmApi: 1`.
 
 O plugin usa leituras de cota existentes, sem consultas adicionais aos provedores. Dados ausentes ou desatualizados não são tratados como zero. Não há cartão na página inicial, página independente nem efeito de pulsação na janela inteira.
 

@@ -47,7 +47,7 @@ node scripts/official-plugin-distribution.cjs build /tmp/token-monitor-official-
 node scripts/official-plugin-distribution.cjs stage /tmp/token-monitor-official-plugins /tmp/token-monitor-plugin-dist
 ```
 
-These commands only write local files. The script's `PLUGINS` list selects maintained packages. Each package declares its own compatibility range and includes localized README and CHANGELOG files. Catalog release notes come from the matching version section in the packaged CHANGELOG bytes. To publish an update, increase the plugin version and add its localized notes. Published versions are immutable; identical reruns are allowed, while changed bytes under the same version stop publication. Previous versions and their packages remain available for compatible selection and recovery.
+These commands only write local files. The builder validates the declared target range without requiring this checkout's product version to satisfy it; installation still enforces the range on the user's App. The script's `PLUGINS` list selects maintained packages. Each package declares its own compatibility range and includes localized README and CHANGELOG files. Catalog release notes come from the matching version section in the packaged CHANGELOG bytes. To publish an update, increase the plugin version and add its localized notes. Published versions are immutable; identical reruns are allowed, while changed bytes under the same version stop publication. The catalog retains the newest 32 versions in SemVer order for selection and recovery; older package files remain in `dist` and cannot be overwritten. Full release history stays in the source CHANGELOG files.
 
 ## Repository details and README
 

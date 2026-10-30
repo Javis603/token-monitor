@@ -11,7 +11,7 @@ Receive desktop alerts when an account’s session quota runs low, recovers or r
 
 ## Compatibility
 
-Use Token Monitor 0.81.0 or later with the official plugin catalog. The plugin uses the experimental `tmApi: 1` interface.
+Use Token Monitor 0.82.0 or later with the official plugin catalog. The plugin uses the experimental `tmApi: 1` interface.
 
 The plugin uses existing quota readings, not additional provider requests. Missing or stale data is not treated as zero. There is no Home card, standalone page or whole-window pulse.
 

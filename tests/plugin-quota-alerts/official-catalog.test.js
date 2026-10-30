@@ -4,6 +4,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+// Model the declared target host in this isolated worker without changing release metadata.
+const app = require('../../package.json');
+const checkoutVersion = app.version;
+app.version = '0.82.0';
+test.after(() => { app.version = checkoutVersion; });
 const { packageDirectory, parsePackage } = require('../../src/electron/plugins/package');
 const { createPluginCatalog } = require('../../src/electron/plugins/catalog');
 const { createPluginManager } = require('../../src/electron/plugins/manager');
@@ -14,6 +19,18 @@ const definition = officialSources[0];
 const root = path.resolve(__dirname, '../..');
 const source = path.join(root, 'plugins/quota-alerts');
 function scratch(t) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-official-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir; }
+
+test('the package rejects a 0.81.0 host and accepts a 0.82.0 host', t => {
+  const output = path.join(scratch(t), 'build'); buildDistribution(output);
+  const bytes = fs.readFileSync(path.join(output, 'quota-alerts-0.1.0.tmplugin'));
+  try {
+    app.version = '0.81.0';
+    assert.throws(() => parsePackage(bytes), /incompatible Token Monitor version/);
+    app.version = '0.82.0';
+    const pkg = parsePackage(bytes);
+    assert.equal(pkg.rawManifest.engines.tokenMonitor, '>=0.82.0');
+  } finally { app.version = '0.82.0'; }
+});
 
 test('the actual published catalog installs the source-matching official package only after approval', async t => {
   const dir = scratch(t), output = path.join(dir, 'build'), index = buildDistribution(output);
