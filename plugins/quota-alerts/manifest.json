@@ -1,0 +1,79 @@
+{
+  "tmApi": 1,
+  "id": "quota-alerts",
+  "name": {
+    "en": "Quota alerts",
+    "zh-TW": "配額提醒",
+    "zh-CN": "配额提醒",
+    "ja": "クォータ通知",
+    "ko": "할당량 알림",
+    "pt-BR": "Alertas de cota"
+  },
+  "description": {
+    "en": "Desktop alerts when session quota runs low, recovers or becomes full.",
+    "zh-TW": "工作階段配額不足、恢復或回滿時發送桌面通知。",
+    "zh-CN": "会话配额不足、恢复或回满时发送桌面通知。",
+    "ja": "セッションクォータの不足・回復・全回復をデスクトップ通知でお知らせします。",
+    "ko": "세션 할당량 부족, 회복 또는 100% 복구 시 데스크톱 알림을 보냅니다.",
+    "pt-BR": "Alertas no computador quando a cota da sessão está baixa, se recupera ou fica completa."
+  },
+  "version": "0.1.0",
+  "author": "Javis603",
+  "homepage": "https://github.com/Javis603/token-monitor",
+  "ui": "ui.mjs",
+  "backend": "backend.cjs",
+  "background": true,
+  "css": [
+    "panel.css"
+  ],
+  "files": [
+    "ui.mjs",
+    "backend.cjs",
+    "evaluator.cjs",
+    "delivery.cjs",
+    "panel.css",
+    "README.md",
+    "NOTICE.md",
+    "LICENSE",
+    "i18n.mjs",
+    "preferences.cjs",
+    "settings-schema.json",
+    "assets/icon.png",
+    "assets/icon.svg",
+    "MAINTAINING.md",
+    "README.zh-TW.md",
+    "README.zh-CN.md",
+    "README.ko.md",
+    "README.ja.md",
+    "README.pt-BR.md"
+  ],
+  "views": [
+    {
+      "id": "panel",
+      "title": {
+        "en": "Quota alerts",
+        "zh-TW": "配額提醒",
+        "zh-CN": "配额提醒",
+        "ja": "クォータ通知",
+        "ko": "할당량 알림",
+        "pt-BR": "Alertas de cota"
+      },
+      "surfaces": [
+        "settings"
+      ]
+    }
+  ],
+  "identityIcon": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAFZElEQVR42u2dr4/UQBTH9w+pQKIRcBsSMIgzQBBLCAmOBBLUBoFAEBTBrEAACktYcYoEiSEI/gAMIYjVCMTpsu+ymyylnc5Mp+17088k3+Ryu93t9X3m/ZppbzZjMBgMBoPB6GmcO39hvtVyq/VOJarV/vrItZpbN/oCYyeDYmHF6MVWq602GC65NrtrW2g1/gojDaaVNlfPjB/HIyzGNj4xXkGOMFasZ9br8gYFxgeCAuMDQYHxgaDoAwCMbwgCsn20Tlnnc0FtaoHrJxTQ3qVtHJ/1cwHzUMHsxwsQ+8kFyPwH1c3jy+XrJ8flyYvr5emnu/9IfievyXvUVQTU/d307OG18uf72/8ZvUnyXjlGTV8AI8bp6Ohi+fXNLW/DVyXHymf0dX4hGzgxaKAe3Lkabfiq5LN6Os+5DwBLDJre+BLzZXaL6nKCgSBYEv97cPs+s/rQtcccM1geAABh8o351eN8c4IxAJiE4V69fVf+/nN6Jvk5Ntv3jesxAIhSVwcAUDF+FwhCSr1YAOQ7ACCxqsbfK7TJE5LZxwIgStksAoBEAEgXbygA5LsAQBkAPqVcKgDkuwBAGQChzZ3UxwNAgG4s7pVPn78sP5x8PFMTAPvX5b1yDAAYN7rL2L6Sz6iDIdSAMY0gAIjQ/UePy89fvnU2fFt4CDVgaCsYAAJ16cpxL4bfq+oFYowYK5LAFknM7svwe4ln6VIGdhFloEMp4ryPqp3C0EZQlxBAIyiB8ffZvcxkCRd1IURe21cL1eO///jVqRUcmwTSCu5gfDGaGLRLaJHPaMoDQhaDYgFgMSgi5nc1fBMIdQtGvsvBMSGgh+Vg+wCIq24zfp2LT/G9dZ8dU9PHeA0A2MlV6klYGML79LkfsO99gaYBkCTNNfOH7DIa3RRqG4Cm2d+X23eFA4vbwk0DILOuafanTPhCvFETCEpvDLENQFPZN6Trr/NILs+j7NYw2wBomv3VcrTaJtYskwC43L8WMNu8AQD00PgZouwLDU3SLGrbTAIAieL/mO7fApzZA6Ah9jb1JgBggARQQ8x1taYBQNEu3imfHwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgH4Amnrtsvyqfauaxn0C2QCgabFF82IVAACAbQAsrLdr3q9gHgALs8vSngBzAFhIsCwkqmYBsFJiWTlPUwA0zawx7wVo0uFt5JoTQVMA1D3TV2tsbcpVYh9EDQCOWaUxu26qVrR5KzMAuG4G0XgDhmtzqKb7BMwA0JT9a8ysLZ2zCQBcs0mj+/d5dI0Wr2UCANdTQLTfe9d03lq8gHoAXE8B0ZZRh1QuWkpC1QDsH8RkKfkLCV9DP8nEHAAu42uO/SG5wNhloVoAhnrkqwaN2chSCYArbuaqsfIZlQBMzfhjVjQAAACEAEKAwiRwShCM2c/g38ZNXAAAAAAAAAAAALkDcJhUxiRdXY8HAGUrciHt17q2dC4QTAKALj1415oEABgHoA2CtgUpADAcAqpLsoebM+Rn11I0IcCgUv4fYc0bUfsAYJ3DH9q2u8hXGnbxJNR6MgCkgCAz43sDsMyt+RGz20jr4947aukDwDzHDphPoleXIGam+cxn5NwKFePK7D6EQX6W32VseL8EMMc8AAXE/wMAFlyw7LSYhYztARsuWjbazELH9qAVFy4brWIAKLhw2aiYxQy8wERnP7nAhGM/FcGEM3/6AhOt+wkFuH7fqgAIDBg/OusHAowPBBgfCDA+1cF0s/3IPgHeYJxZv5hpGbSNDbV3e84NVniE3mb8apRY3yE0kCMkiPGqXH0kDPPdbuM1ULQae727VvMZg8FgMBgMRk/jL2l+F/xdBcPyAAAAAElFTkSuQmCC",
+  "defaults": {
+    "background": true
+  },
+  "backgroundDescription": {
+    "en": "Checks captured session quotas and sends your enabled reminders while the settings page is closed. Token Monitor must remain running.",
+    "zh-TW": "關閉設定頁後繼續檢查已有工作階段配額，並發送你已啟用的提醒。Token Monitor 必須保持運行。",
+    "zh-CN": "关闭设置页后继续检查已有会话配额，并发送你已启用的提醒。Token Monitor 必须保持运行。",
+    "ja": "設定画面を閉じても取得済みのセッションクォータを確認し、有効にした通知を送信します。Token Monitor の起動が必要です。",
+    "ko": "설정 페이지를 닫아도 수집된 세션 할당량을 확인하고 사용 설정한 알림을 보냅니다. Token Monitor가 실행 중이어야 합니다.",
+    "pt-BR": "Verifica as cotas de sessão já coletadas e envia os alertas ativados com a página de configurações fechada. O Token Monitor deve continuar aberto."
+  },
+  "category": "automation"
+}

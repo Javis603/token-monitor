@@ -10,6 +10,7 @@ const { assertHostCompatibility } = require('./contracts');
 const { localize } = require('../../shared/plugins/localized');
 const { createCatalogSources } = require('./catalogSources');
 const OFFICIAL = Object.freeze({ id: 'bundled', kind: 'official', label: 'Token Monitor' });
+const BUNDLED_READMES = require('./catalog/readmes.json');
 const { createGitHubDiscovery } = require('./githubDiscovery');
 const { createCatalogMedia } = require('./catalogMedia');
 const CATALOG_REFRESH_MS = 6 * 60 * 60 * 1000;
@@ -52,6 +53,7 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
       const installed = installation(pkg.manifest.id);
       const homepage = pkg.manifest.homepage;
       entries.push({ ...describePackage(pkg, { locale: getLocale() }), origin: OFFICIAL,
+        readmePaths: BUNDLED_READMES[pkg.manifest.id] || null,
         repository: /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(homepage) ? homepage : '',
         status: !compatible ? 'incompatible' : !installed.exists ? 'available'
           : installed.version && installed.record?.origin.id === OFFICIAL.id && semver.gt(pkg.manifest.version, installed.version) ? 'update' : 'installed',

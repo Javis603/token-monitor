@@ -20,12 +20,12 @@ function index(bytes = packageBytes()) {
     sha256: digest(bytes), url: 'https://catalog.example/demo.tmplugin' }] }] };
 }
 function temp(t) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-catalog-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir; }
-test('the shipped official catalog remains available and empty without showcase plugins', t => {
+test('the shipped official catalog offers the first optional production plugin offline', t => {
   const catalog = createPluginCatalog({ root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
     fetchImpl: () => assert.fail('local discovery must not fetch') });
   t.after(() => catalog.dispose());
   assert.deepEqual(catalog.list().sources.map(source => [source.id, source.kind]), [['bundled', 'official']]);
-  assert.deepEqual(catalog.list().entries, []); assert.equal(catalog.list().error, '');
+  assert.deepEqual(catalog.list().entries.map(entry => [entry.id, entry.version, entry.origin.kind, entry.status]), [['quota-alerts', '0.1.0', 'official', 'available']]); assert.equal(catalog.list().error, '');
 });
 test('local official packages install offline, survive restart, update with renewed trust and roll back', async t => {
   const root = temp(t), userDir = path.join(root, 'plugins'), catalogDirectory = path.join(root, 'official');
@@ -130,7 +130,7 @@ for (const broken of ['malformed', 'directory']) test(`maintainer discovery refr
   if (broken === 'malformed') fs.writeFileSync(configFile, '{broken');
   else { fs.mkdirSync(configFile); fs.writeFileSync(path.join(configFile, 'retained'), 'keep'); }
   let requests = 0;
-  const catalog = createPluginCatalog({ root, manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root, manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
     maintainerSources: [{ id: 'maintainer-fixture', url: URL }],
     fetchImpl: async url => { assert.equal(url, URL); requests++; return new Response(JSON.stringify(index())); } });
   t.after(() => catalog.dispose());
@@ -155,7 +155,7 @@ test('maintainer discovery bootstraps cache and keeps catalog order, hashes and 
   const managed = createManagedPlugins({ root: path.join(root, 'managed'), userDir, dataDir: path.join(root, 'data'), manager, getSettings: () => settings, saveSettings: patch => { settings = { ...settings, ...patch }; } });
   managed.recover(); await manager.reload();
   const raw = index(); raw.plugins.push({ ...raw.plugins[0], id: 'another-plugin' });
-  const catalog = createPluginCatalog({ root: path.join(root, 'catalog'), manager, managed,
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root: path.join(root, 'catalog'), manager, managed,
     maintainerSources: [{ id: 'maintainer-fixture', url: URL }],
     fetchImpl: async url => { requests++; return new Response(url === URL ? JSON.stringify(raw) : packageBytes()); } });
   t.after(async () => { catalog.dispose(); managed.dispose(); await manager.dispose(); });
@@ -201,7 +201,7 @@ for (const operation of ['install', 'update']) test(`a same-source refresh does 
   const managed = createManagedPlugins({ root: path.join(root, 'managed'), userDir, dataDir: path.join(root, 'data'), manager,
     getSettings: () => settings, saveSettings: patch => { settings = { ...settings, ...patch }; } });
   managed.recover(); await manager.reload();
-  const catalog = createPluginCatalog({ root: path.join(root, 'catalog'), manager, managed, fetchImpl: async url => {
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root: path.join(root, 'catalog'), manager, managed, fetchImpl: async url => {
     if (url === URL && holdIndex) return new Promise(resolve => { finishIndex = () => resolve(new Response(JSON.stringify(index(pkg)))); });
     return new Response(url === URL ? JSON.stringify(index(pkg)) : pkg);
   } });
@@ -292,7 +292,7 @@ test('discover → verify → install → approve → update pauses new access �
   const managed = createManagedPlugins({ root: path.join(dir, 'managed'), userDir, dataDir: path.join(dir, 'data'), manager,
     getSettings: () => settings, saveSettings: patch => { settings = { ...settings, ...patch }; } }); managed.recover(); await manager.reload();
   let pkg = packageBytes(); let mismatch = false;
-  const catalog = createPluginCatalog({ root: path.join(dir, 'catalog'), manager, managed,
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root: path.join(dir, 'catalog'), manager, managed,
     fetchImpl: async url => new Response(url.endsWith('.tmplugin') ? (mismatch ? packageBytes('3.0.0') : pkg) : JSON.stringify(index(pkg))) });
   t.after(() => catalog.dispose()); await catalog.addSource({ url: URL });
   let entry = catalog.list().entries.find(p => p.id === 'community-demo'); assert.equal(entry.origin.kind, 'community');
@@ -331,7 +331,7 @@ test('catalog recovery updates use the managed version when discovery is invalid
   const manager = { list: () => ({ plugins: [{ id: 'community-demo', status: 'invalid' }, { id: 'token-pulse', status: 'invalid' }, { id: 'unknown-local', status: 'invalid' }] }) };
   const managed = { describe: id => origins.get(id), cancelSource() {}, preview: pkg => ({ version: pkg.manifest.version }) };
   const pkg = packageBytes('2.0.0');
-  const catalog = createPluginCatalog({ root, manager, managed, fetchImpl: async url => new Response(url.endsWith('.tmplugin') ? pkg : JSON.stringify(index(pkg))) });
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root, manager, managed, fetchImpl: async url => new Response(url.endsWith('.tmplugin') ? pkg : JSON.stringify(index(pkg))) });
   t.after(() => catalog.dispose());
   await catalog.addSource({ url: URL });
   const source = catalog.list().sources.find(s => s.kind === 'community');
@@ -350,7 +350,7 @@ test('catalog recovery updates use the managed version when discovery is invalid
 test('maintainer catalogs refresh after six hours, coalesce calls, and retain cached entries offline', async t => {
   let time = 1000, calls = 0, offline = false, finish;
   const raw = index();
-  const catalog = createPluginCatalog({ root: temp(t), now: () => time,
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root: temp(t), now: () => time,
     manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
     maintainerSources: [{ id: 'maintainer-clock', url: URL }], fetchImpl: async () => {
       calls++; if (offline) throw Error('offline');
@@ -370,7 +370,7 @@ test('maintainer catalogs refresh after six hours, coalesce calls, and retain ca
 
 test('a cache-only discovery just before expiry cannot postpone a newly due refresh', async t => {
   let time = 1000, calls = 0;
-  const catalog = createPluginCatalog({ root: temp(t), now: () => time,
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root: temp(t), now: () => time,
     manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
     maintainerSources: [{ id: 'maintainer-due', url: URL }], fetchImpl: async () => { calls++; return new Response(JSON.stringify(index())); } });
   t.after(() => catalog.dispose());
@@ -383,7 +383,7 @@ test('invalid cached timestamps retain entries but refresh immediately with boun
   for (const at of [undefined, null, 'yesterday', '1000', {}, -1, 100000001]) {
     const root = temp(t), id = 'maintainer-invalid-time'; let time = 100000000, calls = 0;
     fs.writeFileSync(path.join(root, `${id}.json`), JSON.stringify({ url: URL, at, bytes: Buffer.from(JSON.stringify(index())).toString('base64') }));
-    const catalog = createPluginCatalog({ root, now: () => time,
+    const catalog = createPluginCatalog({ catalogDirectory: temp(t), root, now: () => time,
       manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
       maintainerSources: [{ id, url: URL }], fetchImpl: async () => { calls++; throw Error('offline'); } });
     t.after(() => catalog.dispose());
@@ -404,7 +404,7 @@ test('update notes span the installed-to-selected range in SemVer order for the 
     version, sha256: digest(packageBytes(version)), url: `https://catalog.example/${version}.tmplugin`,
     changelog: { en: `Changes ${version}`, 'zh-TW': `變更 ${version}` }
   }));
-  const catalog = createPluginCatalog({ root: temp(t), getLocale: () => 'zh-TW',
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root: temp(t), getLocale: () => 'zh-TW',
     manager: { list: () => ({ plugins: installedVersion ? [{ id: 'community-demo', version: installedVersion }] : [] }) },
     managed: { describe: () => installedVersion ? { version: installedVersion, origin: { id: originId } } : null, cancelSource() {} },
     maintainerSources: [{ id: 'maintainer-notes', url: URL }], fetchImpl: async () => new Response(JSON.stringify(raw)) });
