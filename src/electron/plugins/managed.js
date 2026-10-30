@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const semver = require('semver');
 const { ID_RE, MAX_PACKAGE_BYTES, contentDigest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage } = require('./package');
 const { removePluginPlacements } = require('./placementSettings');
-const { initialSetupReview, initialSetupPlan } = require('./initialSetup');
+const { initialSetupReview, initialSetupPlan, contentSelectionGuard } = require('./initialSetup');
 const SETTING_KEYS = ['pluginStates', 'pluginInitialSetup', 'themeColors', 'vendorColors', 'pluginAuthorSkin', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
 const MAX_REGISTRY_BYTES = 1024 * 1024;
 const MAX_JOURNAL_BYTES = 2 * 1024 * 1024;
@@ -178,11 +178,16 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
         || (operation === 'update' && options.trustUpdate === true && getSettings().pluginStates?.[id]?.enabled === true);
       const setupOptions = { activate: applySetup, context: placementContext(), updating: operation === 'update' };
       const setup = pkg && operation !== 'rollback' ? initialSetupPlan(getSettings(), pkg.manifest, options.initialSetup, setupOptions) : null;
+      const checkContent = setup ? contentSelectionGuard(getSettings(), setup, setupOptions.activate) : null;
       const confirmed = applySetup ? await options.beforeEnable?.(describePackage(pkg, { locale: getLocale() }), setup) : null;
+      checkContent?.(getSettings());
       const commit = async () => {
+        checkContent?.(getSettings());
         let prepared = false, began = false, committed = false, recovered = true;
         try {
           await manager.beginMutation(id); began = true;
+          // No await between this recheck and settings persistence.
+          checkContent?.(getSettings());
           const target = path.join(userDir, id), stage = path.join(txDir, 'stage');
           const hadTarget = hasTarget(target);
           let current = null;
@@ -260,8 +265,9 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       };
       // Lifecycle cleanup starts only after consent. The wrapper resumes UI
       // after commit/recovery has ended the target's mutation.
-      if (options.withLifecycle) return await options.withLifecycle(commit, options.consumePreview);
-      options.consumePreview?.();
+      const beforeRelease = () => { checkContent?.(getSettings()); options.consumePreview?.(); };
+      if (options.withLifecycle) return await options.withLifecycle(commit, beforeRelease);
+      beforeRelease();
       return await commit();
     } finally {
       busy = false;

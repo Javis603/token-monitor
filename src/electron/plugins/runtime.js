@@ -14,7 +14,7 @@ const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const maintainerSources = require('./maintainerSources');
 const { createPluginManager } = require('./manager');
-const { initialSetupReview, initialSetupPlan, recordSetupChoice, placementKey, contentKey } = require('./initialSetup');
+const { initialSetupReview, initialSetupPlan, recordSetupChoice, placementKey, contentKey, contentSelectionGuard } = require('./initialSetup');
 const { translate } = require('../renderer/i18n');
 const { placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
 const { trayLayoutPluginRefs } = require('../../shared/trayLayout');
@@ -561,9 +561,12 @@ function createPluginRuntime({
       const plugin = manager.list().plugins.find(item => item.id === id);
       if (!plugin?.revision) throw new Error('Plugin is unavailable');
       const plan = enabled === true ? initialSetupPlan(getSettings(), plugin, initialSetup, { context: placementContext() }) : null;
+      const checkContent = plan ? contentSelectionGuard(getSettings(), plan) : null;
       const choices = plan ? await confirmContentSwitch(event, plugin, plan) : null;
+      checkContent?.(getSettings());
       const finish = enabled ? await resumeHosts(event, [id]) : await prepareDisable(event, [id]);
       if (enabled === true) {
+        checkContent(getSettings());
         const patch = initialSetupPlan(getSettings(), plugin, choices, { context: placementContext() }).patch;
         if (Object.keys(patch).length) persistManagementSettings(patch);
       }

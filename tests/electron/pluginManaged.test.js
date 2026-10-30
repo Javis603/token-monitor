@@ -63,6 +63,26 @@ for (const invalidate of ['cancel', 'expire']) test(`a preview ${invalidate}d wh
   assert.deepEqual(snapshot(f), before);
 });
 
+test('an update preserves a newer content choice made while its backend is stopping', { timeout: 5000 }, async t => {
+  const f = fixture(t); await f.install('1.0.0');
+  f.args.manager.list = () => ({ enabled: true, plugins: [] });
+  f.settings.pluginStates['test-plugin'] = { enabled: true };
+  f.settings.pluginContentSelections['main.model.content'] = 'other/view';
+  let started, finish;
+  const entered = new Promise(resolve => { started = resolve; });
+  const gate = new Promise(resolve => { finish = resolve; });
+  f.args.manager.beginMutation = () => { started(); return gate; };
+  const pkg = parsePackage(bytes('2.0.0', { views: [{ id: 'content', mode: 'replace', targets: ['main.model.content'] }] }));
+  const pending = f.api.install(f.api.preview(pkg).token, { trustUpdate: true, initialSetup: { 'content:main.model.content': 'test-plugin/content' } }).then(() => null, error => error);
+  await entered;
+  delete f.settings.pluginContentSelections['main.model.content'];
+  finish();
+  assert.match((await pending)?.message || '', /Content selection changed/);
+  assert.equal(f.settings.pluginContentSelections['main.model.content'], undefined);
+  assert.equal(f.api.describe('test-plugin').version, '1.0.0');
+  assert.equal(fs.existsSync(path.join(f.args.root, 'transaction.json')), false);
+});
+
 for (const keepPlacements of [false, true]) for (const hasSetup of [false, true]) {
   test(`constructor plugin uninstalls with keepPlacements=${keepPlacements}, own setup=${hasSetup}`, async t => {
     const f = fixture(t);

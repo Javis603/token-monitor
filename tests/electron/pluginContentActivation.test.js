@@ -12,7 +12,7 @@ const { normalizeInitialSetup, contentKey } = require('../../src/electron/plugin
 const TARGET = 'main.home.content';
 const REF = 'trusted-fixture/content';
 
-async function setup(t, { competitor = false } = {}) {
+async function setup(t, { competitor = false, third = false } = {}) {
   const source = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-content-source-'));
   t.after(() => fs.rmSync(source, { recursive: true, force: true }));
   fs.cpSync(path.resolve(__dirname, '../fixtures/trusted-plugin'), source, { recursive: true });
@@ -22,17 +22,19 @@ async function setup(t, { competitor = false } = {}) {
   fs.writeFileSync(file, JSON.stringify(manifest));
   const f = await runtimeFixture(t, { sourceDirectory: source, beforeStart(dir) {
     if (!competitor) return;
-    const folder = path.join(dir, 'plugins', 'other-fixture');
-    fs.cpSync(source, folder, { recursive: true });
-    const other = structuredClone(manifest); other.id = 'other-fixture'; other.name = 'Other plugin';
-    other.views.push({ id: 'independent', mode: 'replace', targets: ['main.model.content'] });
-    fs.writeFileSync(path.join(folder, 'manifest.json'), JSON.stringify(other));
+    for (const id of ['other-fixture', ...(third ? ['third-fixture'] : [])]) {
+      const folder = path.join(dir, 'plugins', id);
+      fs.cpSync(source, folder, { recursive: true });
+      const other = structuredClone(manifest); other.id = id; other.name = id === 'other-fixture' ? 'Other plugin' : 'Third plugin';
+      other.views.push({ id: 'independent', mode: 'replace', targets: ['main.model.content'] });
+      fs.writeFileSync(path.join(folder, 'manifest.json'), JSON.stringify(other));
+    }
   } });
   return { f, file, manifest };
 }
 
-async function setupUpdate(t) {
-  const value = await setup(t, { competitor: true });
+async function setupUpdate(t, options = {}) {
+  const value = await setup(t, { ...options, competitor: true });
   value.manifest.views = value.manifest.views.filter(view => view.id !== 'content');
   fs.writeFileSync(value.file, JSON.stringify(value.manifest));
   const first = await value.f.invoke('plugins:import', 'directory');
@@ -287,6 +289,46 @@ test('awaiting a draft inspection does not overwrite a concurrent choice for a d
   assert.equal(f.settings.pluginContentSelections['main.model.content'], 'another/model');
   assert.equal(f.settings.pluginContentSelections[TARGET], undefined);
 });
+
+for (const operation of ['enable', 'update']) for (const sameTarget of [true, false]) {
+  test(`${operation} revalidates confirmed selections after lifecycle waits, same target=${sameTarget}`, { timeout: 5000 }, async t => {
+    const { f, file, manifest } = await setupUpdate(t, { third: true });
+    let actionToHold, started, finish;
+    const entered = new Promise(resolve => { started = resolve; });
+    const gate = new Promise(resolve => { finish = resolve; });
+    f.lifecycle(f.main, async ({ action }) => {
+      if (action === actionToHold) { started(); await gate; }
+      return { loaded: true, unsaved: false };
+    });
+    if (operation === 'enable') await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+    manifest.version = '2.0.0'; manifest.views.push({ id: 'content', mode: 'replace', targets: [TARGET] });
+    fs.writeFileSync(file, JSON.stringify(manifest));
+    const preview = await f.invoke('plugins:import', 'directory');
+    const options = { trustUpdate: true, initialSetup: { [contentKey(TARGET)]: REF } };
+    if (operation === 'enable') await f.invoke('plugins:install', preview.token, { trustUpdate: true });
+    actionToHold = operation === 'enable' ? 'resume' : 'release';
+    const pending = (operation === 'enable'
+      ? f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true, initialSetup: options.initialSetup })
+      : f.invoke('plugins:install', preview.token, options)).then(() => null, error => error);
+    await entered;
+    try {
+      if (sameTarget && operation === 'enable') await f.invoke('plugins:setEnabled', { id: 'third-fixture', enabled: true });
+      else await f.invoke('plugins:selectContent', sameTarget ? TARGET : 'main.model.content', null);
+    } finally { finish(); }
+    const newer = { ...f.settings.pluginContentSelections }, error = await pending;
+    if (sameTarget) {
+      assert.match(error?.message || '', /Content selection changed/);
+      assert.deepEqual(f.settings.pluginContentSelections, newer, 'the newer selection must win');
+      const plugin = f.invoke('plugins:list').plugins.find(plugin => plugin.id === 'trusted-fixture');
+      assert.equal(plugin.version, operation === 'update' ? '1.0.0' : '2.0.0');
+      assert.equal(plugin.enabled, operation === 'update');
+    } else {
+      assert.equal(error, null);
+      assert.equal(f.settings.pluginContentSelections[TARGET], REF);
+      assert.equal(f.settings.pluginContentSelections['main.model.content'], undefined);
+    }
+  });
+}
 
 for (const response of [0, 1, 2]) test(`an author suggestion of native content confirms displacement, response=${response}`, async t => {
   const { f, file, manifest } = await setup(t, { competitor: true });

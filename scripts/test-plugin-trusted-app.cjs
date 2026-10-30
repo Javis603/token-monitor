@@ -325,7 +325,7 @@ app.whenReady().then(async () => {
     await js("globalThis.originalUpdateInput=document.querySelector('[aria-label=\"Fixture draft\"]');originalUpdateInput.value='UNSAVED UPDATE DRAFT'");
     const otherDir = path.join(scratch, 'other-source');
     fs.cpSync(fixtureDir, otherDir, { recursive: true });
-    const contentView = { id: 'content', mode: 'replace', targets: ['main.home.content'] };
+    const contentView = { id: 'content', mode: 'replace', targets: ['main.home.content', 'constructor', 'toString'] };
     fs.writeFileSync(path.join(otherDir, 'manifest.json'), JSON.stringify({ ...manifest, id: 'other-fixture', name: 'Other fixture', views: [...manifest.views, contentView] }));
     selectedDirectory = otherDir;
     const other = await js("pluginApi.importPackage('directory')");

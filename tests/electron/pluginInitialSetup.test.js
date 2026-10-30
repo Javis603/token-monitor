@@ -85,6 +85,26 @@ test('initial review rejects undeclared or incorrectly typed choices before chan
   assert.deepEqual(settings, { pluginInitialSetup: {} });
 });
 
+for (const target of ['constructor', 'toString']) test(`legal ${target} target remains cloneable through preview, list and native selection`, async t => {
+  const manifest = { ...raw(), views: [{ id: 'compact', mode: 'replace', targets: [target] }], defaults: {} };
+  const { f } = await fixture(t, { manifest }); f.settings.pluginContentSelections = {}; f.settings.pluginContentOrder = {};
+  const preview = await f.invoke('plugins:import', 'directory');
+  assert.doesNotThrow(() => structuredClone(preview));
+  assert.deepEqual(preview.initialSetup.fields.find(field => field.target === target).options.map(option => option.value), ['setup-fixture/compact']);
+  const installed = await f.invoke('plugins:install', preview.token);
+  assert.doesNotThrow(() => structuredClone(installed));
+  await f.invoke('plugins:setEnabled', { id: 'setup-fixture', enabled: true, initialSetup: { [`content:${target}`]: null } });
+  assert.equal(Object.hasOwn(f.settings.pluginContentSelections, target), false);
+  assert.equal(f.runtime.payload('page').views['setup-fixture/compact'].contentOrder[target], Number.MAX_SAFE_INTEGER);
+  f.settings.pluginContentOrder[target] = ['setup-fixture/compact'];
+  assert.equal(f.runtime.payload('page').views['setup-fixture/compact'].contentOrder[target], 0);
+  await f.invoke('plugins:selectContent', target, 'setup-fixture/compact');
+  assert.equal(f.settings.pluginContentSelections[target], 'setup-fixture/compact');
+  await f.invoke('plugins:selectContent', target, null);
+  assert.equal(Object.hasOwn(f.settings.pluginContentSelections, target), false);
+  assert.doesNotThrow(() => structuredClone(f.invoke('plugins:list')));
+});
+
 test('install-and-enable applies all four author suggestions together, using host-owned skin snapshots', async t => {
   const { f } = await fixture(t); const preview = await f.invoke('plugins:import', 'directory');
   assert.ok(preview.initialSetup.fields.some(field => field.kind === 'skin'));

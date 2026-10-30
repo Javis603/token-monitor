@@ -6,6 +6,7 @@ const { prepareSkinSettings } = require('./skinSettings');
 const MAX_CHOICES = 1024;
 const placementKey = (ref, surface) => `placement:${ref}:${surface}`;
 const contentKey = target => `content:${target}`;
+const contentSelection = (selections, target) => Object.hasOwn(selections || {}, target) ? selections[target] || null : null;
 const refFor = (id, view) => view.ref || `${id}/${view.id}`;
 const ownRecord = (settings, id) => Object.hasOwn(settings.pluginInitialSetup || {}, id)
   ? settings.pluginInitialSetup[id] : { values: {}, applied: [] };
@@ -50,7 +51,7 @@ function setupFields(settings, plugin, { updating = false } = {}) {
   for (const target of targets) {
     const options = views.filter(view => view.mode === 'replace' && view.targets.includes(target))
       .map(view => ({ value: refFor(plugin.id, view), label: view.title }));
-    const current = settings.pluginContentSelections?.[target] || null;
+    const current = contentSelection(settings.pluginContentSelections, target);
     if (current && !options.some(option => option.value === current)) options.push({ value: current, label: current, current: true });
     const preferred = defaults.content[target];
     const preserve = configured.has(contentKey(target)) && current === null || (updating || Object.hasOwn(settings.pluginInitialSetup || {}, plugin.id)) && current;
@@ -72,6 +73,18 @@ function setupFields(settings, plugin, { updating = false } = {}) {
 function initialSetupReview(settings, plugin, options = {}) {
   const fields = setupFields(settings, plugin, options);
   return { fields, values: Object.fromEntries(fields.map(field => [field.key, field.value])) };
+}
+
+function contentSelectionGuard(settings, plan, activate = true) {
+  const before = settings.pluginContentSelections, after = plan.patch.pluginContentSelections;
+  const targets = new Set(activate ? Object.keys(plan.values).filter(key => key.startsWith('content:')).map(key => key.slice(8)) : []);
+  if (after) for (const target of new Set([...Object.keys(before || {}), ...Object.keys(after)])) {
+    if (contentSelection(before, target) !== contentSelection(after, target)) targets.add(target);
+  }
+  const baseline = [...targets].map(target => [target, contentSelection(before, target)]);
+  return current => {
+    if (baseline.some(([target, value]) => contentSelection(current.pluginContentSelections, target) !== value)) throw new Error('Content selection changed; try again');
+  };
 }
 
 function initialSetupPlan(settings, plugin, input, { activate = true, context = {}, updating = false } = {}) {
@@ -111,7 +124,7 @@ function initialSetupPlan(settings, plugin, input, { activate = true, context = 
   if (review.fields.length) patch.pluginInitialSetup = { ...settings.pluginInitialSetup, [plugin.id]: record };
   // Preserve the user's chosen plugin when an update removes only its view.
   for (const target of targets) {
-    const selected = (patch.pluginContentSelections || settings.pluginContentSelections)?.[target];
+    const selected = contentSelection(patch.pluginContentSelections || settings.pluginContentSelections, target);
     const options = plugin.views.filter(view => view.mode === 'replace' && view.targets.includes(target)).map(view => refFor(plugin.id, view));
     if (activate && selected?.startsWith(`${plugin.id}/`) && !options.includes(selected)) {
       patch.pluginContentSelections = { ...(patch.pluginContentSelections || settings.pluginContentSelections), [target]: options[0] };
@@ -120,4 +133,4 @@ function initialSetupPlan(settings, plugin, input, { activate = true, context = 
   return { patch, values: choices };
 }
 
-module.exports = { normalizeInitialSetup, recordSetupChoice, placementKey, contentKey, initialSetupReview, initialSetupPlan };
+module.exports = { normalizeInitialSetup, recordSetupChoice, placementKey, contentKey, contentSelectionGuard, initialSetupReview, initialSetupPlan };
