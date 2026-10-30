@@ -559,6 +559,34 @@ for (const enabled of [true, false]) test(`trusted update preserves enabled=${en
   await f.api.install(f.api.preview(pkg).token, { trustUpdate: true });
   assert.deepEqual(f.settings.pluginStates['test-plugin'], { enabled, background: true, trustedRevision: require('../../src/electron/plugins/package').contentDigest(pkg) });
 });
+
+for (const missing of ['map', 'record', 'enabled']) test(`an update with missing plugin state (${missing}) saves first-use choices without applying them`, async t => {
+  const f = fixture(t);
+  f.args.manager.list = () => ({ enabled: true, plugins: [] });
+  await f.install('1.0.0', { views: [] });
+  if (missing === 'map') delete f.settings.pluginStates;
+  else if (missing === 'record') delete f.settings.pluginStates['test-plugin'];
+  else f.settings.pluginStates['test-plugin'] = { background: false };
+  Object.assign(f.settings, { pluginInitialSetup: {}, pluginContentSelections: { 'main.home.content': 'other/page' },
+    themeColors: { accent: '#123456' }, vendorColors: {}, pluginAuthorSkin: null });
+  const before = structuredClone(f.settings);
+  const pkg = parsePackage(bytes('2.0.0', { background: true,
+    views: [{ id: 'dashboard', surfaces: ['page'], defaultSurfaces: ['page'] },
+      { id: 'content', mode: 'replace', targets: ['main.model.content'] }],
+    skins: [{ id: 'blue', name: 'Blue', colors: { accent: '#abcdef' } }],
+    defaults: { background: true, skin: 'blue' } }));
+  let confirmations = 0;
+  await f.api.install(f.api.preview(pkg).token, { trustUpdate: true, beforeEnable() { confirmations++; } });
+  assert.equal(f.api.describe('test-plugin').version, '2.0.0');
+  assert.equal(confirmations, 0);
+  assert.notEqual(f.settings.pluginStates['test-plugin'].enabled, true);
+  assert.equal(f.settings.pluginStates['test-plugin'].background, before.pluginStates?.['test-plugin']?.background);
+  for (const key of ['pluginMainPages', 'pluginContentSelections', 'themeColors', 'vendorColors', 'pluginAuthorSkin']) assert.deepEqual(f.settings[key], before[key], key);
+  assert.deepEqual(f.settings.pluginInitialSetup['test-plugin'], { values: {
+    'placement:test-plugin/dashboard:page': true, 'content:main.model.content': 'test-plugin/content', background: true, skin: 'test-plugin/blue'
+  }, applied: [] });
+});
+
 for (const point of ['settings-written', 'reloaded']) test(`failed trusted update restores previous trust at ${point}`, async t => {
   let armed = false;
   const f = fixture(t, step => { if (armed && step === point) throw Error('interrupted'); });

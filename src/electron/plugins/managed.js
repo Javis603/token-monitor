@@ -174,8 +174,8 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
     busy = true;
     try {
       // Reserve the operation through consent without stopping the old backend.
-      const enabling = manager.list().enabled && ((operation === 'install' && options.trustInstall)
-        || (operation === 'update' && options.trustUpdate && getSettings().pluginStates?.[id]?.enabled));
+      const enabling = manager.list().enabled === true && ((operation === 'install' && options.trustInstall === true)
+        || (operation === 'update' && options.trustUpdate === true && getSettings().pluginStates?.[id]?.enabled === true));
       const setupOptions = { activate: enabling, context: placementContext(), updating: operation === 'update' };
       const setup = pkg && operation !== 'rollback' ? initialSetupPlan(getSettings(), pkg.manifest, options.initialSetup, setupOptions) : null;
       const confirmed = enabling ? await options.beforeEnable?.(describePackage(pkg, { locale: getLocale() }), setup) : null;
