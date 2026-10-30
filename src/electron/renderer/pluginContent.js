@@ -8,6 +8,7 @@
   // conflict convention, not a DOM security boundary.
   function create({ document, host, getViews, selection = () => null }) {
     const outlets = new Map(), watchers = new Map();
+    let nextOutlet = 0;
     const MutationObserver = document.defaultView?.MutationObserver;
     const findAnchors = (native, selector) => [...native.querySelectorAll(selector)].filter(node => !node.closest('.plugin-content'));
     function unwatch(scope) { watchers.get(scope)?.observer.disconnect(); watchers.delete(scope); }
@@ -95,10 +96,28 @@
         try { anchors = selector ? findAnchors(native, selector) : [native]; }
         catch (error) { console.error('[plugins] Invalid content selector:', selector, error.message); continue; }
         if (selector) selectors.push(selector);
+        const current = new Set(anchors);
+        const previous = [...outlets].filter(([, record]) => record.scope === scope && record.selector === selector);
+        const byNative = new Map(previous.map(([key, record]) => [record.native, { key, record }]));
+        const bySlot = new Map(previous.map(([key, record]) => [JSON.stringify([record.anchorKey, record.anchorIndex]), { key, record }]));
         anchors.forEach((anchor, index) => {
-          const key = JSON.stringify([scope, selector, anchor.dataset?.key || anchor.id || '', index]);
+          const anchorKey = anchor.dataset?.key || anchor.id || '';
+          const existing = byNative.get(anchor);
+          const same = existing?.record.anchorKey === anchorKey ? existing : null;
+          if (existing && !same) {
+            // Reset this logical identity before a new record captures native
+            // visibility; the old replacement may currently be hiding it.
+            clear(existing.record); outlets.delete(existing.key);
+          }
+          const slot = bySlot.get(JSON.stringify([anchorKey, index]));
+          // A surviving native anchor keeps its outlet even after a reorder.
+          // Reuse a rebuilt slot only if its former anchor is not still present;
+          // otherwise an insertion/removal could steal another anchor's draft.
+          const retained = same || (slot && !current.has(slot.record.native) ? slot : null);
+          const key = retained?.key || JSON.stringify([scope, selector, ++nextOutlet]);
           wanted.add(key);
           renderOne(target, anchor, { ...context, root: native, anchorIndex: index }, key, scope, views, pendingMounts);
+          Object.assign(outlets.get(key), { selector, anchorKey, anchorIndex: index });
         });
       }
       for (const [key, record] of outlets) if (record.scope === scope && !wanted.has(key)) { clear(record); outlets.delete(key); }
@@ -112,7 +131,11 @@
       for (const [anchor, nodes] of anchors) {
         let previous = anchor;
         for (const [, node] of nodes.sort((a, b) => ranks.get(a[0]) - ranks.get(b[0]))) {
-          if (node !== previous.nextSibling) anchor.parentNode.insertBefore(node, previous.nextSibling);
+          if (node !== previous.nextSibling) {
+            const parent = anchor.parentNode;
+            if (parent.moveBefore && parent.isConnected && node.isConnected) parent.moveBefore(node, previous.nextSibling);
+            else parent.insertBefore(node, previous.nextSibling);
+          }
           previous = node;
         }
       }
@@ -121,6 +144,12 @@
     }
     function hasTarget(target) { return getViews().some(view => view.targets?.includes(target) && (view.mode !== 'replace' || selection(target) === view.ref)); }
     return { render, hasTarget,
+      hasAnchor(native) { return [...outlets.values()].some(record => record.native === native && record.nodes.size > 0); },
+      nodesFor(native) {
+        if (!native.parentNode) return [];
+        const owned = new Set([...outlets.values()].filter(record => record.native === native).flatMap(record => [...record.nodes.values()]));
+        return [...native.parentNode.children].filter(node => owned.has(node));
+      },
       retain(targets) {
         for (const [scope, watcher] of watchers) if (!targets.includes(watcher.target) || !watcher.native.isConnected) unwatch(scope);
         for (const [key, record] of outlets) {

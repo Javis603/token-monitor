@@ -6340,11 +6340,17 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
 }
 
 function homeModuleShell(kind, title, viewId, meta = '') {
-  const module = document.createElement('section');
+  // A content outlet sits beside its native anchor. Keep that connected shell
+  // while refreshing the native fallback; retaining only author children after
+  // removing their ancestor is too late to preserve focus and scroll anchoring.
+  // Standalone plugin modules already retain their own shell by view ref.
+  const retained = kind === 'plugin' ? null : [...els.homePanel.children].find(node => node.classList.contains(`home-module-${kind}`)
+    && [node, ...node.children].some(anchor => pluginContent?.hasAnchor(anchor)));
+  const module = retained || document.createElement('section');
   module.className = `home-module home-module-${kind}`;
   module.setAttribute('aria-label', title);
   // Plugin modules have no detail view to jump to.
-  if (viewId) {
+  if (viewId && !retained) {
     module.tabIndex = 0;
     module.setAttribute('role', 'button');
     module.addEventListener('click', (event) => {
@@ -6383,6 +6389,13 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   head.append(titleWrap, end);
   const body = document.createElement('div');
   body.className = 'home-module-body';
+  if (retained) {
+    const nativeHead = module.querySelector('.home-module-head');
+    const nativeBody = module.querySelector('.home-module-body');
+    nativeHead.replaceChildren(...head.childNodes);
+    nativeBody.replaceChildren();
+    return { module, body: nativeBody };
+  }
   module.append(head, body);
   return { module, body };
 }
@@ -6675,7 +6688,7 @@ function scheduleHomeSessionRepaint(rows) {
     const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
     const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
     const next = renderHomeSessionModule(nextRows);
-    current.replaceWith(next);
+    if (current !== next) current.replaceWith(next);
     if (hadFocus) next.focus();
     if (hadHeadFocus) next.querySelector('.home-module-head')?.focus({ preventScroll: true });
     if (focusedKey) {
@@ -7320,13 +7333,20 @@ function renderHome() {
   });
   // Reconcile siblings without detaching retained plugin controls. Collector
   // pushes must not discard focused drafts or cancel captured drawing gestures.
-  for (const child of [...els.homePanel.children]) if (!nodes.includes(child)) child.remove();
-  nodes.forEach((node, index) => {
+  // A module-level selector places author controls beside the module. Reorder
+  // those outlets with their anchor instead of moving them back after rendering.
+  const ordered = nodes.flatMap(node => [node, ...pluginContent?.nodesFor(node) || []]);
+  ordered.forEach((node, index) => {
     const current = els.homePanel.children[index];
     if (node === current) return;
     if (node.parentNode === els.homePanel && els.homePanel.moveBefore) els.homePanel.moveBefore(node, current || null);
     else els.homePanel.insertBefore(node, current || null);
   });
+  // Attach replacements before removing obsolete siblings: a synchronous layout
+  // must never observe the page with its retained content/scroll range missing.
+  for (const child of [...els.homePanel.children]) {
+    if (!ordered.includes(child)) child.remove();
+  }
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
@@ -7390,7 +7410,9 @@ function periodContentAvailability() {
 
 function render() {
   renderAppContent();
-  pluginViewHost?.refreshContext();
+  // Composition supplies current native anchors/context below. Do not dispatch
+  // an extra update with the previous composition options first.
+  pluginViewHost?.refreshContext({ includeContent: false });
   if (pluginContent) {
     const target = `main.${state.breakdown}.content`;
     const roots = { home: els.homePanel, limits: els.limitsPanel, trends: els.trendsPanel, status: els.serviceStatusPanel };
