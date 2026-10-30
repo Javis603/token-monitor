@@ -38,8 +38,8 @@ module.exports = {
   accountStatus: ({ settings, env, limits }) => {
     const cookie = limits.traeCookie(env, settings || {});
     const token = limits.traeAccessToken(env, settings || {});
-    const cookieSource = settings?.traeCookie ? 'settings' : limits.traeCookie(env) ? 'env' : '';
-    const tokenSource = settings?.traeAccessToken ? 'settings' : limits.traeAccessToken(env) ? 'env' : '';
+    const cookieSource = limits.traeCookie({}, settings || {}) ? 'settings' : cookie ? 'env' : '';
+    const tokenSource = limits.traeAccessToken({}, settings || {}) ? 'settings' : token ? 'env' : '';
     return {
       traeCookieConfigured: Boolean(cookie),
       traeTokenConfigured: Boolean(token),

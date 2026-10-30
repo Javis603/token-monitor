@@ -573,3 +573,17 @@ test('MiniMax billing choice survives reload and clears only its provider quota'
   const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
   assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
 });
+
+test('Trae credential source follows the usable credential after a malformed stored value', () => {
+  for (const [key, envKey] of [['traeCookie', 'TRAE_COOKIE'], ['traeAccessToken', 'TRAE_ACCESS_TOKEN']]) {
+    const settings = { [key]: 'invalid\r\ncredential' };
+    const fallback = accountStatusProjection(settings, { [envKey]: 'usable-env-credential' });
+    assert.equal(fallback.traeAccessTokenConfigured, true);
+    assert.equal(fallback.traeAccessTokenSource, 'env');
+    const missing = accountStatusProjection(settings, {});
+    assert.equal(missing.traeAccessTokenConfigured, false);
+    assert.equal(missing.traeAccessTokenSource, '');
+    const saved = accountStatusProjection({ [key]: 'usable-stored-credential' }, { [envKey]: 'usable-env-credential' });
+    assert.equal(saved.traeAccessTokenSource, 'settings');
+  }
+});
