@@ -1234,6 +1234,14 @@ test('Qoder renders its single Credits billing window full-width', () => {
   assert.equal(windowText('qoder', credits).detail, '380/500');
   assert.equal(windowText('qoder', credits, { showLimitUsed: true }).detail, '120/500');
 });
+test('OmniRoute renders budget and quota pool windows full-width', () => {
+  const renderProviderWindows = viewBody('renderProviderWindows');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'omniroute'/);
+  assert.match(renderProviderWindows, /limit-windows-omniroute/);
+  assert.match(renderProviderWindows, /limit-window-wide/);
+});
+
 
 test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');

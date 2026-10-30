@@ -94,6 +94,7 @@
     alibaba: ['Token Plan', 'Web'],
     stepfun: ['Coding/Token Plan', 'Web'],
     notion: ['Web', 'Manual'],
+    omniroute: ['Relay', 'API key'],
     thirdparty: ['Relay', 'API']
   };
 

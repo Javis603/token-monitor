@@ -94,6 +94,7 @@
     { id: 'trae', label: 'Trae CN', color: '#32F08C' },
     { id: 'alibaba', label: 'Alibaba Cloud', color: '#615CED', widgetColor: '#7771F4' },
     { id: 'stepfun', label: 'StepFun', color: '#000000', widgetInk: true },
+    { id: 'omniroute', label: 'OmniRoute', color: '#E54D5E' },
     { id: 'nvidia', label: 'NVIDIA', color: '#74B71B' },
     { id: 'typesafe', label: 'TypeSafe', color: '#000000', widgetInk: true },
     { id: 'notion', label: 'Notion AI', color: '#FFFFFF' },

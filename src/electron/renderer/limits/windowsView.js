@@ -1571,6 +1571,30 @@
         windows.append(node);
       }
       if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+    } else if (provider.provider === 'omniroute') {
+      windows.classList.add('limit-windows-omniroute');
+      for (const quotaWindow of provider.windows || []) {
+        const hasMeter = quotaWindow?.showMeter !== false;
+        const remaining = optionalFiniteNumber(quotaWindow?.remaining);
+        const limit = optionalFiniteNumber(quotaWindow?.limit);
+        const isSpend = quotaWindow.metric === 'spend' || quotaWindow.currency === 'USD';
+        let absoluteDetail = '';
+        if (hasMeter && remaining !== null && limit !== null) {
+          absoluteDetail = isSpend
+            ? `${formatMoney(remaining, quotaWindow.currency || 'USD')} left · ${formatMoney(limit, quotaWindow.currency || 'USD')} total`
+            : `${remaining.toLocaleString()} left · ${limit.toLocaleString()} total`;
+        }
+        const node = limitWindowNode(
+          providerWindowLabel(provider, quotaWindow, quotaWindow?.label || 'Budget'),
+          quotaWindow,
+          color,
+          0.85,
+          null,
+          absoluteDetail
+        );
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
     } else if (provider.provider === 'ollama') {
       const spent = spendWindow(provider);
       const visibleSpend = options.showAllUsageItems || !usageItems.isLimitWindowHidden(settings()?.limitProviderHiddenItems, 'ollama', spent)

@@ -98,6 +98,7 @@ const supportedToolOrder = [
   'Alibaba Cloud',
   'StepFun',
   'Notion AI',
+  'OmniRoute',
   'Third-party APIs'
 ];
 
@@ -148,6 +149,7 @@ const supportedToolIdOrder = [
   'alibaba',
   'stepfun',
   'notion',
+  'omniroute',
   'thirdparty'
 ];
 

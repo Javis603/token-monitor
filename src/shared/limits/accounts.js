@@ -122,6 +122,7 @@ const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
   registerProvider(require('../providers/alibaba/account'), () => require('../providers/alibaba/limits')),
   registerProvider(require('../providers/stepfun/account'), () => require('../providers/stepfun/limits')),
   registerProvider(require('../providers/notion/account'), () => require('../providers/notion/limits')),
+  registerProvider(require('../providers/omniroute/account'), () => require('../providers/omniroute/limits')),
   registerProvider(require('../providers/thirdparty/account'), () => require('../providers/thirdparty/limits'))
 ].map((decl) => Object.freeze({
   ...decl,
