@@ -155,6 +155,7 @@ const {
 const { createCredentialCommands } = require('./limits/credentialCommands');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
+const { looksLikeKimiRefreshToken } = require('../shared/providers/kimi/desktopSession');
 const {
   codexAuthIdentity,
   codexAccountKey,
@@ -8097,6 +8098,14 @@ app.whenReady().then(() => {
     // Account fields declared persist:'never' (managed account lists, profile
     // maps, workbuddy session fields) are stripped by the registry walk below.
     normalizeAccountPatch(patch, normalizedPatch);
+    // The kimi paste box accepts either token type; a refresh-classified value
+    // belongs to the self-renewing session field instead of the short-lived
+    // access-token one (registry normalize is per-key, so the routing across
+    // the two kimi fields lives here).
+    if (normalizedPatch.kimiWebAccessToken && looksLikeKimiRefreshToken(normalizedPatch.kimiWebAccessToken)) {
+      normalizedPatch.kimiWebRefreshToken = normalizedPatch.kimiWebAccessToken;
+      delete normalizedPatch.kimiWebAccessToken;
+    }
     // Subscriptions go through subscriptions:save, which knows whether this
     // device owns the list or shares it with a hub. The explicit fields further
     // down are what actually hold the line — they are applied after the spread
