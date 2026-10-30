@@ -256,12 +256,13 @@ function resolveSessionMetadata(sessionIds, context) {
     const meta = context.fileSessionMetadata(sessionId, filePath, result.get(sessionId));
     const nativeSessionId = nativeIdForFile(filePath);
     if (nativeSessionId) meta.nativeSessionId = nativeSessionId;
+    // Explicitly clear legacy countdowns, including sessions outside the tail-read window.
+    meta.promptCache = null;
     if (!shouldReadSessionContext(meta.lastUsedAt, context.now)) return meta;
     const state = readCodexSessionState(filePath, deps.codexDeps);
     // A fresh turn (including an explicit unknown) wins over the catalog.
     // Age or a failed read alone must not erase this persistent setting.
     if (Object.prototype.hasOwnProperty.call(state, 'reasoningEffort')) meta.reasoningEffort = state.reasoningEffort;
-    if (state.promptCacheState?.observation !== undefined) meta.promptCache = state.promptCacheState.observation;
     const sessionContext = deps.readCodexSessionContext ? readContext(filePath) : state.context;
     // The turn boundary rides the same tail and answers the other half of the
     // question the window cannot: whether the agent is still generating.

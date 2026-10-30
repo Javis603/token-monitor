@@ -14,8 +14,9 @@ const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const maintainerSources = require('./maintainerSources');
 const { createPluginManager } = require('./manager');
+const { initialSetupReview, initialSetupPlan, recordSetupChoice, placementKey, contentKey, contentSelectionGuard } = require('./initialSetup');
 const { translate } = require('../renderer/i18n');
-const { initializePlacementPatch, placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
+const { placementPatch, placementsFor, summaryBitmapRefs } = require('./placementSettings');
 const { trayLayoutPluginRefs } = require('../../shared/trayLayout');
 const { createElectronNetFetch } = require('../limits/fetch');
 const { createOutboundFetch, resolveProxyConfig } = require('../../shared/outboundFetch');
@@ -289,6 +290,7 @@ function createPluginRuntime({
         views: [], skins: [], errors: [] });
     }
     for (const plugin of list.plugins) {
+      plugin.initialSetup = initialSetupReview(settings, plugin);
       plugin.installation = managed.describe(plugin.id);
       if (plugin.installation) plugin.settingsIdentity = `${plugin.installation.sha256}:${plugin.installation.installedAt}`;
       for (const view of plugin.views || []) view.placements = placementsFor(settings, view.ref);
@@ -322,7 +324,7 @@ function createPluginRuntime({
 
   const lifecycleHosts = new Set(), lifecyclePlugins = new Map(), observedLifecycleHosts = new WeakSet(), lifecycleRequests = new Map(), failedCleanup = new Map();
   let lifecycleSequence = 0;
-  function requestLifecycle(host, action, ids) {
+  function requestLifecycle(host, action, ids, content) {
     if (host.isDestroyed()) return Promise.resolve({});
     return new Promise((resolve, reject) => {
       const request = ++lifecycleSequence;
@@ -332,13 +334,13 @@ function createPluginRuntime({
       };
       const timer = setTimeout(() => finish('Plugin UI did not respond'), 5000);
       lifecycleRequests.set(request, { host, finish });
-      host.send('plugins:lifecycle', { request, action, ids });
+      host.send('plugins:lifecycle', { request, action, ids, ...(content ? { content } : {}) });
     });
   }
-  async function inspectHosts(ids) {
+  async function inspectHosts(ids, content) {
     const results = await Promise.all([...lifecycleHosts].filter(host => ids.some(id => lifecyclePlugins.get(host)?.get(id) === 'loaded')).map(async host => {
       const loadedIds = ids.filter(id => lifecyclePlugins.get(host)?.get(id) === 'loaded');
-      try { return { host, ids: loadedIds, ...await requestLifecycle(host, 'inspect', loadedIds) }; }
+      try { return { host, ids: loadedIds, ...await requestLifecycle(host, 'inspect', loadedIds, content) }; }
       catch (error) { return { host, ids: loadedIds, loaded: true, error: error.message }; }
     }));
     return results.filter(item => !item.host.isDestroyed() && item.loaded);
@@ -346,7 +348,7 @@ function createPluginRuntime({
   async function confirm(event, note, detail = null) {
     requireMain(event);
     const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
-      type: 'warning', title: translate(getLocale(), note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
+      type: 'warning', title: translate(getLocale(), note === 'plugins.content.unsavedNote' ? 'plugins.content.unsavedTitle' : note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
       message: translate(getLocale(), note),
       ...(detail ? { detail: translate(getLocale(), detail) } : {}),
       buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.trusted.continue')],
@@ -416,7 +418,7 @@ function createPluginRuntime({
     return result;
   }
 
-  async function changePackage(event, change, ids) {
+  async function changePackage(event, change, ids, beforeRelease) {
     requireMain(event);
     const affected = await inspectHosts(ids);
     for (const [host, failedIds] of failedCleanup) {
@@ -429,6 +431,7 @@ function createPluginRuntime({
     const unsaved = affected.some(item => item.unsaved);
     if (reload.length) await confirm(event, 'plugins.trusted.reloadNote', unsaved ? 'plugins.trusted.packageUnsavedNote' : null);
     else if (unsaved) await confirm(event, 'plugins.trusted.packageUnsavedNote');
+    await beforeRelease?.();
     const released = [], recovery = [];
     try {
       for (const item of affected.filter(item => !item.error)) {
@@ -471,6 +474,47 @@ function createPluginRuntime({
     return listWithPlacements();
   }
 
+  async function protectContentSwitch(event, next, excludePluginId) {
+    const current = contentSelections();
+    const active = manager.list().plugins.filter(plugin => plugin.status === 'active' && plugin.id !== excludePluginId);
+    const content = Object.entries(current).filter(([target, ref]) => next[target] !== ref
+      && active.some(plugin => plugin.views.some(view => view.ref === ref && view.mode === 'replace' && view.targets.includes(target))))
+      .map(([target, ref]) => ({ target, ref }));
+    if (!content.length) return;
+    const ids = [...new Set(content.map(item => item.ref.split('/')[0]))];
+    const affected = await inspectHosts(ids, content);
+    if (affected.some(item => item.error)) throw new Error(translate(getLocale(), 'plugins.content.inspectFailed'));
+    if (affected.some(item => item.unsaved)) await confirm(event, 'plugins.content.unsavedNote');
+    if (content.some(item => contentSelections()[item.target] !== item.ref)) throw new Error('Content selection changed; try again');
+  }
+
+  async function confirmContentSwitch(event, plugin, plan, { packageChange = false } = {}) {
+    const current = contentSelections();
+    const next = { ...(plan.patch.pluginContentSelections || current) };
+    const displaced = manager.list().plugins.filter(item => item.id !== plugin.id && item.enabled && item.trusted
+      && item.views.some(view => view.mode === 'replace' && view.targets.some(target => current[target] === view.ref
+        && Object.hasOwn(plan.values, contentKey(target)) && next[target] !== view.ref)));
+    if (displaced.length) {
+      const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
+        type: 'question', title: translate(getLocale(), 'plugins.content.switchTitle', { name: plugin.name }),
+        message: translate(getLocale(), 'plugins.content.switchNote', { names: displaced.map(item => item.name).join(', ') }),
+        buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.content.switch'), translate(getLocale(), 'plugins.content.keep')],
+        defaultId: 2, cancelId: 0
+      });
+      if (response.response === 0) throw new Error('Plugin change cancelled');
+      if (response.response === 2) {
+        for (const plugin of displaced) for (const view of plugin.views) {
+          for (const target of view.targets) if (current[target] === view.ref && Object.hasOwn(plan.values, contentKey(target))) {
+            plan.values[contentKey(target)] = view.ref;
+            next[target] = view.ref;
+          }
+        }
+      }
+    }
+    await protectContentSwitch(event, next, packageChange ? plugin.id : null);
+    return plan.values;
+  }
+
   function registerIpc() {
     handle('plugins:orderContent', (event, target, refs) => {
       requireMain(event);
@@ -481,14 +525,28 @@ function createPluginRuntime({
       persistManagementSettings({ pluginContentOrder: next });
       manager.settingsChanged(); return listWithPlacements();
     });
-    handle('plugins:selectContent', (event, target, ref) => {
+    handle('plugins:selectContent', async (event, target, ref) => {
       requireMain(event);
       if (typeof target !== 'string' || !/^[a-zA-Z][a-zA-Z0-9.-]{0,119}$/.test(target)) throw new Error('Invalid content target');
-      if (ref !== null && !manager.list().plugins.some(plugin => plugin.status === 'active' && plugin.views?.some(view => view.ref === ref && view.mode === 'replace' && view.targets.includes(target)))) throw new Error('Content replacement is unavailable');
-      const next = { ...contentSelections() };
-      if (ref === null) delete next[target]; else next[target] = ref;
-      if (Object.keys(next).length > 128) throw new Error('Too many content selections');
-      persistManagementSettings({ pluginContentSelections: next });
+      const validate = () => {
+        if (ref !== null && !manager.list().plugins.some(plugin => plugin.status === 'active' && plugin.views?.some(view => view.ref === ref && view.mode === 'replace' && view.targets.includes(target)))) throw new Error('Content replacement is unavailable');
+      };
+      const selection = () => {
+        const next = { ...contentSelections() };
+        if (ref === null) delete next[target]; else next[target] = ref;
+        if (Object.keys(next).length > 128) throw new Error('Too many content selections');
+        return next;
+      };
+      validate();
+      const previous = contentSelections()[target], next = selection();
+      await protectContentSwitch(event, next);
+      if (contentSelections()[target] !== previous) throw new Error('Content selection changed; try again');
+      validate();
+      const patch = { pluginContentSelections: selection() };
+      for (const plugin of manager.list().plugins.filter(plugin => plugin.views?.some(view => view.mode === 'replace' && view.targets.includes(target)))) {
+        patch.pluginInitialSetup = recordSetupChoice({ ...getSettings(), ...patch }, plugin.id, contentKey(target), ref);
+      }
+      persistManagementSettings(patch);
       manager.settingsChanged(); return listWithPlacements();
     });
     handle('plugins:contentSelections', event => { requireHost(event); registerSubscriber(event.sender); return { ...contentSelections() }; });
@@ -498,19 +556,33 @@ function createPluginRuntime({
     });
     handle('plugins:getSettings', (event, id) => { requireMain(event); return settingsResult(() => manager.getAuthorSettings(id)); });
     handle('plugins:updateSettings', (event, id, input) => { requireMain(event); return settingsResult(() => manager.updateAuthorSettings(id, input)); });
-    handle('plugins:setEnabled', async (event, { id, enabled } = {}) => {
+    handle('plugins:setEnabled', async (event, { id, enabled, initialSetup } = {}) => {
       requireMain(event); id = String(id);
+      const plugin = manager.list().plugins.find(item => item.id === id);
+      if (!plugin?.revision) throw new Error('Plugin is unavailable');
+      const plan = enabled === true ? initialSetupPlan(getSettings(), plugin, initialSetup, { context: placementContext() }) : null;
+      const checkContent = plan ? contentSelectionGuard(getSettings(), plan) : null;
+      const choices = plan ? await confirmContentSwitch(event, plugin, plan) : null;
+      checkContent?.(getSettings());
       const finish = enabled ? await resumeHosts(event, [id]) : await prepareDisable(event, [id]);
       if (enabled === true) {
-        const patch = initializePlacementPatch(getSettings(), id, placementContext(), manager.list().plugins.find(plugin => plugin.id === id)?.views || []);
-        if (Object.keys(patch).length) persistManagementSettings(patch);
+        try {
+          checkContent(getSettings());
+          const patch = initialSetupPlan(getSettings(), plugin, choices, { context: placementContext() }).patch;
+          if (Object.keys(patch).length) persistManagementSettings(patch);
+          manager.setEnabled(id, true);
+        } finally { await finish(); }
+      } else {
+        manager.setEnabled(id, false);
+        await finish();
       }
-      manager.setEnabled(id, enabled === true);
-      await finish();
       return listWithPlacements();
     });
     handle('plugins:setBackground', (event, { id, enabled } = {}) => {
       requireMain(event);
+      const plugin = manager.list().plugins.find(plugin => plugin.id === String(id));
+      if (!plugin?.background.supported) throw new Error('Plugin does not support background execution');
+      persistManagementSettings({ pluginInitialSetup: recordSetupChoice(getSettings(), String(id), 'background', enabled === true) });
       manager.setBackground(String(id), enabled === true);
       return listWithPlacements();
     });
@@ -549,7 +621,15 @@ function createPluginRuntime({
       if (selection.canceled || !selection.filePaths.length) return null;
       return kind === 'directory' ? managed.previewDirectory(selection.filePaths[0]) : managed.previewFile(selection.filePaths[0]);
     });
-    handle('plugins:install', (event, token, options) => changePackage(event, () => managed.install(token, { trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true, placements: options?.placements }), [managed.previewId(token)]));
+    handle('plugins:install', (event, token, options) => {
+      requireMain(event);
+      const id = managed.previewId(token);
+      return managed.install(token, {
+        trustUpdate: options?.trustUpdate === true, trustInstall: options?.trustInstall === true, initialSetup: options?.initialSetup,
+        beforeEnable: (plugin, plan) => confirmContentSwitch(event, plugin, plan, { packageChange: true }),
+        withLifecycle: (change, beforeRelease) => changePackage(event, change, [id], beforeRelease)
+      });
+    });
     handle('plugins:cancelInstall', (event, token) => { requireMain(event); managed.cancel(token); });
     handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id), [id]));
     handle('plugins:uninstall', (event, id, options) => changePackage(event, () => managed.uninstall(id, options), [id]));
@@ -567,9 +647,7 @@ function createPluginRuntime({
       const patch = placementPatch(getSettings() || {}, { ref: String(ref || ''), surface: String(surface || ''), placed: placed === true }, placementContext());
       const id = view.pluginId;
       applySettingsPatch(patch);
-      const preferences = getSettings().pluginPlacementDefaults;
-      const preference = preferences && Object.hasOwn(preferences, id) ? preferences[id] : null;
-      if (preference && !preference.applied) persistManagementSettings({ pluginPlacementDefaults: { ...getSettings().pluginPlacementDefaults, [id]: { ...preference, applied: true } } });
+      persistManagementSettings({ pluginInitialSetup: recordSetupChoice(getSettings(), id, placementKey(view.ref, surface), placed === true) });
       return listWithPlacements();
     });
     handle('plugins:skins', (event) => {

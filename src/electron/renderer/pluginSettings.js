@@ -13,6 +13,17 @@
 })(typeof window !== 'undefined' ? window : null, function createPluginSettingsApi(positionApi) {
   const isFeatured = origin => origin?.kind === 'official' || origin?.kind === 'maintainer';
   const SURFACE_ORDER = ['home', 'page', 'tray', 'edgeDock', 'notch'];
+  const SURFACE_LABEL_KEYS = { home: 'views.home', page: 'plugins.initial.purpose.page', tray: 'settings.plugins.surface.tray',
+    edgeDock: 'settings.display.edgeDock', notch: 'settings.notch.title' };
+  const surfaceLabel = (surface, t) => t(SURFACE_LABEL_KEYS[surface] || `settings.plugins.surface.${surface}`);
+
+  function contentTargetLabel(target, t) {
+    const [surface, page, kind] = target.split('.');
+    const name = surface === 'edgeDock' && page === 'rail' ? kind : page;
+    const key = ['home', 'limits', 'model', 'tool', 'device', 'project', 'session', 'sessions', 'trends', 'status'].includes(name)
+      ? `views.${name === 'sessions' ? 'session' : name}` : `plugins.content.${name}`;
+    return surface === 'main' ? t(key) : `${surfaceLabel(surface, t)} · ${t(key)}${page === 'rail' ? ` · ${t('plugins.content.rail')}` : ''}`;
+  }
 
   function el(document, tag, className, text) {
     const node = document.createElement(tag);
@@ -323,6 +334,88 @@
       });
     }
 
+    function choiceLabel(row, input, name, purpose) {
+      row.append(input, el(document, 'span', 'plugin-choice-name', name));
+      if (purpose) {
+        row.classList.add('plugin-tagged-choice');
+        row.append(document.createTextNode(' '), el(document, 'span', 'plugin-purpose-tag', purpose));
+      }
+    }
+
+    function choiceControls({ key, title, options, value, change, toggle = null }) {
+      const group = el(document, 'fieldset', 'plugin-choice-group');
+      group.dataset.choiceKey = key;
+      if (toggle) {
+        const row = el(document, 'label', 'plugin-placement-choice');
+        const input = el(document, 'input'); input.type = 'checkbox'; input.value = toggle.value;
+        input.checked = value === toggle.value; input.dataset.controlKey = key;
+        input.addEventListener('change', () => change(input.checked ? toggle.value : toggle.offValue));
+        choiceLabel(row, input, toggle.label, toggle.purpose); group.append(row);
+      } else {
+        group.append(el(document, 'legend', '', title));
+        const name = `plugin-choice-${++menuId}`;
+        for (const option of options) {
+          const row = el(document, 'label', 'plugin-placement-choice');
+          const input = el(document, 'input'); input.type = 'radio'; input.name = name; input.value = option.value ?? '';
+          input.checked = value === option.value; input.dataset.controlKey = `${key}/${option.value ?? 'native'}`;
+          input.addEventListener('change', () => { if (input.checked) change(option.value); });
+          choiceLabel(row, input, option.label, option.purpose); group.append(row);
+        }
+      }
+      return group;
+    }
+
+    function initialSetupControls(source) {
+      const review = source.initialSetup;
+      if (!review?.fields?.length) return null;
+      source.initialChoices ??= { ...review.values };
+      const group = el(document, 'fieldset', 'plugin-initial-setup');
+      group.append(el(document, 'legend', '', t('plugins.initial.title')),
+        el(document, 'p', 'settings-note', t('plugins.initial.note')));
+      const rows = el(document, 'div', 'plugin-initial-choices'); group.append(rows);
+      for (const field of review.fields) {
+        if (field.kind === 'placement' || field.kind === 'background') {
+          const row = el(document, 'label', 'plugin-placement-choice');
+          const input = el(document, 'input'); input.type = 'checkbox'; input.checked = source.initialChoices[field.key] === true;
+          input.dataset.controlKey = `initial/${field.key}`;
+          input.addEventListener('change', () => { source.initialChoices[field.key] = input.checked; });
+          choiceLabel(row, input, field.kind === 'background' ? t('settings.plugins.background') : field.title,
+            field.kind === 'placement' ? field.surface === 'home'
+              ? t('plugins.initial.purpose.home', { name: surfaceLabel('home', t) }) : surfaceLabel(field.surface, t) : null);
+          rows.append(row);
+        } else {
+          if (field.kind === 'content') {
+            const current = field.options.find(option => option.current);
+            const choices = field.options.filter(option => !option.current).map(option => ({ ref: option.value, pluginName: source.name }));
+            rows.append(contentControls({ key: `initial/${field.key}`, target: field.target, choices, value: source.initialChoices[field.key],
+              current: current ? { value: current.value, label: t('plugins.initial.keepCurrent') } : null,
+              change: value => { source.initialChoices[field.key] = value; render(); }, tagged: true }));
+            continue;
+          }
+          const options = [{ value: null, label: t('plugins.initial.keepAppearance') },
+            ...field.options.map(option => ({ value: option.value, label: option.label, purpose: t('plugins.initial.appearance') }))];
+          rows.append(choiceControls({ key: `initial/${field.key}`, title: t('plugins.initial.appearance'),
+            options, value: source.initialChoices[field.key], change: value => { source.initialChoices[field.key] = value; },
+            toggle: field.options.length === 1 ? { value: field.options[0].value, offValue: null,
+              label: field.options[0].label, purpose: t('plugins.initial.appearance') } : null }));
+        }
+      }
+      return group;
+    }
+
+    function contentControls({ key, target, choices, value, change, current = null, tagged = false }) {
+      const label = contentTargetLabel(target, t);
+      const purpose = tagged ? t('plugins.initial.purpose.content', { target: label }) : null;
+      const options = [{ value: null, label: t('plugins.content.native') },
+        ...(current ? [current] : []), ...choices.map(view => ({ value: view.ref,
+          label: tagged ? view.pluginName : t('plugins.content.use', { name: view.pluginName }), purpose }))];
+      const row = choiceControls({ key, title: t('plugins.content.source', { target: label }), options, value, change,
+        toggle: choices.length === 1 && !current ? { value: choices[0].ref, offValue: null,
+          label: tagged ? choices[0].pluginName : t('plugins.content.replace', { name: choices[0].pluginName, target: label }), purpose } : null });
+      row.classList.add('plugin-content-choice');
+      return row;
+    }
+
     function packagePanel() {
       const p = packagePreview;
       const featured = isFeatured(p.origin);
@@ -340,28 +433,12 @@
       panel.append(el(document, 'p', 'settings-note', t(featured
         ? p.operation === 'update' ? 'plugins.package.officialUpdate' : list.enabled ? 'plugins.package.officialInstall' : 'plugins.package.officialEnableLater'
         : p.operation === 'install' ? (list.enabled ? 'plugins.package.installConsent' : 'plugins.package.enableLater') : 'plugins.package.grants')));
-      if (p.operation === 'install' && !p.placementsRetained && p.views?.some(view => view.surfaces.some(surface => SURFACE_ORDER.includes(surface)))) {
-        p.placements ??= p.views.flatMap(view => (view.defaultSurfaces || []).map(surface => ({ ref: view.ref, surface })));
-        const locations = el(document, 'fieldset', 'plugin-default-placements');
-        locations.append(el(document, 'legend', '', t('plugins.package.initialLocations')));
-        locations.append(el(document, 'p', 'settings-note', t('plugins.package.initialLocationsNote')));
-        for (const view of p.views) for (const surface of SURFACE_ORDER.filter(surface => view.surfaces.includes(surface))) {
-          const label = el(document, 'label', 'plugin-placement-choice');
-          const input = el(document, 'input'); input.type = 'checkbox'; input.dataset.ref = view.ref; input.dataset.surface = surface;
-          input.checked = p.placements.some(choice => choice.ref === view.ref && choice.surface === surface);
-          input.addEventListener('change', () => {
-            p.placements = p.placements.filter(choice => !(choice.ref === view.ref && choice.surface === surface));
-            if (input.checked) p.placements.push({ ref: view.ref, surface });
-          });
-          label.append(input, el(document, 'span', '', `${view.title} · ${t(`settings.plugins.surface.${surface}`)}`)); locations.append(label);
-        }
-        panel.append(locations);
-      }
+      const setup = initialSetupControls(p); if (setup) panel.append(setup);
       const details = el(document, 'details', 'plugin-logs'); details.append(el(document, 'summary', '', t('plugins.package.integrity')));
       details.append(el(document, 'code', 'plugin-log', p.sha256)); panel.append(details);
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const install = trustInstall => void run(async () => {
-        const next = await api.install(p.token, { trustUpdate: p.operation === 'update', trustInstall, placements: p.placements });
+        const next = await api.install(p.token, { trustUpdate: p.operation === 'update', trustInstall, initialSetup: p.initialChoices });
         packagePreview = null; catalogReview = null; activeTab = 'installed';
         if (p.operation === 'update' && next.plugins.find(plugin => plugin.id === p.id)?.status === 'needsApproval') { consentFor = p.id; revealConsent = true; }
         return next;
@@ -721,17 +798,19 @@
     function consentPanel(plugin) {
       const panel = el(document, 'div', 'plugin-consent');
       const featured = isFeatured(plugin.installation?.origin);
-      panel.append(el(document, 'div', 'plugin-consent-title', t(featured ? 'settings.plugins.enable' : 'settings.plugins.consentTitle', { name: plugin.name })));
-      if (!featured) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
+      const needsTrust = !featured && !plugin.trusted;
+      panel.append(el(document, 'div', 'plugin-consent-title', t(needsTrust ? 'settings.plugins.consentTitle' : 'settings.plugins.enable', { name: plugin.name })));
+      if (needsTrust) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
+      const setup = initialSetupControls(plugin); if (setup) panel.append(setup);
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const cancel = el(document, 'button', '', t('settings.plugins.cancel'));
       cancel.type = 'button';
       cancel.addEventListener('click', () => { consentFor = ''; render(); });
-      const allow = el(document, 'button', 'plugin-allow', t(featured ? 'settings.plugins.enable' : 'settings.plugins.allow', { name: plugin.name }));
+      const allow = el(document, 'button', 'plugin-allow', t(needsTrust ? 'settings.plugins.allow' : 'settings.plugins.enable', { name: plugin.name }));
       allow.type = 'button';
       allow.addEventListener('click', () => {
         consentFor = '';
-        void run(() => api.setEnabled(plugin.id, true), `plugin:${plugin.id}`);
+        void run(() => api.setEnabled(plugin.id, true, plugin.initialChoices), `plugin:${plugin.id}`);
       });
       actions.append(cancel, allow);
       panel.append(actions);
@@ -748,11 +827,11 @@
         const chips = el(document, 'div', 'plugin-surface-chips');
         for (const surface of SURFACE_ORDER.filter((name) => view.surfaces.includes(name))) {
           const placed = view.placements?.[surface] === true;
-          const chip = el(document, 'button', `plugin-surface-chip${placed ? ' is-on' : ''}`, t(`settings.plugins.surface.${surface}`));
+          const chip = el(document, 'button', `plugin-surface-chip${placed ? ' is-on' : ''}`, surfaceLabel(surface, t));
           chip.type = 'button';
           chip.dataset.controlKey = `place/${view.ref}/${surface}`;
           chip.setAttribute('aria-pressed', String(placed));
-          chip.setAttribute('aria-label', t(placed ? 'settings.plugins.unplace' : 'settings.plugins.place', { view: view.title, surface: t(`settings.plugins.surface.${surface}`) }));
+          chip.setAttribute('aria-label', t(placed ? 'settings.plugins.unplace' : 'settings.plugins.place', { view: view.title, surface: surfaceLabel(surface, t) }));
           chip.addEventListener('click', () => void run(async () => {
             const next = await api.place(view.ref, surface, !placed);
             onPlaced(surface, view.ref, !placed);
@@ -810,7 +889,7 @@
         toggle.type = 'checkbox'; toggle.checked = plugin.enabled; toggle.disabled = !list?.enabled;
         toggle.setAttribute('aria-label', t('settings.plugins.enable', { name: plugin.name }));
         toggle.addEventListener('change', () => {
-          if (toggle.checked && !plugin.trusted) { consentFor = plugin.id; openPlugin(plugin.id); }
+          if (toggle.checked && (!plugin.trusted || plugin.initialSetup?.fields?.length)) { consentFor = plugin.id; openPlugin(plugin.id); }
           else void run(() => api.setEnabled(plugin.id, toggle.checked), `plugin:${plugin.id}`);
         });
         const label = el(document, 'label', 'checkbox-label plugin-toggle'); label.append(toggle); head.append(label);
@@ -842,7 +921,7 @@
         const count = button(t('plugins.ui.locationCount', { count: surfaces.length }), () => openPlugin(plugin.id, true), 'plugin-location-count');
         count.dataset.controlKey = 'placements';
         const details = surfaces.length
-          ? [{ full: t('plugins.ui.selectedLocations'), heading: true }, ...surfaces.map(surface => ({ full: t(`settings.plugins.surface.${surface}`) }))]
+          ? [{ full: t('plugins.ui.selectedLocations'), heading: true }, ...surfaces.map(surface => ({ full: surfaceLabel(surface, t) }))]
           : [{ full: t('plugins.ui.noPlacements') }];
         if (setDetailTooltip) {
           setDetailTooltip(count, details, { centered: true });
@@ -1002,6 +1081,17 @@
       return section;
     }
 
+    function contentSourceRows(plugin) {
+      const targets = new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode === 'replace').flatMap(view => view.targets));
+      return [...targets].map(target => {
+        const choices = (list.plugins || []).filter(item => item.status === 'active').flatMap(item => (item.views || [])
+          .filter(view => view.mode === 'replace' && view.targets.includes(target)).map(view => ({ ...view, pluginName: item.name })));
+        return contentControls({ key: `content/${target}`, target, choices,
+          value: choices.some(view => view.ref === list.contentSelections?.[target]) ? list.contentSelections[target] : null,
+          change: value => void run(() => api.selectContent(target, value)) });
+      });
+    }
+
     function pluginDetail(plugin) {
       const wrap = el(document, 'section', 'plugin-detail'); wrap.dataset.pluginId = plugin.id;
       const toolbar = el(document, 'div', 'plugin-detail-toolbar');
@@ -1036,6 +1126,7 @@
         }
         return wrap;
       }
+      wrap.append(...contentSourceRows(plugin));
       if (plugin.settings && api.getSettings && api.updateSettings) wrap.append(authorSettingsSection(plugin));
       // Disabled plugins keep their saved placements visible, without offering
       // mutations until enabled. The count is a selection, not runtime activity.
@@ -1043,7 +1134,7 @@
         const selected = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
         const placements = el(document, 'div', 'plugin-views');
         placements.append(el(document, 'div', 'plugin-subhead', t('plugins.ui.selectedLocations')));
-        for (const surface of selected) placements.append(el(document, 'span', 'settings-note', t(`settings.plugins.surface.${surface}`)));
+        for (const surface of selected) placements.append(el(document, 'span', 'settings-note', surfaceLabel(surface, t)));
         if (!selected.length) placements.append(el(document, 'span', 'settings-note', t('plugins.ui.noPlacements')));
         wrap.append(placements);
       }
@@ -1059,7 +1150,8 @@
           const text = el(document, 'span', 'settings-item-text'); text.append(el(document, 'span', 'settings-item-title', t('settings.plugins.background')));
           const input = el(document, 'input'); input.type = 'checkbox'; input.checked = plugin.background.enabled;
           input.addEventListener('change', () => void run(() => api.setBackground(plugin.id, input.checked)));
-          label.append(text, input, el(document, 'span', 'settings-note settings-item-desc', t('settings.plugins.backgroundNote'))); wrap.append(label);
+          input.setAttribute('aria-description', t('settings.plugins.backgroundNote'));
+          label.append(text, input, el(document, 'span', 'settings-note settings-item-desc', plugin.background.description || t('settings.plugins.backgroundNote'))); wrap.append(label);
         }
         if (plugin.skins?.length) {
           const skins = el(document, 'div', 'plugin-skins');
@@ -1082,14 +1174,6 @@
             actions.append(open);
           }
           wrap.append(detailSection(t('plugins.ui.pages'), el(document, 'p', 'settings-note', t('plugins.ui.pagesNote')), actions));
-        }
-      }
-      for (const view of plugin.status === 'active' ? plugin.views || [] : []) {
-        for (const target of view.mode === 'replace' ? view.targets || [] : []) {
-          const selected = list.contentSelections?.[target] === view.ref;
-          const row = el(document, 'div', 'settings-actions');
-          row.append(el(document, 'span', 'settings-note', target), button(t(selected ? 'plugins.trusted.restore' : 'plugins.trusted.useContent'), () => void run(() => api.selectContent(target, selected ? null : view.ref))));
-          wrap.append(row);
         }
       }
       for (const target of new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode !== 'replace').flatMap(view => view.targets || []))) {

@@ -272,7 +272,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     getSettings: id => pluginSettingsResult(ipcRenderer.invoke('plugins:getSettings', id)),
     updateSettings: (id, input) => pluginSettingsResult(ipcRenderer.invoke('plugins:updateSettings', id, input)),
     list: () => ipcRenderer.invoke('plugins:list'),
-    setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled }),
+    setEnabled: (id, enabled, initialSetup) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled, initialSetup }),
     setBackground: (id, enabled) => ipcRenderer.invoke('plugins:setBackground', { id, enabled }),
     restart: (id) => ipcRenderer.invoke('plugins:restart', { id }),
     reload: () => ipcRenderer.invoke('plugins:reload'),

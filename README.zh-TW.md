@@ -296,7 +296,7 @@ Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 
 | 每次提示／回覆的用量與工具呼叫 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 明細只在本機讀取，不會同步。 |
 | 上下文用量／剩餘空間 | Claude Code, Codex, DeepSeek Harness | Claude Code 的上下文上限依模型估算。 |
 | 快取用量／會話快取命中率 | 提供快取欄位的來源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 有快取用量資料時才顯示命中率。 |
-| 快取剩餘時間估算 | Claude Code, Codex | Claude Code：5 分鐘或 1 小時；Codex：約 30 分鐘（估算）。 |
+| 快取剩餘時間估算 | Claude Code | 依紀錄中的快取層級估算為 5 分鐘或 1 小時。 |
 | 輸出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 為輸出速度，`tok/min` 為總 Token 消耗速率；計時可能包含等待。 |
 | 推理強度設定 | Claude Code, Codex | 僅顯示會話中明確記錄的設定值。 |
 | 推理 Token 數 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
