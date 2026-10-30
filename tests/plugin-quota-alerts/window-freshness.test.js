@@ -33,8 +33,42 @@ test('adding a session pool does not announce recovery but later transitions sti
 });
 test('reordering duplicates and normal reset-time changes preserve recovery comparisons', () => {
   const scan = sequence();
-  assert.deepEqual(scan([window('Session', 7, new Date(start + 60000).toISOString()), window('Pool', 100)], 0), ['low']);
+  assert.deepEqual(scan([window('Pool', 100), window('Session', 7, new Date(start + 60000).toISOString()), window('Pool', 100)], 0), ['low']);
   assert.deepEqual(scan([window('Pool', 100), window('Session', 100, new Date(start + 3600000).toISOString()), window('Pool', 100)], 90), ['full']);
+});
+test('removing a same-name session window establishes a silent baseline and later full transitions still notify', () => {
+  const scan = sequence();
+  assert.deepEqual(scan([window('Session', 7), window('Session', 100)], 0), ['low']);
+  assert.deepEqual(scan([window('Session', 100)], 1), []);
+  assert.deepEqual(scan([window('Session', 100)], 2), []);
+  assert.deepEqual(scan([window('Session', 80)], 3), []);
+  assert.deepEqual(scan([window('Session', 100)], 4), ['full']);
+});
+test('adding an indistinguishable session window establishes a new baseline', () => {
+  const scan = sequence();
+  assert.deepEqual(scan([window('Session', 7)], 0), ['low']);
+  assert.deepEqual(scan([window('Session', 100), window('Session', 100)], 1), []);
+  assert.deepEqual(scan([window('Session', 100), window('Session', 80)], 2), []);
+  assert.deepEqual(scan([window('Session', 100), window('Session', 100)], 3), ['full']);
+});
+test('removing a request quota cannot announce that the remaining token quota recovered', () => {
+  const quota = (metric, remainingPercent) => ({ ...window('Session', remainingPercent), metric, windowMinutes: 300 });
+  const scan = sequence();
+  assert.deepEqual(scan([quota('requests', 5), quota('tokens', 100)], 0), ['low']);
+  assert.deepEqual(scan([quota('tokens', 100)], 1), []);
+});
+test('request and token session quotas stay distinct even with equal labels, durations and counts', () => {
+  const quota = (metric, remainingPercent) => ({ ...window('Session', remainingPercent), metric, windowMinutes: 300 });
+  const replacement = sequence();
+  assert.deepEqual(replacement([quota('requests', 5)], 0), ['low']);
+  assert.deepEqual(replacement([quota('tokens', 100)], 1), []);
+  assert.deepEqual(replacement([quota('tokens', 80)], 2), []);
+  assert.deepEqual(replacement([quota('tokens', 100)], 3), ['full']);
+});
+test('web/local source changes do not change pool identity or prevent legitimate recovery', () => {
+  const scan = sequence();
+  assert.deepEqual(scan([{ ...window('Session', 7), metric: 'tokens', source: 'web' }], 0), ['low']);
+  assert.deepEqual(scan([{ ...window('Session', 100), metric: 'tokens', source: 'local' }], 1), ['full']);
 });
 for (const usageTime of [new Date(start).toISOString(), null]) test(`fresh quota updates work independently of the usage snapshot clock (${usageTime})`, async t => {
   let now = start;

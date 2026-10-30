@@ -30,9 +30,11 @@ function evaluate(rows, threshold, alerted, now, observations) {
     const key = JSON.stringify([row.provider, row.accountId]);
     let group = groups.get(key);
     if (!group) groups.set(key, group = { key, provider: row.provider, providerLabel: row.providerLabel, accountId: row.accountId,
-      windows: [], sessionKeys: new Set(), values: [], times: [], latestLowAt: null, complete: true });
+      windows: [], sessionKeys: [], values: [], times: [], latestLowAt: null, complete: true });
     const sessions = row.windows.filter(w => w.kind === 'session');
-    for (const w of sessions) group.sessionKeys.add(JSON.stringify([w.displayLabel, w.windowMinutes ?? null]));
+    // Keep multiplicity when the DTO cannot distinguish equal-name pools.
+    // Metrics distinguish quota units; source and reset times do not identify pools.
+    for (const w of sessions) group.sessionKeys.push(JSON.stringify([w.metric ?? null, w.displayLabel, w.windowMinutes ?? null]));
     if (!freshRow(row, now) || !sessions.length) { group.complete = false; skipped++; continue; }
     group.times.push(Date.parse(row.updatedAt));
     for (const w of sessions) {

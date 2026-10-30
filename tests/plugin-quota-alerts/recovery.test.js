@@ -43,8 +43,16 @@ test('duplicates and incomplete readings cannot prove recovery or full quota', (
   assert.equal(scan(s, [row(90, 1), row(7, 1)], 1).triggered.length, 0);
   assert.equal(scan(s, [row(100, 2), row(7, 2)], 2).triggered.length, 0);
   assert.equal(scan(s, [row(100, 3), row(null, 3)], 3).triggered.length, 0);
-  assert.deepEqual(scan(s, [row(100, 4)], 4).triggered.map(a => a.event), ['full']);
+  assert.deepEqual(scan(s, [row(100, 4), row(100, 4)], 4).triggered.map(a => a.event), ['full']);
   assert.equal(scan(s, [row(100, 5, { accountId: 'new-account' })], 5).triggered.length, 0);
+});
+
+test('losing a same-name reading across account rows does not prove recovery', () => {
+  const s = state();
+  assert.deepEqual(scan(s, [row(7), row(100)], 0).triggered.map(a => a.event), ['low']);
+  assert.equal(scan(s, [row(100, 1)], 1).triggered.length, 0);
+  assert.equal(scan(s, [row(80, 2)], 2).triggered.length, 0);
+  assert.deepEqual(scan(s, [row(100, 3)], 3).triggered.map(a => a.event), ['full']);
 });
 
 for (const baseline of [false, true]) for (const unknownAt of [5, 20]) {
