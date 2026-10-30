@@ -55,7 +55,7 @@ module.exports = {
     emptyKey: 'settings.trae.statusNotSet',
     failedKey: 'settings.trae.saveFailed',
     fields: [
-      { key: 'traeCookie', input: 'textarea', labelKey: 'settings.trae.cookie', configuredKey: 'traeCookieConfigured', placeholder: 'sessionid=...' },
+      { key: 'traeCookie', input: 'textarea', ariaLabelKey: 'settings.trae.cookie', configuredKey: 'traeCookieConfigured', placeholder: 'sessionid=...' },
       { key: 'traeAccessToken', input: 'password', labelKey: 'settings.trae.token', configuredKey: 'traeTokenConfigured', placeholder: 'Cloud-IDE-Token' },
       { key: 'traeDeviceId', input: 'text', labelKey: 'settings.trae.deviceId', placeholderKey: 'settings.trae.deviceIdPlaceholder' }
     ],
