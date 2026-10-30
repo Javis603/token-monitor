@@ -15,7 +15,8 @@ export function activate(ctx) {
       const receipt = document.createElement('p'); receipt.className = 'qa-note';
       const test = document.createElement('button'); test.type = 'button'; test.disabled = true; test.dataset.channel = 'os';
       let testing = false;
-      let snapshot, latest = context.data, disposed = false, saving = false;
+      let snapshot, latest = context.data, disposed = false, saving = false, saveTask = Promise.resolve();
+      const pending = new Map();
       function field(name, type, parent) {
         const label = document.createElement('label'); label.className = type === 'checkbox' ? 'qa-setting checkbox-label settings-item' : 'qa-setting settings-item';
         const title = document.createElement('span'); title.className = 'settings-item-title settings-item-text'; const input = document.createElement('input');
@@ -29,9 +30,12 @@ export function activate(ctx) {
       }
       function note(key, parent) { const node = document.createElement('p'); node.className = 'qa-note'; notes.set(key, node); parent.append(node); }
       test.addEventListener('click', async () => {
-        if (saving || testing || disposed) return;
-        testing = true; sync(); feedback.textContent = text('sending');
+        if (testing || disposed || !snapshot) return;
+        testing = true; sync();
         try {
+          await saveTask;
+          if (disposed) return;
+          feedback.textContent = text('sending');
           const results = await ctx.backend.call('notification.test');
           if (!disposed) feedback.textContent = results.length ? results.map(r => text(r.status === 'failed' ? 'testFailed' : r.status)).join(' / ') : text('testFailed');
         } catch (_) { if (!disposed) feedback.textContent = text('testFailed'); }
@@ -45,12 +49,12 @@ export function activate(ctx) {
       const text = (key, args) => t(resolveLocale(document.documentElement.lang || latest?.locale), key, args);
       function sync() {
         for (const [name, input] of controls) {
-          const value = snapshot?.values[name];
+          const value = pending.has(name) ? pending.get(name) : snapshot?.values[name];
           if (input.type === 'checkbox') { input.checked = value === true; input.setAttribute('aria-checked', String(input.checked)); }
           else if (document.activeElement !== input) input.value = value ?? '';
-          input.disabled = saving || testing || !snapshot;
+          input.disabled = testing || !snapshot;
         }
-        test.disabled = saving || testing || !snapshot;
+        test.disabled = testing || !snapshot;
       }
       function render(data = latest) {
         if (disposed) return; latest = data;
@@ -68,26 +72,36 @@ export function activate(ctx) {
         permission.textContent = text(data?.background ? 'backgroundAllowed' : 'backgroundRequired');
         receipt.textContent = (data?.receipts || []).map(r => `${r.providerLabel} · ${text(`${r.channel}Channel`)}: ${text(r.status)}`).join(' / ');
       }
-      async function save(name) {
-        if (disposed || saving || testing || !snapshot) return;
+      function save(name) {
+        if (disposed || testing || !snapshot) return;
         const input = controls.get(name);
         const value = input.type === 'checkbox' ? input.checked : Number(input.value);
-        if (value === snapshot.values[name]) return;
-        const patch = { [name]: value };
+        if (Object.is(value, pending.has(name) ? pending.get(name) : snapshot.values[name])) return;
+        pending.set(name, value);
+        if (!saving) saveTask = flush();
+      }
+      async function flush() {
         saving = true;
-        // Keep the requested toggle visible while the durable save is pending.
-        for (const control of controls.values()) control.disabled = true;
-        test.disabled = true;
+        let failed = false;
+        // Keep controls usable through blur → click; serialize writes instead.
         feedback.textContent = text('saving');
         try {
-          const next = await ctx.backend.call('preferences.update', { expectedRevision: snapshot.revision, patch });
-          snapshot = next;
-          if (!disposed) feedback.textContent = text('saved');
-        } catch (_) {
-          // Failure restores the last confirmed value. A conflict refreshes the
-          // current revision, allowing retry without silently overwriting it.
-          try { snapshot = await ctx.backend.call('preferences.get'); } catch { /* Keep the last confirmed snapshot. */ }
-          if (!disposed) feedback.textContent = text('saveFailed');
+          while (!disposed && pending.size) {
+            const [name, value] = pending.entries().next().value;
+            if (!Object.is(value, snapshot.values[name])) {
+              try {
+                snapshot = await ctx.backend.call('preferences.update', { expectedRevision: snapshot.revision, patch: { [name]: value } });
+              } catch (_) {
+                failed = true;
+                // Refresh conflicts without retrying the failed change.
+                try { snapshot = await ctx.backend.call('preferences.get'); } catch { /* Keep the last confirmed snapshot. */ }
+              }
+            }
+            // Preserve a newer edit made while this value was being saved.
+            if (Object.is(pending.get(name), value)) pending.delete(name);
+            if (!disposed) sync();
+          }
+          if (!disposed) feedback.textContent = text(failed ? 'saveFailed' : 'saved');
         } finally { saving = false; if (!disposed) sync(); }
       }
       const language = new MutationObserver(() => render());

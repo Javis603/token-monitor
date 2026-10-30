@@ -4,6 +4,38 @@ const assert = require('node:assert/strict');
 const { createBusinessDataService } = require('../../src/electron/plugins/businessData');
 const { evaluate } = require('../../plugins/quota-alerts/evaluator.cjs');
 const { message, deliverTest } = require('../../plugins/quota-alerts/delivery.cjs');
+const { createBackend } = require('../../plugins/quota-alerts/backend.cjs');
+const { createPreferences } = require('../../plugins/quota-alerts/preferences.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+test('automatic and manual notifications use the host resolved locale in auto language mode', async t => {
+  const OriginalDateTimeFormat = Intl.DateTimeFormat;
+  t.mock.method(Intl, 'DateTimeFormat', function (...args) {
+    return args.length ? new OriginalDateTimeFormat(...args) : { resolvedOptions: () => ({ locale: 'en-US' }) };
+  });
+  for (const [locale, automaticTitle, testTitle] of [['zh-TW', 'Codex 配額不足', '測試通知'], ['ja', 'Codex の残量不足', 'テスト通知']]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-host-locale-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const prefs = createPreferences(dir); prefs.update({ expectedRevision: 0, patch: { lowQuota: true } });
+    const notices = [], now = Date.now();
+    const backend = createBackend({ dataDirectory: dir, publish() {}, host: { async call(method, args) {
+      if (method === 'app.settings') return { language: 'auto', locale };
+      if (method === 'notify') { notices.push(args); return true; }
+      assert.equal(method, 'data.query');
+      return { availability: 'available', aggregateCoverage: { kind: 'authorizedCollection' }, pageInfo: { hasMore: false },
+        rows: [{ provider: 'codex', providerLabel: 'Codex', accountId: 'fixture', identityAvailable: true, status: 'ok', updatedAt: new Date(now).toISOString(),
+          windows: [{ kind: 'session', displayLabel: 'Session', remainingPercent: 5 }] }] };
+    } } }, { preferences: prefs, intervalMs: 0, now: () => now });
+    t.after(() => backend.dispose());
+    await backend.start();
+    assert.equal(notices[0].title, automaticTitle);
+    await backend.call('notification.test');
+    assert.equal(notices[1].title, testTitle);
+    assert.equal(backend.call('status').locale, locale);
+  }
+});
 
 test('notification titles consume formal tool names and keep quota detail in the body', async t => {
   const now = Date.parse('2026-10-30T02:00:00Z');

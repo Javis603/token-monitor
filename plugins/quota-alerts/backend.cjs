@@ -28,6 +28,11 @@ function createBackend({ dataDirectory, host, publish }, { now = Date.now, inter
     fs.renameSync(temporary, file);
     ledger = next;
   };
+  async function notificationLocale() {
+    const appSettings = await host.call('app.settings');
+    const { resolveLocale } = await import('./i18n.mjs');
+    return resolveLocale(appSettings.locale || (appSettings.language === 'auto' ? Intl.DateTimeFormat().resolvedOptions().locale : appSettings.language));
+  }
   async function scan() {
     const epoch = generation;
     const current = () => !stopped && epoch === generation;
@@ -35,11 +40,8 @@ function createBackend({ dataDirectory, host, publish }, { now = Date.now, inter
     if (!current()) return;
     if (settings.status !== 'ready') throw Error('Plugin settings need attention');
     const s = settings.values;
-    const appSettings = await host.call('app.settings');
+    const locale = await notificationLocale();
     if (!current()) return;
-    const { resolveLocale } = await import('./i18n.mjs');
-    if (!current()) return;
-    const locale = resolveLocale(appSettings.language === 'auto' ? Intl.DateTimeFormat().resolvedOptions().locale : appSettings.language);
     emit({ locale });
     const policy = createHash('sha256').update(JSON.stringify([s.lowQuota, s.threshold, s.recovery])).digest('hex');
     // Opting into a new delivery policy starts a new alert episode. Appearance
@@ -107,9 +109,7 @@ function createBackend({ dataDirectory, host, publish }, { now = Date.now, inter
         testing = true;
         return (async () => {
           try {
-            const appSettings = await host.call('app.settings');
-            const { resolveLocale } = await import('./i18n.mjs');
-            const locale = resolveLocale(appSettings.language === 'auto' ? Intl.DateTimeFormat().resolvedOptions().locale : appSettings.language);
+            const locale = await notificationLocale();
             return await deliverTest({ host, signal: controller.signal, now: now(), locale });
           } finally { testing = false; }
         })();

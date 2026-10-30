@@ -49,6 +49,86 @@ test('settings-only manifest has no duplicate host form or display placements', 
 });
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
+async function pendingSettings(t) {
+  const oldDoc = globalThis.document, oldObserver = globalThis.MutationObserver;
+  globalThis.document = { documentElement: { lang: 'en' }, createElement: tag => new Element(tag), activeElement: null };
+  globalThis.MutationObserver = class { observe() {} disconnect() {} };
+  t.after(() => { globalThis.document = oldDoc; globalThis.MutationObserver = oldObserver; });
+  const root = new Element('main'), updates = [], notifications = [];
+  const { defaults } = require('../../plugins/quota-alerts/preferences.cjs');
+  let snapshot = { revision: 0, values: { ...defaults } };
+  const { activate } = await import('../../plugins/quota-alerts/ui.mjs');
+  const view = activate({ backend: {
+    subscribe() { return () => {}; },
+    async call(method, args) {
+      if (method === 'preferences.get') return structuredClone(snapshot);
+      if (method === 'status') return { state: 'off' };
+      if (method === 'preferences.update') return new Promise((resolve, reject) => updates.push({ ...args, reject,
+        finish() {
+          assert.equal(args.expectedRevision, snapshot.revision, 'writes use the last confirmed revision');
+          snapshot = { revision: snapshot.revision + 1, values: { ...snapshot.values, ...args.patch } };
+          resolve(structuredClone(snapshot));
+        }
+      }));
+      if (method === 'notification.test') { notifications.push(structuredClone(snapshot)); return [{ status: 'submitted' }]; }
+      throw Error('Unexpected operation');
+    }
+  } }).mount(root);
+  t.after(() => view.dispose());
+  await settle();
+  return { root, updates, notifications, view, get snapshot() { return snapshot; },
+    inputs: Object.fromEntries(all(root).filter(n => n.tag === 'input').map(n => [n.name, n])),
+    testButton: all(root).find(n => n.tag === 'button') };
+}
+
+test('threshold blur leaves the next switch clickable and serializes its save before a notification test', async t => {
+  const f = await pendingSettings(t);
+  f.inputs.threshold.value = '20'; f.inputs.threshold.listeners.blur();
+  assert.equal(f.inputs.lowQuota.disabled, false, 'blur must not cancel the following native switch click');
+  f.inputs.lowQuota.checked = true; f.inputs.lowQuota.listeners.change();
+  assert.equal(f.updates.length, 1, 'the second save waits for the threshold revision');
+  assert.equal(f.inputs.lowQuota.checked, true);
+  assert.equal(f.testButton.disabled, false, 'blur must not cancel a following test-button click either');
+  const testing = f.testButton.listeners.click();
+  assert.equal(f.notifications.length, 0);
+  f.updates[0].finish(); await settle();
+  assert.deepEqual(f.updates[1].patch, { lowQuota: true });
+  assert.equal(f.updates[1].expectedRevision, 1);
+  assert.equal(f.inputs.lowQuota.checked, true, 'pending toggle stays visible after the earlier save');
+  f.updates[1].finish(); await testing;
+  assert.deepEqual(f.notifications[0].values, { lowQuota: true, threshold: 20, recovery: false });
+});
+
+test('a failed threshold save rolls back its value while a queued switch still saves', async t => {
+  const f = await pendingSettings(t);
+  f.inputs.threshold.value = '20'; f.inputs.threshold.listeners.blur();
+  assert.equal(f.inputs.lowQuota.disabled, false);
+  f.inputs.lowQuota.checked = true; f.inputs.lowQuota.listeners.change();
+  f.updates[0].reject(Error('fixture write failure')); await settle();
+  assert.equal(f.updates.length, 2);
+  assert.equal(f.updates[1].expectedRevision, 0);
+  assert.equal(f.inputs.threshold.value, 10);
+  assert.equal(f.inputs.lowQuota.checked, true);
+  f.updates[1].finish(); await settle();
+  assert.deepEqual(f.snapshot.values, { lowQuota: true, threshold: 10, recovery: false });
+  assert.ok(all(f.root).some(n => n.textContent.includes('Save failed')));
+});
+
+test('switch edits during a pending save preserve the final intent and dispose stops queued writes', async t => {
+  const f = await pendingSettings(t);
+  f.inputs.lowQuota.checked = true; f.inputs.lowQuota.listeners.change();
+  assert.equal(f.inputs.lowQuota.disabled, false);
+  f.inputs.lowQuota.checked = false; f.inputs.lowQuota.listeners.change();
+  f.updates[0].finish(); await settle();
+  assert.deepEqual(f.updates[1].patch, { lowQuota: false });
+  f.inputs.recovery.checked = true; f.inputs.recovery.listeners.change();
+  assert.equal(f.view.hasUnsavedChanges(), true);
+  f.view.dispose(); f.updates[1].finish(); await settle();
+  assert.equal(f.updates.length, 2, 'disposal prevents the queued recovery write');
+  assert.equal(f.snapshot.values.lowQuota, false);
+  assert.equal(f.snapshot.values.recovery, false);
+});
+
 test('desktop-only switches autosave, roll back on failure, locale and disposal work', async t => {
   const oldDoc = globalThis.document, oldObserver = globalThis.MutationObserver;
   let localeChange, disconnected = false, unsubscribe = false, rejectNext = false;
