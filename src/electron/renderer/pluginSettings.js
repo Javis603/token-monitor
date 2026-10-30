@@ -656,8 +656,8 @@
             const actions = el(document, 'div', 'settings-actions');
             const available = entry.versions?.find(v => v.version === entry.version)?.installable ?? ['available', 'update'].includes(entry.status);
             if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => { catalogReview = entry; await previewCatalog(entry, catalogVersion(entry)); return null; })));
-            else if (entry.versions?.length || entry.status === 'incompatible' || entry.status === 'installed') {
-              const install = button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => {});
+            else if (!entry.installedVersion && (entry.versions?.length || entry.status === 'incompatible' || entry.status === 'installed')) {
+              const install = button(t('plugins.package.install'), () => {});
               install.disabled = true; actions.append(install);
             }
             if (entry.installedVersion) actions.append(button(t('plugins.catalog.installed'), () => { activeTab = 'installed'; selectedPluginId = ''; diagnostics = false; render(); container.querySelector(`[data-plugin-id="${entry.id}"]`)?.scrollIntoView({ block: 'nearest' }); }, 'plugin-installed-link plugin-installed-check'));
