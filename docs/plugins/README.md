@@ -47,7 +47,18 @@ Module-private variables and another process's memory are not automatically avai
 
 `name`, `description` and view titles support localized strings. Optional `author`, HTTPS `homepage` and validated `identityIcon` provide attribution, not trust. The App uses `identityIcon` in main-page navigation and Notch tabs (and their settings choices) before loading the plugin UI. Without artwork, navigation keeps its built-in fallback; image decode failures also fall back. Do not rely on UI CSS loading to supply navigation artwork. `engines.tokenMonitor` can constrain the App version. `tmApi` identifies the plugin API contract, not the plugin release or package format. Only `tmApi: 1` is accepted; other values fail with `incompatible-plugin-api` and are not converted. This experimental API can break; authors must follow release changes.
 
-Optional `category: "automation"` identifies monitoring, conditional reminders or scheduled tasks with an Automation label beside the version. Omit it (or use `null`) when it does not describe the plugin. This is author-supplied display metadata: it does not grant trust, start code, choose locations or allow background execution. The App does not infer automation from `background: true`. Widget, page and appearance labels continue to derive from declared views and skins. Remote catalog versions can include `automation` in their `types` display hints; the downloaded manifest determines package and installed labels.
+### Plugin labels
+
+The App displays labels beside the version to describe the plugin's interfaces and purpose:
+
+| Label | Manifest declaration |
+| --- | --- |
+| Widgets | A view supports `home`, `tray`, `edgeDock` or `notch` |
+| Pages | A view supports `page` or declares content replacement `targets` |
+| Appearance | At least one skin is declared in `skins` |
+| Automation | `category: "automation"` for monitoring, reminders or scheduled tasks |
+
+A plugin can have more than one label. Omit `category` (or use `null`) when Automation does not apply; background support alone does not imply automation. Labels are display metadata and do not enable features or grant execution permissions. See [catalog metadata](distribution-design.md#create-a-community-catalog) for remote catalog display hints.
 
 ### First-use settings
 
