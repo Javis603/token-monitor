@@ -47,7 +47,7 @@ function createMimoExchangeFetch({
     if (configured.httpProxy || configured.httpsProxy) {
       return (envFetch || createOutboundFetch(route.env, route.deps || {}))(url, init);
     }
-    const routes = parseProxyResolveResults(await session.resolveProxy(String(url)));
+    const routes = parseProxyResolveResults(await session.resolveProxy(String(url), { signal: init.signal }));
     let lastError = null;
     // One resolution per hop, deliberately: the proxy can differ per host under
     // a PAC script. Network failures advance through Chromium's ordered fallback

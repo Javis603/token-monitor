@@ -179,6 +179,32 @@ test('without an app setting Chromium requests work without touching the session
   assert.deepEqual(h.sent.map((item) => item.kind), ['request', 'fetch']);
 });
 
+test('aborting MiMo during proxy restoration rejects without resolving or sending later', async () => {
+  const clear = deferred();
+  const settings = { proxyUrl: 'http://127.0.0.1:7897' };
+  const h = harness(settings, (config) => config.mode === 'system' ? clear.promise : undefined);
+  await h.apply();
+  settings.proxyUrl = '';
+  const controller = new AbortController();
+  let outcome;
+  const exchange = h.mimo()('https://example.com/', { signal: controller.signal }).then(
+    () => { outcome = 'resolved'; },
+    (error) => { outcome = error.name; }
+  );
+  try {
+    await flush();
+    assert.equal(h.sent.length, 0);
+    controller.abort();
+    await flush();
+    assert.equal(outcome, 'AbortError', 'cancellation must not wait for session restoration');
+  } finally {
+    clear.resolve();
+    await exchange;
+    await flush();
+  }
+  assert.equal(h.sent.length, 0, 'restoration must not release an aborted resolution or exchange');
+});
+
 test('an aborted readiness wait never sends the deferred request', async () => {
   const pending = deferred();
   const h = harness({ proxyUrl: 'http://127.0.0.1:7897' }, () => pending.promise);
