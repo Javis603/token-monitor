@@ -548,6 +548,8 @@ function runCursorAwareTokscale(clientFilter, operation, signal) {
   return includesCursor ? withCursorLifecycle(operation, { signal }) : operation();
 }
 
+// onScanComplete reports only the successful subprocess's final client filter.
+// Synthetic capability-filtered empties never acquire account overwrite rights.
 function runTokscale({
   clients,
   flags,
@@ -557,7 +559,8 @@ function runTokscale({
   onTerminationUnconfirmed,
   customScanPaths,
   homeDir,
-  workspaces = true
+  workspaces = true,
+  onScanComplete
 }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
@@ -599,7 +602,7 @@ function runTokscale({
       signal,
       subprocessOptions
     );
-  });
+  }).then(result => { onScanComplete?.(filter.split(',')); return result; });
   return runCursorAwareTokscale(clientFilter, () => (
     scan(clientFilter).catch((error) => (
       retryWithKnownCapabilities(error, requested, command, { entries: [] }, (filtered) => (
@@ -612,7 +615,7 @@ function runTokscale({
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, onScanComplete }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
@@ -625,11 +628,11 @@ function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOption
     terminationOptions,
     onTerminationUnconfirmed
   };
+  const scan = filter => spawnTokscaleJson(runArgs(filter), commandTimeoutMs, command, signal, subprocessOptions)
+    .then(result => { onScanComplete?.(filter.split(',')); return result; });
   return runCursorAwareTokscale(clientFilter, () => (
-    spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command, signal, subprocessOptions).catch((error) => (
-      retryWithKnownCapabilities(error, requested, command, { contributions: [] }, (filtered) => (
-        spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command, signal, subprocessOptions)
-      ), signal, {
+    scan(clientFilter).catch((error) => (
+      retryWithKnownCapabilities(error, requested, command, { contributions: [] }, scan, signal, {
         terminationOptions,
         onTerminationUnconfirmed
       })
@@ -818,6 +821,7 @@ async function collectHistoryOnce(options) {
   if (options.historyEnabled === false) return null;
   let liveHistory = null;
   const rawGraphs = [];
+  let cursorGraphScanned = false;
   const runGraph = options.runGraph || runTokscaleGraph;
   const capDays = Number.isFinite(options.capDays) ? options.capDays : HISTORY_CAP_DAYS;
   const todayKey = options.todayKey || localTodayKey();
@@ -826,7 +830,8 @@ async function collectHistoryOnce(options) {
       const graphJson = await runGraph({
         clients,
         commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS,
-        signal: options.signal
+        signal: options.signal,
+        onScanComplete: clients => { cursorGraphScanned = clients.includes('cursor'); }
       });
       throwIfAborted(options.signal);
       rawGraphs.push(graphJson);
@@ -844,8 +849,10 @@ async function collectHistoryOnce(options) {
     // Dots-only replacement for the device's last successful full history.
     if (!history && failureCode === 'history-graph-failed') return null;
     const owner = options.cursorOwnership;
-    const ownedGraph = owner && failureCode === null && clients?.split(',').includes('cursor')
+    const ownedGraph = owner && failureCode === null && cursorGraphScanned
       && rawGraphs.length === 1 && Array.isArray(rawGraphs[0]?.contributions)
+      && rawGraphs[0].contributions.every(row => Array.isArray(row?.clients)
+        && row.clients.every(client => typeof client?.client === 'string'))
       && readCursorUsageOwnership(options)?.signature === owner.signature;
     // A completed owned scan can explicitly correct History to zero. Missing,
     // failed or unowned scans must keep the device's previous observation.
@@ -932,11 +939,17 @@ async function collectUsageOnce(options) {
   let captureCursorPartitions = true;
   const cursorPartitions = {};
   const runTokscaleFn = async (input) => {
-    const json = await runTokscaleScan(input);
+    let cursorScanned = false;
+    const json = await runTokscaleScan({ ...input,
+      onScanComplete: clients => { cursorScanned = clients.includes('cursor'); }
+    });
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
-    if (captureCursorPartitions && normalizeClientsCsv(input.clients).split(',').includes('cursor')) {
+    if (captureCursorPartitions && cursorScanned && Array.isArray(json?.entries)) {
       const name = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
-      cursorPartitions[name] = extractUsageBundleFromTokscale(json).byClient.cursor || emptyPeriod();
+      const bundle = extractUsageBundleFromTokscale(json);
+      if (!json.entries.length || !bundle.byClient[UNATTRIBUTED_USAGE_CLIENT]) {
+        cursorPartitions[name] = bundle.byClient.cursor || emptyPeriod();
+      }
     }
     return json;
   };

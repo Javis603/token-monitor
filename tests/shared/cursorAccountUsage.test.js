@@ -141,8 +141,8 @@ test('collector reuses cache ownership and existing scans, including History and
   let captured;
   const options = { clients: 'cursor,codex', homeDir: home, env: {}, osInfo: {}, deviceId: 'A',
     allTimeSince: '2024-01-01', includeHistory: true, dailyHistoryArchiveEnabled: false,
-    runTokscale: async (input) => { scans++; if (input.clients === 'codex') return { entries: [] }; return { entries: [{ client: 'cursor', sessionId: 's', model: 'shared', totalTokens: 1000, costUsd: 1 }] }; },
-    runGraph: async () => graph,
+    runTokscale: async (input) => { input.onScanComplete(input.clients.split(',')); scans++; if (input.clients === 'codex') return { entries: [] }; return { entries: [{ client: 'cursor', sessionId: 's', model: 'shared', totalTokens: 1000, costUsd: 1 }] }; },
+    runGraph: async input => { input.onScanComplete(input.clients.split(',')); return graph; },
     onAnchorComputed: value => { captured = value; } };
   const a = await collectUsageOnce(options);
   assert.equal(scans, 3);
@@ -259,6 +259,7 @@ async function watchFixture(t) {
   const options = { clients: 'cursor,codex', homeDir: home, env: {}, osInfo: {}, deviceId: 'A',
     allTimeSince: '2024-01-01', historyEnabled: false,
     runTokscale: async input => {
+      input.onScanComplete(input.clients.split(','));
       onScan();
       if (input.clients === 'codex') return { entries: [] };
       const tokens = input.flags.includes('--today') ? 100 : broadTokens;
@@ -548,8 +549,8 @@ test('collector uploads a complete owned empty graph to replace Hub History, but
   const fullGraph = { contributions: [{ date, clients: [{ client: 'cursor', modelId: 'shared', tokens: { input: 1000 }, cost: 1 }] }] };
   const options = { clients: 'cursor', homeDir: home, env: {}, osInfo: {}, deviceId: 'A', allTimeSince: '2024-01-01',
     includeHistory: true, dailyHistoryArchiveEnabled: false,
-    runTokscale: async () => ({ entries: [] }) };
-  const previous = await collectUsageOnce({ ...options, runGraph: async () => fullGraph });
+    runTokscale: async input => { input.onScanComplete(input.clients.split(',')); return { entries: [] }; } };
+  const previous = await collectUsageOnce({ ...options, runGraph: async input => { input.onScanComplete(input.clients.split(',')); return fullGraph; } });
   hub.ingest(buildSyncPayload(previous));
   assert.equal(hub.getHistory().summary.totalTokens, 1000);
   for (const runGraph of [
@@ -567,7 +568,7 @@ test('collector uploads a complete owned empty graph to replace Hub History, but
     writeOwner(true, 2000);
     const empty = await collectUsageOnce({ ...options, dailyHistoryArchiveEnabled: archiveEnabled,
       dailyHistoryArchiveOptions: { path: path.join(home, 'empty-history.json') },
-      runGraph: async () => ({ contributions: [] }) });
+      runGraph: async input => { input.onScanComplete(input.clients.split(',')); return { contributions: [] }; } });
     assert.equal(empty.history?.summary.totalTokens, 0);
     assert.equal(empty.history.cursorAccountUsage.accountKey, key);
     assert.equal(empty.history.cursorAccountUsage.usage.daily.length, 0);

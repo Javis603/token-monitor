@@ -392,3 +392,59 @@ test('CatPaw probing preserves the existing fork-client batch acceptance rule', 
   const calls = await collectWithFallback('claude,amp,qodercn', false, ['catpaw', 'qodercn']);
   assert.deepEqual(calls, ['claude,amp,qodercn', 'claude', 'claude', 'claude']);
 });
+
+for (const mode of ['excluded', 'mixed', 'supported', 'failed', 'malformed', 'unattributed', 'unreported']) {
+  test(`account overwrite rights require actual Cursor scan completion: ${mode}`, async t => {
+    const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-completion-'));
+    t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+    const cacheDir = path.join(home, '.config/tokscale/cursor-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, 'usage.json'), JSON.stringify({
+      _tokscale: { version: 1, accountId: 'user_fixture' }, usageEventsDisplay: []
+    }));
+    t.mock.method(require('../../src/shared/providers/cursor/auth'), 'runCursorSync', async () => ({ synced: true }));
+    const supported = mode !== 'excluded' && mode !== 'mixed';
+    const childProcess = require('node:child_process');
+    let scans = 0;
+    t.mock.method(childProcess, 'spawn', (_bin, args) => {
+      if (args.includes('--help')) return helpChild(['codex']);
+      if (isForkOnlyProbe(args)) return jsonChild({ entries: [] });
+      const clients = args[args.indexOf('--client') + 1].split(',');
+      if (!supported && clients.includes('cursor')) return exitChild(2, "invalid value 'cursor' for '--client <CLIENTS>'");
+      scans++;
+      if (mode === 'failed') return exitChild(1, 'synthetic scan failure');
+      if (mode === 'malformed') return jsonChild({});
+      if (mode === 'unattributed') return jsonChild(args[0] === 'graph'
+        ? { contributions: [{ date: '2026-10-30', tokens: 100 }] } : { entries: [{ totalTokens: 100 }] });
+      return jsonChild(args[0] === 'graph' ? { contributions: [] } : { entries: [] });
+    });
+    const collector = freshCollector();
+    t.after(() => { collector.resetTokscaleCapabilityCache(); delete require.cache[collectorPath]; });
+    const clients = mode === 'mixed' ? 'cursor,codex' : 'cursor';
+    // Learn capabilities through the real rejection/probe/retry path. A later
+    // all-excluded call must not spawn, and a mixed call scans only Codex.
+    if (!supported) await collector.collectHistoryOnce({ clients, homeDir: home, commandTimeoutMs: 1000 });
+    scans = 0;
+    const owner = require('../../src/shared/providers/cursor/usageOwnership').readCursorUsageOwnership({ homeDir: home });
+    for (const retained of [false, true]) {
+      const history = await collector.collectHistoryOnce({ clients, homeDir: home, cursorOwnership: owner,
+        ...(mode === 'unreported' ? { runGraph: async () => ({ contributions: [] }) } : {}),
+        dailyHistoryArchiveEnabled: retained,
+        dailyHistoryArchiveOptions: { path: path.join(home, `history-${retained}.json`) } });
+      assert.equal(Boolean(history?.cursorAccountUsage), mode === 'supported');
+      if (mode === 'supported') assert.equal(history.summary.totalTokens, 0, 'real successful zero remains authoritative');
+    }
+    if (mode === 'excluded') assert.equal(scans, 0, 'no subprocess ran for the excluded Cursor');
+    if (mode === 'failed') {
+      await assert.rejects(collector.collectUsageOnce({ clients, homeDir: home, env: {}, osInfo: {},
+        deviceId: 'fixture', allTimeSince: '2024-01-01', commandTimeoutMs: 1000, historyEnabled: false, wslScanEnabled: false }), /synthetic scan failure/);
+    } else {
+      const summary = await collector.collectUsageOnce({ clients, homeDir: home, env: {}, osInfo: {},
+        ...(mode === 'unreported' ? { runTokscale: async () => ({ entries: [] }) } : {}),
+        deviceId: 'fixture', allTimeSince: '2024-01-01', commandTimeoutMs: 1000, historyEnabled: false, wslScanEnabled: false });
+      for (const name of ['today', 'month', 'allTime']) {
+        assert.equal(Boolean(summary[name].cursorAccountUsage), mode === 'supported', name);
+      }
+    }
+  });
+}
