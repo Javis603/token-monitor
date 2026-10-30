@@ -11,7 +11,8 @@ const {
 
 const MARKER_FILE_NAME = 'mac-widget-launchservices-registration.json';
 const REGISTER_HOST_ARGUMENTS = Object.freeze(['--mode', 'register-host']);
-const MARKER_SCHEMA_VERSION = 2;
+const RECOVER_HOST_ARGUMENTS = Object.freeze(['--mode', 'recover-host']);
+const MARKER_SCHEMA_VERSION = 3;
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_REVALIDATE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_RECOVERY_FILE_BYTES = 64 * 1024;
@@ -105,12 +106,12 @@ function readMarker(markerPath, fsApi, readPrivateFile, logger) {
   return null;
 }
 
-function runRegistration(execFileImpl, helperPath, timeoutMs, signal) {
+function runRegistration(execFileImpl, helperPath, args, timeoutMs, signal) {
   return new Promise((resolve) => {
     try {
       execFileImpl(
         helperPath,
-        REGISTER_HOST_ARGUMENTS,
+        args,
         {
           shell: false,
           timeout: timeoutMs,
@@ -198,10 +199,11 @@ function createMacWidgetLaunchServicesRecovery(options = {}) {
       const identity = registrationIdentity(config, hostAppPath, installation);
       const markerPath = path.join(String(input.userDataPath || ''), MARKER_FILE_NAME);
       const marker = readMarker(markerPath, fsApi, readPrivateFile, input.logger);
+      const sameInstallation = marker?.registrationIdentity === identity;
       const completedAt = Date.parse(marker?.completedAt || '');
       const markerAgeMs = now() - completedAt;
       if (
-        marker?.registrationIdentity === identity
+        sameInstallation
         && markerAgeMs >= 0
         && markerAgeMs < revalidateAfterMs
       ) {
@@ -211,7 +213,11 @@ function createMacWidgetLaunchServicesRecovery(options = {}) {
         return { status: 'skipped', reason: 'cancelled' };
       }
 
-      const error = await runRegistration(execFileImpl, helperPath, timeoutMs, input.signal);
+      // WidgetKit can keep the old extension alive after replacing its bundle,
+      // then reject its timelines because their bundle version no longer matches.
+      // Recycle it once per installation; periodic revalidation only registers.
+      const args = sameInstallation ? REGISTER_HOST_ARGUMENTS : RECOVER_HOST_ARGUMENTS;
+      const error = await runRegistration(execFileImpl, helperPath, args, timeoutMs, input.signal);
       if (input.signal?.aborted || error?.code === 'ABORT_ERR') {
         log(input.logger, '[mac-widget] LaunchServices registration refresh cancelled');
         return { status: 'failed', reason: 'cancelled' };

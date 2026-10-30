@@ -15,6 +15,7 @@ const {
 test('homeHasData returns the client ids whose markers are present', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const present = new Set([
+    `${home}\\.local\\share\\goose\\sessions\\sessions.db`,
     `${home}\\.codex\\sessions`,
     `${home}\\.hermes`,
     `${home}\\.local\\share\\opencode`,
@@ -22,7 +23,7 @@ test('homeHasData returns the client ids whose markers are present', () => {
   ]);
   const existsSync = (p) => present.has(p);
   const ids = homeHasData(home, existsSync);
-  assert.deepEqual([...ids].sort(), ['codex', 'hermes', 'opencode', 'zcode']);
+  assert.deepEqual([...ids].sort(), ['codex', 'goose', 'hermes', 'opencode', 'zcode']);
 });
 
 test('each shared host directory discovers and attributes a WSL-only home', async () => {
@@ -32,6 +33,9 @@ test('each shared host directory discovers and attributes a WSL-only home', asyn
     ['.qwen/projects', 'qwen'],
     ['.pi/agent/sessions', 'pi'],
     ['.omp/agent/sessions', 'omp'],
+    ['.omo/agent/sessions', 'senpi'],
+    ['.senpi/agent/sessions', 'senpi'],
+    ['.omo/senpi-task', 'senpi'],
     ['.commandcode/projects', 'commandcode']
   ];
   for (const [marker, client] of entries) {

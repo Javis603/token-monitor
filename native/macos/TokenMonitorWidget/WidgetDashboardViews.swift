@@ -654,7 +654,7 @@ enum WidgetVendorIdentity {
         if matches("grok|xai") { return "xai" }
         if matches("deepseek") { return "deepseek" }
         if matches("nemotron|nvidia") { return "nvidia" }
-        if matches("llama|meta|muse-spark(?:-|$)") { return "meta" }
+        if matches("llama|meta|(?:^|[^a-z0-9])muse-(?:spark|wonder|glimmer|image|voice)(?:-|$)") { return "meta" }
         if matches("mistral|mixtral|codestral") { return "mistral" }
         if matches("qwen|qwq|qvq|qmodel") { return "qwen" }
         if matches("kimi|moonshot|k2d6-agent|k3-agent|(?:^|[^a-z0-9])k[23](?:[^a-z0-9]|$)") { return "kimi" }

@@ -23,18 +23,22 @@
       motion.from = offsets.get(motion.element) || 0;
       motion.distance = distance;
       motion.startedAt = window.performance.now();
-      motion.duration = Math.max(240, Math.min(8000, Math.abs(distance - motion.from) * 22));
+      // Keep a readable 100 px/s pace even for long task briefs. Capping the
+      // duration would make the speed increase with the overflow distance.
+      motion.duration = Math.max(240, Math.abs(distance - motion.from) * 10);
       if (!motion.frameId) motion.frameId = window.requestAnimationFrame(motion.step);
     }
     function update(element) {
       element.classList.toggle('is-overflow-enabled', enabled(element));
-      if (prefersReducedMotion()) element.title = element.textContent || '';
-      else element.removeAttribute('title');
+      // Reduced motion keeps the full text manually scrollable, without asking
+      // Chromium to create an OS tooltip that can outlive a floating window.
+      element.classList.toggle('is-overflow-static', prefersReducedMotion());
+      element.removeAttribute('title');
       const distance = distanceFor(element);
       const offset = Math.min(offsets.get(element) || 0, distance);
       move(element, offset);
       element.classList.toggle('has-overflow-fade', enabled(element)
-        && distance - offset > 1);
+        && distance - offset - element.scrollLeft > 1);
       const motion = motions.get(element);
       if (motion && motion.startedAt !== null && motion.distance !== distance) animate(motion, distance);
     }
@@ -98,6 +102,7 @@
       contents.set(element, content);
       element.classList.add('fade-overflow');
       update(element);
+      element.addEventListener('scroll', () => update(element));
       element.addEventListener('mouseenter', event => start(element, event));
       element.addEventListener('mousemove', event => {
         const motion = motions.get(element);

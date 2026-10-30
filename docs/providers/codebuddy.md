@@ -27,6 +27,21 @@ working directory it ran in — the same storage shape Claude Code uses:
 ~/.codebuddy/projects/<mangled-cwd>/<session-id>.jsonl
 ```
 
+A session that spawned sub-agents also owns a directory of the same name, with
+one transcript per sub-agent:
+
+```
+~/.codebuddy/projects/<mangled-cwd>/<session-id>/subagents/agent-{agentId}.jsonl
+```
+
+tokscale reports each of those files as its own `codebuddy` session, keyed on
+the top-level `sessionId` its ordinary records state — the sub-agent's own
+UUIDv7 session id, which appears nowhere in the file name. Two fields look like
+that id and are not: `_meta.baggage`'s `codebuddy.session_id` is the **parent**
+session id, and a `session-meta` record's `sessionId` is the agent id
+(`agent-{agentId}`). Sub-agent usage is therefore the scan's own per-session
+accounting and must never be merged into the parent — that would double-count.
+
 `CODEBUDDY_CONFIG_DIR` is deliberately **not** consulted, even though the CLI
 resolves its config directory from it. The pinned tokscale declares no override
 for this client: its table spells the root as a bare `.codebuddy/projects`,
@@ -126,6 +141,18 @@ decoding; an oversized record returns `line-too-large` with no partial usage.
 This Session Detail bound is separate from the metadata scanner's 64 KiB
 record limit described above.
 
+A scan-reported sub-agent session resolves through
+`providers/codebuddy/subagents.js`: the name-based lookup misses, so
+`resolveSessionFile()` falls back to reading the first records of each
+`agent-*.jsonl` under any `subagents` directory — depth-agnostic, bounded to
+one 256 KiB read and 16 lines per candidate, and uncached, because Session
+Detail is opened on demand rather than per tick. The parent's own file always
+wins first, so a parent session never resolves to a sub-agent transcript, and
+the per-tick metadata path, which calls `findSessionFiles` directly, is
+untouched. The resolved sub-agent transcript then feeds the same
+`parseCodebuddyTranscript()` as any other, so its exchanges, tools and tokens
+read exactly like a session's.
+
 Token conversion mirrors `BuddyUsage::to_breakdown()` in the pinned Tokscale Tencent Buddy parser. It selects one usage object in order: `message.usage`, `providerData.usage`, then `providerData.rawUsage`. Explicit zero input, output and cache-miss fields remain authoritative; cache aliases select the first positive count. Fields from different objects are not merged. Records with an explicit status other than `completed` do not contribute usage.
 
 `cachedMissTokens` / `cacheMissTokens` already exclude cached input. Other input fields stay unchanged unless a reported `total_tokens` / `totalTokens` equals input plus output and proves cache reads were included; only then are cache reads subtracted. Cache-read and cache-write aliases follow the pinned parser's precedence. Tencent Buddy reasoning is an additive bucket, so the total includes input, output, cache reads, cache writes and reasoning. Nested token-detail arrays are not additional sources in that parser. Live usage and history normalization also treat both Buddy clients' reasoning as additive; their public output bucket includes it, while Detail retains the separate output and reasoning fields.
@@ -213,6 +240,14 @@ credential planes in [workbuddy.md](workbuddy.md).
 
 ## Known gaps
 
+- **No link from a parent session to its sub-agent sessions.** The parent
+  transcript records the `Agent` call and the sub-agent's final report, but
+  carries no agent id or session id referencing the sub-agent transcript, so a
+  parent's detail rows cannot jump to the sub-agent conversation. Sub-agent
+  sessions open from the session list like any other.
+- **No title or turn boundary for sub-agent sessions.** Sub-agent transcripts
+  carry no `ai-title` record, so the metadata scanner has nothing to add for
+  them and the per-tick path deliberately does not scan `subagents/`.
 - **No context window.** CodeBuddy records no window size anywhere, and
   `turn-metrics.tokenDelta` is a per-turn delta rather than an occupancy, so
   CodeBuddy has no context gauge — the `contextTokens`/`contextWindow` pair is

@@ -16,6 +16,7 @@ html, body.edge-dock {
    edgeDockShapes.js, the same commands that mask the native material on macOS,
    so the tint and the glass behind it share one edge. */
 .edge-dock-root {
+  --edge-dock-card-enter-shift: 3px;
   position: relative;
   width: 100%;
   height: 100%;
@@ -33,7 +34,10 @@ html, body.edge-dock {
 .edge-dock-stat-label,
 .edge-dock-stat-headline strong,
 .edge-dock-usage-tokens,
-.edge-dock-rate-figure {
+.edge-dock-rate-figure,
+.edge-dock-plugin-cell .pv-compact-label,
+.edge-dock-plugin-cell .pv-compact-value,
+.edge-dock-plugin-cell .pv-compact-caption {
   font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
 }
 
@@ -315,6 +319,11 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   text-overflow: clip;
 }
 .edge-dock-cell-stat.is-idle .edge-dock-stat-value { color: var(--muted); }
+/* A rolling readout's glyphs leave its line box and fade out through the mask
+   (see .token-number-glyphs); clipping would cut them with a straight edge. */
+.edge-dock-stat-value[data-token-number-animation="roll"],
+.edge-dock-stat-cost[data-token-number-animation="roll"],
+.edge-dock-cell-rate:has([data-token-number-animation="roll"]) { overflow: visible; }
 /* The tools with work in flight, drawn with their own marks. The cell is 56px
    of a 64px rail, so the row is capped in the projection (runningClients) and
    the remainder is stated as a count rather than shrunk below legibility. */
@@ -941,7 +950,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 .edge-dock-root.is-revealing { animation: edge-dock-rail-in 150ms cubic-bezier(0.33, 1, 0.68, 1) both; }
 
 @keyframes edge-dock-card-in {
-  from { opacity: 0; transform: translateY(3px); }
+  from { opacity: 0; transform: translateY(var(--edge-dock-card-enter-shift)); }
   to { opacity: 1; transform: none; }
 }
 .edge-dock-root.is-card-changed .edge-dock-card { animation: edge-dock-card-in 160ms ease-out both; }
@@ -1031,3 +1040,23 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
    inside details traps wheel gestures once the card hits the work-area cap. */
 .edge-dock-session-family > .edge-dock-sessions { padding: 8px 0 0 16px; }
 .edge-dock-session-family .edge-dock-session-list { overflow: visible; }
+
+/* Plugin cells read like the usage readouts: a caption over one value, both
+   supplied by the plugin's compact view and painted in place on each push. */
+.edge-dock-cell-plugin { gap: 3px; }
+.edge-dock-plugin-cell { max-width: 56px; min-width: 0; }
+.edge-dock-plugin-cell .pv-compact-label { max-width: 54px; overflow: hidden; text-overflow: ellipsis; font-size: 9px; font-weight: 600; letter-spacing: 0.02em; text-transform: none; }
+.edge-dock-plugin-cell .pv-compact-value { max-width: 56px; overflow: hidden; font-size: 12px; font-weight: 650; letter-spacing: -0.01em; }
+.edge-dock-plugin-cell .pv-placeholder { justify-content: center; min-height: 0; }
+.edge-dock-plugin-cell .pv-placeholder span { display: none; }
+.edge-dock-card-plugin .edge-dock-card-head { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
+.edge-dock-plugin-identity { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.edge-dock-plugin-identity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edge-dock-plugin-header-actions, .edge-dock-plugin-header-actions > .plugin-header-actions-mount { display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.edge-dock-plugin-header-actions { flex: 0 1 auto; max-width: 70%; }
+.edge-dock-plugin-header-actions:not(:has(> .plugin-header-actions-mount:not(:empty))) { display: none; }
+.edge-dock-plugin-owner { font-size: 10px; color: var(--muted); }
+.edge-dock-plugin-card { margin-top: 10px; min-width: 0; }
+
+/* Like built-in readouts, rolling glyphs need room for their outgoing ink. */
+.edge-dock-plugin-cell .pv-compact-value[data-token-number-animation="roll"] { overflow: visible; }

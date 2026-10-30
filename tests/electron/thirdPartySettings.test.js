@@ -151,17 +151,16 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(presentation, /if \(planLabel === 'custom'\) return 'Custom'/);
   assert.doesNotMatch(presentation, /planLabel\.includes\('token'\) \|\| quotaLabel\.includes\('token'\)/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /function thirdPartySpendNode/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /balance\?\.requestCount/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.requests/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /if \(allTimeSpend === null && monthSpend === null && entries\.length === 0\) return null/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /monthSpend !== null[\s\S]*?`Month \$\{formatMoney\(monthSpend, currency\)\}`/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /allTimeSpend !== null[\s\S]*?`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /\]\.join\(' · '\)/);
+  // Account metadata and the order of rendered tooltip rows are exercised by
+  // edgeDockLimitCard.test.js through the shared view used by both surfaces.
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /if \(spendRows\.length === 0 && entries\.length === 0\) return null/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /const spendValues = providerSpendEntries\(balance\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /preferredSpend\.length > 0 \? preferredSpend : spendValues\.slice\(0, 2\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /\.join\(' · '\)/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.monthTokens/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.avgResponse/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /label: summary \? 'Spend' : 'Details'/);
   assert.match(balanceDisplay, /return symbol \? `\$\{symbol\}\$\{number\.toFixed\(2\)\}` : `\$\{code\} \$\{number\.toFixed\(2\)\}`/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
   // The group builder is the shared view's, and it now derives the adapter
   // decorations itself: a host that passes nothing — the dock card — still gets
   // each row's own mark, colour and adapter name, and a header that wears the
@@ -317,6 +316,7 @@ test('third-party fallback stays last after named providers across product surfa
   assert.ok(html.indexOf('id="thirdpartyAccountGroup"') > html.indexOf('id="copilotAccountGroup"'));
 
   const providerOrder = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
+  assert.equal(providerOrder.at(-1), 'thirdparty');
   assert.ok(providerOrder.indexOf('thirdparty') > providerOrder.indexOf('ollama'));
   // clientsWithIcon is VENDOR_ORDER now, so this covers the icon set too.
   assert.equal(VENDOR_ORDER.at(-1), 'thirdparty');
@@ -334,8 +334,8 @@ test('third-party fallback stays last after named providers across product surfa
 
   const api = read('docs/API.md');
   const providerContract = api.split('\n').find((line) => line.startsWith('`limits.providers[].provider`'));
-  assert.ok(providerContract, 'docs/API.md must document the limits provider enum');
-  assert.ok(providerContract.lastIndexOf('`thirdparty`') > providerContract.lastIndexOf('`ollama`'));
+  assert.ok(providerContract, 'docs/API.md must document the limits provider contract');
+  assert.match(providerContract, /`LIMIT_PROVIDER_CATALOG` in `src\/shared\/limits\/providers\.js`/);
 
   for (const file of ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md']) {
     const content = read(file);

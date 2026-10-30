@@ -70,15 +70,19 @@ test('period changes preserve row identity, animate rank changes, and count from
   );
 
   assert.match(handler, /const snapshot = captureBreakdownMotion\(\)/);
-  assert.match(handler, /animateBreakdownFrom\(snapshot, \{ duration: 800 \}\)/);
+  assert.match(handler, /animateBreakdownFrom\(snapshot, \{ duration: periodBreakdownMotionDuration\(\), synchronized: true \}\)/);
+  assert.doesNotMatch(handler, /animateBreakdownFrom\(snapshot, \{ duration: periodBreakdownMotionDuration\(\) \}\)/,
+    'every period switch path synchronizes the breakdown');
   assert.doesNotMatch(handler, /state\.currentTotal = 0/);
   assert.match(app, /barScale: trackWidth > 0 \? Math\.max\(0, Math\.min\(1, fillWidth \/ trackWidth\)\) : 0/);
   assert.match(app, /previous\.top - row\.getBoundingClientRect\(\)\.top/);
   assert.match(app, /animateBarBetween\(fill, previous\.barScale, targetScale, 0, duration\)/);
   assert.match(app, /animateBarBetween\(fill, 0, targetScale, delay, Math\.max\(1, duration - delay\)\)/);
-  assert.match(app, /function animateRowNumber\(el, from, to, duration = 420\)/);
-  assert.match(app, /animateRowNumber\(row\.querySelector\('\.row-value'\), previous\.value, value, duration\)/);
-  assert.match(app, /value: Number\(row\.querySelector\('\.row-value'\)\?\.dataset\.motionValue/);
+  assert.match(app, /function animateRowNumber\(el, from, to, duration = 420, capturedRoll = null, \{ synchronized = false \} = \{\}\)/);
+  assert.match(app, /animateRowNumber\(valueEl, previous\?\.value \?\? 0, value,\s*duration, previous\?\.rollSnapshot, \{ synchronized \}\)/);
+  assert.match(app, /const delay = synchronized \? 0 : Math\.min\(enteringIndex, 6\) \* 18;/);
+  assert.match(app, /rollSnapshot: motionRows\.has\(row\) \? tokenNumberAnimationApi\.capture\(valueEl\) : null/);
+  assert.match(app, /value: Number\(valueEl\?\.dataset\.motionValue/);
 });
 
 test('live row updates count and resize bars together without slowing the headline', () => {
@@ -89,8 +93,8 @@ test('live row updates count and resize bars together without slowing the headli
   assert.ok(renderRows.indexOf('captureBreakdownMotion()') < renderRows.indexOf('if (structureChanged)'));
   assert.match(app, /if \(liveMotionSnapshot\) animateBreakdownFrom\(liveMotionSnapshot, \{ duration: 600 \}\)/);
   assert.match(app, /const animationFrom = numberAnimHandle \? numberAnimValue : state\.currentTotal/);
-  assert.match(app, /animateTotalNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000\)/);
-  assert.match(app, /animateRowNumber\(row\.querySelector\('\.row-value'\), 0, value, duration\)/);
+  assert.match(app, /animateTotalNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000,\s*\{ synchronized: state\.periodMotionActive \}\)/);
+  assert.match(app, /if \(!breakdownNumberMotionVisibleOnly \|\| !previous \|\| previous\.value !== value \|\| rowNumberAnimations\.has\(valueEl\)\)/);
 });
 
 test('unrelated rerenders do not truncate an in-flight headline count', () => {
@@ -102,7 +106,7 @@ test('unrelated rerenders do not truncate an in-flight headline count', () => {
 
   assert.match(app, /let numberAnimTarget = null;\s*let numberAnimValue = 0;/);
   assert.match(app, /function headlineNumberIsAnimatingTo\(value\) \{\s*return Boolean\(numberAnimHandle\) && numberAnimTarget === value;\s*\}/);
-  assert.match(app, /numberAnimTarget = to;\s*numberAnimValue = from;/);
+  assert.match(app, /numberAnimTarget = to;\s*numberAnimValue = rolling \? to : from;/);
   assert.match(app, /numberAnimValue = from \+ delta \* easeOutQuart\(progress\)/);
   assert.match(renderTotal, /else if \(!headlineNumberIsAnimatingTo\(nextTotal\)\) \{\s*cancelNumberAnimation\(\)/);
   assert.doesNotMatch(renderTotal, /else \{\s*cancelNumberAnimation\(\)/);
@@ -120,7 +124,7 @@ test('row motion preserves matching targets and continues changed targets from t
   );
 
   assert.match(app, /const rowNumberAnimations = new Map\(\);\s*const rowBarAnimations = new Map\(\);/);
-  assert.match(animateRowNumber, /if \(previous\?\.target === to\) return;/);
+  assert.match(animateRowNumber, /if \(previous\?\.target === to && !prefersReducedMotion\(\)\) return;/);
   assert.match(animateRowNumber, /const startValue = Number\.isFinite\(previous\?\.value\) \? previous\.value : from;/);
   assert.match(animateRowNumber, /const motion = \{ handle: 0, target: to, value: startValue \}/);
   assert.match(animateBarBetween, /const previousIsActive = previous\?\.animation\.pending \|\| previous\?\.animation\.playState === 'running';/);

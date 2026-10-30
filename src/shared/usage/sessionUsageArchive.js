@@ -4,7 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { PERIODS, normalizePeriod } = require('../usage');
+const { isSessionReasoningEffortClient } = require('../sessionLive');
 const {
+  archivedSessionInput,
   cloneJson,
   hasSummaryPeriod,
   localDay,
@@ -16,6 +18,7 @@ const {
 } = require('../archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('../config');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('../providers/reasonix/sessionGuard');
+const { isForkEraPromaSession } = require('../providers/proma/sessionGuard');
 const { splitClientIdFor } = require('../clientIdentitySplits');
 const {
   isLegacyCursorEntry,
@@ -69,6 +72,16 @@ function hasSessionUsage(session) {
   return numberValue(session?.totalTokens) > 0 || numberValue(session?.costUsd) > 0;
 }
 
+// A title/catalog miss on an unchanged observation is not a new turn. Keep
+// its saved setting, but never fill an explicit clear or a newer observation.
+function sessionWithRetainedEffort(session, previous) {
+  if (!isSessionReasoningEffortClient(session.client) || Object.hasOwn(session, 'reasoningEffort')
+    || !previous || !Object.hasOwn(previous, 'reasoningEffort')) return session;
+  const timestamp = Date.parse(session.lastUsedAt);
+  if (!Number.isFinite(timestamp) || timestamp !== Date.parse(previous.lastUsedAt)) return session;
+  return { ...session, reasoningEffort: previous.reasoningEffort };
+}
+
 function normalizeSessionUsageArchive(value) {
   const source = value?.sessions && typeof value.sessions === 'object' ? value.sessions : value;
   const normalized = { version: 1, sessions: {} };
@@ -92,7 +105,8 @@ function normalizeSessionUsageArchive(value) {
 
     for (const periodName of PERIODS) {
       const session = normalizedSessionFrom(rawPeriods?.[periodName], rawKey);
-      if (!session || isReasonixSyntheticSession(session, rawKey) || !hasSessionUsage(session)) continue;
+      if (!session || isReasonixSyntheticSession(session, rawKey)
+        || !hasSessionUsage(session) && rawPeriods?.[periodName]?.totalTokens !== 0) continue;
       delete session.liveActivity;
       delete session.waitingForInput;
       const key = sessionKey(session.client, session.sessionId);
@@ -111,7 +125,25 @@ function normalizeSessionUsageArchive(value) {
     if (!entry.client || !entry.sessionId || Object.keys(entry.periods).length === 0) continue;
     const supersededBy = sessionKey('cursor', String(rawEntry.supersededBy || '').replace(/^cursor:/, ''));
     if (rawEntry.supersededBy && supersededBy && isLegacyCursorEntry(entry)) entry.supersededBy = supersededBy;
-    normalized.sessions[`${entry.client}:${entry.sessionId}`] = entry;
+    const key = `${entry.client}:${entry.sessionId}`;
+    const previous = normalized.sessions[key];
+    if (!previous) normalized.sessions[key] = entry;
+    else {
+      // A released client alias may share its ID with the renamed client.
+      // Keep whole period observations, including a newer explicit zero.
+      for (const name of Object.keys(entry.periods)) {
+        const before = Date.parse(previous.periodWindows[name]?.capturedAt || previous.capturedAt) || 0;
+        const after = Date.parse(entry.periodWindows[name]?.capturedAt || entry.capturedAt) || 0;
+        if (previous.periods[name] && (before > after || before === after && rawKey !== key)) continue;
+        previous.periods[name] = entry.periods[name];
+        previous.periodWindows[name] = entry.periodWindows[name];
+      }
+      if (entry.capturedAt > previous.capturedAt) {
+        previous.capturedAt = entry.capturedAt;
+        previous.day = entry.day;
+        previous.month = entry.month;
+      }
+    }
   }
 
   return normalized;
@@ -169,6 +201,21 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
   const day = localDay(captureDate);
   const month = localMonth(captureDate);
   const sourceArchivedKeys = new Set(deviceRecord.codexLocalSessionKeys || []);
+  // This marks completed App report requests, not parser completeness. A
+  // Today-only tick and a progressive preview cannot clear other observations.
+  const fullScan = deviceRecord.sessionUsageArchiveFullScan === true
+    && PERIODS.every(name => {
+      const value = deviceRecord.periods?.[name] || deviceRecord[name];
+      return value && typeof value === 'object' && value.sessions && typeof value.sessions === 'object';
+    });
+  const allTime = options.canonicalSummary === true
+    ? (deviceRecord.periods?.allTime || deviceRecord.allTime) : fullScan && periodFor(deviceRecord, 'allTime');
+  const liveKeys = fullScan ? new Set(Object.values(allTime.sessions || {})
+    .map(session => sessionKey(session.client, session.sessionId)).filter(Boolean)) : null;
+  const watchToday = deviceRecord.sessionUsageArchiveFullScan === false
+    ? (options.canonicalSummary === true
+      ? deviceRecord.periods?.today || deviceRecord.today || {}
+      : periodFor(deviceRecord, 'today')) : null;
   for (const periodName of PERIODS) {
     if (periodName === 'today' && archive.prunedDay && day < archive.prunedDay) continue;
     if (periodName === 'month' && archive.prunedMonth && month < archive.prunedMonth) continue;
@@ -176,11 +223,25 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
     const period = options.canonicalSummary === true
       ? (rawPeriod && typeof rawPeriod === 'object' ? rawPeriod : { sessions: {} })
       : periodFor(deviceRecord, periodName);
-    for (const session of Object.values(period.sessions || {})) {
-      if (isReasonixSyntheticSession(session) || !hasSessionUsage(session)) continue;
-      const archiveKey = sessionKey(session.client, session.sessionId);
+    const observations = Object.values(period.sessions || {});
+    if (liveKeys && periodName !== 'allTime') {
+      for (const [key, entry] of Object.entries(archive.sessions)) {
+        const identity = sessionKey(entry.client, entry.sessionId);
+        if (!entry.periods?.[periodName] || !liveKeys.has(identity)
+          || period.sessions?.[identity] || sourceArchivedKeys.has(key)) continue;
+        observations.push({ client: entry.client, sessionId: entry.sessionId, totalTokens: 0, costUsd: 0 });
+      }
+    }
+    for (const observation of observations) {
+      const hasUsage = hasSessionUsage(observation);
+      if (isReasonixSyntheticSession(observation) || !hasUsage && observation.totalTokens !== 0) continue;
+      const archiveKey = sessionKey(observation.client, observation.sessionId);
       if (!archiveKey) continue;
       if (sourceArchivedKeys.has(archiveKey)) continue;
+      const session = sessionWithRetainedEffort(observation, archive.sessions[archiveKey]?.periods?.[periodName]);
+      // An empty Today scan can leave zero rows in broader anchor deltas.
+      // Only a still-identified Today row proves a watch zero was observed.
+      if (watchToday && periodName !== 'today' && !hasUsage && !watchToday.sessions?.[archiveKey]) continue;
       const entry = archive.sessions[archiveKey] || {
         client: session.client,
         sessionId: session.sessionId,
@@ -275,22 +336,17 @@ function addSessionBreakdown(period, session) {
     .filter(([, tokens]) => tokens > 0);
   const totalModelTokens = modelTokens.reduce((sum, [, tokens]) => sum + tokens, 0);
   if (totalModelTokens === 0) return;
-  if (modelTokens.length > 1) {
-    for (const [model, tokens] of modelTokens) {
-      period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + tokens;
-    }
-    period.capabilities.tokenComponents = false;
-    return;
-  }
-
   for (const [model, tokens] of modelTokens) {
-    const cr = Math.min(tokens, cacheRead);
-    const cw = Math.min(tokens - cr, cacheWrite);
-    const ou = Math.min(tokens - cr - cw, output);
+    const single = modelTokens.length === 1;
+    const observed = single ? null : session.modelTokenComponents?.[model];
+    const cr = observed ? observed.cacheReadTokens : single ? Math.min(tokens, cacheRead) : 0;
+    const cw = observed ? observed.cacheWriteTokens : single ? Math.min(tokens - cr, cacheWrite) : 0;
+    const ou = observed ? observed.outputTokens : single ? Math.min(tokens - cr - cw, output) : 0;
+    const input = observed ? observed.inputTokens : single ? archivedSessionInput(session) : 0;
     if (cr > 0) period.modelCacheReads[model] = (period.modelCacheReads[model] || 0) + cr;
     if (cw > 0) period.modelCacheWrites[model] = (period.modelCacheWrites[model] || 0) + cw;
     if (ou > 0) period.modelOutputs[model] = (period.modelOutputs[model] || 0) + ou;
-    const unclassified = Math.max(0, tokens - cr - cw - ou);
+    const unclassified = Math.max(0, tokens - cr - cw - ou - input);
     if (unclassified > 0) {
       period.modelUnclassifiedTokens[model] = (period.modelUnclassifiedTokens[model] || 0) + unclassified;
       period.capabilities.tokenComponents = false;
@@ -316,7 +372,7 @@ function addArchivedSession(period, session, archiveKey = null) {
   period.cacheReadTokens += cacheRead;
   period.cacheWriteTokens += cacheWrite;
   period.outputTokens += output;
-  const unclassified = Math.max(0, tokens - cacheRead - cacheWrite - output);
+  const unclassified = Math.max(0, tokens - cacheRead - cacheWrite - output - archivedSessionInput(archived));
   if (unclassified > 0) {
     period.unclassifiedTokens += unclassified;
     period.clientUnclassifiedTokens[archived.client] = (period.clientUnclassifiedTokens[archived.client] || 0) + unclassified;
@@ -385,34 +441,53 @@ function applySessionUsageArchive(summary, archive, options = {}) {
     return targetPeriods.get(periodName);
   };
 
-  const supersededRows = [];
-  const mergedRows = [];
+  // SQLite may still hold a released literal alias beside its canonical peer.
+  // Pick one whole latest observation per period; never add the same ID twice.
+  // Select zeros too, so a newer zero cannot resurrect an older alias's usage.
+  const retainedRows = new Map();
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
+    // Retained, not replayed: see providers/proma/sessionGuard.js.
+    if (isForkEraPromaSession(entry.client, entry.sessionId)) continue;
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
-      if (!session || !hasSessionUsage(session) || !shouldApplyPeriod(periodName, entry, now)) continue;
+      if (!session || !shouldApplyPeriod(periodName, entry, now)) continue;
       // Same rule as the client archive: never create a period the summary does
       // not have. A progressive preview is marked partial by the periods it
       // omits, and a partial that looks complete loses the attribution fields
       // deviceState would otherwise carry forward.
       if (!hasSummaryPeriod(next, periodName)) continue;
       const period = targetFor(periodName);
-      if (period.sessions[archiveKey]) continue;
-      // A row keyed under a merged id replays only after every other row: an
-      // archived split-id copy of the same session is the same usage twice, and
-      // the merged row can only see that overlap once the split row is already
-      // in the period. Insertion order puts the older merged row first, so
-      // deferring by identity is what makes the replay order-independent.
-      if (splitClientIdFor(session.client || entry.client)) {
-        mergedRows.push([period, archiveKey, entry, session]);
+      const key = sessionKey(session.client || entry.client, session.sessionId || entry.sessionId) || archiveKey;
+      if (period.sessions[key]) {
+        period.sessions[key] = sessionWithRetainedEffort(period.sessions[key], session);
         continue;
       }
-      if (entry.supersededBy) {
-        supersededRows.push([period, archiveKey, session, entry.supersededBy]);
-        continue;
-      }
-      addArchivedSession(period, session, archiveKey);
+      const selectionKey = `${periodName}:${key}`;
+      const observedAt = Date.parse(entry.periodWindows?.[periodName]?.capturedAt || entry.capturedAt || '') || 0;
+      const previous = retainedRows.get(selectionKey);
+      if (previous && (previous.observedAt > observedAt
+        || previous.observedAt === observedAt && previous.archiveKey === key)) continue;
+      retainedRows.set(selectionKey, { period, key, entry, session, observedAt, archiveKey });
     }
+  }
+  const supersededRows = [];
+  const mergedRows = [];
+  for (const { period, key: archiveKey, entry, session } of retainedRows.values()) {
+    if (!hasSessionUsage(session)) continue;
+    // A row keyed under a merged id replays only after every other row: an
+    // archived split-id copy of the same session is the same usage twice, and
+    // the merged row can only see that overlap once the split row is already
+    // in the period. Insertion order puts the older merged row first, so
+    // deferring by identity is what makes the replay order-independent.
+    if (splitClientIdFor(session.client || entry.client)) {
+      mergedRows.push([period, archiveKey, entry, session]);
+      continue;
+    }
+    if (entry.supersededBy) {
+      supersededRows.push([period, archiveKey, session, entry.supersededBy]);
+      continue;
+    }
+    addArchivedSession(period, session, archiveKey);
   }
 
   for (const [period, archiveKey, entry, session] of mergedRows) {

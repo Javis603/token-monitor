@@ -170,6 +170,18 @@ test('only an opted-in manual refresh forces the self-synced clients', async () 
   assert.deepEqual(ticks.map((options) => options.forceSelfSync), [false, true]);
 });
 
+test('settings refresh can update limits without scanning usage', async () => {
+  const calls = [];
+  const runtime = {
+    refreshLimits: async (scope, reason) => { calls.push(['limits', scope, reason]); },
+    tick: async () => { calls.push(['usage']); }
+  };
+
+  await runManualDeviceRefresh(runtime, { refreshUsage: false });
+
+  assert.deepEqual(calls, [['limits', { all: true }, 'manual']]);
+});
+
 test('manual refresh reports a late limits failure without rejecting completed usage', async () => {
   const errors = [];
   const runtime = {
@@ -312,4 +324,21 @@ test('limit invalidation can clear without scheduling a refresh', async () => {
 
   assert.deepEqual(calls, [['clear', scope, 'settings-change']]);
   assert.deepEqual(result, { cleared: true });
+});
+
+test('limits-only refresh waits for completion and reports errors without scanning usage', async () => {
+  let finish;
+  let completed = false;
+  const errors = [];
+  const request = runManualDeviceRefresh({
+    refreshLimits: () => new Promise((resolve, reject) => { finish = reject; }),
+    tick: () => { throw new Error('unexpected usage scan'); }
+  }, { refreshUsage: false, onLimitsError: (error) => errors.push(error.message) })
+    .then(() => { completed = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false);
+  finish(new Error('quota offline'));
+  await request;
+  assert.equal(completed, true);
+  assert.deepEqual(errors, ['quota offline']);
 });

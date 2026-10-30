@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Data and settings · Token Monitor Docs</title>
+    <meta name="description" content="Trusted plugin App data queries, local Node backends, paging and saved preferences.">
+    <meta property="og:title" content="Data and settings · Token Monitor Docs">
+    <meta property="og:description" content="Trusted plugin App data queries, local Node backends, paging and saved preferences.">
+    <meta property="og:type" content="article">
+    <meta property="og:image" content="../assets/icon.png">
+    <meta name="theme-color" content="#14171c">
+    <link rel="icon" href="../assets/icon.png">
+    <link rel="stylesheet" href="../styles/tokens.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/base.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/components.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/edgedock.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/sections.css?v=20260929-v063">
+    <link rel="stylesheet" href="../styles/docs.css?v=20260929-v063">
+  </head>
+  <body data-docs-legacy="data">
+    <a class="skip-link" href="#main" data-i18n="nav.skip">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav shell" aria-label="Primary" data-i18n-attr="aria-label:nav.primary">
+        <a class="brand" href="../" aria-label="Token Monitor home" data-i18n-attr="aria-label:nav.home">
+          <img class="brand-mark" src="../assets/icon.png" alt="" width="36" height="36">
+          <span>Token Monitor</span>
+        </a>
+        <div class="nav-actions">
+          <a class="nav-docs-link" href="./" aria-current="page" data-i18n="nav.docs">Docs</a>
+          <details class="lang-menu" data-lang-menu>
+            <summary class="nav-icon-btn lang-btn" aria-label="Language" aria-haspopup="menu" aria-expanded="false" data-i18n-attr="aria-label:nav.language">
+              <svg class="lang-symbol" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 8 11 14"></path>
+                <path d="m4 14 6-6 2-3"></path>
+                <path d="M2 5h12"></path>
+                <path d="M7 2h1"></path>
+                <path d="m22 22-5-10-5 10"></path>
+                <path d="M14 18h6"></path>
+              </svg>
+              <span class="lang-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="lang-pop" role="menu" aria-label="Language" data-i18n-attr="aria-label:nav.language">
+              <button type="button" role="menuitemradio" data-lang="zh-TW" aria-checked="false">繁體中文</button>
+              <button type="button" role="menuitemradio" data-lang="zh-CN" aria-checked="false">简体中文</button>
+              <button type="button" role="menuitemradio" data-lang="en" aria-checked="true">English</button>
+              <button type="button" role="menuitemradio" data-lang="ko" aria-checked="false">한국어</button>
+              <button type="button" role="menuitemradio" data-lang="ja" aria-checked="false">日本語</button>
+              <button type="button" role="menuitemradio" data-lang="pt-BR" aria-checked="false">Português (Brasil)</button>
+            </div>
+          </details>
+          <a class="nav-github-link" href="https://github.com/Javis603/token-monitor" aria-label="Star Token Monitor on GitHub" data-i18n-attr="aria-label:nav.githubStar">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+            </svg>
+            <span class="nav-github-label" data-i18n="nav.star">Star</span>
+            <span class="nav-github-count" data-github-stars>1000</span>
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <button class="docs-menu-btn" type="button" aria-expanded="false" aria-controls="docs-nav"><span data-i18n="docs.menu">Docs menu</span></button>
+        <nav class="docs-nav" id="docs-nav" aria-label="Documentation" data-i18n-attr="aria-label:docs.nav">
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.start">Get started</h2>
+            <ul>
+              <li><a href="./" data-i18n="docs.page.home">Overview</a></li>
+              <li><a href="app.html" data-i18n="docs.page.app">Using the App</a></li>
+              <li><a href="plugins.html" data-i18n="docs.page.plugins">Using plugins</a></li>
+              <li><a href="plugin-quickstart.html" aria-current="page" data-i18n="docs.page.quickstart">Plugin development guide</a></li>
+            </ul>
+          </div>
+          <div class="docs-nav-group">
+            <h2 data-i18n="docs.group.reference">Author references</h2>
+            <ul>
+              <li><a href="plugin-reference.html" data-i18n="docs.page.reference">Plugin API reference</a></li>
+              <li><a href="plugin-ui-reference.html" data-i18n="docs.page.uiReference">UI integration reference</a></li>
+              <li><a href="plugin-distribution-reference.html" data-i18n="docs.page.distributionReference">Distribution reference</a></li>
+              <li><a href="plugin-data-reference.html" data-i18n="docs.page.dataReference">Data and settings reference</a></li>
+              <li><a href="plugin-publishing-reference.html" data-i18n="docs.page.publishingReference">Publishing guide</a></li>
+              <li><a href="plugin-testing-reference.html" data-i18n="docs.page.testingReference">Testing and acceptance</a></li>
+            </ul>
+          </div>
+        </nav>
+      </aside>
+      <main class="docs-main" id="main">
+        <ol class="docs-crumbs"><li><a href="./" data-i18n="docs.crumb">Docs</a></li><li aria-current="page" data-i18n="docs.page.data">Data and settings</li></ol>
+        <article class="doc-lang docs-article" lang="en">
+<h1>Data and settings</h1><p class="docs-lede">This topic now lives inside the continuous plugin author guide. Existing section links will take you to the matching part.</p><p><a href="plugin-quickstart.html#data-settings">Continue in the complete developer guide</a></p>
+        </article>
+        <article class="doc-lang docs-article" lang="zh-TW">
+<h1>資料與設定</h1><p class="docs-lede">本主題已併入連續的外掛開發指南。原有段落連結會帶你前往對應位置。</p><p><a href="plugin-quickstart.html#data-settings">前往完整開發指南</a></p>
+        </article>
+        <article class="doc-lang docs-article" lang="zh-CN">
+<h1>数据与设置</h1><p class="docs-lede">本主题已并入连续的插件开发指南。原有章节链接会跳到对应位置。</p><p><a href="plugin-quickstart.html#data-settings">前往完整开发指南</a></p>
+        </article>
+        <article class="doc-lang docs-article" lang="ko">
+<h1>데이터와 설정</h1><p class="docs-lede">이 주제는 하나의 플러그인 개발 안내에 통합되었습니다. 기존 구역 링크는 해당 위치로 이동합니다.</p><p><a href="plugin-quickstart.html#data-settings">전체 개발 안내로 이동</a></p>
+        </article>
+        <article class="doc-lang docs-article" lang="ja">
+<h1>データと設定</h1><p class="docs-lede">この項目は一続きのプラグイン開発ガイドに統合されました。従来の節リンクは対応箇所へ移動します。</p><p><a href="plugin-quickstart.html#data-settings">完全版の開発ガイドへ</a></p>
+        </article>
+        <article class="doc-lang docs-article" lang="pt-BR">
+<h1>Dados e configurações</h1><p class="docs-lede">Este tema agora integra o guia contínuo de desenvolvimento. Links antigos levam à seção correspondente.</p><p><a href="plugin-quickstart.html#data-settings">Continue no guia completo de desenvolvimento</a></p>
+        </article>
+
+      </main>
+    </div>
+
+    <footer class="footer section shell">
+      <span class="footer-copy">© 2026 Token Monitor</span>
+      <div class="footer-links">
+        <a href="https://github.com/Javis603/token-monitor">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.18-3.37-1.18-.45-1.15-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03A9.55 9.55 0 0 1 12 6.99c.85 0 1.7.11 2.5.34 1.9-1.3 2.74-1.03 2.74-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.95.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/>
+          </svg>
+          <span data-i18n="nav.github">GitHub</span>
+        </a>
+        <a href="./" data-i18n="footer.docs">Guides</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/docs/API.md" data-i18n="footer.api">API docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/worker/README.md" data-i18n="footer.worker">Worker docs</a>
+        <a href="https://github.com/Javis603/token-monitor/blob/main/LICENSE" data-i18n="footer.license">License</a>
+      </div>
+    </footer>
+
+    <script src="../scripts/i18n.js?v=20260929-v063" defer></script>
+    <script src="../scripts/main.js?v=20260929-v063" defer></script>
+    <script src="../scripts/docs.js?v=20260929-v063" defer></script>
+  </body>
+</html>

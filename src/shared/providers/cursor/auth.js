@@ -16,7 +16,9 @@ const { cursorDesktopStateCandidates } = require('./desktopState');
 
 const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
 const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
-const CURSOR_EXPLICIT_SYNC_TIMEOUT_MS = 150_000;
+const CURSOR_BACKGROUND_SYNC_TIMEOUT_MS = 150_000;
+// Upstream explicit sync has a dynamic budget capped at 1800 seconds.
+const CURSOR_EXPLICIT_SYNC_TIMEOUT_MS = 1_830_000;
 const CURSOR_DESKTOP_TOKEN_KEY = 'cursorAuth/accessToken';
 
 function annotateSyncError(error, failureStage, exitCode = null) {
@@ -404,6 +406,7 @@ function runCursorStatus(options = {}) {
 
 module.exports = {
   CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
+  CURSOR_BACKGROUND_SYNC_TIMEOUT_MS,
   canonicalCursorUserId,
   credentialsPath,
   cursorDesktopStateCandidates,

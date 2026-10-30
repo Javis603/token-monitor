@@ -9,7 +9,6 @@ module.exports = {
       key: 'clineApiKey',
       kind: 'credential',
       storePath: ['providers', 'cline', 'apiKey'],
-      config: false,
       resolve: 'clineApiKey',
       normalize: 'secret'
     }

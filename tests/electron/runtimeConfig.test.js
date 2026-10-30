@@ -17,6 +17,7 @@ const {
   usageConfigFromSettings
 } = require('../../src/electron/runtimeConfig');
 const { alibabaVariant } = require('../../src/shared/providers/alibaba/limits');
+const { clineApiKey } = require('../../src/shared/providers/cline/limits');
 
 const BASE_USAGE_SETTINGS = Object.freeze({
   clients: 'claude',
@@ -251,6 +252,24 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
     agentVersion: '1.2.3',
     agentRuntime: 'electron-widget'
   });
+});
+
+// Cline is key-only on a machine that runs neither Cline Desktop nor its CLI: the
+// saved key is the whole credential lane, and nothing else populates it. Field
+// wiring that keeps a credential out of the limits config therefore drops the key
+// on the floor — the provider then reads only CLINE_API_KEY / CLINEPASS_API_KEY or
+// the discovered sign-in, and a configured key silently collects nothing.
+test('a saved Cline API key reaches the limits config and outranks the environment', () => {
+  const saved = limitsConfigFromSettings({ clineApiKey: 'sk-cline-saved' }, { env: {} });
+  assert.equal(saved.clineApiKey, 'sk-cline-saved');
+  assert.equal(clineApiKey({}, saved), 'sk-cline-saved');
+
+  const fromEnv = limitsConfigFromSettings({}, { env: { CLINE_API_KEY: 'sk-cline-env' } });
+  assert.equal(clineApiKey({ CLINE_API_KEY: 'sk-cline-env' }, fromEnv), 'sk-cline-env');
+  assert.equal(
+    clineApiKey({ CLINE_API_KEY: 'sk-cline-env' }, limitsConfigFromSettings({ clineApiKey: 'sk-cline-saved' }, { env: {} })),
+    'sk-cline-saved'
+  );
 });
 
 test('runtime config scopes Trae credentials and prefers saved settings over env', () => {
@@ -556,4 +575,43 @@ test('an unset Alibaba variant leaves the env var reachable by the collector', (
 
   // With neither, the provider falls back to mainland Team.
   assert.equal(alibabaVariant(limitsConfigFromSettings({}, { env: {} }), {}), 'cn');
+});
+
+test('WorkBuddy managed metadata overrides settings while desktop sessions ignore blank/legacy env credentials', () => {
+  const managed = [{ id: 'managed', realm: 'cn', userId: 'user', accountKey: 'stable-key' }];
+  const sessions = [{ realm: 'ai', authenticated: true, userId: 'ai-user', domain: 'www.workbuddy.ai' }];
+  const config = limitsConfigFromSettings({ workbuddyManagedAccounts: [{ id: 'stale' }], workbuddyAccessToken: 'legacy' }, {
+    env: { WORKBUDDY_ACCESS_TOKEN: 'env-token', WORKBUDDY_USER_ID: '' },
+    workbuddyDesktopSessionOnly: true, workbuddyDesktopSessionEnabled: true,
+    workbuddyManagedAccounts: managed, workbuddyLocalSessions: sessions, workbuddyLocalSession: sessions[0]
+  });
+  assert.deepEqual(config.workbuddyManagedAccounts, managed);
+  assert.deepEqual(config.workbuddyLocalSessions, sessions);
+  assert.equal(config.workbuddyAccessToken, '');
+  assert.equal(config.workbuddyUserId, 'ai-user');
+  assert.equal(config.workbuddyRealm, 'ai');
+  assert.deepEqual(limitsConfigFromSettings({}, { env: {}, workbuddyManagedAccounts: [] }).workbuddyManagedAccounts, []);
+  const headless = limitsConfigFromSettings({}, { env: { WORKBUDDY_ACCESS_TOKEN: 'headless-token' },
+    workbuddyLocalSessions: sessions });
+  assert.equal(headless.workbuddyAccessToken, 'headless-token');
+  assert.equal(headless.workbuddyRealm, 'cn');
+  assert.equal(headless.workbuddyLocalSessions, undefined);
+});
+
+test('WorkBuddy managed field is private and owned by the managed service', () => {
+  const { normalizeAccountPatch, initialAccountSettings, rendererOmittedAccountKeys } = require('../../src/electron/limits/accountSettings');
+  const { limitAccountField } = require('../../src/shared/limits/accounts');
+  const field = limitAccountField('workbuddy', 'workbuddyManagedAccounts');
+  assert.equal(field.kind, 'managed');
+  assert.equal(field.contextOverride, true);
+  assert.equal(field.persist, 'never');
+  assert.equal(field.watch, false);
+  assert.equal(field.rendererOmit, true);
+  assert.deepEqual(initialAccountSettings({}).workbuddyManagedAccounts, []);
+  const patch = { workbuddyManagedAccounts: [{ accessToken: 'untrusted' }] };
+  const normalized = { ...patch };
+  normalizeAccountPatch(patch, normalized);
+  assert.equal(Object.hasOwn(normalized, 'workbuddyManagedAccounts'), false);
+  assert.ok(rendererOmittedAccountKeys().includes('workbuddyManagedAccounts'));
+  assert.equal(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.workbuddy.includes('workbuddyManagedAccounts'), false);
 });

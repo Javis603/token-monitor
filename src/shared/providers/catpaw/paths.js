@@ -87,4 +87,4 @@ function catpawSourcesFingerprint(clientsCsv, options = {}) {
   return JSON.stringify(catpawDataSources(options));
 }
 
-module.exports = { catpawDatabaseName, catpawDataSources, catpawSourcesFingerprint, readWindowsFolders };
+module.exports = { catpawDatabaseName, catpawDataSources, catpawSourcesFingerprint, readWindowsFolders, nativeWindowsFolders };

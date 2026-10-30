@@ -84,13 +84,70 @@ test('project rollups merge case and Unicode-equivalent folder labels safely', (
   assert.equal({}.polluted, undefined);
 });
 
+test('project rollups retain bounded model token shares across clients', () => {
+  const projects = projectRollupFromSessions({
+    codex: {
+      client: 'codex', projectLabel: 'App', totalTokens: 100,
+      models: { 'gpt-5': 80, other: 40 }
+    },
+    claude: {
+      client: 'claude', projectLabel: 'App', totalTokens: 50,
+      models: { 'gpt-5': 25, 'claude-sonnet': 25 }
+    },
+    pi: { client: 'pi', projectLabel: 'App', totalTokens: 25, models: {} }
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(projects.app)), {
+    label: 'App',
+    tokens: 175,
+    costUsd: 0,
+    clients: { codex: 100, claude: 50, pi: 25 },
+    models: { 'gpt-5': 105, other: 20, 'claude-sonnet': 25 }
+  });
+});
+
+test('project model maps normalize safely and aggregate across devices', () => {
+  const first = normalizePeriod({
+    totalTokens: 60,
+    projects: {
+      app: {
+        label: 'App', tokens: 60, clients: { codex: 60 },
+        models: { 'GPT-5': 40, other: 40, '__PROTO__': 0 }
+      }
+    }
+  });
+  const second = normalizePeriod({
+    totalTokens: 40,
+    projects: {
+      app: { label: 'App', tokens: 40, clients: { claude: 40 }, models: { 'gpt-5': 40 } }
+    }
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(first.projects.app.models)), { 'gpt-5': 40, other: 20 });
+  assert.equal(Object.getPrototypeOf(first.projects.app.models), null);
+  assert.equal(Object.hasOwn(first.projects.app.models, '__proto__'), false);
+
+  const aggregate = aggregateDevices([
+    { deviceId: 'a', today: first },
+    { deviceId: 'b', today: second }
+  ], 60000);
+  assert.equal(aggregate.periods.today.projects.app.tokens, 100);
+  assert.deepEqual(JSON.parse(JSON.stringify(aggregate.periods.today.projects.app.models)), {
+    'gpt-5': 80,
+    other: 20
+  });
+});
+
 test('project normalization accepts reserved wire keys without prototype pollution', () => {
-  const input = JSON.parse('{"projects":{"__proto__":{"label":"__proto__","tokens":5,"clients":{"constructor":5}},"constructor":{"label":"constructor","tokens":7,"clients":{"codex":7}},"prototype":{"label":"prototype","tokens":9,"clients":{"claude":9}}}}');
+  const input = JSON.parse('{"projects":{"__proto__":{"label":"__proto__","tokens":5,"clients":{"constructor":5},"models":{"__proto__":3,"constructor":2}},"constructor":{"label":"constructor","tokens":7,"clients":{"codex":7}},"prototype":{"label":"prototype","tokens":9,"clients":{"claude":9}}}}');
   const period = normalizePeriod(input);
 
   assert.equal(Object.getPrototypeOf(period.projects), null);
   assert.equal(period.projects.__proto__.tokens, 5);
   assert.equal(period.projects.__proto__.clients.constructor, 5);
+  assert.equal(Object.getPrototypeOf(period.projects.__proto__.models), null);
+  assert.equal(Object.hasOwn(period.projects.__proto__.models, '__proto__'), true);
+  assert.equal(period.projects.__proto__.models.__proto__, 3);
+  assert.equal(period.projects.__proto__.models.constructor, 2);
   assert.equal(period.projects.constructor.tokens, 7);
   assert.equal(period.projects.prototype.tokens, 9);
   assert.equal({}.polluted, undefined);
@@ -115,7 +172,8 @@ test('post-archive project rollup includes deleted sessions', () => {
             totalTokens: 90,
             costUsd: 0.9,
             projectId: 'sha256:deleted',
-            projectLabel: 'Archived Project'
+            projectLabel: 'Archived Project',
+            models: { 'claude-sonnet': 75 }
           }
         }
       }
@@ -125,4 +183,5 @@ test('post-archive project rollup includes deleted sessions', () => {
   applyProjectRollups(archived);
   assert.equal(archived.allTime.projects['archived project'].tokens, 90);
   assert.equal(archived.allTime.projects['archived project'].clients.codex, 90);
+  assert.deepEqual(JSON.parse(JSON.stringify(archived.allTime.projects['archived project'].models)), { 'claude-sonnet': 75 });
 });

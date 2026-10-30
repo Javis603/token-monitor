@@ -127,6 +127,22 @@
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
+/* Docs entry in the actions cluster: .nav-menu hides on phones, this stays. */
+.nav-docs-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 0.7rem;
+  border-radius: 12px;
+  color: var(--nav-muted);
+  font-size: 0.88rem;
+  font-weight: 750;
+  text-decoration: none;
+  transition: color .15s ease, background .15s ease;
+}
+.nav-docs-link:hover,
+.nav-docs-link[aria-current="page"] { color: var(--nav-text); background: var(--nav-control-hover); }
+.nav-docs-link:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 3px; }
 .site-header .brand { color: var(--nav-text); }
 .site-header .nav-menu a:hover { color: var(--nav-text); }
 
@@ -848,15 +864,15 @@
 .tm-view-disclosure > span {
   width: 7px;
   height: 7px;
-  margin-top: -3px;
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
-  transform: rotate(45deg);
-  transition: transform 180ms cubic-bezier(.16, 1, .3, 1), margin 180ms cubic-bezier(.16, 1, .3, 1);
+  /* The flip's optical nudge rides in translateY rather than margin-top, so the
+     transition animates transform alone. */
+  transform: translateY(-1.5px) rotate(45deg);
+  transition: transform 180ms cubic-bezier(.16, 1, .3, 1);
 }
 .tm-view-control.is-open .tm-view-disclosure > span {
-  margin-top: 3px;
-  transform: rotate(225deg);
+  transform: translateY(1.5px) rotate(225deg);
 }
 .tm-settings-button {
   width: 34px;
@@ -1043,11 +1059,14 @@
   object-fit: contain;
 }
 
+/* Marks whose own art renders dark, flattened to white so the marquee stays legible
+   on the dark hero. A brand-colored mark (Claude, Amp, MiniMax, …) is left alone. */
 .tool-chip img[src$="codebuddy.svg"],
 .tool-chip img[src$="codex.svg"],
 .tool-chip img[src$="copilot.svg"],
 .tool-chip img[src$="cursor.svg"],
 .tool-chip img[src$="deepseek.svg"],
+.tool-chip img[src$="dsh.svg"],
 .tool-chip img[src$="gemini.svg"],
 .tool-chip img[src$="hermes-agent.svg"],
 .tool-chip img[src$="kilo.svg"],
@@ -1066,7 +1085,10 @@
 .tool-chip img[src$="devin.svg"],
 .tool-chip img[src$="droid.svg"],
 .tool-chip img[src$="ollama.svg"],
-.tool-chip img[src$="typesafe.svg"] {
+.tool-chip img[src$="typesafe.svg"],
+.tool-chip img[src$="catpaw.svg"],
+.tool-chip img[src$="fx.svg"],
+.tool-chip img[src$="stepfun.svg"] {
   filter: brightness(0) invert(1);
   opacity: .88;
 }

@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
+const { tokscaleConfigDir } = require('../../src/shared/tokscaleConfig');
 
 const {
   clientSourceChecks,
@@ -49,10 +50,10 @@ test('Amp threads feed the XDG source root, watcher, and health paths', () => {
   fs.mkdirSync(threads, { recursive: true });
   try {
     const options = { homeDir: home, env: {}, platform: process.platform };
-    assert.deepEqual(clientSourceRoots('amp', options).amp, [
+    assert.deepEqual(clientSourceRoots('amp', options).amp.filter(({ optional }) => !optional), [
       { id: 'amp-threads', dir: threads }
     ]);
-    assert.deepEqual(clientWatchCandidates('amp', options).amp, [threads]);
+    assert.deepEqual(clientWatchCandidates('amp', options).amp, [threads, path.join(tokscaleConfigDir(options), 'amp-cache', 'threads')]);
     assert.deepEqual(watchPathsForClients('amp', options), [threads]);
     const checks = clientSourceChecks('amp', options);
     assert.deepEqual(checks.amp, [{ id: 'amp-threads', exists: true }]);
@@ -69,18 +70,18 @@ test('Amp follows XDG_DATA_HOME like Tokscale does, not a home-relative literal'
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'amp-xdg-home-'));
   const xdg = path.join(home, 'custom-xdg');
   try {
-    // clients.rs declares PathRoot::XdgData for amp, and that root consults
+    // The legacy Amp root remains PathRoot::XdgData; it consults
     // XDG_DATA_HOME on every platform (never a home-relative literal), so an
     // override must move the root with it. It is set on process.env here because
     // that is the environment production resolves from; the injected options bag
     // is honoured too, and tests/shared/tokscaleBlankEnv.test.js is what pins it.
     const options = { homeDir: home, platform: 'linux' };
-    assert.deepEqual(clientSourceRoots('amp', options).amp, [
+    assert.deepEqual(clientSourceRoots('amp', options).amp.filter(({ optional }) => !optional), [
       { id: 'amp-threads', dir: path.join(home, '.local', 'share', 'amp', 'threads') }
     ]);
 
     process.env.XDG_DATA_HOME = xdg;
-    assert.deepEqual(clientSourceRoots('amp', options).amp, [
+    assert.deepEqual(clientSourceRoots('amp', options).amp.filter(({ optional }) => !optional), [
       { id: 'amp-threads', dir: path.join(xdg, 'amp', 'threads') }
     ]);
 
@@ -95,7 +96,7 @@ test('Amp follows XDG_DATA_HOME like Tokscale does, not a home-relative literal'
     // value the binary actually receives agree.
     process.env.XDG_DATA_HOME = '   ';
     assert.deepEqual(
-      clientSourceRoots('amp', options).amp,
+      clientSourceRoots('amp', options).amp.filter(({ optional }) => !optional),
       [{ id: 'amp-threads', dir: path.join(home, '.local', 'share', 'amp', 'threads') }],
       'blank XDG_DATA_HOME is unset for Token Monitor, and tokscaleCommand() drops it for the child'
     );

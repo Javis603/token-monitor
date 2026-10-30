@@ -19,6 +19,7 @@ var translations = {
     "nav.features": "Features",
     "nav.privacy": "Privacy",
     "nav.download": "Download",
+    "nav.docs": "Docs",
 
     "hero.eyebrow": "Local-first AI coding telemetry",
     "hero.title": "Token Monitor",
@@ -45,7 +46,7 @@ var translations = {
     "cta.download.aria.linux": "Download Token Monitor for Linux",
     "cta.github": "View on GitHub",
 
-    "tools.eyebrow": "41+ tools and providers",
+    "tools.eyebrow": "44+ tools and providers",
     "home.limits": "LIMITS",
     "home.models": "MODELS",
     "home.activity": "ACTIVITY",
@@ -107,7 +108,7 @@ var translations = {
     "mock.cacheHit": "Input (Cache Hit)",
     "mock.cacheMiss": "Input (Cache Miss)",
     "mock.output": "Output",
-    "mock.deviceMeta": "Windows 11 · Agent v0.63.1 · Synced 3m ago",
+    "mock.deviceMeta": "Windows 11 · Agent v0.70.0 · Synced 3m ago",
     "mock.sessions.reviewGroup": "Codex Auto Review",
     "mock.sessions.reviewLatest": "Latest 18:24 · 2.4M",
     "mock.sessions.reviewCount": "6 background runs",
@@ -257,6 +258,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "Portable x64 build",
 
+    "footer.docs": "Guides",
     "footer.api": "API docs",
     "footer.worker": "Worker docs",
     "footer.license": "License"
@@ -278,6 +280,7 @@ var translations = {
     "nav.features": "功能",
     "nav.privacy": "隱私",
     "nav.download": "下載",
+    "nav.docs": "文件",
 
     "hero.eyebrow": "本地優先的 AI coding telemetry",
     "hero.title": "Token Monitor",
@@ -304,7 +307,7 @@ var translations = {
     "cta.download.aria.linux": "下載 Linux 版 Token Monitor",
     "cta.github": "查看 GitHub",
 
-    "tools.eyebrow": "41+ 種工具與供應商",
+    "tools.eyebrow": "44+ 種工具與供應商",
     "home.limits": "額度",
     "home.models": "模型",
     "home.activity": "活動",
@@ -366,7 +369,7 @@ var translations = {
     "mock.cacheHit": "輸入（快取命中）",
     "mock.cacheMiss": "輸入（快取未命中）",
     "mock.output": "輸出",
-    "mock.deviceMeta": "Windows 11 · Agent v0.63.1 · 3 分鐘前同步",
+    "mock.deviceMeta": "Windows 11 · Agent v0.70.0 · 3 分鐘前同步",
     "mock.sessions.reviewGroup": "Codex 自動審查",
     "mock.sessions.reviewLatest": "最近 18:24 · 2.4M",
     "mock.sessions.reviewCount": "6 次背景執行",
@@ -516,6 +519,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "可攜式 x64 版本",
 
+    "footer.docs": "使用指南",
     "footer.api": "API 文件",
     "footer.worker": "Worker 文件",
     "footer.license": "授權"
@@ -537,6 +541,7 @@ var translations = {
     "nav.features": "功能",
     "nav.privacy": "隐私",
     "nav.download": "下载",
+    "nav.docs": "文档",
 
     "hero.eyebrow": "本地优先的 AI coding telemetry",
     "hero.title": "Token Monitor",
@@ -563,7 +568,7 @@ var translations = {
     "cta.download.aria.linux": "下载 Linux 版 Token Monitor",
     "cta.github": "查看 GitHub",
 
-    "tools.eyebrow": "41+ 种工具与提供商",
+    "tools.eyebrow": "44+ 种工具与提供商",
     "home.limits": "额度",
     "home.models": "模型",
     "home.activity": "活动",
@@ -625,7 +630,7 @@ var translations = {
     "mock.cacheHit": "输入（缓存命中）",
     "mock.cacheMiss": "输入（缓存未命中）",
     "mock.output": "输出",
-    "mock.deviceMeta": "Windows 11 · Agent v0.63.1 · 3 分钟前同步",
+    "mock.deviceMeta": "Windows 11 · Agent v0.70.0 · 3 分钟前同步",
     "mock.sessions.reviewGroup": "Codex 自动审查",
     "mock.sessions.reviewLatest": "最近 18:24 · 2.4M",
     "mock.sessions.reviewCount": "6 次后台运行",
@@ -775,6 +780,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "便携式 x64 版本",
 
+    "footer.docs": "使用指南",
     "footer.api": "API 文档",
     "footer.worker": "Worker 文档",
     "footer.license": "许可证"
@@ -796,6 +802,7 @@ var translations = {
     "nav.features": "기능",
     "nav.privacy": "개인정보",
     "nav.download": "다운로드",
+    "nav.docs": "문서",
 
     "hero.eyebrow": "로컬 우선 AI 코딩 텔레메트리",
     "hero.title": "Token Monitor",
@@ -822,7 +829,7 @@ var translations = {
     "cta.download.aria.linux": "Linux용 Token Monitor 다운로드",
     "cta.github": "GitHub에서 보기",
 
-    "tools.eyebrow": "41+ 도구와 제공업체",
+    "tools.eyebrow": "44+ 도구와 제공업체",
     "home.limits": "한도",
     "home.models": "모델",
     "home.activity": "활동",
@@ -884,7 +891,7 @@ var translations = {
     "mock.cacheHit": "입력(캐시 적중)",
     "mock.cacheMiss": "입력(캐시 미적중)",
     "mock.output": "출력",
-    "mock.deviceMeta": "Windows 11 · Agent v0.63.1 · 3분 전 동기화",
+    "mock.deviceMeta": "Windows 11 · Agent v0.70.0 · 3분 전 동기화",
     "mock.sessions.reviewGroup": "Codex 자동 리뷰",
     "mock.sessions.reviewLatest": "최근 18:24 · 2.4M",
     "mock.sessions.reviewCount": "백그라운드 실행 6회",
@@ -1034,6 +1041,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "포터블 x64 빌드",
 
+    "footer.docs": "가이드",
     "footer.api": "API 문서",
     "footer.worker": "Worker 문서",
     "footer.license": "라이선스"
@@ -1055,6 +1063,7 @@ var translations = {
     "nav.features": "機能",
     "nav.privacy": "プライバシー",
     "nav.download": "ダウンロード",
+    "nav.docs": "ドキュメント",
 
     "hero.eyebrow": "ローカルファーストの AI コーディングテレメトリ",
     "hero.title": "Token Monitor",
@@ -1081,7 +1090,7 @@ var translations = {
     "cta.download.aria.linux": "Linux 版 Token Monitor をダウンロード",
     "cta.github": "GitHub で見る",
 
-    "tools.eyebrow": "41+ のツールとプロバイダー",
+    "tools.eyebrow": "44+ のツールとプロバイダー",
     "home.limits": "制限",
     "home.models": "モデル",
     "home.activity": "アクティビティ",
@@ -1143,7 +1152,7 @@ var translations = {
     "mock.cacheHit": "入力(キャッシュヒット)",
     "mock.cacheMiss": "入力(キャッシュミス)",
     "mock.output": "出力",
-    "mock.deviceMeta": "Windows 11 · Agent v0.63.1 · 3分前に同期",
+    "mock.deviceMeta": "Windows 11 · Agent v0.70.0 · 3分前に同期",
     "mock.sessions.reviewGroup": "Codex 自動レビュー",
     "mock.sessions.reviewLatest": "最新 18:24 · 2.4M",
     "mock.sessions.reviewCount": "バックグラウンド実行 6 回",
@@ -1293,6 +1302,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "ポータブル x64 ビルド",
 
+    "footer.docs": "ガイド",
     "footer.api": "API ドキュメント",
     "footer.worker": "Worker ドキュメント",
     "footer.license": "ライセンス"
@@ -1314,6 +1324,7 @@ var translations = {
     "nav.features": "Recursos",
     "nav.privacy": "Privacidade",
     "nav.download": "Baixar",
+    "nav.docs": "Docs",
 
     "hero.eyebrow": "Telemetria de programação com IA local-first",
     "hero.title": "Token Monitor",
@@ -1340,7 +1351,7 @@ var translations = {
     "cta.download.aria.linux": "Baixar o Token Monitor para Linux",
     "cta.github": "Ver no GitHub",
 
-    "tools.eyebrow": "Mais de 41 ferramentas e provedores",
+    "tools.eyebrow": "Mais de 44 ferramentas e provedores",
     "home.limits": "LIMITES",
     "home.models": "MODELOS",
     "home.activity": "ATIVIDADE",
@@ -1402,7 +1413,7 @@ var translations = {
     "mock.cacheHit": "Entrada (no cache)",
     "mock.cacheMiss": "Entrada (fora do cache)",
     "mock.output": "Saída",
-    "mock.deviceMeta": "Windows 11 · Agente v0.63.1 · Sincronizado há 3min",
+    "mock.deviceMeta": "Windows 11 · Agente v0.70.0 · Sincronizado há 3min",
     "mock.sessions.reviewGroup": "Codex Auto Review",
     "mock.sessions.reviewLatest": "Mais recente 18:24 · 2.4M",
     "mock.sessions.reviewCount": "6 execuções em segundo plano",
@@ -1552,6 +1563,7 @@ var translations = {
     "final.linux.title": "Linux AppImage",
     "final.linux.body": "Build x64 portátil",
 
+    "footer.docs": "Guias",
     "footer.api": "Documentação da API",
     "footer.worker": "Documentação do Worker",
     "footer.license": "Licença"

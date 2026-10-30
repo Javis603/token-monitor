@@ -5,6 +5,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 const zlib = require('node:zlib');
+const { prepareSseFanout, sseFrameForClient } = require('../../src/shared/hubProtocol');
 
 function fakeState() {
   const map = new Map();
@@ -25,6 +26,44 @@ async function createHub() {
   return new worker.HubDO(fakeState(), { TOKEN_MONITOR_SECRET: 'shh', STALE_AFTER_MS: '600000' });
 }
 
+test('Worker encodes only selected SSE frames and shares their bytes across peers', async t => {
+  const previousStats = { n: 1, stable: '中😀'.repeat(1000) };
+  const stats = { ...previousStats, n: 2 };
+  const changed = prepareSseFanout({ stats, previousStats, revision: 2, hasDeltaClients: true });
+  const renewed = prepareSseFanout({
+    stats, previousStats: stats, lastContentKey: changed.contentKey,
+    revision: 3, hasDeltaClients: true, hasFreshnessClients: true
+  });
+  assert.match(changed.delta, /^event: delta/);
+  const v4 = { deltaEvents: true, streamRevision: 1 };
+  for (const [name, frames, peers, expected] of [
+    ['no subscribers', changed, [], []],
+    ['v4 only', changed, [v4, v4], [changed.delta]],
+    ['legacy and late join fallback', changed, [v4, v4, {}, { deltaEvents: true, streamRevision: null }], [changed.delta, changed.stats]],
+    ['v3 and v4 freshness', renewed, [{ freshnessEvents: true }, { deltaEvents: true, streamRevision: 2 }], [renewed.freshness, renewed.delta]]
+  ]) await t.test(name, async t => {
+    const hub = await createHub();
+    const encode = t.mock.method(hub.encoder, 'encode');
+    const writes = [];
+    const clients = peers.map(peer => ({ ...peer, writer: {
+      write(chunk) { writes.push(chunk); return Promise.resolve(); }, close() {}
+    } }));
+    for (const client of clients) hub.sseClients.add(client);
+    t.after(() => { for (const client of clients) hub.dropClient(client); });
+    const selected = clients.map(client => sseFrameForClient(frames, client));
+    hub.fanoutSseFrames(frames);
+    assert.equal(encode.mock.callCount(), expected.length);
+    assert.deepEqual(new Set(encode.mock.calls.map(call => call.arguments[0])), new Set(expected));
+    assert.equal(writes.length, clients.length);
+    for (let i = 0; i < clients.length; i++) {
+      assert.deepEqual(Buffer.from(writes[i]), Buffer.from(selected[i]));
+      if (clients[i].deltaEvents) assert.equal(clients[i].streamRevision, frames.revision);
+      const first = selected.indexOf(selected[i]);
+      assert.equal(writes[i], writes[first], 'peers selecting the same frame share one encoded chunk');
+    }
+  });
+});
+
 function ingestRequest(payload, extraHeaders = {}) {
   return new Request('https://hub.example/api/ingest', {
     method: 'POST',
@@ -35,10 +74,10 @@ function ingestRequest(payload, extraHeaders = {}) {
 
 function waitFor(predicate, timeoutMs = 1000) {
   return new Promise((resolve, reject) => {
-    const deadline = Date.now() + timeoutMs;
+    const deadline = performance.now() + timeoutMs;
     const check = () => {
       if (predicate()) return resolve();
-      if (Date.now() >= deadline) return reject(new Error('timed out waiting for Worker SSE event'));
+      if (performance.now() >= deadline) return reject(new Error('timed out waiting for Worker SSE event'));
       setTimeout(check, 10);
     };
     check();
@@ -90,26 +129,37 @@ test('the Worker negotiates compact ingest acknowledgements and gzip JSON', asyn
   assert.equal(body.stats.devices[0].deviceId, 'dev-a');
 });
 
-test('the Worker stream matches the Node Hub freshness and coalescing behavior', async () => {
+test('the Worker stream matches the Node Hub freshness and coalescing behavior', async (t) => {
+  // Lease observations must be in the past regardless of the runner's wall clock.
+  // Only Date is mocked; SSE timers and monotonic wait deadlines remain real.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 9, 28, 12) });
   const hub = await createHub();
   const initialAt = utcTodayAt('10:00:00.000');
   const refreshedAt = utcTodayAt('10:01:00.000');
   const changedAt = utcTodayAt('10:02:00.000');
+  // Live observations must be in the past even when CI runs before 10:00 UTC.
+  const activityAt = new Date(Date.now() - 2000).toISOString();
+  const renewedActivityAt = new Date(Date.now() - 1000).toISOString();
   const base = {
     deviceId: 'dev-a',
     updatedAt: initialAt,
-    today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+    today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: activityAt } } } },
+    clientHealth: {
+      version: 1,
+      clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
+      observedAt: initialAt
+    }
   };
   await hub.fetch(ingestRequest(base, { 'x-token-monitor-response': 'minimal' }));
 
   const modernAbort = new AbortController();
   const legacyAbort = new AbortController();
   const modernResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
-    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' },
+    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' },
     signal: modernAbort.signal
   }));
   const legacyResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
-    headers: { authorization: 'Bearer shh' },
+    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' },
     signal: legacyAbort.signal
   }));
   const modern = [];
@@ -123,14 +173,27 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
     modern.length = 0;
     legacy.length = 0;
 
-    await hub.fetch(ingestRequest({ ...base, updatedAt: refreshedAt }, {
+    await hub.fetch(ingestRequest({ ...base, updatedAt: refreshedAt, clientHealth: { ...base.clientHealth, observedAt: refreshedAt } }, {
       'x-token-monitor-response': 'minimal'
     }));
     await waitFor(() => modern.length === 1 && legacy.length === 1);
     assert.equal(modern[0].event, 'freshness');
     assert.equal(modern[0].data.stats.devices[0].updatedAt, refreshedAt);
+    assert.equal(modern[0].data.stats.devices[0].clientHealthObservedAt, refreshedAt);
     assert.equal(legacy[0].event, 'stats');
     assert.equal(legacy[0].data.stats.devices[0].updatedAt, refreshedAt);
+    modern.length = 0;
+    legacy.length = 0;
+
+    await hub.fetch(ingestRequest({ ...base, today: { ...base.today, sessions: { a: {
+      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: renewedActivityAt }
+    } } } }, { 'x-token-monitor-response': 'minimal' }));
+    await waitFor(() => modern.length === 1 && legacy.length === 1);
+    assert.equal(modern[0].event, 'freshness');
+    assert.equal(Object.values(modern[0].data.stats.sessionActivityObservedAt.today)[0], renewedActivityAt);
+    assert.equal(Object.values(modern[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], renewedActivityAt);
+    assert.equal(legacy[0].event, 'stats');
+    assert.equal(Object.values(legacy[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, renewedActivityAt);
     modern.length = 0;
     legacy.length = 0;
 
@@ -162,5 +225,232 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
     modernAbort.abort();
     legacyAbort.abort();
     await Promise.all([modernPump, legacyPump]);
+  }
+});
+
+test('Worker SSE fan-out serializes the stats payload once for every subscriber', async () => {
+  const hub = await createHub();
+  const initialAt = utcTodayAt('10:00:00.000');
+  const changedAt = utcTodayAt('10:03:00.000');
+  const base = {
+    deviceId: 'dev-a',
+    updatedAt: initialAt,
+    today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+  };
+  await hub.fetch(ingestRequest(base, { 'x-token-monitor-response': 'minimal' }));
+
+  const aborts = [new AbortController(), new AbortController(), new AbortController()];
+  const events = [[], [], []];
+  const pumps = [];
+  for (let index = 0; index < 3; index += 1) {
+    const response = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
+      headers: { authorization: 'Bearer shh' },
+      signal: aborts[index].signal
+    }));
+    pumps.push(collectSse(response, events[index]));
+  }
+  const original = JSON.stringify;
+  const ingestPayloads = [];
+  const originalEncode = hub.encoder.encode;
+  const encodedFrames = [];
+  try {
+    await waitFor(() => events.every((list) => list.length === 1));
+    for (const list of events) list.length = 0;
+
+    hub.encoder.encode = function (frame) {
+      encodedFrames.push(frame);
+      return originalEncode.call(this, frame);
+    };
+    JSON.stringify = (value, replacer, space) => {
+      if (value && value.type === 'stats' && value.reason === 'ingest') ingestPayloads.push(value);
+      return original(value, replacer, space);
+    };
+    await hub.fetch(ingestRequest({
+      ...base,
+      updatedAt: changedAt,
+      today: { ...base.today, totalTokens: 4 }
+    }, { 'x-token-monitor-response': 'minimal' }));
+    await waitFor(() => events.every((list) => list.length === 1));
+    assert.equal(ingestPayloads.length, 1);
+    assert.equal(encodedFrames.length, 1);
+    assert.equal(events[0][0].data.stats.periods.today.totalTokens, 4);
+    assert.equal(events[2][0].data.stats.periods.today.totalTokens, 4);
+  } finally {
+    JSON.stringify = original;
+    hub.encoder.encode = originalEncode;
+    for (const abort of aborts) abort.abort();
+    await Promise.all(pumps);
+  }
+});
+
+function spyTypedStringify() {
+  const original = JSON.stringify;
+  const typed = [];
+  JSON.stringify = (value, replacer, space) => {
+    if (value && typeof value === 'object' && value.type) {
+      typed.push({ type: value.type, reason: value.reason });
+    }
+    return original(value, replacer, space);
+  };
+  return {
+    typed,
+    restore() { JSON.stringify = original; }
+  };
+}
+
+test('Worker subscribers receive identical frames and delete/subscription writes stay full stats', async () => {
+  const hub = await createHub();
+  const initialAt = utcTodayAt('10:00:00.000');
+  const refreshedAt = utcTodayAt('10:01:00.000');
+  const base = {
+    deviceId: 'dev-a',
+    updatedAt: initialAt,
+    today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+  };
+  await hub.fetch(ingestRequest(base, { 'x-token-monitor-response': 'minimal' }));
+
+  const modernAAbort = new AbortController();
+  const modernBAbort = new AbortController();
+  const legacyAbort = new AbortController();
+  const modernA = [];
+  const modernB = [];
+  const legacy = [];
+  const modernAResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
+    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' },
+    signal: modernAAbort.signal
+  }));
+  const modernBResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
+    headers: { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' },
+    signal: modernBAbort.signal
+  }));
+  const legacyResponse = await hub.fetch(new Request('https://hub.example/api/stats/stream', {
+    headers: { authorization: 'Bearer shh' },
+    signal: legacyAbort.signal
+  }));
+  const pumps = [
+    collectSse(modernAResponse, modernA),
+    collectSse(modernBResponse, modernB),
+    collectSse(legacyResponse, legacy)
+  ];
+  try {
+    await waitFor(() => modernA.length === 1 && modernB.length === 1 && legacy.length === 1);
+    assert.deepEqual(modernA[0].data.stats.periods, modernB[0].data.stats.periods);
+    assert.deepEqual(modernA[0].data.stats.periods, legacy[0].data.stats.periods);
+    modernA.length = 0;
+    modernB.length = 0;
+    legacy.length = 0;
+
+    await hub.fetch(ingestRequest({ ...base, updatedAt: refreshedAt }, {
+      'x-token-monitor-response': 'minimal'
+    }));
+    await waitFor(() => modernA.length === 1 && modernB.length === 1 && legacy.length === 1);
+    assert.equal(modernA[0].event, 'freshness');
+    assert.equal(modernB[0].event, 'freshness');
+    assert.deepEqual(modernA[0].data, modernB[0].data);
+    assert.equal(legacy[0].event, 'stats');
+    modernA.length = 0;
+    modernB.length = 0;
+    legacy.length = 0;
+
+    const deleteSpy = spyTypedStringify();
+    try {
+      const deleted = await hub.fetch(new Request('https://hub.example/api/devices/dev-a', {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer shh' }
+      }));
+      assert.equal(deleted.status, 200);
+      await waitFor(() => modernA.length === 1 && modernB.length === 1 && legacy.length === 1);
+      assert.deepEqual(deleteSpy.typed.filter((entry) => entry.reason === 'delete'), [
+        { type: 'stats', reason: 'delete' }
+      ]);
+    } finally {
+      deleteSpy.restore();
+    }
+    assert.equal(modernA[0].event, 'stats');
+    assert.equal(legacy[0].event, 'stats');
+    assert.equal(modernA[0].data.reason, 'delete');
+    assert.deepEqual(modernA[0].data.stats.devices, []);
+    assert.deepEqual(modernA[0].data, modernB[0].data);
+    modernA.length = 0;
+    modernB.length = 0;
+    legacy.length = 0;
+
+    const record = {
+      id: 'sub_1', provider: 'codex', planName: 'Plus',
+      amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31'
+    };
+    const subSpy = spyTypedStringify();
+    let written;
+    try {
+      written = await (await hub.fetch(new Request('https://hub.example/api/subscriptions', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
+        body: JSON.stringify({ subscriptions: [record], baseUpdatedAt: '' })
+      }))).json();
+      await waitFor(() => modernA.length === 1 && modernB.length === 1 && legacy.length === 1);
+      assert.deepEqual(subSpy.typed.filter((entry) => entry.reason === 'subscriptions'), [
+        { type: 'stats', reason: 'subscriptions' }
+      ]);
+    } finally {
+      subSpy.restore();
+    }
+    assert.equal(modernA[0].event, 'stats');
+    assert.equal(legacy[0].event, 'stats');
+    assert.equal(modernA[0].data.reason, 'subscriptions');
+    assert.equal(modernA[0].data.stats.subscriptionsUpdatedAt, written.updatedAt);
+    assert.equal('subscriptions' in modernA[0].data.stats, false);
+    assert.deepEqual(modernA[0].data, modernB[0].data);
+  } finally {
+    modernAAbort.abort();
+    modernBAbort.abort();
+    legacyAbort.abort();
+    await Promise.all(pumps);
+  }
+});
+
+test('Worker skips empty fan-out and isolates a rejected writer from later clients', async () => {
+  const hub = await createHub();
+  const originalStats = hub.statsWithSubscriptionVersion;
+  hub.statsWithSubscriptionVersion = () => { throw new Error('empty fan-out must not read stats'); };
+  await hub.broadcast();
+  await hub.flushBroadcast();
+  hub.statsWithSubscriptionVersion = originalStats;
+
+  let failedWrites = 0;
+  let closed = 0;
+  const failed = {
+    freshnessEvents: true,
+    writer: {
+      write() { failedWrites += 1; return Promise.reject(new Error('closed writer')); },
+      close() { closed += 1; }
+    }
+  };
+  const modernFrames = [];
+  const legacyFrames = [];
+  const healthy = (freshnessEvents, frames) => ({
+    freshnessEvents,
+    writer: { write(chunk) { frames.push(new TextDecoder().decode(chunk)); return Promise.resolve(); } }
+  });
+  hub.sseClients.add(failed);
+  hub.sseClients.add(healthy(true, modernFrames));
+  hub.sseClients.add(healthy(false, legacyFrames));
+  try {
+    await hub.broadcast('delete');
+    assert.equal(failedWrites, 1);
+    assert.equal(closed, 1);
+    assert.equal(hub.sseClients.has(failed), false);
+    assert.equal(modernFrames.length, 1);
+    assert.equal(legacyFrames.length, 1);
+    assert.equal(modernFrames[0], legacyFrames[0]);
+    assert.match(modernFrames[0], /^event: stats\n/);
+
+    await hub.flushBroadcast();
+    assert.equal(failedWrites, 1);
+    assert.equal(modernFrames.length, 2);
+    assert.equal(legacyFrames.length, 2);
+    assert.match(modernFrames[1], /^event: freshness\n/);
+    assert.match(legacyFrames[1], /^event: stats\n/);
+  } finally {
+    hub.sseClients.clear();
   }
 });

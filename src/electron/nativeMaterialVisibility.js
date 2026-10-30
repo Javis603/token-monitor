@@ -38,7 +38,7 @@ function syncNativeMaterialVisibility(win, options, platform = process.platform,
   if (!win || win.isDestroyed?.() || platform !== 'darwin') return;
   const entry = entryFor(win);
   const {
-    enabled, opaque, liquidGlass = false, reducedTransparency: systemReduced = false, highContrast = false, dark = true, radius = 14
+    enabled, opaque, liquidGlass = false, style = 'regular', tintOpacity, reducedTransparency: systemReduced = false, highContrast = false, dark = true, radius = 14
   } = typeof options === 'boolean' ? { enabled: options } : (options || {});
   // Reduce Transparency replaces only the system material. With System Glass
   // off, the CSS glass and background image stay under the user's sliders.
@@ -57,7 +57,7 @@ function syncNativeMaterialVisibility(win, options, platform = process.platform,
     try {
       setVibrancy(null);
       if (!entry.glass) entry.glass = (deps.createGlass || createMacLiquidGlass)(win);
-      entry.glass.update({ dark, radius });
+      entry.glass.update({ dark, radius, style, tintOpacity });
     } catch (error) {
       entry.failed = error.message;
       console.warn(`[native-material] Liquid Glass unavailable: ${error.message}`);

@@ -13,6 +13,7 @@ const {
   edgeDockHandleZones,
   edgeDockPeekBounds,
   edgeDockPlacementForDrop,
+  edgeDockPollDelay,
   edgeDockRailBounds,
   edgeDockRefreshBounds,
   edgeDockRefreshCorridor,
@@ -27,12 +28,11 @@ const {
   scaledEdgeDockMetrics
 } = require('./geometry');
 const { shapeRectsFromPolygons } = require('./mask');
+const { normalizeWindowsDockBackdropMode } = require('../windowsBackdropMode');
+const { normalizeEdgeDockBackdropMode } = require('../macBackdropMode');
 const { bubbleCommands, peekCommands, railCommands, refreshCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
 
 const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
-const POLL_IDLE_MS = 90;
-const POLL_ACTIVE_MS = 40;
-const POLL_DRAG_MS = 16;
 // How often `alwaysExceptFullScreen` re-checks for a full-screen app. The macOS
 // Space transition itself takes longer than this, so a faster poll would only
 // spend window-list reads without making the dock react sooner.
@@ -60,8 +60,8 @@ function canUseEdgeDock(settings = {}, platform = process.platform) {
 // Every surface is a frameless window whose silhouette (rail shoulders, card
 // tail) is drawn by the renderer from edgeDockShapes.js. On macOS the native
 // material behind it is clipped to the same silhouette through a mask. Windows
-// uses a transparent shaped window and lets the renderer paint the tint: both
-// DWM backdrop APIs paint the full BrowserWindow rectangle despite setShape().
+// uses a separate, geometrically clipped HostBackdrop underlay: the HWND-wide
+// Acrylic/Accent APIs cannot follow the concave outline.
 function createEdgeDockController(deps) {
   const {
     BrowserWindow,
@@ -69,6 +69,7 @@ function createEdgeDockController(deps) {
     powerMonitor,
     screen,
     platform = process.platform,
+    osRelease = os.release(),
     rendererDir,
     preloadPath,
     getSettings,
@@ -77,9 +78,12 @@ function createEdgeDockController(deps) {
     // null for the classic masked vibrancy.
     liquidGlass = () => null,
     createGlass,
+    windowsBackdrop,
     prefersReducedMotion = () => false,
     onPlacementChange,
+    onWebSurfaceChanged = () => {},
     applyShapeMask,
+    installNonActivatingInput = () => {},
     primaryButtonDown = () => null,
     onToggleRateMode,
     onSwitchCodexAccount,
@@ -94,7 +98,15 @@ function createEdgeDockController(deps) {
 
   const windows = { peek: null, rail: null, bubble: null };
   const ready = { peek: false, rail: false, bubble: false };
+  const visibleTargets = { peek: false, rail: false, bubble: false };
+  // Before macOS 26 (Darwin 25), park hidden rails and cards off every display
+  // to work around flashes during Space switches, reproduced on macOS 15.6.1.
+  // Keep newer systems on the existing opacity-only path. `placed` preserves
+  // the bounds the layout wants while a surface is parked.
+  const parked = { rail: false, bubble: false };
+  const placed = { rail: null, bubble: null };
   const fades = new Map();
+  const backdrops = new Map();
   const intent = createEdgeDockIntent();
   let running = false;
   let pollTimer = null;
@@ -111,6 +123,7 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleVisible = false;
   let railVisible = false;
+  let pointerOnRail = false;
   const refreshHapticTarget = Symbol('refresh');
   let hapticTarget = null;
   // How many times the rail has been revealed, as an event the page can key the
@@ -198,7 +211,8 @@ function createEdgeDockController(deps) {
   }
 
   function cellKinds() {
-    return cells.map((cell) => (cell.kind === 'stat' ? 'stat' : 'provider'));
+    // Plugin cells take a stat-sized slot: a label over one compact reading.
+    return cells.map((cell) => (cell.kind === 'stat' || cell.kind === 'plugin' ? 'stat' : 'provider'));
   }
 
   function placement() {
@@ -308,11 +322,20 @@ function createEdgeDockController(deps) {
     fades.delete(win);
   }
 
+  function setOpacity(win, opacity) {
+    win.setOpacity(opacity);
+    backdrops.get(win)?.setOpacity(opacity);
+  }
+
+  function reorderBackdrops() {
+    for (const backdrop of backdrops.values()) backdrop.reorder();
+  }
+
   function fade(win, to, duration, done) {
     if (!alive(win)) return;
     cancelFade(win);
     if (prefersReducedMotion() || duration <= 0) {
-      win.setOpacity(to);
+      setOpacity(win, to);
       done?.();
       return;
     }
@@ -324,7 +347,7 @@ function createEdgeDockController(deps) {
       step += 1;
       const t = step / steps;
       const eased = 1 - Math.pow(1 - t, 3);
-      win.setOpacity(from + (to - from) * eased);
+      setOpacity(win, from + (to - from) * eased);
       if (step >= steps) {
         cancelFade(win);
         done?.();
@@ -339,15 +362,28 @@ function createEdgeDockController(deps) {
   function setVisible(surface, visible, duration) {
     const win = windows[surface];
     if (!alive(win)) return;
+    const revealing = visible && !visibleTargets[surface];
+    visibleTargets[surface] = visible;
+    onWebSurfaceChanged();
     const ignore = !(visible && (surface !== 'peek' || peekTakesPointer()));
     if (surface === 'peek') setPeekIgnoresMouse(win, ignore, visible);
     else win.setIgnoreMouseEvents(ignore);
     if (!win.isVisible()) {
-      win.setOpacity(0);
+      setOpacity(win, 0);
       win.showInactive();
-      // Reassert native topmost after showInactive. The floating level can be
-      // demoted when Electron moves the HWND behind a non-topmost taskbar.
-      if (platform === 'win32') win.setAlwaysOnTop(true, 'pop-up-menu');
+      // Reassert native topmost and taskbar exclusion after showInactive. The
+      // floating level can be demoted when Electron moves the HWND behind a
+      // non-topmost taskbar, and the constructor's skipTaskbar call ran while
+      // the HWND was still hidden.
+      if (platform === 'win32') {
+        win.setSkipTaskbar?.(true);
+        win.setAlwaysOnTop(true, 'pop-up-menu');
+      }
+    } else if (platform === 'win32' && revealing) {
+      // Restoring only the newly revealed card leaves an already-visible rail
+      // behind other windows. Repair the visible Dock together, even when its
+      // HWNDs still report topmost, preserving the card/refresh stacking.
+      restoreWindowsTopmost(true);
     }
     // The nested refresh circle overlaps the rail's transparent shoulder, but
     // macOS still hit-tests that rail rectangle. Keep the action above it,
@@ -356,7 +392,42 @@ function createEdgeDockController(deps) {
       && (surface === 'peek' || (surface === 'rail' && refreshVisible))) {
       windows.peek?.moveTop?.();
     }
-    fade(win, visible ? 1 : 0, duration);
+    if (visible) unpark(surface);
+    fade(win, visible ? 1 : 0, duration, visible ? undefined : () => park(surface));
+    if (platform === 'win32') reorderBackdrops();
+  }
+
+  function parks(surface) {
+    return platform === 'darwin' && Number.parseInt(osRelease, 10) < 25 && Object.hasOwn(parked, surface);
+  }
+
+  function parkedBounds(bounds) {
+    let right = -Infinity;
+    for (const { bounds: d } of screen.getAllDisplays?.() || [display()]) right = Math.max(right, d.x + d.width);
+    return { x: right + bounds.width, y: bounds.y, width: bounds.width, height: bounds.height };
+  }
+
+  // Runs when a fade out finishes; a reveal in the meantime cancels the fade.
+  function park(surface) {
+    const win = windows[surface];
+    if (!parks(surface) || !alive(win) || visibleTargets[surface]) return;
+    parked[surface] = true;
+    win.setBounds(parkedBounds(placed[surface] || win.getBounds()));
+  }
+
+  // A display added or moved past the parked spot would put a parked window on
+  // screen again; a hidden card has no cell left to place it, so move both here.
+  function repark() {
+    for (const surface of Object.keys(parked)) {
+      const win = windows[surface];
+      if (parked[surface] && alive(win)) win.setBounds(parkedBounds(placed[surface] || win.getBounds()));
+    }
+  }
+
+  function unpark(surface) {
+    if (!parked[surface]) return;
+    parked[surface] = false;
+    if (placed[surface]) placeSurface(surface, placed[surface]);
   }
 
   // The handle's own visibility, kept beside the fade it drives: the page plays the
@@ -498,6 +569,7 @@ function createEdgeDockController(deps) {
     if (serialized === lastSent[surface]) return;
     lastSent[surface] = serialized;
     send(surface, 'edgeDock:render', payload);
+    onWebSurfaceChanged();
   }
 
   function createSurface(surface, materialKey) {
@@ -528,11 +600,14 @@ function createEdgeDockController(deps) {
       // window has no shape-aware shadow to offer.
       hasShadow: macMaterial,
       backgroundColor: '#00000000',
-      // DWM's Acrylic and Accent policies both paint the full native rectangle
-      // even after Electron applies a shaped region. Windows therefore keeps
-      // the transparent renderer-backed surface used by the no-glass mode.
+      // Windows keeps the content transparent over its native underlay. Its
+      // region owns hit testing; the helper clips the actual backdrop visual.
       transparent: true,
-      ...(win32 ? { thickFrame: false } : {}),
+      // `type: 'toolbar'` sets WS_EX_TOOLWINDOW on the native HWND. Without it,
+      // the three always-shown surfaces are unowned top-level windows that
+      // Windows Shell can re-add to the taskbar and DWM thumbnail previews
+      // when showInactive() or setIgnoreMouseEvents() updates the window.
+      ...(win32 ? { type: 'toolbar', thickFrame: false } : {}),
       ...(mac ? { type: 'panel', acceptFirstMouse: true, roundedCorners: false } : {}),
       // The macOS material stays attached for the window's lifetime rather than
       // being detached while hidden: re-attaching builds a new effect view,
@@ -549,6 +624,19 @@ function createEdgeDockController(deps) {
         zoomFactor: dockScale()
       }
     });
+    if (win32 || mac) installNonActivatingInput(win);
+    if (materialKey === 'win-host') {
+      try {
+        const backdrop = windowsBackdrop.attach(win, (enabled) => {
+          if (windows[surface] !== win) return;
+          nativeMaterial[surface] = enabled;
+          render(surface);
+        });
+        backdrops.set(win, backdrop);
+      } catch (error) {
+        logger(`[edge-dock] ${surface} HostBackdrop unavailable: ${error.message}`);
+      }
+    }
     if (mac) {
       win.setAlwaysOnTop(true, 'floating');
       win.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
@@ -572,10 +660,14 @@ function createEdgeDockController(deps) {
     });
     win.on('closed', () => {
       cancelFade(win);
+      backdrops.get(win)?.dispose();
+      backdrops.delete(win);
       if (windows[surface] === win) disposeGlass(surface, { windowClosed: true });
       if (windows[surface] === win) {
         windows[surface] = null;
         ready[surface] = false;
+        if (Object.hasOwn(parked, surface)) parked[surface] = false;
+        onWebSurfaceChanged();
       }
     });
     win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface, platform } })
@@ -599,7 +691,7 @@ function createEdgeDockController(deps) {
     const glass = glasses[surface];
     const wanted = liquidGlass();
     try {
-      glass.update({ dark: wanted?.dark !== false, shape: { commands, width, height } });
+      glass.update({ dark: wanted?.dark !== false, style: wanted?.style, tintOpacity: wanted?.tintOpacity, shape: { commands, width, height } });
       return true;
     } catch (error) {
       logger(`[edge-dock] ${surface} Liquid Glass shape failed: ${error.message}`);
@@ -612,8 +704,11 @@ function createEdgeDockController(deps) {
   function destroyWindows() {
     for (const surface of SURFACES) {
       const win = windows[surface];
+      backdrops.get(win)?.dispose();
+      backdrops.delete(win);
       windows[surface] = null;
       ready[surface] = false;
+      visibleTargets[surface] = false;
       lastSent[surface] = '';
       if (alive(win)) {
         cancelFade(win);
@@ -622,6 +717,7 @@ function createEdgeDockController(deps) {
       }
     }
     railVisible = false;
+    pointerOnRail = false;
     peeking = false;
     peekNear = false;
     pointerOnHandle = false;
@@ -642,6 +738,7 @@ function createEdgeDockController(deps) {
       shapes[surface] = null;
       nativeMaterial[surface] = false;
     }
+    onWebSurfaceChanged();
   }
 
   function commandsFor(surface, bounds, side) {
@@ -678,6 +775,12 @@ function createEdgeDockController(deps) {
   function placeSurface(surface, bounds) {
     const win = windows[surface];
     if (!alive(win) || !bounds) return;
+    if (parks(surface)) placed[surface] = { ...bounds };
+    if (parked[surface]) {
+      // The shape follows on unpark, from the bounds kept here.
+      win.setBounds(parkedBounds(bounds));
+      return;
+    }
     const { x, y, width, height } = bounds;
     const previousBounds = win.getBounds();
     if (previousBounds.x !== x || previousBounds.y !== y || previousBounds.width !== width || previousBounds.height !== height) {
@@ -692,6 +795,7 @@ function createEdgeDockController(deps) {
     const closed = Array.isArray(built) ? built : built.closed;
     const outline = Array.isArray(built) ? built : built.outline;
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline) };
+    backdrops.get(win)?.update({ key, commands: closed });
     if (glasses[surface] && (surface !== 'peek' || peekMode === 'refresh') && shapeGlass(surface, closed, width, height)) {
       // Shaped Liquid Glass needs no mask.
     } else if (builtGlass && platform === 'darwin' && nativeMaterial[surface]) {
@@ -726,9 +830,13 @@ function createEdgeDockController(deps) {
   }
 
   function buildWindows() {
-    const glass = Boolean(nativeGlass());
-    const materialKey = !glass || platform !== 'darwin' ? 'none'
-      : liquidGlass() && createGlass ? 'mac-glass' : 'mac';
+    const ownStyle = platform === 'win32' ? normalizeWindowsDockBackdropMode(settings().edgeDockWindowsBackdrop)
+      : platform === 'darwin' ? normalizeEdgeDockBackdropMode(settings().edgeDockMacBackdrop) : 'inherit';
+    // An explicit dock style overrides System Glass either way; inherit follows it.
+    const glass = ownStyle === 'inherit' ? Boolean(nativeGlass()) : ownStyle !== 'transparent';
+    const materialKey = !glass ? 'none'
+      : platform === 'win32' ? (windowsBackdrop ? 'win-host' : 'none')
+        : platform === 'darwin' ? (liquidGlass() && createGlass ? 'mac-glass' : 'mac') : 'none';
     if (builtMaterial === materialKey && SURFACES.every((surface) => alive(windows[surface]))) return;
     destroyWindows();
     builtMaterial = materialKey;
@@ -780,14 +888,14 @@ function createEdgeDockController(deps) {
         nativeMaterial.peek = true;
         try {
           if (!glasses.peek) glasses.peek = createGlass(win);
-          glasses.peek.update({ dark: liquidGlass()?.dark !== false, visible: true });
+          glasses.peek.update({ dark: liquidGlass()?.dark !== false, style: liquidGlass()?.style, tintOpacity: liquidGlass()?.tintOpacity, visible: true });
         } catch (error) {
           logger(`[edge-dock] refresh Liquid Glass unavailable: ${error.message}`);
           disposeGlass('peek');
           win.setVibrancy?.('hud');
         }
       } else {
-        try { glasses.peek?.update({ dark: liquidGlass()?.dark !== false, visible: false }); }
+        try { glasses.peek?.update({ dark: liquidGlass()?.dark !== false, style: liquidGlass()?.style, tintOpacity: liquidGlass()?.tintOpacity, visible: false }); }
         catch { disposeGlass('peek'); }
         win.setVibrancy?.('hud');
         nativeMaterial.peek = true;
@@ -938,7 +1046,7 @@ function createEdgeDockController(deps) {
     const snapshot = intent.snapshot();
     // The approach zone is on the way to the handle, and only the poll lets the
     // handle take the pointer, so it runs at the active rate from there on.
-    const delay = drag ? POLL_DRAG_MS : (snapshot.revealed || peekNear ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+    const delay = edgeDockPollDelay({ drag, revealed: snapshot.revealed, near: peekNear });
     pollTimer = setTimeout(poll, delay);
   }
 
@@ -984,6 +1092,8 @@ function createEdgeDockController(deps) {
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
           cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length, metrics()) : null
         };
+        const enteredRail = input.inRail && !pointerOnRail;
+        pointerOnRail = input.inRail;
         // The refresh action shares the readouts' enter-once hover feedback.
         const hoveredTarget = inRefresh
           ? (!peekPaintPending && settings().edgeDockRefreshEnabled === true && canRefreshLimits() === true
@@ -997,6 +1107,9 @@ function createEdgeDockController(deps) {
         applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
         refreshHovered = input.inRail || input.inBubble || input.inCorridor;
         syncRefresh(current);
+        // An always-visible rail has no reveal transition of its own. Recover
+        // on entry (including a return from its card), never on every poll.
+        if (platform === 'win32' && revealed && enteredRail) restoreWindowsTopmost(true);
       }
     } catch (error) {
       logger(`[edge-dock] poll failed: ${error.message}`);
@@ -1191,6 +1304,7 @@ function createEdgeDockController(deps) {
 
   function onDisplayChange() {
     if (!running) return;
+    repark();
     if (bubbleCell !== null) invalidateBubblePlacement();
     positionRail();
     if (bubbleCell !== null) render('bubble');
@@ -1219,6 +1333,7 @@ function createEdgeDockController(deps) {
     running = true;
     if (platform === 'win32') {
       powerMonitor?.on('resume', onWake);
+      powerMonitor?.on('unlock-screen', onWake);
     }
     registerIpc();
     attachDisplayListeners();
@@ -1226,29 +1341,31 @@ function createEdgeDockController(deps) {
     schedulePoll();
   }
 
-  // These windows stay shown at opacity zero between reveals. A wake can leave
-  // them behind ordinary windows, so the first-show repair never runs again.
-  // Restore the native level and stacking without changing content or focus.
-  function restoreWindowsTopmost() {
+  // Opacity-only surfaces can retain their topmost flags while their ordering
+  // is stale. Power events repair all HWNDs; reveals and rail entry repair the
+  // visible group without changing content, visibility or focus.
+  function restoreWindowsTopmost(visibleOnly = false) {
     if (!running) return;
     // The refresh button uses peek and must stay above the rail's shoulder.
     const surfaces = refreshVisible && !peekPaintPending ? ['rail', 'bubble', 'peek'] : SURFACES;
     for (const surface of surfaces) {
+      if (visibleOnly && !visibleTargets[surface]) continue;
       const win = windows[surface];
       if (!alive(win)) continue;
       try {
         win.setAlwaysOnTop(true, 'pop-up-menu');
       } catch (error) {
-        logger(`[edge-dock] ${surface} wake topmost restore failed: ${error.message}`);
+        logger(`[edge-dock] ${surface} topmost restore failed: ${error.message}`);
       }
     }
+    reorderBackdrops();
   }
 
   function onWake() {
     clearTimeout(wakeTopmostTimer);
     restoreWindowsTopmost();
     // The shell can finish restoring windows after the power event. One bounded
-    // follow-up also coalesces repeated resume events; no permanent raise loop.
+    // follow-up also coalesces resume/unlock events; no permanent raise loop.
     wakeTopmostTimer = setTimeout(() => {
       wakeTopmostTimer = null;
       restoreWindowsTopmost();
@@ -1259,6 +1376,7 @@ function createEdgeDockController(deps) {
     running = false;
     if (platform === 'win32') {
       powerMonitor?.removeListener('resume', onWake);
+      powerMonitor?.removeListener('unlock-screen', onWake);
     }
     clearTimeout(wakeTopmostTimer);
     wakeTopmostTimer = null;
@@ -1343,13 +1461,20 @@ function createEdgeDockController(deps) {
       render('rail');
       if (bubbleCell !== null) render('bubble');
     },
-    setAppearance(nextAppearance) {
-      appearance = nextAppearance || {};
+    setAppearance(nextAppearance, { preview = false } = {}) {
+      if (preview) {
+        // Keep the canonical currency/subscription projection; slider previews
+        // replace only the CSS glass values. Native tints come from liquidGlass().
+        appearance = { ...appearance };
+        for (const key of ['glassOpacity', 'glassBlur']) {
+          if (nextAppearance?.[key] !== undefined) appearance[key] = nextAppearance[key];
+        }
+      } else appearance = nextAppearance || {};
       if (!running) return;
       const wanted = liquidGlass();
       for (const surface of SURFACES) {
         try {
-          glasses[surface]?.update({ dark: wanted?.dark !== false, visible: surface !== 'peek' || peekMode === 'refresh' });
+          glasses[surface]?.update({ dark: wanted?.dark !== false, style: wanted?.style, tintOpacity: wanted?.tintOpacity, visible: surface !== 'peek' || peekMode === 'refresh' });
         } catch (error) {
           logger(`[edge-dock] ${surface} Liquid Glass appearance failed: ${error.message}`);
         }
@@ -1357,6 +1482,10 @@ function createEdgeDockController(deps) {
       for (const surface of SURFACES) render(surface);
     },
     isRunning: () => running,
+    webSurface: (host) => {
+      const kind = ['rail', 'bubble'].find(key => windows[key]?.webContents === host);
+      return kind ? { kind, visible: running && !drag && visibleTargets[kind] === true && (kind === 'rail' ? railVisible : bubbleVisible) } : null;
+    },
     owns: (win) => Boolean(win) && SURFACES.some((surface) => windows[surface] === win),
     stop
   };

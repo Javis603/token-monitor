@@ -135,6 +135,6 @@ test('the subscription usage comparison reads the scan, never a display-label ta
     path.join(rootDir, 'src/electron/renderer/edgeDock/presentation.js'), 'utf8'
   );
   assert.match(app, /monthClientCosts: \(\) => state\.stats\?\.periods\?\.month\?\.clientCosts,/);
-  assert.match(dock, /monthClientCosts: \(\) => state\.payload\?\.cell\?\.monthClientCosts,/);
+  assert.match(dock, /monthClientCosts: \(\) => cell\(\)\?\.monthClientCosts,/);
   assert.match(presentation, /monthClientCosts: options\.stats\?\.periods\?\.month\?\.clientCosts \|\| \{\}/);
 });

@@ -92,6 +92,7 @@ test('motion preference labels exist in every bundled locale', () => {
 // every dock fade running for a Windows user who had asked the OS to reduce motion.
 test('the dock fades read the system reduce-motion setting on every platform it runs on', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const dock = main.slice(main.indexOf('function ensureEdgeDockController()'), main.indexOf('applyShapeMask: (win, commands'));
+  const start = main.indexOf('function ensureEdgeDockController()');
+  const dock = main.slice(start, main.indexOf('applyShapeMask: (win, commands', start));
   assert.match(dock, /edgeDockSupported\(process\.platform\) && systemPreferences\?\.getAnimationSettings\?\.\(\)\.prefersReducedMotion === true/);
 });

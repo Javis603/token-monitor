@@ -75,6 +75,54 @@ test('keeps native and WSL read failures instead of reporting a missing transcri
   }
 });
 
+test('Pi detail reads the scoped WSL scanner root despite a host env override', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-pi-wsl-detail-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const nativeHome = path.join(root, 'native');
+  const wslHome = path.join(root, 'wsl');
+  const dir = path.join(wslHome, '.pi', 'agent', 'sessions', '--project--');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '2026-10-12T00-00-00-000Z_pi-wsl.jsonl'), [
+    JSON.stringify({ type: 'message', timestamp: '2026-10-12T00:00:00.000Z', message: { role: 'user', content: 'from Pi WSL' } }),
+    JSON.stringify({ type: 'message', timestamp: '2026-10-12T00:00:01.000Z', message: {
+      role: 'assistant', content: [], usage: { input: 10, output: 5, cost: { total: 0.25 } }
+    } })
+  ].join('\n'));
+  const detail = await resolveSessionDetailForPlatform({ client: 'pi', sessionId: 'pi-wsl', period: 'total' }, {
+    platform: 'win32', homedir: () => nativeHome,
+    env: { PI_CODING_AGENT_DIR: path.join(root, 'host-override') }, wslUsageHomes: () => [wslHome]
+  });
+  assert.equal(detail.found, true);
+  assert.equal(detail.exchanges[0].promptPreview, 'from Pi WSL');
+  assert.equal(detail.totals.totalTokens, 15);
+  assert.equal(detail.totals.costUsd, 0.25);
+});
+
+test('OMP detail reads the fixed session root from a discovered WSL home', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-omp-wsl-detail-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const nativeHome = path.join(root, 'native');
+  const wslHome = path.join(root, 'wsl');
+  const sessionId = 'omp-wsl-main';
+  const dir = path.join(wslHome, '.omp', 'agent', 'sessions', '-project');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `2026-10-12T00-00-00-000Z_${sessionId}.jsonl`), [
+    JSON.stringify({ type: 'title', v: 1, title: 'OMP WSL', pad: '' }),
+    JSON.stringify({ type: 'session', version: 3, id: sessionId, cwd: '/project' }),
+    JSON.stringify({ type: 'message', timestamp: '2026-10-12T00:00:00.000Z', message: { role: 'user', content: 'from OMP WSL' } }),
+    JSON.stringify({ type: 'message', timestamp: '2026-10-12T00:00:01.000Z', message: { role: 'assistant', content: [], usage: { input: 8, output: 4, cost: { total: 0.5 } } } })
+  ].join('\n'));
+  const detail = await resolveSessionDetailForPlatform({ client: 'omp', sessionId, period: 'total' }, {
+    platform: 'win32', homedir: () => nativeHome,
+    env: { OMP_PROFILE: path.join(root, 'host-profile'), PI_CODING_AGENT_DIR: path.join(root, 'host-pi') },
+    wslUsageHomes: () => [wslHome]
+  });
+  assert.equal(detail.found, true);
+  assert.equal(detail.exchanges[0].promptPreview, 'from OMP WSL');
+  assert.equal(detail.totals.totalTokens, 12);
+  assert.equal(detail.totals.costUsd, 0.5);
+});
+
 test('reads a Claude transcript from a discovered WSL home', async (t) => {
   const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-detail-'));
   const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-detail-'));

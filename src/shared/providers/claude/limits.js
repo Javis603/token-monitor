@@ -5,14 +5,16 @@
 // through providerFetchers() in src/shared/limits/collector.js, which re-exports
 // the handful of names the widget and the tests use.
 
-const { spawn } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
-const { normalizeLimitProvider } = require('../../limits/core');
-const { abortError } = require('../../probeDeadline');
+const { aggregateLimits, normalizeLimitProvider } = require('../../limits/core');
+const { abortError, runWithProbeDeadline } = require('../../probeDeadline');
+const { claudeWebAccountMetadata, normalizeClaudeManagedAccounts } = require('./webAccounts');
 const { hashKey } = require('../../hashKey');
+const { CLAUDE_PROBE_ARGS, prepareClaudeProbeDir } = require('./probe');
 const {
   PLAN_LABEL_ALIASES,
   TOKEN_MONITOR_USER_AGENT,
@@ -1346,6 +1348,128 @@ async function refreshClaudeCredentials(currentCredentials, deps = {}) {
   return { ...currentCredentials, ...refreshed };
 }
 
+// The single-credential probe remains the save-time validator. Runtime fans out
+// the saved Web sessions alongside the automatic OAuth/CLI lane.
+async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
+  if (deps.probe === true) return fetchClaudeLimits(options, deps);
+  const accounts = normalizeClaudeManagedAccounts(options.claudeManagedAccounts).filter((account) => account.enabled);
+  const legacyCookie = claudeWebCookie(deps.env || process.env, options);
+  const web = [...accounts, ...(legacyCookie ? [{
+    id: 'legacy', cookie: legacyCookie, organizationId: options.claudeWebOrganizationId || ''
+  }] : [])];
+  const scope = options.limitRefreshScope;
+  const scopeId = String(scope?.accountId || scope?.managedAccountId || '');
+  const scopeField = ['accountKey', 'accountEmail', 'accountName'].find((key) => scope?.[key]);
+  const matchesScope = (row) => !scopeField
+    || String(row?.[scopeField] || '').toLowerCase() === String(scope[scopeField]).toLowerCase();
+  if (!scopeField && !scopeId && !web.length && !options.previousLimits?.providers?.some((row) => row.provider === 'claude')) {
+    return fetchClaudeLimits({ ...options, claudeWebCookie: '' }, deps);
+  }
+  const rows = [];
+  const retainedCreditKeys = new Set();
+  let unidentifiedWebFailure = false;
+  const renewedCookies = new Map();
+  for (const account of web) {
+    if (scopeId && account.id !== scopeId) continue;
+    if (scopeField && account[scopeField] && !matchesScope(account)) continue;
+    if (deps.signal?.aborted) throw abortError(deps.signal);
+    let row;
+    try {
+      const credential = account.id === 'legacy' ? account.cookie : await deps.resolveClaudeWebCredential?.(account);
+      if (!credential) throw errorWithStatus('notConfigured', 'Claude Web login is not configured');
+      const cookie = renewedCookies.get(credential) || credential;
+      account.cookie = cookie;
+      row = await runWithProbeDeadline(({ signal }) => fetchClaudeLimits({
+          ...options, claudeWebCookie: cookie, claudeWebOrganizationId: account.organizationId
+        }, {
+          ...deps, signal,
+          onClaudeWebCookieRenewed: async (renewal) => {
+            if (signal.aborted) return false;
+            for (const [old, current] of renewedCookies) {
+              if (current === renewal.previousCookie) renewedCookies.set(old, renewal.cookie);
+            }
+            renewedCookies.set(renewal.previousCookie, renewal.cookie);
+            return deps.onClaudeWebCookieRenewed?.({ ...renewal, ...(account.id !== 'legacy' ? { accountId: account.id } : {}) });
+          }
+        }), { signal: deps.signal, deadlineMs: deps.claudeAccountTimeoutMs || 45000 });
+    } catch (error) {
+      if (deps.signal?.aborted) throw abortError(deps.signal);
+      const cached = claudeCachedIdentity(claudeWebIdentityFingerprint(renewedCookies.get(account.cookie) || account.cookie), deps, { allowStale: true });
+      const identity = cached?.selectedOrganizationId === account.organizationId ? cached.identity : null;
+      row = normalizeLimitProvider({
+        provider: 'claude', ...claudeWebAccountMetadata(account), source: 'web',
+        ...identity,
+        status: error?.status || 'unavailable', updatedAt: nowIso((deps.now || Date.now)()), windows: []
+      });
+      if (!row.accountKey) unidentifiedWebFailure = true;
+      // Only a transient loss of a still-configured Web source may retain its
+      // last credits, bounded by the existing prepaid cache's read deadline.
+      if (['timeout', 'unavailable', 'rateLimited', 'sourceRateLimited', 'error'].includes(row.status)
+        && claudePrepaidBalanceEnabled(deps.env || process.env, options)) {
+        const context = { identity: { accountKey: row.accountKey }, organizationId: cached?.organizationId || account.organizationId };
+        if (claudeCachedPrepaid(claudePrepaidKey(context), deps, options, true)?.balance) retainedCreditKeys.add(row.accountKey);
+      }
+    }
+    rows.push(row);
+    if (!deps.signal?.aborted) {
+      try {
+        await deps.onClaudeWebAccountResolved?.({ id: account.id, organizationId: account.organizationId,
+          cookie: renewedCookies.get(account.cookie) || account.cookie, provider: row,
+          scopedById: Boolean(scopeId && !scopeField) });
+      } catch (_) {
+        deps.logger?.('[limits] Claude account observation could not be recorded');
+      }
+    }
+  }
+  let local;
+  try {
+    if (!scopeId && (scope?.reconcileSources || !scopeField || !rows.some((row) => row.status === 'ok' && matchesScope(row)))) {
+      local = await runWithProbeDeadline(({ signal }) => fetchClaudeLimits({ ...options, claudeWebCookie: '' }, { ...deps, signal }), {
+        signal: deps.signal, deadlineMs: deps.claudeLocalAccountTimeoutMs || 120000
+      });
+      rows.push(local);
+    }
+  } catch (error) {
+    if (deps.signal?.aborted) throw abortError(deps.signal);
+    local = { provider: 'claude', status: error?.status || 'unavailable', windows: [] };
+    rows.push(local);
+  }
+  const represented = new Set(rows.map((row) => row.accountKey).filter(Boolean));
+  for (const previous of options.previousLimits?.providers || []) {
+    if (scopeField || scopeId) break;
+    if (previous.provider !== 'claude' || !previous.accountKey || represented.has(previous.accountKey)) continue;
+    const retired = previous.source === 'web' ? !unidentifiedWebFailure
+      : local?.status === 'ok' || local?.status === 'notConfigured';
+    if (retired) rows.push({ provider: 'claude', accountKey: previous.accountKey, removed: true });
+  }
+  // Anonymous failures cannot stand in for every saved account in the runtime.
+  // Missing known rows already get last-good retention there.
+  let result = rows.some((row) => row.accountKey && !row.removed)
+    ? rows.filter((row) => row.accountKey)
+    : [...rows.filter((row) => row.removed), rows.find((row) => !row.removed)];
+  if (scopeField) {
+    result = result.filter(matchesScope);
+    if (!result.length) result.push({ provider: 'claude', [scopeField]: scope[scopeField],
+      ...(!unidentifiedWebFailure && ['ok', 'notConfigured'].includes(local?.status)
+        ? { removed: true } : { status: 'unavailable', windows: [] }) });
+  }
+  // Reuse the account aggregator before the runtime's one-row-per-key commit:
+  // Web-only credits survive an OAuth reading of the same subscription, and a
+  // failed credential cannot replace that account's healthy observation.
+  const removals = result.filter((row) => row?.removed);
+  const providers = aggregateLimits([{ limits: { providers: result.filter((row) => row && !row.removed) } }], 0, (deps.now || Date.now)()).providers;
+  return [...providers.map((provider) => {
+    const row = normalizeLimitProvider(provider);
+    const previous = options.previousLimits?.providers?.find((entry) => entry.provider === 'claude' && entry.accountKey === row.accountKey);
+    // Reuse runtime partial-window retention: current OAuth usage replaces
+    // quota, while credits retain their old timestamp and unavailable status.
+    return row.status === 'ok' && !row.balance && retainedCreditKeys.has(row.accountKey)
+      && previous?.balance && previous.windows?.some((window) => window.metric === 'credits')
+      ? { ...row, invalidateCachedWindowLabels: previous.windows.filter((window) => window.metric !== 'credits').map((window) => window.label) }
+      : row;
+  }), ...removals];
+}
+
 async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const platform = deps.platform || process.platform;
@@ -1702,32 +1826,55 @@ function withClaudePathHints(env = process.env, platform = process.platform) {
   return {
     ...env,
     [pathKey]: uniqueStrings([...hints, ...currentPath.split(delimiter)]).join(delimiter),
-    DISABLE_AUTOUPDATER: '1'
+    DISABLE_AUTOUPDATER: '1',
+    CLAUDE_CODE_SKIP_PROMPT_HISTORY: '1'
   };
 }
 
 function claudePtyPythonScript() {
   return `
-import fcntl, os, pty, re, select, signal, struct, subprocess, sys, termios, time
+import errno, fcntl, json, os, pty, re, select, signal, stat, struct, subprocess, sys, termios, time
 cmd = os.environ.get("TOKEN_MONITOR_CLAUDE_COMMAND_PATH", "claude")
 cwd = os.environ.get("TOKEN_MONITOR_CLAUDE_PROBE_DIR") or os.getcwd()
 timeout = float(os.environ.get("TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT", "35"))
 slash_command = os.environ.get("TOKEN_MONITOR_CLAUDE_SLASH_COMMAND", "/usage")
 exit_marker = os.environ.get("TOKEN_MONITOR_CLAUDE_EXIT_MARKER_REGEX", "currentsession.*?[0-9]{1,3}(?:\\\\.[0-9]+)?%")
 exit_pattern = re.compile(exit_marker) if exit_marker else None
-os.makedirs(os.path.join(cwd, ".claude"), exist_ok=True)
-settings_path = os.path.join(cwd, ".claude", "settings.local.json")
-if not os.path.exists(settings_path):
-    open(settings_path, "w").write('{"disableDeepLinkRegistration":"disable"}\\n')
+# Check and pin the prepared cwd before allowing any workspace trust response.
+try:
+    directory = os.open(cwd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    info = os.fstat(directory)
+    if (info.st_uid != os.getuid() or (stat.S_IMODE(info.st_mode) & 0o777) != 0o700
+            or str(info.st_dev) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_DEV"]
+            or str(info.st_ino) != os.environ["TOKEN_MONITOR_CLAUDE_PROBE_INO"]):
+        raise RuntimeError("Claude probe directory changed before launch")
+    os.fchdir(directory)
+    os.close(directory)
+except (OSError, RuntimeError):
+    sys.stderr.write("TOKEN_MONITOR_UNSAFE_PROBE: Claude probe directory changed before launch")
+    sys.exit(78)
+# Version and printed usage share the same isolated interpreter and cwd pin.
+# exec preserves the CLI exit status and pipes, without opening a terminal.
+if os.environ.get("TOKEN_MONITOR_CLAUDE_NONINTERACTIVE") == "1":
+    # execFile has no detached option: isolate ordinary wrapper descendants here.
+    os.setsid()
+    os.execvp(cmd, [cmd] + json.loads(os.environ["TOKEN_MONITOR_CLAUDE_PROBE_ARGS"]))
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 160, 0, 0))
-proc = subprocess.Popen([cmd, "--allowed-tools", ""], stdin=slave, stdout=slave, stderr=slave, cwd=cwd, close_fds=True, start_new_session=True)
+proc = subprocess.Popen([cmd] + json.loads(os.environ["TOKEN_MONITOR_CLAUDE_PROBE_ARGS"]), stdin=slave, stdout=slave, stderr=slave, cwd=".", close_fds=True, start_new_session=True)
 os.close(slave)
 fcntl.fcntl(master, fcntl.F_SETFL, os.O_NONBLOCK)
 ansi = re.compile(rb"\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b[()][A-Za-z0-9]|\\x1b[78=>][^\\x1b]*")
 def compact(data):
     text = ansi.sub(b"", data).decode("utf-8", "ignore").lower()
     return re.sub(r"[^a-z0-9%]+", "", text)
+def menu_text(data):
+    # Ink can position words by column rather than outputting literal spaces.
+    return ansi.sub(b"", re.sub(rb"\\x1b\\[[0-9]+[GC]", b" ", data)).decode("utf-8", "ignore")
+def input_prompt(data):
+    text = menu_text(data)
+    return (re.search(r"Claude\\s+Code\\s+v[0-9]", text)
+            and re.search(r"(?:^|[\\r\\n])\\s*[❯›>][ \\t\\u00a0]*(?:[\\r\\n]|$)", text))
 def write_master(data):
     try:
         os.write(master, data)
@@ -1741,10 +1888,16 @@ sent_cmd = False
 matched_at = None
 handled_prompts = set()
 prompt_tokens = [
-    "quicksafetycheck", "yesitrustthisfolder", "pressentertocontinue",
-    "readytocodehere", "showplanusage", "showplan"
+    "pressentertocontinue", "showplanusage", "showplan"
 ]
+# Trust is a menu, not a press-Enter prompt. Wait for its complete rendering,
+# observe the affirmative selection, then wait for the normal input prompt.
+trust_state = "unseen"
+trust_ready_at = None
+trust_selection_end = 0
+trust_confirm_end = 0
 slash_bytes = (slash_command + "\\r").encode("utf-8")
+pty_closed = False
 try:
     while time.time() - start < timeout:
         io_closed = False
@@ -1752,18 +1905,53 @@ try:
         if readable:
             try:
                 chunk = os.read(master, 8192)
-                if chunk:
-                    buf += chunk
-                    if b"\\x1b[6n" in buf[-32:] and not write_master(b"\\x1b[1;1R"):
-                        io_closed = True
+                if not chunk:
+                    pty_closed = True
+                    break
+                buf += chunk
+                if b"\\x1b[6n" in buf[-32:] and not write_master(b"\\x1b[1;1R"):
+                    io_closed = True
             except BlockingIOError:
                 pass
-            except OSError:
+            except OSError as error:
+                pty_closed = error.errno == errno.EIO
                 break
         if io_closed:
             break
         scan = compact(buf[-20000:])
         now = time.time()
+        if trust_state == "unseen" and any(token in scan for token in ("quicksafetycheck", "readytocodehere", "yesitrustthisfolder")):
+            trust_state = "menu"
+        if trust_state in ("menu", "selection", "confirmed"):
+            text = menu_text(buf)
+            if trust_state == "confirmed":
+                if input_prompt(buf[trust_confirm_end:]):
+                    trust_state = "done"
+            elif ("yesitrustthisfolder" in scan and ("noexit" in scan or "nocontinuewithoutthesepermissions" in scan)
+                    and ("entertoconfirm" in scan or "entertoselect" in scan)):
+                # Claude 2.1.309 refuses confirmation for 150 ms after mount.
+                # Allow the complete menu to settle without blocking PTY reads.
+                if trust_ready_at is None:
+                    trust_ready_at = now
+                if now - trust_ready_at < 0.25:
+                    continue
+                choices = list(re.finditer(r"[❯›>] *(?:[0-9]+\\. *)?(Yes, I trust this folder|No, exit|No, continue without these permissions)", text))
+                if choices:
+                    choice = choices[-1]
+                    if choice.group(1) == "Yes, I trust this folder" and (trust_state == "menu" or choice.end() > trust_selection_end):
+                        if not write_master(b"\\r"):
+                            break
+                        trust_state = "confirmed"
+                        trust_confirm_end = len(buf)
+                    elif trust_state == "menu":
+                        # Use the displayed order, never assume Yes is the default.
+                        direction = b"\\x1b[B" if text.rfind("Yes, I trust this folder") > choice.start() else b"\\x1b[A"
+                        if not write_master(direction):
+                            break
+                        trust_state = "selection"
+                        trust_selection_end = choice.end()
+            if trust_state != "done":
+                continue
         prompt_token = next(
             (
                 token for token in sorted(prompt_tokens, key=len, reverse=True)
@@ -1782,10 +1970,11 @@ try:
                 last_enter = now
         if io_closed:
             break
-        if not sent_cmd and now - start > 5:
+        if not sent_cmd and now - start > 5 and input_prompt(buf):
             if not write_master(slash_bytes):
                 break
             sent_cmd = True
+            last_enter = now
         if sent_cmd and now - last_enter > 0.8:
             if not write_master(b"\\r"):
                 break
@@ -1796,15 +1985,38 @@ try:
             break
     sys.stdout.buffer.write(buf)
 finally:
+    # Only propagate a failure that happened before our intentional shutdown.
+    # Claude handles SIGTERM by exiting 143 even after a successful /usage.
+    early_exit_code = proc.poll()
+    # PTY EOF or EIO may precede a waitable child exit. Collect
+    # that exit before sending SIGTERM; marker/timeout shutdown keeps using poll.
+    if pty_closed and early_exit_code is None:
+        try:
+            early_exit_code = proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
     write_master(b"/exit\\r")
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except Exception:
         pass
+    try:
+        proc.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+# A signal observed before our cleanup is a failure, not an intentional stop.
+if early_exit_code is not None and early_exit_code < 0:
+    early_exit_code = 128 - early_exit_code
+if trust_state in ("menu", "selection", "confirmed") and not early_exit_code:
+    raise RuntimeError("Claude workspace trust did not complete")
+if not sent_cmd and early_exit_code is None:
+    raise RuntimeError("Claude input prompt did not become ready")
+sys.exit(early_exit_code if early_exit_code is not None else 0)
 `.trim();
 }
 
-async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
+async function runClaudePosixProbe(slashCommand, exitMarkerRegex, deps = {}, directArgs = null) {
   if ((deps.platform || process.platform) === 'win32') {
     throw errorWithStatus('unavailable', 'Claude CLI PTY probe is not available on Windows yet');
   }
@@ -1812,27 +2024,39 @@ async function runClaudePtyProbe(slashCommand, exitMarkerRegex, deps = {}) {
   const platform = deps.platform || process.platform;
   const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
   if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
-  const probeDir = deps.claudeProbeDir || path.join(os.tmpdir(), 'token-monitor-claude-probe');
-  fs.mkdirSync(probeDir, { recursive: true });
+  const { dir: probeDir, identity } = await prepareClaudeProbeDir(deps);
   const runEnv = {
     ...env,
     DISABLE_AUTOUPDATER: '1',
+    // Interactive /usage and /status probes must not become saved conversations.
+    CLAUDE_CODE_SKIP_PROMPT_HISTORY: '1',
     TERM: env.TERM && env.TERM !== 'dumb' ? env.TERM : 'xterm-256color',
     COLORTERM: env.COLORTERM || 'truecolor',
+    ...(!directArgs ? { FORCE_COLOR: '1' } : {}),
     TOKEN_MONITOR_CLAUDE_COMMAND_PATH: command,
     TOKEN_MONITOR_CLAUDE_PROBE_DIR: probeDir,
+    TOKEN_MONITOR_CLAUDE_PROBE_DEV: identity.dev,
+    TOKEN_MONITOR_CLAUDE_PROBE_INO: identity.ino,
+    TOKEN_MONITOR_CLAUDE_PROBE_ARGS: JSON.stringify(directArgs || CLAUDE_PROBE_ARGS),
+    TOKEN_MONITOR_CLAUDE_NONINTERACTIVE: directArgs ? '1' : '0',
     TOKEN_MONITOR_CLAUDE_CLI_TIMEOUT: String(deps.claudeCliTimeoutSeconds || 35),
     TOKEN_MONITOR_CLAUDE_SLASH_COMMAND: slashCommand,
     TOKEN_MONITOR_CLAUDE_EXIT_MARKER_REGEX: exitMarkerRegex || ''
   };
+  // Unstyled Ink redraws only the marker; styled output also redraws the
+  // selected label required by the trust handshake. This PTY is not user UI.
+  if (!directArgs) delete runEnv.NO_COLOR;
   const pythonCandidates = deps.pythonCommand ? [deps.pythonCommand] : ['python3', 'python'];
   let lastError = null;
   for (const python of pythonCandidates) {
     try {
-      return await runProcessText(python, ['-c', claudePtyPythonScript()], {
+      // Imports must not read cwd/PYTHONPATH before the directory identity check.
+      const run = directArgs ? runClaudeCapturedCommand : runProcessText;
+      return await run(python, ['-I', '-c', claudePtyPythonScript()], {
         ...deps,
         env: runEnv,
         cwd: probeDir,
+        closeStdin: Boolean(directArgs),
         timeoutMs: Number(deps.claudeCliTimeoutMs || 45000)
       });
     } catch (error) {
@@ -1847,7 +2071,12 @@ function claudeDirectInvocation(command, args, platform, env) {
   if (platform !== 'win32' || /\.exe$/i.test(command)) return { command, args };
   const commandShell = envValue(env, 'ComSpec') || 'cmd.exe';
   const quotedCommand = `"${String(command).replace(/"/g, '""')}"`;
-  const commandLine = `"${[quotedCommand, ...args].join(' ')}"`;
+  // cmd shims forward to a native executable via %*: retain empty arguments and
+  // escape embedded JSON quotes for its Windows argv parser. Probe args are
+  // fixed literals, never user-provided shell fragments.
+  const quotedArgs = args.map((arg) => arg && !/[\s"]/u.test(arg)
+    ? arg : `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1')}"`);
+  const commandLine = `"${[quotedCommand, ...quotedArgs].join(' ')}"`;
   return {
     command: commandShell,
     args: ['/d', '/s', '/c', commandLine],
@@ -1855,19 +2084,118 @@ function claudeDirectInvocation(command, args, platform, env) {
   };
 }
 
-function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000) {
+function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000, captured = false) {
   const platform = deps.platform || process.platform;
   const env = deps.env || process.env;
   const command = existingClaudeCommandCandidates(claudeCommandCandidates(env, platform), deps)[0];
   if (!command) throw errorWithStatus('notConfigured', 'Claude CLI not found');
   const invocation = claudeDirectInvocation(command, args, platform, env);
-  return runProcessText(invocation.command, invocation.args, {
+  const run = captured ? runClaudeCapturedCommand : runProcessText;
+  return run(invocation.command, invocation.args, {
     ...deps,
     env: withClaudePathHints(env, platform),
     closeStdin: true,
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     timeoutMs
   });
+}
+
+// execFile bounds capture and waits for close after its timeout kill. A timed-out
+// print must be gone before fallback; SIGTERM can be ignored by the child.
+function runClaudeCapturedCommand(command, args, options) {
+  if (options.signal?.aborted) return Promise.reject(abortError(options.signal));
+  return new Promise((resolve, reject) => {
+    const execute = options.execFile || execFile;
+    const platform = options.platform || process.platform;
+    let cleanup = Promise.resolve(null);
+    // Node's execFile abort callback can precede exit and uses SIGTERM. Own the
+    // cancellation so the same hard/tree kill runs, and settle only on close.
+    const onAbort = () => child.kill('SIGKILL');
+    const child = execute(command, args, {
+      cwd: options.cwd, env: options.env, encoding: 'utf8', windowsHide: true,
+      windowsVerbatimArguments: options.windowsVerbatimArguments,
+      timeout: options.timeoutMs, killSignal: 'SIGKILL', maxBuffer: 256 * 1024
+    }, async (error, stdout = '', stderr = '') => {
+      options.signal?.removeEventListener('abort', onAbort);
+      // cmd.exe may close while taskkill is still working. Both must finish
+      // before allowing fallback, including when cleanup eventually fails.
+      const cleanupError = await cleanup;
+      if (cleanupError) { reject(cleanupError); return; }
+      if (options.signal?.aborted) { reject(abortError(options.signal)); return; }
+      // Preserve stdout too: some CLI builds report rejected flags there.
+      const failure = errorWithStatus('unavailable', [stderr, stdout].filter(Boolean).join('\n') || 'Claude printed no output');
+      if (error?.code) failure.code = error.code;
+      if (claudeProbeMustStop(failure, options)) reject(failure);
+      else if (error) reject(failure);
+      else if (stdout.trim()) resolve(stdout);
+      else reject(failure);
+    });
+    if (child.pid) {
+      const kill = child.kill.bind(child);
+      if (platform !== 'win32') {
+        child.kill = signal => {
+          // The isolated group includes ordinary shell-wrapper descendants.
+          try { process.kill(-child.pid, signal); }
+          catch (error) {
+            if (error.code !== 'ESRCH') {
+              const failure = errorWithStatus('unavailable', 'Claude probe process group could not be stopped');
+              failure.code = 'CLAUDE_PROBE_CLEANUP_FAILED';
+              cleanup = Promise.resolve(failure);
+            }
+          }
+          return kill(signal);
+        };
+      } else if (options.windowsVerbatimArguments) {
+        // A .cmd shim owns another process: terminating cmd.exe alone leaves it alive.
+        let stopping = false;
+        child.kill = signal => {
+          if (stopping) return true;
+          stopping = true;
+          let complete;
+          cleanup = new Promise(resolve => { complete = resolve; });
+          const root = envValue(options.env, 'SystemRoot') || 'C:\\Windows';
+          const finished = error => {
+            const failure = error && errorWithStatus('unavailable', 'Claude probe process tree could not be stopped');
+            if (failure) failure.code = 'CLAUDE_PROBE_CLEANUP_FAILED';
+            complete(failure || null);
+            kill(signal);
+          };
+          try {
+            execute(path.win32.join(root, 'System32', 'taskkill.exe'), ['/pid', String(child.pid), '/t', '/f'],
+              { windowsHide: true, timeout: 2000, killSignal: 'SIGKILL' }, finished);
+          } catch (error) { finished(error); }
+          return true;
+        };
+      }
+    }
+    child.stdin?.end();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+  });
+}
+
+function claudeProbeMustStop(error, deps) {
+  return deps.signal?.aborted || error?.name === 'AbortError'
+    || ['CLAUDE_UNSAFE_PROBE_DIR', 'CLAUDE_PROBE_CLEANUP_FAILED', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'].includes(error?.code)
+    || /TOKEN_MONITOR_UNSAFE_PROBE|(?:unknown option|unrecognized arguments?|unsupported|invalid option)[^\n]*(?:--allowed-tools|--allowedTools|--setting-sources|--settings|--strict-mcp-config|--tools|--no-session-persistence)/i.test(error?.message || '');
+}
+
+async function runClaudeNoninteractive(args, deps, timeoutMs) {
+  const restricted = [...CLAUDE_PROBE_ARGS, ...args];
+  if ((deps.platform || process.platform) !== 'win32') {
+    return runClaudePosixProbe('', '', { ...deps, claudeCliTimeoutMs: timeoutMs }, restricted);
+  }
+  const { dir } = await prepareClaudeProbeDir(deps);
+  return runClaudeDirectCommand(restricted, { ...deps, cwd: dir }, timeoutMs, true);
+}
+
+function supportsClaudePrintedUsage(text) {
+  // 2.1.178 is a conservative application gate, not the first implementation.
+  // Unknown or prerelease builds retain the established interactive path.
+  const match = String(text).trim().match(/^(\d+)\.(\d+)\.(\d+)(?: \(Claude Code\))?$/);
+  if (!match) return false;
+  const [, major, minor, patch] = match.map(Number);
+  return major > 2 || (major === 2 && (minor > 1 || (minor === 1 && patch >= 178)));
 }
 
 function runClaudeAuthStatus(deps = {}) {
@@ -1897,14 +2225,34 @@ async function isClaudeCliAuthenticated(deps = {}) {
 
 async function runClaudeUsageCli(deps = {}) {
   if (deps.runClaudeUsageCli) return deps.runClaudeUsageCli();
+  try {
+    const version = deps.runClaudeVersion
+      ? await deps.runClaudeVersion()
+      : await runClaudeNoninteractive(['--version'], deps, 5000);
+    if (supportsClaudePrintedUsage(version)) {
+      const text = await runClaudeNoninteractive(
+        ['--tools', '', '--no-session-persistence', '-p', '--', '/usage'], deps,
+        Number(deps.claudePrintedCliTimeoutMs || 30000)
+      );
+      // Cost/token accounting, subscription notices and exit zero alone are not quota.
+      parseClaudeCliUsageText(text);
+      return text;
+    }
+  } catch (error) {
+    if (claudeProbeMustStop(error, deps)) throw error;
+    // Old/unknown CLI or no usable printed quota: one original-path attempt.
+    // Preparation and cwd pinning run again, never with weaker security flags.
+  }
   if ((deps.platform || process.platform) === 'win32') return runClaudeDirectUsageCli(deps);
-  return runClaudePtyProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
+  return runClaudePosixProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
 }
 
-function runClaudeDirectUsageCli(deps = {}) {
+async function runClaudeDirectUsageCli(deps = {}) {
+  const { dir: probeDir } = await prepareClaudeProbeDir(deps);
   return runClaudeDirectCommand(
-    ['/usage'],
-    deps,
+    // Keep /usage positional even alongside variadic --allowed-tools.
+    [...CLAUDE_PROBE_ARGS, '--', '/usage'],
+    { ...deps, cwd: probeDir },
     Number(deps.claudeDirectCliTimeoutMs || 12000)
   );
 }
@@ -1915,7 +2263,7 @@ async function touchClaudeAuthPath(deps = {}) {
   // and refresh the OAuth token if needed. We don't parse output — the side-effect
   // (mutated credentials file / Keychain entry) is the signal. Permissive exit
   // marker matches common /status output tokens so we exit promptly on success.
-  return runClaudePtyProbe('/status', '(?:loggedin|subscription|account|model|version|email|organization)', {
+  return runClaudePosixProbe('/status', '(?:loggedin|subscription|account|model|version|email|organization)', {
     ...deps,
     claudeCliTimeoutSeconds: deps.claudeStatusTimeoutSeconds || 20,
     claudeCliTimeoutMs: deps.claudeStatusTimeoutMs || 25000
@@ -1923,6 +2271,9 @@ async function touchClaudeAuthPath(deps = {}) {
 }
 
 module.exports = {
+  claudeWebAccountMetadata,
+  normalizeClaudeManagedAccounts,
+  fetchClaudeAccountsLimits,
   claudeCommandCandidates,
   claudeWebCookie,
   delegatedClaudeRefresh,

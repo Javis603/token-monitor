@@ -3,15 +3,36 @@
 const semver = require('semver');
 
 const GITHUB_REPO = 'Javis603/token-monitor';
-const RELEASES_LATEST_URL = `https://github.com/${GITHUB_REPO}/releases/latest`;
+const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
+const RELEASES_LATEST_URL = `${RELEASES_URL}/latest`;
 const REQUEST_TIMEOUT_MS = 10 * 1000;
-const APP_UPDATE_BACKGROUND_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+// A hotfix should reach someone already on the release it fixes within a couple
+// of hours. Each packaged check downloads the releases Atom feed (about 0.7 MB,
+// served uncompressed) plus the platform's latest*.yml, all from github.com
+// outside the REST API quota, which is why this is not hourly.
+const APP_UPDATE_BACKGROUND_COOLDOWN_MS = 2 * 60 * 60 * 1000;
 const APP_UPDATE_OUTDATED_COOLDOWN_MS = 60 * 60 * 1000;
+// A launch checks once regardless of the cooldown: launches are rare and the
+// user expects one to notice a release. The delay lets a start-at-login launch
+// get a network connection first and keeps the check off the startup scans.
+const APP_UPDATE_STARTUP_DELAY_MS = 15 * 1000;
+// The hourly timer and the launch delay put a tick a little short of a whole
+// cooldown after the check it follows; without slack that tick skips and the
+// real interval grows by an hour.
+const APP_UPDATE_COOLDOWN_SLACK_MS = 60 * 1000;
 const MAX_RELEASE_BODY_CHARS = 128 * 1024;
 const MAX_RELEASE_NOTE_GROUPS = 4;
-const MAX_RELEASE_NOTE_ITEMS = 12;
+// A bound against a malformed body, not an editorial limit: release notes are
+// written summaries, and the update card shows every item. At 12 the busiest
+// releases (18 items) lost their whole Fixed group without a trace.
+const MAX_RELEASE_NOTE_ITEMS = 40;
 const MAX_RELEASE_NOTE_ITEM_CHARS = 600;
 const MAX_RELEASE_NOTE_HTML_MARKUP_CHARS = 1024;
+// How many of the releases between the running version and the latest one keep
+// their notes. electron-updater reads them from the releases Atom feed, which
+// only ever carries the newest few releases, so a long gap is cut short either
+// way; the renderer points at the release list for the remainder.
+const MAX_RELEASE_NOTE_HISTORY = 6;
 const TRAILING_PULL_REQUEST_REFERENCES_RE = /\s*(?:\(\s*#\d+(?:\s*,\s*#\d+)*\s*\)|（\s*#\d+(?:\s*[、，,]\s*#\d+)*\s*）)\s*$/;
 const RELEASE_NOTE_HTML_TAGS = new Set([
   'a', 'abbr', 'article', 'aside', 'b', 'blockquote', 'br', 'caption', 'cite', 'code',
@@ -360,7 +381,6 @@ function parseHtmlReleaseNoteGroups(section) {
 function extractHtmlReleaseNotes(value) {
   if (typeof value !== 'string' || !value.trim()) return {};
   const body = value.slice(0, MAX_RELEASE_BODY_CHARS);
-  const headings = Array.from(body.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi));
   const localeByHeading = new Map([
     ['english', 'en'],
     ['中文', 'zh'],
@@ -368,19 +388,22 @@ function extractHtmlReleaseNotes(value) {
     ['한국어', 'ko'],
     ['日本語', 'ja']
   ]);
+  // English and Simplified Chinese are top-level h1 sections. The other locales
+  // sit in collapsed <details> blocks under an h2 of the same name; the Atom feed
+  // keeps that content, so both levels name a locale.
+  const headings = Array.from(body.matchAll(/<h([12])\b[^>]*>([\s\S]*?)<\/h\1>/gi))
+    .map((heading) => ({ heading, locale: localeByHeading.get(plainReleaseNoteText(heading[2], 40).toLowerCase()) }))
+    .filter((entry) => entry.locale);
   const notes = {};
   for (let index = 0; index < headings.length; index += 1) {
-    const heading = headings[index];
-    const title = plainReleaseNoteText(heading[1], 40).toLowerCase();
-    const locale = localeByHeading.get(title);
-    if (!locale) continue;
+    const { heading, locale } = headings[index];
+    if (notes[locale]) continue;
     const contentStart = (heading.index || 0) + heading[0].length;
-    const contentEnd = index + 1 < headings.length ? headings[index + 1].index : body.length;
+    const contentEnd = index + 1 < headings.length ? headings[index + 1].heading.index : body.length;
     const localeSection = body.slice(contentStart, contentEnd);
-    // GitHub strips Markdown comment markers and may omit collapsed <details>
-    // content from Atom entirely. Parse only locale headings present in the
-    // feed; the renderer owns locale fallback when a section is absent. The
-    // first h2 is the app summary and the next begins its download section.
+    // The renderer owns locale fallback when a section is absent. The first h2
+    // after the locale heading is the app summary and the next begins its
+    // download section.
     const sectionHeadings = Array.from(localeSection.matchAll(/<h2\b[^>]*>[\s\S]*?<\/h2>/gi));
     if (sectionHeadings.length === 0) continue;
     const summaryStart = (sectionHeadings[0].index || 0) + sectionHeadings[0][0].length;
@@ -402,14 +425,67 @@ function extractUpdaterReleaseNotes(value, version) {
   return Object.keys(marked).length > 0 ? marked : extractHtmlReleaseNotes(note);
 }
 
+function releaseTagUrl(tag) {
+  return `${RELEASES_URL}/tag/${encodeURIComponent(tag)}`;
+}
+
+// With fullChangelog on, electron-updater hands over one { version, note } entry
+// per release newer than the running version, up to the latest. Each keeps its
+// own notes so the update card can show everything a user is about to receive,
+// not just the newest release.
+function extractUpdaterReleaseHistory(value, latestVersion) {
+  if (!Array.isArray(value)) return null;
+  const latest = parseTag(latestVersion);
+  const seen = new Set();
+  const entries = [];
+  for (const entry of value) {
+    const version = parseTag(entry?.version);
+    if (!version || seen.has(version) || (latest && semver.gt(version, latest))) continue;
+    seen.add(version);
+    entries.push({ version, note: entry?.note });
+  }
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => semver.rcompare(a.version, b.version));
+  const releaseNoteHistory = entries.slice(0, MAX_RELEASE_NOTE_HISTORY).map(({ version, note }) => {
+    const releaseNotes = extractUpdaterReleaseNotes(note, version);
+    return {
+      version,
+      htmlUrl: releaseTagUrl(`v${version}`),
+      ...(Object.keys(releaseNotes).length > 0 ? { releaseNotes } : {})
+    };
+  });
+  return {
+    releaseNoteHistory,
+    releaseHistoryTruncated: entries.length > MAX_RELEASE_NOTE_HISTORY
+  };
+}
+
+// The history is relative to the version that ran the check. A remembered one can
+// outlive that version (an update installed by hand, say), so anything not newer
+// than the running version is dropped before it reaches the renderer.
+function latestForCurrentVersion(latest, currentVersion) {
+  const history = latest?.releaseNoteHistory;
+  const current = semver.valid(currentVersion);
+  if (!Array.isArray(history) || !current) return latest || null;
+  const relevant = history.filter((entry) => semver.valid(entry?.version) && semver.gt(entry.version, current));
+  return relevant.length === history.length ? latest : { ...latest, releaseNoteHistory: relevant };
+}
+
 function mergeLatestReleaseMetadata(existing, incoming) {
   if (!incoming || typeof incoming !== 'object') return null;
   if (!existing || existing.version !== incoming.version) return incoming;
   const releaseNotes = incoming.releaseNotes || existing.releaseNotes;
+  // The history and its truncation flag describe one feed read, so they travel
+  // together rather than being merged field by field.
+  const history = incoming.releaseNoteHistory ? incoming : existing;
   return {
     ...existing,
     ...incoming,
-    ...(releaseNotes ? { releaseNotes } : {})
+    ...(releaseNotes ? { releaseNotes } : {}),
+    ...(history.releaseNoteHistory ? {
+      releaseNoteHistory: history.releaseNoteHistory,
+      releaseHistoryTruncated: Boolean(history.releaseHistoryTruncated)
+    } : {})
   };
 }
 
@@ -418,7 +494,7 @@ function parseLatestReleasePayload(payload) {
   const tag = typeof payload.tag_name === 'string' ? payload.tag_name : '';
   const version = parseTag(tag);
   if (!version) return null;
-  const htmlUrl = `https://github.com/${GITHUB_REPO}/releases/tag/${encodeURIComponent(tag)}`;
+  const htmlUrl = releaseTagUrl(tag);
   const releaseNotes = extractReleaseNotes(payload.body);
   return {
     version,
@@ -437,13 +513,15 @@ function latestFromUpdaterInfo(info) {
   const infoTag = typeof info.tag === 'string' && parseTag(info.tag) === version ? info.tag : '';
   const tag = infoTag || `v${version}`;
   const releaseNotes = extractUpdaterReleaseNotes(info.releaseNotes, version);
+  const history = extractUpdaterReleaseHistory(info.releaseNotes, version);
   return {
     version,
     tag,
     name: (typeof info.releaseName === 'string' && info.releaseName.trim()) ? info.releaseName : tag,
-    htmlUrl: `https://github.com/${GITHUB_REPO}/releases/tag/${encodeURIComponent(tag)}`,
+    htmlUrl: releaseTagUrl(tag),
     publishedAt: typeof info.releaseDate === 'string' ? info.releaseDate : '',
-    ...(Object.keys(releaseNotes).length > 0 ? { releaseNotes } : {})
+    ...(Object.keys(releaseNotes).length > 0 ? { releaseNotes } : {}),
+    ...(history || {})
   };
 }
 
@@ -527,7 +605,7 @@ function shouldSkipAppUpdateCheck({
   const availability = deriveAppUpdateAvailability({ currentVersion, latest, dismissedVersion });
   const cachedUpdate = availability.hasUpdate && !availability.dismissed;
   const cooldownMs = cachedUpdate ? APP_UPDATE_OUTDATED_COOLDOWN_MS : APP_UPDATE_BACKGROUND_COOLDOWN_MS;
-  return nowMs - last < cooldownMs;
+  return nowMs - last < cooldownMs - APP_UPDATE_COOLDOWN_SLACK_MS;
 }
 
 function downloadedAppUpdateMatchesLatest({
@@ -638,10 +716,15 @@ module.exports = {
   deriveAppUpdateAvailability,
   extractReleaseNotes,
   extractUpdaterReleaseNotes,
+  extractUpdaterReleaseHistory,
+  latestForCurrentVersion,
   mergeLatestReleaseMetadata,
   checkLatestRelease,
+  MAX_RELEASE_NOTE_HISTORY,
+  RELEASES_URL,
   RELEASES_LATEST_URL,
   GITHUB_REPO,
   APP_UPDATE_BACKGROUND_COOLDOWN_MS,
-  APP_UPDATE_OUTDATED_COOLDOWN_MS
+  APP_UPDATE_OUTDATED_COOLDOWN_MS,
+  APP_UPDATE_STARTUP_DELAY_MS
 };

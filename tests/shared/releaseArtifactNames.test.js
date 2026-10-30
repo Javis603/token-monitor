@@ -56,10 +56,9 @@ test('release artifact templates use GitHub-safe names', () => {
   for (const pattern of patterns) assert.doesNotMatch(pattern, /\s/);
 });
 
-test('updater metadata embeds every localized release-note section', () => {
-  assert.equal(rootPackage.build.releaseInfo?.releaseNotesFile, '.github/RELEASE_TEMPLATE.md');
+test('release body template carries every localized release-note section', () => {
   const releaseTemplate = fs.readFileSync(
-    path.join(__dirname, '..', '..', rootPackage.build.releaseInfo.releaseNotesFile),
+    path.join(__dirname, '..', '..', '.github', 'RELEASE_TEMPLATE.md'),
     'utf8'
   );
   const notes = extractReleaseNotes(releaseTemplate);
@@ -117,8 +116,8 @@ test('mac release scripts build native Apple Silicon and Intel artifacts with th
   );
 });
 
-test('release workflow pins Electron only for the Linux artifact', () => {
-  assert.equal(rootPackage.devDependencies.electron, '43.7.9');
+test('release workflow uses the package Electron version on every platform', () => {
+  assert.equal(rootPackage.devDependencies.electron, '45.1.0');
   assert.match(
     rootPackage.scripts['dist:linux'],
     /^npm run ensure:tokscale -- --platform=linux-x64 && electron-builder --config scripts\/electron-builder\.config\.js --linux --x64 --publish never$/
@@ -170,8 +169,7 @@ test('release workflow pins Electron only for the Linux artifact', () => {
   );
 
   const workflow = fs.readFileSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'release.yml'), 'utf8');
-  assert.match(workflow, /if: matrix\.target == 'linux'\s+run: \|\s+echo "TOKEN_MONITOR_ELECTRON_TARGET=linux" >> "\$GITHUB_ENV"/);
-  assert.match(workflow, /echo "TOKEN_MONITOR_LINUX_ELECTRON_VERSION=43\.2\.0" >> "\$GITHUB_ENV"/);
+  assert.doesNotMatch(workflow, /TOKEN_MONITOR_LINUX_ELECTRON_VERSION\s*[:=]/);
   assert.match(workflow, /- name: Verify Electron packaging version\s+run: \|\s+node -e /);
   assert.match(workflow, /require\('\.\/scripts\/electron-builder\.config\.js'\)/);
   assert.match(workflow, /npm run \$\{\{ matrix\.dist_script \}\}/);

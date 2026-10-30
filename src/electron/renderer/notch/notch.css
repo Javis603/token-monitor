@@ -1,0 +1,412 @@
+/* Scoped to the macOS top entry and its fixed-page panel. */
+html.notch-black { --glass-rgb: 0,0,0 !important; --text: #fff !important; --muted: rgba(255,255,255,.58) !important; --overlay-rgb: 255,255,255; --line: transparent; }
+html.notch-black .edge-dock-shape-fill { fill: #000; }
+html.notch-black .edge-dock-shape-line { stroke: transparent; }
+/* A glass entry still joins the physical camera housing as solid black. Its
+   lower half reveals the selected material only as the panel opens. The same
+   animated outline clips the shade; capsules keep their
+   own material without a fabricated camera band. */
+.notch-hardware-shade, .notch-glass-rim { display: none; pointer-events: none; }
+html:not(.notch-black) .is-notch-attached .notch-hardware-shade,
+html:not(.notch-black) .is-notch-attached .notch-glass-rim { display: inline; }
+/* Native glass paints its camera cap in the material transaction. Keep the SVG
+   fallback for vibrancy; drawing both would darken the panel twice. */
+html:not(.notch-black) .is-notch-attached.has-native-hardware-shade :is(.notch-hardware-shade, .notch-glass-rim) { display: none; }
+.notch-hardware-stop-0 { stop-opacity: 1; }
+.notch-hardware-stop-1 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .36); }
+.notch-hardware-stop-2 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .68); }
+/* The scrim supplies the dark floor once; native glass stays untinted here.
+   Preserve a clear lower region instead of covering its optics in black. */
+.notch-hardware-stop-3 { stop-opacity: calc(1 - var(--notch-content-progress, 0) * .77); }
+.notch-glass-rim { fill: none; stroke-width: .75; opacity: var(--notch-content-progress, 0); }
+html:not(.notch-black) .is-notch-attached .edge-dock-shape-line { stroke: transparent; }
+.is-notch-attached .notch-summary { --text: #fff; --muted: rgba(255,255,255,.68); --overlay-rgb: 255,255,255; color: var(--text); }
+/* Light widget ink cannot cross a black camera band. Keep the attached shell
+   on the existing dark surface palette; detached capsules still follow the theme. */
+html.notch-hardware-light {
+  --glass-rgb: 48,52,56 !important;
+  --text: #eef5fb !important;
+  --number: #eef5fb !important;
+  --muted: #a3adbb !important;
+  --overlay-rgb: 255,255,255 !important;
+  --line: rgba(255,255,255,.14) !important;
+  --line-strong: rgba(255,255,255,.22) !important;
+}
+/* The open panel lifts off the page on a soft shadow that fades in with it;
+   geometry.js reserves canvas room for the same blur radius and offset. */
+html.notch-black .edge-dock-root[data-surface="notch"] .edge-dock-shape {
+  filter: drop-shadow(0 calc(6.5px * var(--notch-zoom, 1)) calc(19.5px * var(--notch-zoom, 1)) rgba(0, 0, 0, calc(.59 * var(--notch-content-progress, 0))));
+}
+.edge-dock-root[data-surface="notch"] .edge-dock-content { overflow: hidden; }
+/* Retain the summary in its own compositor layer while the silhouette changes. */
+.notch-summary { opacity: var(--notch-summary-opacity, 1); pointer-events: none; transform: translate3d(0, calc(-1 * var(--notch-progress, 0) * var(--edge-dock-card-enter-shift)), 0); z-index: 1; position: absolute; top: 0; display: grid; align-items: center; flex: 0 0 auto; gap: 0; padding: 0; box-sizing: border-box; }
+/* Root extensions share one compact row. Native slots retain the camera gap;
+   replacements use the safe shoulder (the full width on camera-free entries). */
+.notch-summary:has(> .plugin-native-content) { display: flex; overflow: hidden; }
+.notch-summary > .plugin-native-content:not([hidden]) { display: grid; grid-template-columns: var(--notch-native-left) var(--notch-camera-gap) minmax(0, 1fr); align-items: center; flex: 1 1 auto; width: 100%; min-width: var(--notch-plugin-clearance); height: 100%; overflow: hidden; }
+.notch-summary > .plugin-content { flex: 0 1 auto; min-width: 0; max-height: 100%; overflow: hidden; }
+.notch-summary:has(> .plugin-native-content[hidden]) { padding-left: var(--notch-plugin-clearance); }
+.notch-summary:has(> .plugin-native-content[hidden]) > .plugin-content { flex: 1 1 0; }
+.notch-slot { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; overflow: visible; white-space: nowrap; }
+.notch-left { justify-content: flex-start; padding-left: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
+.notch-right { justify-content: flex-end; padding-right: calc(var(--notch-shoulder, 0px) + 8px); box-sizing: border-box; }
+.notch-slot-content { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; width: max-content; zoom: var(--notch-summary-zoom, 1); }
+.notch-left .notch-slot-content { transform-origin: left center; }
+.notch-right .notch-slot-content { transform-origin: right center; }
+.notch-summary-field { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.notch-gap { flex: 0 0 auto; }
+.notch-plugin-bitmap { width: 20px; height: 20px; flex: 0 0 20px; }
+.notch-summary .edge-dock-mark { flex-shrink: 0; width: 17px; height: 17px; }
+.notch-app-mark { font-size: 18px; font-weight: 650; line-height: 1; color: var(--text); }
+.notch-reading { display: inline-flex; flex-shrink: 0; align-items: center; font-family: var(--display-font); line-height: 1.2; font-variant-numeric: tabular-nums; }
+.notch-stack { flex-direction: column; align-items: flex-end; }
+.notch-text-layout { display: inline-block; flex: 0 0 auto; }
+.notch-text-run { display: inline-block; width: max-content; white-space: nowrap; vertical-align: bottom; transform-origin: left center; overflow: hidden; text-overflow: ellipsis; }
+.notch-text-run.is-unavailable { color: rgba(var(--overlay-rgb), .32); }
+.notch-bars { flex-direction: column; }
+.notch-bar { background: rgba(var(--overlay-rgb), .18); overflow: hidden; }
+.notch-bar-fill { display: block; height: 100%; background: var(--text); border-radius: inherit; transition: width 420ms cubic-bezier(.2,.8,.2,1); }
+
+/* Preserve mark size; shared rings grow outward on hardware-free entries. */
+.notch-summary .notch-provider-icon { position: static; left: auto; right: auto; width: var(--notch-ring-size, 28px); height: var(--notch-ring-size, 28px); gap: 0; flex: 0 0 auto; }
+.notch-summary .notch-provider-icon .edge-dock-ring { width: var(--notch-ring-size, 28px); height: var(--notch-ring-size, 28px); }
+.notch-summary .notch-provider-icon .edge-dock-mark { width: 17px; height: 17px; }
+
+/* Author flex styles must not override the native hidden attribute. */
+.notch-slot-content > [hidden] { display: none !important; }
+
+
+/* ---- Collapsed: adaptive readings ------------------------------------------ */
+.notch-reading-unit { margin-left: 3px; font: 500 10px/1 var(--ui-font, ui-monospace, monospace); color: var(--muted); }
+.notch-reading[data-tone="alert"] .notch-text-run { color: var(--red); }
+.notch-activity { gap: 4px; }
+.notch-activity-count { font-weight: 600; }
+.notch-activity-waiting { color: var(--yellow); }
+.notch-waiting-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+/* Session-only marks are one measured group, with a surface-coloured separator. */
+.notch-session-icons { display: inline-flex; align-items: center; isolation: isolate; }
+.notch-session-icon { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 21px; width: 21px; height: 21px; border-radius: 50%; background: rgb(var(--glass-rgb)); }
+.notch-session-icon + .notch-session-icon { margin-left: -9px; }
+.is-notch-attached .notch-session-icon, html.notch-black .notch-session-icon { background: #000; }
+.notch-session-activity { --notch-waiting-color: #e7b764; gap: 6px; }
+.notch-session-activity .notch-activity-count { color: var(--notch-accent, var(--text)); font-size: 1.3em; font-weight: 600; line-height: 1; }
+.notch-session-activity .notch-activity-count.is-mixed { background: linear-gradient(115deg, #81d9e0 8%, #adbfdf 48%, #efb08e 95%); background-clip: text; -webkit-background-clip: text; color: transparent; }
+.notch-waiting-badge { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; padding: 3px 4px; border-radius: 5px; color: var(--notch-waiting-color); background: color-mix(in srgb, var(--notch-waiting-color) 14%, transparent); font-size: 1em; font-weight: 600; line-height: 1; }
+.notch-waiting-badge svg { width: 11px; height: 11px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.is-light-session-summary .notch-session-activity { --notch-waiting-color: #8a570a; }
+.is-light-session-summary .notch-activity-count { color: var(--text); }
+.is-light-session-summary .notch-activity-count.is-mixed { background-image: linear-gradient(115deg, #17626c 8%, #575a88 48%, #8f4d32 95%); color: transparent; }
+.notch-wave { display: inline-flex; align-items: center; gap: 2.5px; height: 16px; }
+.notch-summary .notch-wave { scale: 1 1.15; }
+.notch-wave i { width: 3px; border-radius: 2px; background: var(--notch-accent, var(--text)); animation: notch-wave 1.05s ease-in-out infinite; }
+.notch-wave i:nth-child(1) { height: 7px; animation-delay: -.2s; }
+.notch-wave i:nth-child(2) { height: 13px; animation-delay: -.55s; }
+.notch-wave i:nth-child(3) { height: 9px; animation-delay: -.85s; }
+.notch-wave i:nth-child(4) { height: 15px; animation-delay: -.35s; }
+.notch-wave i:nth-child(5) { height: 6px; animation-delay: -.7s; }
+@keyframes notch-wave { 50% { transform: scaleY(.4); } }
+
+/* ---- Open panel ------------------------------------------------------------ */
+/* The body spans the whole open outline: the band shares the camera row on an
+   attached shell and leads the capsule otherwise. Content resolves out of a
+   blur as the panel opens and dissolves back into it. */
+.notch-body { position: absolute; top: 0; left: 0; width: 100%; height: calc(var(--notch-header-height, 32px) + var(--notch-body-height, 0px)); overflow: hidden;
+  opacity: var(--notch-content-opacity, 0); filter: blur(calc((1 - var(--notch-content-progress, 0)) * 10px)); }
+.notch-panel {
+  --notch-band-height: 34px; --notch-gap-width: 0px; --notch-page-gap: 40px;
+  --notch-ink: var(--text); --notch-dim: var(--muted); --notch-faint: color-mix(in srgb, var(--muted) 82%, transparent);
+  --notch-rule: rgba(var(--overlay-rgb), .085); --notch-fill: rgba(var(--overlay-rgb), .055); --notch-fill-strong: rgba(var(--overlay-rgb), .13);
+  --notch-ui: var(--ui-font, ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace);
+  --notch-display: var(--display-font, var(--notch-ui));
+  --notch-spring: cubic-bezier(.3, 1.2, .4, 1);
+  --notch-ease: cubic-bezier(.2, .8, .2, 1);
+  position: relative; height: 100%; zoom: var(--notch-zoom, 1); padding: 0 24px; box-sizing: border-box; overflow: clip;
+  transform: scale(var(--notch-content-scale, 1)); transform-origin: 50% 0;
+  color: var(--notch-ink); font-family: var(--notch-ui); font-variant-numeric: tabular-nums;
+}
+.is-notch-attached .notch-panel { padding: 0 calc(24px + 18px); }
+/* Keep labels distinct over a sharp, bright backdrop without darkening the
+   entire glass face. Pure black and detached surfaces keep their own styling. */
+html:not(.notch-black) .is-notch-attached .notch-panel {
+  text-shadow: 0 1px 2px rgba(0,0,0,.9), 0 0 6px rgba(0,0,0,.5);
+}
+html:not(.notch-black) .is-notch-attached .notch-panel .edge-dock-mark {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.8));
+}
+/* Dark ink on its own light chip already has contrast; a dark halo smears it. */
+html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is-today, .notch-pill) { text-shadow: none; }
+.notch-panel button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.notch-panel button:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.notch-panel .edge-dock-mark { width: 13px; height: 13px; flex: 0 0 auto; }
+
+/* Band: tabs left of the camera, live status right of it. */
+.notch-band { height: var(--notch-band-height); display: grid; grid-template-columns: minmax(0, 1fr) var(--notch-gap-width) minmax(0, 1fr); align-items: center; }
+.notch-tabs { width: max-content; position: relative; display: flex; gap: 2px; padding: 2px; border-radius: 11px; background: var(--notch-fill); }
+.notch-tab-pill { position: absolute; top: 2px; left: 2px; width: 34px; height: 24px; border-radius: 9px; background: var(--notch-fill-strong);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 1px 6px rgba(0,0,0,.3); transition: transform .42s var(--notch-spring), opacity .18s ease; }
+.notch-tab-pill.is-off { opacity: 0; }
+.notch-tab { flex: 0 0 34px; position: relative; z-index: 1; width: 34px; height: 24px; border-radius: 9px; display: grid; place-items: center; color: var(--notch-faint); transition: color .25s ease; }
+.notch-tab:hover, .notch-tab.is-selected { color: var(--notch-ink); }
+.notch-tab .view-switcher-icon { width: 15px; height: 15px; }
+.notch-tab-badge { position: absolute; top: 3px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--yellow); box-shadow: 0 0 6px var(--yellow); display: none; }
+.notch-tab.has-badge .notch-tab-badge { display: block; }
+.notch-status { flex: none; margin-left: auto; justify-content: flex-end; display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--notch-dim); white-space: nowrap; }
+.notch-rate { display: inline-flex; align-items: center; gap: 6px; }
+.notch-rate-value { color: var(--notch-ink); }
+.notch-rate-probe { display: inline-grid; position: absolute; visibility: hidden; pointer-events: none; white-space: nowrap; }
+.notch-rate-probe > span { grid-area: 1 / 1; }
+.notch-rate.is-idle .notch-rate-value { color: var(--notch-dim); }
+.notch-rate.is-idle .notch-rate-icon { color: var(--notch-faint); }
+.notch-rate-icon { width: 12px; height: 12px; flex: 0 0 auto; color: var(--notch-ink); background: currentColor;
+  -webkit-mask: url("../icons/actions/zap.svg") center / contain no-repeat;
+  mask: url("../icons/actions/zap.svg") center / contain no-repeat; }
+.notch-status-rule { width: 1px; height: 12px; background: var(--notch-rule); }
+.notch-status .edge-dock-refresh { width: 24px; height: 24px; }
+
+.notch-pages { position: relative; height: 176px; margin-top: 6px; }
+.notch-pages.is-handoff { overflow: clip; }
+.notch-pages.is-handoff .notch-page { overflow: clip; transition: none; }
+.notch-page { position: absolute; inset: 0; opacity: 0; transform: translateX(12px); filter: blur(5px); pointer-events: none;
+  transition: opacity .22s ease, transform .38s var(--notch-spring), filter .28s ease; }
+.notch-page.is-before { transform: translateX(-12px); }
+.notch-page.is-selected { opacity: 1; transform: none; filter: none; pointer-events: auto; }
+.notch-kicker { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--notch-dim); }
+.notch-strong { color: var(--notch-ink); }
+.notch-empty { color: var(--notch-faint); font-size: 11px; }
+.notch-pill { font-size: 9.5px; font-weight: 600; letter-spacing: .04em; color: #1b1600; background: var(--yellow); padding: 3px 6px; border-radius: 5px; }
+.notch-wave { height: 10px; gap: 1.5px; }
+.notch-wave i { width: 2px; }
+
+/* Home */
+.notch-page-home { display: grid; grid-template-columns: minmax(0, 1fr) 236px; column-gap: 34px; }
+.notch-home-main { display: flex; flex-direction: column; min-width: 0; }
+.notch-kicker-row { display: flex; align-items: center; gap: 8px; height: 12px; }
+.notch-kicker-row.is-scrubbing .notch-kicker { color: var(--blue); }
+.notch-scrub-date { font-size: 10.5px; color: var(--blue); }
+/* The widget's .total-number owns figure typography; only fit and place it here. */
+.notch-panel .total-number { color: var(--notch-ink); }
+.notch-big { flex: none; margin-top: 12px; font-size: 40px; }
+.notch-cost { margin-top: 9px; font-size: 12px; color: var(--notch-dim); min-height: 12px; }
+.notch-now { margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 9px 0; border-top: 1px solid var(--notch-rule); }
+.notch-now:not(.is-live) .notch-now-title { color: var(--notch-dim); }
+.notch-now.is-empty { display: block; color: var(--notch-faint); font-size: 11px; }
+.notch-now-body { min-width: 0; }
+.notch-now-title { display: block; font-size: 12px; line-height: 1.25; white-space: nowrap; overflow: hidden; }
+.notch-now-meta { margin-top: 5px; display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: var(--notch-dim); white-space: nowrap; overflow: hidden; }
+.notch-waiting-note { color: var(--yellow); }
+.notch-now-value { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; text-align: right; }
+.notch-now-tokens { display: block; font-size: 14px; line-height: 1.15; }
+.notch-fuel { display: flex; align-items: center; gap: 12px; padding-top: 10px; border-top: 1px solid var(--notch-rule); font-size: 11.5px; color: var(--notch-dim); white-space: nowrap; }
+.notch-fuel-item, .notch-fuel-more { flex-shrink: 0; }
+.notch-fuel-item { display: inline-flex; align-items: center; gap: 6px; }
+.notch-fuel-item .edge-dock-mark { width: 12px; height: 12px; }
+.notch-fuel-value { color: var(--notch-ink); }
+.notch-fuel-dot { color: var(--notch-faint); }
+.notch-fuel-empty { color: var(--notch-faint); }
+[data-tone="low"] { --notch-tone: var(--yellow); }
+[data-tone="critical"] { --notch-tone: var(--red); }
+.notch-fuel-value[data-tone] { color: var(--notch-tone); }
+
+.notch-week { display: flex; flex-direction: column; min-width: 0; }
+.notch-week-head { display: flex; justify-content: space-between; align-items: baseline; }
+.notch-week-title { font: 600 16px/1 var(--notch-display); letter-spacing: -.01em; }
+.notch-week-caption { font-size: 10.5px; color: var(--notch-faint); }
+.notch-week-bars, .notch-week-names, .notch-week-dates { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+.notch-week-bars { height: 76px; margin-top: 14px; align-items: end; }
+.notch-panel .notch-day { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; min-width: 0; }
+.notch-day-bar { width: 100%; display: flex; flex-direction: column-reverse; border-radius: 6px; overflow: hidden; background: rgba(var(--overlay-rgb), .15);
+  transform-origin: bottom; transition: opacity .25s ease; }
+.notch-panel.is-entering .notch-day-bar { animation: notch-bar-rise .7s var(--notch-spring) both; animation-delay: calc(.12s + var(--i, 0) * 40ms); }
+.notch-day-bar i { display: block; width: 100%; }
+.notch-day-bar i.is-unattributed { background: rgba(var(--overlay-rgb), .28); }
+.notch-day-bar i + i { box-shadow: 0 1px 0 rgba(0,0,0,.55); }
+.notch-day:not(.is-today):not(:hover):not(:focus-visible) .notch-day-bar i { background: transparent !important; box-shadow: none; }
+.notch-day.is-unknown { background: linear-gradient(rgba(var(--overlay-rgb), .25), rgba(var(--overlay-rgb), .25)) center bottom / 8px 2px no-repeat; }
+.notch-day.is-today .notch-day-bar.is-plain { background: var(--blue); }
+.notch-day.is-today .notch-day-bar { box-shadow: 0 0 18px rgba(115,189,245,.22); }
+.notch-day:not(.is-today):hover .notch-day-bar { background: rgba(var(--overlay-rgb), .32); }
+.notch-week-bars:hover .notch-day:not(:hover) .notch-day-bar { opacity: .55; }
+@keyframes notch-bar-rise { from { transform: scaleY(.02); } }
+.notch-week-names { margin-top: 9px; text-align: center; font: 500 10.5px/1 var(--notch-display); color: var(--notch-faint); }
+.notch-week-dates { margin-top: 7px; text-align: center; font: 500 11.5px/18px var(--notch-display); color: var(--notch-dim); }
+.notch-week-names .is-today { color: var(--notch-ink); }
+.notch-week-dates .is-today { justify-self: center; width: 22px; border-radius: 9px; background: var(--notch-ink); color: #000; font-weight: 700; }
+.notch-week-foot { margin-top: auto; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.notch-week-summary { display: flex; align-items: baseline; gap: 5px; min-width: 0; font-size: 11.5px; line-height: 12px; white-space: nowrap; }
+.notch-week-info { align-self: center; }
+.notch-week-info .limit-detail-tooltip {
+  right: auto; left: anchor(center);
+  translate: calc(-50% + var(--tooltip-shift, 0px)) 0;
+  max-width: calc(100vw - 16px);
+}
+.notch-week-info .limit-detail-tooltip::after {
+  right: auto; left: calc(50% - 4px - var(--tooltip-shift, 0px));
+}
+.notch-week-cost { flex-shrink: 0; }
+.notch-week-cost-value { color: var(--notch-dim); white-space: nowrap; }
+
+/* Limits */
+/* Three columns per page; past one page the strip scrolls sideways, snapping a
+   page at a time, and the next column peeks in under a fade. */
+.notch-limits { --notch-limit-gap: var(--notch-page-gap); --notch-limit-peek: 0px; display: flex; column-gap: var(--notch-limit-gap); height: 160px;
+  overflow: auto hidden; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none; }
+.notch-limits.is-handoff { scroll-snap-type: none; }
+.notch-limits::-webkit-scrollbar { display: none; }
+.notch-limits.is-paged { --notch-limit-peek: 64px; }
+.notch-limits.has-after { mask-image: linear-gradient(to right, #000 calc(100% - var(--notch-limit-peek)), transparent); }
+.notch-limit { position: relative; flex: 0 0 calc((100% - 2 * var(--notch-limit-gap) - var(--notch-limit-peek)) / 3); display: flex; flex-direction: column; min-width: 0; }
+.notch-limit.is-page-start { scroll-snap-align: start; }
+.notch-limit + .notch-limit:not(.notch-limit-filler)::before { content: ''; position: absolute; top: 0; bottom: 0; left: calc(var(--notch-limit-gap) / -2); border-left: 1px solid var(--notch-rule); }
+.notch-limits-tail { flex: 0 0 calc(var(--notch-limit-peek) - var(--notch-limit-gap)); }
+.notch-limit-head { display: flex; align-items: center; gap: 8px; font: 600 13.5px/1 var(--notch-display); white-space: nowrap; min-width: 0; }
+.notch-limit-head .edge-dock-mark { width: 14px; height: 14px; }
+.notch-limit-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.notch-chip { margin-left: auto; font: 500 10px/1 var(--notch-ui); color: var(--notch-faint); padding: 3px 6px; border-radius: 5px; background: var(--notch-fill); }
+.notch-limit-sub { margin-top: 8px; display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--notch-faint); white-space: nowrap; overflow: hidden; }
+.notch-limit-account { overflow: hidden; text-overflow: ellipsis; }
+/* A cached reading is dimmed, as stale rows are on the Edge Dock and Home. */
+.notch-limit-stale { flex: none; color: var(--notch-dim); }
+.notch-limit[data-tone="stale"] .notch-limit-value { opacity: .55; }
+.notch-limit-active { flex: none; color: var(--notch-dim); }
+.notch-limit-updated { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+:is(.notch-limit-head, .notch-limit-sub) .notch-chip { flex: none; }
+.notch-limit-windows { margin-top: 24px; display: grid; gap: 16px; }
+.notch-limit-window { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px 8px; }
+.notch-limit-label { font-size: 10.5px; color: var(--notch-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notch-limit-value { grid-row: span 2; text-align: right; font: 300 30px/.85 var(--notch-display); letter-spacing: -.025em; white-space: nowrap; }
+.notch-limit-percent { font: 400 13px/1 var(--notch-display); color: var(--notch-dim); margin-left: 1px; letter-spacing: 0; }
+.notch-limit-money { font-size: 22px; }
+.notch-limit-detail { display: inline-block; max-width: 110px; overflow: hidden; text-overflow: ellipsis; font-size: 14px; line-height: 1.2; }
+.notch-panel .notch-window-page { align-self: flex-end; margin-top: auto; min-height: 20px; padding: 2px 6px; font-size: 10px; color: var(--notch-dim); }
+.notch-window-page:hover { color: var(--notch-ink); }
+.notch-limit-reset { font-size: 10.5px; color: var(--notch-faint); white-space: nowrap; }
+/* Three or four windows (or three beside a page button) tighten to fit the
+   column's height. */
+.notch-limit-windows:is([data-count="3"], [data-count="4"]) .notch-limit-window { row-gap: 1px; }
+.notch-limit-windows:is([data-count="3"], [data-count="4"]) :is(.notch-limit-label, .notch-limit-reset) { font-size: 10px; line-height: 11.5px; }
+.notch-limit-windows[data-count="3"] { margin-top: 14px; gap: 8px; }
+.notch-limit-windows[data-count="3"] .notch-limit-value { font-size: 24px; }
+.notch-limit-windows[data-count="3"] .notch-limit-money { font-size: 19px; }
+.notch-limit-windows[data-count="4"] { margin-top: 10px; gap: 4px; }
+.notch-limit-windows[data-count="4"] .notch-limit-value { font-size: 20px; }
+.notch-limit-windows[data-count="4"] .notch-limit-money { font-size: 16px; }
+.notch-limit-windows:is([data-count="3"], [data-count="4"]) .notch-limit-percent { font-size: 11px; }
+.notch-limit-windows:is([data-count="3"], [data-count="4"]) .notch-limit-detail { font-size: 12px; }
+.notch-limit-window[data-tone] .notch-limit-number { color: var(--notch-tone); text-shadow: 0 0 18px color-mix(in srgb, var(--notch-tone) 45%, transparent); }
+.notch-limit-note { font-size: 11px; color: var(--notch-faint); }
+.notch-pager { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; gap: 5px; }
+.notch-pager button { position: relative; width: 22px; height: 18px; }
+.notch-pager button::after { content: ''; display: block; margin: auto; width: 5px; height: 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), .35); transition: width .3s var(--notch-spring), background .2s ease; }
+.notch-pager button.is-selected::after { width: 12px; background: var(--notch-ink); }
+
+/* Sessions */
+.notch-page-sessions { display: grid; grid-template-columns: minmax(0, 1fr) 1px 264px; column-gap: 18px; }
+.notch-rule { background: var(--notch-rule); }
+.notch-section-head { display: flex; align-items: center; justify-content: space-between; height: 12px; margin-bottom: 12px; }
+.notch-section-count { font-size: 10.5px; color: var(--notch-dim); }
+.notch-sessions-active { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.notch-page-sessions .notch-section-head { height: 18px; flex: 0 0 auto; margin-bottom: 10px; }
+.notch-sessions-active .notch-section-head { margin-bottom: 2px; }
+.notch-active { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 8px; margin-left: -8px; border-radius: 14px; }
+.notch-active.is-running::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--notch-accent) 18%, transparent), color-mix(in srgb, var(--notch-accent) 5%, transparent) 44%, transparent 74%); }
+.notch-session-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.notch-session-heading .edge-dock-mark { width: 13px; height: 13px; }
+.notch-session-heading .fade-overflow { flex: 1; min-width: 0; }
+.notch-active-body { min-width: 0; }
+.notch-active-title { display: block; font-size: 12px; line-height: 1.25; white-space: nowrap; overflow: hidden; }
+.notch-active-meta { margin-top: 6px; display: flex; align-items: center; gap: 6px; font-size: 9.5px; line-height: 13px; color: var(--notch-dim); white-space: nowrap; overflow: hidden; }
+.notch-active-meta > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.notch-active-value { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; text-align: right; }
+.notch-active-tokens { display: block; font-size: 13px; line-height: 1.15; }
+.notch-active-list { display: flex; flex-direction: column; gap: 8px; margin-left: -8px; padding-left: 8px; }
+.notch-active-list > .notch-active { flex-shrink: 0; }
+.notch-sessions-empty { flex: 1; display: grid; place-content: center; text-align: center; gap: 6px; font-size: 11px; color: var(--notch-faint); }
+.notch-empty-title { font: 500 14px/1.4 var(--notch-display); color: var(--notch-dim); }
+.notch-sessions-recent { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* Keep overlay scrollbars outside the token and context readouts. */
+.notch-active-list, .notch-recent-list { flex: 1; min-height: 0; margin-right: -12px; padding-right: 12px; overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--notch-fill-strong) transparent; scrollbar-gutter: stable; }
+.notch-active-list:focus-visible, .notch-recent-list:focus-visible { outline: 1px solid var(--blue); outline-offset: -1px; }
+.notch-recent { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: start; min-height: 46px; padding: 6px 0; }
+.notch-recent + .notch-recent { margin-top: 3px; }
+.notch-recent .edge-dock-mark { opacity: .85; }
+.notch-recent-body { min-width: 0; }
+.notch-recent-title { display: block; font-size: 11.5px; line-height: 15px; white-space: nowrap; overflow: hidden; }
+.notch-recent-meta { display: block; margin-top: 5px; font-size: 9.5px; line-height: 12px; color: var(--notch-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notch-recent-value { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.notch-recent-tokens { font-size: 11.5px; line-height: 15px; }
+.notch-session-tokens { font-family: var(--notch-ui); font-variant-numeric: normal; }
+.notch-session-context, .notch-session-cache { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; white-space: nowrap; font-size: 10px; line-height: 12px; color: var(--notch-dim); }
+/* These tooltips wrap text and a meter, rather than the shared 14px info icon. */
+.notch-session-context.limit-detail-tooltip-wrap, .notch-session-cache.limit-detail-tooltip-wrap { width: auto; height: auto; }
+.notch-session-context-meter { flex: 0 0 20px; width: 20px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), .18); }
+.notch-session-context-fill { display: block; width: 100%; height: 100%; background: rgba(var(--overlay-rgb), .5); transform: scaleX(var(--bar-scale, 0)); transform-origin: left center; transition: transform .42s var(--notch-ease); }
+.notch-session-context[data-tone="caution"] { color: var(--yellow); }
+.notch-session-context[data-tone="low"] { color: var(--orange); }
+.notch-session-context[data-tone="caution"] .notch-session-context-fill { background: var(--yellow); }
+.notch-session-context[data-tone="low"] .notch-session-context-fill { background: var(--orange); }
+
+/* Breakdown */
+.notch-page-breakdown { display: flex; flex-direction: column; }
+.notch-breakdown-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; height: 46px; flex-shrink: 0; }
+.notch-segmented { position: relative; display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--notch-fill); }
+.notch-segmented-pill { position: absolute; top: 2px; left: 2px; height: calc(100% - 4px); border-radius: 6px; background: var(--notch-fill-strong);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12); transition: transform .4s var(--notch-spring), width .4s var(--notch-spring); }
+.notch-segmented button { position: relative; z-index: 1; font-size: 9.5px; line-height: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--notch-faint); padding: 5px 8px; border-radius: 6px; transition: color .2s ease; }
+.notch-segmented button.is-selected { color: var(--notch-ink); }
+.notch-breakdown-total { flex: 1; display: flex; align-items: baseline; gap: 24px; min-width: 0; white-space: nowrap; }
+.notch-breakdown-tokens { display: block; margin: 0; font-size: 30px; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: clip; }
+.notch-breakdown-cost { flex-shrink: 0; font-size: 11px; line-height: 12px; color: var(--notch-dim); white-space: nowrap; }
+.notch-breakdown-period { flex-shrink: 0; }
+.notch-breakdown-columns { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr); column-gap: 22px; margin-top: 8px; }
+.notch-breakdown-column { min-width: 0; display: flex; flex-direction: column; }
+.notch-breakdown-column-head { display: flex; align-items: baseline; justify-content: space-between; height: 12px; }
+.notch-breakdown-label { margin: 0; font: 600 10px/12px var(--notch-ui); letter-spacing: .07em; text-transform: uppercase; color: var(--notch-dim); }
+.notch-breakdown-column > .notch-empty { flex: 1; display: grid; place-items: center; }
+.notch-spectrum { flex: none; display: flex; gap: 2px; height: 5px; margin: 6px 0 3px; border-radius: 3px; overflow: hidden; }
+.notch-spectrum i { display: block; min-width: 2px; transition: opacity .25s ease, filter .25s ease; }
+.notch-spectrum.is-hovering i { opacity: .28; }
+.notch-spectrum.is-hovering i.is-highlighted { opacity: 1; filter: brightness(1.15); }
+.notch-rank-row { display: grid; grid-template-columns: 13px minmax(0, 1fr) auto 33px; column-gap: 8px; align-items: center; height: 24px; border-radius: 4px; transition: opacity .2s ease; }
+.notch-rank-row:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; }
+.notch-rank.is-hovering .notch-rank-row:not(.is-highlighted) { opacity: .45; }
+.notch-swatch { width: 8px; height: 8px; border-radius: 3px; justify-self: center; }
+.notch-rank-name { font: 500 12px/1 var(--notch-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notch-rank-tokens { font-size: 12px; line-height: 1.15; font-variant-numeric: normal; text-align: right; }
+.notch-rank-share { font-size: 10px; color: var(--notch-dim); text-align: right; }
+
+.notch-panel.is-reduced-motion *, .notch-panel.is-reduced-motion *::before { animation: none !important; transition: none !important; }
+
+/* Plugin pages use the whole page; their selected tab already names the view. */
+.notch-page-plugin { display: flex; flex-direction: column; }
+.notch-plugin-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.notch-plugin-body .pv-root { height: 100%; }
+.notch-tab-plugin-icon { display: grid; place-items: center; width: 15px; height: 15px; }
+.notch-tab-plugin-icon .pv-icon { width: 15px; height: 15px; }
+
+/* Each rail spans one lane and never scrolls: the leading rail sits left of
+   the camera, the trailing rail continues the page order to its right ahead
+   of the status. Every track keeps width:max-content so the fill stays
+   rounded at both ends and never shows a clipped icon. */
+.notch-tab-rail { position: relative; min-width: 0; max-width: 100%; overflow: visible; }
+.notch-tab-rail [hidden] { display: none; }
+.notch-tab-rail button:focus-visible { outline-offset: -2px; }
+.notch-tab-rail.is-leading { margin-right: 6px; }
+.notch-band-trailing { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.notch-tab-rail.is-trailing { flex: 1 1 0; min-width: 0; margin-left: 6px; }
+/* No camera: the band collapses to a single left lane plus the status. */
+.notch-panel:not(.is-attached) .notch-band { grid-template-columns: minmax(0, 1fr) 0 auto; }
+.notch-panel:not(.is-attached) .notch-tab-rail.is-trailing { display: none; }
+/* Step buttons share the track fill; a pair costs exactly one 36px slot. */
+.notch-tab-step { flex: 0 0 16px; width: 16px; height: 24px; border-radius: 8px; display: grid; place-items: center; color: var(--notch-faint); }
+.notch-tab-step:hover:not(:disabled) { color: var(--notch-ink); }
+.notch-tab-step:disabled { opacity: .25; cursor: default; }
+.notch-tab-step svg { width: 9px; height: 9px; }
+
+/* Page-owned tools occupy the native status position, within the safe shoulder.
+   Empty/loading/failed mounts leave native TPS and refresh available. */
+.notch-plugin-header-actions { display: flex; align-items: center; justify-content: flex-end; margin-left: auto; min-width: 0; max-width: 100%; overflow: hidden; }
+.notch-plugin-header-actions .plugin-header-actions-mount { display: flex; align-items: center; min-width: 0; max-width: 100%; }
+.notch-plugin-header-actions[hidden],
+.notch-plugin-header-actions:not(:has(> .plugin-header-actions-mount:not(:empty))) { display: none; }
+.notch-band-trailing:has(> .notch-plugin-header-actions:not([hidden]) > .plugin-header-actions-mount:not(:empty)) > .notch-status { display: none; }

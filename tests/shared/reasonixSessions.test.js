@@ -157,6 +157,7 @@ test('Reasonix native adapter reads official cumulative telemetry without invent
   assert.equal(allTime['reasonix:project-id'].projectLabel, 'token-monitor');
   assert.equal(view.projects.allTime['token-monitor'].tokens, 141);
   assert.equal(view.projects.allTime['token-monitor'].clients.reasonix, 141);
+  assert.deepEqual(JSON.parse(JSON.stringify(view.projects.allTime['token-monitor'].models)), { 'deepseek-v4-pro': 141 });
   assert.deepEqual(view.projects.allTime['token-monitor'].sessionIds, ['reasonix:project-id']);
   assert.equal(JSON.stringify(view).includes(stateHome), false);
   assert.equal(JSON.stringify(view).includes(workspaceRoot), false);
@@ -883,7 +884,13 @@ test('Reasonix native rows use the common session formatter and merge project at
 
   const projects = projectRowsForPeriod({ projects: {} }, {
     nativeProjects: {
-      'token monitor': { label: 'Token Monitor', tokens: 140, costUsd: 999, clients: { reasonix: 140 } }
+      'token monitor': {
+        label: 'Token Monitor',
+        tokens: 140,
+        costUsd: 999,
+        clients: { reasonix: 140 },
+        models: { 'deepseek-v4': 140 }
+      }
     },
     clientLabels: { reasonix: 'Reasonix' },
     clientColors: { reasonix: '#4d6bfe' }
@@ -892,6 +899,24 @@ test('Reasonix native rows use the common session formatter and merge project at
   assert.equal(projects[0].value, 140);
   assert.equal(projects[0].cost, 0);
   assert.deepEqual(projects[0].accordionRows.map(({ key, value }) => ({ key, value })), [{ key: 'reasonix', value: 140 }]);
+
+  const modelProjects = projectRowsForPeriod({ projects: {} }, {
+    nativeProjects: {
+      'token monitor': {
+        label: 'Token Monitor',
+        tokens: 140,
+        clients: { reasonix: 140 },
+        models: { 'deepseek-v4': 140 }
+      }
+    },
+    shareBy: 'model',
+    modelColor: () => '#4d6bfe'
+  });
+  assert.equal(modelProjects[0].value, 140);
+  assert.equal(modelProjects[0].cost, 0);
+  assert.deepEqual(modelProjects[0].accordionRows.map(({ key, value }) => ({ key, value })), [
+    { key: 'deepseek-v4', value: 140 }
+  ]);
 });
 
 test('readReasonixNativeSession skips missing stable ID and missing/corrupt telemetry', () => {

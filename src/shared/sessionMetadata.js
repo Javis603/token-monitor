@@ -1,9 +1,11 @@
 'use strict';
 
 const fs = require('node:fs');
+const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./providers/codex/transcript');
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { normalizeSessionContext } = require('./sessionContext');
+const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const antigravitySessionMetadata = require('./providers/antigravity/sessionMetadata');
 const codebuddySession = require('./providers/codebuddy/sessionMetadata');
@@ -16,6 +18,7 @@ const dshSessionMetadata = require('./providers/dsh/sessionMetadata');
 const workbuddySession = require('./providers/workbuddy/sessionMetadata');
 const devinSessionMetadata = require('./providers/devin/sessionMetadata');
 const grokSessionMetadata = require('./providers/grok/sessionMetadata');
+const zcodeSessionMetadata = require('./providers/zcode/sessionMetadata');
 const { readT3SessionRelationResult } = require('./t3SessionMetadata');
 const { supportsT3SessionClient, nativeAccountingId } = require('./t3SessionIdentity');
 
@@ -42,6 +45,10 @@ function timestampFromSessionId(id) {
 function readFileTail(filePath, bytes = 64 * 1024) {
   let fd;
   try {
+    if (isCompressedCodexTranscript(filePath)) {
+      const decoded = readCompressedCodexTranscript(filePath);
+      return decoded.subarray(Math.max(0, decoded.length - bytes)).toString('utf8');
+    }
     fd = fs.openSync(filePath, 'r');
     const stat = fs.fstatSync(fd);
     const length = Math.min(bytes, stat.size);
@@ -147,13 +154,17 @@ function projectPathFromJsonl(filePath) {
     cacheKey = `${stat.size}:${stat.mtimeMs}`;
     const cached = projectPathCache.get(filePath);
     if (cached?.key === cacheKey) return cached.value;
-    const fd = fs.openSync(filePath, 'r');
-    try {
-      const size = Math.min(256 * 1024, fs.fstatSync(fd).size);
-      const buffer = Buffer.alloc(size);
-      fs.readSync(fd, buffer, 0, size, 0);
-      text = buffer.toString('utf8');
-    } finally { fs.closeSync(fd); }
+    if (isCompressedCodexTranscript(filePath)) {
+      text = readCompressedCodexTranscript(filePath).subarray(0, 256 * 1024).toString('utf8');
+    } else {
+      const fd = fs.openSync(filePath, 'r');
+      try {
+        const size = Math.min(256 * 1024, fs.fstatSync(fd).size);
+        const buffer = Buffer.alloc(size);
+        fs.readSync(fd, buffer, 0, size, 0);
+        text = buffer.toString('utf8');
+      } finally { fs.closeSync(fd); }
+    }
   } catch (_) { return ''; }
   for (const line of text.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -202,6 +213,7 @@ function lastJsonlTimestamp(filePath) {
   const cached = jsonlTimestampCache.get(filePath);
   if (cached?.key === cacheKey) return cached.value;
   const tail = readFileTail(filePath);
+  if (isCompressedCodexTranscript(filePath) && !tail) return '';
   const lines = tail.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   let value = '';
   for (let index = lines.length - 1; index >= 0; index -= 1) {
@@ -248,7 +260,11 @@ const SESSION_METADATA_RESOLVERS = new Map([
   // within the tick. grok writes `summary.json` after tokscale first exposes
   // the id, so it needs the retry.
   ['grok', { resolve: grokSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
-  ['workbuddy', { resolve: workbuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }]
+  ['workbuddy', { resolve: workbuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  // ZCode keeps titles in its own CLI SQLite database, which tokscale's JSONL
+  // scan never reads; the resolver shares the scan's home, and the retry
+  // covers the tick where the database row lands after the usage does.
+  ['zcode', { resolve: zcodeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
 ]);
 
 function resolverDefinition(entry) {
@@ -462,6 +478,9 @@ function applySessionMetadata(periods, home, deps = {}) {
       if ((meta.t3Title || meta.catalogTitle) && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
         meta.titleFallback = session.title;
       }
+      if (meta.parentSessionId && meta.parentSessionId !== session.sessionId && !session.parentSessionId) {
+        session.parentSessionId = meta.parentSessionId;
+      }
       if (meta.title) session.title = meta.title;
       if (session.client === 'codex' && meta.nativeSessionId) session.nativeSessionId = meta.nativeSessionId;
       // A catalog title is not evidence about transcript state or activity.
@@ -496,6 +515,9 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
+      if (isSessionReasoningEffortClient(session.client) && Object.prototype.hasOwnProperty.call(meta, 'reasoningEffort')) {
+        session.reasoningEffort = normalizeReasoningEffort(meta.reasoningEffort);
+      }
       if (session.client === 'codex' && typeof meta.waitingForInput === 'boolean') {
         session.waitingForInput = meta.waitingForInput;
       }

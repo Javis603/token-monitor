@@ -7,11 +7,15 @@
   const limitWindowLabelsApi = typeof module === 'object' && module.exports
     ? require('../../../shared/limits/windowLabels')
     : root?.TokenMonitorLimitWindowLabels;
-  const api = factory(accountIdentityApi, limitWindowLabelsApi || {});
+  const workbuddyIdentityApi = typeof module === 'object' && module.exports
+    ? require('../../../shared/providers/workbuddy/identity')
+    : root?.TokenMonitorWorkbuddyIdentity;
+  const api = factory(accountIdentityApi, limitWindowLabelsApi || {}, workbuddyIdentityApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitProviderPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi, limitWindowLabelsApi) {
+})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi, limitWindowLabelsApi, workbuddyIdentityApi) {
   const { isMimoMembershipProduct } = limitWindowLabelsApi;
+  const { isWorkbuddyPlaceholder } = workbuddyIdentityApi;
   const SOURCE_LABELS = {
     oauth: 'OAuth',
     cli: 'CLI',
@@ -34,17 +38,18 @@
     zed: { web: 'Web' },
     commandcode: { web: 'Web' },
     mimo: { web: 'Web' },
+    muse: { cli: 'CLI' },
     zai: { api: 'API' },
     zaiteam: { api: 'API' },
     kiro: { cli: 'CLI' },
-    workbuddy: { local: 'Local', api: 'API' },
+    workbuddy: { local: 'Local', api: 'API', oauth: 'OAuth' },
     qoder: { web: 'Web' },
     deepseek: { api: 'API' },
     devin: { web: 'Web' },
     minimax: { api: 'API' },
     openrouter: { api: 'API' },
     volcengine: { api: 'API', cli: 'arkcli' },
-    ollama: { web: 'Web' },
+    ollama: { api: 'API', web: 'Web' },
     trae: { api: 'Web' },
     alibaba: { web: 'Web' },
     stepfun: { web: 'Web' },
@@ -72,21 +77,23 @@
     zed: ['Manual login', 'Web'],
     commandcode: ['Manual login', 'Web'],
     mimo: ['Auto', 'Desktop app', 'Token Plan'],
+    muse: ['Auto', 'CLI'],
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
-    workbuddy: ['Auto', 'Desktop app'],
+    workbuddy: ['Auto', 'Desktop app', 'Web'],
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
-    minimax: ['Token Plan', 'API key'],
+    minimax: ['Token Plan', 'Pay-as-you-go', 'API key'],
     typesafe: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
-    ollama: ['Manual login', 'Web'],
+    ollama: ['Manual login', 'API/Web'],
     trae: ['Manual login', 'Web'],
     alibaba: ['Token Plan', 'Web'],
     stepfun: ['Coding/Token Plan', 'Web'],
+    notion: ['Web', 'Manual'],
     omniroute: ['Relay', 'API key'],
     thirdparty: ['Relay', 'API']
   };
@@ -246,6 +253,13 @@
       : Number.POSITIVE_INFINITY;
   }
 
+  function antigravityQuotaWindowVisible(window) {
+    // Grouped quotas keep their established layout, including disabled lanes.
+    // Legacy model pools need a measured percentage to offer a useful row.
+    return Boolean(antigravityQuotaWindow(window))
+      || [window?.remainingPercent, window?.usedPercent].some(Number.isFinite);
+  }
+
   function limitProviderCompactWindows(providerOrId, windows = []) {
     const provider = providerId(providerOrId);
     if (provider === 'codex') return (windows || []).filter(isCanonicalCodexWindow);
@@ -258,12 +272,16 @@
       ));
     }
     if (provider !== 'antigravity') return windows;
-    const entries = (windows || []).map((window, index) => ({
+    if (!windows) return windows;
+    const visibleWindows = windows.every(antigravityQuotaWindowVisible)
+      ? windows
+      : windows.filter(antigravityQuotaWindowVisible);
+    const entries = visibleWindows.map((window, index) => ({
       window,
       index,
       groupLabel: antigravityQuotaWindow(window)?.groupLabel || ''
     }));
-    if (entries.length === 0 || entries.some((entry) => !entry.groupLabel)) return windows;
+    if (entries.length === 0 || entries.some((entry) => !entry.groupLabel)) return visibleWindows;
     const groups = new Map();
     for (const entry of entries) {
       if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
@@ -455,9 +473,9 @@
       // settings field, while a stale sign-in only opening Cline fixes. The shared
       // vocabulary carries one `unauthorized` for both, so the label reads the lane
       // off the row: providers/cline/limits.js reports `api` for a configured key
-      // and `oauth` for the discovered sign-in. This is the one provider whose
-      // status branches on source, and it does so because both causes are reachable
-      // with neither of them rarer than the other — the file lane is the discovery
+      // and `oauth` for the discovered sign-in. Its status branches on source
+      // because both causes are reachable with neither of them rarer than the
+      // other — the file lane is the discovery
       // default and its access token expires hourly. Grok and kiro name the vendor's
       // own action here for the same reason, without needing the split.
       if (providerName === 'cline') {
@@ -465,12 +483,21 @@
           ? { label: 'Update API key', tone: 'setup' }
           : { label: 'Open Cline', tone: 'setup' };
       }
+      // Ollama accepts an API key or a web session cookie; both causes land on
+      // `unauthorized`, so the label follows the lane the row was read from.
+      if (providerName === 'ollama') {
+        return sourceId(provider) === 'api'
+          ? { label: 'Update API key', tone: 'setup' }
+          : { label: 'Sign in again', tone: 'setup' };
+      }
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
         : providerName === 'qoder' || providerName === 'trae'
           ? { label: 'Sign in again', tone: 'setup' }
           : providerName === 'grok'
           ? { label: 'Re-login', tone: 'setup' }
+          : providerName === 'muse'
+          ? { label: 'Run muse login', tone: 'setup' }
           : { label: 'Sign in again', tone: 'setup' };
     }
     if (status === 'rateLimited') return { label: 'Limited', tone: 'warn' };
@@ -478,9 +505,9 @@
     if (status === 'unavailable') return { label: 'Unavailable', tone: 'warn' };
     if (providerName === 'mimo' && status === 'error') return { label: 'Unavailable', tone: 'warn' };
     if (status === 'notConfigured') {
-      if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
+      if (providerName === 'kimi' || providerName === 'ollama') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       // Cline joins the key-configured family: with neither a key nor a stored
       // sign-in, the one thing this application can be told is a key (the sign-in
@@ -488,6 +515,7 @@
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi' || providerName === 'cline') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
       if (providerName === 'kiro') return { label: 'Run kiro-cli login', tone: 'setup' };
+      if (providerName === 'muse') return { label: 'Install Muse Code', tone: 'setup' };
       return { label: 'Not set up', tone: 'setup' };
     }
     return status ? { label: 'Error', tone: 'warn' } : null;
@@ -612,6 +640,46 @@
     return tags;
   }
 
+  // A total describes the entire group, never just the successful subset. Compare
+  // every non-measurement field too: currency, pool, period and reset boundaries
+  // must describe the same kind of finite entitlement before addition is useful.
+  function workbuddyCreditTotals(providers) {
+    if (!Array.isArray(providers) || providers.length < 2) return null;
+    const keys = providers.map((provider) => String(provider?.accountKey || '').trim());
+    if (keys.some((key) => !key) || new Set(keys).size !== providers.length) return null;
+    const measurementFields = new Set(['used', 'remaining', 'limit', 'usedPercent', 'remainingPercent']);
+    const signature = (window) => JSON.stringify(Object.keys(window).sort()
+      .filter((key) => !measurementFields.has(key)).map((key) => [key, window[key]]));
+    const readings = providers.map((provider) => {
+      if (provider?.provider !== 'workbuddy' || provider.status !== 'ok' || provider.stale || provider.actionRequired) return null;
+      if (!Array.isArray(provider.windows) || !provider.windows.length) return null;
+      const windows = new Map();
+      for (const window of provider.windows) {
+        if (!window || window.metric !== 'credits' || !window.currency || window.detail === 'unlimited'
+          || !Number.isFinite(window.limit) || window.limit <= 0
+          || !Number.isFinite(window.used) || window.used < 0 || window.used > window.limit
+          || !Number.isFinite(window.remaining) || window.remaining < 0 || window.remaining > window.limit) return null;
+        const key = signature(window);
+        if (windows.has(key)) return null;
+        windows.set(key, window);
+      }
+      return windows;
+    });
+    if (readings.some((reading) => !reading)) return null;
+    if (providers.some((provider) => provider.realm !== providers[0].realm || provider.region !== providers[0].region)) return null;
+    const first = readings[0];
+    if (readings.some((reading) => reading.size !== first.size || [...first.keys()].some((key) => !reading.has(key)))) return null;
+    const totals = [...first].map(([key, window]) => {
+      const sum = (field) => readings.reduce((total, reading) => total + reading.get(key)[field], 0);
+      const used = sum('used');
+      const remaining = sum('remaining');
+      const limit = sum('limit');
+      return { ...window, used, remaining, limit, usedPercent: used / limit * 100, remainingPercent: remaining / limit * 100 };
+    });
+    return totals.every((window) => [window.used, window.remaining, window.limit, window.usedPercent, window.remainingPercent].every(Number.isFinite))
+      ? totals : null;
+  }
+
   function limitProviderSettingsRecord(providers, id) {
     const rows = (providers || []).filter((row) => row.provider === id);
     if (id !== 'mimo') return rows.at(-1);
@@ -624,6 +692,7 @@
 
   return {
     antigravityQuotaWindow,
+    antigravityQuotaWindowVisible,
     apiKeyAccountStatus,
     codexAdditionalQuotaDisplayName,
     isCodexLiveAccount,
@@ -647,6 +716,8 @@
     thirdPartyAdapterFamily,
     thirdPartyAdapterVisual,
     thirdPartyGroupPlanText,
-    thirdPartySharedAdapterFamily
+    thirdPartySharedAdapterFamily,
+    workbuddyCreditTotals,
+    isWorkbuddyPlaceholder
   };
 });

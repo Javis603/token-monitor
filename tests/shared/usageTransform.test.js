@@ -35,6 +35,31 @@ function fakeStore(overrides = {}) {
   };
 }
 
+test('release forgets both owners and a failed fallback cannot publish even if the archive later reads', () => {
+  let archive = { version: 1, sessions: {} };
+  let releases = 0;
+  let reads = 0;
+  const transform = createUsageTransform({
+    store: fakeStore({
+      read() { reads += 1; return archive; },
+      release() { releases += 1; archive = { version: 1, sessions: {} }; },
+      capture() { throw new Error('capture unavailable'); }
+    }),
+    log: () => {}
+  });
+  const prime = transform.ensureLoaded();
+  transform.release();
+  assert.equal(releases, 1);
+  assert.equal(transform.getState().loaded, false);
+  assert.throws(() => transform.transform(summary()), /capture unavailable/);
+  assert.equal(reads, 1, 'a failed capture cannot be replaced by a best-effort read');
+  assert.equal(transform.getState().loaded, false);
+  assert.notEqual(transform.ensureLoaded(), prime);
+  assert.equal(reads, 2);
+  assert.equal(transform.getState().loaded, true);
+  assert.notEqual(transform.ensureLoaded(), prime);
+});
+
 test('an external agent keeps archive loading read-only', () => {
   const store = fakeStore();
   let snapshots = 0;
@@ -89,7 +114,7 @@ test('a disabled session archive is neither captured nor read', () => {
   assert.deepEqual(store.calls, []);
 });
 
-test('a failed capture is reported and falls back to the loaded archive', () => {
+test('a failed capture is reported and rejects publication despite a loaded archive', () => {
   const failures = [];
   const logs = [];
   const store = fakeStore({
@@ -102,13 +127,45 @@ test('a failed capture is reported and falls back to the loaded archive', () => 
     log: (message) => logs.push(message)
   });
 
-  const visible = transform.transform(summary());
+  transform.ensureLoaded();
+  assert.throws(() => transform.transform(summary()), /disk full/);
 
   assert.deepEqual(failures, ['disk full']);
   assert.deepEqual(logs, ['[session-archive] write failed: disk full']);
   assert.equal(transform.getState().lastUpdate.failureCode, 'archive-write-failed');
   assert.deepEqual(store.calls, ['read']);
-  assert.equal(visible.allTime.sessions['codex:c1'].totalTokens, 100);
+  assert.equal(transform.getState().loaded, true, 'loaded alone is not proof of completeness');
+});
+
+test('failed initial reads are not cached as empty and successful reads can recover', () => {
+  let fail = true;
+  const transform = createUsageTransform({
+    store: fakeStore({ read() { if (fail) throw new Error('temporary EIO'); return { version: 1, sessions: {} }; } }),
+    log: () => {}
+  });
+  assert.throws(() => transform.ensureLoaded(), /temporary EIO/);
+  assert.equal(transform.getState().loaded, false);
+  fail = false;
+  assert.deepEqual(transform.ensureLoaded(), { version: 1, sessions: {} });
+});
+
+test('external-agent reads and refresh require strict snapshots and propagate failures', () => {
+  let fail = false;
+  const transform = createUsageTransform({
+    store: fakeStore({ refresh(_now, options) {
+      assert.equal(options.strict, true);
+      if (fail) throw new Error('incomplete refresh');
+      return { version: 1, sessions: {} };
+    } }),
+    isExternalAgentActive: () => true,
+    readSnapshot(options) { assert.equal(options.strict, true); throw new Error('failed snapshot'); },
+    log: () => {}
+  });
+  assert.throws(() => transform.ensureLoaded(), /failed snapshot/);
+  transform.transform(summary());
+  fail = true;
+  assert.throws(() => transform.transform(summary()), /incomplete refresh/);
+  assert.equal(transform.getState().loaded, true);
 });
 
 test('settings are read when a summary is transformed, not when the transform is created', () => {

@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./providers/codex/transcript');
 const { resolveSessionFile } = require('./sessionFiles');
 const {
   isUserPromptRecord,
@@ -13,15 +14,20 @@ const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
+const PI_FORMAT_CLIENTS = new Set(['pi', 'omp', 'senpi']);
 
-function* readTranscriptLines(filePath) {
-  const fd = fs.openSync(filePath, 'r');
+function* readTranscriptLines(filePath, transcriptFs = fs) {
+  const decoded = isCompressedCodexTranscript(filePath) ? readCompressedCodexTranscript(filePath, { fs: transcriptFs }) : null;
+  const fd = decoded ? undefined : transcriptFs.openSync(filePath, 'r');
+  let position = 0;
   let parts = [];
   let lineBytes = 0;
   try {
     for (;;) {
       const buffer = Buffer.allocUnsafe(64 * 1024);
-      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      const bytesRead = decoded ? decoded.copy(buffer, 0, position, position + buffer.length)
+        : transcriptFs.readSync(fd, buffer, 0, buffer.length, null);
+      position += bytesRead;
       if (bytesRead === 0) break;
       const chunk = buffer.subarray(0, bytesRead);
       let start = 0;
@@ -43,7 +49,7 @@ function* readTranscriptLines(filePath) {
     }
     if (lineBytes) yield Buffer.concat(parts, lineBytes).toString('utf8');
   } finally {
-    fs.closeSync(fd);
+    if (fd !== undefined) transcriptFs.closeSync(fd);
   }
 }
 
@@ -380,6 +386,81 @@ function parseCodebuddyTranscriptLines(lines) {
   return events;
 }
 
+// Pi (pi.dev) and OMP write the same conversation format, with billed
+// operations as separate entries. OMP's title slot is naturally ignored
+// because only user messages create prompt boundaries; summary, tool and
+// standalone usage contributes to totals without counting as assistant replies.
+// Both follow OpenAI's convention: totalTokens is input + output + cacheRead +
+// cacheWrite, and reasoning is an informational subset of output.
+function piPromptText(content) {
+  if (typeof content === 'string') return cleanPromptText(content) || null;
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .filter((part) => part && part.type === 'text')
+    .map((part) => String(part.text || ''))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text) return text;
+  const images = content.filter((part) => part && part.type === 'image').length;
+  if (!images) return null;
+  return images > 1 ? `[${images} images]` : '[image]';
+}
+
+function parsePiTranscriptLines(lines) {
+  const events = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let obj;
+    try { obj = JSON.parse(trimmed); } catch (_) { continue; }
+    const message = obj.type === 'message' ? obj.message || {} : {};
+    const timestamp = obj.timestamp || '';
+    if (message.role === 'user') {
+      const text = piPromptText(message.content);
+      if (text) events.push({ kind: 'prompt', timestamp, text });
+      continue;
+    }
+    let type;
+    let u;
+    if (message.role === 'assistant' || message.role === 'toolResult') {
+      u = message.usage;
+      if (message.role === 'toolResult') type = 'tool-usage';
+    } else if (obj.type === 'compaction' || obj.type === 'branch_summary' || obj.type === 'usage') {
+      u = obj.usage;
+      type = obj.type === 'compaction' ? 'compaction-summary'
+        : obj.type === 'branch_summary' ? 'branch-summary'
+          : obj.kind === 'cache_warm' ? 'cache-warm' : 'usage';
+    }
+    if (u) {
+      const tools = message.role === 'assistant' && Array.isArray(message.content)
+        ? message.content.filter((part) => part && part.type === 'toolCall').map((part) => part.name)
+        : [];
+      events.push({
+        kind: 'turn',
+        ...(type ? { type } : {}),
+        timestamp,
+        tokens: makeTokens({
+          input: u.input,
+          output: u.output,
+          cacheRead: u.cacheRead,
+          cacheWrite: u.cacheWrite,
+          reasoning: u.reasoning ?? u.reasoningTokens
+        }),
+        // Pi and OMP report each operation's cost; prefer it over the
+        // proportional split of the session subtotal.
+        cost: num(u.cost && u.cost.total),
+        tools: uniqueTools(tools)
+      });
+    }
+  }
+  return events;
+}
+
+function parsePiTranscript(text) {
+  return parsePiTranscriptLines(String(text || '').split(/\r?\n/));
+}
+
 function emptyTokens() {
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 };
 }
@@ -409,7 +490,9 @@ function finalizeExchange(ex) {
   // Paid non-reply usage such as a DSH compaction summary or failed/retried
   // assistant attempt stays in `turns` for period filtering, token totals and
   // cost allocation, but must not inflate the user-facing conversation count.
-  ex.turnCount = ex.turns.filter((turn) => turn.type !== 'compaction-summary' && turn.type !== 'assistant-attempt').length;
+  ex.turnCount = ex.turns.filter((turn) => ![
+    'compaction-summary', 'assistant-attempt', 'branch-summary', 'tool-usage', 'cache-warm', 'usage'
+  ].includes(turn.type)).length;
   ex.tools = uniqueTools(ex.turns.flatMap((t) => t.tools));
   ex.tokensAvailable = ex.turns.every((turn) => turn.tokensAvailable !== false);
   const unpriced = ex.turns.reduce((sum, turn) => sum + num(turn.unpricedTokens), 0);
@@ -593,7 +676,7 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
 function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
   if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
-  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots });
+  const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots, fs: deps.fs });
   if (!filePath && client === 'codebuddy') {
     return readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps });
   }
@@ -622,13 +705,15 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   let parsed;
   let events;
   try {
-    const lines = readTranscriptLines(filePath);
+    const lines = readTranscriptLines(filePath, deps.fs || fs);
     // The filename is a lookup key, not necessarily Codex's conversation identity.
     parsed = client === 'codex' ? parseCodexTranscriptData(lines) : null;
     // WorkBuddy writes the same transcript family as CodeBuddy Code.
     events = parsed ? parsed.events
       : (client === 'codebuddy' || client === 'workbuddy')
         ? parseCodebuddyTranscriptLines(lines)
+      : PI_FORMAT_CLIENTS.has(client)
+        ? parsePiTranscriptLines(lines)
         : parseClaudeTranscriptLines(lines);
   } catch (error) {
     if (error.code === 'ENOENT') return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
@@ -639,9 +724,21 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   }
   const now = new Date((deps.now || Date.now)());
   const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
-  distributeCost(grouped, sessionCost);
+  // Pi and OMP price replies with `usage.cost.total`, so use the reported
+  // per-turn costs instead of splitting the session subtotal. A provider that
+  // reports no price (all zeros) falls back to that split.
+  const reportedCost = PI_FORMAT_CLIENTS.has(client)
+    ? grouped.reduce((sum, ex) => sum + ex.turns.reduce((turnSum, t) => turnSum + num(t.costEstimate), 0), 0)
+    : 0;
+  let costUsd = num(sessionCost);
+  if (reportedCost > 0) {
+    sumRealCost(grouped);
+    costUsd = reportedCost;
+  } else {
+    distributeCost(grouped, sessionCost);
+  }
   return {
-    found: true, client, sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost),
+    found: true, client, sessionId, period, exchanges: grouped, totals: totalsOf(grouped, costUsd),
     ...(parsed ? { canonicalSessionId: parsed.canonicalSessionId } : {})
   };
 }
@@ -650,6 +747,7 @@ module.exports = {
   parseClaudeTranscript,
   parseCodebuddyTranscript,
   parseCodexTranscript,
+  parsePiTranscript,
   makeTokens,
   readCodebuddyExtensionSessionDetail,
   groupEvents,

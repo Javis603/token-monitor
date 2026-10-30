@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
 const { resolveRegionalLocale } = require('../../src/electron/renderer/i18n');
-const { extractUsageFromTokscale, normalizePeriod } = require('../../src/shared/usage');
+const { aggregateHistory, extractUsageFromTokscale, normalizePeriod } = require('../../src/shared/usage');
 
 function day(date, tokens, client = 'claude', model = 'opus') {
   return {
@@ -237,17 +237,19 @@ test('fixed ranges expose exact History token components only when every selecte
       }
     }
   };
+  const history = aggregateHistory([{ history: { daily: [exactDay] } }], { todayKey: '2026-08-12' });
   const exact = ranges.fixedPeriodSnapshot('last7', {
     historyAvailable: true,
     historyEnabled: true,
     todayKey: '2026-08-12',
-    daily: [exactDay]
+    daily: history.daily
   });
   assert.equal(exact.period.capabilities.tokenComponents, true);
   assert.equal(exact.period.cacheReadTokens, 60);
   assert.equal(exact.period.cacheWriteTokens, 10);
   assert.equal(exact.period.outputTokens, 20);
   assert.equal(exact.period.clientCacheReads.claude, 60);
+  assert.equal(exact.period.clientUnclassifiedTokens.claude, 0);
   assert.equal(exact.period.modelOutputs.opus, 20);
 
   const mixed = ranges.fixedPeriodSnapshot('last7', {

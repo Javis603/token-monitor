@@ -135,7 +135,7 @@ function ringHarness() {
       old.isConnected = old.circle.isConnected = old.ring.isConnected = old.value.isConnected = false;
     }
     rail.cells = cells;
-    context.animateRingResets(snapshot);
+    cells.owned = context.animateRingResets(snapshot);
     return cells;
   }
   function frame(time) {
@@ -162,6 +162,18 @@ test('a real reset sweeps the arc, counts the figure up and lands the flare', ()
   assert.equal(after[0].value.textContent, '5%');
   h.frame(1665);
   assert.equal(after[0].value.textContent, '100%');
+});
+
+// The count-up of a new refill starts on the next frame. The rail's digit roll
+// runs in the render itself, so the figure must already be claimed by then.
+test('a refill claims its figure in the render that starts it, before its first frame', () => {
+  const h = ringHarness();
+  h.refresh([h.cell(20, { resetsAt: '2026-09-30T12:00:00.000Z' }), h.cell(60, { key: 'other' })]);
+  const after = h.refresh([h.cell(100, { resetsAt: '2026-10-01T12:00:00.000Z' }), h.cell(59, { key: 'other' })]);
+  assert.deepEqual([...after.owned], [after[0].value], 'only the refilling figure is claimed');
+  h.frame(100);
+  const resumed = h.refresh([h.cell(100, { resetsAt: '2026-10-01T12:00:00.000Z' }), h.cell(59, { key: 'other' })]);
+  assert.deepEqual([...resumed.owned], [resumed[0].value], 'a resumed refill keeps its figure');
 });
 
 test('a stats push mid-refill carries the arc, count and flare onto replacement cells', () => {
@@ -222,7 +234,7 @@ test('the renderer wires the ring driver and the shared card animator', () => {
   // account and window identities the projection now carries.
   assert.match(dock, /node\.dataset\.ringMotionKey = `\$\{cell\.id\}\\0\$\{cell\.headlineAccount \|\| ''\}\\0\$\{cell\.headlineWindowKey \|\| ''\}`;/);
   assert.match(dock, /node\.dataset\.ringResetAt = cell\.resetsAt \|\| '';/);
-  assert.match(dock, /const ringSnapshot = captureRingResetMotion\(\);\s*railNode\.replaceChildren\(\.\.\.nodes\);\s*animateRingResets\(ringSnapshot\);/);
+  assert.match(dock, /const ringSnapshot = captureRingResetMotion\(\);[\s\S]*?railNode\.insertBefore\(node, cursor\);[\s\S]*?const refilling = animateRingResets\(ringSnapshot\);/);
   assert.match(dock, /strokeDashoffset: `\$\{fromOffset\}px`/);
   // The card is the page's animator scoped to the card layer, bound in
   // commitCard around the same replaceChildren the refresh performs.
@@ -241,4 +253,17 @@ test('the renderer wires the ring driver and the shared card animator', () => {
   const animatorAt = dockHtml.indexOf('<script src="../limits/resetAnimator.js"></script>');
   const rendererAt = dockHtml.indexOf('<script src="dock.js"></script>');
   assert.ok(motionAt > -1 && motionAt < animatorAt && animatorAt < rendererAt);
+});
+
+
+test('the same reset driver accepts a compact header scope without moving the rail timeline', () => {
+  const h = ringHarness();
+  const before = h.cell(5, { resetsAt: '2026-09-30T12:00:00.000Z' });
+  const after = h.cell(100, { resetsAt: '2026-10-01T12:00:00.000Z' });
+  const snapshot = h.context.captureRingResetMotion({ querySelectorAll: () => [before] });
+  h.context.animateRingResets(snapshot, { querySelectorAll: () => [after] });
+  h.frame(100);
+  assert.equal(after.circle.animations.length, 1);
+  assert.equal(after.circle.animations[0].options.duration, 1565);
+  assert.equal(before.circle.animations.length, 0);
 });

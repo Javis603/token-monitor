@@ -10,7 +10,8 @@ const { createStatsPublicationBatcher } = require('../../src/electron/statsPubli
 
 const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const refreshSource = main.slice(main.indexOf('let manualStatsRefreshInFlight ='), main.indexOf('function managedPricingSidecarPath('));
-const dockSource = main.slice(main.indexOf('// Week / last-7 / last-30 are not collector periods'), main.indexOf('// Hand cells to the controller'));
+const dockSource = main.slice(main.indexOf('function configuredDockItemLists('), main.indexOf('function edgeDockShowsLiveRate('))
+  + main.slice(main.indexOf('// Week / last-7 / last-30 are not collector periods'), main.indexOf('// Hand cells to the controller'));
 const pushSource = main.slice(main.indexOf('function sendPush('), main.indexOf('function statsHistoryRevision('));
 
 function deferred() {
@@ -40,6 +41,7 @@ function fixture() {
     runManualDeviceRefresh,
     electronPresentationStats: (stats) => stats,
     edgeDockController: { isRunning: () => true },
+    notchController: null,
     pushEdgeDockCells: (cells) => { context.dockStats = cells.stats; context.dockPeriods = cells.derivedPeriods; },
     buildEdgeDockCells: (stats, options) => ({ stats, derivedPeriods: options.derivedPeriods }),
     EDGE_DOCK_DERIVED_PERIODS: ['week', 'last7', 'last30'],
@@ -66,6 +68,7 @@ function fixture() {
     rendererSnapshots: { stamp: (_, stats) => stats },
     rendererStats: (stats) => stats,
     scheduleMacWidgetSnapshot() {},
+    pluginRuntime: null,
     updateTrayDisplay() {},
     mainWindow: null,
     dashboardWindow: null,
@@ -199,7 +202,7 @@ test('a delayed derived-period repaint retains the manually refreshed snapshot u
   const pushed = { historyRevision: '3', devices: [{ today: 'pushed' }] };
   context.sendPush({ event: 'stats', data: { stats: pushed } });
   await new Promise((resolve) => setImmediate(resolve));
-  context.repaintEdgeDockCells();
+  context.repaintDockSurfaces();
   assert.equal(context.dockStats, pushed, 'a new push must replace the manually refreshed source');
   assert.equal(context.dockPeriods.week, pushed.devices[0]);
 });
@@ -211,18 +214,19 @@ test('dock re-projections keep manual stats through settings updates but never a
   usage.resolve(true);
   await context.refreshStatsFromEdgeDock();
   const fresh = context.localStats;
-  const syncSource = main.slice(main.indexOf('function syncEdgeDock('), main.indexOf('function refreshLimitStatsPresentation('));
+  const syncSource = main.slice(main.indexOf('function syncDockSurfaces('), main.indexOf('function refreshLimitStatsPresentation('));
   Object.assign(context, {
     canUseEdgeDock: () => true,
+    syncNotch() {},
     ensureEdgeDockController: () => ({ setAppearance() {}, sync() {} }),
     edgeDockAppearance: () => ({}),
-    scheduleEdgeDockSessionExpiry() {}
+    scheduleSessionExpiry() {}
   });
   vm.runInNewContext(syncSource, context);
-  context.syncEdgeDock({});
+  context.syncDockSurfaces({});
   assert.equal(context.dockStats, fresh, 'settings must re-project the manual snapshot');
   context.hubModeGeneration += 1;
-  context.repaintEdgeDockCells();
+  context.repaintDockSurfaces();
   assert.equal(context.dockStats, old, 'a different mode must not reuse the manual snapshot');
   limits.resolve();
 });
@@ -248,7 +252,7 @@ test('forecast completion and session expiry re-project the manually refreshed d
   });
   const schedulerSource = main.slice(main.indexOf('function edgeDockNextSessionExpiry('), main.indexOf('function ensureEdgeDockController('));
   vm.runInNewContext(schedulerSource, context);
-  context.scheduleEdgeDockSessionExpiry();
+  context.scheduleSessionExpiry();
   assert.equal(timers.length, 1);
   timers[0]();
   assert.equal(context.dockStats, context.localStats, 'session expiry must retain the manual snapshot');
@@ -291,7 +295,7 @@ test('App-only Client refresh updates the dock and replaces its previous manual 
   const newer = { updatedAt: 'newer' };
   context.fetch = async () => ({ ok: true, json: async () => newer });
   assert.equal(await context.refreshManualStats(), newer);
-  context.repaintEdgeDockCells();
+  context.repaintDockSurfaces();
   assert.equal(context.dockStats, newer);
 });
 
@@ -306,7 +310,7 @@ for (const entry of ['App', 'Edge Dock']) {
     response.resolve(freshRead);
     await request;
     assert.equal(context.dockStats, pushed, 'late manual completion must not repaint over the push');
-    context.repaintEdgeDockCells();
+    context.repaintDockSurfaces();
     assert.equal(context.dockStats, pushed, 'late manual completion must not retain an override');
   });
 }
@@ -322,7 +326,7 @@ test('runtime replacement without a mode change invalidates the dock manual sour
   context.deviceRuntimeHandle.tick = () => nextUsage.promise;
   const pending = context.refreshManualStats();
   context.deviceRuntimeHandle = null;
-  context.repaintEdgeDockCells();
+  context.repaintDockSurfaces();
   assert.equal(context.dockStats, old);
   nextUsage.resolve(true);
   await pending;
@@ -359,7 +363,100 @@ for (const entry of ['App', 'Edge Dock']) {
     await request;
     assert.equal(context.dockStats.remote, 'fresh');
     assert.equal(context.dockStats.local, 'fresh');
-    context.repaintEdgeDockCells();
+    context.repaintDockSurfaces();
     assert.equal(context.dockStats.remote, 'fresh');
   });
 }
+
+
+test('manual App refresh feeds an independently enabled Notch through the same snapshot source', async () => {
+  const { context, usage, limits } = fixture();
+  context.edgeDockController = null;
+  context.notchController = { isRunning: () => true };
+  let topStats;
+  context.pushNotchCells = (stats) => { topStats = stats; };
+  const refreshed = context.refreshManualStats();
+  usage.resolve(true);
+  await refreshed;
+  assert.equal(topStats, context.localStats);
+  limits.resolve();
+});
+
+test('generic settings/account refresh waits for new limits without dispatching usage', async () => {
+  const { context, limits, calls } = fixture();
+  let completed = false;
+  const request = context.fetchStats({ force: true }).then((stats) => { completed = true; return stats; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false, 'do not return the previous limits snapshot');
+  assert.equal(JSON.stringify(calls), JSON.stringify([['limits', { all: true }, 'manual']]));
+  context.localStats = { limits: 'fresh' };
+  limits.resolve();
+  assert.equal(await request, context.localStats);
+});
+
+test('manual refresh reconciles older-only usage in Month, All Time and History', async () => {
+  const { startCollector, localTodayKey } = require('../../src/shared/collector');
+  const { context } = fixture();
+  const calls = [];
+  let imported = false;
+  let graphs = 0;
+  const runtime = startCollector({
+    clients: 'claude', allTimeSince: '2024-01-01', deviceId: 'manual-history-test',
+    intervalMs: 3600000, watchEnabled: false, wslScanEnabled: false,
+    historyEnabled: true, historyIntervalMs: 3600000,
+    dailyHistoryArchiveEnabled: false, anchorPersistenceEnabled: false,
+    sessionUsageArchiveEnabled: false, sessionActivityPolling: false,
+    codexLocalUsageEnabled: false, projectsEnabled: false, limitsEnabled: false,
+    runTokscale: async ({ flags }) => {
+      calls.push(flags);
+      const input = flags.includes('--today') ? 10 : imported ? 150 : 100;
+      return { entries: [{ client: 'claude', sessionId: 's1', model: 'test', input, output: 0, cost: 0 }] };
+    },
+    runGraph: async () => {
+      graphs += 1;
+      return { contributions: [{ date: localTodayKey(new Date(Date.now() - 86400000)), clients: [
+        { client: 'claude', modelId: 'test', tokens: { input: imported ? 140 : 90 }, cost: 0 }
+      ] }] };
+    },
+    onUpdate: (summary) => { context.localStats = summary; }
+  });
+  try {
+    await runtime.whenIdle();
+    assert.equal(context.localStats.month.totalTokens, 100);
+    imported = true;
+    context.deviceRuntimeHandle = { refreshLimits: async () => {}, tick: (...args) => runtime.tick(...args) };
+    calls.length = 0;
+    const beforeGraphs = graphs;
+    const stats = await context.refreshManualStats();
+    assert.equal(stats.today.totalTokens, 10);
+    assert.equal(stats.month.totalTokens, 150);
+    assert.equal(stats.allTime.totalTokens, 150);
+    assert.equal(stats.history.daily[0].tokens, 140);
+    assert.equal(JSON.stringify(calls), JSON.stringify([['--today'], ['--month'], ['--since', '2024-01-01']]));
+    assert.equal(graphs, beforeGraphs + 1, 'manual refresh bypasses the History interval');
+  } finally {
+    await runtime.stop();
+  }
+});
+
+test('Tray-menu refresh retains its existing full usage request', async () => {
+  const { context, usage, limits, calls } = fixture();
+  Object.assign(context, {
+    trayRefreshInFlight: false,
+    captureMacWidgetProducerOwner: () => null,
+    runTrayMenuAction: ({ action }) => action(),
+    refreshTrayContextMenu() {},
+    latestStats: context.localStats,
+    showTrayRefreshError: (error) => { throw new Error(error); }
+  });
+  const trayRefresh = main.slice(main.indexOf('async function refreshFromTray'), main.indexOf('function setTrayContentFromMenu'));
+  vm.runInNewContext(trayRefresh, context);
+  const request = context.refreshFromTray();
+  assert.equal(JSON.stringify(calls), JSON.stringify([
+    ['limits', { all: true }, 'manual'],
+    ['usage', 'manual', { forceHistory: false, forceSelfSync: false }]
+  ]));
+  usage.resolve();
+  limits.resolve();
+  await request;
+});

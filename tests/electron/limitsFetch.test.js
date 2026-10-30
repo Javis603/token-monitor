@@ -98,8 +98,7 @@ test('every widget provider probe takes the runtime transport', () => {
   assert.match(main, /opencodeGoApi\.fetchGoApi\(apiKey, \{\s*fetch: electronLimitsFetch\(\)/);
   // Every settings-side validation that can refuse to save a credential.
   for (const call of [
-    /opencodeWeb\.fetchGoWeb\([^,]+, electronProviderDeps\(\)\)/,
-    /opencodeWeb\.fetchZen\([^,]+, electronProviderDeps\(\)\)/,
+    /opencodeWeb\.fetchWeb\([^,]+, electronProviderDeps\(\)\)/,
     // Every account form's save-time probe (limits:saveCredential).
     /function credentialProbeDeps\(renewed = \{\}\) \{\s*return electronProviderDeps\(/,
     // MiMo's save path is hand-wired rather than going through the account

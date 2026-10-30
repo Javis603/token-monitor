@@ -12,8 +12,11 @@ const {
   deriveAppUpdateAvailability,
   downloadedAppUpdateMatchesLatest,
   extractReleaseNotes,
+  extractUpdaterReleaseHistory,
   extractUpdaterReleaseNotes,
+  latestForCurrentVersion,
   latestFromUpdaterInfo,
+  MAX_RELEASE_NOTE_HISTORY,
   mergeLatestReleaseMetadata,
   parseLatestReleasePayload,
   parseTag,
@@ -21,7 +24,9 @@ const {
   RELEASES_LATEST_URL,
   resolveAppUpdateCheckError,
   shouldDownloadAutomaticAppUpdate,
-  shouldSkipAppUpdateCheck
+  shouldSkipAppUpdateCheck,
+  APP_UPDATE_BACKGROUND_COOLDOWN_MS,
+  APP_UPDATE_STARTUP_DELAY_MS
 } = require('../../src/shared/appUpdater');
 
 const trailingPullRequestReference = /(?:\(\s*#\d+(?:\s*,\s*#\d+)*\s*\)|（\s*#\d+(?:\s*[、，,]\s*#\d+)*\s*）)$/;
@@ -136,15 +141,50 @@ test('shouldSkipAppUpdateCheck refreshes cached update prompts sooner than the n
 
 test('shouldSkipAppUpdateCheck uses normal cooldown for dismissed cached updates', () => {
   const nowMs = Date.parse('2026-07-02T18:30:00Z');
-  const twoHoursAgo = '2026-07-02T16:30:00Z';
+  const oneHourAgo = '2026-07-02T17:30:00Z';
+  const threeHoursAgo = '2026-07-02T15:30:00Z';
 
   assert.equal(shouldSkipAppUpdateCheck({
     currentVersion: '0.17.0',
     latest: { version: '0.18.0' },
     dismissedVersion: '0.18.0',
-    lastCheckedAt: twoHoursAgo,
+    lastCheckedAt: oneHourAgo,
     nowMs
   }), true);
+
+  assert.equal(shouldSkipAppUpdateCheck({
+    currentVersion: '0.17.0',
+    latest: { version: '0.18.0' },
+    dismissedVersion: '0.18.0',
+    lastCheckedAt: threeHoursAgo,
+    nowMs
+  }), false);
+});
+
+test('background cooldown lets the tick a cooldown later run', () => {
+  const nowMs = Date.parse('2026-07-02T18:30:00Z');
+  const ago = (ms) => new Date(nowMs - ms).toISOString();
+  const noUpdate = {
+    currentVersion: '0.17.0',
+    latest: { version: '0.17.0' },
+    dismissedVersion: null,
+    nowMs
+  };
+  // The launch check stamps 15 s into the hourly timer, so the tick two hours
+  // after it lands a few seconds short of the cooldown and must still run.
+  assert.equal(shouldSkipAppUpdateCheck({ ...noUpdate, lastCheckedAt: ago(2 * 60 * 60 * 1000 - 15 * 1000) }), false);
+  assert.equal(shouldSkipAppUpdateCheck({ ...noUpdate, lastCheckedAt: ago(2 * 60 * 60 * 1000 - 5) }), false);
+  assert.equal(shouldSkipAppUpdateCheck({ ...noUpdate, lastCheckedAt: ago(2 * 60 * 60 * 1000 - 2 * 60 * 1000) }), true);
+  assert.equal(shouldSkipAppUpdateCheck({ ...noUpdate, lastCheckedAt: ago(60 * 60 * 1000) }), true);
+
+  const outdated = {
+    currentVersion: '0.17.0',
+    latest: { version: '0.18.0' },
+    dismissedVersion: null,
+    nowMs
+  };
+  assert.equal(shouldSkipAppUpdateCheck({ ...outdated, lastCheckedAt: ago(60 * 60 * 1000 - 15 * 1000) }), false);
+  assert.equal(shouldSkipAppUpdateCheck({ ...outdated, lastCheckedAt: ago(50 * 60 * 1000) }), true);
 });
 
 test('downloadedAppUpdateMatchesLatest only trusts the downloaded latest version', () => {
@@ -391,17 +431,15 @@ ${added}
 - Improved 2
 - Improved 3
 ### Fixed
-- Fixed 1
-- Fixed 2
-- Fixed 3
+${Array.from({ length: 30 }, (_, index) => `- Fixed ${index + 1}`).join('\n')}
 ### Extra
 - Extra
 <!-- app-update-notes:en:end -->
 `);
 
   assert.deepEqual(notes.en.map((group) => group.title), ['Added', 'Changed', 'Improved', 'Fixed']);
-  assert.deepEqual(notes.en.map((group) => group.items.length), [5, 3, 3, 1]);
-  assert.equal(notes.en.reduce((total, group) => total + group.items.length, 0), 12);
+  assert.deepEqual(notes.en.map((group) => group.items.length), [5, 3, 3, 29]);
+  assert.equal(notes.en.reduce((total, group) => total + group.items.length, 0), 40);
   assert.equal(Array.from(notes.en[0].items[0]).length, 600);
   assert.match(notes.en[0].items[0], /…$/);
 });
@@ -514,6 +552,314 @@ test('release-note text ignores false closing tags in comments and quoted markup
     'Compare x<a and later > here',
     'Compare x<a and later > here label.'
   ]);
+});
+
+test('extractReleaseNotes keeps every item of a busy release', () => {
+  // v0.65.0 shipped 18 items; the old bound of 12 dropped its whole Fixed group.
+  const notes = extractReleaseNotes(`
+<!-- app-update-notes:en:start -->
+### Added
+${Array.from({ length: 7 }, (_, index) => `- Added ${index + 1}`).join('\n')}
+### Improved
+${Array.from({ length: 5 }, (_, index) => `- Improved ${index + 1}`).join('\n')}
+### Fixed
+${Array.from({ length: 6 }, (_, index) => `- Fixed ${index + 1}`).join('\n')}
+<!-- app-update-notes:en:end -->
+`);
+  assert.deepEqual(notes.en.map((group) => [group.title, group.items.length]), [['Added', 7], ['Improved', 5], ['Fixed', 6]]);
+});
+
+test('extractUpdaterReleaseNotes reads locales collapsed under h2 headings in the Atom feed', () => {
+  // The release body keeps Traditional Chinese, Korean and Japanese in <details>
+  // blocks under an h2 of the locale name. The feed carries them; only h1 used to count.
+  const html = `
+<h1>English</h1><h2>What's changed</h2><h3>Fixed</h3><ul><li><strong>Tray:</strong> Fixes a reopen.</li></ul><h2>Download</h2><ul><li>Installer</li></ul>
+<details><summary>繁體中文 · 日本語</summary>
+<details><summary><strong>繁體中文</strong></summary>
+<h2>繁體中文</h2><h2>更新內容</h2><h3>修復</h3><ul><li><strong>托盤：</strong> 修復重新開啟的問題。 （<a href="https://example.com">#1037</a>）</li></ul><h2>下載</h2><ul><li>安裝程式</li></ul>
+</details>
+<details><summary><strong>日本語</strong></summary>
+<h2>日本語</h2><h2>更新内容</h2><h3>修正</h3><ul><li><strong>トレイ:</strong> 再表示を修正しました。</li></ul><h2>ダウンロード</h2>
+</details>
+</details>
+`;
+
+  assert.deepEqual(extractUpdaterReleaseNotes(html, '0.71.0'), {
+    en: [{ title: 'Fixed', items: ['Tray: Fixes a reopen.'] }],
+    'zh-TW': [{ title: '修復', items: ['托盤：修復重新開啟的問題。'] }],
+    ja: [{ title: '修正', items: ['トレイ: 再表示を修正しました。'] }]
+  });
+});
+
+test('extractUpdaterReleaseHistory keeps every release up to the latest, newest first', () => {
+  const note = (text) => `<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>${text}</li></ul>`;
+  const history = extractUpdaterReleaseHistory([
+    { version: '0.69.0', note: note('Sixty-nine.') },
+    { version: 'v0.71.0', note: note('Seventy-one.') },
+    { version: '0.72.0-beta.1', note: note('Ahead of the offered version.') },
+    { version: '0.70.0', note: 'No content' },
+    { version: '0.71.0', note: note('Duplicate tag.') },
+    { version: 'not-a-version', note: note('Ignored.') }
+  ], '0.71.0');
+
+  assert.deepEqual(history, {
+    releaseNoteHistory: [
+      {
+        version: '0.71.0',
+        htmlUrl: 'https://github.com/Javis603/token-monitor/releases/tag/v0.71.0',
+        releaseNotes: { en: [{ title: 'Fixed', items: ['Seventy-one.'] }] }
+      },
+      { version: '0.70.0', htmlUrl: 'https://github.com/Javis603/token-monitor/releases/tag/v0.70.0' },
+      {
+        version: '0.69.0',
+        htmlUrl: 'https://github.com/Javis603/token-monitor/releases/tag/v0.69.0',
+        releaseNotes: { en: [{ title: 'Fixed', items: ['Sixty-nine.'] }] }
+      }
+    ],
+    releaseHistoryTruncated: false
+  });
+  assert.equal(extractUpdaterReleaseHistory('<p>Single note.</p>', '0.71.0'), null);
+  assert.equal(extractUpdaterReleaseHistory([], '0.71.0'), null);
+});
+
+test('extractUpdaterReleaseHistory bounds the history and says when it did', () => {
+  const entries = Array.from({ length: 10 }, (_, index) => ({ version: `0.${71 - index}.0`, note: '' }));
+  const history = extractUpdaterReleaseHistory(entries, '0.71.0');
+  assert.equal(history.releaseNoteHistory.length, MAX_RELEASE_NOTE_HISTORY);
+  assert.equal(history.releaseNoteHistory[0].version, '0.71.0');
+  assert.equal(history.releaseHistoryTruncated, true);
+});
+
+test('latestFromUpdaterInfo carries the full changelog alongside the latest notes', () => {
+  const note = (text) => `<h1>English</h1><h2>Changes</h2><h3>Fixed</h3><ul><li>${text}</li></ul>`;
+  const latest = latestFromUpdaterInfo({
+    version: '0.71.0',
+    releaseNotes: [
+      { version: '0.71.0', note: note('Latest.') },
+      { version: '0.70.0', note: note('Previous.') }
+    ]
+  });
+  assert.deepEqual(latest.releaseNotes, { en: [{ title: 'Fixed', items: ['Latest.'] }] });
+  assert.deepEqual(latest.releaseNoteHistory.map((entry) => entry.version), ['0.71.0', '0.70.0']);
+  assert.equal(latest.releaseHistoryTruncated, false);
+});
+
+test('latestFromUpdaterInfo reads every locale from the Atom feed\'s full changelog', () => {
+  // electron-updater's fullChangelog hands over each release body through the
+  // releases Atom feed as escaped HTML. Comments are stripped there, so the
+  // locales are found by heading: English and 中文 are h1 sections while
+  // 繁體中文, 한국어 and 日本語 sit in nested <details> blocks under an h2 of
+  // the language name. Each locale's notes are the section between its first
+  // two h2 headings (the update heading and the download heading).
+  const atomFeedNote = (version, { en, zh, zhTW, ko, ja }) => `
+<h1>English</h1>
+<h2>What's changed</h2>
+<h3>Added</h3>
+<ul>
+<li><strong>Widget:</strong> ${en[0]} (<a class="issue-link js-issue-link" data-hovercard-type="pull_request" href="https://github.com/Javis603/token-monitor/pull/1050">#1050</a>)</li>
+</ul>
+<h3>Fixed</h3>
+<ul>
+<li><strong>Updater:</strong> ${en[1]} (<a class="issue-link js-issue-link" data-hovercard-type="pull_request" href="https://github.com/Javis603/token-monitor/pull/1047">#1047</a>)</li>
+</ul>
+<h2>Download</h2>
+<ul>
+<li><strong>macOS Apple Silicon</strong> — <a href="https://github.com/Javis603/token-monitor/releases/download/v${version}/Token-Monitor-${version}-arm64.dmg">Token-Monitor-${version}-arm64.dmg</a></li>
+</ul>
+<details>
+<summary><strong>First launch and other notes</strong></summary>
+<h3>First launch</h3>
+<p><strong>macOS:</strong> open the <code>.dmg</code>, then drag the app to Applications.</p>
+</details>
+<h1>中文</h1>
+<h2>更新内容</h2>
+<h3>新增</h3>
+<ul>
+<li><strong>小部件：</strong> ${zh[0]} （<a class="issue-link js-issue-link" href="https://github.com/Javis603/token-monitor/pull/1050">#1050</a>）</li>
+</ul>
+<h3>修复</h3>
+<ul>
+<li><strong>更新器：</strong> ${zh[1]} （<a class="issue-link js-issue-link" href="https://github.com/Javis603/token-monitor/pull/1047">#1047</a>）</li>
+</ul>
+<h2>下载</h2>
+<ul>
+<li><strong>macOS Apple Silicon</strong> — <a href="https://github.com/Javis603/token-monitor/releases/download/v${version}/Token-Monitor-${version}-arm64.dmg">Token-Monitor-${version}-arm64.dmg</a></li>
+</ul>
+<details>
+<summary><strong>首次启动与其他说明</strong></summary>
+<h3>首次启动</h3>
+<p><strong>macOS:</strong> 打开 <code>.dmg</code>，然后将应用拖入“应用程序”。</p>
+</details>
+<details>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v${version}-prev...v${version}">v${version}-prev...v${version}</a></summary>
+<h2>What's Changed</h2>
+<ul><li>* chore: generated pull-request list by @ghost in <a href="https://github.com/Javis603/token-monitor/pull/9999">Javis603/token-monitor#9999</a></li></ul>
+<h2>New Contributors</h2>
+<ul><li>* @ghost made their first contribution in <a href="https://github.com/Javis603/token-monitor/pull/9999">Javis603/token-monitor#9999</a></li></ul>
+</details>
+<details>
+<summary>繁體中文 · 한국어 · 日本語</summary>
+<details>
+<summary><strong>繁體中文</strong></summary>
+<h2>繁體中文</h2>
+<h2>更新內容</h2>
+<h3>新增</h3>
+<ul><li><strong>小工具：</strong> ${zhTW[0]} （<a class="issue-link js-issue-link" href="https://github.com/Javis603/token-monitor/pull/1050">#1050</a>）</li></ul>
+<h3>修復</h3>
+<ul><li><strong>更新器：</strong> ${zhTW[1]} （<a class="issue-link js-issue-link" href="https://github.com/Javis603/token-monitor/pull/1047">#1047</a>）</li></ul>
+<h2>下載</h2>
+<ul><li>安裝程式</li></ul>
+</details>
+<details>
+<summary><strong>한국어</strong></summary>
+<h2>한국어</h2>
+<h2>업데이트 내용</h2>
+<h3>추가</h3>
+<ul><li><strong>위젯:</strong> ${ko[0]} (<a class="issue-link js-issue-link" href="https://github.com/Javis603/token-monitor/pull/1050">#1050</a>)</li></ul>
+<h3>수정</h3>
+<ul><li><strong>업데이터:</strong> ${ko[1]} (<a class="issue-link js-issue-link" href="https://github.com/Javis603/token-monitor/pull/1047">#1047</a>)</li></ul>
+<h2>다운로드</h2>
+<ul><li>설치 프로그램</li></ul>
+</details>
+<details>
+<summary><strong>日本語</strong></summary>
+<h2>日本語</h2>
+<h2>更新内容</h2>
+<h3>追加</h3>
+<ul><li><strong>ウィジェット:</strong> ${ja[0]} (<a class="issue-link js-issue-link" href="https://github.com/Javis603/token-monitor/pull/1050">#1050</a>)</li></ul>
+<h3>修正</h3>
+<ul><li><strong>アップデーター:</strong> ${ja[1]} (<a class="issue-link js-issue-link" href="https://github.com/Javis603/token-monitor/pull/1047">#1047</a>)</li></ul>
+<h2>ダウンロード</h2>
+<ul><li>インストーラー</li></ul>
+</details>
+</details>
+`;
+
+  const latest = latestFromUpdaterInfo({
+    version: '0.71.0',
+    releaseNotes: [
+      {
+        version: '0.71.0',
+        note: atomFeedNote('0.71.0', {
+          en: ['Adds Goose usage tracking.', 'Fixes the tray popover reopening.'],
+          zh: ['新增 Goose 用量追踪。', '修复托盘弹窗重新打开的问题。'],
+          zhTW: ['新增 Goose 用量追蹤。', '修復托盤彈窗重新開啟的問題。'],
+          ko: ['Goose 사용량 추적을 추가합니다.', '트레이 팝오버가 다시 열리는 문제를 수정합니다.'],
+          ja: ['Goose 使用量トラッキングを追加します。', 'トレイポップオーバーが再び開く問題を修正しました。']
+        })
+      },
+      {
+        version: '0.70.0',
+        note: atomFeedNote('0.70.0', {
+          en: ['Adds a session details view.', 'Fixes stale limits after sign-in.'],
+          zh: ['新增会话详情视图。', '修复登录后额度未更新的问题。'],
+          zhTW: ['新增工作階段詳細資料檢視。', '修復登入後額度未更新的問題。'],
+          ko: ['세션 세부 정보 보기를 추가합니다.', '로그인 후 한도가 갱신되지 않던 문제를 수정합니다.'],
+          ja: ['セッション詳細ビューを追加します。', 'サインイン後に上限が更新されない問題を修正しました。']
+        })
+      }
+    ]
+  });
+
+  assert.deepEqual(latest.releaseNoteHistory.map((entry) => entry.version), ['0.71.0', '0.70.0']);
+  assert.deepEqual(latest.releaseNoteHistory[0].releaseNotes, {
+    en: [
+      { title: 'Added', items: ['Widget: Adds Goose usage tracking.'] },
+      { title: 'Fixed', items: ['Updater: Fixes the tray popover reopening.'] }
+    ],
+    zh: [
+      { title: '新增', items: ['小部件：新增 Goose 用量追踪。'] },
+      { title: '修复', items: ['更新器：修复托盘弹窗重新打开的问题。'] }
+    ],
+    'zh-TW': [
+      { title: '新增', items: ['小工具：新增 Goose 用量追蹤。'] },
+      { title: '修復', items: ['更新器：修復托盤彈窗重新開啟的問題。'] }
+    ],
+    ko: [
+      { title: '추가', items: ['위젯: Goose 사용량 추적을 추가합니다.'] },
+      { title: '수정', items: ['업데이터: 트레이 팝오버가 다시 열리는 문제를 수정합니다.'] }
+    ],
+    ja: [
+      { title: '追加', items: ['ウィジェット: Goose 使用量トラッキングを追加します。'] },
+      { title: '修正', items: ['アップデーター: トレイポップオーバーが再び開く問題を修正しました。'] }
+    ]
+  });
+  assert.deepEqual(latest.releaseNoteHistory[1].releaseNotes, {
+    en: [
+      { title: 'Added', items: ['Widget: Adds a session details view.'] },
+      { title: 'Fixed', items: ['Updater: Fixes stale limits after sign-in.'] }
+    ],
+    zh: [
+      { title: '新增', items: ['小部件：新增会话详情视图。'] },
+      { title: '修复', items: ['更新器：修复登录后额度未更新的问题。'] }
+    ],
+    'zh-TW': [
+      { title: '新增', items: ['小工具：新增工作階段詳細資料檢視。'] },
+      { title: '修復', items: ['更新器：修復登入後額度未更新的問題。'] }
+    ],
+    ko: [
+      { title: '추가', items: ['위젯: 세션 세부 정보 보기를 추가합니다.'] },
+      { title: '수정', items: ['업데이터: 로그인 후 한도가 갱신되지 않던 문제를 수정합니다.'] }
+    ],
+    ja: [
+      { title: '追加', items: ['ウィジェット: セッション詳細ビューを追加します。'] },
+      { title: '修正', items: ['アップデーター: サインイン後に上限が更新されない問題を修正しました。'] }
+    ]
+  });
+
+  const generatedLeak = latest.releaseNoteHistory
+    .flatMap((entry) => Object.values(entry.releaseNotes).flatMap((group) => group.items))
+    .filter((item) => /generated pull-request list|first contribution/.test(item));
+  assert.deepEqual(generatedLeak, [], 'GitHub\'s generated What\'s Changed and New Contributors sections must not leak into locale notes');
+});
+
+test('package build config leaves release notes out of the updater metadata', () => {
+  const { build } = require('../../package.json');
+  assert.equal(
+    build.releaseInfo?.releaseNotes,
+    undefined,
+    'release notes in latest*.yml make electron-updater skip the fullChangelog Atom read'
+  );
+  assert.equal(
+    build.releaseInfo?.releaseNotesFile,
+    undefined,
+    'release notes in latest*.yml make electron-updater skip the fullChangelog Atom read'
+  );
+});
+
+test('latestForCurrentVersion drops remembered releases the running version already has', () => {
+  const latest = {
+    version: '0.71.0',
+    releaseNoteHistory: [{ version: '0.71.0' }, { version: '0.70.0' }, { version: '0.69.0' }]
+  };
+  assert.deepEqual(latestForCurrentVersion(latest, '0.69.0').releaseNoteHistory.map((entry) => entry.version), ['0.71.0', '0.70.0']);
+  assert.equal(latestForCurrentVersion(latest, '0.68.0'), latest);
+  assert.equal(latestForCurrentVersion({ version: '0.71.0' }, '0.69.0').releaseNoteHistory, undefined);
+  assert.equal(latestForCurrentVersion(null, '0.69.0'), null);
+});
+
+test('mergeLatestReleaseMetadata keeps a remembered history the incoming metadata lacks', () => {
+  const releaseNoteHistory = [{ version: '0.71.0' }, { version: '0.70.0' }];
+  assert.deepEqual(
+    mergeLatestReleaseMetadata(
+      { version: '0.71.0', releaseNoteHistory, releaseHistoryTruncated: true },
+      { version: '0.71.0', name: 'From the release API' }
+    ),
+    { version: '0.71.0', name: 'From the release API', releaseNoteHistory, releaseHistoryTruncated: true }
+  );
+  const fresh = [{ version: '0.71.0' }];
+  assert.deepEqual(
+    mergeLatestReleaseMetadata(
+      { version: '0.71.0', releaseNoteHistory, releaseHistoryTruncated: true },
+      { version: '0.71.0', releaseNoteHistory: fresh, releaseHistoryTruncated: false }
+    ).releaseNoteHistory,
+    fresh
+  );
+});
+
+test('background update checks run every couple of hours', () => {
+  assert.equal(APP_UPDATE_BACKGROUND_COOLDOWN_MS, 2 * 60 * 60 * 1000);
+  assert.equal(APP_UPDATE_STARTUP_DELAY_MS, 15 * 1000);
 });
 
 test('extractUpdaterReleaseNotes selects the matching full-changelog entry', () => {

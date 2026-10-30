@@ -75,6 +75,164 @@ function renderPanel(form, callbacks = {}) {
 
 const translated = (key, params) => i18n.translate('en', key, params);
 
+test('Ollama defaults to API key and switches instructions, setup URL and draft together', async () => {
+  const { resolveOpenUrl, syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'ollama');
+  const drafts = [];
+  const writes = [];
+  const { group, document } = renderPanel(form, {
+    onSave: (_, values) => drafts.push(values),
+    onFieldChange: (...args) => writes.push(args)
+  });
+  syncCredentialFields(form, { document, settings: {} });
+  const choice = group.byId('ollamaCredentialKindInput');
+  const api = group.byId('ollamaApiKeyInput');
+  const cookie = group.byId('ollamaCookieInput');
+  const steps = [...group.walk()].find((node) => node.dataset.dependent === 'credential' && /DevTools/.test(node.text));
+  assert.equal(choice.value, 'ollamaApiKey');
+  assert.equal(api.placeholder, 'ollama-...');
+  assert.equal(api.attributes['aria-label'], 'API key');
+  assert.equal(cookie.attributes['aria-label'], 'Cookie');
+  assert.equal([...group.walk()].some((node) => node.attributes.for === api.id || node.attributes.for === cookie.id), false, 'the selected type names each input accessibly without a repeated visible label');
+  assert.equal(cookie.disabled, true);
+  assert.equal(steps.classList.contains('hidden'), true);
+  assert.equal(resolveOpenUrl(form, { document }), 'https://ollama.com/settings/keys');
+  assert.equal([...group.walk()].find((node) => node.attributes.for === choice.id).text, 'Credential');
+  api.value = 'fixture-api-key';
+  await group.byId('ollamaCredentialSubmit').click();
+  assert.deepEqual(drafts.pop(), { ollamaApiKey: 'fixture-api-key' });
+
+  choice.change('ollamaCookie');
+  assert.equal(api.value, '', 'switching discards the hidden secret like OpenCode');
+  assert.equal(api.disabled, true);
+  assert.equal(cookie.disabled, false);
+  assert.equal(steps.classList.contains('hidden'), false);
+  assert.equal(resolveOpenUrl(form, { document }), 'https://ollama.com/settings');
+  cookie.value = 'wos-session=fixture';
+  syncCredentialFields(form, { document, settings: {} });
+  assert.equal(choice.value, 'ollamaCookie', 'a stats/settings redraw preserves the chosen draft type');
+  assert.equal(cookie.value, 'wos-session=fixture');
+  api.value = 'hidden-stale-key';
+  await group.byId('ollamaCredentialSubmit').click();
+  assert.deepEqual(drafts.pop(), { ollamaCookie: 'wos-session=fixture' }, 'only the selected lane reaches main');
+  choice.change('ollamaApiKey');
+  assert.equal(cookie.value, '');
+  assert.equal(api.value, 'hidden-stale-key');
+  assert.deepEqual(writes, [], 'changing the draft type never writes settings or clears stored credentials');
+});
+
+test('Ollama initializes from configured credential flags without receiving secrets', () => {
+  const { syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'ollama');
+  const { group, document } = renderPanel(form);
+  const choice = group.byId('ollamaCredentialKindInput');
+  syncCredentialFields(form, { document, settings: { ollamaCookieConfigured: true } });
+  assert.equal(choice.value, 'ollamaCookie');
+  assert.equal(group.byId('ollamaCookieInput').disabled, false);
+  syncCredentialFields(form, { document, settings: { ollamaApiKeyConfigured: true, ollamaCookieConfigured: true } });
+  assert.equal(choice.value, 'ollamaApiKey', 'effective API key still wins, including an env-backed key');
+  syncCredentialFields(form, { document, settings: {} });
+  assert.equal(choice.value, 'ollamaApiKey', 'clearing configuration restores the new-account default');
+  assert.equal(group.byId('ollamaApiKeyInput').value, '');
+  assert.equal(group.byId('ollamaCookieInput').value, '');
+});
+
+test('Ollama selector saves replace the stored sibling before subsequent polling', async () => {
+  const { createCredentialCommands } = require('../../src/electron/limits/credentialCommands');
+  const { fetchOllamaLimits } = require('../../src/shared/providers/ollama/limits');
+  const { syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'ollama');
+  let current = { ollamaApiKey: 'ollama-fixture-old', ollamaCookie: '' };
+  const patches = [];
+  const requests = [];
+  const html = '<span>Cloud Usage</span><span>Pro</span><section aria-label="Session usage 14.5% used"><div style="width: 14.5%"></div></section>';
+  const fetch = async (url) => {
+    requests.push(String(url));
+    return {
+      ok: true, status: 200, headers: { get: () => '' }, text: async () => html,
+      json: async () => String(url).endsWith('/api/me')
+        ? { Email: 'fixture@example.com', Plan: 'pro' }
+        : { included: { balance_usd: 40, allowance_usd: 60 } }
+    };
+  };
+  const commands = createCredentialCommands({
+    env: {}, getSettings: () => current,
+    applySettingsPatch: (patch) => { patches.push(patch); current = { ...current, ...patch }; return {}; },
+    probeDeps: () => ({ probe: true, providerRuntimeState: new Map(), fetch })
+  });
+  const { group, document } = renderPanel(form, {
+    onSave: async (_, values, clearInput) => {
+      const result = await commands.saveCredential('ollama', values);
+      assert.equal(result.saved, true);
+      clearInput();
+    }
+  });
+  syncCredentialFields(form, { document, settings: { ollamaApiKeyConfigured: true } });
+  const choice = group.byId('ollamaCredentialKindInput');
+  choice.change('ollamaCookie');
+  group.byId('ollamaCookieInput').value = 'wos-session=fixture-switch';
+  assert.equal(patches.length, 0, 'switching alone never changes stored credentials');
+  await group.byId('ollamaCredentialSubmit').click();
+  assert.equal(current.ollamaApiKey, '', 'Cookie save clears the old settings key in main');
+  assert.equal(current.ollamaCookie, 'wos-session=fixture-switch');
+  assert.equal((await fetchOllamaLimits(current, { env: {}, fetch })).source, 'web');
+  assert.equal(requests.some((url) => url.endsWith('/api/balance')), false, 'the stored API key cannot take precedence after Cookie save');
+
+  requests.length = 0;
+  choice.change('ollamaApiKey');
+  group.byId('ollamaApiKeyInput').value = 'ollama-fixture-new';
+  await group.byId('ollamaCredentialSubmit').click();
+  assert.equal(current.ollamaCookie, '', 'API save clears the old settings Cookie in main');
+  assert.equal(current.ollamaApiKey, 'ollama-fixture-new');
+  assert.equal((await fetchOllamaLimits(current, { env: {}, fetch })).source, 'api');
+  assert.equal(requests.some((url) => url.endsWith('/settings')), false);
+  assert.equal(patches.length, 2);
+});
+
+test('Ollama selector and API hint are translated in every locale', () => {
+  for (const messages of Object.values(i18n.MESSAGES)) {
+    assert.ok(messages['settings.common.credentialKind']);
+    assert.ok(messages['settings.ollama.apiKeyNote']);
+    assert.equal(messages['settings.ollama.apiKeyPlaceholder'], 'ollama-...');
+    assert.equal(messages['settings.ollama.modeNote'], undefined);
+    assert.equal(messages['settings.ollama.apiKeyStep1'], undefined);
+  }
+});
+
+test('Ollama locks credential type until Save settles and restores it after success or failure', async () => {
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'ollama');
+  const drafts = [];
+  let finish;
+  let fail;
+  const { group } = renderPanel(form, {
+    onSave: (_, values, clearInput) => new Promise((resolve, reject) => {
+      drafts.push(values);
+      finish = () => { clearInput(); resolve(); };
+      fail = reject;
+    })
+  });
+  const choice = group.byId('ollamaCredentialKindInput');
+  const submit = group.byId('ollamaCredentialSubmit');
+  group.byId('ollamaApiKeyInput').value = 'fixture-api-key';
+  const apiSave = submit.click();
+  assert.equal(choice.disabled, true, 'the user cannot switch to a new credential draft during this save');
+  assert.deepEqual(drafts, [{ ollamaApiKey: 'fixture-api-key' }]);
+  await submit.click();
+  assert.equal(drafts.length, 1);
+  finish();
+  await apiSave;
+  assert.equal(choice.disabled, false);
+  choice.change('ollamaCookie');
+  group.byId('ollamaCookieInput').value = 'wos-session=fixture';
+  const cookieSave = submit.click();
+  assert.equal(choice.disabled, true);
+  assert.deepEqual(drafts[1], { ollamaCookie: 'wos-session=fixture' });
+  fail(new Error('fixture write failed'));
+  await assert.rejects(cookieSave, /fixture write failed/);
+  assert.equal(choice.disabled, false);
+  assert.equal(group.byId('ollamaCookieInput').value, 'wos-session=fixture');
+});
+
 test('Claude organization choice starts hidden before a cookie is checked', () => {
   const form = limitAccountFormsForRenderer().find((entry) => entry.id === 'claude');
   const { group } = renderPanel(form);
@@ -128,7 +286,8 @@ for (const form of limitAccountFormsForRenderer()) {
 
     // Credential draft fields reach the caller: whether it is complete, rejected
     // or saved is the save path's call, and so is the message line.
-    const expected = Object.fromEntries(form.fields.filter((field) => field.submitWithCredential !== false).map((field) => [
+    const expected = Object.fromEntries(form.fields.filter((field) => field.submitWithCredential !== false
+      && (!form.credentialChoice?.fields.includes(field.key) || field.key === form.credentialChoice.fields[0])).map((field) => [
       field.key,
       field.input === 'select' ? field.options[0].value : `${field.key}-draft`
     ]));
@@ -145,7 +304,8 @@ for (const form of limitAccountFormsForRenderer()) {
     await submit.click();
     // Clearing the draft empties secrets and leaves settings beside them.
     for (const field of form.fields) {
-      assert.equal(group.byId(`${field.key}Input`).value, field.secret ? '' : field.options[0].value, field.key);
+      assert.equal(group.byId(`${field.key}Input`).value,
+        field.secret ? '' : field.input === 'select' ? field.options[0].value : `${field.key}-draft`, field.key);
     }
   });
 }
@@ -248,7 +408,8 @@ function accountFormSave({ result, reject } = {}) {
         calls.push(['saveCredential', ...args]);
         if (reject) throw reject;
         return result;
-      }
+      },
+      refresh: async (id) => calls.push(['refreshLimitQuota', id])
     } } },
     applyPersistedSettings: (settings) => calls.push(['applyPersistedSettings', settings]),
     renderExternalProviderStatus: () => calls.push(['render', { ...state.accountPanelMessages }]),
@@ -278,6 +439,138 @@ function accountFormSave({ result, reject } = {}) {
     }
   };
 }
+
+test('shared account actions reuse credential settings invalidation and collect once', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const { createCredentialCommands } = require('../../src/electron/limits/credentialCommands');
+  const { classifySettingsChange, limitsConfigFromSettings } = require('../../src/electron/runtimeConfig');
+  const { runLimitInvalidation, runManualDeviceRefresh, settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from)));
+  for (const action of ['save', 'save-unchanged', 'save-cookie', 'save-slow', 'save-refresh-fails', 'clear', 'clear-empty', 'refresh', 'startup']) {
+    await t.test(action, async (t) => {
+      let settings = { limitsEnabled: true, limitProviders: 'ollama,deepseek', ollamaApiKey: 'fixture-old', ollamaCookie: '' };
+      if (action === 'clear-empty') settings.ollamaApiKey = '';
+      if (action === 'startup') settings.limitProviders = 'ollama';
+      const env = action.startsWith('clear') ? { OLLAMA_API_KEY: 'fixture-env' } : {};
+      const polls = [];
+      const pending = [];
+      let releaseQuota;
+      let quotaStarted;
+      const quotaPending = new Promise((resolve) => { quotaStarted = resolve; });
+      const http = async (url, probe) => {
+        const quota = String(url).endsWith('/api/balance') || String(url).endsWith('/settings');
+        if (!probe && quota) polls.push(String(url));
+        if (action === 'save-cookie' && probe) await new Promise((resolve) => setTimeout(resolve, 5));
+        if (action === 'save-slow' && !probe && quota) {
+          await new Promise((resolve) => { releaseQuota = resolve; quotaStarted(); });
+        }
+        const status = !probe && action === 'save-refresh-fails' ? 500 : !probe && polls.length > 1 ? 429 : 200;
+        return {
+          ok: status === 200, status, headers: { get: () => null },
+          json: async () => String(url).endsWith('/api/me')
+            ? { Email: 'fixture@example.com', Plan: 'pro' }
+            : { included: { balance_usd: 40, allowance_usd: 60 } },
+          text: async () => '<span id="header-email">fixture@example.com</span><section aria-label="Session usage 10% used"></section>'
+        };
+      };
+      const runtime = createLimitsRuntime(limitsConfigFromSettings(settings, { env }), {
+        autoStart: false, autoRetry: false, env,
+        fetch: (url) => http(url, false)
+      });
+      t.after(() => runtime.stop());
+      const handle = { refreshLimits: runtime.refresh, clearLimits: runtime.clear };
+      let commands;
+      const host = {
+        console: { log() {} },
+        settingsForRenderer: () => ({ limitAccountForms: [form] }),
+        applySettingsPatch: (patch, _onDots, limitContext) => {
+          const previous = settings;
+          commands.noteSettingsPatch(patch);
+          settings = { ...settings, ...patch };
+          const change = classifySettingsChange(previous, settings);
+          if (change.limitsReconfigure) runtime.reconfigure(limitsConfigFromSettings(settings, { env }));
+          for (const entry of settingsLimitInvalidationPlan(change, limitContext.ensureLimitProvider)) {
+            const refresh = action === 'startup'
+              ? (pending.push(entry), Promise.resolve({ queued: true }))
+              : runLimitInvalidation(handle, entry.scope, entry.reason, entry.options);
+            limitContext.onLimitsRefresh(entry.scope, refresh);
+          }
+        }
+      };
+      vm.runInNewContext(slice(main, '  async function applyCredentialSettingsPatch(', '\n  // The settings:update body'), host);
+      commands = createCredentialCommands({
+        getSettings: () => settings,
+        applySettingsPatch: host.applyCredentialSettingsPatch,
+        env,
+        probeDeps: () => ({ probe: true, providerRuntimeState: new Map(), fetch: (url) => http(url, true) })
+      });
+      const form = { id: 'ollama', kind: 'credential' };
+      let callbacks;
+      let statsReads = 0;
+      let cutoff;
+      const context = {
+        state: { settings: { limitAccountForms: [form] }, accountPanelMessages: {} },
+        LIMIT_PROVIDERS: [{ id: 'ollama', label: 'Ollama' }],
+        document: { getElementById: (id) => id === 'accountsSettingsDetails' ? { insertBefore() {} } : null },
+        window: { tokenMonitor: { limits: {
+          saveCredential: commands.saveCredential,
+          clearCredential: commands.clearCredential,
+          refresh: (id) => runLimitInvalidation(handle, { provider: id }, 'account-panel', { clear: false })
+        } } },
+        limitAccountPanelsApi: {
+          createCredentialPanel: (_form, handlers) => { callbacks = handlers; return {}; },
+          syncCredentialFields() {}
+        },
+        refreshStats: async (options = {}) => {
+          statsReads += 1;
+          if (options.force) await runManualDeviceRefresh(handle, { refreshUsage: false });
+        },
+        renderExternalProviderStatus() {},
+        markExternalProviderCheckPending: (_id, since) => { cutoff = since; },
+        clearExternalProviderCheckPending() {}, clearExternalProviderPendingStatus() {},
+        setExternalAccountExpanded() {}, externalProviderAccountLinked: () => false,
+        initSettingsAnimationWrappers() {}, applyPersistedSettings() {}, t: translated
+      };
+      vm.runInNewContext(
+        slice(app, 'function setAccountPanelMessage(', '\nfunction markExternalProviderCheckPending(')
+          + slice(app, 'async function saveAccountCredential(', '\nfunction limitAccountForm(')
+          + slice(app, 'function setupLimitAccountPanels(', '\nfunction limitProviderAccountGroup('),
+        context
+      );
+      if (action.startsWith('save') || action === 'startup') {
+        const values = action === 'save-cookie'
+          ? { ollamaApiKey: '', ollamaCookie: 'wos-session=fixture-cookie' }
+          : { ollamaApiKey: action === 'save-unchanged' ? 'fixture-old' : 'fixture-new', ollamaCookie: '' };
+        let settled = false;
+        const saved = context.saveAccountCredential('ollama', values).then((result) => { settled = true; return result; });
+        if (action === 'save-slow') {
+          await quotaPending;
+          assert.equal(settled, false, 'save waits for the settings write\'s authoritative check');
+          releaseQuota();
+        }
+        assert.equal((await saved).saved, true, 'refresh failure cannot undo a successful credential write');
+      } else if (action.startsWith('clear')) await context.clearAccountCredential('ollama');
+      else {
+        context.setupLimitAccountPanels();
+        await callbacks.onRefresh();
+      }
+      if (action === 'startup') {
+        assert.equal(polls.length, 0, 'startup queues one intent until a runtime is ready');
+        assert.equal(pending.length, 1);
+        runtime.start();
+        await Promise.all(pending.map((entry) => runLimitInvalidation(handle, entry.scope, entry.reason, entry.options)));
+      }
+      assert.equal(polls.length, action === 'save-cookie' ? 0 : 1, 'save probes are separate; a Cookie poll reuses validation instead of requesting again');
+      assert.equal(statsReads, 1);
+      const row = runtime.getSnapshot().providers.find((entry) => entry.provider === 'ollama');
+      assert.equal(row.status, action === 'save-refresh-fails' ? 'unavailable' : 'ok');
+      if (cutoff !== undefined) assert.ok(Date.parse(row.updatedAt) >= cutoff, 'the completed check, including cached Cookie validation, must satisfy the save cutoff');
+      assert.equal(runtime.getSnapshot().providers.some((entry) => entry.provider === 'deepseek'), false, 'account actions never refresh unrelated providers');
+    });
+  }
+});
 
 test('a rejected or incomplete draft keeps the draft and the current status', async () => {
   for (const [result, expected, messages] of [
@@ -353,6 +646,14 @@ test('every shared account message exists in each locale with its placeholders',
   }
 });
 
+test('MiniMax key hints cover both billing types in every locale', () => {
+  for (const locale of Object.keys(i18n.MESSAGES)) {
+    const hint = i18n.translate(locale, 'settings.minimax.apiKeyPlaceholder');
+    assert.match(hint, /sk-cp-/, locale);
+    assert.match(hint, /sk-api-/, locale);
+  }
+});
+
 test('MiniMax explicit regions drive Open before a probe and override stale status', async () => {
   const { resolveOpenUrl, syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
@@ -374,6 +675,31 @@ test('MiniMax explicit regions drive Open before a probe and override stale stat
   provider = null;
   panel.group.byId('minimaxOpenBrowser').click();
   assert.equal(opened.pop(), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+});
+
+test('MiniMax billing choice waits for saving before key submission and follows the balance setup link', async () => {
+  const { resolveOpenUrl, syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const drafts = [];
+  let finish;
+  const panel = renderPanel(form, {
+    onFieldChange: () => new Promise((resolve) => { finish = resolve; }),
+    onSave: (_, values) => drafts.push(values)
+  });
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxApiRegion: 'intl' } });
+  const mode = panel.group.byId('minimaxBillingModeInput');
+  assert.equal(mode.value, 'token-plan');
+  mode.change('api');
+  assert.equal(resolveOpenUrl(form, { document: panel.document, provider: null }), 'https://platform.minimax.io/user-center/payment/balance');
+  panel.group.byId('minimaxApiKeyInput').value = 'sk-api-test';
+  const pending = panel.group.byId('minimaxCredentialSubmit').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(drafts, []);
+  finish();
+  await pending;
+  assert.deepEqual(drafts, [{ minimaxApiKey: 'sk-api-test' }]);
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxBillingMode: 'api', minimaxApiRegion: 'auto' } });
+  assert.equal(resolveOpenUrl(form, { document: panel.document, provider: { region: 'cn' } }), 'https://platform.minimaxi.com/user-center/payment/balance');
 });
 
 test('MiniMax key submission waits for a region save without submitting an implicit region', async () => {

@@ -23,6 +23,14 @@ function numberValue(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+// Session archives retain explicit input separately from cache/output. Only
+// classify the bounded amount actually saved; legacy missing input stays unknown.
+function archivedSessionInput(session) {
+  const value = key => Math.max(0, Math.round(numberValue(session?.[key])));
+  return Math.min(value('inputTokens'), Math.max(0,
+    value('totalTokens') - value('cacheReadTokens') - value('cacheWriteTokens') - value('outputTokens')));
+}
+
 function toDate(value) {
   const date = value instanceof Date ? value : new Date(value || Date.now());
   return Number.isNaN(date.getTime()) ? new Date() : date;
@@ -76,6 +84,7 @@ function hasSummaryPeriod(summary, periodName) {
 }
 
 module.exports = {
+  archivedSessionInput,
   cloneJson,
   hasSummaryPeriod,
   localDay,

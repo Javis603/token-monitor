@@ -9,7 +9,8 @@ const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const compactTokenApi = require('../../src/shared/compactTokens');
-const { normalizeSubscriptions } = require('../../src/shared/subscriptionDisplay');
+const { matchProviderAccount, needsRebinding, normalizeSubscriptions } = require('../../src/shared/subscriptionDisplay');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
 const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
@@ -198,9 +199,12 @@ test('compact Antigravity retains the two tightest groups when more than two are
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 70 },
     { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 5 },
     { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 20 },
-    { kind: 'session', label: 'Future Group 5-hour', remainingPercent: 10 }
+    { kind: 'weekly', label: 'Gemini 4 Argon weekly', remainingPercent: 10 }
   ];
-  assert.deepEqual(limitProviderCompactWindows('antigravity', windows), [windows[1], windows[3]]);
+  const selected = limitProviderCompactWindows('antigravity', windows);
+  assert.deepEqual(selected, [windows[1], windows[3]]);
+  assert.equal(limitProviderCompactWindowLabel('antigravity', selected[1], selected), 'Gemini 4 Argon');
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', selected[1], selected), 'Weekly');
 });
 
 test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pools', () => {
@@ -246,8 +250,8 @@ test('compact Codex windows never backfill canonical lanes with additional quota
 
 test('compact Antigravity labels preserve legacy and mixed-payload fallbacks', () => {
   const legacy = [
-    { kind: 'session', label: 'Gemini Pro' },
-    { kind: 'session', label: 'Gemini Flash' }
+    { kind: 'session', label: 'Gemini Pro', usedPercent: 25 },
+    { kind: 'session', label: 'Gemini Flash', usedPercent: 25 }
   ];
 
   const mixed = [{ kind: 'session', label: 'Gemini 5-hour' }, legacy[0]];
@@ -435,6 +439,7 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
     formatHomeLimitWindowValue: () => '',
     formatLimitBoundary: (window) => boundaryLabels[window.resetsAt] || '',
     limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' },
+    limitWindowsView: createLimitWindowsView({}),
     state: { settings: {} },
     t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
   };
@@ -502,7 +507,7 @@ test('capability tags explain how each provider is collected in settings', () =>
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
-  assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'API key']);
+  assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'Pay-as-you-go', 'API key']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
   assert.deepEqual(limitProviderCapabilityTags('copilot'), ['Manual login', 'API']);
   assert.deepEqual(limitProviderCapabilityTags('unknown'), []);
@@ -961,6 +966,7 @@ test('limit percent tray mode renders provider icons into a generated tray image
   assert.match(renderLimitSessionsIcon, /·/);
   assert.match(maybeUpdateBarsIcon, /TokenMonitorTrayText\.isGeneratedTrayIconMode\(mode\)/);
   assert.match(maybeUpdateBarsIcon, /edgeDockAvailable\(\) && state\.settings\?\.edgeDockEnabled === true\) edgeDockComposer\?\.render\(\)/);
+  assert.match(maybeUpdateBarsIcon, /state\.settings\?\.notchEnabled === true\) notchItemsComposer\?\.render\(\)/);
   assert.match(maybeUpdateBarsIcon, /trayDataUrlForMode\(mode, 44, colors, \{ trayInk: true \}\)/);
   // The tray ink must come from the platform-aware helper, not the app theme:
   // macOS needs the black its template inversion expects, while a dark Windows
@@ -1172,6 +1178,7 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
   const grouped = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
     { kind: 'session', label: 'Gemini 5-hour' },
     { kind: 'weekly', label: 'Gemini weekly' },
+    { kind: 'weekly', label: 'Gemini 4 Argon weekly' },
     { kind: 'weekly', label: 'Future Group weekly' }
   ] });`, context);
   assert.deepEqual(JSON.parse(JSON.stringify(grouped)), [
@@ -1180,6 +1187,12 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
       windows: [
         { groupLabel: 'Gemini', windowLabel: '5-hour', window: { kind: 'session', label: 'Gemini 5-hour' } },
         { groupLabel: 'Gemini', windowLabel: 'Weekly', window: { kind: 'weekly', label: 'Gemini weekly' } }
+      ]
+    },
+    {
+      label: 'Gemini 4 Argon',
+      windows: [
+        { groupLabel: 'Gemini 4 Argon', windowLabel: 'Weekly', window: { kind: 'weekly', label: 'Gemini 4 Argon weekly' } }
       ]
     },
     {
@@ -1600,7 +1613,6 @@ test('The detail tooltip widens its grid and pads short rows for three-column en
   assert.match(infoNode, /columns > 2 \? 'limit-detail-tooltip-triple' : ''/);
   assert.match(infoNode, /for \(let column = 0; column < columns; column \+= 1\)/);
   assert.match(infoNode, /cell\.textContent = entry\[column\] \?\? '';/);
-  assert.match(infoNode, /entries\s*\.filter\(Array\.isArray\)\s*\.map\(\(\[entryLabel, \.\.\.rest\]\) => `\$\{entryLabel\}: \$\{rest\.filter\(Boolean\)\.join\(' '\)\}`\)/);
   assert.match(balanceNode, /const grants = claudePrepaidGrantRows\(tranches, currency\);/);
   assert.match(balanceNode, /\.\.\.grants\.map\(\(grant\) => grant\.aria\)/);
   // The wording belongs to the spoken label now, never to a rendered cell.
@@ -1945,7 +1957,7 @@ test('a saved credential folds its panel only once a fresh record confirms the a
   // The refresh after a save can return before the collector publishes the
   // checked account, so the panel stays open and folds when that record lands.
   assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
-  assert.match(save, /markExternalProviderCheckPending\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
+  assert.match(save, /markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*await refreshStats\(\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
   // Ollama answers its first poll from the save-time check instead of fetching
   // the settings page twice in a row.
   const { limitProviderEntry } = require('../../src/shared/limits/registry');
@@ -2483,7 +2495,7 @@ test('empty OpenCode profiles render a localized summary before returning', () =
   const app = readRendererFile('app.js');
   const renderProfiles = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
   const renderSummary = functionBody(app, 'renderOpenCodeProfilesStatusSummary', 'openrouterProfileStatusText');
-  const totalEl = { textContent: 'Not configured' };
+  const totalEl = { textContent: 'Not configured', setAttribute(name, value) { this[name] = value; } };
   const context = {
     document: {
       getElementById(id) {
@@ -3088,8 +3100,8 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Auto', 'API key', 'CLI']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
   assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app', 'Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'API/Web']);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
@@ -3098,6 +3110,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'trae', source: 'api' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'workbuddy', source: 'local' }), 'Local');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'web' }), 'Web');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'api' }), 'API');
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'factory', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
@@ -3140,11 +3153,15 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'notConfigured' }),
-    { label: 'Sign in', tone: 'setup' }
+    { label: 'Add credential', tone: 'setup' }
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'unauthorized' }),
     { label: 'Sign in again', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'unauthorized', source: 'api' }),
+    { label: 'Update API key', tone: 'setup' }
   );
 });
 
@@ -3577,7 +3594,7 @@ test('switching to another edit preserves its form values during a canceled clos
       matchProviderAccount: () => account,
       amountUnits: (subscription) => subscription.amountMinor / 100
     },
-    limitProvidersForSubscriptions: () => [],
+    subscriptionAccountChoices: () => [],
     subscriptionAccountValue: () => 'acct-b',
     renderSubscriptionPickers() {},
     setSubscriptionFormMode: () => {},
@@ -4249,7 +4266,7 @@ test('one account holds one subscription record', () => {
     {
       subscriptionApi,
       accountIdentityApi: require('../../src/electron/renderer/accountIdentity'),
-      limitProvidersForSubscriptions: () => accounts,
+      subscriptionAccountChoices: () => accounts.map((provider) => ({ provider })),
       list: existing,
       target,
       excludeId
@@ -4506,6 +4523,7 @@ test('a record added on another device turns up without pushing settings at the 
   // this exercises the real rollback path rather than a stand-in.
   const run = (previous, incoming, { saveOk = true } = {}) => {
     const context = vm.createContext({
+    pluginRuntime: null,
       hubSubscriptions: previous,
       hubSubscriptionsHub: previous ? 'https://hub.example' : '',
       settings: {
@@ -4789,6 +4807,59 @@ test('a device with no limits of its own can still name the accounts on the hub'
   // matched to by key.
   assert.deepEqual(run(copy, [personal]).map((entry) => entry.accountKey), ['personal']);
   assert.deepEqual(run([personal], [copyAccount]).map((entry) => entry.accountKey), ['personal']);
+});
+
+test('limitProvidersForSubscriptions keeps anonymous Muse accounts from every device', () => {
+  const app = readRendererFile('app.js');
+  const source = functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountValue');
+  const museRow = (remainingPercent, updatedAt) => ({
+    provider: 'muse', accountKey: '', status: 'ok', source: 'cli', updatedAt,
+    windows: [{ kind: 'session', label: 'Session', usedPercent: 100 - remainingPercent, remainingPercent }]
+  });
+  // Two synced devices, each reporting its own Muse allowance. The local
+  // device's raw row (41%) deliberately differs from its aggregate copy (40%)
+  // so the survivor proves which copy won.
+  const devices = [
+    { deviceId: 'device-a', limits: { providers: [museRow(41, '2026-08-31T10:00:00.000Z')] } },
+    { deviceId: 'device-b', limits: { providers: [museRow(70, '2026-08-31T10:02:00.000Z')] } }
+  ];
+  const aggregate = aggregateLimits([
+    { deviceId: 'device-a', limits: { providers: [museRow(40, '2026-08-31T10:00:00.000Z')] } },
+    devices[1]
+  ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
+  const stats = { devices, limits: aggregate };
+  const run = (localStats, localDeviceId) => plain(vm.runInNewContext(
+    `${source}\nlimitProvidersForSubscriptions();`,
+    {
+      accountIdentityApi,
+      localDeviceLimitsProviders: () => accountIdentityApi.localDeviceLimitsProviders(localStats, localDeviceId),
+      state: { stats: localStats }
+    }
+  ));
+
+  const pool = run(stats, 'device-a');
+  assert.deepEqual(pool.map((entry) => entry.sourceDeviceId), ['device-a', 'device-b']);
+  assert.equal(pool[0].windows[0].remainingPercent, 41, 'the local copy wins its own device, without duplicating it');
+  assert.equal(pool.filter((entry) => entry.sourceDeviceId === 'device-a').length, 1);
+  assert.deepEqual(
+    aggregate.providers.filter((entry) => entry.provider === 'muse').map((entry) => entry.sourceDeviceId),
+    ['device-a', 'device-b'],
+    'the raw aggregate still displays both devices'
+  );
+  assert.equal(devices[0].limits.providers[0].sourceDeviceId, undefined, 'stats are not mutated');
+
+  // An anonymous binding names no account, so with two devices it must stay
+  // unresolved rather than silently landing on one of them.
+  const anonymous = { provider: 'muse', binding: { accountKey: '', accountEmail: '', profileName: '' } };
+  assert.equal(matchProviderAccount(anonymous, pool), null);
+  assert.equal(needsRebinding(anonymous, pool), true);
+
+  // One device is unambiguous, and the sole-account heal still applies.
+  const singleStats = { devices: [devices[0]], limits: aggregateLimits([devices[0]], 0, Date.parse('2026-08-31T10:03:00.000Z')) };
+  const singlePool = run(singleStats, 'device-a');
+  assert.equal(singlePool.length, 1);
+  assert.equal(matchProviderAccount(anonymous, singlePool), singlePool[0]);
+  assert.equal(needsRebinding(anonymous, singlePool), false);
 });
 
 test('the account picker tells two address-only accounts apart', () => {
@@ -5569,6 +5640,7 @@ test('a form opened on a hub is not written into this device own list instead', 
   ].join('\n');
 
   const context = vm.createContext({
+    pluginRuntime: null,
     // Switched to local mode with the hub still configured, which is the state
     // the mode switch leaves behind. Only the mode says which list is in front of
     // the user, so only the mode can say which one an edit belongs to.

@@ -68,6 +68,8 @@ const supportedToolOrder = [
   'GitHub Copilot',
   'Pi',
   'Oh My Pi',
+  'OmO Native',
+  'Goose',
   'Zed',
   'Kilo',
   'Command Code',
@@ -95,6 +97,7 @@ const supportedToolOrder = [
   'Trae CN',
   'Alibaba Cloud',
   'StepFun',
+  'Notion AI',
   'OmniRoute',
   'Third-party APIs'
 ];
@@ -116,6 +119,8 @@ const supportedToolIdOrder = [
   'copilot',
   'pi',
   'omp',
+  'senpi',
+  'goose',
   'zed',
   'kilo',
   'commandcode',
@@ -143,6 +148,7 @@ const supportedToolIdOrder = [
   'trae',
   'alibaba',
   'stepfun',
+  'notion',
   'omniroute',
   'thirdparty'
 ];
@@ -207,6 +213,22 @@ test('localized READMEs list the same supported tools', () => {
   }
 });
 
+// The logo wall under "Supported Tools" is a second copy of the table's tool list, kept
+// short so the showcase stays near the top. Adding a table row without its icon (or the
+// reverse) would leave the wall silently out of date.
+const logoWallIds = (text, file) => {
+  const wall = text.match(/^<p align="center">\n((?:\s+<img src="\.github\/assets\/tools-icon\/[^\n]+\n)+)<\/p>/m)?.[1];
+  assert.ok(wall, `${file}: no supported-tools logo wall found`);
+  return [...wall.matchAll(/tools-icon\/([^".]+)\.[a-z]+"/gi)].map((match) => match[1]);
+};
+
+test('localized README logo walls match the supported-tools table', () => {
+  for (const file of localizedReadmes) {
+    const text = read(file);
+    assert.deepEqual(logoWallIds(text, file), supportedToolIds(text, file), file);
+  }
+});
+
 test('localized READMEs describe native macOS Widget data and layouts', () => {
   for (const [file, copy] of Object.entries(nativeMacWidgetCopy)) {
     const text = read(file);
@@ -218,7 +240,7 @@ test('localized READMEs describe native macOS Widget data and layouts', () => {
 test('localized READMEs disclose the LM Studio server-log tracking boundary', () => {
   for (const file of localizedReadmes) {
     const text = read(file);
-    const rowEnd = text.indexOf('\n', text.indexOf('tools-icon/lmstudio.png'));
+    const rowEnd = text.indexOf('\n', text.indexOf('| <img src=".github/assets/tools-icon/lmstudio.png'));
     const detailsStart = text.indexOf('<details>', rowEnd);
     const detailsEnd = text.indexOf('</details>', detailsStart);
     const beforeDetails = text.slice(rowEnd, detailsStart);
@@ -366,7 +388,7 @@ test('localized README internal links resolve to their own heading anchors', () 
   for (const file of localizedReadmes) {
     const text = read(file);
     const anchors = new Set([...text.matchAll(/^#{2,3} (.+)$/gm)].map((match) => githubSlug(match[1])));
-    const targets = [...text.matchAll(/\]\(#([^)]+)\)/g)].map((match) => match[1]);
+    const targets = [...text.matchAll(/\]\(#([^)]+)\)|href="#([^"]+)"/g)].map((match) => match[1] || match[2]);
     assert.ok(targets.length > 0, `${file}: no internal anchor links found`);
     for (const target of targets) {
       assert.ok(anchors.has(target), `${file}: #${target} does not match any heading in this README`);

@@ -166,7 +166,15 @@
       if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
       groups.get(entry.groupLabel).push(entry);
     }
-    return [...groups].map(([label, windows]) => ({ label, windows }));
+    // Keep the original quota pairs in place even when normalization places
+    // Argon beside the other Gemini windows. This order belongs to the view.
+    const groupOrder = ['Gemini', 'Claude/GPT', 'Gemini 4 Argon'];
+    const rank = ({ label }) => {
+      const index = groupOrder.indexOf(label);
+      return index < 0 ? groupOrder.length : index;
+    };
+    return [...groups].map(([label, windows]) => ({ label, windows }))
+      .sort((a, b) => rank(a) - rank(b));
   }
 
   function formatLimitAmount(value) {
@@ -495,8 +503,10 @@
     info.setAttribute(
       'aria-label',
       ariaLabel || entries
-        .filter(Array.isArray)
-        .map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`)
+        .map((entry) => Array.isArray(entry)
+          ? `${entry[0]}: ${entry.slice(1).filter(Boolean).join(' ')}`
+          : entry?.full)
+        .filter(Boolean)
         .join(', ')
     );
     const tooltip = detailTooltipNode(entries, columns);
@@ -633,18 +643,16 @@
     const balance = provider?.balance || null;
     const usage = provider?.usageSummary || null;
     const currency = balance?.currency || 'USD';
-    const allTimeSpend = optionalFiniteNumber(balance?.allTimeSpend);
-    const monthSpend = optionalFiniteNumber(balance?.monthSpend);
     const entries = [];
     const total = optionalFiniteNumber(quotaWindow?.limit);
     const requestCount = optionalFiniteNumber(balance?.requestCount);
     const quotaGroup = String(balance?.quotaGroup || '').trim();
-    const expiresAt = balance?.expiresAt ? new Date(balance.expiresAt) : null;
     if (total !== null) entries.push([t('settings.thirdparty.totalQuota'), formatMoney(total, currency)]);
     if (requestCount !== null) {
       entries.push([t('settings.thirdparty.requests'), Math.max(0, Math.trunc(requestCount)).toLocaleString()]);
     }
     if (quotaGroup) entries.push([t('settings.thirdparty.group'), quotaGroup]);
+    const expiresAt = balance?.expiresAt ? new Date(balance.expiresAt) : null;
     if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
       entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
     }
@@ -672,20 +680,35 @@
       const standardCost = optionalFiniteNumber(usage.standardCost);
       if (standardCost !== null) entries.push([t('settings.thirdparty.standardCost'), formatMoney(standardCost, currency)]);
     }
-    if (allTimeSpend === null && monthSpend === null && entries.length === 0) return null;
+    // Only New API account dashboards add period details. Other adapters keep
+    // their existing Month/All time summary and account-only tooltip.
+    const isNewApiAccount = provider?.adapterId === 'newapi-account';
+    const spendValues = providerSpendEntries(balance)
+      .filter(([label]) => isNewApiAccount || label === 'Month' || label === 'All time');
+    const spendRows = spendValues.map(([label, value]) => [label, formatMoney(value, currency)]);
+    if (spendRows.length === 0 && entries.length === 0) return null;
     // Without a spend figure the row has nothing to summarize, so it retitles
     // itself and leans entirely on the tooltip.
-    const summary = [
-      ...(monthSpend !== null ? [`Month ${formatMoney(monthSpend, currency)}`] : []),
-      ...(allTimeSpend !== null ? [`All time ${formatMoney(allTimeSpend, currency)}`] : [])
-    ].join(' · ');
+    const preferredSpend = isNewApiAccount
+      ? spendValues.filter(([label]) => label === 'Today' || label === 'Month')
+      : spendValues;
+    const summaryValues = preferredSpend.length > 0 ? preferredSpend : spendValues.slice(0, 2);
+    const summary = summaryValues
+      .map(([label, value]) => `${label} ${formatMoney(value, currency)}`)
+      .join(' · ');
+    const periodDetails = isNewApiAccount && spendRows.length > summaryValues.length ? spendRows : [];
+    const detailEntries = [
+      ...entries,
+      ...(entries.length > 0 && periodDetails.length > 0 ? [{ full: '', separated: true }] : []),
+      ...periodDetails
+    ];
     const node = limitNoteRowNode({
       label: summary ? 'Spend' : 'Details',
       summary,
-      detailEntries: entries,
+      detailEntries: detailEntries.length > 0 ? detailEntries : null,
       ariaParts: [
-        ...(summary ? [summary] : []),
-        ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`)
+        ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`),
+        ...spendRows.map(([entryLabel, value]) => `${entryLabel} ${value}`)
       ]
     });
     return tagUsageItem(node, 'spend', summary ? 'Spend' : 'Details');
@@ -763,6 +786,34 @@
   function thirdPartyQuotaWindow(provider) {
     const windows = Array.isArray(provider?.windows) ? provider.windows : [];
     return windows.find((window) => window?.metric === 'credits') || null;
+  }
+
+  function workbuddyCombinedProvider(providers) {
+    if (settings()?.workbuddyQuotaTotalEnabled !== true) return null;
+    const windows = presentationApi.workbuddyCreditTotals(providers);
+    if (!windows || windows.length !== 1 || windows[0].currency !== 'CREDITS') return null;
+    const first = providers[0];
+    const remaining = windows[0].remaining;
+    return {
+      ...first, accountKey: '', accountName: '', accountEmail: '', accountLabel: '',
+      accountGroup: true, groupAccounts: providers,
+      updatedAt: providers.map((provider) => provider.updatedAt || '').sort()[0],
+      windows,
+      balance: { amount: remaining, currency: 'CREDITS' }
+    };
+  }
+
+  function collapseWorkbuddyAccounts(providers) {
+    const accounts = providers.filter((provider) => provider.provider === 'workbuddy');
+    const combined = workbuddyCombinedProvider(accounts);
+    if (!combined) return providers;
+    let inserted = false;
+    return providers.flatMap((provider) => {
+      if (provider.provider !== 'workbuddy') return [provider];
+      if (inserted) return [];
+      inserted = true;
+      return [combined];
+    });
   }
 
   function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
@@ -980,7 +1031,9 @@
         }
       } else {
         const weeklyWindows = windowsForKind(provider, 'weekly');
-        const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
+        const visibleWindows = weeklyWindows.length > 0
+          ? weeklyWindows.filter(presentationApi.antigravityQuotaWindowVisible)
+          : [null];
         for (const quotaWindow of visibleWindows) {
           const node = limitWindowNode(providerWindowLabel(provider, quotaWindow, 'Weekly'), quotaWindow, color, 0.78);
           node.classList.add('limit-window-wide');
@@ -1543,6 +1596,10 @@
         windows.append(node);
       }
     } else if (provider.provider === 'ollama') {
+      const spent = spendWindow(provider);
+      const visibleSpend = options.showAllUsageItems || !usageItems.isLimitWindowHidden(settings()?.limitProviderHiddenItems, 'ollama', spent)
+        ? spent : null;
+      let hasWallet = false;
       const session = windowForKind(provider, 'session');
       const weekly = windowForKind(provider, 'weekly');
       if (session) {
@@ -1551,6 +1608,46 @@
         windows.append(node);
       }
       if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
+      for (const monthly of windowsForKind(provider, 'billing').filter((window) => !window.metric)) {
+        const node = limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.95);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
+      // Included credits have a real denominator. Wallet balances do not;
+      // their showMeter:false survives both local and synced presentation.
+      for (const creditsWindow of (provider.windows || []).filter((window) => isCreditsWindow(window) && window.showMeter !== false)) {
+        const amount = creditsAmount(provider, creditsWindow);
+        if (amount === null) continue;
+        const node = limitWindowNode(
+          providerWindowLabel(provider, creditsWindow, 'Balance'),
+          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow, { inferBalance: creditsWindow.showMeter !== false }) },
+          color,
+          0.95,
+          formatMoney(amount, creditsCurrency(provider, creditsWindow))
+        );
+        node.classList.add('limit-window-wide');
+        if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) node.classList.add('limit-window-no-reset');
+        windows.append(node);
+      }
+      for (const wallet of (provider.windows || []).filter((window) => isCreditsWindow(window) && window.showMeter === false)) {
+        if (!options.showAllUsageItems && usageItems.isLimitWindowHidden(settings()?.limitProviderHiddenItems, 'ollama', wallet)) continue;
+        const amount = creditsAmount(provider, wallet);
+        if (amount === null) continue;
+        const details = [];
+        if (visibleSpend && Number.isFinite(visibleSpend.used)) details.push([visibleSpend.label || 'Monthly credits used', formatMoney(visibleSpend.used, visibleSpend.currency)]);
+        if (wallet.resetDescription) details.push({ full: wallet.resetDescription });
+        const label = providerWindowLabel(provider, wallet, 'Credit balance');
+        const value = formatMoney(amount, creditsCurrency(provider, wallet));
+        const node = limitNoteRowNode({ label, summary: value, detailEntries: details.length ? details : null, ariaParts: [value] });
+        tagUsageItem(node, 'credits', label);
+        windows.append(node);
+        hasWallet = true;
+      }
+      if (!hasWallet && spent && Number.isFinite(spent.used)) {
+        const node = limitWindowNode(spent.label || 'Monthly credits used', { ...spent, showMeter: false }, color, 0.68, formatMoney(spent.used, spent.currency));
+        node.classList.add('limit-window-wide', 'limit-window-no-reset');
+        windows.append(node);
+      }
     } else if (provider.provider === 'claude') {
       // Claude usually shows session + one all-models weekly, but can carry a second
       // model-scoped weekly (the temporary "Fable only" promo cap). Render every
@@ -1588,6 +1685,17 @@
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
+    } else if (provider.provider === 'notion') {
+      // Both included allowances are percentage quotas. Monthly is a billing
+      // window, which the default session/weekly branch would omit.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => window.kind === 'session' || window.kind === 'billing')
+        .map((window) => limitWindowNode(
+          providerWindowLabel(provider, window), window, color,
+          window.kind === 'session' ? 0.95 : 0.68
+        ));
+      if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+      windows.append(...quotaNodes);
     } else if (provider.provider === 'cline') {
       // ClinePass measures three quota windows, and the account's credit arrives as
       // a fourth "billing" window — told apart by its metric rather than by its
@@ -1618,12 +1726,26 @@
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to
-      // the real one. (Grok is handled above; this branch covers minimax's
-      // session + weekly pair and any future session/weekly provider.)
+      // the real one. Credits windows carry money rather than quota percentages;
+      // their display meter is derived without changing the provider reading.
       const session = windowForKind(provider, 'session');
       const weekly = windowForKind(provider, 'weekly');
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
       if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
+        const amount = creditsAmount(provider, creditsWindow);
+        if (amount === null) continue;
+        const balanceNode = limitWindowNode(
+          providerWindowLabel(provider, creditsWindow, 'Balance'),
+          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) },
+          color,
+          0.95,
+          formatMoney(amount, creditsCurrency(provider, creditsWindow))
+        );
+        balanceNode.classList.add('limit-window-wide');
+        if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
+        windows.append(balanceNode);
+      }
     }
     if (!options.showAllUsageItems) {
       hideUsageItems(windows, usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, provider?.provider));
@@ -1683,6 +1805,9 @@
     };
     for (const record of records || []) {
       if (record) collect(renderProviderWindows(record, color, { showAllUsageItems: true }));
+      // Ollama spending stays independently selectable when folded into the wallet tooltip.
+      const spent = record?.provider === 'ollama' ? spendWindow(record) : null;
+      if (spent && Number.isFinite(spent.used)) items.set('spend', spent.label || 'Monthly credits used');
     }
     return [...items].map(([id, label]) => ({ id, label }));
   }
@@ -1717,6 +1842,13 @@
     return 'Error';
   }
 
+  function limitProviderFailureLabel(provider) {
+    if (provider?.provider === 'workbuddy' && provider.actionRequired === 'appSessionEncrypted') {
+      return t('settings.limits.status.appSessionEncrypted');
+    }
+    return limitStatusLabel(provider?.status);
+  }
+
   function limitProviderMeta(provider, provenance = null) {
     const sourceDevice = presentationApi.limitProviderMainDeviceLabel(provenance, { showSource: Boolean(settings()?.showLimitSource) });
     // The freshness wording is shared with the edge dock so a row cannot read as
@@ -1736,11 +1868,11 @@
       if (sourceDevice) parts.push(sourceDevice);
       return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
     }
-    return limitStatusLabel(provider?.status);
+    return limitProviderFailureLabel(provider);
   }
 
   function limitProviderPlan(provider) {
-    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status);
+    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitProviderFailureLabel(provider);
     const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
     if (mimoProduct) {
       const plan = String(provider?.planLabel || '').trim();
@@ -2057,7 +2189,7 @@
 
     head.append(title, value);
     item.append(openButton, head, detail);
-    openButton.title = t('limits.codexResetForecast.openSource');
+    openButton.setAttribute('aria-label', t('limits.codexResetForecast.openSource'));
     openButton.setAttribute('aria-label', [label.textContent, value.textContent, detail.textContent, t('limits.codexResetForecast.openSource')].filter(Boolean).join(', '));
     return item;
   }
@@ -2119,6 +2251,9 @@
     }),
     claude: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
+    }),
+    workbuddy: (provider, color, { grouped }) => ({
+      options: grouped ? { showIcon: false } : {}
     }),
     mimo: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
@@ -2405,6 +2540,17 @@
     const { row, list: accountList } = renderLimitProviderGroupFrame(
       providerId, label, providers, color, { count: providers.length, markId }
     );
+    if (providerId === 'workbuddy') {
+      // Dock visibility/reporting filters may omit a failed or unlimited
+      // sibling. A total is eligible only when this group covers the complete
+      // known identity pool supplied beside the drawn rows.
+      const known = subscriptionAccounts().filter((account) => account?.provider === 'workbuddy'
+        && !presentationApi.isWorkbuddyPlaceholder(account));
+      const drawnKeys = new Set(providers.map((account) => account.accountKey));
+      const complete = known.every((account) => account.accountKey && drawnKeys.has(account.accountKey));
+      const combined = complete ? workbuddyCombinedProvider(providers) : null;
+      if (combined) row.insertBefore(renderProviderWindows(combined, color), accountList);
+    }
     providers.forEach((provider, index) => {
       const account = limitAccountRowPolicy(providerId, provider, color, { grouped: true, sharedFamily });
       // The row's own title is also the name the switch control offers, so the
@@ -2697,6 +2843,8 @@
     if (rows.length === 0) return null;
     const card = document.createElement('span');
     card.className = 'limit-detail-tooltip subscription-tooltip';
+    card.setAttribute('role', 'tooltip');
+    const notes = new Set();
     for (const row of rows) {
       if (row.separator) {
         const rule = document.createElement('span');
@@ -2713,13 +2861,11 @@
       const value = document.createElement('span');
       if (row.warn) value.className = 'subscription-tooltip-warn';
       value.textContent = row.value;
-      if (row.title) {
-        label.title = row.title;
-        value.title = row.title;
-      }
+      if (row.title) notes.add(row.title);
       line.append(label, value);
       card.append(line);
     }
+    if (notes.size) card.setAttribute('aria-description', [...notes].join(' '));
     return card;
   }
 
@@ -2764,6 +2910,8 @@
     wrap.className = 'limit-plan limit-detail-tooltip-wrap subscription-plan-wrap';
     wrap.classList.toggle('has-opened', tooltipHost.hasOpened());
     wrap.tabIndex = 0;
+    const description = card.getAttribute('aria-description');
+    if (description) wrap.setAttribute('aria-description', description);
     const trigger = document.createElement('span');
     trigger.className = 'subscription-plan-trigger';
     trigger.textContent = plan.textContent;
@@ -2808,6 +2956,8 @@
     renderProviderWindows,
     limitProviderUsageItems,
     thirdPartyQuotaWindow,
+    workbuddyCombinedProvider,
+    collapseWorkbuddyAccounts,
     thirdPartySpendNode,
     windowForKind,
     windowsForKind

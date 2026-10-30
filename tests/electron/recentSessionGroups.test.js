@@ -107,7 +107,7 @@ test('global reviews stay excluded and Grok bots keep their global group outside
   stats.periods.month.sessions['codex:review'] = session('codex', 'review', {
     parentSessionId: 'same', sessionKind: 'background-review' });
   stats.periods.month.sessions['cursor:bot1'] = session('cursor', 'bot1', {
-    parentClient: 'codex', parentSessionId: 'same', models: { 'grok-bot-automation': 100 } });
+    parentClient: 'codex', parentSessionId: 'same', models: { 'grok-bot-automation': 100 }, turnEnded: false });
   stats.periods.month.sessions['cursor:bot2'] = session('cursor', 'bot2', {
     parentClient: 'codex', parentSessionId: 'same', models: { 'grok-bot-automation': 100 } });
   const rows = presentation.recentSessionRows(stats, 1, { includeRunningBeyondCap: true });
@@ -166,12 +166,12 @@ function renderStatusGroup(group, metric = 'used') {
   const contextSource = app.slice(app.indexOf('function homeSessionContext('), app.indexOf('function stopHomeSessionRepaint('));
   const homeSource = app.slice(app.indexOf('function renderHomeSessionModule('), app.indexOf('function renderHomeDeviceModule()'));
   const tooltip = { setDetailTooltip() {} };
-  const home = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
+  const home = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
     'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
     'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView',
     `${shellSource}; ${contextSource}; ${homeSource}; return renderHomeSessionModule;`)(
     document, { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
-    state, { homePanel: { querySelector: () => null } }, () => false,
+    state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
     () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip
   )([group]);
   const dockContext = dock.slice(dock.indexOf('function contextNode('), dock.indexOf('// Last activity seen'));
@@ -285,16 +285,16 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     const state = { stats, period: 'today', breakdown: 'home', openSession: null, settings: { periodMonthMode: periodMode } };
     const routes = [];
     const readingTargets = [];
-    const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'sessionTooltipShouldHoldRender',
+    const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
       'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
       'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeSessionContext',
-      'sessionPresentationOptions', `${shellSource}; ${source}; return renderHomeSessionModule;`)(
+      'sessionPresentationOptions', 'homeModulePreferencesApi', `${shellSource}; ${source}; return renderHomeSessionModule;`)(
       { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) },
       { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
-      state, { homePanel: { querySelector: () => null } }, () => false,
+      state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
       (view, options) => { routes.push([view, options]); state.breakdown = view; }, {}, translate,
       () => {}, () => '', {}, () => '', [], node => readingTargets.push(node), String, () => 'just now',
-      rowApi, { setDetailTooltip() {} }, () => assert.fail('group context must be absent'), () => opts
+      rowApi, { setDetailTooltip() {} }, () => assert.fail('group context must be absent'), () => opts, require('../../src/electron/renderer/homeModulePreferences')
     );
     const module = renderHomeSessionModule();
     const row = module.children[1].children[0];
@@ -305,7 +305,8 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     assert.equal(title.children.length, 0, 'membership never consumes title width');
     const description = meta.children[0];
     const countIndex = description.children.findIndex(node => node.className === 'home-session-member-count');
-    const modelIndex = description.children.findIndex(node => node.textContent === rowApi.sessionModelLabel(group));
+    const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
+      && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
     assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
     assert.equal(description.children[countIndex].textContent, '2 subagents');
     assert.equal(description.children.at(-1).textContent, ' · just now');
@@ -332,11 +333,11 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   const resized = [];
   const build = Function('document', 'presentation', 'sessionKey', 'el', 't', 'stateMark', 'overflowText',
     'clientLabel', 'sessionRowsApi', 'relativeAgo', 'limitWindowsView', 'contextNode', 'sessionLive',
-    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', `${source}; return sessionsContainer;`)(
-    { createTextNode: text => new Node('text', '', text) }, presentation, row => row.key,
+    'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', 'appearance', `${source}; return sessionsContainer;`)(
+    { createTextNode: text => new Node('text', '', text), createElement: tag => new Node(tag) }, presentation, row => row.key,
     (tag, className, text) => new Node(tag, className, text), translate, () => new Node('span'), { bind() {} },
     value => value, rowApi, () => '', { setDetailTooltip() {} }, () => null, sessionLive, String,
-    { payload }, 'bubble', value => resized.push(value), () => new Node('span')
+    { payload }, 'bubble', value => resized.push(value), () => new Node('span'), () => ({})
   );
   const list = build([group]);
   const family = list.children.at(-1).children[0];
@@ -352,7 +353,8 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   assert.equal(titleLine.children.some(node => node.className === 'edge-dock-session-member-count'), false);
   assert.equal(description.className, 'edge-dock-session-description');
   const countIndex = description.children.findIndex(node => node.className === 'edge-dock-session-member-count');
-  const modelIndex = description.children.findIndex(node => node.textContent === rowApi.sessionModelLabel(group));
+  const modelIndex = description.children.findIndex(node => node.className === 'session-model-metadata'
+    && node.children[0]?.textContent === rowApi.sessionModelLabel(group));
   assert.ok(modelIndex >= 0 && countIndex > modelIndex, 'models precede membership like Sessions');
   assert.equal(description.children[countIndex].textContent, '2 subagents');
   assert.equal(family.children[1].children.at(-1).children.length, 3, 'members retain individual navigable expansion rows');
@@ -411,8 +413,8 @@ test('resumed archived child preserves its accounting parent unless native metad
 test('Home session navigation uses the incumbent module action without a second heading or row action', () => {
   const source = app.slice(app.indexOf('function homeModuleShell('), app.indexOf('function homeLimitRows('));
   const routes = [];
-  const shell = Function('document', 'renderBreakdownChange', 'VIEW_ICON_CLASSES', `${source}; return homeModuleShell;`)(
-    { createElement: tag => new Node(tag) }, (...args) => routes.push(args), {}
+  const shell = Function('document', 'els', 'pluginContent', 'renderBreakdownChange', 'VIEW_ICON_CLASSES', `${source}; return homeModuleShell;`)(
+    { createElement: tag => new Node(tag) }, { homePanel: { children: [] } }, null, (...args) => routes.push(args), {}
   );
   const { module } = shell('session', 'Sessions', 'session');
   const head = module.children[0];

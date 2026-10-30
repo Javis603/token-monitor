@@ -20,7 +20,9 @@
  */
 
 const fs = require('node:fs');
+const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./transcript');
 const { normalizeSessionContext } = require('../../sessionContext');
+const { normalizeReasoningEffort } = require('../../sessionLive');
 const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 
 const TAIL_READ_BUDGETS = [256 * 1024, 1024 * 1024];
@@ -39,12 +41,21 @@ function contextFromInfo(info) {
 }
 
 function applyLine(state, line, position, contextStart, cacheStart) {
+  // An unreadable new configuration cannot leave the previous turn's badge.
+  // Only inspect the bounded record prefix; never decode large tool output.
+  const configuration = /"type"\s*:\s*"turn_context"/.test(line.subarray(0, 512).toString('utf8'));
+  if (configuration && position >= contextStart) state.reasoningEffort = null;
   // Metadata records are small; never decode arbitrarily large tool output.
   if (!line.length || line.length > MAX_METADATA_LINE_BYTES) return;
   let entry;
   try { entry = JSON.parse(line.toString('utf8')); } catch (_) { return; }
   if (!entry || typeof entry !== 'object') return;
   const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : entry;
+  if (entry.type === 'turn_context' && position >= contextStart) {
+    state.reasoningEffort = normalizeReasoningEffort(
+      Object.prototype.hasOwnProperty.call(payload, 'effort') ? payload.effort : payload.reasoning_effort
+    );
+  }
   if (payload.type === 'token_count' && payload.info && position >= contextStart) {
     const context = contextFromInfo(payload.info);
     if (context) state.context = context;
@@ -53,6 +64,7 @@ function applyLine(state, line, position, contextStart, cacheStart) {
     state.turnEnded = true;
     state.pendingInputCalls.clear();
   } else if (payload.type === 'task_started') {
+    state.reasoningEffort = null;
     state.turnEnded = false;
     state.pendingInputCalls.clear();
   }
@@ -81,6 +93,7 @@ function consumeBytes(state, chunk, start, contextStart, cacheStart) {
   }
   const remainder = bytes.subarray(lineStart);
   if (state.droppingLine || remainder.length > MAX_METADATA_LINE_BYTES) {
+    if (!state.droppingLine) applyLine(state, remainder, base + lineStart, contextStart, cacheStart);
     state.trailing = Buffer.alloc(0);
     state.droppingLine = true;
   } else state.trailing = Buffer.from(remainder);
@@ -98,9 +111,25 @@ function readCodexSessionState(filePath, deps = {}) {
     const identity = `${stat.dev}:${stat.ino}`;
     const cached = cache.get(filePath);
     if (cached?.identity === identity && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached;
-    const appendOnly = cached?.identity === identity && stat.size > cached.size;
+    const compressed = isCompressedCodexTranscript(filePath);
+    const appendOnly = !compressed && cached?.identity === identity && stat.size > cached.size;
     const state = appendOnly ? { ...cached, pendingInputCalls: new Set(cached.pendingInputCalls), promptCacheState: { ...cached.promptCacheState } }
       : { context: null, turnEnded: undefined, pendingInputCalls: new Set(), promptCacheState: createPromptCacheState(), trailing: Buffer.alloc(0), droppingLine: false };
+    if (compressed) {
+      const bytes = readCompressedCodexTranscript(filePath, deps);
+      const start = Math.max(0, bytes.length - TURN_READ_MAX_BYTES);
+      const contextStart = Math.max(0, bytes.length - TAIL_READ_BUDGETS[1]);
+      state.droppingLine = start > 0;
+      for (let position = start; position < bytes.length; position += TAIL_READ_BUDGETS[0]) {
+        consumeBytes(state, bytes.subarray(position, position + TAIL_READ_BUDGETS[0]), position, contextStart, contextStart);
+      }
+      if (!state.droppingLine) applyLine(state, state.trailing, bytes.length - state.trailing.length, contextStart, contextStart);
+      Object.assign(state, { identity, size: stat.size, mtimeMs: stat.mtimeMs,
+        waitingForInput: state.turnEnded !== true && state.pendingInputCalls.size > 0 });
+      if (cache.size >= 512 && !cache.has(filePath)) cache.delete(cache.keys().next().value);
+      cache.set(filePath, state);
+      return state;
+    }
     fd = fsApi.openSync(filePath, 'r');
     let start;
     const chunks = [];

@@ -302,10 +302,10 @@ test('Home Antigravity preserves lone-window labels and omits missing or hidden 
 
 test('Home shows the plan on the account heading in both modes and omits unknown plans', () => {
   for (const homeLimitDisplayMode of ['text', 'bars']) {
-    const known = renderHomeWindow({ remainingPercent: 88 }, { homeLimitDisplayMode }, 'Pro More');
+    const known = renderHomeWindow({ remainingPercent: 88 }, { homeLimitDisplayMode }, 'Pro 200');
     assert.equal(known.accountHead.children[2].className, 'home-limit-plan');
-    assert.equal(known.accountHead.children[2].textContent, 'Pro More');
-    assert.equal(known.accountHead.children[2].title, 'Pro More');
+    assert.equal(known.accountHead.children[2].textContent, 'Pro 200');
+    assert.equal(known.accountHead.children[2].attributes['aria-label'], 'Pro 200');
     const unknown = renderHomeWindow({ remainingPercent: 88 }, { homeLimitDisplayMode });
     assert.equal(unknown.accountHead.children.length, 2);
   }
@@ -488,4 +488,19 @@ test('Home account display count setting is translated in every locale', () => {
   for (const [locale, messages] of Object.entries(MESSAGES)) {
     assert.ok(messages['settings.home.limitAccountCount'], `${locale} should translate the Home account count setting`);
   }
+});
+
+
+test('Home displays separate WorkBuddy accounts unless quota totals are explicitly enabled', () => {
+  const providers = ['a', 'b', 'c'].map((accountKey) => ({
+    provider: 'workbuddy', accountKey, accountName: accountKey, status: 'ok', region: 'cn',
+    windows: [{ kind: 'billing', label: 'Credits', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }]
+  }));
+  assert.equal(resolveHomeRows(providers).length, 3);
+  assert.equal(resolveHomeRows(providers, { workbuddyQuotaTotalEnabled: false }).length, 3);
+  const combined = resolveHomeRows(providers, { workbuddyQuotaTotalEnabled: true });
+  assert.equal(combined.length, 1);
+  assert.equal(combined[0].windows[0].remaining, 240);
+  const partial = [providers[0], providers[1], { ...providers[2], status: 'unavailable', windows: [] }];
+  assert.equal(resolveHomeRows(partial, { workbuddyQuotaTotalEnabled: true }).length, 2);
 });

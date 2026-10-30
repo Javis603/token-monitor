@@ -1,8 +1,8 @@
 'use strict';
 
-// Renderer for the three edge dock surfaces. All placement and hover decisions
-// live in the main process (edgeDock.js); this page only paints what it is
-// pushed and reports clicks, drags and its own content height.
+// Shared renderer for EdgeDock and the macOS top entry. Their independent
+// main-process controllers own placement and hover decisions; this page paints
+// projected data and reports input and measured content size.
 
 const bridge = window.tokenMonitorEdgeDock;
 const presentation = window.TokenMonitorEdgeDockPresentation;
@@ -69,6 +69,10 @@ const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
 const surface = query.get('surface') || 'rail';
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+const tokenNumberAnimationApi = window.TokenMonitorTokenNumberAnimation;
+const railNumberRollApi = window.TokenMonitorEdgeDockRailNumberRoll;
+const railNumberRoll = railNumberRollApi.create({ animation: tokenNumberAnimationApi, selector: '[data-roll-key]:not([data-plugin-roll])', mode: () => tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation) });
+const markRoll = railNumberRollApi.mark;
 
 const state = {
   payload: null,
@@ -95,6 +99,91 @@ function t(key, params) {
   return i18n.translate(state.locale, key, params);
 }
 
+// Plugin views drawn on this surface. Each dock window keeps its own copy of
+// the resolved views it shows and reports which are on screen; main pushes
+// updates on a channel separate from cell renders, so a plugin's live value
+// repaints only its own node.
+const pluginSurface = surface === 'notch' ? 'notch' : 'edgeDock';
+const pluginViewsApi = window.TokenMonitorPluginViews;
+const pluginHost = pluginViewsApi && bridge.onPluginViews ? pluginViewsApi.createPluginViewHost({
+  document,
+  window,
+  t,
+  services: { app: bridge, native: { get quota() { return limitWindowsView; } } },
+  getContext: () => ({ nativeData: state.payload, surfaceVariant: surface }),
+  onLoaded: () => { if (surface === 'notch') notchRenderer?.paintSummaryPlugins(); },
+  isSurfaceActive: (_surface, container) => !container.closest('.notch-page')?.inert,
+  onDemand: (_surface, refs) => bridge.setPluginDemand(refs),
+  motionAllowed: () => !prefersReducedMotion(),
+  motionMode: () => tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation)
+}) : null;
+let contentSelections = {};
+const pluginContent = pluginHost ? window.TokenMonitorPluginContent.create({ document,
+  host: { mount: (container, view, context) => pluginHost.mount(container, view.ref, pluginSurface, context), unmount: container => pluginHost.unmount(container) },
+  getViews: () => pluginHost.descriptors(pluginSurface), selection: target => contentSelections[target]
+}) : null;
+// Settings previews have no preload/plugin host; keep native ready/render wiring
+// independent of trusted plugin APIs.
+if (pluginHost) void window.tokenMonitorTrustedPlugins.contentSelections().then(value => { contentSelections = value; if (state.payload) render(state.payload); });
+let pluginContentsKey = '';
+function updatePluginViews(payload) {
+  if (payload?.surface !== pluginSurface) return;
+  pluginHost?.update(payload);
+  if (surface === 'notch') notchRenderer?.paintSummaryPlugins();
+  if (surface === 'rail') refreshPluginCellLabels(railNode);
+  const key = JSON.stringify(Object.values(payload.views || {}).map(view => [view.ref, view.revision, view.targets, view.mode, view.selector, view.contentOrder]));
+  void window.tokenMonitorTrustedPlugins.contentSelections().then(value => {
+    const next = key + JSON.stringify(value);
+    if (pluginContentsKey === next) return;
+    pluginContentsKey = next; contentSelections = value;
+    if (surface === 'notch') notchRenderer?.pluginViewsChanged();
+    else if (state.payload) render(state.payload);
+  });
+}
+if (pluginHost) {
+  bridge.onPluginViews(updatePluginViews);
+  void window.tokenMonitorTrustedPlugins.views(pluginSurface).then(updatePluginViews);
+}
+
+function pluginCellLabel(ref) {
+  const view = pluginHost?.state('edgeDock', ref);
+  return view?.title || ref;
+}
+
+// Plugin values repaint in place between rail renders; keep the spoken label
+// in step with the painted value.
+function refreshPluginCellLabels(rail) {
+  for (const node of rail?.querySelectorAll('.edge-dock-cell-plugin[data-plugin-ref]') || []) {
+    node.setAttribute('aria-label', pluginCellLabel(node.dataset.pluginRef));
+  }
+}
+
+function pluginCellNode(cell, retained) {
+  const node = retained || el('div', 'edge-dock-cell edge-dock-cell-plugin');
+  node.dataset.pluginRef = cell.ref;
+  const mount = retained?.firstElementChild || el('div', 'edge-dock-plugin-cell');
+  if (!retained) node.append(mount);
+  pluginHost?.mount(mount, cell.ref, 'edgeDock', { variant: 'compact' });
+  node.setAttribute('aria-label', pluginCellLabel(cell.ref));
+  return node;
+}
+
+function pluginCard(cell) {
+  const card = el('section', 'edge-dock-card edge-dock-card-plugin');
+  card.dataset.pluginRef = cell.ref;
+  const head = el('header', 'edge-dock-card-head');
+  const view = pluginHost?.state('edgeDock', cell.ref);
+  const identity = el('div', 'edge-dock-plugin-identity');
+  identity.append(el('span', 'edge-dock-stat-caption', view?.title || cell.ref));
+  if (view?.pluginName && view.pluginName !== view.title) identity.append(el('span', 'edge-dock-plugin-owner', view.pluginName));
+  const headerActions = el('div', 'edge-dock-plugin-header-actions');
+  head.append(identity, headerActions);
+  const body = el('div', 'edge-dock-plugin-card');
+  card.append(head, body);
+  pluginHost?.mount(body, cell.ref, 'edgeDock', { variant: 'full', headerActions });
+  return card;
+}
+
 const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
   document,
   requestAnimationFrame,
@@ -102,6 +191,7 @@ const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
   switchAccount: (accountId) => bridge.switchCodexAccount(accountId),
   requestRender: () => {
     if (surface === 'bubble' && state.payload?.cell) renderBubble(state.payload);
+    if (surface === 'notch' && state.payload) notchRenderer.render(state.payload);
   },
   onSwitchFailure: (message) => {
     console.log(`[edge-dock] codex account switch failed: ${message}`);
@@ -129,7 +219,7 @@ function isMacLegacy(payload) {
 
 function applyAppearance(payload) {
   const appearance = payload?.appearance || {};
-  const key = JSON.stringify([appearance, payload?.platform, payload?.glass, payload?.liquidGlass]);
+  const key = JSON.stringify([appearance, payload?.platform, payload?.glass, payload?.liquidGlass, payload?.style]);
   if (key === state.appearanceKey) return;
   state.appearanceKey = key;
 
@@ -158,6 +248,7 @@ function applyAppearance(payload) {
   const reduceMotion = motionPreferenceApi.shouldReduceMotion(appearance.reduceMotion, reducedMotionMedia?.matches);
   docEl.classList.toggle('edge-dock-reduced-motion', reduceMotion);
   if (reduceMotion) settleDockMotions();
+  pluginHost?.refreshMotion();
 
   state.locale = i18n.resolveLocale(appearance.language, navigator.languages);
   docEl.lang = state.locale;
@@ -361,91 +452,95 @@ function limitTooltipShouldHoldRender() {
   return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
 
-const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
-  document,
-  t,
-  settings: appearance,
-  currentLocale: () => state.locale,
-  presentation: limitPresentationApi,
-  // Which device a row's reading came from — "· imac-m1" beside the provider's
-  // own source label. The card has no settings and no device list, so both
-  // facts ride the cell it is rendering, the same way its account set does.
-  provenanceContext: () => state.payload?.cell?.provenanceContext || {},
-  motion: limitResetMotionApi,
-  tooltip: {
-    hasOpened: () => limitTooltip.opened,
-    markOpened() {
-      limitTooltip.opened = true;
-      limitTooltip.active = true;
+function createCardWindowsView(cell = () => state.payload?.cell, forecast = () => cardForecast) {
+  return limitWindowsViewApi.createLimitWindowsView({
+    document,
+    t,
+    settings: appearance,
+    currentLocale: () => state.locale,
+    presentation: limitPresentationApi,
+    // Which device a row's reading came from — "· imac-m1" beside the provider's
+    // own source label. The card has no settings and no device list, so both
+    // facts ride the cell it is rendering, the same way its account set does.
+    provenanceContext: () => cell()?.provenanceContext || {},
+    motion: limitResetMotionApi,
+    tooltip: {
+      hasOpened: () => limitTooltip.opened,
+      markOpened() {
+        limitTooltip.opened = true;
+        limitTooltip.active = true;
+      },
+      release() {
+        requestAnimationFrame(() => {
+          if (limitTooltipShouldHoldRender()) return;
+          limitTooltip.active = false;
+          if (!limitTooltip.pending) return;
+          limitTooltip.pending = false;
+          if (surface === 'notch' && state.payload) notchRenderer.render(state.payload);
+          else if (state.payload?.cell) renderBubble(state.payload);
+        });
+      }
     },
-    release() {
-      requestAnimationFrame(() => {
-        if (limitTooltipShouldHoldRender()) return;
-        limitTooltip.active = false;
-        if (!limitTooltip.pending) return;
-        limitTooltip.pending = false;
-        if (state.payload?.cell) renderBubble(state.payload);
-      });
-    }
-  },
-  formatCompact: formatTokens,
-  compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
-    compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale),
-    state.locale
-  ),
-  formatMoney: balanceDisplay.formatMoney,
-  formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
-    value, currency, appearance().compactTokenUnits, state.locale
-  ),
-  formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
-  formatDuration: presentation.formatResetDuration,
-  formatLimitBoundary: limitPresentationApi.limitBoundaryText,
-  limitFillPercent,
-  limitModeSuffix,
-  optionalFiniteNumber,
-  colorWithAlpha,
-  applyBarScale,
-  creditsAmount: balanceDisplay.creditsAmount,
-  creditsCurrency: balanceDisplay.creditsCurrency,
-  creditsMeterPercent: balanceDisplay.creditsMeterPercent,
-  isCreditsWindow: balanceDisplay.isCreditsWindow,
-  spendWindow: balanceDisplay.spendWindow,
-  limitWindowLabel: limitWindowLabels.limitWindowLabel,
-  mimoAccountGroups,
-  mimoProductLabel,
-  limitWindowText: limitWindowTextApi.limitWindowText,
-  accountIdentity: accountIdentityApi,
-  accountControl: codexAccountControl,
-  codexAccounts,
-  // Probed off the stylesheet the dock borrows, so the card can never disagree
-  // with the page about which providers have a mark.
-  hasMark: hasMask,
-  formatAgo: relativeAgo,
-  // The renderer names the intent; the main process owns the URL.
-  openExternal: () => bridge.openResetForecastSource?.(),
-  // The subscription records the widget holds, pushed with the appearance. The
-  // card's plan cell decorates itself from them exactly as the page's does —
-  // same rows, same wording — so a recorded subscription shows the same hover
-  // card here as it does there. What is not pushed is nothing: an empty list
-  // renders a plain plan label on both surfaces.
-  subscriptionApi: subscriptionDisplayApi,
-  subscriptionText: subscriptionTextApi,
-  currencyApi,
-  formatCost,
-  subscriptions: () => appearance().subscriptions,
-  // The row being decorated is one of this card's own accounts, and a record
-  // binds through the same list the page matches against — every account the
-  // provider has, never the rows this card happens to draw, or
-  // matchProviderAccount()'s sole-account fallback would bind a record to
-  // whichever row asked. The composer can hide an account from the card without
-  // it leaving the provider, so the cell carries that list beside its rows.
-  subscriptionAccounts: () => state.payload?.cell?.subscriptionAccounts || [],
-  // What this month's tokens would have cost, which the subscription card
-  // compares the plan's price against. It rides the cell because it changes with
-  // every stats push, while the appearance is only re-pushed on a settings edit.
-  monthClientCosts: () => state.payload?.cell?.monthClientCosts,
-  resetForecast: () => ({ busy: false, forecast: cardForecast })
-});
+    formatCompact: formatTokens,
+    compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
+      compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale),
+      state.locale
+    ),
+    formatMoney: balanceDisplay.formatMoney,
+    formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
+      value, currency, appearance().compactTokenUnits, state.locale
+    ),
+    formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
+    formatDuration: presentation.formatResetDuration,
+    formatLimitBoundary: limitPresentationApi.limitBoundaryText,
+    limitFillPercent,
+    limitModeSuffix,
+    optionalFiniteNumber,
+    colorWithAlpha,
+    applyBarScale,
+    creditsAmount: balanceDisplay.creditsAmount,
+    creditsCurrency: balanceDisplay.creditsCurrency,
+    creditsMeterPercent: balanceDisplay.creditsMeterPercent,
+    isCreditsWindow: balanceDisplay.isCreditsWindow,
+    spendWindow: balanceDisplay.spendWindow,
+    limitWindowLabel: limitWindowLabels.limitWindowLabel,
+    mimoAccountGroups,
+    mimoProductLabel,
+    limitWindowText: limitWindowTextApi.limitWindowText,
+    accountIdentity: accountIdentityApi,
+    accountControl: codexAccountControl,
+    codexAccounts,
+    // Probed off the stylesheet the dock borrows, so the card can never disagree
+    // with the page about which providers have a mark.
+    hasMark: hasMask,
+    formatAgo: relativeAgo,
+    // The renderer names the intent; the main process owns the URL.
+    openExternal: () => bridge.openResetForecastSource?.(),
+    // The subscription records the widget holds, pushed with the appearance. The
+    // card's plan cell decorates itself from them exactly as the page's does —
+    // same rows, same wording — so a recorded subscription shows the same hover
+    // card here as it does there. What is not pushed is nothing: an empty list
+    // renders a plain plan label on both surfaces.
+    subscriptionApi: subscriptionDisplayApi,
+    subscriptionText: subscriptionTextApi,
+    currencyApi,
+    formatCost,
+    subscriptions: () => appearance().subscriptions,
+    // The row being decorated is one of this card's own accounts, and a record
+    // binds through the same list the page matches against — every account the
+    // provider has, never the rows this card happens to draw, or
+    // matchProviderAccount()'s sole-account fallback would bind a record to
+    // whichever row asked. The composer can hide an account from the card without
+    // it leaving the provider, so the cell carries that list beside its rows.
+    subscriptionAccounts: () => cell()?.subscriptionAccounts || [],
+    // What this month's tokens would have cost, which the subscription card
+    // compares the plan's price against. It rides the cell because it changes with
+    // every stats push, while the appearance is only re-pushed on a settings edit.
+    monthClientCosts: () => cell()?.monthClientCosts,
+    resetForecast: () => ({ busy: false, forecast: forecast() })
+  });
+}
+const limitWindowsView = createCardWindowsView();
 
 // ---- Silhouette -------------------------------------------------------------
 
@@ -475,13 +570,34 @@ let refreshButton = null;
 let refreshBusy = false;
 let refreshResult = '';
 let refreshFeedbackTimer = null;
+let refreshVisit = 0;
+
+function ensureRefreshButton() {
+  if (!refreshButton) {
+    refreshButton = el('button', 'edge-dock-refresh');
+    refreshButton.type = 'button';
+    const icon = el('span', 'edge-dock-refresh-icon');
+    icon.setAttribute('aria-hidden', 'true');
+    refreshButton.append(icon);
+    refreshButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void refreshDockLimits();
+    });
+  }
+  paintRefreshButton();
+  return refreshButton;
+}
+
+function resetRefreshVisit() {
+  refreshVisit++; clearTimeout(refreshFeedbackTimer);
+  refreshBusy = false; refreshResult = '';
+}
 
 function paintRefreshButton() {
   if (!refreshButton) return;
   const key = refreshBusy ? 'refreshButton.refreshing'
     : refreshResult === 'success' ? 'refreshButton.refreshed'
       : refreshResult === 'error' ? 'refreshButton.failed' : 'edgeDock.refreshLimits';
-  refreshButton.title = t(key);
   refreshButton.setAttribute('aria-label', t(key));
   refreshButton.setAttribute('aria-busy', String(refreshBusy));
   refreshButton.disabled = refreshBusy || state.payload?.refreshable !== true;
@@ -489,23 +605,29 @@ function paintRefreshButton() {
 }
 
 async function refreshDockLimits() {
-  if (refreshBusy || state.payload?.peekMode !== 'refresh') return;
+  const allowed = surface === 'notch'
+    ? state.payload?.expanded === true && state.payload?.refreshEnabled === true
+    : state.payload?.peekMode === 'refresh';
+  if (refreshBusy || !allowed || state.payload?.refreshable !== true) return;
+  const visit = refreshVisit;
   clearTimeout(refreshFeedbackTimer);
   refreshBusy = true;
   refreshResult = '';
   paintRefreshButton();
   try {
     const result = await bridge.refreshLimits();
-    refreshResult = result?.ok === true ? 'success' : 'error';
+    if (visit === refreshVisit) refreshResult = result?.ok === true ? 'success' : 'error';
   } catch {
-    refreshResult = 'error';
+    if (visit === refreshVisit) refreshResult = 'error';
   } finally {
-    refreshBusy = false;
-    paintRefreshButton();
-    refreshFeedbackTimer = setTimeout(() => {
-      refreshResult = '';
+    if (visit === refreshVisit) {
+      refreshBusy = false;
       paintRefreshButton();
-    }, 1800);
+      refreshFeedbackTimer = setTimeout(() => {
+        refreshResult = '';
+        paintRefreshButton();
+      }, 1800);
+    }
   }
 }
 
@@ -522,24 +644,14 @@ function renderPeek(payload) {
     if (state.payload === payload) bridge.peekPainted?.(payload.peekMode || 'handle', payload.shape?.key);
   }));
   if (payload.peekMode === 'refresh') {
-    root.title = '';
+    root.setAttribute('aria-label', '');
     root.classList.remove('is-handle-hidden');
-    if (!refreshButton) {
-      refreshButton = el('button', 'edge-dock-refresh');
-      refreshButton.type = 'button';
-      const icon = el('span', 'edge-dock-refresh-icon');
-      icon.setAttribute('aria-hidden', 'true');
-      refreshButton.append(icon);
-      refreshButton.addEventListener('click', (event) => {
-        event.stopPropagation();
-        void refreshDockLimits();
-      });
-    }
+    ensureRefreshButton();
     if (contentLayer.firstChild !== refreshButton) contentLayer.replaceChildren(refreshButton);
     paintRefreshButton();
     return;
   }
-  root.title = t('settings.display.edgeDock');
+  root.setAttribute('aria-label', t('settings.display.edgeDock'));
   // The handle is the silhouette itself (updateShape), tinted and outlined as the
   // rail is; the refresh button is the only content this window carries.
   if (contentLayer.firstChild) contentLayer.replaceChildren();
@@ -564,6 +676,27 @@ if (surface === 'peek') {
   };
   document.addEventListener('mousemove', reportPointer);
   document.documentElement.addEventListener('mouseleave', reportPointer);
+}
+
+// The notch window passes the pointer through, with its moves forwarded, until
+// the main process sees the pointer on the shell. Moves are reported once a
+// frame so the shell takes input as the pointer arrives; presses and wheel
+// events only reach the page while it does, and the main process decides what
+// they mean from the cursor position.
+if (surface === 'notch') {
+  let pointerFrame = 0;
+  const reportPointer = () => {
+    if (pointerFrame) return;
+    pointerFrame = requestAnimationFrame(() => { pointerFrame = 0; bridge.pointer(); });
+  };
+  document.addEventListener('mousemove', reportPointer);
+  document.documentElement.addEventListener('mouseleave', () => bridge.pointer());
+  document.addEventListener('mousedown', (event) => { if (event.button === 0) bridge.press(); });
+  // Line-based deltas are rare on macOS; scale them to points like Chromium.
+  window.addEventListener('wheel', (event) => {
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+    bridge.wheel(event.deltaX * scale, event.deltaY * scale);
+  }, { passive: true });
 }
 
 // ---- Rail ----------------------------------------------------------------
@@ -655,7 +788,8 @@ function providerCellNode(cell) {
   const color = providerColor(cell.provider);
   const shown = presentation.displayPercent(cell.remainingPercent, appearance().showLimitUsed === true);
   const value = el('span', 'edge-dock-value');
-  if (cell.credits && cell.credits.amount !== null && cell.credits.amount !== undefined) {
+  const hasCreditsAmount = Boolean(cell.credits) && cell.credits.amount !== null && cell.credits.amount !== undefined;
+  if (hasCreditsAmount) {
     value.textContent = balanceDisplay.formatCompactMoney(
       cell.credits.amount, cell.credits.currency, appearance().compactTokenUnits, state.locale
     );
@@ -665,7 +799,10 @@ function providerCellNode(cell) {
   // What a refill motion compares against to recognise a real reset on this
   // cell: the headline's account and window identities ride the key, so a
   // headline that swapped to another account or pool is never animated as one.
+  // The figure's roll keys on the same identity for the same reason.
   node.dataset.ringMotionKey = `${cell.id}\0${cell.headlineAccount || ''}\0${cell.headlineWindowKey || ''}`;
+  markRoll(value, `${node.dataset.ringMotionKey}:value`, hasCreditsAmount ? Number(cell.credits.amount) : shown, reading => hasCreditsAmount
+    ? balanceDisplay.formatCompactMoney(reading, cell.credits.currency, appearance().compactTokenUnits, state.locale) : `${Math.round(reading)}%`);
   node.dataset.ringRemaining = cell.remainingPercent === null || cell.remainingPercent === undefined
     ? ''
     : String(cell.remainingPercent);
@@ -738,7 +875,7 @@ function cellRateNode(cell) {
   // item's readout, which really does toggle rate mode on click while this cell
   // opens its card. A tooltip nobody can read is not worth five translations.
   node.append(
-    el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)),
+    markRoll(el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)), `${cell.id}:rate`, cell.rate, formatRate),
     el('span', 'edge-dock-cell-rate-unit', t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'))
   );
   return node;
@@ -781,8 +918,9 @@ function statCellNode(cell) {
   node.append(el('span', 'edge-dock-stat-label', statShortLabel(cell)));
   if (cell.metric === 'liveRate') {
     node.classList.toggle('is-idle', cell.idle === true);
-    node.title = t('edgeDock.rate.switch');
-    node.append(el('span', 'edge-dock-stat-value', cell.rate === null || cell.rate === undefined ? '—' : formatRate(cell.rate)));
+    node.setAttribute('aria-description', t('edgeDock.rate.switch'));
+    node.append(markRoll(el('span', 'edge-dock-stat-value', cell.rate === null || cell.rate === undefined ? '—' : formatRate(cell.rate)),
+      `${cell.id}:value`, cell.rate, formatRate));
   } else if (cell.metric === presentation.SESSIONS_METRIC) {
     // Nothing running is a real reading, not a missing one, so the zero is
     // shown - muted, exactly as the live-rate cell mutes its own idle state.
@@ -790,7 +928,7 @@ function statCellNode(cell) {
     // running session the moment that session crosses the ten-minute window.
     const running = runningSessionSummary(cell.sessions).count;
     node.classList.toggle('is-idle', running === 0);
-    node.append(el('span', 'edge-dock-stat-value', String(running)));
+    node.append(markRoll(el('span', 'edge-dock-stat-value', String(running)), `${cell.id}:value`, running, value => String(Math.round(value))));
     // The third line is the item's own choice: the tools with work in flight, or
     // the live token rate. Rate mode keeps its line even with nothing running, so
     // the cell does not change height as work starts and stops.
@@ -805,8 +943,8 @@ function statCellNode(cell) {
     node.append(el('span', 'edge-dock-stat-value', '—'));
   } else {
     node.append(
-      el('span', 'edge-dock-stat-value', formatTokens(cell.totalTokens)),
-      el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd, cell.unpricedTokens))
+      markRoll(el('span', 'edge-dock-stat-value', formatTokens(cell.totalTokens)), `${cell.id}:value`, cell.totalTokens, formatTokens),
+      markRoll(el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd, cell.unpricedTokens)), `${cell.id}:cost`, cell.costUsd, value => formatRailCost(value, cell.unpricedTokens))
     );
   }
   // The tool marks are decorative: the count beside them already says how many
@@ -850,9 +988,9 @@ const RING_MOTION_EASING = limitResetAnimatorApi.EASING;
 const RING_GLOW_MS = limitResetAnimatorApi.GLOW_MS;
 const RING_GLOW_LEAD_MS = limitResetAnimatorApi.GLOW_LEAD_MS;
 
-function captureRingResetMotion() {
+function captureRingResetMotion(scope = railNode) {
   const snapshot = new Map();
-  for (const cell of railNode?.querySelectorAll('.edge-dock-cell[data-ring-motion-key]') || []) {
+  for (const cell of scope?.querySelectorAll('.edge-dock-cell[data-ring-motion-key]') || []) {
     const key = cell.dataset.ringMotionKey;
     const entry = {
       remainingPercent: cell.dataset.ringRemaining,
@@ -946,10 +1084,13 @@ function animateRingCompletion(ring, duration, startedAt = null) {
   animation.oncancel = remove;
 }
 
-function animateRingResets(snapshot) {
-  if (!snapshot?.size || prefersReducedMotion()) return;
+// Returns the figures a refill counts up, including ones whose count-up starts
+// on the next frame, so nothing else animates them in the meantime.
+function animateRingResets(snapshot, scope = railNode) {
+  const owned = new Set();
+  if (!snapshot?.size || prefersReducedMotion()) return owned;
   const motions = [];
-  for (const cell of railNode?.querySelectorAll('.edge-dock-cell[data-ring-motion-key]') || []) {
+  for (const cell of scope?.querySelectorAll('.edge-dock-cell[data-ring-motion-key]') || []) {
     const key = cell.dataset.ringMotionKey;
     const previous = snapshot.get(key);
     const current = {
@@ -1001,7 +1142,7 @@ function animateRingResets(snapshot) {
       }
     });
   }
-  if (!motions.length) return;
+  if (!motions.length) return owned;
   // The same batch rule the meters follow: refills land on full together,
   // paced by the longest member.
   const duration = limitResetMotionApi.groupDurationMs(
@@ -1029,6 +1170,10 @@ function animateRingResets(snapshot) {
   if (pending.length) requestAnimationFrame((now) => {
     for (const entry of pending) startMotion(entry, now);
   });
+  for (const { cell, motion } of motions) {
+    if (motion.display) owned.add(cell.querySelector('.edge-dock-value'));
+  }
+  return owned;
 }
 
 // Snapping running effects to their end state when reduced motion turns on —
@@ -1043,6 +1188,7 @@ function settleDockMotions() {
     el.textContent = `${Math.round(entry.target)}%`;
   }
   ringNumberAnimations.clear();
+  railNumberRoll.settle();
   cardResetAnimator.settle(contentLayer);
 }
 
@@ -1089,7 +1235,8 @@ function renderRail(payload) {
   // slide belongs to the reveal rather than to every payload that follows it: the
   // count moves only on a real reveal, and this plays when it has moved on.
   const reveal = payload.reveal;
-  if (railReveal !== null && reveal !== railReveal) playRailReveal();
+  const revealing = railReveal !== null && reveal !== railReveal;
+  if (revealing) playRailReveal();
   railReveal = reveal;
   if (!railNode) {
     railNode = el('div', 'edge-dock-rail');
@@ -1098,9 +1245,11 @@ function renderRail(payload) {
   }
   const layout = payload.cellLayout || null;
   railNode.classList.toggle('is-compact', layout?.compact === true);
+  const retainedPlugins = new Map([...railNode.children].filter(node => node.dataset.pluginRef).map(node => [node.dataset.cellId, node]));
   const nodes = [];
   (payload.cells || []).forEach((cell, index) => {
-    const node = cell.kind === 'stat' ? statCellNode(cell) : providerCellNode(cell);
+    const node = cell.kind === 'stat' ? statCellNode(cell) : cell.kind === 'plugin' ? pluginCellNode(cell, retainedPlugins.get(cell.id)?.dataset.pluginRef === cell.ref ? retainedPlugins.get(cell.id) : null) : providerCellNode(cell);
+    node.dataset.cellId = cell.id;
     node.dataset.index = String(index);
     // Cells are placed on the main process's layout so hover hit-testing and
     // what is painted can never drift apart.
@@ -1111,13 +1260,40 @@ function renderRail(payload) {
     node.classList.toggle('is-focused', payload.focusCellId === cell.id);
     nodes.push(node);
   });
-  const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind !== 'stat').map((cell) => cell.id));
+  const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind === 'provider').map((cell) => cell.id));
   for (const id of waitingRingStarts.keys()) {
     if (!providerIds.has(id)) waitingRingStarts.delete(id);
   }
   const ringSnapshot = captureRingResetMotion();
-  railNode.replaceChildren(...nodes);
-  animateRingResets(ringSnapshot);
+  const rollSnapshot = railNumberRoll.capture(railNode);
+  // Keep surviving author controls connected: re-inserting an unchanged node
+  // clears browser focus even when its input object and draft survive.
+  const keep = new Set(nodes);
+  for (const node of [...railNode.children]) if (!keep.has(node)) node.remove();
+  let cursor = railNode.firstChild;
+  for (const node of nodes) {
+    if (node !== cursor) railNode.insertBefore(node, cursor);
+    cursor = node.nextSibling;
+  }
+  const targets = [];
+  (payload.cells || []).forEach((cell, index) => {
+    if (cell.kind === 'plugin') return;
+    const target = `edgeDock.rail.${cell.kind}.content`;
+    targets.push(target);
+    if (!pluginContent?.hasTarget(target)) return;
+    const node = nodes[index], native = el('div', 'plugin-native-content');
+    native.append(...node.childNodes); node.append(native);
+    pluginContent.render(target, native, { surface: 'edgeDock', surfaceVariant: 'rail', targetInstance: cell.id, cell, nativeData: payload });
+  });
+  pluginContent?.retain(targets);
+  pluginHost?.refreshDemand();
+  const refilling = animateRingResets(ringSnapshot);
+  // A retracted rail is not repainted, so a reveal shows the latest readings at
+  // once rather than rolling from ones left on screen minutes ago. A refill's
+  // count-up owns its figure.
+  if (!revealing && !prefersReducedMotion()) {
+    railNumberRoll.play(railNode, rollSnapshot, { skip: (node) => refilling.has(node) });
+  }
 }
 
 let gesture = null;
@@ -1195,25 +1371,6 @@ function relativeAgo(value) {
 // colour rule as the Sessions list - neutral while healthy, a colour only as it
 // runs out. Absent for a session whose transcript states no window, which is the
 // normal case rather than an error.
-function contextNode(session) {
-  session = session.groupRows?.[0] || session;
-  const context = sessionLive.sessionActivityState(session) !== 'idle' ? session?.context : null;
-  if (!context) return null;
-  const showUsed = appearance().sessionContextMetric !== 'remaining';
-  const percent = showUsed ? context.percentUsed : context.percentLeft;
-  const node = el('span', 'edge-dock-session-context');
-  node.dataset.tone = String(context.tone || '');
-  // The full phrase lives in the tooltip; the line itself stays a bar and a
-  // number so it reads at a glance in the meta row.
-  const meter = el('span', 'edge-dock-session-context-meter');
-  const fill = el('span', 'edge-dock-session-context-fill');
-  fill.style.setProperty('--bar-scale', String(percent / 100));
-  meter.append(fill);
-  node.append(meter, el('span', 'edge-dock-session-context-value', `${percent}%`));
-  sessionRowsApi.setSessionTooltip(node, context, sessionLive.sessionPromptCacheForRow(session), t, limitWindowsView);
-  return node;
-}
-
 // Last activity seen for each session, so the running dot can flare on an
 // actual transcript write instead of pulsing forever. Module state on purpose:
 // the comparison is against the previous payload.
@@ -1243,14 +1400,16 @@ function sessionKey(session) {
 // session that has simply gone quiet.
 function stateMark(session, key, state) {
   const dot = el('span', 'edge-dock-session-dot');
-  dot.setAttribute('aria-hidden', 'true');
   // The glyphs come from the shared builder, so this card and the Sessions list
   // cannot drift into different spinner or check shapes.
   dot.innerHTML = SESSION_STATE_GLYPHS;
   dot.dataset.state = state;
-  if (state === 'running') dot.title = t('session.running');
-  else if (state === 'waiting') dot.title = t('session.waiting');
-  else if (state === 'ended') dot.title = t('session.finished');
+  const labelKey = { running: 'session.running', waiting: 'session.waiting', ended: 'session.finished' }[state];
+  dot.setAttribute('aria-hidden', labelKey ? 'false' : 'true');
+  if (labelKey) {
+    dot.setAttribute('role', 'img');
+    dot.setAttribute('aria-label', t(labelKey));
+  }
   const previous = lastActivityBySession.get(key) || 0;
   const next = Date.parse(session.lastUsedAt || '') || 0;
   if (next > 0) lastActivityBySession.set(key, next);
@@ -1358,33 +1517,22 @@ function sessionsContainer(sessions, options = {}) {
     // for the same session. The label is the tooltip trigger there too: one
     // row per model with its tokens and share.
     const modelLabel = sessionRowsApi.sessionModelLabel(session);
+    const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(session);
     const age = relativeAgo(session.lastUsedAt || session.startedAt);
-    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(session, {
+    description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...session, modelLabel }, {
+      translate: t, view: limitWindowsView,
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatBreakdownTokens
-    });
-    if (modelLabel) {
-      if (modelEntries.length > 1) {
-        const models = el('span', 'session-models', modelLabel);
-        limitWindowsView.setDetailTooltip(models, modelEntries);
-        description.append(models);
-      } else description.append(document.createTextNode(modelLabel));
-    }
+    }));
     if (memberLabel) {
-      if (modelLabel) description.append(document.createTextNode(' · '));
+      if (metadataLabel) description.append(document.createTextNode(' · '));
       description.append(el('span', 'edge-dock-session-member-count', memberLabel));
     }
-    if (age) description.append(document.createTextNode(`${memberLabel || modelLabel ? ' · ' : ''}${age}`));
+    if (age) description.append(document.createTextNode(`${memberLabel || metadataLabel ? ' · ' : ''}${age}`));
     meta.append(description);
-    const statusRow = session.groupRows?.[0] || session;
-    const context = contextNode(statusRow);
-    const cache = context ? null : sessionLive.sessionPromptCacheForRow(statusRow);
-    if (cache) {
-      const badge = el('span', 'edge-dock-session-cache', t('session.cacheEstimate', { minutes: cache.minutes }));
-      sessionRowsApi.setSessionTooltip(badge, statusRow, cache, t, limitWindowsView);
-      meta.append(badge);
-    }
-    if (context) meta.append(context);
+    const status = sessionRowsApi.sessionStatusNode(document, session, { prefix: 'edge-dock-session', translate: t,
+      view: limitWindowsView, showUsed: appearance().sessionContextMetric !== 'remaining' });
+    if (status) meta.append(status);
     row.append(
       nameNode,
       el('span', 'edge-dock-session-tokens', formatBreakdownTokens(session.totalTokens)),
@@ -1414,7 +1562,7 @@ function sessionsContainer(sessions, options = {}) {
   return node;
 }
 
-function providerCard(cell) {
+function providerCard(cell, view = limitWindowsView) {
   const card = el('section', 'edge-dock-card');
   const color = limitProviderColor(cell.provider);
   const label = providerLabel(cell.provider);
@@ -1435,9 +1583,9 @@ function providerCard(cell) {
   // caller passes the provider and nothing else.
   const accounts = el('div', 'edge-dock-accounts');
   if (records.length > 1) {
-    accounts.append(limitWindowsView.renderLimitProviderGroup(cell.provider, label, records, color));
+    accounts.append(view.renderLimitProviderGroup(cell.provider, label, records, color));
   } else if (records.length === 1) {
-    accounts.append(limitWindowsView.renderLimitProviderSolo(cell.provider, label, records[0], color));
+    accounts.append(view.renderLimitProviderSolo(cell.provider, label, records[0], color));
   } else {
     accounts.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
   }
@@ -1448,15 +1596,14 @@ function providerCard(cell) {
   const sessions = cell.showSessions === false ? null : sessionsNode(cell.sessions);
   if (sessions) card.append(sessions);
 
-  if (cell.usage) {
-    const usage = el('div', 'edge-dock-usage');
-    usage.append(
-      usageTile(t('edgeDock.period.today'), cell.usage.today),
-      usageTile(t('edgeDock.period.month'), cell.usage.month)
-    );
-    card.append(usage);
-  }
+  if (cell.usage) card.append(providerUsageNode(cell.usage));
   return card;
+}
+
+function providerUsageNode(usage) {
+  const node = el('div', 'edge-dock-usage');
+  node.append(usageTile(t('edgeDock.period.today'), usage?.today), usageTile(t('edgeDock.period.month'), usage?.month));
+  return node;
 }
 
 // Live rate: the selected measure as the headline, the other measure (and the
@@ -1476,7 +1623,7 @@ function appendLiveRate(card, head, cell) {
   const headline = el('div', 'edge-dock-stat-headline edge-dock-rate-headline');
   const figure = el('button', 'edge-dock-rate-figure');
   figure.type = 'button';
-  figure.title = t('edgeDock.rate.switch');
+  figure.setAttribute('aria-description', t('edgeDock.rate.switch'));
   const unit = el('span', 'edge-dock-rate-unit', t(burnMode ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'));
   figure.append(el('strong', '', hasSample ? formatRate(cell.rate) : '—'), unit, el('span', 'edge-dock-rate-swap', '⇄'));
   // Press-activated, not click: the card is rebuilt whenever the rate moves, and
@@ -1694,6 +1841,7 @@ function sessionsCard(cell, card, head) {
 // scroll on every clock tick - yanking the reader back to the top while they read it.
 const CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list';
 
+let observedPluginCard = null;
 const stagingLayer = document.createElement('div');
 stagingLayer.className = 'edge-dock-staging';
 if (surface === 'bubble') root.append(stagingLayer);
@@ -1735,14 +1883,29 @@ function clampBreakdownList(card) {
   if (height > 0) list.style.maxHeight = `${height}px`;
 }
 
-function fitCardTotal(card) {
+// Provider details and sessions have separate existing scroll containers. A
+// long session list must not squeeze even a short account/forecast block into
+// an unreadable strip. Measure its natural height before flex shrink, reserving
+// at most half the card so multiple accounts still leave room for sessions.
+function reserveAccountHeight(card, maxHeight) {
+  const native = card.querySelector(':scope > .plugin-native-content') || card;
+  const accounts = native.querySelector(':scope > .edge-dock-accounts');
+  if (!accounts || !native.querySelector(':scope > .edge-dock-sessions') || !(maxHeight > 0)) return;
+  const shrink = accounts.style.flexShrink;
+  accounts.style.flexShrink = '0';
+  const naturalHeight = Math.ceil(accounts.getBoundingClientRect().height);
+  accounts.style.flexShrink = shrink;
+  if (naturalHeight > 0) accounts.style.minHeight = `${Math.min(naturalHeight, maxHeight / 2)}px`;
+}
+
+function fitCardTotal(card, scale = 1) {
   const row = card.querySelector('.edge-dock-total-row');
   if (!row) return;
   const number = row.querySelector('strong');
   const compact = row.querySelector('.edge-dock-total-compact');
   const gap = compact ? parseFloat(getComputedStyle(row).columnGap) || 0 : 0;
-  const available = row.clientWidth - (compact?.getBoundingClientRect().width || 0) - gap;
-  const natural = number.getBoundingClientRect().width;
+  const available = row.clientWidth - (compact ? compact.getBoundingClientRect().width / scale : 0) - gap;
+  const natural = number.getBoundingClientRect().width / scale;
   if (!(available > 0 && natural > available)) return;
   const base = parseFloat(getComputedStyle(number).fontSize);
   if (base > 0) number.style.fontSize = `${Math.max(12, Math.floor(base * (available - 1) / natural))}px`;
@@ -1752,15 +1915,41 @@ function renderBubble(payload) {
   root.dataset.side = payload.side;
   const cell = payload.cell;
   if (!cell) {
+    if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
+    observedPluginCard = null;
+    for (const body of root.querySelectorAll('.edge-dock-plugin-card')) pluginHost?.unmount(body);
+    pluginContent?.retain([]);
+    contentLayer.replaceChildren();
     stagingLayer.replaceChildren();
     return;
   }
-  const card = cell.kind === 'stat' ? statCard(cell) : providerCard(cell);
+  const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin');
+  if (retained && retained.dataset.pluginRef === cell.ref && retained.dataset.cellId === cell.id) {
+    const view = pluginHost?.state('edgeDock', cell.ref);
+    const caption = retained.querySelector('.edge-dock-stat-caption'); if (caption) caption.textContent = view?.title || cell.ref;
+    retained.style.maxHeight = payload.maxCardHeight ? `${payload.maxCardHeight}px` : '';
+    const height = Math.min(Math.ceil(retained.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
+    if (payload.placed?.cellId !== cell.id || payload.placed.height !== height) bridge.reportBubbleSize(cell.id, height);
+    return;
+  }
+  const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
+  pluginContent?.retain(cell.kind === 'plugin' ? [] : [`edgeDock.${cell.kind}.content`]);
+  if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {
+    const native = document.createElement('div'); native.className = 'plugin-native-content';
+    native.append(...card.childNodes); card.append(native);
+    const target = `edgeDock.${cell.kind}.content`;
+    pluginContent.retain([target]);
+    pluginContent.render(target, native, { surface: 'edgeDock', cell, nativeData: payload });
+  }
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
+  if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
+  observedPluginCard = cell.kind === 'plugin' ? card : null;
   stagingLayer.replaceChildren(card);
   fitCardTotal(card);
   clampBreakdownList(card);
+  if (observedPluginCard) bubbleSizeObserver?.observe(observedPluginCard);
+  if (cell.kind === 'provider') reserveAccountHeight(card, payload.maxCardHeight);
   const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
   if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
     commitCard(card, cell.id);
@@ -1769,15 +1958,41 @@ function renderBubble(payload) {
   }
 }
 
+
+const bubbleSizeObserver = surface === 'bubble' && window.ResizeObserver ? new ResizeObserver(() => {
+  const card = observedPluginCard?.isConnected ? observedPluginCard : contentLayer.querySelector('.edge-dock-card') || stagingLayer.querySelector('.edge-dock-card');
+  const payload = state.payload;
+  if (card && payload?.cell?.id === card.dataset.cellId) {
+    const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
+    if (height > 0 && payload.placed?.height !== height) bridge.reportBubbleSize(card.dataset.cellId, height);
+  }
+}) : null;
+bubbleSizeObserver?.observe(root);
+window.addEventListener('pagehide', () => bubbleSizeObserver?.disconnect(), { once: true });
+
+const notchRenderer = surface === 'notch'
+  ? window.TokenMonitorNotchRenderer.createNotchRenderer({
+    document, window, bridge, state, root, shapeLayer, contentLayer,
+    shared: {
+      el, t, appearance, prefersReducedMotion, readableColor, providerLabel, limitProviderColor,
+      markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
+      limitAccountTitle: (...args) => limitWindowsView.limitAccountTitle(...args),
+      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit, pluginHost, pluginContent
+    }
+  }) : null;
+
 // ---- Wiring ---------------------------------------------------------------
 
 function render(payload) {
   if (!payload || payload.surface !== surface) return;
   state.payload = payload;
   applyAppearance(payload);
-  updateShape(payload);
+  notchRenderer?.applyAppearance(payload);
+  if (surface === 'notch') notchRenderer.applyMotion(payload.motion);
+  else updateShape(payload);
   if (surface === 'peek') renderPeek(payload);
   else if (surface === 'rail') renderRail(payload);
+  else if (surface === 'notch' && !deferBubbleRender()) notchRenderer.render(payload);
   else if (!deferBubbleRender()) renderBubble(payload);
   // A push carries fresh expiry times, so the self-repaint is re-armed from what
   // was just painted rather than left on the schedule the previous payload set.
@@ -1810,6 +2025,7 @@ function cellReadsSessions(cell) {
 }
 
 function surfacesShowingSessions() {
+  if (surface === 'notch') return notchRenderer.sessionCells().some(cellReadsSessions);
   if (surface === 'rail') return (state.payload?.cells || []).some(cellReadsSessions);
   if (surface === 'bubble') return cellReadsSessions(state.payload?.cell);
   return false;
@@ -1833,7 +2049,8 @@ const BUBBLE_REPAINT_MS = 30_000;
 // timer at all. The floor keeps a payload whose expiry has just passed from spinning.
 function sessionsExpiryDelayMs() {
   if (!surfacesShowingSessions()) return 0;
-  const cells = surface === 'rail' ? state.payload?.cells || [] : [state.payload?.cell].filter(Boolean);
+  const cells = surface === 'notch' ? notchRenderer.sessionCells()
+    : surface === 'rail' ? state.payload?.cells || [] : [state.payload?.cell].filter(Boolean);
   let soonest = 0;
   const now = Date.now();
   for (const cell of cells) {
@@ -1862,7 +2079,7 @@ function sessionsExpiryDelayMs() {
 // shortened wait does not lower the period that follows it.
 function selfRepaintDelayMs() {
   const expiry = sessionsExpiryDelayMs();
-  const period = surface === 'bubble' ? BUBBLE_REPAINT_MS : 0;
+  const period = surface === 'bubble' || surface === 'notch' && notchRenderer.needsClock() ? BUBBLE_REPAINT_MS : 0;
   const waits = [period, expiry].filter((value) => value > 0);
   return waits.length ? Math.min(...waits) : 0;
 }
@@ -1875,6 +2092,9 @@ function repaintSelf() {
     return;
   }
   if (surface === 'rail' && state.payload) renderRail(state.payload);
+  if (surface === 'notch' && state.payload && !deferBubbleRender()) {
+    notchRenderer.repaint();
+  }
 }
 
 // Re-armed after every repaint rather than fixed at one interval, so a surface
@@ -1885,6 +2105,7 @@ let selfRepaintTimer = null;
 function scheduleSelfRepaint() {
   if (selfRepaintTimer) clearTimeout(selfRepaintTimer);
   selfRepaintTimer = null;
+  if (bridge.isSettingsPreview) return;
   const delay = selfRepaintDelayMs();
   // 0 means this surface has nothing to wake for: a rail with no sessions expiry, or
   // the peek handle. Leaving the timer unarmed is what keeps the rail push-driven.

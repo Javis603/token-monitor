@@ -147,6 +147,11 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     // declared default. The workbuddy fields below stay hand-written because
     // the desktop session rewrites their lanes entirely.
     ...limitsAccountConfig(settings, context),
+    workbuddyLocalSessions: context.workbuddyDesktopSessionEnabled === true && Array.isArray(context.workbuddyLocalSessions)
+      ? context.workbuddyLocalSessions
+      : undefined,
+    workbuddyLocalSessionsComplete: context.workbuddyLocalSessionsComplete,
+    workbuddyRealm: context.workbuddyDesktopSessionEnabled === true ? workbuddyLocalSession.realm || 'cn' : 'cn',
     workbuddyAccessToken: workbuddySettings.workbuddyAccessToken
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN
       || workbuddyEnv.WORKBUDDY_ACCESS_TOKEN

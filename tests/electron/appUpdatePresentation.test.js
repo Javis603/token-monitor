@@ -7,6 +7,7 @@ const {
   appUpdateActionMode,
   appUpdateErrorMessageKey,
   appUpdateInstallErrorMessageKey,
+  appUpdatePopoverMaxHeight,
   appUpdateStatusPresentation,
   automaticAppUpdateControlState
 } = require('../../src/electron/renderer/appUpdatePresentation');
@@ -316,6 +317,24 @@ test('a spent attempt stops the automatic downloader, and the control says so', 
     const key = 'settings.appUpdate.automaticBlockedUntilRestart';
     assert.equal(typeof MESSAGES[locale][key], 'string', `${locale} is missing ${key}`);
     assert.notEqual(MESSAGES[locale][key], MESSAGES[locale]['settings.appUpdate.automaticDescription']);
+  }
+});
+
+test('the update card height never exceeds the space above its anchor', () => {
+  // The card anchors below the footer button, so its ceiling is the space above
+  // it minus a 12px top margin. A 140px-tall window (the minimum) leaves 78px —
+  // any floor would push the header and dismiss control off the top edge.
+  assert.equal(appUpdatePopoverMaxHeight({ viewportHeight: 140, bottom: 50 }), 78);
+  assert.equal(appUpdatePopoverMaxHeight({ viewportHeight: 900, bottom: 50 }), 440);
+  assert.equal(appUpdatePopoverMaxHeight({ viewportHeight: 40, bottom: 50 }), 0);
+  for (const viewportHeight of [140, 240, 480, 1200]) {
+    for (const bottom of [12, 50, 200]) {
+      const available = viewportHeight - bottom - 12;
+      const result = appUpdatePopoverMaxHeight({ viewportHeight, bottom });
+      if (available > 0) assert.ok(result <= available, `${viewportHeight}/${bottom}`);
+      assert.ok(result >= 0);
+      assert.ok(result <= 440);
+    }
   }
 });
 

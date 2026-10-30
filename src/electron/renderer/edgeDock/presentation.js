@@ -228,7 +228,7 @@
         parentClient: normalizedId(session.parentClient || session.client),
         parentSessionId: String(session.parentSessionId || ''),
         grokBotSession: session.grokBotSession,
-        title: String(session.title || ''),
+        title: sessionRowsApi.sessionTitleForDisplay(session),
         projectLabel: String(session.projectLabel || ''),
         // Carried so the renderer keys its state map and its flare cache on
         // the same identity this projection used, instead of re-deriving one
@@ -244,6 +244,7 @@
         // could not reproduce from a flattened winner.
         models: session.models || (session.model ? { [session.model]: finite(session.totalTokens) || 0 } : {}),
         promptCache: session.promptCache || null,
+        reasoningEffort: sessionLive.isSessionReasoningEffortClient(session.client) ? session.reasoningEffort || null : null,
         contextTokens: finite(session.contextTokens),
         contextWindow: finite(session.contextWindow),
         totalTokens: finite(session.totalTokens) || 0,
@@ -253,7 +254,7 @@
         startedAt: session.startedAt || null,
         // Carried onto the projected row, not just used here: the dock renderer
         // re-derives the state at paint time and needs the boundary to do it.
-        turnEnded: session.turnEnded === true,
+        turnEnded: session.turnEnded,
         liveActivity: session.liveActivity || null,
         waitingForInput: session.client === 'codex' && session.waitingForInput === true,
         // The archive flags ride along for the same reason, and their absence was a
@@ -277,11 +278,21 @@
   // Group the complete source list before selecting recent/running rows. Keep
   // accounting identities on the members; summaries exist only in presentation.
   function groupedSessionRows(stats, options = {}) {
-    const entries = sessionSourceRows(stats);
-    const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
+    const sources = sessionSourceRows(stats);
     const botIds = new Set(Array.isArray(stats?.grokBotSessionIds) ? stats.grokBotSessionIds
-      : sessionRowsApi.grokBotSessionIdsForMaps([Object.fromEntries(entries.map(({ key, session }) => [key, session]))],
+      : sessionRowsApi.grokBotSessionIdsForMaps([Object.fromEntries(sources.map(({ key, session }) => [key, session]))],
         Object.values(stats?.periods || {}).map(period => period?.sessions)));
+    // Resolve bot identity before activity, then retain it for deferred
+    // projection and paint-time expiry checks, including Claude-only periods.
+    const entries = sources.map(entry => {
+      const { key, session } = entry;
+      const client = normalizedId(session.client);
+      const grokBot = sessionLive.isGrokBotSession(client === session.client ? session : { ...session, client }, key)
+        || (client === 'cursor' && botIds.has(String(session.sessionId || '').trim() || key.replace(/^cursor:/, '')));
+      if (client === session.client && (!grokBot || session.grokBotSession === true)) return entry;
+      return { ...entry, session: { ...session, client, ...(grokBot ? { grokBotSession: true } : {}) } };
+    });
+    const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
     // Resolve all group identities and totals before caps, but build display
     // rows (context, archive flags and member DTOs) only for selected groups.
     const entriesByKey = new Map();
@@ -297,7 +308,7 @@
         key: `session:${key}`, kind: 'session', client,
         clientLabel: options.clientLabels?.[client] || client,
         nativeSessionId: normalizedId(session.nativeSessionId), t3ThreadId: String(session.t3ThreadId || ''),
-        name: String(session.title || session.projectLabel || sessionId.slice(0, 12) || '—'),
+        name: sessionRowsApi.sessionTitleForDisplay(session) || String(session.projectLabel || sessionId.slice(0, 12) || '—'),
         titled: Boolean(session.title || session.projectLabel),
         modelTokens: models,
         value: finite(session.totalTokens) || 0, cost: finite(session.costUsd ?? session.reportedCostUsd) || 0,
@@ -305,11 +316,8 @@
         tokenDataUnavailable: session.tokenDataUnavailable === true,
         parentKey: parentSessionId && (parentClient !== client || parentSessionId !== sessionId)
           ? `session:${parentClient}:${parentSessionId}` : undefined,
-        grokBot: client === 'cursor' && (sessionRowsApi.isGrokBotSession({ client, sessionId, models,
-          grokBotSession: session.grokBotSession }, key) || botIds.has(sessionId)),
-        activityState: client === session.client ? states.get(key) : sessionLive.sessionActivityState({ client, lastUsedAt: session.lastUsedAt, liveActivity: session.liveActivity,
-          turnEnded: session.turnEnded === true, archived: session.archived === true, deleted: session.deleted === true,
-          sourceDeleted: session.sourceDeleted === true, waitingForInput: session.client === 'codex' && session.waitingForInput === true }), running: states.get(key) === 'running',
+        grokBot: client === 'cursor' && session.grokBotSession === true,
+        activityState: states.get(key), running: states.get(key) === 'running',
         sortTime: entry.lastUsedMs
       };
     });
@@ -322,12 +330,7 @@
         return ['running', 'waiting'].find(state => memberStates.includes(state)) || memberStates[0] || 'idle';
       }
       const session = entriesByKey.get(row.key).session;
-      return sessionLive.sessionActivityState(row.client === session.client ? session : {
-        client: row.client, lastUsedAt: session.lastUsedAt, liveActivity: session.liveActivity,
-        turnEnded: session.turnEnded === true, archived: session.archived === true,
-        deleted: session.deleted === true, sourceDeleted: session.sourceDeleted === true,
-        waitingForInput: session.client === 'codex' && session.waitingForInput === true
-      }, now);
+      return sessionLive.sessionActivityState(session, now);
     };
     const projected = new Map();
     const projectMember = key => {
@@ -712,7 +715,8 @@
   }
 
   // Two answers, because the rail and the subscription matcher want different
-  // ones. `byId` is what the cell draws, so it is gated on `hasReportableData`.
+  // ones. `byId` is what the cell draws, gated on `hasReportableData` for the
+  // ordinary rail; the top detail opts into aggregate failures.
   // `allById` is every account the provider has, gate ignored, because a
   // subscription binds to the account rather than to the row.
   //
@@ -745,7 +749,9 @@
     }
     for (const provider of providers) {
       const id = normalizedId(provider?.provider);
-      if (!id || !hasReportableData(provider)) continue;
+      // The top entry's detail keeps unavailable accounts in the aggregate,
+      // with the shared view's status/recovery UI. The ordinary rail stays gated.
+      if (!id || (!options.includeUnavailableAccounts && !hasReportableData(provider))) continue;
       if (!byId.has(id)) byId.set(id, []);
       byId.get(id).push(provider);
     }
@@ -768,6 +774,7 @@
     const groupedSessions = items.some(item => item.metric === dockItems.SESSIONS_METRIC
       || (item.type === 'limit' && options.limitsEnabled !== false))
       ? groupedSessionRows(stats) : { rows: [], project: row => row, stateFor: sessionActivityState };
+    const pluginRefs = Array.isArray(options.availablePluginRefs) ? new Set(options.availablePluginRefs) : null;
     const cells = [];
     for (const item of items) {
       if (item.type === 'stat') {
@@ -775,6 +782,11 @@
         // item was configured with, and the projection is the only place that
         // knows how to apply them.
         cells.push(statCell(stats, item.metric, { ...options, ...item, groupedSessions }));
+      } else if (item.type === 'plugin') {
+        if (pluginRefs && !pluginRefs.has(item.ref)) continue;
+        // Plugin cells carry only their ref; the plugin's live content reaches
+        // the dock on its own channel and is drawn into the cell in place.
+        cells.push({ id: `plugin:${item.ref}`, kind: 'plugin', ref: item.ref });
       } else if (item.type === 'limit' && options.limitsEnabled !== false) {
         // An explicitly chosen provider keeps its slot while it has nothing to
         // report (it renders as `--`), so the user's layout does not reshuffle

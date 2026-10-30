@@ -97,6 +97,7 @@ test('a hidden floating-bubble state update changes state without touching DOM',
         }
       },
       isRendererWindowHidden: () => true,
+      syncPluginTrayDemand() {},
       state,
       statsRenderScheduler: { request() { scheduledRenders += 1; } }
     }
@@ -256,7 +257,7 @@ test('leaving Settings no longer needs a catch-up repaint', () => {
 test('stats-derived Settings rows refresh behind an open panel', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   const renderBody = app.slice(
-    app.indexOf('function render() {'),
+    app.indexOf('function renderAppContent() {'),
     app.indexOf('\nfunction setStatus(')
   );
   const archiveBody = app.slice(
@@ -275,6 +276,7 @@ test('stats-derived Settings rows refresh behind an open panel', () => {
   assert.match(archiveBody, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
   assert.doesNotMatch(archiveBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.match(renderBody, /renderSessionUsageArchiveStatus\(\);/);
+  assert.match(app, /function render\(\) \{\n {2}renderAppContent\(\);/);
   assert.doesNotMatch(renderBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.doesNotMatch(surfaceBody, /isSettingsPanelOpen/);
 });
@@ -284,6 +286,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
   const settingsRenderers = [
     'renderCodexAccounts',
     'renderMimoStatus',
+    'renderWorkbuddyStatus',
     'renderSettingsSummaries',
     'renderLimitProviderCheckboxes',
     'renderToolPreferences',
@@ -422,6 +425,7 @@ test('a direct main render defers only while the window is hidden', () => {
   let surface = 'bubble';
   let scheduled = 0;
   const render = rendererFunction('render', '\nfunction setStatus(', {
+    pluginContent: null, pluginViewHost: null,
     visibleStatsSurface: () => surface,
     statsRenderScheduler: { request() { scheduled += 1; } },
     state: { stats: null }

@@ -27,6 +27,7 @@
           <span>Token Monitor</span>
         </a>
         <div class="nav-actions">
+          <a class="nav-docs-link" href="docs/" data-i18n="nav.docs">Docs</a>
           <details class="lang-menu" data-lang-menu>
             <summary class="nav-icon-btn lang-btn" aria-label="Language" aria-haspopup="menu" aria-expanded="false" data-i18n-attr="aria-label:nav.language">
               <svg class="lang-symbol" viewBox="0 0 24 24" aria-hidden="true">
@@ -90,7 +91,7 @@
           </div>
         </div>
         <div class="hero-tools reveal" aria-labelledby="tools-title">
-          <p class="tool-strip-label" id="tools-title" data-i18n="tools.eyebrow">41+ tools and providers</p>
+          <p class="tool-strip-label" id="tools-title" data-i18n="tools.eyebrow">44+ tools and providers</p>
           <div class="tool-marquee" aria-label="Supported tools" data-i18n-attr="aria-label:tools.eyebrow">
             <div class="tool-track">
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/claude.svg" alt=""></span><span>Claude Code</span></span>
@@ -123,6 +124,7 @@
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/amp.svg" alt=""></span><span>Amp</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/droid.svg" alt=""></span><span>Droid</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/omp.svg" alt=""></span><span>Oh My Pi</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/senpi.svg" alt=""></span><span>OmO Native</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/commandcode.svg" alt=""></span><span>Command Code</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/qoder.svg" alt=""></span><span>Qoder</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/trae.svg" alt=""></span><span>Trae</span></span>
@@ -134,6 +136,9 @@
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/ollama.svg" alt=""></span><span>Ollama</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/proma.svg" alt=""></span><span>Proma</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/meta.svg" alt=""></span><span>Muse Code</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/catpaw.svg" alt=""></span><span>CatPaw</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/fx.svg" alt=""></span><span>fx</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/stepfun.svg" alt=""></span><span>StepFun</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/claude.svg" alt=""></span><span>Claude Code</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/codex.svg" alt=""></span><span>Codex</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/opencode.svg" alt=""></span><span>OpenCode</span></span>
@@ -164,6 +169,7 @@
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/amp.svg" alt=""></span><span>Amp</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/droid.svg" alt=""></span><span>Droid</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/omp.svg" alt=""></span><span>Oh My Pi</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/senpi.svg" alt=""></span><span>OmO Native</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/commandcode.svg" alt=""></span><span>Command Code</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/qoder.svg" alt=""></span><span>Qoder</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/trae.svg" alt=""></span><span>Trae</span></span>
@@ -175,6 +181,9 @@
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/ollama.svg" alt=""></span><span>Ollama</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/proma.svg" alt=""></span><span>Proma</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/meta.svg" alt=""></span><span>Muse Code</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/catpaw.svg" alt=""></span><span>CatPaw</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/fx.svg" alt=""></span><span>fx</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/stepfun.svg" alt=""></span><span>StepFun</span></span>
             </div>
           </div>
         </div>
@@ -1094,7 +1103,7 @@
               <li><strong data-i18n="more.glass.name">Liquid Glass</strong><span data-i18n="more.glass.body">macOS 26 glass for the main window, Dashboard, and Edge Dock.</span></li>
               <li><strong data-i18n="more.bgImage.name">Background image</strong><span data-i18n="more.bgImage.body">A local image with its own opacity over the glass.</span></li>
               <li><strong data-i18n="more.fonts.name">Custom fonts</strong><span data-i18n="more.fonts.body">Separate interface and display fonts.</span></li>
-              <li><strong data-i18n="more.languages.name">Five languages</strong><span data-i18n="more.languages.body">English, 简体中文, 繁體中文, 한국어, 日本語.</span></li>
+              <li><strong data-i18n="more.languages.name">Six languages</strong><span data-i18n="more.languages.body">English, 简体中文, 繁體中文, 한국어, 日本語, Português (Brasil).</span></li>
             </ul>
           </div>
           <div class="more-cluster">
@@ -1199,7 +1208,7 @@
                       <div class="tm-device-client-row"><span><img src="assets/icons/codex.svg" alt="">Codex <em>100%</em></span><strong>6.80B</strong></div>
                       <div class="tm-device-model-row"><span>gpt-5.6-sol</span><strong>6.31B</strong></div>
                       <div class="tm-device-model-row"><span>codex-auto-review</span><strong>490.3M</strong></div>
-                      <small data-i18n="mock.deviceMeta">Windows 11 · Agent v0.63.1 · Synced 3m ago</small>
+                      <small data-i18n="mock.deviceMeta">Windows 11 · Agent v0.70.0 · Synced 3m ago</small>
                     </div>
                   </div>
                   <div class="tm-row tm-device-row is-stale">
@@ -1255,7 +1264,7 @@
   <span class="pk">"deviceId"</span>: <span class="ps">"mac-studio"</span>,
   <span class="pk">"hostname"</span>: <span class="ps">"Mac Studio"</span>,
   <span class="pk">"platform"</span>: <span class="ps">"darwin"</span>,
-  <span class="pk">"agentVersion"</span>: <span class="ps">"0.63.1"</span>,
+  <span class="pk">"agentVersion"</span>: <span class="ps">"0.70.0"</span>,
   <span class="pk">"updatedAt"</span>: <span class="ps">"2026-07-28T10:14:20.193Z"</span>,
   <span class="pk">"today"</span>: {
     <span class="pk">"totalTokens"</span>: <span class="pn">165164772</span>,
@@ -1347,6 +1356,7 @@
           </svg>
           <span data-i18n="nav.github">GitHub</span>
         </a>
+        <a href="docs/" data-i18n="footer.docs">Guides</a>
         <a href="https://github.com/Javis603/token-monitor/blob/main/docs/API.md" data-i18n="footer.api">API docs</a>
         <a href="https://github.com/Javis603/token-monitor/blob/main/worker/README.md" data-i18n="footer.worker">Worker docs</a>
         <a href="https://github.com/Javis603/token-monitor/blob/main/LICENSE" data-i18n="footer.license">License</a>

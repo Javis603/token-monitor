@@ -7,6 +7,15 @@ const path = require('node:path');
 //
 //   <configDir>/projects/<mangled-cwd>/<session-id>.jsonl
 //
+// A session that spawned sub-agents also owns a directory of the same name,
+// holding one transcript per sub-agent:
+//
+//   <configDir>/projects/<mangled-cwd>/<session-id>/subagents/agent-{agentId}.jsonl
+//
+// sessionFiles.js resolves those through providers/codebuddy/subagents.js —
+// the file name carries the agent id, while the records inside state the
+// sub-agent's own session id, which is what the scan reports.
+//
 // `CODEBUDDY_CONFIG_DIR` is deliberately not consulted, even though the CLI
 // itself resolves its config directory from it. The pinned tokscale declares no
 // override for this client — its table spells the root as a bare

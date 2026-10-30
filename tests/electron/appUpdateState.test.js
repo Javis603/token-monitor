@@ -94,6 +94,28 @@ test('enabling automatic updates bypasses the background-check cooldown', () => 
   assert.match(main, /settings\.automaticAppUpdates && !previousAutomaticAppUpdates\) \{\s*runAppUpdateCheck\(\{ bypassCooldown: true \}\)\.catch\(\(\) => \{\}\);\s*\}/);
 });
 
+test('a launch checks once after a delay, bypassing the cooldown', () => {
+  const startup = sourceBetween('function scheduleStartupAppUpdateCheck', 'function startAppUpdateBackgroundChecks');
+  assert.match(startup, /setTimeout\(/);
+  assert.match(startup, /APP_UPDATE_STARTUP_DELAY_MS/);
+  assert.match(startup, /runAppUpdateCheck\(\{ bypassCooldown: true \}\)/);
+  assert.match(startup, /timer\.unref\?\.\(\)/);
+  // Both manual and start-at-login launches take this whenReady tail; the
+  // delayed startup check replaces the old immediate cooldown-bound call.
+  assert.match(main, /scheduleStartupAppUpdateCheck\(\);\s*startAppUpdateBackgroundChecks\(\);\s*\}\);/);
+  assert.doesNotMatch(main, /maybeRunBackgroundUpdateCheck\(\);\s*startAppUpdateBackgroundChecks\(\)/);
+});
+
+test('recurring checks keep the cooldown', () => {
+  const maybeCheck = sourceBetween('function maybeRunBackgroundUpdateCheck', 'function scheduleStartupAppUpdateCheck');
+  assert.match(maybeCheck, /runAppUpdateCheck\(\{ force: false \}\)/);
+  assert.doesNotMatch(maybeCheck, /bypassCooldown/);
+  const background = sourceBetween('function startAppUpdateBackgroundChecks', 'function dismissAppUpdateVersion');
+  assert.match(background, /setInterval\(maybeRunBackgroundUpdateCheck/);
+  assert.match(background, /powerMonitor\.on\('resume', maybeRunBackgroundUpdateCheck\)/);
+  assert.match(background, /powerMonitor\.on\('unlock-screen', maybeRunBackgroundUpdateCheck\)/);
+});
+
 test('automatic update control persists through settings', () => {
   assert.match(html, /id="automaticAppUpdatesInput"[^>]*type="checkbox"/);
   assert.match(html, /<script src="appUpdatePresentation\.js"><\/script>[\s\S]*<script src="app\.js"><\/script>/);

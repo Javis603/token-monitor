@@ -73,12 +73,36 @@ test('provider notes route by catalog ids', () => {
   }
 });
 
-test('root guidance links only existing core documents', () => {
+test('root guidance links only existing core documents and sections', () => {
   const agents = read('AGENTS.md');
-  const links = [...agents.matchAll(/`(docs\/[A-Za-z0-9_./-]+\.md)`/g)].map((match) => match[1]);
+  const links = [...agents.matchAll(/(?:`|\]\()(docs\/[A-Za-z0-9_./-]+\.md(?:#[a-z0-9-]+)?)(?:`|\))/g)]
+    .map((match) => match[1]);
   assert.ok(links.length > 0, 'AGENTS.md contains no routed documentation links');
 
-  for (const file of new Set(links)) {
+  for (const link of new Set(links)) {
+    const [file, anchor] = link.split('#');
     assert.ok(fs.existsSync(path.join(rootDir, file)), `AGENTS.md references missing ${file}`);
+    if (!anchor) continue;
+    const headings = [...read(file).matchAll(/^#{1,6} (.+)$/gm)]
+      .map((match) => match[1].toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s/g, '-'));
+    assert.ok(headings.includes(anchor), `AGENTS.md references missing section ${link}`);
   }
+});
+
+test('root guidance separates registration routes and links watch contracts', () => {
+  const routes = read('AGENTS.md').split('## Where guidance lives\n')[1].split('\n## ')[0]
+    .split('\n').filter((line) => line.startsWith('|'));
+  const clientChecklist = 'docs/providers/README.md#adding-a-tracked-client';
+  const limitsChecklist = 'docs/providers/README.md#adding-a-limits-provider';
+
+  for (const [target, unrelated] of [[clientChecklist, limitsChecklist], [limitsChecklist, clientChecklist]]) {
+    const route = routes.find((line) => line.includes(target));
+    assert.ok(route, `missing section-level route to ${target}`);
+    assert.ok(!route.includes(unrelated), `${target} must not require the other registration checklist`);
+  }
+
+  const watchRoute = routes.find((line) => line.includes('docs/architecture.md#watching'));
+  assert.ok(watchRoute, 'missing section-level watch route');
+  assert.ok(watchRoute.includes('docs/providers/README.md#partition-invariants'),
+    'watch changes must also route to partition invariants');
 });

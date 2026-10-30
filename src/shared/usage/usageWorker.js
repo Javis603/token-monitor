@@ -49,7 +49,7 @@ const transform = createUsageTransform({
 });
 
 function transformed(type, summary, reason) {
-  const visible = transform.transform(summary);
+  const visible = transform.transform(summary, reason, { preview: type === 'preview' });
   post({ type, summary: visible, reason, archive: transform.getState(), diagnostics: diagnostics() });
   return visible;
 }

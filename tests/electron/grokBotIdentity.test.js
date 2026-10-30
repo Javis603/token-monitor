@@ -6,6 +6,7 @@ const { grokBotSessionIdsForMaps, groupSessionRows, sessionRowsForPeriod } = req
 const { attachLocalNativeViews, attachLocalPresentationNativeViews, composeLocalSyncSummary } = require('../../src/electron/syncDisplayStats');
 const { rendererStats } = require('../../src/electron/statsPublisher');
 const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
+const dock = require('../../src/electron/renderer/edgeDock/presentation');
 
 function chat(id, model = 'claude-opus-5-5-medium') {
   return { client: 'cursor', sessionId: id, totalTokens: 10, costUsd: 0.1, models: { [model]: 10 } };
@@ -14,6 +15,38 @@ function chat(id, model = 'claude-opus-5-5-medium') {
 function statsWith(sessions) {
   return { periods: { today: { sessions }, month: { sessions }, allTime: { sessions: {} } } };
 }
+
+test('known bot conversations stay recent without implying running across Sessions, Home and Dock', (t) => {
+  const now = Date.parse('2026-10-18T12:00:00Z');
+  t.mock.method(Date, 'now', () => now);
+  const lastUsedAt = new Date(now - 1000).toISOString();
+  const bot = { ...chat('bot'), lastUsedAt };
+  const direct = { ...chat('direct', 'grok-bot-default'), lastUsedAt };
+  const ordinary = { ...chat('ordinary'), lastUsedAt };
+  const stats = statsWith({ 'cursor:bot': bot, 'cursor:direct': direct, 'cursor:ordinary': ordinary });
+  attachLocalNativeViews(stats, { periods: { allTime: { sessions: { 'cursor:bot': chat('bot', 'grok-bot-default') } } } });
+  const before = JSON.stringify(stats);
+  const visible = rendererStats(projectModelAliasStats(stats, {
+    'claude-opus-5-5-medium': 'Claude', 'grok-bot-default': 'Claude'
+  }));
+  const rows = sessionRowsForPeriod(visible.periods.today, { ...visible, now: new Date(now) });
+  assert.deepEqual(rows.filter(row => row.grokBot).map(row => row.activityState), ['idle', 'idle']);
+  assert.equal(rows.find(row => !row.grokBot).activityState, 'running');
+  for (const options of [{}, { includeRunningBeyondCap: true }]) {
+    const recent = dock.recentSessionRows(visible, 6, options);
+    const group = recent.find(row => row.sessionGroup === 'cursor-grok-bot');
+    assert.equal(group.totalTokens, 20);
+    assert.equal(group.costUsd, 0.2);
+    assert.equal(group.lastUsedAt, lastUsedAt);
+    assert.equal(dock.sessionActivityState(group, now), 'idle');
+    assert.ok(group.groupRows.every(row => dock.sessionActivityState(row, now + 1000) === 'idle'),
+      'paint-time status retains identity and missing turn evidence');
+  }
+  assert.deepEqual(dock.recentSessionRows(visible, 6, { runningOnly: true }).map(row => row.sessionId), ['ordinary']);
+  const [cell] = dock.buildEdgeDockCells(visible, { items: [{ type: 'stat', metric: dock.SESSIONS_METRIC, runningOnly: true }] });
+  assert.deepEqual(cell.sessions.map(row => row.sessionId), ['ordinary']);
+  assert.equal(JSON.stringify(stats), before, 'presentation leaves accounting and timestamps unchanged');
+});
 
 test('compact bot identity uses current candidates only and caches immutable snapshot maps', () => {
   const current = { 'cursor:bot': chat('bot'), 'cursor:ordinary': chat('ordinary'),

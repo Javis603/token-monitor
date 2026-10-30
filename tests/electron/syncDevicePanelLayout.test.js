@@ -113,17 +113,18 @@ test('select and navigation popups share their regular and native glass surface'
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   const rule = selector => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .find(match => match[1].trim() === selector)?.[2];
-  const surface = rule('.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.settings-help-popover');
+  const surface = rule('.plugin-menu,\n.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.plugin-catalog-dialog,\n.settings-help-popover,\n.app-update-popover');
   assert.ok(surface);
   for (const property of ['border', 'border-radius', 'background', 'box-shadow', 'backdrop-filter']) {
     assert.ok(surface.includes(`${property}:`), property);
   }
   assert.match(surface, /var\(--glass-rgb\)/);
+  assert.doesNotMatch(rule('.plugin-menu'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.select-control-popup'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.sync-content-dialog,\n.settings-help-popover'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.view-switcher-menu'), /background:|border-radius:|box-shadow:/);
-  assert.ok(rule('html.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .view-switcher-menu,\nhtml.native-liquid-glass .sync-content-dialog,\nhtml.native-liquid-glass .settings-help-popover'));
-  assert.ok(rule('html.native-liquid-glass .select-control-option,\nhtml.native-liquid-glass .view-switcher-menu-item'));
+  assert.ok(rule('html.native-liquid-glass .plugin-menu,\nhtml.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .view-switcher-menu,\nhtml.native-liquid-glass .sync-content-dialog,\nhtml.native-liquid-glass .plugin-catalog-dialog,\nhtml.native-liquid-glass .settings-help-popover,\nhtml.native-liquid-glass .app-update-popover'));
+  assert.ok(rule('html.native-liquid-glass .plugin-menu button,\nhtml.native-liquid-glass .select-control-option,\nhtml.native-liquid-glass .view-switcher-menu-item'));
   const selected = '.select-control-option[data-selected="true"]';
   const highlighted = '.select-control-option[data-highlighted="true"]';
   assert.match(rule(selected), /var\(--accent-rgb\), 0\.12/);
@@ -258,7 +259,7 @@ test('device versions get their own line rather than competing with sync status'
   });
   const [, main, side] = row.children;
   const [title, meta] = main.children;
-  assert.equal(title.children[0].title, 'Long workstation name · workstation.local');
+  assert.equal(title.children[0]['aria-label'], 'Long workstation name · workstation.local');
   assert.equal(meta.children.length, 1);
   assert.equal(meta.children[0].textContent, 'Windows 11 25H2 · Widget v0.64.0');
   assert.equal(side.children.length, 2);

@@ -80,10 +80,6 @@ const SUBSCRIPTIONS_KEY = 'subscriptions';
 const SETTINGS_PREFIX = 'sync-settings:';
 const TITLE_POLICY_PREFIX = 'title-policy:';
 
-function sseFormat(event, data) {
-  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-}
-
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return textResponse(204, '');
@@ -101,6 +97,12 @@ export class HubDO {
     this.heartbeatTimer = null;
     this.broadcastTimer = null;
     this.lastSseContentKey = '';
+    this.lastSseStats = null;
+    this.streamRevision = 0;
+    this.sseGeneration = 0;
+    this.broadcastTail = Promise.resolve();
+    this.pendingBroadcast = null;
+    this.broadcasting = false;
     this.encoder = new TextEncoder();
     this.mutationTail = Promise.resolve();
     this.titlePrivacyServerEnabled = null;
@@ -191,7 +193,8 @@ export class HubDO {
   }
 
   async setSyncTitlePolicy(deviceId, enabled) {
-    return this.mutate(() => this.withStorageTransaction(async (storage) => {
+    let changed = false;
+    const policy = await this.mutate(() => this.withStorageTransaction(async (storage) => {
       if (enabled === true && !this.syncSessionTitles) {
         const error = new Error('session title sync is disabled on the server');
         error.code = 'forbidden';
@@ -206,8 +209,13 @@ export class HubDO {
         const record = await storage.get(`dev:${deviceId}`);
         if (record) await storage.put(`dev:${deviceId}`, stripSessionTextFromDeviceRecord(record));
       }
+      changed = true;
       return next;
     }));
+    // Agents revalidate an enabled policy every minute; that stores nothing, so
+    // only a stored change broadcasts, matching the Node Hub.
+    if (changed) this.broadcast('sync-titles').catch(() => {});
+    return policy;
   }
 
   get secret() {
@@ -268,7 +276,7 @@ export class HubDO {
     this.heartbeatTimer = setInterval(() => {
       const chunk = this.encoder.encode(': hb\n\n');
       for (const client of this.sseClients) {
-        client.writer.write(chunk).catch(() => this.dropClient(client));
+        if (!client.busy) this.writeEncoded(client, chunk);
       }
       if (this.sseClients.size === 0 && this.heartbeatTimer) {
         clearInterval(this.heartbeatTimer);
@@ -279,55 +287,120 @@ export class HubDO {
 
   dropClient(client) {
     this.sseClients.delete(client);
-    try { client.writer.close(); } catch (_) {}
+    client.onDrop?.();
+    try {
+      const stop = client.writer.close;
+      Promise.resolve(stop?.call(client.writer)).catch(() => {});
+    } catch (_) {}
     if (this.sseClients.size === 0 && this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
     if (this.sseClients.size === 0) {
       this.lastSseContentKey = '';
+      this.lastSseStats = null;
+      this.sseGeneration++;
+      this.pendingBroadcast?.resolve();
+      this.pendingBroadcast = null;
       if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
       this.broadcastTimer = null;
     }
   }
 
-  writeClient(client, event, data) {
-    client.writer.write(this.encoder.encode(sseFormat(event, data))).catch(() => this.dropClient(client));
+  writeEncoded(client, chunk) {
+    if (!this.sseClients.has(client)) return false;
+    if (client.busy) {
+      client.needsSnapshot = true;
+      return false;
+    }
+    client.busy = true;
+    let write;
+    try { write = client.writer.write(chunk); }
+    catch (_) { this.dropClient(client); return false; }
+    Promise.resolve(write).then(async () => {
+      if (!this.sseClients.has(client)) return;
+      if (!client.needsSnapshot) { client.busy = false; return; }
+      // No queued frames: the pending write plus one dirty bit bounds memory.
+      // Keep busy during the read, so a concurrent broadcast cannot overtake it.
+      client.needsSnapshot = false;
+      client.streamRevision = null;
+      const stats = await this.statsWithSubscriptionVersion();
+      if (!this.sseClients.has(client)) return;
+      client.busy = false;
+      this.writeEncoded(client, this.encoder.encode(hubProtocol.encodeSseEvent('stats', {
+        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
+        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {})
+      })));
+    }, () => this.dropClient(client)).catch(() => this.dropClient(client));
+    return true;
   }
 
-  async broadcast(reason = 'update') {
+  fanoutSseFrames(frames) {
+    // Encode only selected frames, once for all peers that need the same bytes.
+    const chunks = new Map();
+    for (const client of this.sseClients) {
+      const frame = hubProtocol.sseFrameForClient(frames, client);
+      if (!frame) continue;
+      if (!chunks.has(frame)) chunks.set(frame, this.encoder.encode(frame));
+      if (this.writeEncoded(client, chunks.get(frame)) && client.deltaEvents) client.streamRevision = frames.revision;
+    }
+  }
+
+  publishStats(reason, allowFreshness) {
+    // One active read and one pending batch, shared by all waiting updates.
+    // A later ingest must not downgrade an explicit mutation's full snapshot.
+    if (this.pendingBroadcast) {
+      if (!allowFreshness) Object.assign(this.pendingBroadcast, { reason, allowFreshness: false });
+      return this.pendingBroadcast.promise;
+    }
+    const batch = { reason, allowFreshness, generation: this.sseGeneration };
+    batch.promise = new Promise((resolve, reject) => Object.assign(batch, { resolve, reject }));
+    this.pendingBroadcast = batch;
+    this.broadcastTail = batch.promise.catch(() => {});
+    this.state.waitUntil?.(this.broadcastTail);
+    if (!this.broadcasting) {
+      this.broadcasting = true;
+      void this.drainBroadcasts();
+    }
+    return batch.promise;
+  }
+
+  async drainBroadcasts() {
+    while (this.pendingBroadcast) {
+      const batch = this.pendingBroadcast;
+      this.pendingBroadcast = null;
+      try {
+        if (this.sseClients.size && batch.generation === this.sseGeneration) {
+          const stats = await this.statsWithSubscriptionVersion();
+          if (this.sseClients.size && batch.generation === this.sseGeneration) {
+            const frames = hubProtocol.prepareSseFanout({
+              reason: batch.reason, stats, at: new Date().toISOString(),
+              lastContentKey: this.lastSseContentKey,
+              previousStats: this.lastSseStats,
+              revision: ++this.streamRevision,
+              ...hubProtocol.sseClientKinds(this.sseClients), allowFreshness: batch.allowFreshness
+            });
+            this.lastSseContentKey = frames.contentKey;
+            this.lastSseStats = stats;
+            this.fanoutSseFrames(frames);
+          }
+        }
+        batch.resolve();
+      } catch (error) { batch.reject(error); }
+    }
+    this.broadcasting = false;
+  }
+
+  broadcast(reason = 'update') {
     if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
     this.broadcastTimer = null;
-    if (this.sseClients.size === 0) return;
-    const stats = await this.statsWithSubscriptionVersion();
-    this.lastSseContentKey = hubProtocol.hubStatsContentKey(stats);
-    const at = new Date().toISOString();
-    for (const client of this.sseClients) {
-      this.writeClient(client, 'stats', { type: 'stats', reason, stats, at });
-    }
+    return this.publishStats(reason, false);
   }
 
-  async flushBroadcast() {
+  flushBroadcast() {
+    if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
     this.broadcastTimer = null;
-    if (this.sseClients.size === 0) return;
-    const stats = await this.statsWithSubscriptionVersion();
-    const nextContentKey = hubProtocol.hubStatsContentKey(stats);
-    const at = new Date().toISOString();
-    if (!this.lastSseContentKey || nextContentKey !== this.lastSseContentKey) {
-      this.lastSseContentKey = nextContentKey;
-      for (const client of this.sseClients) {
-        this.writeClient(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
-      }
-      return;
-    }
-    const event = hubProtocol.freshnessEvent(stats, 'ingest', at);
-    for (const client of this.sseClients) {
-      if (client.freshnessEvents) {
-        this.writeClient(client, 'freshness', event);
-      } else {
-        this.writeClient(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
-      }
-    }
+    return this.publishStats('ingest', true);
   }
 
   queueBroadcast() {
@@ -400,7 +473,6 @@ export class HubDO {
           return jsonResponse(400, { error: 'bad_request', message: 'enabled must be a boolean' });
         }
         const policy = await this.setSyncTitlePolicy(decodeURIComponent(titlesMatch[1]), payload.enabled);
-        this.broadcast('sync-titles').catch(() => {});
         return jsonResponse(200, { ok: true, ...policy });
       } catch (error) {
         if (error.code === 'stale_write') return jsonResponse(409, { error: 'stale_write', ...error.current });
@@ -427,14 +499,25 @@ export class HubDO {
       const stats = await this.statsWithSubscriptionVersion();
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
-      writer.write(this.encoder.encode(sseFormat('snapshot', {
-        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString()
-      }))).catch(() => {});
-      const client = { writer, freshnessEvents: hubProtocol.wantsFreshnessEvents(request) };
-      if (this.sseClients.size === 0) this.lastSseContentKey = hubProtocol.hubStatsContentKey(stats);
+      const client = {
+        writer, freshnessEvents: hubProtocol.wantsFreshnessEvents(request),
+        deltaEvents: hubProtocol.wantsDeltaEvents(request), streamRevision: null
+      };
+      if (this.sseClients.size === 0) {
+        this.lastSseContentKey = hubProtocol.hubStatsContentKey(stats);
+        this.lastSseStats = stats;
+        if (client.deltaEvents) client.streamRevision = this.streamRevision;
+      }
       this.sseClients.add(client);
+      this.writeEncoded(client, this.encoder.encode(hubProtocol.encodeSseEvent('snapshot', {
+        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
+        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {})
+      })));
       this.ensureHeartbeat();
-      request.signal.addEventListener('abort', () => this.dropClient(client));
+      const onAbort = () => this.dropClient(client);
+      request.signal.addEventListener('abort', onAbort, { once: true });
+      client.onDrop = () => request.signal.removeEventListener('abort', onAbort);
+      if (request.signal.aborted) this.dropClient(client);
       return new Response(readable, {
         status: 200,
         headers: {

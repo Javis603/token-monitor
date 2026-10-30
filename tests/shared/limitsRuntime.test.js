@@ -468,6 +468,26 @@ test('a transient failure retains matching lastGood windows with the latest stat
   runtime.stop();
 });
 
+test('a generic cache invalidation cannot clear known accounts in a provider lane', async (t) => {
+  const seed = providerRow('cursor', 'account', 'Cursor', {
+    windows: [{ kind: 'billing', label: 'Cursor Models', usedPercent: 0 }]
+  });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['cursor'], previousLimits: { providers: [seed] }
+  }, runtimeDeps({
+    autoRetry: false,
+    probeProvider: async () => [{
+      provider: 'cursor', status: 'unavailable', windows: [],
+      invalidateCachedWindowLabels: ['Cursor Models']
+    }]
+  }));
+  t.after(() => runtime.stop());
+  const before = runtime.getSnapshot().providers[0];
+  await runtime.refresh({ provider: 'cursor' }, 'interval');
+  assert.equal(runtime.getSnapshot().providers[0].status, 'unavailable');
+  assert.deepEqual(runtime.getSnapshot().providers[0].windows, before.windows);
+});
+
 test('a Codex source-rate-limited response retains the last known quota windows', async () => {
   const results = [
     [providerRow('codex', 'account', 'Plus', { updatedAt: '2026-07-21T00:00:00.000Z' })],
@@ -522,6 +542,47 @@ test('an explicit identity removal drops a disappeared automatic account without
   assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.accountKey), ['A']);
   assert.equal(JSON.stringify(runtime.getSnapshot()).includes('removed'), false);
   runtime.stop();
+});
+
+test('a superseded Ollama identity lookup cannot consume the accepted account removal', async (t) => {
+  const { hashKey } = require('../../src/shared/hashKey');
+  let at = Date.parse('2026-10-25T00:00:00Z');
+  let identityPending = false;
+  const key = 'fixture-ollama-superseded-identity';
+  const runtime = createLimitsRuntime({ limitProviders: ['ollama'], ollamaApiKey: key }, runtimeDeps({
+    autoRetry: false,
+    env: {},
+    now: () => at,
+    fetch: async (url, init) => {
+      if (String(url).endsWith('/api/balance')) {
+        return { ok: true, status: 200, json: async () => ({ included: { balance_usd: 40, allowance_usd: 60 } }) };
+      }
+      if (at === Date.parse('2026-10-25T00:00:00Z')) {
+        return { ok: true, status: 200, json: async () => ({ Email: 'fixture@example.com', Plan: 'pro' }) };
+      }
+      identityPending = true;
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(Object.assign(new Error('superseded'), { name: 'AbortError' })), { once: true });
+      });
+    }
+  }));
+  t.after(() => runtime.stop());
+
+  await runtime.refresh({ provider: 'ollama' }, 'manual');
+  assert.equal(runtime.getSnapshot().providers[0].accountKey, hashKey('ollama', 'fixture@example.com'));
+  at += 6 * 60 * 60 * 1000 + 1;
+  const superseded = runtime.refresh({ provider: 'ollama' }, 'manual');
+  await waitFor(() => identityPending, 'expired identity lookup');
+  const trailing = runtime.refresh({ provider: 'ollama' }, 'manual');
+  assert.equal((await superseded).superseded, true);
+  await trailing;
+
+  const rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1, 'the last accepted email identity must be retired even after a discarded lookup');
+  assert.equal(rows[0].accountKey, hashKey('ollama', `api-key:${key}`));
+  assert.equal(rows[0].status, 'ok');
+  assert.equal(rows[0].windows[0].remaining, 40);
+  assert.equal(JSON.stringify(rows).includes('removed'), false, 'control rows never enter the snapshot');
 });
 
 test('a new identity failure never retains the removed identity windows', async () => {
@@ -851,6 +912,51 @@ test('a retained row from a failed probe never becomes the burn-rate baseline', 
     // so the successful row is the first baseline and no rate exists yet. Only
     // the base interval stays armed.
     assert.deepEqual(clock.delays(), [240_000]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('partial cached quotas retry without becoming a burn-rate baseline', async () => {
+  const clock = fakeClock(1_000);
+  const calls = [];
+  const events = [];
+  const included = (usedPercent) => ({ kind: 'weekly', label: 'Included usage', usedPercent });
+  const team = (usedPercent) => ({ kind: 'billing', label: 'Team pool', usedPercent });
+  const previous = providerRow('cursor', 'acct', 'Account', { windows: [included(30), team(10)] });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['cursor'], limitsRefreshMode: 'adaptive', previousLimits: { providers: [previous] }
+  }, runtimeDeps({
+    autoStart: true,
+    now: clock.now, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+    retryBaseMs: 60_000, random: () => 0.5,
+    onEvent: (event) => events.push(event),
+    probeProvider: async (provider, _config, context) => {
+      calls.push(context.reason);
+      const partial = calls.length === 1;
+      return [{
+        ...providerRow(provider, 'acct', 'Account', {
+          updatedAt: new Date(clock.now()).toISOString(),
+          windows: partial ? [team(75)] : [included(88), team(90)]
+        }),
+        ...(partial ? { invalidateCachedWindowLabels: ['Cursor Models', 'Other Models'] } : {})
+      }];
+    }
+  }));
+  try {
+    await waitFor(() => events.some((event) => event.type === 'retry-scheduled'), 'partial-result retry');
+    const partial = runtime.getSnapshot().providers[0];
+    assert.equal(partial.status, 'unavailable');
+    assert.equal(partial.updatedAt, previous.updatedAt);
+    assert.deepEqual(partial.windows.map((window) => [window.label, window.usedPercent]), [['Included usage', 30], ['Team pool', 75]]);
+    clock.advance(60_000);
+    await waitFor(() => runtime.getSnapshot().providers[0]?.status === 'ok', 'retry recovery');
+    assert.deepEqual(calls, ['startup', 'retry']);
+    // Neither the persisted included quota nor the partially refreshed team
+    // quota is a fresh baseline. Recovery starts sampling, without an early
+    // urgency refresh inferred from the gap before it.
+    assert.deepEqual(clock.delays(), [240_000]);
+    assert.equal(runtime.getSnapshot().providers[0].updatedAt, new Date(clock.now()).toISOString());
   } finally {
     runtime.stop();
   }

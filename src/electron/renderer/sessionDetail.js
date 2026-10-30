@@ -5,6 +5,15 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorSessionDetail = api;
 })(typeof window !== 'undefined' ? window : null, function createSessionDetailApi() {
+  const nonReplyLabels = {
+    'compaction-summary': 'Compaction summary',
+    'assistant-attempt': 'Model attempt',
+    'branch-summary': 'Branch summary',
+    'tool-usage': 'Tool usage',
+    'cache-warm': 'Cache warming',
+    usage: 'Usage'
+  };
+
   function finiteNumber(value) {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
@@ -27,11 +36,9 @@
   }
 
   function turnRow(turn, index, replyIndex) {
-    const isCompactionSummary = turn.type === 'compaction-summary';
-    const isAssistantAttempt = turn.type === 'assistant-attempt';
     return {
       key: `turn:${index}`,
-      label: isCompactionSummary ? 'Compaction summary' : (isAssistantAttempt ? 'Model attempt' : `Reply #${replyIndex + 1}`),
+      label: Object.hasOwn(nonReplyLabels, turn.type) ? nonReplyLabels[turn.type] : `Reply #${replyIndex + 1}`,
       value: finiteNumber(turn.tokens && turn.tokens.total),
       tokensAvailable: turn.tokensAvailable !== false,
       cost: finiteNumber(turn.costEstimate),
@@ -45,7 +52,7 @@
     let replyIndex = 0;
     return (turns || []).map((turn, index) => {
       const row = turnRow(turn, index, replyIndex);
-      if (turn.type !== 'compaction-summary' && turn.type !== 'assistant-attempt') replyIndex += 1;
+      if (!Object.hasOwn(nonReplyLabels, turn.type)) replyIndex += 1;
       return row;
     });
   }
@@ -59,7 +66,13 @@
     const now = options.now || new Date();
     const sortBy = options.sortBy === 'tokens' ? 'tokens' : 'time';
     const exchanges = (detail && detail.exchanges) || [];
-    const rows = exchanges.map((ex, i) => {
+    const occurrences = new Map();
+    const rows = exchanges.map((ex) => {
+      // Appending replies or changing display order must not change identity.
+      // Disambiguate repeated prompts in transcript order, including missing times.
+      const identity = JSON.stringify([ex.startedAt || '', ex.promptPreview || '']);
+      const occurrence = occurrences.get(identity) || 0;
+      occurrences.set(identity, occurrence + 1);
       const turnCount = finiteNumber(ex.turnCount);
       const toolCount = (ex.tools || []).length;
       const subtitleParts = [
@@ -68,7 +81,7 @@
         toolCount > 0 ? `${toolCount} tool${toolCount === 1 ? '' : 's'}` : ''
       ].filter(Boolean);
       return {
-        key: `exchange:${i}`,
+        key: `exchange:${identity}:${occurrence}`,
         isPrompt: Boolean(ex.promptPreview),
         title: ex.promptPreview ? ex.promptPreview : '(session start)',
         subtitle: subtitleParts.join(' · '),

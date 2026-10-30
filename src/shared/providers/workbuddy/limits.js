@@ -6,7 +6,11 @@ const { cleanSecret, numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 
 const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
+const WORKBUDDY_ACCOUNT_CONCURRENCY = 4;
+// Match the limits collector's physical bound; its cleanup grace is not work time.
+const WORKBUDDY_PROBE_BUDGET_MS = 120_000;
 const WORKBUDDY_DEFAULT_ENDPOINT = 'https://copilot.tencent.com';
+const WORKBUDDY_AI_ENDPOINT = 'https://www.workbuddy.ai';
 const WORKBUDDY_PERSONAL_PATH = '/v2/billing/meter/get-user-resource';
 const WORKBUDDY_ENTERPRISE_PATH = '/v2/billing/meter/get-enterprise-user-usage';
 const WORKBUDDY_PRODUCT_CODE = 'p_tcaca';
@@ -120,6 +124,9 @@ function pickArray(source, paths) {
 
 function parsePersonalAccounts(body) {
   const accounts = pickArray(body, [
+    ['data', 'Accounts'],
+    ['data', 'data', 'Accounts'],
+    ['Accounts'],
     ['data', 'Response', 'Data', 'Accounts'],
     ['data', 'data', 'Response', 'Data', 'Accounts'],
     ['Response', 'Data', 'Accounts'],
@@ -274,6 +281,7 @@ function parseEnterpriseUsage(body) {
 
 function httpError(status) {
   const error = new Error(`WorkBuddy billing request returned HTTP ${status}`);
+  error.httpStatus = status;
   error.status = status === 401 || status === 403
     ? 'unauthorized'
     : status === 429
@@ -286,11 +294,14 @@ function httpError(status) {
 
 function applicationError(code) {
   const error = new Error(`WorkBuddy billing response returned application code ${code}`);
+  error.applicationCode = code;
   error.status = code === 401 || code === 403
     ? 'unauthorized'
     : code === 429
       ? 'sourceRateLimited'
-      : 'error';
+      : code >= 500 || code === 408
+        ? 'unavailable'
+        : 'error';
   return error;
 }
 
@@ -327,7 +338,9 @@ function requestHeaders(token, userId, enterpriseId, locale, domain, departmentI
     headers['X-Tenant-Id'] = enterpriseId;
   }
   if (domain) headers['X-Domain'] = domain;
-  if (departmentInfo) headers['X-Department-Info'] = departmentInfo;
+  // Optional descriptive header: preserve ASCII compatibility without inventing
+  // an encoding the official API does not declare. Identity uses uid/enterprise.
+  if (departmentInfo && /^[\x20-\x7e]+$/.test(departmentInfo)) headers['X-Department-Info'] = departmentInfo;
   if (locale) headers['Accept-Language'] = locale;
   return headers;
 }
@@ -338,121 +351,262 @@ function workbuddyStatus(error) {
   return 'unavailable';
 }
 
-function workbuddyAccountKey(token, userId, enterpriseId, identity = '') {
-  if (enterpriseId && userId) return hashKey('workbuddy', `enterprise:${enterpriseId}:${userId}`);
-  if (userId) return hashKey('workbuddy', `user:${userId}`);
-  if (identity) return hashKey('workbuddy', `account:${identity}`);
-  return hashKey('workbuddy', token ? `token:${token}` : 'local-app');
+// Accept metadata for the managed/OAuth lane, while preserving the legacy
+// positional API and every existing CN identity hash.
+function workbuddyAccountKey(token, userId, enterpriseId, identity = '', realm = 'cn') {
+  if (token && typeof token === 'object') {
+    const account = token;
+    return workbuddyAccountKey('', cleanSecret(account.userId), cleanSecret(account.enterpriseId), '', account.realm);
+  }
+  const prefix = realm === 'ai' ? 'ai:' : '';
+  if (enterpriseId && userId) return hashKey('workbuddy', `${prefix}enterprise:${enterpriseId}:${userId}`);
+  if (userId) return hashKey('workbuddy', `${prefix}user:${userId}`);
+  if (identity) return hashKey('workbuddy', `${prefix}account:${identity}`);
+  return hashKey('workbuddy', `${prefix}${token ? `token:${token}` : 'local-app'}`);
 }
 
-async function fetchWorkbuddyLimits(options = {}, deps = {}) {
+function workbuddyBillingPaths(realm, enterprise = false) {
+  const path = enterprise ? WORKBUDDY_ENTERPRISE_PATH : WORKBUDDY_PERSONAL_PATH;
+  return realm === 'ai' ? [path.slice(3), path] : [path];
+}
+
+// Domains are header metadata only. A contradictory realm is refused before
+// dispatch, and no domain ever selects an arbitrary billing host.
+function workbuddyDomainMatchesRealm(domain, realm) {
+  const value = cleanSecret(domain).toLowerCase();
+  if (!value) return true;
+  const ai = value === 'www.workbuddy.ai' || value === 'workbuddy.ai';
+  const international = ai || value.endsWith('.workbuddy.ai')
+    || value === 'codebuddy.ai' || value.endsWith('.codebuddy.ai');
+  return realm === 'ai' ? ai : realm === 'cn' && !international;
+}
+
+function workbuddyRowKey(account) {
+  return cleanSecret(account.userId)
+    ? workbuddyAccountKey(account)
+    : cleanSecret(account.accountKey) || hashKey('workbuddy', `${account.realm || 'cn'}:managed:${account.id}`);
+}
+
+async function fetchWorkbuddyAccount(options, deps, account = null, managed = false) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
-  const token = workbuddyAccessToken(env, options);
-  const userId = workbuddyUserId(env, options);
-  const enterpriseId = workbuddyEnterpriseId(env, options);
-  const domain = workbuddyDomain(env, options);
-  const departmentInfo = workbuddyDepartmentInfo(env, options);
-  const accountType = cleanSecret(options.workbuddyAccountType);
-  const sessionReason = cleanSecret(options.workbuddyLocalSessionReason);
-  const localAppUnsupported = !token && options.workbuddyDesktopSessionSupported === false;
-  // The app owns the credential and sealed it: the generic not-configured row
-  // would tell the user to sign in again, which cannot change this outcome.
-  const localAppSessionEncrypted = !token
-    && options.workbuddyDesktopSessionEnabled === true
-    && sessionReason === WORKBUDDY_SESSION_REASON_ENCRYPTED;
-  // The desktop widget reads the session owned by the installed WorkBuddy
-  // app. If an advanced/headless token is present, keep the explicit token
-  // path deterministic rather than mixing its metadata with the app session.
-  const useLocalApp = !localAppUnsupported
-    && !token
-    && options.workbuddyDesktopSessionEnabled === true
-    && typeof deps.workbuddyFetch === 'function';
+  const explicitToken = managed ? '' : workbuddyAccessToken(env, options);
+  const userId = account ? cleanSecret(account.userId) : workbuddyUserId(env, options);
+  const enterpriseId = account ? cleanSecret(account.enterpriseId) : workbuddyEnterpriseId(env, options);
+  const domain = account ? cleanSecret(account.domain) : workbuddyDomain(env, options);
+  const departmentInfo = account ? cleanSecret(account.departmentInfo) : workbuddyDepartmentInfo(env, options);
+  const accountType = cleanSecret(account?.accountType || options.workbuddyAccountType);
+  const realm = account?.realm || options.workbuddyRealm || 'cn';
+  const sessionReason = cleanSecret(account?.reason || options.workbuddyLocalSessionReason);
+  const localAppUnsupported = !managed && !explicitToken && options.workbuddyDesktopSessionSupported === false;
+  const useLocalApp = !managed && !localAppUnsupported && !explicitToken
+    && options.workbuddyDesktopSessionEnabled === true && typeof deps.workbuddyFetch === 'function';
+  const accountKey = managed ? workbuddyRowKey(account)
+    : workbuddyAccountKey(explicitToken, userId, enterpriseId, '', realm);
   const source = {
     provider: 'workbuddy',
+    region: realm,
     source: useLocalApp || localAppUnsupported ? 'local' : 'api',
-    sourceDetail: useLocalApp || localAppUnsupported ? 'app' : 'unknown',
+    sourceDetail: managed ? 'managed' : useLocalApp || localAppUnsupported ? 'app' : 'unknown',
+    accountKey,
+    accountName: account?.accountName || '',
+    accountEmail: managed ? account?.accountEmail || '' : '',
+    accountLabel: enterpriseId ? 'Enterprise' : 'Personal',
     updatedAt,
     windows: []
   };
-
-  if (localAppUnsupported) return normalizeLimitProvider({ ...source, status: 'unavailable' });
-  if (localAppSessionEncrypted) {
-    return normalizeLimitProvider({
-      ...source,
-      status: 'notConfigured',
-      actionRequired: WORKBUDDY_SESSION_ENCRYPTED_ACTION
-    });
+  const row = (status, extra = {}) => normalizeLimitProvider({ ...source, status, ...extra });
+  if (deps.signal?.aborted) return row('unavailable');
+  if (localAppUnsupported) return row('unavailable');
+  if (!managed && !explicitToken && options.workbuddyDesktopSessionEnabled === true
+    && sessionReason === WORKBUDDY_SESSION_REASON_ENCRYPTED) {
+    return row('notConfigured', { actionRequired: WORKBUDDY_SESSION_ENCRYPTED_ACTION });
   }
-  if (!token && !useLocalApp) return normalizeLimitProvider({ ...source, status: 'notConfigured' });
-
-  const endpoint = WORKBUDDY_DEFAULT_ENDPOINT;
-  const headers = useLocalApp
-    ? requestHeaders('', '', '', '', '', '')
-    : requestHeaders(token, userId, enterpriseId, workbuddyLocale(env, options), domain, departmentInfo);
-  const expectedSession = useLocalApp
-    ? {
-        authenticated: true,
-        userId,
-        enterpriseId,
-        departmentInfo,
-        domain,
-        accountType
-      }
-    : null;
-  const requestDeps = useLocalApp
-    ? {
-        ...deps,
-        fetch: (url, init) => deps.workbuddyFetch(url, init, expectedSession)
-      }
-    : deps;
-  const accountKey = workbuddyAccountKey(token, userId, enterpriseId, '');
+  if (!managed && !explicitToken && !useLocalApp) return row('notConfigured');
+  const expectedSession = useLocalApp ? {
+    authenticated: true, userId, enterpriseId, departmentInfo, domain, accountType, realm,
+    ...(account?.accountKey ? { accountKey: account.accountKey } : {})
+  } : null;
+  const deadlineMs = Number(deps.workbuddyFetchTimeoutMs || deps.fetchTimeoutMs || WORKBUDDY_FETCH_TIMEOUT_MS);
   try {
-    const isEnterprise = Boolean(enterpriseId);
-    const body = isEnterprise
-      ? await fetchJson(`${endpoint}${WORKBUDDY_ENTERPRISE_PATH}`, {
-        method: 'POST',
-        redirect: 'error',
-        headers,
-        body: '{}'
-      }, requestDeps)
-      : await fetchJson(`${endpoint}${WORKBUDDY_PERSONAL_PATH}`, {
-        method: 'POST',
-        redirect: 'error',
-        headers,
-        body: JSON.stringify({
-          PageNumber: 1,
-          PageSize: 100,
-          ProductCode: WORKBUDDY_PRODUCT_CODE,
-          // Match the server-side package selection used by WorkBuddy's
-          // desktop client. parsePersonalUsage still excludes Status 3 rows
-          // from the current spendable aggregate.
-          Status: [0, 3],
-          PackageEndTimeRangeBegin: formatWorkbuddyDateTime(now),
-          PackageEndTimeRangeEnd: formatWorkbuddyDateTime(now + WORKBUDDY_PERSONAL_RANGE_MS)
-        })
-      }, requestDeps);
-    const usage = isEnterprise ? parseEnterpriseUsage(body) : parsePersonalUsage(body);
-    const resolvedAccountKey = workbuddyAccountKey(token, userId, enterpriseId, usage.accountId);
-    const balance = usage.window
-      ? { amount: usage.remaining, currency: 'CREDITS' }
-      : null;
-    return normalizeLimitProvider({
-      ...source,
-      accountKey: resolvedAccountKey,
-      accountLabel: isEnterprise ? 'Enterprise' : 'Personal',
-      status: 'ok',
-      windows: usage.window ? [usage.window] : [],
-      ...(balance ? { balance } : {})
-    });
-  } catch (error) {
-    return normalizeLimitProvider({ ...source, accountKey, status: workbuddyStatus(error) });
+    return await runWithProbeDeadline(async ({ signal }) => {
+      const requestDeps = { ...deps, signal,
+        ...(useLocalApp ? { fetch: (url, init) => deps.workbuddyFetch(url, init, expectedSession) } : {}) };
+      if (!['cn', 'ai'].includes(realm) || !workbuddyDomainMatchesRealm(domain, realm)) {
+        throw Object.assign(new Error('WorkBuddy credential realm mismatch'), { status: 'unavailable' });
+      }
+      const resolveCredential = async (forceRefresh) => {
+        if (typeof deps.resolveWorkbuddyManagedCredential !== 'function') {
+          throw Object.assign(new Error('WorkBuddy managed credential is missing'), { status: 'notConfigured' });
+        }
+        return runWithProbeDeadline(({ signal }) => deps.resolveWorkbuddyManagedCredential(account, { signal, forceRefresh }),
+          { signal, deadlineMs });
+      };
+      let credential = managed ? await resolveCredential(false) : { accessToken: explicitToken, domain };
+      const requestQuota = async () => {
+        const token = cleanSecret(credential?.accessToken);
+        const credentialDomain = cleanSecret(credential?.domain) || domain;
+        if (managed && !token) throw Object.assign(new Error('WorkBuddy managed credential is missing'), { status: 'notConfigured' });
+        if (!workbuddyDomainMatchesRealm(credentialDomain, realm)) {
+          throw Object.assign(new Error('WorkBuddy credential realm mismatch'), { status: 'unavailable' });
+        }
+        const headers = useLocalApp ? requestHeaders('', '', '', '', '', '')
+          : requestHeaders(token, userId, enterpriseId, workbuddyLocale(env, options), credentialDomain, departmentInfo);
+        const init = {
+          method: 'POST', redirect: 'error', credentials: 'omit', headers,
+          body: enterpriseId ? '{}' : JSON.stringify({
+            PageNumber: 1, PageSize: 100, ProductCode: WORKBUDDY_PRODUCT_CODE, Status: [0, 3],
+            PackageEndTimeRangeBegin: formatWorkbuddyDateTime(now),
+            PackageEndTimeRangeEnd: formatWorkbuddyDateTime(now + WORKBUDDY_PERSONAL_RANGE_MS)
+          })
+        };
+        const endpoint = realm === 'ai' ? WORKBUDDY_AI_ENDPOINT : WORKBUDDY_DEFAULT_ENDPOINT;
+        const paths = workbuddyBillingPaths(realm, Boolean(enterpriseId));
+        for (let index = 0; index < paths.length; index += 1) {
+          try { return await fetchJson(`${endpoint}${paths[index]}`, init, requestDeps); }
+          catch (error) {
+            if (error.httpStatus !== 404 || index === paths.length - 1) throw error;
+          }
+        }
+      };
+      let body;
+      try { body = await requestQuota(); }
+      catch (error) {
+        // The resolver owns serialization and durable rotation. Await its
+        // completion before retrying billing, and renew at most once per row.
+        const expiredToken = error.httpStatus === 401 || error.applicationCode === 401;
+        if (!managed || !expiredToken) throw error;
+        credential = await resolveCredential(true);
+        body = await requestQuota();
+      }
+      const usage = enterpriseId ? parseEnterpriseUsage(body) : parsePersonalUsage(body);
+      return row('ok', {
+        accountKey: managed || userId ? accountKey : workbuddyAccountKey(explicitToken, userId, enterpriseId, usage.accountId, realm),
+        windows: usage.window ? [usage.window] : [],
+        ...(usage.window ? { balance: { amount: usage.remaining, currency: 'CREDITS' } } : {})
+      });
+    }, { signal: deps.signal, deadlineMs: deps.workbuddyAccountTimeoutMs || WORKBUDDY_PROBE_BUDGET_MS });
+  } catch (error) { return row(workbuddyStatus(error)); }
+}
+
+async function runWorkbuddyAccounts(jobs, deps) {
+  const configured = Number(deps.providerPhysicalBounds?.workbuddy);
+  const budgetMs = Number.isFinite(configured) && configured > 0 ? configured : WORKBUDDY_PROBE_BUDGET_MS;
+  const startedAt = performance.now();
+  const controller = new AbortController();
+  const signal = deps.signal ? AbortSignal.any([deps.signal, controller.signal]) : controller.signal;
+  const concurrency = Math.min(WORKBUDDY_ACCOUNT_CONCURRENCY, jobs.length);
+  const rows = new Array(jobs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const index = next++;
+      const remainingMs = budgetMs - (performance.now() - startedAt);
+      if (remainingMs <= 0) controller.abort();
+      // Bound the entire resolve/refresh/billing sequence, reserving time for
+      // later waves. Quick accounts leave their unused time for queued ones.
+      const waves = Math.ceil((jobs.length - index) / concurrency);
+      rows[index] = await jobs[index]({ ...deps, signal,
+        workbuddyAccountTimeoutMs: Math.max(1, Math.floor(remainingMs / waves)) });
+      // With an aborted signal, remaining jobs produce identity-only unavailable
+      // rows without resolving credentials or dispatching requests.
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return rows;
+}
+
+// Removal uses only the runtime's accepted snapshot. Probe-local caches can
+// consume a deletion in a superseded request before it is ever committed.
+function appendWorkbuddyRemovals(rows, options, deps, accountScoped) {
+  if (accountScoped || deps.signal?.aborted) return rows;
+  const represented = new Set(rows.map((row) => row.accountKey));
+  const rawManaged = options.workbuddyManagedAccounts;
+  const managedComplete = Array.isArray(rawManaged) && rawManaged.every((account) =>
+    account && cleanSecret(account.id) && cleanSecret(account.userId) && ['cn', 'ai'].includes(account.realm));
+  const sessions = options.workbuddyLocalSessions;
+  const localComplete = (realm) => {
+    if (options.workbuddyDesktopSessionEnabled !== true || options.workbuddyLocalSessionsComplete === false) return false;
+    if (Array.isArray(sessions)) {
+      return sessions.filter((session) => (session?.realm || 'cn') === realm).every((session) =>
+        session && session.discoveryComplete !== false
+        && (session.authenticated === true || session.reason === 'absent'
+          || (cleanSecret(session.userId) && ['expired', 'encrypted'].includes(session.reason))));
+    }
+    return (options.workbuddyRealm || 'cn') === realm
+      && (options.workbuddyLocalSessionReason === 'absent'
+        || (cleanSecret(options.workbuddyUserId) && !options.workbuddyLocalSessionReason));
+  };
+  const disabled = new Set((Array.isArray(rawManaged) ? rawManaged : [])
+    .filter((account) => account?.enabled === false && cleanSecret(account.userId)).map(workbuddyRowKey));
+  const removals = (options.previousLimits?.providers || []).filter((previous) => {
+    if (previous?.provider !== 'workbuddy' || !previous.accountKey || represented.has(previous.accountKey)) return false;
+    if (disabled.has(previous.accountKey)) return true;
+    if (previous.sourceDetail === 'managed') return managedComplete;
+    if (previous.sourceDetail === 'app') return localComplete(previous.region || 'cn');
+    // An explicit headless token lane has a complete credential snapshot.
+    return previous.sourceDetail === 'unknown' && !options.workbuddyDesktopSessionEnabled;
+  }).map((previous) => ({ provider: 'workbuddy', accountKey: previous.accountKey, removed: true }));
+  return [...rows, ...removals];
+}
+
+async function fetchWorkbuddyLimits(options = {}, deps = {}) {
+  const managed = Array.isArray(options.workbuddyManagedAccounts)
+    ? options.workbuddyManagedAccounts.filter((account) => account && typeof account === 'object' && cleanSecret(account.id)) : [];
+  const token = workbuddyAccessToken(deps.env || process.env, options);
+  const locals = !token && options.workbuddyDesktopSessionEnabled === true && Array.isArray(options.workbuddyLocalSessions)
+    ? options.workbuddyLocalSessions.filter((account) => account && typeof account === 'object'
+      && (cleanSecret(account.userId) || !managed.length
+        || !['absent', 'unsupported'].includes(account.reason))) : [];
+  const scope = options.limitRefreshScope?.provider === 'workbuddy' ? options.limitRefreshScope : null;
+  const targeted = scope && (scope.accountId || scope.accountKey);
+  const namesOnly = scope && ['accountName', 'accountEmail', 'accountLabel', 'name', 'email', 'managedAccountId', 'id'].some((field) => scope[field]);
+  const matches = (account, key) => !scope || (!targeted && !namesOnly) || (
+    (cleanSecret(scope.accountId) || cleanSecret(scope.accountKey))
+    && (!scope.accountId || cleanSecret(scope.accountId) === cleanSecret(account?.id))
+    && (!scope.accountKey || cleanSecret(scope.accountKey) === key)
+  );
+  // Disabled managed identities still suppress the equivalent local source.
+  // Only verified user/enterprise identity can deduplicate a local session.
+  const managedIdentities = new Set(managed.filter((account) => cleanSecret(account.userId)).map(workbuddyRowKey));
+  const jobs = [];
+  const seen = new Set();
+  for (const account of managed) {
+    const key = workbuddyRowKey(account);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (account.enabled !== false && matches(account, key)) jobs.push((jobDeps) => fetchWorkbuddyAccount(options, jobDeps, account, true));
   }
+  for (const account of locals) {
+    const key = workbuddyAccountKey(account);
+    if ((cleanSecret(account.userId) && managedIdentities.has(key)) || seen.has(key)) continue;
+    seen.add(key);
+    if (matches(account, key)) jobs.push((jobDeps) => fetchWorkbuddyAccount(options, jobDeps, account));
+  }
+  if (!locals.length) {
+    const identity = {
+      realm: options.workbuddyRealm || 'cn',
+      userId: workbuddyUserId(deps.env || process.env, options),
+      enterpriseId: workbuddyEnterpriseId(deps.env || process.env, options)
+    };
+    const key = workbuddyAccountKey(token, identity.userId, identity.enterpriseId, '', identity.realm);
+    const legacyLocal = options.workbuddyDesktopSessionEnabled === true;
+    if ((!managed.length || token || (legacyLocal && identity.userId))
+      && !managedIdentities.has(key) && matches(null, key)) {
+      jobs.push((jobDeps) => fetchWorkbuddyAccount(options, jobDeps));
+    }
+  }
+  const currentRows = await runWorkbuddyAccounts(jobs, deps);
+  const rows = appendWorkbuddyRemovals(currentRows, options, deps, targeted || namesOnly);
+  // Keep the legacy single-object return when there is no managed account
+  // configuration and at most one local discovery row.
+  return !managed.length && !scope && rows.length === 1 ? rows[0] : rows;
 }
 
 module.exports = {
   WORKBUDDY_DEFAULT_ENDPOINT,
+  WORKBUDDY_AI_ENDPOINT,
   WORKBUDDY_ENTERPRISE_PATH,
   WORKBUDDY_FETCH_TIMEOUT_MS,
   WORKBUDDY_PERSONAL_PATH,
@@ -465,6 +619,8 @@ module.exports = {
   parsePersonalUsage,
   workbuddyAccessToken,
   workbuddyAccountKey,
+  workbuddyBillingPaths,
+  workbuddyDomainMatchesRealm,
   workbuddyDepartmentInfo,
   workbuddyDomain,
   workbuddyEnterpriseId,

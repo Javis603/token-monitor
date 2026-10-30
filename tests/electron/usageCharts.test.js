@@ -225,7 +225,7 @@ test('heatmapSvg keeps normal geometry without directional hover scaling', () =>
   assert.match(svg, /class="heat-month" x="0" y="33"/);
 });
 
-test('heatmapSvg embeds escaped per-cell titles when supplied', () => {
+test('heatmapSvg embeds escaped per-cell descriptions when supplied', () => {
   const svg = heatmapSvg({
     width: 9,
     height: 9,
@@ -235,7 +235,7 @@ test('heatmapSvg embeds escaped per-cell titles when supplied', () => {
     monthLabels: []
   }, { titleOf: (cell) => `${cell.date} < ${cell.tokens}` });
 
-  assert.match(svg, /<title>2026-06-22 &lt; 1234<\/title>/);
+  assert.match(svg, /<desc>2026-06-22 &lt; 1234<\/desc>/);
 });
 
 test('heatmapSvg can include a glow filter for hovered cells', () => {
@@ -438,7 +438,7 @@ test('patchTodayBar keeps earlier values while replacing an existing today row',
   assert.equal(points[1].tokens, 2);          // original not mutated
 });
 
-test('cross-day live bar keeps the current date and hover title on the same slot', () => {
+test('cross-day live bar keeps the current date and description on the same slot', () => {
   const points = patchTodayBar([
     { date: '2026-08-04', tokens: 500 },
     { date: '2026-08-05', tokens: 507_800_000 }
@@ -451,7 +451,7 @@ test('cross-day live bar keeps the current date and hover title on the same slot
     { date: '2026-08-05', tokens: 507_800_000 },
     { date: '2026-08-06', tokens: 11_751_310 }
   ]);
-  assert.deepEqual([...svg.matchAll(/<title>([^<]+)/g)].map((match) => match[1]).slice(-2), [
+  assert.deepEqual([...svg.matchAll(/<desc>([^<]+)/g)].map((match) => match[1]).slice(-2), [
     '2026-08-05 · 507800000',
     '2026-08-06 · 11751310'
   ]);
@@ -464,7 +464,7 @@ test('sparklineSvg renders one rect per bar and marks the last', () => {
   assert.match(svg, /viewBox="0 0 20 10"/);
   assert.equal((svg.match(/<rect /g) || []).length, 2);
   assert.match(svg, /spark-bar--last/);
-  assert.doesNotMatch(svg, /<title>/); // no titles unless provided
+  assert.doesNotMatch(svg, /<desc>/); // no titles unless provided
 });
 
 test('sparklineSvg can mark zero-value trend dates without changing bar height', () => {
@@ -473,7 +473,7 @@ test('sparklineSvg can mark zero-value trend dates without changing bar height',
   });
   const svg = sparklineSvg(model, { titles: ['zero', 'two'], showZeroMarkers: true });
   assert.match(svg, /class="spark-zero-marker"/);
-  assert.match(svg, /<title>zero<\/title>/);
+  assert.match(svg, /<desc>zero<\/desc>/);
   assert.match(svg, /class="spark-bar spark-bar--last"/);
   assert.doesNotMatch(svg, /spark-zero-marker--last/);
 });
@@ -486,12 +486,12 @@ test('sparklineSvg marks a trailing zero-value date as the last marker', () => {
 
   assert.equal(model.bars[1].height, 0);
   assert.match(svg, /class="spark-zero-marker spark-zero-marker--last"/);
-  assert.match(svg, /<title>zero<\/title>/);
+  assert.match(svg, /<desc>zero<\/desc>/);
 });
 
-test('sparklineSvg embeds per-bar hover titles when supplied and escapes them', () => {
+test('sparklineSvg embeds per-bar descriptions when supplied and escapes them', () => {
   const model = sparklinePreview([{ tokens: 1 }, { tokens: 2 }], { width: 20, height: 10, gap: 0, metric: 'tokens' });
   const svg = sparklineSvg(model, { titles: ['6/7 · 1', 'a<b&c'] });
-  assert.match(svg, /<title>6\/7 · 1<\/title>/);
-  assert.match(svg, /<title>a&lt;b&amp;c<\/title>/);
+  assert.match(svg, /<desc>6\/7 · 1<\/desc>/);
+  assert.match(svg, /<desc>a&lt;b&amp;c<\/desc>/);
 });

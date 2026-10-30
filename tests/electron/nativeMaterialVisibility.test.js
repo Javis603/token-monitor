@@ -83,6 +83,29 @@ test('an unchanged material preference does not recreate its native container', 
   assert.equal(disposals, 1);
 });
 
+test('Regular and Clear update in place while older macOS and reduced transparency keep their fallbacks', () => {
+  const win = fakeWindow();
+  win.setVisible(true);
+  const updates = [];
+  let creations = 0;
+  const deps = { osRelease: '25.0.0', createGlass() {
+    creations++;
+    return { update(value) { updates.push(value); }, dispose() {} };
+  } };
+  for (const [style, tintOpacity] of [['regular', 0.12], ['clear', 0.65], ['clear', 0], ['regular', 0.12]]) {
+    syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true, style, tintOpacity }, 'darwin', deps);
+  }
+  assert.deepEqual(updates.map((update) => [update.style, update.tintOpacity]), [['regular', 0.12], ['clear', 0.65], ['clear', 0], ['regular', 0.12]]);
+  assert.equal(creations, 1);
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true, style: 'clear', reducedTransparency: true }, 'darwin', deps);
+  assert.equal(getNativeMaterialState(win).type, 'opaque');
+  const older = fakeWindow();
+  older.setVisible(true);
+  syncNativeMaterialVisibility(older, { enabled: true, liquidGlass: true, style: 'clear' }, 'darwin', { ...deps, osRelease: '24.0.0' });
+  assert.equal(getNativeMaterialState(older).type, 'vibrancy');
+  assert.equal(creations, 1);
+});
+
 test('failed native initialization reports the fallback instead of claiming Liquid Glass', (t) => {
   t.mock.method(console, 'warn', () => {});
   const win = fakeWindow();

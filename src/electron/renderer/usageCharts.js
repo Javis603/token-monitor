@@ -437,7 +437,7 @@
     if (/grok|xai/.test(name)) return 'xai';
     if (/deepseek/.test(name)) return 'deepseek';
     if (/nemotron|nvidia/.test(name)) return 'nvidia';
-    if (/llama|meta|muse-spark(?:-|$)/.test(name)) return 'meta';
+    if (/llama|meta|(?:^|[^a-z0-9])muse-(?:spark|wonder|glimmer|image|voice)(?:-|$)/.test(name)) return 'meta';
     if (/mistral|mixtral|codestral/.test(name)) return 'mistral';
     if (/qwen|qwq|qvq|qmodel/.test(name)) return 'qwen';
     // Kimi's coding-plan catalog also serves bare `k2`/`k3` ids with no `kimi`
@@ -488,7 +488,7 @@
     const o = Object.assign({ radius: 1, titles: null, showZeroMarkers: false }, options || {});
     const titles = Array.isArray(o.titles) ? o.titles : null;
     const bars = Array.isArray(model?.bars) ? model.bars : [];
-    const titleOf = (index) => titles && titles[index] ? `<title>${escapeXml(titles[index])}</title>` : '';
+    const titleOf = (index) => titles && titles[index] ? `<desc>${escapeXml(titles[index])}</desc>` : '';
     const zeroMarkers = o.showZeroMarkers
       ? bars.map((b, i) => {
         if (b.value !== 0) return '';
@@ -555,7 +555,7 @@
         return `<rect x="${svgRound(s.x)}" y="${svgRound(s.y)}" width="${svgRound(s.width)}" height="${svgRound(h)}" fill="${o.colorFor(s.key)}" class="bar-seg"></rect>`;
       }).join('');
       const tip = o.titleOf(bar);
-      const title = tip ? `<title>${escapeXml(tip)}</title>` : '';
+      const title = tip ? `<desc>${escapeXml(tip)}</desc>` : '';
       const hover = `<rect data-i="${bar.index}" x="${svgRound(bar.x)}" y="${svgRound(p.y)}" width="${svgRound(bar.width)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
       const label = axisText(o.axisLabel(bar, bar.index, model.bars), bar.x + bar.width / 2, model.height - 4);
       const stack = `<g class="bar-stack" data-motion-key="${encodeURIComponent(String(bar.label))}">${drawn}</g>`;
@@ -577,7 +577,7 @@
         + `<line class="candle-wick candle-wick-low ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(bodyMid)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yLow)}"></line>`;
       const body = `<rect class="candle-body ${cls}" x="${svgRound(c.x)}" y="${svgRound(c.bodyY)}" width="${svgRound(c.width)}" height="${svgRound(bodyHeight)}" rx="1"></rect>`;
       const tip = o.titleOf(c);
-      const title = tip ? `<title>${escapeXml(tip)}</title>` : '';
+      const title = tip ? `<desc>${escapeXml(tip)}</desc>` : '';
       const hover = `<rect data-i="${i}" x="${svgRound(c.x)}" y="${svgRound(p.y)}" width="${svgRound(c.width)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
       const label = axisText(o.axisLabel(c, i, model.candles), c.wickX, model.height - 4);
       const candle = `<g class="candle-stack" data-motion-key="${encodeURIComponent(String(c.key))}">${wick}${body}</g>`;
@@ -610,7 +610,7 @@
     const initialVisibility = o.initialHidden ? ' data-motion-hidden="true" opacity="0"' : '';
     const cellAttrs = (c) => `class="heat lvl-${c.intensity}" data-d="${escapeXml(c.date)}" data-t="${svgRound(c.tokens || 0)}" data-cost="${svgRound(c.cost || 0)}" x="${svgRound(c.x)}" y="${svgRound(c.y)}" width="${svgRound(c.size)}" height="${svgRound(c.size)}" rx="${svgRound(Math.max(0, Number(o.radius) || 0))}"${initialVisibility}`;
     const cells = (model.cells || []).map((c) =>
-      `<rect ${cellAttrs(c)}>${o.titleOf(c) ? `<title>${escapeXml(o.titleOf(c))}</title>` : ''}</rect>`
+      `<rect ${cellAttrs(c)}>${o.titleOf(c) ? `<desc>${escapeXml(o.titleOf(c))}</desc>` : ''}</rect>`
     ).join('');
     const brightCells = spotlightId
       ? (model.cells || []).map((c) =>

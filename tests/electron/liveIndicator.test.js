@@ -15,6 +15,7 @@ function liveDotHarness() {
   const animations = [];
   const dot = {
     live: true,
+    setAttribute(name, value) { this[name] = value; },
     classList: {
       contains: () => dot.live,
       toggle: (_name, value) => { dot.live = value; }

@@ -6,7 +6,7 @@
 const { isSessionActivityClient } = require('./sessionActivityProviders');
 
 const PERIODS = ['today', 'month', 'allTime'];
-const { normalizeLiveActivity, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
+const { normalizeLiveActivity, normalizeReasoningEffort, isSessionReasoningEffortClient, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
@@ -73,6 +73,14 @@ function firstNumber(obj, keys) {
     }
   }
   return 0;
+}
+
+function firstPresent(obj, keys) {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+  }
+  return undefined;
 }
 
 function firstString(obj, keys) {
@@ -282,6 +290,7 @@ function normalizeClientName(value) {
   if (raw.includes('claude')) return 'claude';
   if (raw.includes('codex')) return 'codex';
   if (raw.includes('hermes')) return 'hermes';
+  if (raw === 'goose') return 'goose';
   if (raw.includes('gemini')) return 'gemini';
   if (raw.includes('cursor')) return 'cursor';
   if (raw.includes('antigravity')) return 'antigravity';
@@ -291,6 +300,10 @@ function normalizeClientName(value) {
   if (raw.includes('grok')) return 'grok';
   if (raw === 'droid') return 'droid';
   if (raw.includes('copilot')) return 'copilot';
+  // Senpi before Oh My Pi and the generic Pi test. Tokscale's id is `senpi`;
+  // "Senpi (OmO Native)" must not fall through to a hyphenated label, and the
+  // Pi word test must not capture a future spelling that contains "pi".
+  if (raw === 'senpi' || /^omo[\s_-]*native$/.test(raw) || /^senpi(?:[\s_-]*\([^)]*\))?$/.test(raw)) return 'senpi';
   // Oh My Pi before the generic Pi test: its display name contains "Pi" as a
   // word, so the Pi heuristic would otherwise capture it. Tokscale reports the
   // id `omp`; these spellings only appear when a caller passes a display name.
@@ -320,7 +333,14 @@ function normalizeClientName(value) {
   if (raw === 'mcode' || /^minimax[\s_-]*code$/.test(raw)) return 'mcode';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
-  return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
+  const slug = raw.replace(/[^a-z0-9_-]+/g, '-');
+  // Trim edge dashes by index: /^-+|-+$/ is quadratic on long dash runs, and
+  // client names arrive in device payloads.
+  let start = 0;
+  let end = slug.length;
+  while (start < end && slug[start] === '-') start += 1;
+  while (end > start && slug[end - 1] === '-') end -= 1;
+  return slug.slice(start, end) || null;
 }
 
 function detectClient(obj) {
@@ -361,6 +381,21 @@ function emptyProject(label = '') {
     costUsd: 0,
     clients: Object.create(null)
   };
+}
+
+function addProjectModels(project, models, tokenLimit) {
+  if (!models || typeof models !== 'object' || Array.isArray(models)) return;
+  let remaining = Math.max(0, Math.round(asNumber(tokenLimit)));
+  const entries = Object.entries(models).sort(([left], [right]) => left.localeCompare(right));
+  for (const [rawModel, value] of entries) {
+    const model = normalizeModelName(rawModel);
+    if (!model || remaining <= 0) continue;
+    const tokens = Math.min(remaining, Math.max(0, Math.round(asNumber(value))));
+    if (tokens <= 0) continue;
+    const target = project.models ||= Object.create(null);
+    target[model] = (target[model] || 0) + tokens;
+    remaining -= tokens;
+  }
 }
 
 // costUsd remains the known subtotal. Missing prices are explicit token counts,
@@ -426,9 +461,11 @@ function addProjectInto(projects, rawKey, source) {
   if (!hasOwn(projects, key)) projects[key] = emptyProject(label || rawKey);
   const target = projects[key];
   target.label = deterministicProjectLabel(target.label, label || rawKey);
-  target.tokens += Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
+  const tokens = Math.max(0, Math.round(asNumber(source.tokens ?? source.totalTokens)));
+  target.tokens += tokens;
   target.costUsd += asNumber(source.costUsd ?? source.cost);
-  addUnpricedTokens(target, source, Math.max(0, asNumber(source.tokens ?? source.totalTokens)));
+  addUnpricedTokens(target, source, tokens);
+  addProjectModels(target, source.models, tokens);
   for (const [client, tokens] of Object.entries(source.clients || {})) {
     const clientKey = normalizeClientName(client);
     if (!clientKey) continue;
@@ -458,6 +495,7 @@ function projectRollupFromSessions(sessions) {
     project.tokens += tokens;
     project.costUsd += asNumber(session.costUsd);
     addUnpricedTokens(project, session, tokens);
+    addProjectModels(project, session.models, tokens);
     const client = normalizeClientName(session.client);
     if (client && tokens > 0) {
       project.clients[client] = (hasOwn(project.clients, client) ? project.clients[client] : 0) + tokens;
@@ -585,6 +623,43 @@ function collectUsageRows(node, rows) {
   }
 }
 
+const SESSION_MODEL_COMPONENT_FIELDS = ['inputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens'];
+
+// Each entry describes an observed portion of a model bucket, not an inferred
+// decomposition of the whole session. Legacy/unobserved portions stay unknown.
+function normalizeSessionModelComponents(input, session, normalizeModel) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const result = Object.create(null);
+  for (const [rawModel, row] of Object.entries(input)) {
+    const model = normalizeModel(rawModel);
+    if (!model || !row || typeof row !== 'object') return undefined;
+    const keys = ['totalTokens', ...SESSION_MODEL_COMPONENT_FIELDS];
+    if (keys.some(key => !Number.isSafeInteger(row[key]) || row[key] < 0)) return undefined;
+    if (SESSION_MODEL_COMPONENT_FIELDS.reduce((sum, key) => sum + row[key], 0) > row.totalTokens) return undefined;
+    const target = result[model] ||= Object.fromEntries(keys.map(key => [key, 0]));
+    for (const key of keys) target[key] += row[key];
+  }
+  for (const [model, row] of Object.entries(result)) {
+    if (['totalTokens', ...SESSION_MODEL_COMPONENT_FIELDS].some(key => !Number.isSafeInteger(row[key]))) return undefined;
+    if (row.totalTokens > (session.models[model] || 0)) return undefined;
+  }
+  if (Object.values(result).reduce((sum, row) => sum + row.totalTokens, 0) > session.totalTokens) return undefined;
+  for (const field of SESSION_MODEL_COMPONENT_FIELDS) {
+    if (Object.values(result).reduce((sum, row) => sum + row[field], 0) > session[field]) return undefined;
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
+function mergeSessionModelComponents(target, source) {
+  if (!source.modelTokenComponents) return;
+  target.modelTokenComponents ||= Object.create(null);
+  for (const [model, row] of Object.entries(source.modelTokenComponents)) {
+    const next = target.modelTokenComponents[model] ||= { totalTokens: 0, inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 };
+    for (const key of ['totalTokens', ...SESSION_MODEL_COMPONENT_FIELDS]) next[key] += row[key];
+  }
+}
+
+
 function sessionTokenComponents(input) {
   return {
     inputTokens: Math.max(0, Math.round(firstNumber(input, INPUT_TOKEN_KEYS))),
@@ -607,9 +682,9 @@ function emptySession(client, id) {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     reasoningTokens: 0,
-    // The session's share of the period throughput counters: raw sums, gated
-    // per tokscale entry exactly as the period's are, so a row divides them at
-    // display time into its own tok/s. 0/0 means the client reported no
+    // The session's share of the period throughput counters: raw sums from
+    // the same timed messages, divided at display time into its own tok/s.
+    // 0/0 means the client reported no
     // durations for this session, not that it generated nothing.
     timedOutputTokens: 0,
     timedDurationMs: 0,
@@ -639,6 +714,7 @@ function emptySession(client, id) {
 const sessionsWithLiveSource = new WeakSet();
 
 function mergeSession(target, source) {
+  mergeSessionModelComponents(target, source);
   const sourceTokens = Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.totalTokens += sourceTokens;
   target.costUsd += asNumber(source.costUsd);
@@ -659,6 +735,16 @@ function mergeSession(target, source) {
   if (sourceLastUsed && sourceLastUsed > targetLastUsed) target.lastUsedAt = new Date(sourceLastUsed).toISOString();
   if (hasOwn(source, 'promptCache') && sourceLastUsed >= targetLastUsed) {
     target.promptCache = normalizePromptCache(source.promptCache);
+  }
+  if (isSessionReasoningEffortClient(source.client) && sourceLastUsed >= targetLastUsed) {
+    if (sourceLastUsed > targetLastUsed || !hasOwn(target, 'reasoningEffort')) {
+      if (hasOwn(source, 'reasoningEffort') || hasOwn(target, 'reasoningEffort')) {
+        target.reasoningEffort = normalizeReasoningEffort(source.reasoningEffort);
+      }
+    } else if (hasOwn(source, 'reasoningEffort') && target.reasoningEffort !== source.reasoningEffort) {
+      // Conflicting or missing configuration at the same timestamp is unknown.
+      target.reasoningEffort = null;
+    }
   }
   const sourceProjectId = String(source.projectId || '');
   if (!target.projectId && sourceProjectId) {
@@ -771,7 +857,7 @@ function sessionFromRow(row) {
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.outputTokens = Math.max(0, Math.round(outputValueForClient(row, client)));
-  Object.assign(session, entryThroughput(row, session.outputTokens));
+  Object.assign(session, entryThroughput(row, session.outputTokens, client));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();
@@ -781,6 +867,12 @@ function sessionFromRow(row) {
   applyParentLink(session, row);
   const model = detectModel(row, client);
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
+  if (model && session.totalTokens > 0) {
+    const rowComponents = Object.fromEntries(['totalTokens', 'inputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens']
+      .map(key => [key, session[key]]));
+    const components = normalizeSessionModelComponents({ [model]: rowComponents }, session, name => name);
+    if (components) session.modelTokenComponents = components;
+  }
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
   const provider = normalizeProviderName(row.provider);
   if (provider && session.totalTokens > 0) session.providers[provider] = (session.providers[provider] || 0) + session.totalTokens;
@@ -815,6 +907,7 @@ function normalizeSession(input, fallbackKey) {
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
   if (hasOwn(input, 'promptCache')) session.promptCache = normalizePromptCache(input.promptCache);
+  if (isSessionReasoningEffortClient(client) && hasOwn(input, 'reasoningEffort')) session.reasoningEffort = normalizeReasoningEffort(input.reasoningEffort);
   session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
   session.contextWindow = Math.max(0, Math.round(asNumber(input.contextWindow ?? input.context_window ?? 0)));
   // Carried rather than summed, and only when the source actually states it:
@@ -853,6 +946,9 @@ function normalizeSession(input, fallbackKey) {
       if (key) session.modelCosts[key] = (session.modelCosts[key] || 0) + asNumber(value);
     }
   }
+  const modelComponents = normalizeSessionModelComponents(input.modelTokenComponents, session,
+    model => normalizeModelNameForClient(model, client));
+  if (modelComponents) session.modelTokenComponents = modelComponents;
   if (input.providers && typeof input.providers === 'object') {
     for (const [provider, value] of Object.entries(input.providers)) {
       const key = normalizeProviderName(provider);
@@ -1129,15 +1225,20 @@ function normalizeModelThroughput(value, period) {
 }
 
 
-// One tokscale entry's throughput counters. An entry contributes its output to
-// the numerator exactly when it contributes a duration to the denominator, so
-// the two always describe the same entries. Gating rather than scaling by
-// tokscale's `tokenCoverage` keeps both plain counters that merge and delta
-// like every other token field.
-function entryThroughput(row, output) {
+// Exact per-message subtotals are authoritative, including zero. Older binaries
+// lack these fields, so retain their legacy whole-row behavior until upgraded.
+// Coverage measures all token buckets and cannot apportion generated output.
+function entryThroughput(row, output, client) {
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
-  return { timedOutputTokens: timedDurationMs > 0 ? output : 0, timedDurationMs };
+  const timedOutput = firstPresent(performance, ['timedOutputTokens', 'timed_output_tokens']);
+  if (timedOutput === undefined) return { timedOutputTokens: timedDurationMs > 0 ? output : 0, timedDurationMs };
+  const reasoning = hasDisjointReasoning(client)
+    ? Math.max(0, Math.round(asNumber(firstPresent(performance, ['timedReasoningTokens', 'timed_reasoning_tokens'])))) : 0;
+  return {
+    timedOutputTokens: normalizeTimedOutputTokens(Math.max(0, Math.round(asNumber(timedOutput))) + reasoning, output, timedDurationMs),
+    timedDurationMs
+  };
 }
 
 function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
@@ -1149,7 +1250,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const output = Math.max(0, Math.round(outputValueForClient(row, client)));
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
-  const { timedOutputTokens, timedDurationMs } = entryThroughput(row, output);
+  const { timedOutputTokens, timedDurationMs } = entryThroughput(row, output, client);
   const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
@@ -1919,6 +2020,7 @@ function deltaValue(base, fresh, anchor, key) {
   // Cache observations are snapshots, never additive accounting. Missing
   // metadata retains the base; only an explicit null clears an observation.
   if (key === 'promptCache') return fresh === undefined ? base : normalizePromptCache(fresh);
+  if (key === 'reasoningEffort') return fresh === undefined ? base : normalizeReasoningEffort(fresh);
   if (key === 'tokenComponents') {
     // A warm tick may introduce aggregate-only fallback data. Boolean
     // provenance is not arithmetically subtractable, so retain exactness only
@@ -1961,9 +2063,40 @@ function deltaValue(base, fresh, anchor, key) {
     // the base pair intact; the collector's fresh-link gate decides whether
     // to replace it. Field-wise fallback can invent a cross-provider parent.
     if (sample.client && sample.sessionId) {
+      // Component coverage is optional. A mixed legacy/partial anchor cannot
+      // establish the per-model delta; do not subtract a missing reading as zero.
+      if (result.modelTokenComponents && (asNumber(fresh?.totalTokens) > 0 || asNumber(anchor?.totalTokens) > 0)) {
+        const complete = [base, fresh, anchor].every(session => !session || asNumber(session.totalTokens) === 0
+          || Object.entries(session.models || {}).every(([model, tokens]) => tokens === 0
+            || session.modelTokenComponents?.[model]?.totalTokens === tokens));
+        const models = new Set([base, fresh, anchor].flatMap(session => Object.keys(session?.modelTokenComponents || {})));
+        const exact = complete && [...models].every(model =>
+          ['totalTokens', 'inputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens'].every(field =>
+            (base?.modelTokenComponents?.[model]?.[field] || 0)
+            + (fresh?.modelTokenComponents?.[model]?.[field] || 0)
+            - (anchor?.modelTokenComponents?.[model]?.[field] || 0) >= 0));
+        const components = exact && normalizeSessionModelComponents(result.modelTokenComponents, result,
+          model => normalizeModelNameForClient(model, result.client));
+        if (components) result.modelTokenComponents = components;
+        else delete result.modelTokenComponents;
+      }
+
       delete result.parentSessionId;
       delete result.parentClient;
       applyParentLink(result, base?.parentSessionId ? base : fresh || {});
+      // Compare before lastUsedAt is projected to the maximum: a missing
+      // setting preserves only the same observation, never a newer turn.
+      if (isSessionReasoningEffortClient(sample.client)) {
+        const freshAt = timestampMs(fresh?.lastUsedAt);
+        const retainedAt = timestampMs(base?.lastUsedAt);
+        if (freshAt < retainedAt) {
+          if (hasOwn(base || {}, 'reasoningEffort')) result.reasoningEffort = normalizeReasoningEffort(base.reasoningEffort);
+          else delete result.reasoningEffort;
+        } else if (!hasOwn(fresh || {}, 'reasoningEffort')) {
+          if (freshAt > retainedAt) result.reasoningEffort = null;
+          else if (!hasOwn(base || {}, 'reasoningEffort')) delete result.reasoningEffort;
+        }
+      }
     }
     return result;
   }

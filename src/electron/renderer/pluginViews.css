@@ -1,0 +1,26 @@
+/* Optional host theme tokens for trusted author UI. Authors may supply their
+   own CSS; these defaults are not an enforced visual system. */
+:root {
+  --plugin-default: var(--text);
+  --plugin-muted: var(--muted);
+  --plugin-accent: var(--accent);
+  --plugin-chart: var(--chart-color);
+  --plugin-ok: var(--success);
+  --plugin-warn: var(--orange);
+  --plugin-bad: var(--red);
+  --plugin-info: var(--blue);
+}
+.pv-icon { display: block; flex: 0 0 auto; }
+.pv-mount, .plugin-content { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+[data-pv-font="system"] { --pv-font: system-ui, -apple-system, sans-serif; }
+[data-pv-font="mono"] { --pv-font: ui-monospace, Menlo, Consolas, monospace; }
+[data-pv-density="compact"] { --pv-spacing: .75; --pv-padding: 6px; }
+[data-pv-density="standard"] { --pv-spacing: 1; --pv-padding: 12px; }
+[data-pv-density="comfortable"] { --pv-spacing: 1.4; --pv-padding: 16px; }
+[data-pv-corners="square"] { --pv-radius: 0px; }
+[data-pv-corners="rounded"] { --pv-radius: 8px; }
+[data-pv-corners="soft"] { --pv-radius: 16px; }
+.plugin-inline-error { color: var(--red, #d65a60); font: inherit; }
+/* Native shell geometry and hit testing remain owned by the host. */
+.plugin-native-content { display: contents; }
+.plugin-native-content[hidden] { display: none; }

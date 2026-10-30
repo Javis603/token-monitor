@@ -486,7 +486,7 @@ test('applySessionTimestamps closes the initial DSH index generation race before
     const id = 'session-index-race';
     const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
     fs.mkdirSync(dir, { recursive: true });
-    const header = `${JSON.stringify({ type: 'session', id, createdAt: 1750000000000 })}\n`;
+    const header = `${JSON.stringify({ type: 'session', id, createdAt: 1750000000000, cwd: '/work/race-project' })}\n`;
     const unversioned = path.join(dir, 'session.jsonl');
     const versioned = path.join(dir, 'session.v3.jsonl');
     fs.writeFileSync(unversioned, header);
@@ -512,6 +512,7 @@ test('applySessionTimestamps closes the initial DSH index generation race before
     applySessionTimestamps(periods, home, cache);
 
     assert.equal(periods.today.sessions[`dsh:${id}`].lastUsedAt, newMtime.toISOString());
+    assert.equal(periods.today.sessions[`dsh:${id}`].projectLabel, 'race-project');
     assert.equal(indexCalls, 1);
     assert.equal([...cache.dshSessionFileCache.values()][0].filePath, versioned);
   } finally {
@@ -593,7 +594,7 @@ test('scopedHome DSH lookup ignores a host DSH_HOME override', () => {
   try {
     const dir = path.join(wslHome, '.dsh', 'sessions', 'proj', 'session-wsl');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id: 'session-wsl', createdAt: 1750000000000 })}\n`);
+    fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id: 'session-wsl', createdAt: 1750000000000, cwd: '/work/wsl-project' })}\n`);
     // hostDshHome deliberately has no matching session: if DSH_HOME leaked
     // through, the lookup would resolve here instead and find nothing.
 
@@ -609,6 +610,7 @@ test('scopedHome DSH lookup ignores a host DSH_HOME override', () => {
     });
 
     assert.equal(periods.today.sessions['dsh:session-wsl'].startedAt, new Date(1750000000000).toISOString());
+    assert.equal(periods.today.sessions['dsh:session-wsl'].projectLabel, 'wsl-project');
   } finally {
     fs.rmSync(wslHome, { recursive: true, force: true });
     fs.rmSync(hostDshHome, { recursive: true, force: true });
@@ -632,7 +634,7 @@ test('applySessionTimestamps scopes the DSH cache by sessions root, not just ses
     for (const [home, createdAt] of [[nativeHome, nativeCreatedAt], [wslHome, wslCreatedAt]]) {
       const dir = path.join(home, '.dsh', 'sessions', 'proj', id);
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id, createdAt })}\n`);
+      fs.writeFileSync(path.join(dir, 'session.jsonl'), `${JSON.stringify({ type: 'session', id, createdAt, cwd: `${home}/workspace` })}\n`);
     }
 
     // No dshSessionFileCache injected on purpose: both calls share the
@@ -644,6 +646,9 @@ test('applySessionTimestamps scopes the DSH cache by sessions root, not just ses
     const wslPeriods = { today: { sessions: { [`dsh:${id}`]: { client: 'dsh', sessionId: id } } } };
     applyFresh(wslPeriods, wslHome, { scopedHome: true, env: {} });
     assert.equal(wslPeriods.today.sessions[`dsh:${id}`].startedAt, new Date(wslCreatedAt).toISOString());
+    assert.ok(nativePeriods.today.sessions[`dsh:${id}`].projectId);
+    assert.ok(wslPeriods.today.sessions[`dsh:${id}`].projectId);
+    assert.notEqual(nativePeriods.today.sessions[`dsh:${id}`].projectId, wslPeriods.today.sessions[`dsh:${id}`].projectId);
   } finally {
     delete require.cache[collectorPath];
     fs.rmSync(nativeHome, { recursive: true, force: true });
@@ -680,12 +685,13 @@ test('applySessionTimestamps recovers createdAt once a torn header becomes reada
     assert.equal(first.startedAt, mtime1.toISOString(), 'no readable header yet, so startedAt falls back to mtime');
 
     const createdAt = 1750000000000;
-    fs.writeFileSync(file, `${JSON.stringify({ type: 'session', id, createdAt })}\n`);
+    fs.writeFileSync(file, `${JSON.stringify({ type: 'session', id, createdAt, cwd: '/work/recovered-project' })}\n`);
     const mtime2 = new Date('2026-07-01T11:00:00.000Z');
     fs.utimesSync(file, mtime2, mtime2);
 
     const second = tick();
     assert.equal(second.startedAt, new Date(createdAt).toISOString(), 'the rewritten header must be re-read to recover createdAt');
+    assert.equal(second.projectLabel, 'recovered-project');
   } finally {
     delete require.cache[collectorPath];
     fs.rmSync(home, { recursive: true, force: true });

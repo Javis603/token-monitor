@@ -6,6 +6,23 @@ const path = require('node:path');
 // marks only sources where the same path is a host directory on every platform;
 // file sources, alternate roots and platform-specific paths remain explicit in
 // clientSourceRoots().
+// Upstream claude_desktop::storage_roots uses these home-relative paths on
+// every OS, without APPDATA/XDG overrides. Keep WSL detection and host roots
+// together; only the retained transcript trees and conversation store are read.
+const CLAUDE_DESKTOP_SOURCES = [
+  'Library/Application Support/Claude',
+  'AppData/Roaming/Claude',
+  '.config/Claude'
+].flatMap((app) => [
+  ...['local-agent-mode-sessions', 'claude-code-sessions'].map((name) => ({
+    marker: `${app}/${name}`, client: 'claude', hostCheckId: 'claude-desktop-transcripts'
+  })),
+  ...['leveldb', 'blob'].map((extension) => ({
+    marker: `${app}/IndexedDB/https_claude.ai_0.indexeddb.${extension}`,
+    client: 'claude', hostCheckId: 'claude-desktop-cache'
+  }))
+]);
+
 const SOURCE_MARKERS = [
   { marker: '.claude/projects', client: 'claude' },
   { marker: '.claude/transcripts', client: 'claude' },
@@ -15,6 +32,8 @@ const SOURCE_MARKERS = [
   { marker: '.clawdbot/agents', client: 'openclaw' },
   { marker: '.moltbot/agents', client: 'openclaw' },
   { marker: '.moldbot/agents', client: 'openclaw' },
+  { marker: '.local/share/goose/sessions/sessions.db', client: 'goose' },
+  { marker: '.local/share/Block/goose/sessions/sessions.db', client: 'goose' },
   { marker: '.hermes', client: 'hermes' },
   { marker: '.kimi/sessions', client: 'kimi' },
   { marker: '.kimi-code/sessions', client: 'kimi' },
@@ -27,11 +46,17 @@ const SOURCE_MARKERS = [
   { marker: '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks', client: 'cline' },
   { marker: '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks', client: 'cline' },
   { marker: '.local/share/amp/threads', client: 'amp' },
+  { marker: '.config/tokscale/amp-cache/threads', client: 'amp' },
   { marker: '.pi/agent/sessions', client: 'pi', hostCheckId: 'pi-sessions' },
   { marker: '.omp/agent/sessions', client: 'omp', hostCheckId: 'omp-sessions' },
+  { marker: '.omo/agent/sessions', client: 'senpi', hostCheckId: 'senpi-omo-sessions' },
+  { marker: '.senpi/agent/sessions', client: 'senpi', hostCheckId: 'senpi-sessions' },
+  { marker: '.omo/senpi-task', client: 'senpi', hostCheckId: 'senpi-task-children' },
   { marker: '.local/share/zed/threads/threads.db', client: 'zed' },
   { marker: '.local/share/kilo/kilo.db', client: 'kilo' },
   { marker: '.config/Code/User/globalStorage/kilocode.kilo-code/tasks', client: 'kilo' },
+  { marker: 'Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks', client: 'kilo' },
+  { marker: 'AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks', client: 'kilo' },
   { marker: '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks', client: 'kilo' },
   { marker: '.commandcode/projects', client: 'commandcode', hostCheckId: 'commandcode-projects' },
   { marker: '.dsh/sessions', client: 'dsh' },
@@ -48,6 +73,11 @@ const SOURCE_MARKERS = [
   { marker: '.workbuddy', client: 'workbuddy' },
   { marker: '.workbuddy-ai', client: 'workbuddy' },
   { marker: '.proma/agent-sessions', client: 'proma' },
+  { marker: '.proma/sdk-config/sessions', client: 'proma' },
+  { marker: '.proma/sdk-config/projects', client: 'proma' },
+  { marker: '.proma-dev/agent-sessions', client: 'proma' },
+  { marker: '.proma-dev/sdk-config/sessions', client: 'proma' },
+  { marker: '.proma-dev/sdk-config/projects', client: 'proma' },
   { marker: '.lmstudio/server-logs', client: 'lmstudio' },
   { marker: '.unsloth/studio/studio.db', client: 'unsloth' },
   { marker: '.local/share/devin/cli/sessions.db', client: 'devin' },
@@ -58,7 +88,8 @@ const SOURCE_MARKERS = [
   { marker: 'Library/Application Support/Devin/User/acp-events', client: 'devin' },
   { marker: '.fx/sessions', client: 'fx', hostCheckId: 'fx-sessions' },
   { marker: '.minimax/v2/sessions', client: 'mcode' },
-  { marker: '.mavis/v2/sessions', client: 'mcode' }
+  { marker: '.mavis/v2/sessions', client: 'mcode' },
+  ...CLAUDE_DESKTOP_SOURCES
 ];
 
 const WSL_DATA_MARKERS = SOURCE_MARKERS.map(({ marker }) => marker);

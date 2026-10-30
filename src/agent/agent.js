@@ -130,14 +130,18 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
       ).archive;
     } else {
       const result = sessionUsageArchiveStore.capture(summary, archiveDate);
+      if (result.error) {
+        console.error(`[session-archive] update failed: ${result.error.message}`);
+        throw result.error;
+      }
       sessionUsageArchive = result.archive;
-      if (result.error) console.error(`[session-archive] update failed: ${result.error.message}`);
     }
     visibleSummary = applySessionUsageArchive(summary, sessionUsageArchive, {
       now: archiveDate,
       canonical: !dryRun
     });
   }
+  delete visibleSummary.sessionUsageArchiveFullScan;
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 

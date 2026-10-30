@@ -37,6 +37,36 @@ test('WSL SQLite guidance stays hidden when WSL is not running, unavailable, or 
   assert.equal(shouldShowSqliteHelp(null), false);
 });
 
+// Antigravity stores current usage in the conversations SQLite database. A
+// Windows-side scan finds its WSL marker through \\wsl$ while still receiving no
+// rows. The advisory reuses the same WSL source-state condition as the other
+// SQLite-backed tools; the host's own totals are not an input.
+test('WSL SQLite guidance shows when Antigravity is detected in WSL without WSL usage', () => {
+  assert.equal(shouldShowSqliteHelp({ state: 'no-data', detected: ['antigravity'], withData: [] }), true);
+  assert.equal(shouldShowSqliteHelp({ state: 'active', detected: ['antigravity'], withData: ['codex'] }), true);
+});
+
+test('WSL SQLite guidance is unaffected by the host Antigravity usage total', () => {
+  // #1030: host all-time tokens coexist with a missing WSL source. The condition
+  // reads only the WSL source state, so a host total cannot hide the hint.
+  assert.equal(shouldShowSqliteHelp({
+    state: 'no-data',
+    detected: ['antigravity'],
+    withData: [],
+    localUsage: { antigravity: 800000000 }
+  }), true);
+});
+
+test('WSL SQLite guidance stays hidden once the WSL scan reads Antigravity', () => {
+  // withData reports the Windows-side WSL scan only; it does not say whether a
+  // remote agent covers the same WSL source, so the hint cannot distinguish that.
+  assert.equal(shouldShowSqliteHelp({ state: 'active', detected: ['antigravity'], withData: ['antigravity'] }), false);
+});
+
+test('WSL SQLite guidance stays hidden when WSL has no problem to report', () => {
+  assert.equal(shouldShowSqliteHelp({ state: 'no-data', detected: [], withData: [] }), false);
+});
+
 test('renderer loads WSL status presentation before app.js', () => {
   const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
   assert.ok(html.indexOf('<script src="wslStatusPresentation.js"></script>') < html.indexOf('<script src="app.js"></script>'));

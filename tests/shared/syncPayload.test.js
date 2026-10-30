@@ -5,6 +5,28 @@ const test = require('node:test');
 
 const { SYNC_PAYLOAD_BUDGET_BYTES, postSyncPayload, serializeSyncPayload, syncPayload } = require('../../src/shared/syncPayload');
 
+test('sync payload preserves optional bounded project model attribution', () => {
+  const summary = {
+    deviceId: 'project-models',
+    allTime: {
+      totalTokens: 100,
+      projects: {
+        app: {
+          label: 'App',
+          tokens: 100,
+          clients: { codex: 100 },
+          models: { 'gpt-5': 75 }
+        }
+      }
+    }
+  };
+  const { payload } = serializeSyncPayload(summary);
+
+  assert.equal(payload.allTime.projects.app.tokens, 100);
+  assert.deepEqual(JSON.parse(JSON.stringify(payload.allTime.projects.app.models)), { 'gpt-5': 75 });
+  assert.equal(summary.allTime.projects.app.models['gpt-5'], 75, 'serialization does not mutate the source');
+});
+
 test('syncPayload preserves nullish inputs', () => {
   assert.equal(syncPayload(null), null);
   assert.equal(syncPayload(undefined), undefined);

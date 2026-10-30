@@ -27,7 +27,7 @@ function directoryStatFingerprint(dir) {
 }
 
 function resolveSessionMetadata(sessionIds, context) {
-  const { deps, home, isoFromDate } = context;
+  const { deps, home, isoFromDate, resolveProjects, projectIdentity } = context;
   const result = new Map();
   const fileCache = deps.dshSessionFileCache || sessionFileCache;
   // Windows directory timestamps can remain unchanged across a create observed
@@ -59,7 +59,7 @@ function resolveSessionMetadata(sessionIds, context) {
       if (preferredPath && preferredPath !== indexedEntry.filePath) {
         const preferredHeader = readDshSessionHeader(preferredPath);
         if (preferredHeader?.id === sessionId) {
-          entry = { filePath: preferredPath, createdAt: preferredHeader.createdAt };
+          entry = { filePath: preferredPath, createdAt: preferredHeader.createdAt, cwd: preferredHeader.cwd };
         }
       }
       let statFingerprint = '';
@@ -87,6 +87,7 @@ function resolveSessionMetadata(sessionIds, context) {
           entry = {
             filePath: preferredPath,
             createdAt: preferredHeader.createdAt,
+            cwd: preferredHeader.cwd,
             statFingerprint: '',
             directoryFingerprint,
             sessionState: undefined
@@ -111,8 +112,8 @@ function resolveSessionMetadata(sessionIds, context) {
     // createdAt values are immutable in DSH's append-only log and need no retry.
     if (entry.createdAt === undefined && statFingerprint && statFingerprint !== entry.statFingerprint) {
       const refreshed = readDshSessionHeader(entry.filePath);
-      if (refreshed) {
-        entry = { ...entry, createdAt: refreshed.createdAt, statFingerprint };
+      if (refreshed?.id === sessionId) {
+        entry = { ...entry, createdAt: refreshed.createdAt, cwd: refreshed.cwd, statFingerprint };
       } else {
         entry.statFingerprint = statFingerprint;
       }
@@ -138,6 +139,9 @@ function resolveSessionMetadata(sessionIds, context) {
     // what stops a session reading as running, and the recency window would
     // otherwise keep it green for its whole length.
     result.set(sessionId, {
+      // The directory bucket is opaque; only the transcript's workspace path
+      // can join DSH usage to the same project as other tracked tools.
+      ...(resolveProjects && typeof entry.cwd === 'string' ? projectIdentity(entry.cwd) : {}),
       startedAt: startedAt || lastUsedAt,
       lastUsedAt: lastUsedAt || startedAt,
       ...(sessionState?.title ? { title: sessionState.title } : {}),

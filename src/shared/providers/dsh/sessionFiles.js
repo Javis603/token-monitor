@@ -160,10 +160,11 @@ function dshSessionFiles(root) {
 
 // Locate complete frames without decompressing them, so a torn trailing frame
 // from a crash or a mid-write scan is skipped instead of aborting the parse.
-function scanZstdFrames(buffer) {
+function scanZstdFrames(buffer, maxFrames = Infinity) {
   const frames = [];
   let offset = 0;
   while (offset < buffer.length) {
+    if (frames.length >= maxFrames) return frames;
     const start = offset;
     if (buffer.length - offset < 4) return frames;
     if (buffer.readUInt32LE(offset) !== ZSTD_MAGIC) return frames;
@@ -562,7 +563,7 @@ function indexDshSessionHeaders(options = {}) {
     const header = readDshSessionHeader(filePath);
     // First wins: dshSessionFiles() lists a session's live transcript first, and a
     // v3 upgrade leaves an older re-encode of the same id right beside it.
-    if (header && !index.has(header.id)) index.set(header.id, { filePath, createdAt: header.createdAt });
+    if (header && !index.has(header.id)) index.set(header.id, { filePath, createdAt: header.createdAt, cwd: header.cwd });
   }
   return index;
 }

@@ -7,6 +7,8 @@ const {
   macActivationPolicyMode,
   mainWindowCloseAction,
   normalizeTrayModeSettings,
+  popoverBlurMatchesPress,
+  popoverToggleAction,
   shouldCreateTray,
   skipTaskbarForSettings,
   trayToggleAction
@@ -65,6 +67,31 @@ test('uses the tray icon as a window toggle unless tray-only mode is active', ()
   assert.equal(trayToggleAction({ showTrayIcon: true, trayMode: false }), 'focusWindow');
   assert.equal(trayToggleAction({ showTrayIcon: true, trayMode: true }), 'togglePopover');
   assert.equal(trayToggleAction({ showTrayIcon: false, trayMode: true }), 'none');
+});
+
+test('popover click uses the press-time state after a menu-bar blur hides it', () => {
+  assert.equal(popoverToggleAction({ visible: false, visibleAtMouseDown: true }), 'hide');
+  assert.equal(popoverToggleAction({ visible: true, visibleAtMouseDown: false }), 'hide');
+  assert.equal(popoverToggleAction({ visible: false, blurMatchedAtMouseDown: true }), 'hide');
+  assert.equal(popoverToggleAction({ visible: true, focused: true }), 'hide');
+  assert.equal(popoverToggleAction({ visible: false }), 'show');
+});
+
+test('popover activations without a completed press refocus an unfocused window', () => {
+  assert.equal(popoverToggleAction({ visible: true, focused: false }), 'show');
+  assert.equal(popoverToggleAction({ visible: true, focused: true }), 'hide');
+  assert.equal(popoverToggleAction({ visible: false, focused: false }), 'show');
+  assert.equal(popoverToggleAction({ visible: true, focused: false, visibleAtMouseDown: true }), 'hide');
+  assert.equal(popoverToggleAction({ visible: true, focused: false, visibleAtMouseDown: false }), 'hide');
+  assert.equal(popoverToggleAction({ visible: false, focused: false, blurMatchedAtMouseDown: true }), 'hide');
+});
+
+test('popover blur matches only the nearby tray press within the time window', () => {
+  const recentBlur = { at: 1000, point: { x: 140, y: 12 } };
+  assert.equal(popoverBlurMatchesPress({ recentBlur, pressPoint: { x: 142, y: 13 }, now: 1020 }), true);
+  assert.equal(popoverBlurMatchesPress({ recentBlur, pressPoint: { x: 142, y: 13 }, now: 1800 }), false);
+  assert.equal(popoverBlurMatchesPress({ recentBlur, pressPoint: { x: 500, y: 400 }, now: 1020 }), false);
+  assert.equal(popoverBlurMatchesPress({ recentBlur: null, pressPoint: { x: 142, y: 13 }, now: 1020 }), false);
 });
 
 test('uses accessory activation when macOS is running from the menu bar only', () => {

@@ -97,8 +97,13 @@ function normalizeTimeMetrics(value) {
 // uses the same reasoning-inclusive public output convention as usage.js.
 // zcode/opencode/muse: tokscale subtracts the reasoning overlap out of
 // `output` (their sources are reasoning-inclusive), so add it back here.
-// Tencent Buddy and Cherry Studio chat ledgers also emit independent reasoning.
-const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'antigravity', 'codex', 'droid', 'dsh', 'zcode', 'opencode', 'muse', 'codebuddy', 'workbuddy', 'cherrystudio']);
+// hermes: same shape — `state.db.reasoning_tokens` is a subset of
+// `output_tokens`, and tokscale only started subtracting that overlap out in
+// junhoyeo/tokscale#1411, so this entry is only correct once the vendored pin
+// carries that fix. On an older pin, whose `output` is already
+// reasoning-inclusive, folding reasoning back in here counts it twice.
+// Grok, Tencent Buddy and Cherry Studio chat ledgers also emit independent reasoning.
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'antigravity', 'codex', 'droid', 'dsh', 'grok', 'zcode', 'opencode', 'muse', 'codebuddy', 'workbuddy', 'cherrystudio', 'hermes']);
 
 function hasDisjointReasoning(client) {
   return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(normalizeTokscaleClientName(client));
@@ -347,7 +352,8 @@ function addPerClient(target, source, includeTokenComponents = false) {
       if (num(v.cacheWriteTokens) > 0) t.cacheWriteTokens = num(t.cacheWriteTokens) + num(v.cacheWriteTokens);
       if (num(v.outputTokens) > 0) t.outputTokens = num(t.outputTokens) + num(v.outputTokens);
       const unclassifiedTokens = unclassifiedTokensFor(v);
-      if (unclassifiedTokens > 0) t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
+      // Keep explicit zero provenance through repeated merges, just as for models.
+      t.unclassifiedTokens = num(t.unclassifiedTokens) + unclassifiedTokens;
     }
   }
 }

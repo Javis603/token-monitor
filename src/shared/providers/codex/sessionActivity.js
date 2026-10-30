@@ -6,7 +6,7 @@ const { resolveSqlite, openDb } = require('../../sqliteReadOnly');
 const { nativeIdForFile } = require('./sessionIdentity');
 const { readT3Activity } = require('../../t3SessionActivity');
 const { clientSourceRoots } = require('../../clientSources');
-const { codexSessionFile } = require('../../sessionFiles');
+const { codexSessionFile, preferredCodexSessionFile } = require('../../sessionFiles');
 const { RUNNING_WINDOW_MS, isArchivedSession, sessionActivityState } = require('../../sessionLive');
 const { readCodexSessionState } = require('./sessionContext');
 const { codexHomeDir, discoverDbPaths, readSessionMeta, readT3SessionMeta } = require('./sessionMetadata');
@@ -51,8 +51,10 @@ function discoverFilesUncached(options, activity, summary) {
   const accepted = new Set();
   const now = Number(new Date(options.now ?? Date.now()));
   const accept = (file, catalogActive = false) => {
-    if (files.size >= MAX_SESSIONS || !/^rollout-.+\.jsonl$/.test(path.basename(file))) return;
-    const id = path.basename(file, '.jsonl');
+    if (files.size >= MAX_SESSIONS || !/^rollout-.+\.jsonl(?:\.zst)?$/.test(path.basename(file))) return;
+    file = preferredCodexSessionFile(file);
+    if (!file) return;
+    const id = path.basename(file).replace(/\.jsonl(?:\.zst)?$/, '');
     // Today's usage rows get native metadata through the normal collector.
     // A historical session resumed without new tokens still needs a Today row.
     if (!activity.size && hasKnownSession(summary, 'codex', id, 'today', false)) return;
@@ -91,7 +93,9 @@ function discoverFilesUncached(options, activity, summary) {
   for (const root of roots) for (const offset of [0, 1]) {
     const dir = path.join(root, ...localDayParts(now, offset));
     try {
-      const names = fs.readdirSync(dir).filter((name) => /^rollout-.+\.jsonl$/.test(name)).sort().reverse().slice(0, MAX_SESSIONS);
+      const names = [...new Set(fs.readdirSync(dir)
+        .filter((name) => /^rollout-.+\.jsonl(?:\.zst)?$/.test(name))
+        .map((name) => name.replace(/\.zst$/, '')))].sort().reverse().slice(0, MAX_SESSIONS);
       for (const name of names) accept(path.join(dir, name));
     } catch (_) { /* No session on this date. */ }
   }
@@ -196,6 +200,7 @@ async function readSessionActivity(summary, options = {}) {
       ...metadata.get(id),
       ...(!generatedTitleIds.get(id) ? t3Metadata.get(id) : {}),
       turnEnded: state.turnEnded, waitingForInput: state.waitingForInput,
+      ...(Object.prototype.hasOwnProperty.call(state, 'reasoningEffort') ? { reasoningEffort: state.reasoningEffort } : {}),
       ...(reading ? { liveActivity: reading } : {})
     };
     if (!['running', 'waiting'].includes(sessionActivityState(session, options.now))) continue;

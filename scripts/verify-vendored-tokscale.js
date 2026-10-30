@@ -47,16 +47,69 @@ const EXPECTED = { client: FIXTURE_CLIENT, model: 'deepseek-reasoner', input: 28
 const MUSE_SESSION_ID = 'b1111111-2222-4333-8444-555555555555';
 const MUSE_MODEL = 'muse-spark-1.3-contributor';
 const FX_SESSION_ID = 'fxsess-0001-aaaa-bbbb-ccccdddddddd';
-// Proma and Qoder CN session ids embed a hash of the transcript path, and the
-// fixture home is a fresh temp dir, so their sessions are matched by pattern.
-const PROMA_SESSION_ID = /^proma:tm-contract@[0-9a-f]{12}$/;
+// Qoder CN session ids embed a hash of the transcript path, and the fixture
+// home is a fresh temp dir, so its sessions are matched by pattern.
 const QODER_CN_SESSION_ID = /^qodercn:qodercn:jsonl:[0-9a-f]{12}:qsess-1$/;
 const MCODE_SESSION_ID = 'mvs_0123456789abcdef0123456789abcdef';
+const DSH_MODEL_CONTRACT_CASES = Object.freeze([
+  { responseModel: 'keepalive', sourceModel: 'deepseek-reasoner', expectedModel: 'deepseek-reasoner' },
+  { responseModel: '  KeEpAlIvE  ', sourceModel: 'deepseek-reasoner', expectedModel: 'deepseek-reasoner' },
+  { responseModel: 'keepalive', sourceModel: '', headerModel: 'deepseek-reasoner', expectedModel: 'deepseek-reasoner' },
+  { responseModel: 'glm-5.3', sourceModel: 'glm-5.2', expectedModel: 'glm-5.3' },
+  { responseModel: 'keepalive-v2', sourceModel: 'glm-5.2', expectedModel: 'keepalive-v2' },
+  { responseModel: '', sourceModel: 'keepalive', expectedModel: 'keepalive' }
+]);
 // Every Tokscale-parsed client added after the legacy baseline in
 // tests/shared/tokscaleTokenContracts.test.js needs a case here. That test
 // makes a new catalog id fail locally until its real binary output and Token
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
+  {
+    client: 'goose',
+    // The total gap is inferred reasoning, not measured additive output.
+    // Preserve input + output; do not inflate usage with that heuristic.
+    expectedRow: { model: 'claude-sonnet-4', input: 1200, output: 340, cacheRead: 0, cacheWrite: 0, reasoning: 60 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1540, clientTokens: 1540, clientOutputTokens: 340 },
+    expectedSession: { id: 'goose-contract', totalTokens: 1540, outputTokens: 340, reasoningTokens: 60 },
+    writeFixture(home) {
+      const { writeGooseDatabase } = require('../tests/fixtures/goose');
+      writeGooseDatabase(path.join(home, '.local', 'share', 'goose', 'sessions', 'sessions.db'));
+    }
+  },
+  {
+    client: 'hermes',
+    // Hermes stores reasoning inside output; Tokscale splits it before JSON.
+    expectedRow: { model: 'claude-sonnet-4-5', input: 1000, output: 250, cacheRead: 200, cacheWrite: 50, reasoning: 150, cost: 1.25 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1650, clientTokens: 1650, clientOutputTokens: 400 },
+    expectedSession: { id: 'hermes-contract', totalTokens: 1650, outputTokens: 400, reasoningTokens: 150 },
+    writeFixture(home) {
+      const { DatabaseSync } = require('node:sqlite');
+      const dir = path.join(home, '.hermes');
+      fs.mkdirSync(dir, { recursive: true });
+      const db = new DatabaseSync(path.join(dir, 'state.db'));
+      try {
+        db.exec(`CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, model TEXT, billing_provider TEXT, started_at REAL,
+          message_count INTEGER, input_tokens INTEGER, output_tokens INTEGER,
+          cache_read_tokens INTEGER, cache_write_tokens INTEGER, reasoning_tokens INTEGER,
+          actual_cost_usd REAL, estimated_cost_usd REAL
+        );
+        INSERT INTO sessions VALUES
+          ('hermes-contract', 'claude-sonnet-4-5', 'anthropic', 1787196900, 1, 1000, 400, 200, 50, 150, 1.25, 1.25);
+        CREATE TABLE session_model_usage (
+          session_id TEXT, model TEXT, billing_provider TEXT, input_tokens INTEGER,
+          output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+          reasoning_tokens INTEGER, actual_cost_usd REAL, estimated_cost_usd REAL
+        );
+        INSERT INTO session_model_usage VALUES
+          ('hermes-contract', 'claude-sonnet-4-5', 'anthropic', 1000, 400, 200, 50, 150, 1.25, 1.25);`);
+      } finally {
+        db.close();
+      }
+    }
+  },
   {
     client: 'cherrystudio',
     // Native chat ledger counts include cached input and reasoning output.
@@ -200,13 +253,13 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
     }
   },
   {
-    // Fork-only client (crates/tokscale-core/src/token_monitor/proma.rs):
-    // Anthropic-shaped usage, so input excludes the cache buckets.
+    // Upstream legacy Claude SDK-shaped Agent journal: Anthropic usage, so
+    // input excludes the cache buckets. The session id is the file stem.
     client: 'proma',
     expectedRow: { model: 'claude-sonnet-4-5', input: 1200, output: 340, cacheRead: 500, cacheWrite: 80, reasoning: 0 },
     hasExplicitTotal: false,
     expectedPeriod: { totalTokens: 2120, clientTokens: 2120, clientOutputTokens: 340 },
-    expectedSession: { id: PROMA_SESSION_ID, totalTokens: 2120, outputTokens: 340, reasoningTokens: 0 },
+    expectedSession: { id: 'tm-contract', totalTokens: 2120, outputTokens: 340, reasoningTokens: 0 },
     writeFixture(home) {
       const dir = path.join(home, '.proma', 'agent-sessions');
       fs.mkdirSync(dir, { recursive: true });
@@ -331,6 +384,41 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
         }
       })}\n`);
     }
+  },
+  {
+    // Senpi (OmO Native) reuses the Pi JSONL parser. usage.reasoning is a
+    // subset of output, and tokscale leaves the additive reasoning bucket at 0.
+    client: 'senpi',
+    expectedRow: { model: 'claude-sonnet-4', input: 100, output: 40, cacheRead: 20, cacheWrite: 5, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 165, clientTokens: 165, clientOutputTokens: 40 },
+    expectedSession: { id: 'senpi-contract', totalTokens: 165, outputTokens: 40, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.omo', 'agent', 'sessions', '-tmp-workspace');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, '2026-07-29T15-19-53-436Z_senpi-contract.jsonl'), [
+        JSON.stringify({
+          type: 'session', version: 3, id: 'senpi-contract',
+          timestamp: '2026-07-29T15:19:53.436Z', cwd: '/tmp/workspace'
+        }),
+        JSON.stringify({
+          type: 'model_change', id: 'a1', parentId: null,
+          timestamp: '2026-07-29T15:19:53.500Z', provider: 'anthropic', modelId: 'claude-sonnet-4'
+        }),
+        JSON.stringify({
+          type: 'message', id: 'b2', parentId: 'a1', timestamp: '2026-07-29T15:20:01.000Z',
+          message: {
+            role: 'assistant', model: 'claude-sonnet-4', provider: 'anthropic',
+            api: 'anthropic-messages', stopReason: 'stop',
+            usage: {
+              input: 100, output: 40, cacheRead: 20, cacheWrite: 5,
+              totalTokens: 165, reasoning: 10,
+              cost: { input: 0.001, output: 0.002, cacheRead: 0.0001, cacheWrite: 0.0001, total: 0.0032 }
+            }
+          }
+        })
+      ].join('\n') + '\n');
+    }
   }
 ]);
 
@@ -363,7 +451,7 @@ function applicableTokenContracts(platform = process.platform) {
   return TOKEN_CONTRACT_CASES.filter((contract) => !contract.platforms || contract.platforms.includes(platform));
 }
 
-function writeFixtureHome() {
+function writeFixtureHome(modelContract) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-dsh-fixture-'));
   const sessionDir = path.join(home, '.dsh', 'sessions', FIXTURE_WORKSPACE_DIR, FIXTURE_SESSION_ID);
   fs.mkdirSync(sessionDir, { recursive: true });
@@ -371,8 +459,19 @@ function writeFixtureHome() {
   // none` backend writes this exact spelling, and the scanner/parser both
   // sniff the frame magic rather than assume compression, so this and a
   // zstd-compressed session.jsonl.zstd are equivalent inputs.
-  fs.writeFileSync(path.join(sessionDir, 'session.jsonl'), `${FIXTURE_LINES.join('\n')}\n`);
-  for (const contract of applicableTokenContracts()) contract.writeFixture(home);
+  const lines = [...FIXTURE_LINES];
+  if (modelContract) {
+    const turn = JSON.parse(lines[1]);
+    const source = turn.data.message.source;
+    source.model = modelContract.sourceModel;
+    source.replayState = { response: { id: 'chatcmpl-keepalive', responseModel: modelContract.responseModel } };
+    lines[1] = JSON.stringify(turn);
+    if (modelContract.headerModel) lines.splice(1, 0, JSON.stringify({
+      type: 'request/header', data: { header: { config: { model: modelContract.headerModel, provider: 'deepseek' } } }
+    }));
+  }
+  fs.writeFileSync(path.join(sessionDir, 'session.jsonl'), `${lines.join('\n')}\n`);
+  if (!modelContract) for (const contract of applicableTokenContracts()) contract.writeFixture(home);
   return home;
 }
 
@@ -418,9 +517,10 @@ function hermeticEnv(home) {
   // overrides would do the same for the fork-only qodercn client, and the
   // MiniMax data-directory overrides for the fork's mcode supplement.
   for (const key of [
-    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME',
+    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
-    'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR'
+    'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
+    'SENPI_CODING_AGENT_DIR', 'SENPI_CODING_AGENT_SESSION_DIR'
   ]) {
     delete env[key];
   }
@@ -448,16 +548,16 @@ function runAgainstFixture(binPath, home, groupBy = 'client,model', client = FIX
   return parsed;
 }
 
-function assertExpected(parsed) {
+function assertExpected(parsed, expected = EXPECTED) {
   const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
   if (entries.length !== 1) {
     throw new Error(`Expected exactly 1 fixture entry, got ${entries.length}: ${JSON.stringify(parsed)}`);
   }
   const entry = entries[0];
-  const mismatches = Object.entries(EXPECTED).filter(([key, value]) => entry[key] !== value);
+  const mismatches = Object.entries(expected).filter(([key, value]) => entry[key] !== value);
   if (mismatches.length > 0) {
     throw new Error(
-      `DSH fixture mismatch — expected ${JSON.stringify(EXPECTED)}, got ${JSON.stringify(entry)}. ` +
+      `DSH fixture mismatch — expected ${JSON.stringify(expected)}, got ${JSON.stringify(entry)}. ` +
         'If this is a legitimate upstream behavior change, update EXPECTED and scripts/vendor/tokscale.json together, do not just silence this check.'
     );
   }
@@ -526,6 +626,108 @@ function assertGroupByRejected(result) {
   }
 }
 
+function verifyGooseScannerContract(binPath) {
+  const assert = require('node:assert/strict');
+  const { writeGooseDatabase, insertGooseRow } = require('../tests/fixtures/goose');
+  const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tm-goose-contract-'));
+  const env = hermeticEnv(home);
+  // Pin local date boundaries as well as the fixture clock.
+  env.TZ = 'UTC';
+  const run = (overrides = {}, args = []) => {
+    const result = spawnSync(binPath, ['--json', '--client', 'goose', '--group-by', 'client,session,model', '--no-spinner', ...args], {
+      encoding: 'utf8', timeout: 15_000, env: { ...env, ...overrides }
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  const counters = (parsed) => Object.fromEntries(parsed.entries.map((row) => [row.sessionId,
+    [row.input, row.output, row.reasoning]]));
+  const xdg = path.join(home, '.local', 'share', 'goose', 'sessions', 'sessions.db');
+  let writer;
+  try {
+    writeGooseDatabase(xdg, [
+      {},
+      { id: 'fallback', accumulatedTotal: null, accumulatedInput: null, accumulatedOutput: null },
+      { id: 'mixed', accumulatedTotal: null, accumulatedInput: null, accumulatedOutput: 20 },
+      { id: 'zero', accumulatedInput: 0, accumulatedOutput: 0, accumulatedTotal: 0 },
+      { id: 'no-model', model: ' ' }
+    ]);
+    const parsed = run();
+    assert.deepEqual(counters(parsed), {
+      'goose-contract': [1200, 340, 60], fallback: [70, 30, 0], mixed: [70, 20, 10]
+    });
+    const usage = extractUsageFromTokscale(parsed);
+    assert.equal(usage.totalTokens, 1730);
+    assert.equal(usage.clientOutputs.goose, 390);
+    const graphResult = spawnSync(binPath, ['graph', '--client', 'goose', '--no-spinner'], {
+      encoding: 'utf8', timeout: 15_000, env
+    });
+    assert.equal(graphResult.status, 0, graphResult.stderr);
+    const { parseGraphResult, normalizeHistory } = require('../src/shared/history');
+    const history = normalizeHistory(parseGraphResult(JSON.parse(graphResult.stdout)), { todayKey: '2026-08-21' });
+    assert.equal(history.summary.totalTokens, 1730);
+    assert.equal(history.daily.length, 1);
+    assert.equal(history.daily[0].date, '2026-08-20');
+    assert.equal(history.daily[0].perClient.goose.tokens, 1730);
+    assert.equal(history.daily[0].outputTokens, 390);
+    assert.equal(extractUsageFromTokscale(run({}, ['--since', '2026-08-20', '--until', '2026-08-20'])).totalTokens, 1730);
+    assert.equal(run({}, ['--since', '2026-08-21', '--until', '2026-08-21']).entries.length, 0);
+    fs.rmSync(xdg);
+
+    // A raw absolute override is authoritative; invalid overrides use defaults.
+    const customRoot = path.join(home, 'custom');
+    const candidates = [
+      path.join(customRoot, 'data', 'sessions', 'sessions.db'), xdg,
+      path.join(home, 'Library', 'Application Support', 'goose', 'sessions', 'sessions.db'),
+      path.join(home, 'Library', 'Application Support', 'Block', 'goose', 'sessions', 'sessions.db'),
+      path.join(home, '.local', 'share', 'Block', 'goose', 'sessions', 'sessions.db')
+    ];
+    candidates.forEach((file, i) => writeGooseDatabase(file, [{ id: `priority-${i}`, accumulatedInput: (i + 1) * 100 }]));
+    // Windows checkout and TEMP can be on different drives; relative(cwd, root)
+    // then returns an absolute path and accidentally tests a valid override.
+    const relativeRoot = path.relative(home, customRoot);
+    assert.equal(path.isAbsolute(relativeRoot), false, 'fixture override must be relative');
+    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: relativeRoot }))), ['priority-1'], 'relative override is ignored');
+    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: ` ${customRoot} ` }))), ['priority-1']);
+    assert.deepEqual(Object.keys(counters(run({ GOOSE_PATH_ROOT: customRoot }))), ['priority-0']);
+    fs.rmSync(candidates[0]);
+    assert.equal(run({ GOOSE_PATH_ROOT: customRoot }).entries.length, 0);
+    // Default candidates are first-existing, never a union. Empty shadows too.
+    for (let i = 1; i < candidates.length; i += 1) {
+      assert.deepEqual(Object.keys(counters(run())), [`priority-${i}`]);
+      if (i === 1) {
+        fs.rmSync(candidates[i]);
+        writeGooseDatabase(candidates[i], []);
+        assert.equal(run().entries.length, 0);
+      }
+      fs.rmSync(candidates[i]);
+    }
+    const extra = path.join(home, 'extra');
+    writeGooseDatabase(path.join(extra, 'sessions.db'));
+    assert.equal(run({ TOKSCALE_EXTRA_DIRS: `goose:${extra}` }).entries.length, 0);
+    const windowsDb = path.join(home, 'AppData', 'Roaming', 'Block', 'goose', 'data', 'sessions', 'sessions.db');
+    writeGooseDatabase(windowsDb);
+    writeGooseDatabase(path.join(home, 'Library', 'Application Support', 'Block', 'goose', 'data', 'sessions', 'sessions.db'));
+    assert.equal(extractUsageFromTokscale(run()).totalTokens, process.platform === 'win32' ? 1540 : 0);
+    // Explicit --home inspects only that profile, on every host platform.
+    assert.equal(extractUsageFromTokscale(run({
+      GOOSE_PATH_ROOT: customRoot, APPDATA: path.join(home, 'unrelated-appdata')
+    }, ['--home', home])).totalTokens, 1540);
+    fs.rmSync(windowsDb);
+
+    writer = writeGooseDatabase(xdg, [{}], { wal: true });
+    assert.ok(fs.statSync(`${xdg}-wal`).size > 0);
+    assert.equal(extractUsageFromTokscale(run()).totalTokens, 1540);
+    insertGooseRow(writer, { id: 'wal-next', accumulatedInput: 200, accumulatedOutput: 50, accumulatedTotal: 250 });
+    assert.equal(extractUsageFromTokscale(run()).totalTokens, 1790);
+    // Even a later WAL write remains on created_at, not the update/read date.
+    assert.equal(run({}, ['--since', '2026-08-21']).entries.length, 0);
+  } finally {
+    writer?.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 function main() {
   const manifest = loadManifest();
   const isUpstream = manifestMode(manifest) === 'upstream';
@@ -538,6 +740,8 @@ function main() {
         : `No binary at ${binPath} for ${key} — run ensure-vendored-tokscale.js first`
     );
   }
+
+  verifyGooseScannerContract(binPath);
 
   const home = writeFixtureHome();
   try {
@@ -555,8 +759,18 @@ function main() {
     fs.rmSync(home, { recursive: true, force: true });
   }
 
+  for (const contract of DSH_MODEL_CONTRACT_CASES) {
+    const modelHome = writeFixtureHome(contract);
+    try {
+      const parsed = runAgainstFixture(binPath, modelHome);
+      assertExpected(parsed, { ...EXPECTED, model: contract.expectedModel });
+      const period = extractUsageFromTokscale(parsed);
+      if (period.totalTokens !== 2910 || period.clientOutputs.dsh !== 25) throw new Error('DSH model attribution changed token accounting');
+    } finally { fs.rmSync(modelHome, { recursive: true, force: true }); }
+  }
+
   console.log(
-    `Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH and ${applicableTokenContracts().length} tracked-client token contract fixture(s) applicable to ${process.platform} parse correctly, and ${isUpstream ? `'${SESSION_GROUP_BY}' is rejected as the collector's fallback expects` : 'the joined grouping reports session and workspace metadata'}.`
+    `Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): Goose cumulative/date/path/WAL contracts, DSH and ${applicableTokenContracts().length} tracked-client token contract fixture(s) applicable to ${process.platform} parse correctly, and ${isUpstream ? `'${SESSION_GROUP_BY}' is rejected as the collector's fallback expects` : 'the joined grouping reports session and workspace metadata'}.`
   );
 }
 
@@ -569,4 +783,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, TOKEN_CONTRACT_CASES, applicableTokenContracts };
+module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract };

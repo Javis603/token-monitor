@@ -153,7 +153,7 @@ test('Hub secret input stays masked and exposes an accessible paste button', () 
   assert.match(secretLabel, /<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>/);
   assert.doesNotMatch(secretLabel, /secretPasteButton/);
   assert.match(secretRow, /<input id="secretInput" type="password"[\s\S]*data-i18n-placeholder="settings\.sync\.secretPlaceholder"/);
-  assert.match(secretRow, /<button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings\.sync\.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings\.sync\.pasteSecret">/);
+  assert.match(secretRow, /<button id="secretPasteButton" type="button" class="icon-button" aria-label="Paste secret" data-i18n-aria-label="settings\.sync\.pasteSecret">/);
 
   const css = readRendererFile('styles.css');
   // No standalone .hub-secret-field layout rule — settings-field handles it
@@ -313,7 +313,7 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /document\.getElementById\('opencodeAddToggle'\)/);
   assert.match(setupBody, /addDetails\?\.classList\.toggle\('hidden'/);
   assert.match(setupBody, /document\.getElementById\('opencodeOpenBrowser'\)\?\.addEventListener\('click'/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/auth'\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/console'\)/);
   // The add form asks before binding: main refuses a name that already holds a
   // different credential, and the form offers the confirmation rather than
   // retrying with merge on its own.
@@ -552,7 +552,8 @@ test('Codex account email masking is an opt-in display-only setting', () => {
     main.indexOf("ipcMain.handle('settings:openConfig'")
   );
   assert.match(updateHandler, /maskLimitAccountEmails:\s*parseBoolean\(patch\.maskLimitAccountEmails \?\? settings\.maskLimitAccountEmails, false\)/);
-  assert.doesNotMatch(updateHandler, /accountEmail|accountKey|syncLimits|publicLimits/);
+  const settingsUpdate = updateHandler.slice(0, updateHandler.indexOf("ipcMain.handle('claude:accounts'"));
+  assert.doesNotMatch(settingsUpdate, /accountEmail|accountKey|syncLimits|publicLimits/);
 
   const settingsBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(settingsBody, /els\.maskLimitAccountEmailsInput\.checked = Boolean\(state\.settings\.maskLimitAccountEmails\);/);
@@ -752,7 +753,7 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   const forms = limitAccountFormsForRenderer();
   const expectedFields = {
     deepseek: [['deepseekApiKey', 'password']],
-    minimax: [['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
+    minimax: [['minimaxBillingMode', 'select'], ['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
   };
   for (const id of ['deepseek', 'minimax']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
@@ -791,7 +792,11 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
       cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
       en: 'https://platform.minimax.io/user-center/payment/token-plan'
     },
-    default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
+    default: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+    pathByField: {
+      byField: 'minimaxBillingMode',
+      values: { 'token-plan': '/user-center/payment/token-plan', api: '/user-center/payment/balance' }
+    }
   });
 
   // The region is a plain setting beside the credential, so Clear leaves it
@@ -804,7 +809,7 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   for (const { labelKey } of region.options) {
     assert.match(labelKey, /^settings\.minimax\./, labelKey);
   }
-  assert.deepEqual(minimax.top, [{ field: 'minimaxApiRegion' }]);
+  assert.deepEqual(minimax.top, [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }]);
 
   // The region never becomes a credential: no store path, so it stays in
   // settings.json only after a selection; an implicit default stays empty.
@@ -983,10 +988,15 @@ test('Z.ai, Qoder, Trae and Ollama panels are generated from their declared form
   assert.doesNotMatch(JSON.stringify(forms.trae), /settings\.trae\.note/);
   assert.match(readRendererFile('i18n.js'), /'settings\.trae\.deviceIdNote': '[^']*ide_user_ent_usage[^']*X-Device-Id/);
 
-  // Ollama: numbered steps, the cookie textarea, and a validated save.
-  assert.equal(forms.ollama.manual[0].steps.length, 4);
-  assert.deepEqual(forms.ollama.fields.map(({ key, input }) => [key, input]), [['ollamaCookie', 'textarea']]);
+  // Ollama chooses one draft lane; API key is the fresh-install default.
+  assert.deepEqual(forms.ollama.credentialChoice.fields, ['ollamaApiKey', 'ollamaCookie']);
+  assert.deepEqual(forms.ollama.manual[0], { note: 'settings.ollama.apiKeyNote', whenCredential: 'ollamaApiKey' });
+  assert.equal(forms.ollama.manual.find((block) => block.steps).whenCredential, 'ollamaCookie');
+  assert.deepEqual(forms.ollama.fields.map(({ key, input }) => [key, input]), [['ollamaApiKey', 'password'], ['ollamaCookie', 'textarea']]);
+  assert.equal(forms.ollama.fields[0].required, false);
+  assert.equal(forms.ollama.fields[1].required, false);
   assert.equal(forms.ollama.messages.rejected, 'settings.ollama.validationInvalid');
+  assert.equal(forms.ollama.messages.required, 'settings.ollama.required');
   assert.match(readRendererFile('i18n.js'), /'settings\.ollama\.cookiePlaceholder': 'wos-session=\.\.\.'/);
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
@@ -1107,6 +1117,8 @@ test('Kimi account panel makes the Code API primary and keeps Web access as a fa
   }
   for (const host of ['ollama.com', 'www.ollama.com']) {
     assert.equal(limitProviderUrlAllowed(host, '/settings'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/settings/keys'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/settings/keys/untrusted'), false);
     assert.equal(limitProviderUrlAllowed(host, '/'), false);
   }
 });
@@ -1139,7 +1151,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     }
   }
   assert.equal(MESSAGES.en['settings.claude.title'], 'Claude Account');
-  assert.match(MESSAGES.en['settings.claude.note'], /detected automatically when Web login is not configured/);
+  assert.match(MESSAGES.en['settings.claude.note'], /collected alongside the automatically detected Claude Code OAuth or CLI account/);
   assert.match(MESSAGES.en['settings.claude.step2'], /Application\/Storage[\s\S]*Cookies[\s\S]*https:\/\/claude\.ai/);
   assert.match(MESSAGES.en['settings.claude.step3'], /Copy the sessionKey value/);
   assert.equal(MESSAGES.en['settings.claude.cookiePlaceholder'], 'sessionKey=...');
@@ -1233,7 +1245,7 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   assert.match(app, /minimaxPendingCheckSince: 0/);
 
   const saveBody = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
-  assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
+  assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\);/);
   const clearBody = functionBody(app, 'clearAccountCredential', 'commitAccountCredential');
   assert.match(clearBody, /clearCredential\(id\)\);[\s\S]*clearExternalProviderCheckPending\(id\);[\s\S]*clearExternalProviderPendingStatus\(id\);[\s\S]*renderExternalProviderStatus\(id\);/);
   assert.match(functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup'), /onClear: \(\{ id \}\) => clearAccountCredential\(id\)/);
@@ -1241,7 +1253,7 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   const configLookup = /const config = externalLimitAccountConfig\[providerName\] \|\| limitAccountForm\(providerName\)\?\.status;/;
   const pendingBody = functionBody(app, 'markExternalProviderCheckPending', 'clearExternalProviderCheckPending');
   assert.match(pendingBody, configLookup);
-  assert.match(pendingBody, /state\[config\.pendingKey\] = Date\.now\(\);/);
+  assert.match(pendingBody, /state\[config\.pendingKey\] = checkedSince;/);
   assert.match(pendingBody, /clearExternalProviderPendingStatus\(providerName\);/);
 
   const providerBody = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
@@ -1250,6 +1262,13 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   assert.match(providerBody, /updatedAt < pendingSince/);
   assert.match(providerBody, /state\[config\.pendingKey\] = 0;/);
 
+  const settleBody = functionBody(app, 'scheduleExternalProviderCheckSettle', 'markExternalProviderCheckPending');
+  assert.match(settleBody, /externalProviderCheckSettled\.add\(providerName\)/);
+  assert.doesNotMatch(settleBody, /clearExternalProviderCheckPending\(providerName\)/, 'the save cutoff must survive the settle timeout');
+  const renderBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  assert.match(renderBody, /const settled = externalProviderCheckSettled\.has\(providerName\)/);
+  assert.match(renderBody, /pending = enabled &&[^;]*!settled/);
+  assert.match(renderBody, /settled && configured && enabled \? \{ status: 'noSyncedData' \}/);
   const linkedBody = functionBody(app, 'externalProviderAccountLinked', 'markExternalProviderCheckPending');
   assert.match(linkedBody, /state\.settings\?\.\[config\.configuredKey\]/);
   assert.match(linkedBody, /provider\?\.status === 'ok'/);
@@ -1273,7 +1292,7 @@ test('disabled credential providers settle account status instead of checking fo
   assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
   assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
   assert.match(externalRenderBody, /const pending = enabled &&/);
-  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, provider, configured, source, enabled\)/);
+  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, statusProvider, configured, source, enabled\)/);
   assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
 });
 
@@ -1630,6 +1649,7 @@ test('Factory keeps a saved-key Clear action available after validation fails', 
       document: { getElementById: id => elements.get(id) || null },
       externalProviderForAccount: () => ({ provider: 'factory', status }),
       externalProviderAccountLinked: () => false,
+      externalProviderCheckSettled: new Set(),
       limitProviderEnabled: () => true,
       setCursorStatusText: () => {},
       apiKeyAccountStatusText: () => '',
@@ -1681,6 +1701,7 @@ test('an account message survives the stats re-renders until its own condition r
     document: { getElementById: id => elements.get(id) || null },
     externalProviderForAccount: () => provider,
     externalProviderAccountLinked: () => false,
+    externalProviderCheckSettled: new Set(),
     limitProviderEnabled: () => true,
     setCursorStatusText: () => {},
     apiKeyAccountStatusText: () => '',
@@ -1718,7 +1739,11 @@ test('account credentials persist through the settings:update body, not a second
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), patchStart);
   assert.match(updateHandler, /applySettingsPatch\(patch, \(refresh\) => \{ dotsVisibilityApplied = refresh; \}\)/);
   assert.match(updateHandler, /await dotsVisibilityApplied;/);
-  assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch: applyCredentialSettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  const credentialPatch = functionBody(main, 'applyCredentialSettingsPatch', 'applySettingsPatch');
+  assert.match(credentialPatch, /applySettingsPatch\(patch, undefined, \{/);
+  assert.match(credentialPatch, /ensureLimitProvider: provider/);
+  assert.match(credentialPatch, /await Promise\.all\(refreshes\)/);
   const body = main.slice(patchStart, main.indexOf("ipcMain.handle('appearance:preview'"));
   assert.match(body, /credentialCommands\.noteSettingsPatch\(patch\);/);
   assert.match(body, /normalizeAccountPatch\(patch, normalizedPatch\)/);
@@ -1794,17 +1819,19 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(main, /delete result\.account\.cookieHeader/);
 });
 
-test('WorkBuddy settings uses the same automatic provider row as other ambient integrations', () => {
+test('WorkBuddy settings retain automatic detection alongside managed regional account login', () => {
   const html = readRendererFile('index.html');
-  assert.doesNotMatch(html, /workbuddy(?:Settings|AccountGroup|LocalApp|Open|Refresh|Privacy|OptIn|Error)/);
-
+  assert.match(html, /id="workbuddyAccountGroup"/);
+  assert.match(html, /id="workbuddyAddCnAccountButton"/);
+  assert.match(html, /id="workbuddyAddAiAccountButton"/);
+  assert.match(html, /id="workbuddyAccountStatus"/);
   const app = readRendererFile('app.js');
   assert.match(app, /workbuddy: 'settings\.limits\.connection\.workbuddy'/);
-  assert.doesNotMatch(app, /workbuddyAccountGroup|workbuddyAccountStatus|renderWorkbuddyStatus/);
-  assert.doesNotMatch(app, /window\.tokenMonitor\.workbuddy/);
-
+  assert.match(app, /renderWorkbuddyStatus/);
+  assert.match(app, /window\.tokenMonitor\.workbuddy/);
+  assert.doesNotMatch(html, /workbuddy(?:AccessToken|RefreshToken|Privacy|OptIn)/);
   const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
-  assert.doesNotMatch(preload, /workbuddy:/);
+  assert.match(preload, /addAccount: \(realm\) => ipcRenderer\.invoke\('workbuddy:addAccount', realm\)/);
 });
 
 test('WorkBuddy auth is resolved only when its enabled local provider is active', () => {
@@ -2770,6 +2797,7 @@ test('main collectors share one live GUI limit credential resolver in every widg
     'persistClaudeWebCookieRenewal',
     'credentialProbeDeps'
   );
+  assert.match(renewalPersistence, /claudeAccountService\(\)\.renew/);
   assert.match(renewalPersistence, /settings\.claudeWebCookie === renewed\) return true/);
   assert.match(renewalPersistence, /saveSettings\(\{ throwOnError: true \}\)/);
   assert.doesNotMatch(renewalPersistence, /queueLimitInvalidation|classifySettingsChange/);
@@ -3310,7 +3338,7 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
     append(...children) { this.children.push(...children); }
     replaceChildren(...children) { this.children = children; }
     addEventListener() {}
-    setAttribute() {}
+    setAttribute(name, value) { (this.attributes ||= {})[name] = value; }
     *walk() { yield this; for (const child of this.children) yield* child.walk(); }
   }
   const list = new Node();
@@ -3350,9 +3378,9 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   assert.equal(list.children[2].children[2].children.length, 1, 'the detected account has no remove control');
   const info = list.children.map((row) => [...row.walk()].find((node) => node.className === 'managed-account-info'));
   assert.deepEqual(info.map((node) => node.textContent), ['Sign in again', 'Console', 'Sign in again']);
-  assert.equal(info[0].title, 'Sign in again');
-  assert.equal(info[1].title, 'Console');
-  assert.equal(info[2].title, 'Sign in again');
+  assert.equal(info[0].attributes['aria-label'], 'Sign in again');
+  assert.equal(info[1].attributes['aria-label'], 'Console');
+  assert.equal(info[2].attributes['aria-label'], 'Sign in again');
   providers = [{ provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
   render();
   assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');

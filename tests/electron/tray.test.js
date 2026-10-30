@@ -88,6 +88,16 @@ function trayCalls() {
   };
 }
 
+test('system tray has no native tooltip on any platform', () => {
+  for (const platform of ['darwin', 'win32', 'linux']) {
+    const calls = trayCalls();
+    const electron = fakeTrayElectron(calls);
+    electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+    createTray({ electron, platform });
+    assert.deepEqual(calls.tooltips, [''], platform);
+  }
+});
+
 test('recent usage provider follows the newest valid session timestamp', () => {
   const recentStats = {
     periods: {
@@ -262,6 +272,77 @@ test('macOS tray click passes the screen cursor, not its window-relative event p
 
   tray.handlers.click({}, { x: 900, y: 0, width: 24, height: 24 }, { x: 12, y: 900 });
   assert.deepEqual(clickPoint, { x: 1200, y: -1060 });
+});
+
+test('macOS tray click keeps the visibility from mouse-down across a window blur', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.screen = { getCursorScreenPoint: () => ({ x: 100, y: 10 }) };
+  electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+  let visible = true;
+  const snapshots = [];
+  const tray = createTray({
+    electron,
+    getWindowVisible: () => visible,
+    onToggle: (_tray, _point, wasVisible) => snapshots.push(wasVisible),
+    platform: 'darwin'
+  });
+
+  tray.handlers['mouse-down']();
+  visible = false; // Window blur hides the popover before Tray.click arrives.
+  tray.handlers['mouse-up']();
+  tray.handlers.click({}, {}, {});
+  assert.deepEqual(snapshots, [true]);
+
+  tray.handlers['mouse-down']();
+  tray.handlers['mouse-up']();
+  tray.handlers.click({}, {}, {});
+  assert.deepEqual(snapshots, [true, false]);
+});
+
+test('macOS tray records blur candidates only while the pointer is on its icon', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+  const tray = createTray({ electron, platform: 'darwin' });
+  tray.getBounds = () => ({ x: 100, y: 0, width: 20, height: 24 });
+
+  assert.equal(tray.isPointerOverIcon({ x: 90, y: 10 }), false);
+  assert.equal(tray.isPointerOverIcon({ x: 110, y: 10 }), true);
+  tray.handlers['mouse-enter']();
+  assert.equal(tray.isPointerOverIcon({ x: 900, y: 10 }), true); // Secondary display.
+  tray.handlers['mouse-leave']();
+  assert.equal(tray.isPointerOverIcon({ x: 90, y: 10 }), false);
+});
+
+test('a canceled macOS tray press cannot reuse its blur for the next click', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.screen = { getCursorScreenPoint: () => ({ x: 100, y: 10 }) };
+  electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+  let recentBlur = true;
+  const toggles = [];
+  const tray = createTray({
+    electron,
+    platform: 'darwin',
+    onMouseDown: () => {
+      const matched = recentBlur;
+      recentBlur = false;
+      return matched;
+    },
+    onCancelMouseDown: () => { recentBlur = false; },
+    onToggle: (_tray, _point, _visible, matched) => toggles.push(matched)
+  });
+
+  tray.handlers['mouse-enter']();
+  tray.handlers['mouse-down']();
+  recentBlur = true; // Blur from the first press arrives before it is canceled.
+  tray.handlers['mouse-leave']();
+  tray.handlers['mouse-enter']();
+  tray.handlers['mouse-down']();
+  tray.handlers['mouse-up']();
+  tray.handlers.click({}, {}, {});
+  assert.deepEqual(toggles, [false]);
 });
 
 test('Linux tray exports current menu state and skips unchanged D-Bus rebuilds', () => {
@@ -444,7 +525,7 @@ test('tray context menu complements the primary click with useful commands', () 
   });
 
   assert.deepEqual(template.map((item) => item.label || item.type), [
-    'Refresh Now', 'Open View', 'separator', 'Tray Display', 'Window Presentation', 'separator', 'Version 0.27.0', 'Settings…', 'Quit Token Monitor'
+    'Refresh Now', 'Open View', 'separator', 'Tray Display', 'Window Presentation', 'separator', 'Version 0.27.0', 'Settings…', 'Restart without plugins', 'Quit Token Monitor'
   ]);
   assert.equal(template.some((item) => item.label === 'Show / Hide'), false);
   assert.equal(template[3].submenu.find((item) => item.label === 'Today Tokens + Cost').checked, true);
@@ -457,7 +538,7 @@ test('tray context menu complements the primary click with useful commands', () 
   template[4].submenu.find((item) => item.label === 'Desktop Pinned').click();
   assert.equal(template[6].enabled, false);
   template[7].click();
-  template[8].click();
+  template[9].click();
   assert.deepEqual(calls, [
     ['refresh'], ['view', 'project'], ['content', 'icon'], ['presentation', 'desktop'], ['settings'], ['quit']
   ]);
@@ -512,11 +593,11 @@ test('tray context menu uses the selected locale for every visible level', () =>
   });
 
   assert.deepEqual(template.map((item) => item.label || item.type), [
-    '立即重新整理', '開啟頁面', 'separator', '托盤顯示', '視窗呈現方式', 'separator', '版本 0.27.0', '設定…', '結束 Token Monitor'
+    '立即重新整理', '開啟頁面', 'separator', '托盤顯示', '視窗呈現方式', 'separator', '版本 0.27.0', '設定…', '不載入外掛並重新啟動', '結束 Token Monitor'
   ]);
   assert.equal(template[1].submenu[0].label, '主頁');
   assert.equal(template[3].submenu[0].label, '今日 Tokens');
-  assert.equal(template[3].submenu.find((item) => item.label === '即時速率（tok/s）').checked, false);
+  assert.equal(template[3].submenu.find((item) => item.label === '即時速度（tok/s）').checked, false);
   assert.deepEqual(template[3].submenu.slice(-3).map((item) => item.label), [
     '最低剩餘額度條',
     '僅顯示 App 圖示',
@@ -1309,7 +1390,7 @@ test('live rate is a generated tray mode with no legacy token title', () => {
 
 test('only macOS draws a tray title beside the icon', () => {
   // main.js gates tray.setTitle() on darwin; Windows and Linux show the icon
-  // alone and put the text in the tooltip. The settings Live preview reads the
+  // alone. The settings Live preview reads the
   // same helper so it cannot promise text the platform will never render.
   assert.equal(trayShowsTitle('darwin'), true);
   assert.equal(trayShowsTitle('win32'), false);
@@ -1337,4 +1418,11 @@ test('every tray helper main.js destructures is actually exported', () => {
   assert.ok(names.length > 0);
   const missing = names.filter((name) => typeof trayModule[name] === 'undefined');
   assert.deepEqual(missing, []);
+});
+test('plugin menu callbacks keep native Settings, recovery and Quit entries available', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({ state: { pluginMenu: [{ pluginId: 'fixture', id: 'ping', pluginName: 'Fixture', label: 'Ping' }] }, onPluginMenu: (...args) => calls.push(args) });
+  template.find(item => item.label === 'Fixture: Ping').click();
+  assert.deepEqual(calls, [['fixture', 'ping']]);
+  for (const label of ['Settings…', 'Restart without plugins', 'Quit Token Monitor']) assert.ok(template.some(item => item.label === label));
 });

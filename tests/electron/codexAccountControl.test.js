@@ -103,7 +103,7 @@ test('shared Codex account control keeps hover, locking, active and failure beha
   const failedButton = failedZone.children[1].children[0];
   assert.equal(failedZone.classList.contains('is-error'), true);
   assert.equal(failedButton.textContent, 'Failed');
-  assert.equal(failedButton.title, 'Credential write failed');
+  assert.equal(failedButton.getAttribute('aria-label'), 'Credential write failed');
 
   const activeZone = control.render({ titleNode: fakeElement('span'), active: true });
   assert.equal(activeZone.classList.contains('limit-account-active-zone'), true);

@@ -112,8 +112,7 @@ test('small action glyphs stay fixed while text scales', () => {
     ['.managed-account-remove', '11px'],
     ['.subscription-topup-remove', '11px'],
     ['.subscription-row-actions button', '11px'],
-    ['.opencode-profile-item .profile-delete', '11px'],
-    ['.update-pill-dismiss', '12px']
+    ['.opencode-profile-item .profile-delete', '11px']
   ]) {
     const rule = cssRules.find((r) => r.selector === selector);
     assert.ok(rule, selector);
@@ -133,11 +132,11 @@ test('profile rename icons keep fixed geometry and an accessible name', () => {
   assert.ok(fs.existsSync(path.join(rendererDir, 'icons', 'actions', 'pencil-line.svg')));
 
   const app = readRendererFile('app.js');
-  const renameButtons = [...app.matchAll(/const renameBtn = document\.createElement\('button'\);([\s\S]*?)renameBtn\.setAttribute\('aria-label', renameBtn\.title\);/g)];
+  const renameButtons = [...app.matchAll(/const renameBtn = document\.createElement\('button'\);([\s\S]*?)renameBtn\.setAttribute\('aria-label', t\('settings\.(?:opencode|profiles)\.rename'\)\);/g)];
   assert.equal(renameButtons.length, 2, 'OpenCode and shared profile rows both label the icon');
   for (const [, setup] of renameButtons) {
     assert.match(setup, /renameBtn\.type = 'button';/);
-    assert.match(setup, /renameBtn\.title = t\('settings\.(?:opencode|profiles)\.rename'\);/);
+    assert.doesNotMatch(setup, /renameBtn\.title/);
     assert.doesNotMatch(setup, /renameBtn\.textContent/);
   }
 });

@@ -11,6 +11,7 @@ const {
 } = require('../shared/trayText');
 const { codexAccountDisplayLabel } = require('./renderer/accountIdentity');
 const { EDGE_DOCK_MODES, normalizeEdgeDockMode } = require('./edgeDock/geometry');
+const { normalizeNotchHoverAction } = require('./notch/controller');
 const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
@@ -353,6 +354,29 @@ function buildTrayMenuTemplate(options = {}) {
       ]
     };
   })() : null;
+  const notchItem = platform === 'darwin' && state.notchSupported ? (() => {
+    const setNotch = callback('onSetNotch');
+    const toggle = (key, labelKey, fallback = true) => {
+      const checked = typeof state[key] === 'boolean' ? state[key] : fallback;
+      return { label: t(labelKey), type: 'checkbox', checked, click: () => setNotch({ [key]: !checked }) };
+    };
+    return {
+      label: t('settings.notch.title'),
+      submenu: [
+        toggle('notchEnabled', 'trayMenu.notchShow', false),
+        { type: 'separator' },
+        ...[['peek', 'trayMenu.notchHoverPeek'], ['open', 'trayMenu.notchHoverOpen']].map(([value, labelKey]) => ({
+          label: t(labelKey), type: 'radio', checked: normalizeNotchHoverAction(state.notchHoverAction) === value,
+          click: () => setNotch({ notchHoverAction: value })
+        })),
+        { type: 'separator' },
+        toggle('notchSummaryEnabled', 'settings.notch.showSummary'),
+        toggle('notchHideSummaryInFullScreen', 'settings.notch.hideSummaryInFullScreen'),
+        { type: 'separator' },
+        { label: t('trayMenu.settings'), click: () => callback('onOpenSettings')('notch') }
+      ]
+    };
+  })() : null;
   return [
     {
       label: t(state.refreshing ? 'trayMenu.refreshing' : 'trayMenu.refreshNow'),
@@ -388,9 +412,12 @@ function buildTrayMenuTemplate(options = {}) {
       }))
     },
     ...(edgeDockItem ? [edgeDockItem] : []),
+    ...(notchItem ? [notchItem] : []),
+    ...(state.pluginMenu || []).map(item => ({ label: `${item.pluginName}: ${item.label}`, click: () => callback('onPluginMenu')(item.pluginId, item.id) })),
     { type: 'separator' },
     { label: t('trayMenu.version', { version: state.appVersion || '' }), enabled: false },
     { label: t('trayMenu.settings'), click: callback('onOpenSettings') },
+    { label: t('plugins.trusted.safeMode'), click: callback('onRestartPluginsSafe') },
     {
       label: t('trayMenu.quit'),
       // macOS draws a menu item's shortcut from `accelerator` as that item's key
@@ -427,26 +454,34 @@ function createTray({
   electron = require('electron'),
   getMenuState,
   onOpenSettings,
+  onRestartPluginsSafe,
+  onPluginMenu,
   onOpenView,
   onQuit,
   onRefresh,
   onSetTrayContent,
   onSetWindowPresentation,
   onSetEdgeDock,
+  onSetNotch,
   onSwitchCodexAccount,
   onToggle,
+  getWindowVisible,
+  onMouseDown,
+  onCancelMouseDown,
   platform = process.platform,
   translateMenu
 }) {
   const { Tray, Menu, nativeImage } = electron;
   const tray = new Tray(buildTrayIcon({ platform, nativeImage }));
-  tray.setToolTip('Token Monitor');
+  tray.setToolTip('');
 
   const menuState = () => (typeof getMenuState === 'function' ? getMenuState() : {});
   const buildMenu = (state = menuState()) => Menu.buildFromTemplate(buildTrayMenuTemplate({
     state,
     platform,
     onOpenSettings,
+    onRestartPluginsSafe,
+    onPluginMenu,
     onOpenView,
     onQuit,
     onRefresh,
@@ -469,6 +504,7 @@ function createTray({
         refreshContextMenu();
       }
     },
+    onSetNotch,
     onSwitchCodexAccount,
     translate: translateMenu
   }));
@@ -490,8 +526,64 @@ function createTray({
 
   // On macOS the event position is window-relative, while the screen cursor is
   // in the coordinates popoverBounds uses. Read it while handling the click.
-  tray.on('click', (_event, _bounds, position) => onToggle(tray, pointerPoint(position, electron, platform)));
+  // A menu-bar press can blur and hide the popover before Cocoa emits click.
+  // Remember the state at mouse-down so that same click still closes it.
+  let press = null;
+  let releasedPress = null;
+  if (platform === 'darwin') {
+    let pointerOverIcon = false;
+    // The hover event follows the icon across displays, where getBounds() can
+    // still describe the primary display. Bounds cover a missed hover event.
+    tray.isPointerOverIcon = (point) => pointerOverIcon || pointInside(point, tray.getBounds?.());
+    tray.on('mouse-enter', () => { pointerOverIcon = true; });
+    tray.on('mouse-down', (_event, position) => {
+      pointerOverIcon = true;
+      releasedPress = null;
+      press = {
+        visible: typeof getWindowVisible === 'function' ? getWindowVisible() : null,
+        matchedBlur: onMouseDown?.(pointerPoint(position, electron, platform)) === true,
+        canceled: false
+      };
+    });
+    tray.on('mouse-up', () => {
+      releasedPress = press;
+      press = null;
+      onCancelMouseDown?.();
+      const completed = releasedPress;
+      // Cocoa emits click/double-click synchronously after mouse-up. Expire
+      // any unused release at the event-loop boundary (e.g. clickCount > 2),
+      // so a later accessibility activation cannot consume it.
+      setImmediate(() => {
+        if (releasedPress === completed) releasedPress = null;
+      });
+    });
+    tray.on('mouse-leave', () => {
+      pointerOverIcon = false;
+      // Cocoa still emits click on mouse-up after leaving the icon. Preserve
+      // cancellation until that click is consumed, or a fresh press starts.
+      if (press) press.canceled = true;
+      if (releasedPress) releasedPress.canceled = true;
+      onCancelMouseDown?.();
+    });
+  }
+  tray.on('click', (_event, _bounds, position) => {
+    // VoiceOver emits click then mouse-down, without mouse-up. Its activation
+    // must use current visibility, never an unpaired down from a previous one.
+    const completedPress = releasedPress;
+    press = null;
+    releasedPress = null;
+    if (completedPress?.canceled) return;
+    onToggle(tray, pointerPoint(position, electron, platform), completedPress?.visible ?? null, completedPress?.matchedBlur === true, Boolean(completedPress));
+  });
+  tray.on('double-click', () => {
+    press = null;
+    releasedPress = null;
+    onCancelMouseDown?.();
+  });
   tray.on('right-click', () => {
+    press = null;
+    releasedPress = null;
+    onCancelMouseDown?.();
     tray.popUpContextMenu(buildMenu());
   });
 

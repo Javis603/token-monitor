@@ -28,7 +28,8 @@ function createCursorSelfSync({ selfSyncThrottle }) {
     try {
       await cursorAuth.runCursorSync({
         signal: options.signal,
-        timeoutMs: options.timeoutMs,
+        timeoutMs: options.timeoutMs ?? (options.explicit === true
+          ? cursorAuth.CURSOR_EXPLICIT_SYNC_TIMEOUT_MS : cursorAuth.CURSOR_BACKGROUND_SYNC_TIMEOUT_MS),
         terminationOptions: options.terminationOptions,
         onTerminationUnconfirmed: options.onTerminationUnconfirmed
       });

@@ -30,7 +30,10 @@ const { createLimitWindowsView } = require('../../src/electron/renderer/limits/w
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 const { parseStepfunUsage } = require('../../src/shared/providers/stepfun/limits');
 const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../src/shared/providers/factory/limits');
-const { normalizeLimitProvider } = require('../../src/shared/limits/core');
+const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
+const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
+const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
+const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
 
 const root = path.join(__dirname, '../..');
 
@@ -61,16 +64,36 @@ class FakeElement {
       this.children.push(child);
     }
   }
+  insertBefore(child, reference) {
+    const index = this.children.indexOf(reference);
+    if (index < 0) throw new Error('Reference is not a child');
+    child.parent = this;
+    this.children.splice(index, 0, child);
+  }
   remove() {
     if (!this.parent) return;
     this.parent.children = this.parent.children.filter((child) => child !== this);
     this.parent = null;
   }
-  addEventListener() {}
+  addEventListener(name, handler) { (this.listeners ||= {})[name] = handler; }
   setAttribute(name, value) { this.attributes[name] = value; }
+  getAttribute(name) { return this.attributes[name] ?? null; }
   removeAttribute(name) { delete this.attributes[name]; }
   replaceChildren(...children) { this.children = [...children]; }
-  querySelector(selector) { return this.find(selector.replace('.', '')); }
+  querySelector(selector) {
+    if (selector === '.limit-window-text > span') return this.find('limit-window-text')?.children[0] || null;
+    return this.querySelectorAll(selector)[0] || null;
+  }
+  querySelectorAll(selector) {
+    const names = selector.split(',').map((part) => part.trim().replace('.', ''));
+    return [...this.walk()].slice(1).filter((node) => names.some((name) => node.classNames.has(name)));
+  }
+  replaceWith(node) {
+    const index = this.parent.children.indexOf(this);
+    this.parent.children.splice(index, 1, node);
+    node.parent = this.parent;
+    this.parent = null;
+  }
 
   // Depth-first walk, so an assertion can ask what the card actually drew
   // without knowing which provider branch nested it where.
@@ -183,6 +206,256 @@ function dockView(appearance = {}, overrides = {}) {
   });
 }
 
+function limitsSubscriptionPool(localProviders, aggregateProviders) {
+  const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const state = { mode: 'sync', settings: { deviceId: 'local' }, stats: {
+    devices: [{ deviceId: 'local', limits: { providers: localProviders } }],
+    limits: { providers: aggregateProviders }
+  } };
+  const context = vm.createContext({ state, accountIdentityApi });
+  for (const name of ['localDeviceLimitsProviders', 'limitProvidersForSubscriptions']) {
+    vm.runInContext(balancedCall(app, `function ${name}() {`), context);
+  }
+  return vm.runInContext('limitProvidersForSubscriptions()', context);
+}
+
+for (const realm of ['cn', 'ai']) for (const reason of ['', 'encrypted']) {
+  test(`WorkBuddy ${realm} totals ignore ${reason || 'unsigned'} local placeholders without removing local hints`, async () => {
+    const now = Date.parse('2026-10-12T00:10:00Z');
+    const at = new Date(now).toISOString();
+    const healthy = ['remote-a', 'remote-b'].map((user) => normalizeLimitProvider({
+      provider: 'workbuddy', accountKey: workbuddyAccountKey('', user, '', '', realm),
+      status: 'ok', region: realm, updatedAt: at,
+      windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }]
+    }));
+    for (const localRealm of ['cn', 'ai']) {
+      const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true,
+        workbuddyRealm: localRealm, workbuddyLocalSessionReason: reason }, { env: {}, now: () => now });
+      const summary = aggregateLimits([
+        { deviceId: 'remote', limits: { updatedAt: at, providers: healthy } },
+        { deviceId: 'local', limits: { updatedAt: at, providers: [placeholder] } }
+      ], 0, now);
+      assert.equal(summary.providers.length, 2);
+      const pool = limitsSubscriptionPool([placeholder], summary.providers);
+      assert.equal(pool.length, 3, 'the global pool still includes local discovery');
+      const view = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => pool });
+      assert.equal(view.workbuddyCombinedProvider(summary.providers).windows[0].remaining, 160);
+      const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+      assert.equal(group.children[1].className, 'limit-windows', localRealm);
+      assert.match(group.children[1].text, /160/);
+      assert.equal(group.find('limit-account-list').children.length, 2);
+      assert.equal(pool.length, 3, 'rendering does not mutate the observed pool');
+      const off = dockView({ workbuddyQuotaTotalEnabled: false }, { subscriptionAccounts: () => pool })
+        .renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+      assert.equal(off.children[1].className, 'limit-account-list');
+      const hint = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', placeholder, '#12B7F5');
+      assert.ok(hint.text.includes(reason ? 'Encrypted by app' : 'Not signed in'), hint.text);
+    }
+  });
+}
+
+test('WorkBuddy total completeness retains real failed, incomplete and hidden accounts beside a placeholder', async () => {
+  const healthy = ['a', 'b'].map((accountKey) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey, status: 'ok', region: 'cn',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }]
+  }));
+  const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true }, { env: {} });
+  const failed = (extra = {}) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey: 'c', status: 'notConfigured', region: 'cn', windows: [], ...extra
+  });
+  const siblings = [
+    ['missing credentials', failed()],
+    ['unauthorized', failed({ status: 'unauthorized' })],
+    ['unavailable', failed({ status: 'unavailable' })],
+    ['known encrypted identity', failed({ actionRequired: 'appSessionEncrypted' })],
+    ['missing key', failed({ accountKey: '' })],
+    ['missing quota', failed({ status: 'ok' })],
+    ['stale', { ...healthy[0], accountKey: 'c', stale: true }],
+    ['unlimited', { ...healthy[0], accountKey: 'c', windows: [
+      { kind: 'billing', metric: 'credits', currency: 'CREDITS', detail: 'unlimited', used: 20 }
+    ] }],
+    ['healthy hidden', { ...healthy[0], accountKey: 'c' }]
+  ];
+  for (const [name, sibling] of siblings) {
+    assert.equal(limitPresentationApi.isWorkbuddyPlaceholder(sibling), false, name);
+    const pool = limitsSubscriptionPool([placeholder, sibling], healthy);
+    assert.equal(pool.length, 4, name);
+    const view = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => pool });
+    const hidden = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', healthy, '#12B7F5');
+    assert.equal(hidden.children[1].className, 'limit-account-list', name);
+    if (name !== 'healthy hidden') {
+      const drawn = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', [...healthy, sibling], '#12B7F5');
+      assert.equal(drawn.children[1].className, 'limit-account-list', `${name} drawn`);
+    }
+    assert.equal(pool.length, 4, 'real identities and local hints remain in the global pool');
+  }
+});
+
+test('Limits group counts only genuine accounts when both credentials are unavailable', async () => {
+  const now = Date.parse('2026-10-12T00:10:00Z');
+  const at = new Date(now).toISOString();
+  const known = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true, workbuddyLocalSessions: [
+    { realm: 'cn', userId: 'encrypted-user', reason: 'encrypted' },
+    { realm: 'cn', userId: 'missing-user', reason: 'incomplete' }
+  ] }, { env: {}, now: () => now });
+  const placeholder = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true }, { env: {}, now: () => now });
+  const summary = aggregateLimits([
+    { deviceId: 'known', limits: { updatedAt: at, providers: known } },
+    { deviceId: 'unsigned', limits: { updatedAt: at, providers: [placeholder] } }
+  ], 0, now);
+  const view = dockView({ workbuddyQuotaTotalEnabled: true });
+  const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', summary.providers, '#12B7F5');
+  assert.ok(group.text.includes('2 accounts'), group.text);
+  assert.equal(group.find('limit-account-list').children.length, 2);
+  assert.equal(group.text.includes('Account 3'), false);
+  assert.ok(group.text.includes('Encrypted by app'), group.text);
+  assert.ok(group.text.includes('Not signed in'), group.text);
+  assert.equal(view.workbuddyCombinedProvider(summary.providers), null);
+  const alone = aggregateLimits([{ deviceId: 'unsigned', limits: { updatedAt: at, providers: [placeholder] } }], 0, now);
+  const signIn = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', alone.providers[0], '#12B7F5');
+  assert.ok(signIn.text.includes('Not signed in'), signIn.text);
+});
+
+test('WorkBuddy group draws a healthy total plus independent accounts and omits partial totals', () => {
+  const rows = ['one', 'two'].map((accountKey) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey, accountName: 'Same nickname', region: 'cn', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, limit: 100, remaining: 80 }]
+  }));
+  const healthy = dockView({ workbuddyQuotaTotalEnabled: true }).renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
+  assert.equal(healthy.children[1].className, 'limit-windows');
+  assert.equal(healthy.find('limit-account-list').children.length, 2);
+  for (const appearance of [{}, { workbuddyQuotaTotalEnabled: false }]) {
+    const off = dockView(appearance).renderLimitProviderGroup('workbuddy', 'WorkBuddy', rows, '#12B7F5');
+    assert.equal(off.children[1].className, 'limit-account-list');
+    assert.equal(off.children[1].children.length, 2);
+  }
+  const partial = dockView({ workbuddyQuotaTotalEnabled: true }).renderLimitProviderGroup('workbuddy', 'WorkBuddy',
+    [rows[0], { ...rows[1], status: 'unavailable' }], '#12B7F5');
+  assert.equal(partial.children[1].className, 'limit-account-list');
+  assert.equal(partial.children[1].children.length, 2);
+});
+
+test('Dock projection cannot total only visible WorkBuddy accounts while a known sibling is omitted', () => {
+  const wb = (accountKey, extra = {}) => normalizeLimitProvider({ provider: 'workbuddy', accountKey, region: 'cn', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }], ...extra });
+  for (const scenario of ['nonreporting', 'hidden', 'unlimited-hidden', 'healthy-hidden']) {
+    const c = scenario === 'nonreporting' ? wb('c', { status: 'unauthorized', windows: [] })
+      : scenario === 'unlimited-hidden' ? wb('c', { windows: [{ kind: 'billing', metric: 'credits', detail: 'unlimited', used: 20 }] })
+        : wb('c', { status: scenario === 'hidden' ? 'unavailable' : 'ok' });
+    const [cell] = buildEdgeDockCells({ limits: { providers: [wb('a'), wb('b'), c] } }, {
+      items: [{ type: 'limit', provider: 'workbuddy', hiddenAccounts: scenario === 'nonreporting' ? [] : ['c'] }]
+    });
+    const drawn = cell.accounts.map((account) => account.record);
+    assert.equal(drawn.length, 2, scenario);
+    const card = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => cell.subscriptionAccounts })
+      .renderLimitProviderGroup('workbuddy', 'WorkBuddy', drawn, '#12B7F5');
+    assert.equal(card.children[1].className, 'limit-account-list', scenario);
+  }
+});
+
+test('saved-only WorkBuddy subscription card does not appear on the sole live sibling', () => {
+  const live = normalizeLimitProvider({ provider: 'workbuddy', accountKey: 'a', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }] });
+  const saved = { id: 'saved-c', provider: 'workbuddy', kind: 'subscription', binding: { accountKey: 'c', profileName: 'Saved C' },
+    planName: 'C plan', amountMinor: 9900, currency: 'USD', interval: 'month', intervalCount: 1, startDate: '2026-01-01', autoRenew: true };
+  const [cell] = buildEdgeDockCells({ limits: { providers: [live] } }, { items: [{ type: 'limit', provider: 'workbuddy' }] });
+  const card = dockView({ subscriptions: [saved] }, { subscriptionAccounts: () => cell.subscriptionAccounts })
+    .renderLimitProviderSolo('workbuddy', 'WorkBuddy', live, '#12B7F5');
+  assert.equal(card.find('subscription-tooltip'), null);
+});
+
+test('Notion rolling and monthly allowances render in both display modes and hide independently', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'notion', status: 'ok', source: 'web',
+    windows: [
+      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: '2026-11-01T00:00:00Z' },
+      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: '2026-12-01T00:00:00Z' }
+    ]
+  });
+  const before = JSON.stringify(provider);
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#888888');
+    assert.equal(card.children.length, 2);
+    assert.deepEqual(card.children.map((row) => row.children[0].children[0].textContent), ['Rolling', 'Monthly']);
+    assert.match(card.text, showLimitUsed ? /42% used/ : /58% left/);
+    assert.match(card.text, showLimitUsed ? /18% used/ : /82% left/);
+    assert.equal(card.text.includes('$'), false, 'included allowance units are not spendable money');
+    assert.ok(card.children.every((row) => row.find('limit-reset').text));
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 2);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { notion: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#888888').children.length, 1);
+      assert.deepEqual(hidden.limitProviderUsageItems([provider]), items);
+    }
+  }
+  const monthlyOnly = { ...provider, windows: [provider.windows[1]] };
+  assert.ok(dockView().renderProviderWindows(monthlyOnly, '#888888').children[0].classNames.has('limit-window-wide'));
+  assert.equal(JSON.stringify(provider), before);
+});
+
+test('MiniMax API balances reach the shared Limits and dock renderer in both currencies', async () => {
+  for (const [region, currency, symbol] of [['cn', 'CNY', '¥'], ['intl', 'USD', '$']]) {
+    for (const amount of [98.25, 0, -1.5]) {
+      const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: region }, {
+        env: {}, fetchJson: async () => ({ available_amount: String(amount), base_resp: { status_code: 0 } })
+      });
+      assert.equal(provider.status, 'ok');
+      assert.equal(provider.windows[0].currency, currency);
+      assert.equal(provider.balance, null, 'the collector only supplies a credits window');
+      const before = JSON.stringify(provider);
+      for (const showLimitUsed of [false, true]) {
+        const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#888888');
+        assert.equal(card.children.length, 1);
+        const row = card.children[0];
+        assert.equal(row.children[0].children[0].textContent, 'Balance');
+        assert.equal(row.children[0].children[1].textContent, `${symbol}${amount.toFixed(2)}`);
+        assert.equal(row.dataset.usageItem, 'credits');
+        assert.ok(row.classNames.has('limit-window-wide'));
+        assert.ok(row.classNames.has('limit-window-no-reset'));
+        assert.equal(row.find('limit-meter-fill').style['--bar-scale'], amount > 0 ? '1' : '0');
+        assert.equal(row.find('limit-reset').text, '');
+      }
+      assert.equal(JSON.stringify(provider), before, 'display percentages never mutate the wire reading');
+    }
+  }
+});
+
+test('MiniMax Balance is listed and can be hidden without disappearing from its checklist', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'minimax', status: 'ok',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 0, currency: 'CNY' }]
+  });
+  const view = dockView({ limitProviderHiddenItems: { minimax: ['credits'] } });
+  assert.deepEqual(view.limitProviderUsageItems([provider]), [{ id: 'credits', label: 'Balance' }]);
+  assert.equal(view.renderProviderWindows(provider, '#888888').children.length, 0);
+  assert.equal(view.renderProviderWindows(provider, '#888888', { showAllUsageItems: true }).children.length, 1);
+  assert.equal(dockView().renderProviderWindows(provider, '#888888').children.length, 1);
+});
+
+test('MiniMax Token Plan retains its quota pair and missing API balances do not invent a row', async () => {
+  const plan = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-fixture', minimaxApiRegion: 'cn' }, {
+    env: {}, fetchJson: async () => ({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 75, current_weekly_remaining_percent: 50 }] } })
+  });
+  const card = dockView().renderProviderWindows(plan, '#888888');
+  assert.equal(plan.status, 'ok');
+  assert.deepEqual(card.children.map((row) => row.children[0].children[0].textContent), ['5h', 'Weekly']);
+  assert.equal(card.text.includes('Balance'), false);
+  for (const available_amount of [undefined, 'invalid']) {
+    const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' }, {
+      env: {}, fetchJson: async () => ({ available_amount, base_resp: { status_code: 0 } })
+    });
+    assert.equal(provider.status, 'unavailable');
+    assert.equal(dockView().renderProviderWindows(provider, '#888888').children.length, 0);
+  }
+});
+
+test('default provider balance rendering follows the credits marker without a provider whitelist', () => {
+  const provider = { provider: 'future-provider', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD' }] };
+  assert.match(dockView().renderProviderWindows(provider, '#888888').text, /\$5\.00/);
+});
+
 test('Home text and bars use the plan text rendered by Limits account rows', () => {
   const window = { kind: 'weekly', remainingPercent: 40 };
   const fixtures = [
@@ -252,7 +525,7 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
         assert.deepEqual(body.children.map((row) => row.find('home-limit-plan')?.textContent || ''), limitsPlans);
         for (const row of body.children) {
           const plan = row.find('home-limit-plan');
-          if (plan) assert.equal(plan.title, plan.textContent);
+          if (plan) assert.equal(plan.attributes['aria-label'], plan.textContent);
           assert.equal(Boolean(row.find('limit-meter')), homeLimitDisplayMode === 'bars');
         }
       }
@@ -340,13 +613,14 @@ test('a DeepSeek card shows the spend row the projection used to drop', () => {
   const card = dockView().renderProviderWindows({
     provider: 'deepseek',
     windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
-    balance: { amount: 4.2, currency: 'USD', todaySpend: 0.12, monthSpend: 1.4 }
+    balance: { amount: 4.2, currency: 'USD', todaySpend: 0.12, weekSpend: 0.5, monthSpend: 1.4 }
   }, '#4D6BFE');
 
   assert.ok(card.find('limit-spend'), 'the card should carry the spend row');
   assert.match(card.text, /Today/);
   assert.match(card.text, /Month/);
   assert.match(card.text, /\$4\.20/);
+  assert.match(card.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), /Month: \$1\.40/);
 });
 
 test('a TypeSafe card shows the next credit expiry without calling it a reset', () => {
@@ -399,6 +673,210 @@ test('a TypeSafe card does not repeat the full balance beside its expiry', () =>
   assert.equal(card.text.match(/\$5\.00/g)?.length, 1);
 });
 
+test('an Ollama new-plan card draws the monthly included credits', () => {
+  const row = normalizeLimitProvider({
+    provider: 'ollama',
+    accountKey: 'sha256:ollama-credits-row',
+    status: 'ok',
+    source: 'api',
+    updatedAt: '2026-10-23T12:00:00Z',
+    windows: [{
+      kind: 'billing',
+      metric: 'credits',
+      label: 'Included credits',
+      used: 15,
+      limit: 60,
+      remaining: 45,
+      currency: 'USD',
+      usedPercent: 25,
+      remainingPercent: 75,
+      resetsAt: '2026-11-08T08:00:00Z',
+      showMeter: true
+    }]
+  });
+  const node = dockView().renderLimitProviderSolo('ollama', 'Ollama', row, '#888888');
+  assert.match(node.text, /\$45\.00/);
+  assert.match(node.text, /Included credits/);
+});
+
+test('Ollama Cookie monthly and wallet cards render real measurements with no wallet meter', async () => {
+  const { fetchOllamaLimits } = require('../../src/shared/providers/ollama/limits');
+  const { monthly, free, wallet } = require('../fixtures/ollamaCookieUsage.cjs');
+  for (const [html, meters, amounts] of [
+    [monthly, 1, ['$52.50']],
+    [free, 1, ['31% left']],
+    [wallet, 0, ['$18.25', '$4.50', 'Refills to $30 in 3 weeks.']],
+    [monthly + wallet, 1, ['$52.50', '$18.25', '$4.50']]
+  ]) {
+    const row = await fetchOllamaLimits({ ollamaCookie: 'wos-session=fixture-card' }, {
+      env: {}, bypassValidationCache: true,
+      fetch: async () => ({ ok: true, status: 200, text: async () => html })
+    });
+    assert.equal(row.status, 'ok');
+    const card = dockView().renderProviderWindows(row, '#888888');
+    assert.equal(card.textOf('limit-meter').length, meters);
+    for (const amount of amounts) assert.ok(card.text.includes(amount), card.text);
+  }
+});
+
+test('an Ollama API card keeps purchased balance separate from included monthly credits', async () => {
+  const { fetchOllamaLimits } = require('../../src/shared/providers/ollama/limits');
+  const row = await fetchOllamaLimits({ ollamaApiKey: 'fixture-purchased-card' }, {
+    env: {}, probe: true,
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({
+      included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 }
+    }) })
+  });
+  const card = dockView().renderProviderWindows(row, '#888888');
+  assert.equal(card.textOf('limit-meter').length, 1);
+  for (const amount of ['$52.50', '$18.25', '$7.50']) assert.ok(card.text.includes(amount), card.text);
+  assert.equal(card.text.includes('$70.75'), false, 'wallet and allowance must not be added');
+  assert.deepEqual([...card.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['Included credits', 'Credit balance']);
+  assert.match(card.find('limit-spend-summary').textContent, /\$18\.25/);
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.equal(tooltip.text, 'Monthly credits used $7.50');
+  const trigger = card.find('limit-detail-tooltip-trigger');
+  assert.equal(trigger.tabIndex, 0);
+  assert.match(trigger.getAttribute('aria-label'), /Monthly credits used: \$7\.50/);
+  const wrap = card.find('limit-spend-info-wrap');
+  wrap.isConnected = true;
+  wrap.getBoundingClientRect = () => ({ top: 200 });
+  tooltip.childElementCount = tooltip.children.length;
+  tooltip.offsetHeight = 40;
+  tooltip.showPopover = () => { tooltip.opened = true; };
+  tooltip.hidePopover = () => { tooltip.opened = false; };
+  wrap.listeners.focusin();
+  assert.equal(tooltip.opened, true);
+  wrap.listeners.keydown({ key: 'Escape' });
+  assert.equal(tooltip.opened, false);
+  wrap.listeners.pointerenter();
+  assert.equal(tooltip.opened, true);
+  wrap.listeners.pointerleave();
+  assert.equal(tooltip.opened, false);
+});
+
+test('Ollama hides spending details when that usage item is disabled and keeps spend-only readings', () => {
+  const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
+  const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 0 } });
+  const row = normalizeLimitProvider({ provider: 'ollama', status: 'ok', windows: parsed.windows });
+  const hidden = dockView({ limitProviderHiddenItems: { ollama: ['spend'] } }).renderProviderWindows(row, '#888888');
+  assert.match(hidden.text, /Credit balance \$0\.00/);
+  assert.equal(hidden.find('limit-detail-tooltip'), null);
+  assert.ok(dockView().limitProviderUsageItems([row]).some((item) => item.id === 'spend'));
+  const hiddenBalance = dockView({ limitProviderHiddenItems: { ollama: ['credits'] } }).renderProviderWindows(row, '#888888');
+  assert.doesNotMatch(hiddenBalance.text, /Credit balance/);
+  assert.match(hiddenBalance.text, /Monthly credits used \$7\.50/);
+  const spendOnly = dockView().renderProviderWindows({ provider: 'ollama', windows: parsed.windows.filter((w) => w.metric === 'spend') }, '#888888');
+  assert.match(spendOnly.text, /Monthly credits used \$7\.50/);
+  assert.doesNotMatch(spendOnly.text, /Credit balance/);
+});
+
+function renderHomeLimitFixture(rows) {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const functions = ['homeModuleShell', 'homeLimitWindowLabel', 'formatHomeLimitWindowValue', 'renderHomeLimitModule'].map((name) => {
+    const start = source.indexOf(`function ${name}(`);
+    return source.slice(start, source.indexOf('\n}\n', start) + 2);
+  }).join('\n');
+  const context = {
+    document: { createElement: (tag) => new FakeElement(tag) }, homeLimitRows: () => rows,
+    els: { homePanel: { children: [] } }, pluginContent: null,
+    state: { settings: { homeLimitDisplayMode: 'bars' } }, VIEW_ICON_CLASSES: {}, renderBreakdownChange() {},
+    t: (key) => i18n.translate('en', key), applyHomeListMark() {}, iconKindFor: () => '',
+    limitWindowsView: dockView(), limitProviderPresentationApi: limitPresentationApi,
+    isCreditsWindow: balanceDisplay.isCreditsWindow, formatCompactMoney: balanceDisplay.formatCompactMoney,
+    currentLocale: () => 'en', formatPercent: (n) => `${n}%`,
+    limitModeSuffix: limitDisplayMode.limitModeSuffix, limitFillPercent: limitDisplayMode.limitFillPercent,
+    formatLimitBoundary: () => '', optionalFiniteNumber: (n) => n == null ? null : Number(n)
+  };
+  vm.runInNewContext(`${functions}\nthis.result = renderHomeLimitModule();`, context);
+  return context.result;
+}
+
+test('Home renders Ollama included quota before balance on separate full-width rows with the shared tooltip', () => {
+  const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
+  const { homeLimitAccounts } = require('../../src/electron/renderer/homeOverview');
+  const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 } });
+  const rows = homeLimitAccounts([{ providerId: 'ollama', name: 'Ollama', windows: parsed.windows }]);
+  const result = renderHomeLimitFixture(rows);
+  const readings = [...result.walk()].filter((node) => node.classNames.has('home-limit-window'));
+  assert.equal(readings.length, 2);
+  assert.ok(readings.every((node) => node.classNames.has('home-limit-window-wide')));
+  assert.equal(readings[1].find('home-limit-window-label').textContent, 'Credit balance');
+  assert.equal(readings[1].find('home-list-value').textContent, '$18.25');
+  assert.equal(readings[1].find('limit-meter'), null);
+  assert.equal(readings[1].find('limit-detail-tooltip').text, 'Monthly credits used $7.50');
+  assert.equal(readings[1].find('limit-detail-tooltip-trigger').tabIndex, 0);
+  assert.equal(readings[0].find('home-list-value').textContent, '$52.50');
+  assert.ok(readings[0].find('limit-meter'));
+});
+
+test('Ollama refill tooltips expose complete accessible names on cards and Home', () => {
+  const { parseOllamaUsageHtml } = require('../../src/shared/providers/ollama/limits');
+  const { homeLimitAccounts } = require('../../src/electron/renderer/homeOverview');
+  const { wallet } = require('../fixtures/ollamaCookieUsage.cjs');
+  const refill = 'Refills to $30 in 3 weeks.';
+  for (const withSpend of [false, true]) {
+    const html = withSpend ? wallet : wallet.replace('<div><span>Monthly credits used</span><span>$4.50</span></div>', '');
+    const parsed = parseOllamaUsageHtml(html);
+    const row = normalizeLimitProvider({ provider: 'ollama', status: 'ok', windows: parsed.windows });
+    const surfaces = [
+      dockView().renderProviderWindows(row, '#888888'),
+      renderHomeLimitFixture(homeLimitAccounts([{ providerId: 'ollama', windows: row.windows }]))
+    ];
+    for (const surface of surfaces) {
+      const trigger = surface.find('limit-detail-tooltip-trigger');
+      assert.equal(trigger.tabIndex, 0);
+      assert.equal(trigger.getAttribute('aria-label'), withSpend ? `Monthly credits used: $4.50, ${refill}` : refill);
+      const wrap = surface.find('limit-detail-tooltip-wrap');
+      const tooltip = surface.find('limit-detail-tooltip');
+      assert.ok(tooltip.text.includes(refill));
+      wrap.isConnected = true;
+      wrap.getBoundingClientRect = () => ({ top: 200 });
+      tooltip.childElementCount = tooltip.children.length;
+      tooltip.offsetHeight = 40;
+      tooltip.showPopover = () => { tooltip.opened = true; };
+      tooltip.hidePopover = () => { tooltip.opened = false; };
+      wrap.listeners.focusin();
+      assert.equal(tooltip.opened, true);
+      wrap.listeners.keydown({ key: 'Escape' });
+      assert.equal(tooltip.opened, false);
+    }
+  }
+  const custom = dockView().limitDetailInfoNode([{ full: refill }], '', 'Custom accessible label');
+  assert.equal(custom.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), 'Custom accessible label');
+  const mixed = dockView().limitDetailInfoNode([['Grant', '$1', '7/1'], { full: refill }, null, {}]);
+  assert.equal(mixed.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), `Grant: $1 7/1, ${refill}`);
+});
+
+test('Home retains standalone Ollama spending after legacy quotas when balance is absent or hidden', () => {
+  const { parseOllamaUsageHtml } = require('../../src/shared/providers/ollama/limits');
+  const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
+  const { wallet } = require('../fixtures/ollamaCookieUsage.cjs');
+  const legacy = '<section><span>Session usage</span><span>25% used</span><span>Weekly usage</span><span>40% used</span></section>';
+  for (const hiddenWallet of [false, true]) {
+    const html = legacy + (hiddenWallet ? wallet : wallet.replace('<span>$18.25</span>', ''));
+    const parsed = parseOllamaUsageHtml(html);
+    const row = normalizeLimitProvider({ provider: 'ollama', status: 'ok', windows: parsed.windows });
+    for (const hiddenSpend of [false, true]) {
+      const isWindowHidden = (_, window) => (hiddenWallet && window.metric === 'credits') || (hiddenSpend && window.metric === 'spend');
+      const windows = limitPresentationApi.limitProviderCompactWindows(row, row.windows.filter((window) => !isWindowHidden('ollama', window)));
+      const rows = homeLimitAccountsForProviders({
+        providers: [{ ...row, windows }], providerOptions: [{ id: 'ollama', label: 'Ollama' }],
+        enabledProviderIds: ['ollama'], isWindowHidden
+      });
+      const result = renderHomeLimitFixture(rows);
+      const readings = [...result.walk()].filter((node) => node.classNames.has('home-limit-window'));
+      assert.equal(readings.length, hiddenSpend ? 2 : 3);
+      assert.equal(result.text.includes('$4.50'), !hiddenSpend);
+      assert.ok(readings.every((node) => node.classNames.has('home-limit-window-wide')));
+      if (!hiddenSpend) {
+        assert.equal(readings.at(-1).find('home-limit-window-label').textContent, 'Monthly credits used');
+        assert.equal(readings.at(-1).find('limit-meter'), null);
+      }
+    }
+  }
+});
+
 test('a TypeSafe card omits expiry when the billing response has no valid grants', () => {
   const card = dockView().renderProviderWindows({
     provider: 'typesafe',
@@ -421,6 +899,128 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.ok(tooltip, 'the card should carry the ⓘ tooltip, not only the page');
   assert.match(card.find('limit-detail-tooltip-trigger').textContent, /i/);
   assert.match(tooltip.text, /All time/);
+});
+
+test('a Sub2API card keeps Month and All time in the summary and its original usage tooltip', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'sub2api', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, currency: 'USD' }],
+    balance: { amount: 12.5, currency: 'USD', monthSpend: 2.5, allTimeSpend: 18.75 },
+    usageSummary: {
+      period: 'month', requests: 21, totalTokens: 1940, inputTokens: 1234,
+      outputTokens: 456, cacheReadTokens: 200, cacheCreationTokens: 50,
+      averageDurationMs: 850, standardCost: 3
+    }
+  }, '#888888');
+  assert.equal(card.find('limit-spend-summary').text, 'Month $2.50 · All time $18.75');
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.deepEqual(tooltip.children.map((row) => row.text), [
+    'Month requests 21', 'Month tokens 1,940', 'Input tokens 1,234',
+    'Output tokens 456', 'Cache tokens 250', 'Avg response 850 ms', 'Standard cost $3.00'
+  ]);
+  assert.equal(tooltip.find('is-separated'), null);
+});
+
+test('a real Sub2API adapter result retains its inferred balance meter', () => {
+  const { THIRD_PARTY_ADAPTERS } = require('../../src/shared/providers/thirdparty/limits');
+  const quota = THIRD_PARTY_ADAPTERS.sub2api.quota({ code: 0, data: { id: 7, balance: 4 } }, null, null, null, {
+    month: { code: 0, data: { total_actual_cost: 6 } }
+  });
+  const row = normalizeLimitProvider({ provider: 'thirdparty', adapterId: 'sub2api', status: 'ok', windows: [quota.window], balance: quota.balance });
+  const card = dockView().renderProviderWindows(row, '#888888');
+  assert.equal(card.textOf('limit-meter').length, 1);
+  assert.match(card.text, /\$4\.00/);
+  assert.match(card.text, /Month \$6\.00/);
+  assert.equal(card.find('limit-meter-fill').style['--bar-scale'], '0.4');
+});
+
+test('a third-party card summarizes Today and Month and details every period', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty',
+    adapterId: 'newapi-account',
+    status: 'ok',
+    planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 11.42, currency: 'USD' }],
+    balance: {
+      amount: 11.42,
+      currency: 'USD',
+      todaySpend: 0,
+      weekSpend: 1.44,
+      monthSpend: 1.44,
+      allTimeSpend: 18.58
+    }
+  }, '#888888');
+
+  assert.match(card.text, /Spend Today \$0\.00 · Month \$1\.44/);
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.ok(tooltip, 'the card should carry the ⓘ tooltip, not only the summary');
+  assert.match(tooltip.text, /Today \$0\.00/);
+  assert.match(tooltip.text, /Week \$1\.44/);
+  assert.match(tooltip.text, /All time \$18\.58/);
+});
+
+test('a third-party tooltip keeps account details above spend without duplicate spoken periods', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 11.42, limit: 30, currency: 'USD' }],
+    balance: {
+      amount: 11.42, currency: 'USD', todaySpend: 0, weekSpend: 1.44,
+      monthSpend: 1.44, allTimeSpend: 18.58, requestCount: 12345, quotaGroup: 'default'
+    }
+  }, '#888888');
+  const tooltip = card.find('limit-detail-tooltip');
+  const rows = tooltip.children.map((row) => row.text);
+  assert.deepEqual(rows, [
+    'Total quota $30.00', 'Requests 12,345', 'Group default', '',
+    'Today $0.00', 'Week $1.44', 'Month $1.44', 'All time $18.58'
+  ]);
+  assert.ok(tooltip.children[3].classList.contains('is-separated'));
+  const spoken = card.find('limit-spend').attributes['aria-label'];
+  assert.equal(spoken.match(/Today/g)?.length, 1);
+  assert.equal(spoken.match(/Month/g)?.length, 1);
+});
+
+test('a third-party card falls back to all-time when dashboard periods are unknown', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 39.45, currency: 'USD' }],
+    balance: {
+      amount: 39.45, currency: 'USD', todaySpend: null, weekSpend: null,
+      monthSpend: null, allTimeSpend: 140.57
+    }
+  }, '#888888');
+  assert.match(card.text, /Spend All time \$140\.57/);
+  assert.doesNotMatch(card.text, /Today|Week|Month|\$0\.00/);
+});
+
+test('a third-party tooltip keeps the original account format when all-time is the summary', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 39.45, limit: 180.02, currency: 'USD' }],
+    balance: {
+      amount: 39.45, currency: 'USD', todaySpend: null, weekSpend: null,
+      monthSpend: null, allTimeSpend: 140.57, requestCount: 30836, quotaGroup: 'default'
+    }
+  }, '#888888');
+  assert.match(card.find('limit-spend-summary').text, /All time \$140\.57/);
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.deepEqual(tooltip.children.map((row) => row.text), [
+    'Total quota $180.02', 'Requests 30,836', 'Group default'
+  ]);
+  assert.doesNotMatch(tooltip.text, /Today|Week|Month|All time/);
+  assert.equal(tooltip.find('is-separated'), null);
+});
+
+test('a third-party card retains zero account details when spend is unavailable', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 0, limit: 0, currency: 'USD' }],
+    balance: { amount: 0, currency: 'USD', requestCount: 0, quotaGroup: 'default' }
+  }, '#888888');
+  assert.match(card.find('limit-spend').text, /Details/);
+  assert.deepEqual(card.find('limit-detail-tooltip').children.map((row) => row.text), [
+    'Total quota $0.00', 'Requests 0', 'Group default'
+  ]);
 });
 
 test('a MiMo membership row meters like any percent quota, WorkBuddy included', () => {
@@ -879,6 +1479,7 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   const view = dockView();
 
   for (const [id, label, color] of [
+    ['workbuddy', 'WorkBuddy', '#10B981'],
     ['claude', 'Claude', '#D97757'],
     ['openrouter', 'OpenRouter', '#6566F1'],
     ['antigravity', 'Antigravity', '#4285F4']
@@ -1248,7 +1849,7 @@ test('a subscription bound to a hidden account does not decorate the row that is
   );
 
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
-  assert.match(dock, /subscriptionAccounts: \(\) => state\.payload\?\.cell\?\.subscriptionAccounts \|\| \[\],/);
+  assert.match(dock, /subscriptionAccounts: \(\) => cell\(\)\?\.subscriptionAccounts \|\| \[\],/);
 });
 
 // Hiding is not the only display rule that narrows the universe. The rail lists
@@ -1464,7 +2065,7 @@ test('the dock hands the shared view the device context a cell carries', () => {
   const wiring = balancedCall(dock, 'createLimitWindowsView({');
   assert.match(
     wiring,
-    /provenanceContext: \(\) => state\.payload\?\.cell\?\.provenanceContext/,
+    /provenanceContext: \(\) => cell\(\)\?\.provenanceContext/,
     'the dock card must read the context off the cell it renders'
   );
 });
@@ -1586,6 +2187,123 @@ test('an Antigravity group whose rows are all unchecked goes with them', () => {
   assert.doesNotMatch(card.text, /Claude/);
 });
 
+for (const unavailable of [false, true]) for (const showLimitUsed of [false, true]) test(`Antigravity keeps the original quota pairs above Argon weekly with Claude 5-hour ${unavailable ? 'unavailable' : 'available'} in ${showLimitUsed ? 'used' : 'remaining'} mode`, () => {
+  const record = normalizeLimitProvider({
+    provider: 'antigravity',
+    windows: [
+      { kind: 'weekly', label: 'Gemini 4 Argon weekly', usedPercent: 63 },
+      { kind: 'session', label: 'Gemini 5-hour', usedPercent: 2 },
+      { kind: 'weekly', label: 'Gemini weekly', usedPercent: 1 },
+      { kind: 'session', label: 'Claude/GPT 5-hour', usedPercent: unavailable ? null : 0, showMeter: !unavailable },
+      { kind: 'weekly', label: 'Claude/GPT weekly', usedPercent: 100 }
+    ]
+  });
+  const before = structuredClone(record);
+  const card = dockView({ showLimitUsed }).renderProviderWindows(record, '#4285F4');
+  const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
+  assert.deepEqual(
+    groups.map((group) => [
+      group.find('limit-window-group-title')?.textContent,
+      [...group.walk()].filter((node) => node.classNames.has('limit-window')).map(rowTitle)
+    ]),
+    [
+      ['Gemini', ['5-hour', 'Weekly']],
+      ['Claude/GPT', ['5-hour', 'Weekly']],
+      ['Gemini 4 Argon', ['Weekly']]
+    ]
+  );
+  const items = dockView().limitProviderUsageItems([record]);
+  assert.deepEqual(items.map((item) => item.label), [
+    'Gemini · 5-hour',
+    'Gemini · Weekly',
+    'Claude/GPT · 5-hour',
+    'Claude/GPT · Weekly',
+    'Gemini 4 Argon · Weekly'
+  ]);
+  assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-meter')).length, unavailable ? 4 : 5);
+  const expectedRemaining = [98, 99, unavailable ? null : 100, 0, 37];
+  const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  rows.forEach((row, index) => {
+    const remaining = expectedRemaining[index];
+    const fill = row.find('limit-meter-fill');
+    if (remaining === null) {
+      assert.equal(fill, null);
+      assert.doesNotMatch(row.text, /%/);
+    } else {
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(fill.style['--bar-scale']), percent / 100);
+    }
+  });
+  assert.deepEqual(record, before, 'display ordering does not mutate the normalized quota record');
+});
+
+test('Antigravity OAuth legacy fallback keeps unknown, exhausted and numeric quotas distinct in both display modes', async () => {
+  const resetTime = '2030-06-03T04:00:00Z';
+  const providers = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'legacy', accountEmail: 'legacy@example.com',
+      credentials: { accessToken: 'fixture-token', expiresAt: Date.now() + 3600_000,
+        clientId: 'client', clientSecret: 'secret', projectId: 'fixture-project' }
+    }]
+  }, {
+    antigravityProbe: async () => { throw new Error('local RPC unavailable'); },
+    fetch: async (url) => {
+      let payload;
+      if (url.endsWith(':loadCodeAssist')) payload = {};
+      else if (url.endsWith(':retrieveUserQuotaSummary')) payload = { groups: [] };
+      else if (url.endsWith(':fetchAvailableModels')) payload = { models: {
+        'gemini-4-argon-high': { displayName: 'Gemini 4 Argon', quotaInfo: { remainingFraction: null, resetTime } },
+        'gemini-flash': { displayName: 'Gemini Flash', quotaInfo: { remainingFraction: 0.8, resetTime } },
+        'claude-sonnet': { displayName: 'Claude', quotaInfo: { remainingFraction: 0, resetTime } }
+      } };
+      else throw new Error(`Unexpected URL ${url}`);
+      return { ok: true, status: 200, json: async () => payload };
+    }
+  });
+  assert.equal(providers.length, 1);
+  const provider = providers[0];
+  assert.equal(provider.source, 'oauth');
+  const unknown = provider.windows.find((window) => window.label === 'Gemini 4 Argon');
+  assert.equal(unknown.remainingPercent, null);
+  assert.equal(unknown.usedPercent, null);
+  assert.equal(unknown.showMeter, false);
+  assert.equal(unknown.resetsAt, new Date(resetTime).toISOString());
+  const before = structuredClone(provider);
+
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+    const argon = rows.find((row) => row.text.includes('Gemini 4 Argon'));
+    assert.equal(argon, undefined, 'unknown legacy pools do not render their name or reset');
+    assert.equal(rows.length, 2);
+    for (const [label, remaining] of [['Gemini Flash', 80], ['Claude', 0]]) {
+      const row = rows.find((entry) => entry.text.includes(label));
+      const percent = showLimitUsed ? 100 - remaining : remaining;
+      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+      assert.equal(Number(row.find('limit-meter-fill').style['--bar-scale']), percent / 100);
+    }
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]).map((item) => item.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows).map((window) => window.label), ['Gemini Flash', 'Claude']);
+  assert.deepEqual(provider, before, 'hidden legacy pools retain their source data');
+});
+
+test('Antigravity hides an all-unknown legacy pool without adding a placeholder quota', () => {
+  const provider = normalizeLimitProvider({ provider: 'antigravity', windows: [
+    { kind: 'weekly', label: 'Gemini 4 Argon', usedPercent: null, resetsAt: '2030-06-03T04:00:00Z' }
+  ] });
+  const before = structuredClone(provider);
+  for (const showLimitUsed of [false, true]) {
+    const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#4285F4');
+    assert.equal(card.children.length, 0);
+    assert.equal(card.text, '');
+  }
+  assert.deepEqual(dockView().limitProviderUsageItems([provider]), []);
+  assert.deepEqual(limitPresentationApi.limitProviderCompactWindows('antigravity', provider.windows), []);
+  assert.deepEqual(provider, before);
+});
+
 test('a MiMo plan drawn from the balance is the same item as the plan window', () => {
   const planKey = usageItems.limitWindowKey({ kind: 'billing', label: 'Token Plan' });
   const record = {
@@ -1693,4 +2411,348 @@ test('with every item unchecked, Home and the picker keep no window the card dre
     }
   }
   assert.deepEqual(problems, []);
+});
+
+
+test('WorkBuddy sealed credentials show their cause instead of signed-out instructions on shared rows', () => {
+  const view = dockView();
+  const provider = { provider: 'workbuddy', status: 'notConfigured', accountKey: 'encrypted-account', actionRequired: 'appSessionEncrypted', windows: [] };
+  const row = view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', provider, '#10A37F');
+  assert.equal(row.find('limit-plan').textContent, 'Encrypted by app');
+  assert.equal(view.limitProviderMeta(provider), 'Encrypted by app');
+  assert.equal(view.renderLimitProviderSolo('workbuddy', 'WorkBuddy', { ...provider, actionRequired: undefined }, '#10A37F').find('limit-plan').textContent, 'Not signed in');
+});
+
+
+test('WorkBuddy groups count accounts and retain failures without repeating the provider mark', () => {
+  const view = dockView();
+  const accounts = [
+    { provider: 'workbuddy', status: 'ok', accountKey: 'a', accountName: 'Personal', region: 'cn', windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', remaining: 80, limit: 100 }] },
+    { provider: 'workbuddy', status: 'unavailable', accountKey: 'b', accountName: 'Work', region: 'cn', windows: [] }
+  ];
+  const group = view.renderLimitProviderGroup('workbuddy', 'WorkBuddy', accounts, '#10B981');
+  assert.equal(group.find('limit-plan').textContent, '2 accounts');
+  assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-icon')).length, 1);
+  const rows = group.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), ['Personal', 'Work']);
+  assert.equal(rows[1].find('limit-plan').textContent, 'Unavailable');
+});
+
+
+
+
+
+
+
+
+
+test('EdgeDock render hold preserves account gestures and open tooltips', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const start = source.indexOf('function deferBubbleRender(');
+  const end = source.indexOf('bridge.onRender(render);', start);
+  let accountHeld = false, tooltipHeld = false;
+  const context = {
+    contentLayer: {}, codexAccountControl: { deferRender: () => accountHeld },
+    limitTooltipShouldHoldRender: () => tooltipHeld, limitTooltip: { pending: false }
+  };
+  vm.runInNewContext(source.slice(start, end), context);
+  assert.equal(context.deferBubbleRender(), false);
+  accountHeld = true;
+  assert.equal(context.deferBubbleRender(), true, 'an in-progress account gesture keeps its DOM');
+  accountHeld = false; tooltipHeld = true;
+  assert.equal(context.deferBubbleRender(), true, 'an open tooltip holds the update');
+  assert.equal(context.limitTooltip.pending, true);
+  tooltipHeld = false;
+  assert.equal(context.deferBubbleRender(), false, 'closing the tooltip releases the update');
+});
+
+
+
+
+
+
+
+
+
+
+
+test('Notch ears preserve configured tray items and embedded fields across all styles', () => {
+  const trayLayout = require('../../src/shared/trayLayout');
+  const typography = require('../../src/electron/renderer/trayTypography');
+  const { buildNotchData } = require('../../src/electron/notch/data');
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => {
+    const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node;
+  };
+  const context = {
+    el, trayTypographyApi: typography, trayBarsApi: require('../../src/electron/renderer/trayBars'), notchNumbers: new Map(), cancelAnimationFrame() {},
+    providerLabel: id => id, positionNotchSummary() {},
+    notchIcon: item => el('span', 'edge-dock-mark', item.provider),
+    notchText: (_item, row) => el('span', 'notch-text-run', row.text)
+  };
+  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function zoomForNotchText(')), context);
+  const stats = {
+    limits: { providers: [{ provider: 'codex', status: 'ok', accountKey: 'test', accountEmail: 'test@example.test', windows: [
+      { kind: 'session', remainingPercent: 64, resetsAt: new Date(Date.now() + 3600000).toISOString() },
+      { kind: 'weekly', remainingPercent: 74 }
+    ] }] }, periods: { today: { totalTokens: 9500, costUsd: 0 } }
+  };
+  for (const style of trayLayout.STYLE_IDS) {
+    const item = trayLayout.createTrayLayoutItem(style);
+    const icon = trayLayout.createTrayLayoutItem('providerIcon'); icon.source.provider = 'codex';
+    const cost = trayLayout.createTrayLayoutItem('cost');
+    const separator = trayLayout.createTrayLayoutItem('separatorDot');
+    const readings = !['icon', 'spacer'].includes(item.type);
+    if (readings) {
+      const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom',
+        notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item] } }).summary;
+      const single = context.notchSummary({ summary, geometry: { gapWidth: 179 }, appearance: {} });
+      assert.equal(single.find('notch-left').querySelectorAll('.notch-reading').length, 0, `${style} remains one field even with multiple rows`);
+      assert.equal(single.find('notch-right').querySelectorAll('.notch-reading').length, 1);
+    }
+    for (const gapWidth of [179, 0]) {
+      const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom',
+        notchCustomLayout: { version: trayLayout.VERSION, items: [icon, item, separator, cost] }
+      }).summary;
+      const head = context.notchSummary({ summary, geometry: { gapWidth }, appearance: {} });
+      const left = head.find('notch-left').children[0], right = head.find('notch-right').children[0];
+      if (gapWidth && readings) {
+        assert.equal(left.children.length, 2, style);
+        assert.equal(right.children.length, 1, style);
+        assert.equal(right.dataset.notchOptional, 'true');
+        assert.equal(left.children[0].textContent, 'codex');
+        assert.equal(left.children[1].dataset.notchPrimary, 'true');
+        assert.equal(right.children[0].dataset.notchSpacer, 'false', 'no separator starts the right ear');
+        if (item.type === 'stack' || item.type === 'bars') {
+          const block = left.find(item.type === 'stack' ? 'notch-stack' : 'notch-bars');
+          assert.equal(block.children.length, item.rows?.length || item.lines.length, `${style} rows stay together`);
+          if (item.type === 'bars') {
+            assert.equal(block.style.gap, '3px');
+            for (const track of block.children) {
+              assert.equal(track.style.width, '18px', 'bars retain the compact tray width');
+              assert.equal(track.style.height, '5px');
+            }
+          }
+          if (summary.items[1].iconProvider) {
+            const field = left.find('notch-summary-field');
+            assert.equal(field.children.length, 2, 'only the embedded mark stays with its field');
+            assert.equal(field.style.gap, item.type === 'bars' ? '3px' : '2px');
+          }
+        }
+        assert.match(right.text, /0/, 'zero cost remains a displayed field');
+      } else {
+        assert.equal(left.querySelectorAll('.notch-reading').filter(node => node.dataset.notchSpacer !== 'true').length, 0, `${style} keeps readings together on the right`);
+      }
+    }
+  }
+});
+
+test('ear fitting keeps graphics whole within the hard budget', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => {
+    const node = new FakeElement(tag); node.className = classes; node.textContent = text;
+    node.getBoundingClientRect = () => ({ width: node.width ?? node.children.filter(child => !child.hidden)
+      .reduce((total, child, index) => total + child.getBoundingClientRect().width + (index ? 6 : 0), 0) });
+    return node;
+  };
+  const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom: 1, gap: '6px' }) };
+  vm.runInNewContext(source.slice(source.indexOf('function zoomForNotchText('), source.indexOf('function reportNotchSlots(')), context);
+  const content = el('div', 'notch-slot-content');
+  const field = el('span', 'notch-summary-field');
+  const mark = el('span', 'edge-dock-mark'); mark.width = 17;
+  const reading = el('span', 'notch-reading'); reading.width = 40;
+  field.append(mark, reading); content.append(field);
+  const primary = context.fitNotchSlot(content, 20);
+  assert.equal(primary.minimum, 63, 'the icon and primary number are both reserved');
+  assert.equal(field.hidden, true, 'an indivisible group cannot exceed the budget');
+  const optional = el('div', 'notch-slot-content'); optional.dataset.notchOptional = 'true';
+  optional.append(field);
+  const overflow = el('span', 'notch-reading notch-overflow', '⋯'); overflow.width = 8;
+  optional.append(overflow);
+  const result = context.fitNotchSlot(optional, 20);
+  assert.equal(result.minimum, 0);
+  assert.equal(field.hidden, true, 'the whole group disappears, not just its reading');
+  assert.equal(mark.hidden, undefined);
+  assert.equal(overflow.hidden, false);
+});
+
+
+test('custom summary order never infers standalone icon ownership or removes same-ear separators', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => { const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node; };
+  const context = { el, trayTypographyApi: require('../../src/electron/renderer/trayTypography'), notchNumbers: new Map(),
+    cancelAnimationFrame() {}, providerLabel: id => id, positionNotchSummary() {},
+    notchIcon: item => el('span', 'edge-dock-mark', item.provider), notchText: (_item, row) => el('span', 'notch-text-run', row.text) };
+  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function zoomForNotchText(')), context);
+  const icon = provider => ({ type: 'icon', provider });
+  const text = value => ({ type: 'text', text: value });
+  const dot = { type: 'spacer', variant: 'dot' };
+  const cases = [
+    { items: [icon('codex'), icon('claude'), text('89%'), text('62%')], left: ['codex', 'claude', '89%'], right: ['62%'] },
+    { items: [icon('codex'), text('89%'), icon('claude'), text('62%')], left: ['codex', '89%'], right: ['claude', '62%'] },
+    { items: [text('51M'), dot, text('$1'), dot, text('62%')], left: ['51M'], right: ['$1', '·', '62%'] },
+    { items: [text('89%'), icon('claude'), text('62%'), icon('codex')], left: ['89%'], right: ['claude', '62%', 'codex'] }
+  ];
+  for (const row of cases) for (const gapWidth of [179, 0]) {
+    const head = context.notchSummary({ summary: { items: row.items }, geometry: { gapWidth }, appearance: {} });
+    const left = head.find('notch-left').children[0], right = head.find('notch-right').children[0];
+    const texts = node => [...node.walk()].map(n => n.textContent).filter(Boolean);
+    const actual = [...texts(left), ...texts(right)];
+    const expected = gapWidth ? [...row.left, ...row.right] : row.items.map(item => item.provider || item.text || '·');
+    assert.deepEqual(actual, expected);
+    assert.equal(left.find('notch-summary-field'), null, 'standalone icons do not become part of another field');
+    if (gapWidth) { assert.deepEqual(texts(left), row.left); assert.deepEqual(texts(right), row.right); }
+  }
+});
+
+test('primary reading survives extra standalone icons without inflating the minimum budget', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => {
+    const node = new FakeElement(tag); node.className = classes; node.textContent = text;
+    node.getBoundingClientRect = () => ({ width: node.width ?? node.children.filter(child => !child.hidden).reduce((sum, child, i) => sum + child.getBoundingClientRect().width + (i ? 6 : 0), 0) });
+    return node;
+  };
+  const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom: 1, gap: '6px' }) };
+  vm.runInNewContext(source.slice(source.indexOf('function zoomForNotchText('), source.indexOf('function reportNotchSlots(')), context);
+  const content = el('div', 'notch-slot-content');
+  const icons = Array.from({ length: 10 }, () => { const node = el('span', 'edge-dock-mark'); node.width = 17; return node; });
+  const reading = el('span', 'notch-reading'); reading.width = 40; reading.dataset.notchPrimary = 'true';
+  content.append(...icons, reading);
+  const overflow = el('span', 'notch-reading notch-overflow', '⋯'); overflow.width = 8; content.append(overflow);
+  const result = context.fitNotchSlot(content, 80);
+  assert.equal(result.minimum, 40, 'only the primary reading sets the minimum');
+  assert.equal(reading.hidden, false);
+  assert.equal(icons.filter(node => !node.hidden).length, 1);
+  assert.equal(overflow.hidden, false);
+  assert.ok(result.width <= 80);
+  context.fitNotchSlot(content, 40);
+  assert.ok(icons.every(node => node.hidden));
+  assert.equal(reading.hidden, false);
+  assert.equal(overflow.hidden, true);
+});
+
+
+test('switching camera clearance rebuilds the same summary without losing configured separators', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const el = (tag, classes, text = '') => { const node = new FakeElement(tag); node.className = classes; node.textContent = text; return node; };
+  const layer = el('div', 'content');
+  layer.prepend = node => { node.parent = layer; layer.children.unshift(node); };
+  const context = { el, contentLayer: layer, root: el('div', 'root'), state: { appearanceKey: 'unchanged' }, pluginHost: null,
+    notchHeaderKey: '', notchClock: 0, notchNumbers: new Map(), trayTypographyApi: require('../../src/electron/renderer/trayTypography'),
+    refreshVisit: 0, refreshFeedbackTimer: null, refreshBusy: false, refreshResult: '',
+    clearTimeout() {}, cancelAnimationFrame() {}, settleNotchNumbers() {}, panel: { suspend() {} }, settleNotchStatNumbers() {}, resetRefreshVisit() {}, paintRefreshButton() {}, captureRingResetMotion() {}, animateRingResets() {},
+    notchSummaryObserver: { disconnect() {}, observe() {} }, providerLabel: id => id, positionNotchSummary() {},
+    notchIcon: item => el('span', 'edge-dock-mark', item.provider), notchText: (_item, row) => el('span', 'notch-text-run', row.text) };
+  const summarySource = source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function zoomForNotchText('));
+  const renderSource = source.slice(source.indexOf('function renderNotch('), source.indexOf('  const summary = contentLayer.querySelector', source.indexOf('function renderNotch(')));
+  vm.runInNewContext(`${summarySource}\n${renderSource}\n}`, context);
+  const payload = { summary: { items: [{ type: 'icon', provider: 'codex' }, { type: 'text', text: '51M' },
+    { type: 'spacer', variant: 'dot' }, { type: 'text', text: '$1' }] }, appearance: {}, geometry: { notched: true, gapWidth: 179 } };
+  context.renderNotch(payload);
+  const attached = layer.find('notch-summary');
+  assert.equal(attached.find('notch-left').text, 'codex 51M');
+  assert.equal(attached.find('notch-right').text, '$1');
+  context.renderNotch({ ...payload, geometry: { notched: false, gapWidth: 0 } });
+  const pill = layer.find('notch-summary');
+  assert.notEqual(pill, attached);
+  assert.equal(pill.find('notch-left').text, 'codex');
+  assert.equal(pill.find('notch-right').text, '51M · $1');
+  context.renderNotch({ ...payload, geometry: { notched: true, gapWidth: 0 } });
+  assert.equal(layer.find('notch-summary'), pill, 'camera-free outlines share the compact grouping');
+  context.renderNotch(payload);
+  assert.notEqual(layer.find('notch-summary'), pill);
+  assert.equal(layer.find('notch-right').text, '$1');
+});
+
+
+test('summary text ellipsis preserves the full value and restores within a larger budget', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  for (const zoom of [1, 1.25]) {
+    const el = (tag, classes, text = '') => {
+      const node = new FakeElement(tag); node.className = classes; node.textContent = text;
+      node.getBoundingClientRect = () => {
+        const width = node.width ?? (node.classList.contains('notch-overflow') ? (node.textContent === '…' && /12px/.test(node.style.font || '') ? 12 : 8) : node.children.filter(child => !child.hidden)
+          .reduce((total, child, index) => total + child.getBoundingClientRect().width + (index ? 6 : 0), 0));
+        const maximum = parseFloat(node.style.maxWidth);
+        return { width: Number.isFinite(maximum) ? Math.min(width, maximum * zoom) : width };
+      };
+      return node;
+    };
+    const context = { el, fitNotchTypeface() {}, getComputedStyle: () => ({ zoom, gap: '6px', font: '', fontStyle: 'normal', fontWeight: '500', fontSize: '12px', fontFamily: 'sans-serif' }) };
+    vm.runInNewContext(source.slice(source.indexOf('function zoomForNotchText('), source.indexOf('function reportNotchSlots(')), context);
+    const content = el('div', 'notch-slot-content');
+    const reading = el('span', 'notch-reading');
+    const run = el('span', 'notch-text-run', 'HK$7557194.97'); run.width = 100;
+    run.dataset.horizontalScale = '1'; run.closest = () => content;
+    reading.append(run); content.append(reading);
+    const fitted = context.fitNotchSlot(content, 40);
+    assert.equal(fitted.width, 40);
+    assert.equal(run.style.maxWidth, `${40 / zoom}px`);
+    assert.equal(run.textContent, 'HK$7557194.97');
+    assert.equal(content.querySelector('.notch-overflow').hidden, true, 'native text ellipsis needs no second marker');
+    context.fitNotchSlot(content, 8);
+    assert.equal(reading.hidden, true, 'too little space for the text ellipsis cannot leave a partial glyph');
+    assert.equal(content.querySelector('.notch-overflow').hidden, false);
+    context.fitNotchSlot(content, 0);
+    assert.equal(reading.hidden, true);
+    const restored = context.fitNotchSlot(content, 200);
+    assert.equal(restored.width, 100);
+    assert.equal(run.style.maxWidth, 'none');
+    assert.equal(reading.hidden, false);
+    assert.equal(run.textContent, 'HK$7557194.97');
+  }
+});
+
+test('summary overflow marks omitted content, not removed spacing', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const context = {};
+  vm.runInNewContext(source.slice(source.indexOf('function fitNotchSummaryItems('), source.indexOf('function fitNotchSlot(')), context);
+  const reading = { width: 35, minimum: 35, spacer: false };
+  const spacer = { width: 4, minimum: 4, spacer: true };
+  const cases = [
+    { name: 'trailing decoration', items: [reading, spacer], budget: Infinity, visible: [0], overflow: false },
+    { name: 'spacing only', items: [spacer, spacer], budget: Infinity, visible: [], overflow: false },
+    { name: 'decoration exceeds clearance', items: [reading, spacer], budget: 40, visible: [0], overflow: false },
+    { name: 'optional trailing decoration', items: [reading, spacer], budget: 80, optional: true, visible: [0], overflow: false },
+    { name: 'optional spacing only', items: [spacer], budget: 80, optional: true, visible: [], overflow: false },
+    { name: 'internal separator remains', items: [reading, spacer, reading], budget: 100, visible: [0, 1, 2], overflow: false },
+    { name: 'omitted reading', items: [reading, spacer, reading], budget: 60, visible: [0], overflow: true },
+    { name: 'omitted icon beside primary', items: [{ width: 17, minimum: 17, spacer: false }, reading], budget: 50, primary: 1, visible: [1], overflow: true }
+  ];
+  for (const row of cases) {
+    const fitted = context.fitNotchSummaryItems(row.items, { budget: row.budget, gap: 6, overflowWidth: 8, primary: row.primary ?? -1, optional: row.optional === true });
+    assert.deepEqual(Array.from(fitted.visible), row.visible, row.name);
+    assert.equal(fitted.overflow, row.overflow, row.name);
+  }
+});
+
+test('summary allocation and width fitting need only ordered items and measured widths', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/notch/renderer.js'), 'utf8');
+  const context = {};
+  vm.runInNewContext(source.slice(source.indexOf('function allocateNotchSummary('), source.indexOf('function notchSummary(')), context);
+  vm.runInNewContext(source.slice(source.indexOf('function fitNotchSummaryItems('), source.indexOf('function fitNotchSlot(')), context);
+  const types = ['icon', 'text', 'spacer', 'icon', 'stack', 'spacer', 'text'];
+  const items = Object.freeze(types.map(type => Object.freeze({ type })));
+  const plan = context.allocateNotchSummary(items, true);
+  assert.deepEqual(Array.from(plan.left), [0, 1]);
+  assert.deepEqual(Array.from(plan.right), [3, 4, 5, 6], 'only the camera split loses its separator');
+  assert.equal(plan.primary, 1);
+  const compact = context.allocateNotchSummary(items, false);
+  assert.deepEqual([...compact.left, ...compact.right], items.map((_item, index) => index));
+  assert.equal(compact.primary, null);
+  const widths = Object.freeze([
+    Object.freeze({ width: 17, minimum: 17, spacer: false }),
+    Object.freeze({ width: 40, minimum: 40, spacer: false })
+  ]);
+  const fitted = context.fitNotchSummaryItems(widths, { budget: 40, gap: 6, overflowWidth: 8, primary: 1 });
+  assert.deepEqual(Array.from(fitted.visible), [1], 'the reading survives when its independent icon does not fit');
+  assert.equal(fitted.minimum, 40);
+  assert.equal(fitted.overflow, false);
+  const embedded = context.fitNotchSummaryItems([{ width: 63, minimum: 63, spacer: false }],
+    { budget: 40, gap: 6, overflowWidth: 8, primary: 0 });
+  assert.deepEqual(Array.from(embedded.visible), [], 'an indivisible item cannot exceed the budget');
+  assert.equal(embedded.minimum, 63);
+  const hidden = context.fitNotchSummaryItems(widths, { budget: 0, gap: 6, overflowWidth: 8, optional: true });
+  assert.deepEqual(Array.from(hidden.visible), []);
+  assert.equal(hidden.overflow, false, 'unknown or occupied clearance admits no optional overflow');
 });

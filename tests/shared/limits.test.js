@@ -14,6 +14,8 @@ const {
 const { collectLimitsOnce } = require('../../src/shared/limits/collector');
 const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 const { hashKey } = require('../../src/shared/hashKey');
+const { aggregateDevices: aggregateNodeDevices } = require('../../src/shared/usage');
+const { aggregateDevices: aggregateWorkerDevices } = require('../../worker/src/shared/usage');
 
 function codexProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
   return {
@@ -1216,6 +1218,43 @@ test('aggregateLimits keeps anonymous Antigravity RPC fallback identities device
   );
 });
 
+test('aggregateLimits keeps Muse rows device-scoped because the CLI exposes no account identity', () => {
+  const museProvider = (remainingPercent, updatedAt) => ({
+    provider: 'muse',
+    accountKey: '',
+    status: 'ok',
+    source: 'cli',
+    updatedAt,
+    windows: [{
+      kind: 'session',
+      label: 'Session',
+      usedPercent: 100 - remainingPercent,
+      remainingPercent
+    }]
+  });
+  const aggregate = aggregateLimits([
+    {
+      deviceId: 'device-a',
+      limits: { providers: [museProvider(40, '2026-08-31T10:00:00.000Z')] }
+    },
+    {
+      deviceId: 'device-b',
+      limits: { providers: [museProvider(70, '2026-08-31T10:02:00.000Z')] }
+    }
+  ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
+
+  const museRows = aggregate.providers.filter((provider) => provider.provider === 'muse');
+  assert.equal(museRows.length, 2);
+  assert.deepEqual(
+    new Set(museRows.map((provider) => provider.sourceDeviceId)),
+    new Set(['device-a', 'device-b'])
+  );
+  assert.deepEqual(
+    new Set(museRows.map((provider) => provider.windows[0].remainingPercent)),
+    new Set([40, 70])
+  );
+});
+
 test('aggregateLimits does not merge anonymous Antigravity RPC with managed OAuth', () => {
   const sharedFallbackKey = 'sha256:antigravity-shared-fallback';
   const aggregate = aggregateLimits([
@@ -1368,6 +1407,68 @@ test('aggregateLimits keeps two Alibaba accounts apart and merges one across dev
     ['Team A']
   );
 });
+
+// Exercise both Hub entry points so a stale Worker mirror cannot hide behind
+// passing canonical-core tests. Multiple rows in an envelope are a wire fixture,
+// not a claim that the Cline collector discovers a local pool of keys.
+for (const [runtime, aggregate] of [
+  ['Node Hub', aggregateNodeDevices],
+  ['Worker', aggregateWorkerDevices]
+]) {
+  test(`${runtime} keeps Cline credential identities apart and merges matching identities`, () => {
+    const now = '2026-06-24T10:00:00.000Z';
+    const nowMs = Date.parse('2026-06-24T10:02:00.000Z');
+    const clineRow = (accountKey, accountEmail, source = 'api') => ({
+      provider: 'cline',
+      accountKey,
+      accountLabel: '',
+      accountEmail,
+      status: 'ok',
+      source,
+      updatedAt: now,
+      windows: [{ kind: 'weekly', used: 1, limit: 10 }]
+    });
+    const device = (deviceId, ...providers) => ({ deviceId, updatedAt: now, limits: { updatedAt: now, providers } });
+    const rows = (devices) => aggregate(devices, 0, nowMs).limits.providers
+      .filter((provider) => provider.provider === 'cline')
+      .map(({ accountKey, accountEmail, source }) => ({ accountKey, accountEmail, source }))
+      .sort((a, b) => a.accountKey.localeCompare(b.accountKey));
+    const keyA = hashKey('cline', 'key-a');
+    const keyB = hashKey('cline', 'key-b');
+    const signInKey = hashKey('cline', 'usr-account-a');
+
+    assert.deepEqual(
+      rows([device('sg', clineRow(keyA, 'a@example.com'), clineRow(keyB, 'b@example.com'))]),
+      [
+        { accountKey: keyA, accountEmail: 'a@example.com', source: 'api' },
+        { accountKey: keyB, accountEmail: 'b@example.com', source: 'api' }
+      ].sort((a, b) => a.accountKey.localeCompare(b.accountKey))
+    );
+
+    // Each identity is portable within its own lane.
+    for (const [accountKey, source] of [[keyA, 'api'], [signInKey, 'oauth']]) {
+      assert.deepEqual(
+        rows([
+          device('mac', clineRow(accountKey, 'a@example.com', source)),
+          device('sg', clineRow(accountKey, 'a@example.com', source))
+        ]),
+        [{ accountKey, accountEmail: 'a@example.com', source }]
+      );
+    }
+
+    // Display email cannot join an API-key identity to a sign-in identity.
+    assert.deepEqual(
+      rows([
+        device('mac', clineRow(keyA, 'a@example.com')),
+        device('sg', clineRow(signInKey, 'a@example.com', 'oauth'))
+      ]),
+      [
+        { accountKey: keyA, accountEmail: 'a@example.com', source: 'api' },
+        { accountKey: signInKey, accountEmail: 'a@example.com', source: 'oauth' }
+      ].sort((a, b) => a.accountKey.localeCompare(b.accountKey))
+    );
+  });
+}
 
 // Regression guard for the renderer's localProviderStatus(): a sync-mode account
 // card (DeepSeek/Minimax/Grok) must read the local device's RAW limits from

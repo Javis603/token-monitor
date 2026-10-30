@@ -69,6 +69,7 @@ test('fetchCursorLimits uses Requests for a legacy request-based plan', async ()
     probe: async () => ({
       ok: true,
       usage: {
+        planInfo: { isMerged: false },
         planPercent: 42,
         autoPercent: 20,
         apiPercent: 64,
@@ -143,7 +144,7 @@ test('fetchCursorLimits prefers account identity over the plan for the account l
     readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
     probe: async () => ({
       ok: true,
-      usage: { planPercent: 10, membershipType: 'pro_student' },
+      usage: { planPercent: 10, membershipType: 'pro_student', planInfo: { isMerged: false } },
       user: { email: 'a@b.com', name: 'Alice', sub: 'u1' }
     })
   });
@@ -280,4 +281,144 @@ test('fetchCursorLimits includes team pool when Cursor reports pooled usage', as
   assert.equal(pool.used, 127251.35);
   assert.equal(pool.limit, 281220);
   assert.equal(pool.remaining, 153968.65);
+});
+
+function unifiedProbe(usage) {
+  return async () => ({
+    ok: true,
+    usage: {
+      planPercent: 37,
+      autoPercent: 12,
+      apiPercent: 50,
+      onDemandUsedUsd: 0,
+      billingCycleEnd: '2026-11-01T00:00:00Z',
+      membershipType: 'premium',
+      grokBot: { usedPercent: 37, resetsAt: '2026-10-20T00:00:00Z', windowMinutes: 10080, hasNonZeroIncludedLimit: true, isUnified: true },
+      planInfo: {
+        isMerged: true,
+        planName: 'Premium',
+        includedUsagePeriod: 'weekly',
+        includedUsageResetsAt: '2026-10-19T00:00:00.000Z',
+        billingCycleEnd: '2026-11-01T00:00:00.000Z'
+      },
+      prepaid: { availableUsd: 14.46 },
+      ...usage
+    },
+    user: { email: 'a@b.com', sub: 'u1' }
+  });
+}
+
+test('fetchCursorLimits shows one weekly included pool and the prepaid balance for unified plans', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe()
+  });
+  assert.deepEqual(result.windows.map((window) => window.label), ['Included usage', 'Prepaid balance']);
+  assert.equal(result.planLabel, 'Premium');
+  const [included, prepaid] = result.windows;
+  assert.equal(included.kind, 'weekly');
+  assert.equal(included.usedPercent, 37);
+  assert.equal(included.resetsAt, '2026-10-19T00:00:00.000Z');
+  assert.equal(included.windowMinutes, 10080);
+  assert.equal(prepaid.metric, 'credits');
+  assert.equal(prepaid.currency, 'USD');
+  assert.equal(prepaid.remaining, 14.46);
+  assert.equal(prepaid.showMeter, false);
+});
+
+test('fetchCursorLimits hides an empty or missing unified prepaid balance', async () => {
+  for (const prepaid of [{ availableUsd: 0 }, null]) {
+    const result = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+      probe: unifiedProbe({ prepaid })
+    });
+    assert.deepEqual(result.windows.map((window) => window.label), ['Included usage']);
+  }
+});
+
+test('fetchCursorLimits keeps a monthly unified pool on the billing cycle', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({ planInfo: { isMerged: true, includedUsagePeriod: 'monthly' }, membershipType: 'unified_ultra' })
+  });
+  assert.equal(result.planLabel, 'Ultra');
+  assert.equal(result.windows[0].kind, 'billing');
+  assert.equal(result.windows[0].resetsAt, '2026-11-01T00:00:00.000Z');
+  assert.equal(result.windows[0].windowMinutes, null);
+});
+
+test('fetchCursorLimits keeps unified pools weekly when the period is missing or unknown', async () => {
+  for (const period of [{}, { includedUsagePeriod: null }, { includedUsagePeriod: 'unknown' }]) {
+    const result = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+      probe: unifiedProbe({ planInfo: {
+        isMerged: true,
+        billingCycleEnd: '2026-11-01T00:00:00.000Z',
+        ...period
+      } })
+    });
+    const included = result.windows[0];
+    assert.equal(included.kind, 'weekly');
+    assert.equal(included.windowMinutes, 10080);
+    assert.equal(included.resetsAt, null, 'a billing reset cannot stand in for the unknown weekly reset');
+  }
+});
+
+test('fetchCursorLimits hides legacy on-demand data only for unified plans', async () => {
+  for (const onDemand of [
+    { onDemandUsedUsd: 2, onDemandLimitUsd: 50 },
+    { onDemandUsedUsd: 0, onDemandLimitUsd: 50 },
+    { onDemandUsedUsd: 2 },
+    { teamOnDemandUsedUsd: 2, teamOnDemandLimitUsd: 50 }
+  ]) {
+    for (const planInfo of [{ isMerged: true, includedUsagePeriod: 'weekly' }, null]) {
+      const result = await fetchCursorLimits({}, {
+        readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+        probe: unifiedProbe({ planInfo, ...onDemand })
+      });
+      assert.deepEqual(result.windows.map((window) => window.label), ['Included usage', 'Prepaid balance']);
+    }
+    const legacy = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+      probe: unifiedProbe({ planInfo: { isMerged: false }, ...onDemand })
+    });
+    assert.equal(legacy.windows.at(-1).label, 'On-demand spend');
+  }
+});
+
+test('fetchCursorLimits keeps the legacy layout when plan info says the plan is not unified', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({
+      membershipType: 'pro',
+      grokBot: { usedPercent: 10, resetsAt: '2026-10-20T00:00:00Z', windowMinutes: 10080, hasNonZeroIncludedLimit: true, isUnified: false },
+      planInfo: { isMerged: false, planName: 'Pro', includedUsagePeriod: 'monthly' },
+      prepaid: null
+    })
+  });
+  assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot']);
+});
+
+test('fetchCursorLimits keeps a sand-only unified pool weekly with an unknown reset', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({ planInfo: null, prepaid: null })
+  });
+  assert.deepEqual(result.windows.map((window) => window.label), ['Included usage']);
+  assert.equal(result.windows[0].kind, 'weekly');
+  assert.equal(result.windows[0].resetsAt, null);
+  assert.equal(result.windows[0].windowMinutes, 10080);
+});
+
+test('fetchCursorLimits lets plan info override the sand unified flag', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({
+      membershipType: 'pro',
+      planInfo: { isMerged: false, planName: 'Pro', includedUsagePeriod: null },
+      prepaid: null
+    })
+  });
+  assert.equal(result.windows.find((window) => window.label === 'Grok Bot')?.kind, 'weekly');
+  assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot']);
 });

@@ -302,7 +302,7 @@ test('Main Screen drag keeps expandable rows and their panels together', () => {
   const apply = functionBody(app, 'applyPreferenceOrder', 'createPreferenceOrderHandle');
   assert.match(apply, /home: 'homeSettingsContainer'/);
   assert.match(apply, /status: 'serviceProvidersContainer'/);
-  assert.match(apply, /limits: 'homeLimitProviderContainer'/);
+  assert.match(apply, /HOME_MODULE_SUBGROUPS\[id\]\?\.\[1\]/);
   assert.match(apply, /if \(companion\) list\.appendChild\(companion\)/);
 
   const expand = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');

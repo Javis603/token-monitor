@@ -8,9 +8,15 @@ const { createSubprocessTermination } = require('../../subprocessTermination');
 // can be identical on several computers. Never retain or log the command line.
 function executorIdsFromProcesses(text) {
   const ids = new Set();
+  // Desktop versions can put global config overrides before the subcommand.
+  // Admit only assignment-valued -c/--config options, not arbitrary argv which
+  // could contain an exec-server command as another subcommand's argument.
+  const assignment = String.raw`(?:[A-Za-z0-9_.-]+=(?:\\"|[^\s"']|"(?:[^"\\]|\\.)*"|'[^']*')+|"[A-Za-z0-9_.-]+=(?:[^"\\]|\\.)*"|'[A-Za-z0-9_.-]+=[^']*')`;
+  const executor = new RegExp(`^\\s*(?:"(?:[^"]*[\\\\/])?codex(?:\\.exe)?"|(?:[^\\s"]*[\\\\/])?codex(?:\\.exe)?)(?:\\s+(?:-c|--config)\\s+${assignment})*\\s+exec-server\\s`);
   for (const line of String(text || '').split(/\r?\n/)) {
-    if (!/^\s*(?:"(?:[^"]*[\\/])?codex(?:\.exe)?"|(?:[^\s"]*[\\/])?codex(?:\.exe)?)\s+exec-server\s/.test(line)) continue;
-    const id = line.match(/--environment-id\s+"?([A-Za-z0-9_-]+)(?:"|\s|$)/)?.[1];
+    const command = line.match(executor);
+    if (!command) continue;
+    const id = line.slice(command[0].length).match(/(?:^|\s)--environment-id\s+"?([A-Za-z0-9_-]+)(?:"|\s|$)/)?.[1];
     if (id) ids.add(id);
   }
   return ids;
@@ -42,7 +48,8 @@ function localExecutorIds(options = {}) {
     };
     const termination = createSubprocessTermination(child, { onUnconfirmed: () => finish() });
     const abort = () => { failed = true; termination.request(); };
-    const timer = setTimeout(abort, 2000);
+    // Windows PowerShell cold start was measured above five seconds.
+    const timer = setTimeout(abort, platform === 'win32' ? 15000 : 2000);
     options.signal?.addEventListener('abort', abort, { once: true });
     child.stdout.on('data', (bytes) => {
       if (failed || finished) return;
