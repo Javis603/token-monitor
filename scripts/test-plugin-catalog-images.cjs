@@ -25,7 +25,7 @@ electron.app.whenReady().then(async () => {
     fetchImpl: async url => {
       calls.push(url);
       if (url.endsWith('.png')) return new Response(png);
-      if (url.includes('api.github.com')) return new Response(JSON.stringify({ encoding: 'base64',
+      if (new URL(url).origin === 'https://api.github.com') return new Response(JSON.stringify({ encoding: 'base64',
         content: Buffer.from('# Preview\n\n![Page](page.png)\n\n![Notch](notch.png)\n\n![Dock](dock.png)').toString('base64'),
         download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', html_url: 'https://github.com/author/project/blob/main/README.md' }));
       return new Response(JSON.stringify({ format: 1, title: 'Fixture', plugins: [{ id: 'image-fixture', name: 'Preview', repository: 'https://github.com/author/project',
