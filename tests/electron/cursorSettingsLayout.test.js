@@ -977,16 +977,19 @@ test('Z.ai, Qoder, Trae and Ollama panels are generated from their declared form
   assert.deepEqual(forms.qoder.openUrl.urls, { global: 'https://qoder.com/account/usage', cn: 'https://qoder.com.cn/account/usage' });
   assert.doesNotMatch(JSON.stringify(forms.qoder), /settings\.qoder\.note/);
 
-  // Trae: the optional device ID comes after the token, then its note.
-  assert.deepEqual(forms.trae.manual.slice(1), [
-    { field: 'traeAccessToken' }, { field: 'traeDeviceId' }, { note: 'settings.trae.deviceIdNote' }
+  // Trae defaults to the browser Cookie lane; legacy token/device inputs stay available.
+  assert.deepEqual(forms.trae.credentialChoice.fields, ['traeCookie', 'traeAccessToken']);
+  assert.equal(forms.trae.fields[0].input, 'textarea');
+  assert.equal(forms.trae.fields[1].placeholder, 'Cloud-IDE-Token');
+  assert.equal(forms.trae.fields[2].required, false);
+  assert.deepEqual(forms.trae.manual[0].steps, ['settings.trae.step1', 'settings.trae.cookieStep2', 'settings.trae.cookieStep3', 'settings.trae.step4']);
+  assert.deepEqual(forms.trae.manual.slice(-3), [
+    { field: 'traeAccessToken', whenCredential: 'traeAccessToken' },
+    { field: 'traeDeviceId', whenCredential: 'traeAccessToken' },
+    { note: 'settings.trae.deviceIdNote', whenCredential: 'traeAccessToken' }
   ]);
-  assert.equal(forms.trae.fields[0].placeholder, 'Cloud-IDE-Token');
-  assert.equal(forms.trae.fields[1].required, false);
-  assert.deepEqual(forms.trae.manual[0].steps[2], ['settings.trae.step3Before', { code: 'Cloud-IDE-Token' }, 'settings.trae.step3After']);
   assert.equal(forms.trae.messages.required, 'settings.trae.missingAuthorization');
-  assert.doesNotMatch(JSON.stringify(forms.trae), /settings\.trae\.note/);
-  assert.match(readRendererFile('i18n.js'), /'settings\.trae\.deviceIdNote': '[^']*ide_user_ent_usage[^']*X-Device-Id/);
+
 
   // Ollama chooses one draft lane; API key is the fresh-install default.
   assert.deepEqual(forms.ollama.credentialChoice.fields, ['ollamaApiKey', 'ollamaCookie']);

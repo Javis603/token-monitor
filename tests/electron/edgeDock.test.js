@@ -116,12 +116,14 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   assert.equal(number.style.fontSize, undefined);
   assert.match(css, /\.edge-dock-total-row \{[^}]*white-space: nowrap/);
   const bubble = dock.slice(dock.indexOf('function renderBubble('));
-  assert.ok(bubble.indexOf('fitCardTotal(card);') < bubble.indexOf('const height = '));
+  const freshCard = bubble.slice(bubble.indexOf('const card = cell.kind'));
+  assert.ok(freshCard.indexOf('fitCardTotal(card);') >= 0);
+  assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('const height = '));
 });
 
 test('a card commits after its reported height is clamped to the work area', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const notchRenderer ='));
+  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
   for (const kind of ['provider', 'stat']) {
     for (const { measured, maxCardHeight, expected } of [
       // Chromium at 175% scaling can measure a max-height: 851px card this way.
@@ -135,6 +137,8 @@ test('a card commits after its reported height is clamped to the work area', () 
       const renderBubble = Function('deps', `
         const { root, stagingLayer, providerCard, statCard, fitCardTotal,
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
+        let observedPluginCard = null;
+        const bubbleSizeObserver = null, pluginContent = null;
         ${source}
         return renderBubble;
       `)({
@@ -161,6 +165,47 @@ test('a card commits after its reported height is clamped to the work area', () 
       assert.equal(reports.length, 1, 'a placed card must not keep reporting its size');
     }
   }
+});
+
+test('a no-cell payload unmounts committed and staged plugin cards and removes their header actions', async () => {
+  const { Element } = require('../helpers/notchPanel');
+  const { createHost } = require('../../src/electron/renderer/pluginUi');
+  const document = { createElement: tag => new Element(tag, document) };
+  document.body = document.createElement('body'); document.head = document.createElement('head');
+  const root = document.createElement('main'), contentLayer = document.createElement('div'), stagingLayer = document.createElement('div');
+  document.body.append(root); root.append(contentLayer, stagingLayer);
+  let disposals = 0;
+  const pluginHost = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(_body, context) {
+    context.headerActions.append(document.createElement('button'));
+    return { dispose() { disposals++; } };
+  } }) });
+  const cards = [];
+  for (const layer of [contentLayer, stagingLayer]) {
+    const card = document.createElement('section'), actions = document.createElement('div'), body = document.createElement('div');
+    card.className = 'edge-dock-card edge-dock-card-plugin'; body.className = 'edge-dock-plugin-card';
+    card.append(actions, body); layer.append(card); cards.push({ card, actions, body });
+    await pluginHost.mount(body, { pluginId: 'fixture', ref: 'fixture/view', revision: 'one', entry: 'fixture' }, { headerActions: actions });
+    assert.equal(actions.children[0].children.length, 1);
+  }
+  const retained = [], unobserved = [];
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
+  const { renderBubble, observed } = Function('deps', `
+    const { root, contentLayer, stagingLayer, pluginHost, pluginContent, bubbleSizeObserver } = deps;
+    let observedPluginCard = deps.card;
+    ${source}
+    return { renderBubble, observed: () => observedPluginCard };
+  `)({ root, contentLayer, stagingLayer, pluginHost, card: cards[1].card,
+    pluginContent: { retain: targets => retained.push(targets) },
+    bubbleSizeObserver: { unobserve: card => unobserved.push(card) } });
+  renderBubble({ side: 'right', cell: null });
+  assert.equal(contentLayer.children.length, 0); assert.equal(stagingLayer.children.length, 0);
+  assert.ok(cards.every(({ actions }) => actions.children.length === 0), 'header ownership must be released, not just detached');
+  assert.deepEqual(retained, [[]]); assert.deepEqual(unobserved, [cards[1].card]); assert.equal(observed(), null);
+  await new Promise(setImmediate); assert.equal(disposals, 2);
+  renderBubble({ side: 'right', cell: null }); await new Promise(setImmediate);
+  assert.equal(disposals, 2, 'repeated empty payloads do not dispose an old mount twice');
+  await pluginHost.dispose();
 });
 
 const {
@@ -1044,7 +1089,7 @@ test('provider detail reserves natural account height without exceeding half the
   const reserve = Function(`${source}; return reserveAccountHeight;`)();
   for (const [natural, cap, expected] of [[75.15, 570, '76px'], [1200, 570, '285px'], [75.15, 228, '76px']]) {
     const accounts = { style: { flexShrink: '' }, getBoundingClientRect: () => ({ height: accounts.style.flexShrink === '0' ? natural : 48 }) };
-    const card = { querySelector: selector => selector.endsWith('accounts') ? accounts : {} };
+    const card = { querySelector: selector => selector.endsWith('accounts') ? accounts : selector.endsWith('sessions') ? {} : null };
     reserve(card, cap);
     assert.equal(accounts.style.minHeight, expected);
     assert.equal(accounts.style.flexShrink, '', 'keep the original shared scrolling/flex rule');
@@ -2978,4 +3023,32 @@ test('expired idle leases restore transcript running and waiting before Home and
     const [provider] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'codex' }] });
     assert.deepEqual(provider.sessions.map(row => row.sessionId), ['old', 'new']);
   }
+});
+
+test('full plugin cards expose header actions beside identity while compact rail mounts stay minimal', () => {
+  const source = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const { Element } = require('../helpers/notchPanel');
+  const document = {};
+  const el = (tag, className, value) => {
+    const node = new Element(tag, document); node.className = className || '';
+    if (value !== undefined) node.textContent = value;
+    return node;
+  };
+  const mounts = [];
+  const pluginHost = {
+    state: () => ({ title: 'Routes', pluginName: 'Author' }),
+    mount(...args) { mounts.push(args); }
+  };
+  const cardSource = source.slice(source.indexOf('function pluginCard('), source.indexOf('const codexAccountControl =')).trim();
+  const card = Function('el', 'pluginHost', `return (${cardSource})`)(el, pluginHost)({ ref: 'demo/routes' });
+  const header = card.querySelector('.edge-dock-card-head');
+  const slot = mounts[0][3].headerActions;
+  assert.equal(slot.parentNode, header);
+  assert.equal(header.querySelector('.edge-dock-stat-caption').textContent, 'Routes');
+  assert.equal(header.querySelector('.edge-dock-plugin-owner').textContent, 'Author');
+  assert.equal(mounts[0][0], card.querySelector('.edge-dock-plugin-card'));
+  assert.equal(mounts[0][3].variant, 'full');
+  const railSource = source.slice(source.indexOf('function pluginCellNode('), source.indexOf('function pluginCard(')).trim();
+  Function('el', 'pluginHost', 'pluginCellLabel', `return (${railSource})`)(el, pluginHost, () => 'Routes')({ ref: 'demo/routes' });
+  assert.deepEqual(mounts[1][3], { variant: 'compact' });
 });

@@ -42,7 +42,11 @@
     'separatorDot'
   ]);
   const STYLE_SET = new Set(STYLE_IDS);
-  const ITEM_TYPES = new Set(['icon', 'bars', 'stack', 'text', 'spacer']);
+  const ITEM_TYPES = new Set(['icon', 'bars', 'stack', 'text', 'spacer', 'plugin']);
+  // A plugin view ref (`<pluginId>/<viewId>`); the plugin draws the item.
+  // Plugin items are placed from the plugin manager, so they are a type but
+  // not one of the composer's STYLE_IDS.
+  const PLUGIN_REF_RE = /^[a-z0-9][a-z0-9-]{1,39}\/[a-z][a-z0-9-]{0,31}$/;
   const ACCOUNT_MODES = new Set(['lowest', 'active', 'specific']);
   const VALUE_MODES = new Set(['remaining', 'used']);
   const TEXT_METRICS = new Set(['percent', 'percentReset', 'reset', 'tokens', 'cost', 'liveTokenRate', 'account', 'custom']);
@@ -246,6 +250,10 @@
 
   function createTrayLayoutItem(style, options = {}) {
     const id = nextItemId(options.idFactory);
+    if (style === 'plugin') {
+      const ref = clean(options.ref, 80).toLowerCase();
+      return { id, type: 'plugin', style: 'plugin', ref: PLUGIN_REF_RE.test(ref) ? ref : '' };
+    }
     const styleId = STYLE_SET.has(style) ? style : 'singleBar';
     if (styleId === 'appIcon') {
       return {
@@ -387,6 +395,11 @@
               : TEXT_METRICS.has(input.metric) ? input.metric : 'percent'
     );
     const id = clean(input.id, 80) || `item-${index + 1}`;
+    if (type === 'plugin') {
+      const ref = clean(input.ref, 80).toLowerCase();
+      // A removed plugin keeps its slot; the resolver reports it unavailable.
+      return PLUGIN_REF_RE.test(ref) ? { id, type, style: 'plugin', ref } : null;
+    }
     if (type === 'icon') {
       return {
         id,
@@ -1129,9 +1142,17 @@
           return { ...item, available: rows.some((row) => row.available), rows };
         }
         if (item.type === 'spacer') return { ...item, available: true };
+        if (item.type === 'plugin') {
+          const view = options.pluginViews?.[item.ref] || null;
+          return { ...item, available: view?.status === 'active', plugin: view };
+        }
         return resolveTextItem(item, stats, options, recentProvider);
       })
     };
+  }
+
+  function trayLayoutPluginRefs(layout) {
+    return normalizeTrayLayout(layout).items.filter((item) => item.type === 'plugin').map((item) => item.ref);
   }
 
   return {
@@ -1157,6 +1178,7 @@
     selectSource,
     sourceWindowOptions,
     trayLayoutNeedsClock,
+    trayLayoutPluginRefs,
     windowKey,
     windowOptions
   };

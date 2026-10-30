@@ -274,6 +274,16 @@ const HOME_MODULE_OPTIONS = [
   { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'trends', labelKey: 'home.activity', viewId: 'trends' }
 ];
+const pluginViewsApi = window.TokenMonitorPluginViews;
+const pluginPlacementsApi = window.TokenMonitorPluginPlacements;
+// Assigned in the Plugins block below; read lazily by Home, tray and settings.
+let pluginViewHost = null;
+let pluginContent = null;
+let pluginMainPages = null;
+function pluginPageOptions() { return window.TokenMonitorPluginMainPages?.entries(state.pluginCatalog) || []; }
+let pluginApi = null;
+let pluginSettingsPanel = null;
+let pluginUpdateCount = 0;
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;
 const VIEW_SWITCHER_HOVER_CLOSE_MS = 160;
 const VIEW_ICON_CLASSES = {
@@ -299,7 +309,7 @@ const TOKEN_MONITOR_ISSUES_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/issues/new/cho
 const TOKEN_MONITOR_WEBSITE_URL = 'https://javis-ai.com/token-monitor/';
 const TOKEN_MONITOR_WSL_SQLITE_GUIDE_URL = `${TOKEN_MONITOR_REPOSITORY_URL}/blob/main/docs/wsl-sqlite-setup.md`;
 const serviceStatusProviderPreferencesApi = window.TokenMonitorServiceStatusProviderPreferences;
-const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync'];
+const SETTINGS_SECTION_IDS = ['general', 'main', 'window', 'appearance', 'tools', 'limits', 'subscriptions', 'sync', 'plugins'];
 const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;
 const LIVE_TOKEN_RATE_CLEAR_MS = 3 * 60 * 1000;
@@ -310,7 +320,7 @@ let initialBreakdownPreferenceApplied = typeof initialViewState.breakdown === 's
 
 function normalizeInitialViewValue(value, allowed, fallback) {
   const raw = String(value || '').trim();
-  return allowed.has(raw) ? raw : fallback;
+  return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
@@ -535,6 +545,10 @@ Object.assign(els, {
   automaticAppUpdatesRow: document.getElementById('automaticAppUpdatesRow'),
   automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
   automaticAppUpdatesNote: document.getElementById('automaticAppUpdatesNote'),
+  proxyUrlInput: document.getElementById('proxyUrlInput'),
+  noProxyInput: document.getElementById('noProxyInput'),
+  networkProxySource: document.getElementById('networkProxySource'),
+  proxyUrlError: document.getElementById('proxyUrlError'),
   appUpdateLatest: document.getElementById('appUpdateLatest'),
   appUpdateCheckButton: document.getElementById('appUpdateCheckButton'),
   appUpdateViewReleaseButton: document.getElementById('appUpdateViewReleaseButton'),
@@ -567,6 +581,7 @@ Object.assign(els, {
   mainSettingsSummary: document.getElementById('mainSettingsSummary'),
   windowSettingsSummary: document.getElementById('windowSettingsSummary'),
   appearanceSettingsSummary: document.getElementById('appearanceSettingsSummary'),
+  pluginsSettingsSummary: document.getElementById('pluginsSettingsSummary'),
   backgroundImageStatus: document.getElementById('backgroundImageStatus'),
   chooseBackgroundImageButton: document.getElementById('chooseBackgroundImageButton'),
   clearBackgroundImageButton: document.getElementById('clearBackgroundImageButton'),
@@ -788,6 +803,7 @@ function setSettingsSectionExpanded(section, expanded) {
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
   if (id === 'sync' && next) void syncContentForm?.refresh();
+  if (id === 'plugins' && next) void pluginSettingsPanel?.refresh().then(renderSettingsSummaries);
 }
 
 // Expanding a section auto-collapses the previously open one. When that one
@@ -882,6 +898,12 @@ function viewsSummary() {
 
 function settingsSectionSummary(section) {
   if (!state.settings) return '';
+  if (section === 'plugins') {
+    const plugins = state.pluginCatalog?.plugins || [];
+    const summary = state.settings.pluginsEnabled === false ? t('settings.summary.off') : plugins.length
+      ? t('settings.summary.plugins', { active: plugins.filter((plugin) => plugin.status === 'active').length, total: plugins.length }) : '';
+    return [summary, pluginUpdateCount ? t('plugins.catalog.updatesAvailable', { count: pluginUpdateCount }) : ''].filter(Boolean).join(' · ');
+  }
   if (section === 'sync') {
     const modeKeys = { host: 'settings.sync.hostHub', client: 'settings.sync.connectHub', icloud: 'settings.sync.icloud' };
     const label = t(modeKeys[state.settings.hubMode] || 'settings.sync.localOnly');
@@ -1777,6 +1799,66 @@ function renderSettingsAppUpdateRow() {
   }
 }
 
+// Per-field edit state. `dirty` keeps a settings push from overwriting text
+// that has not been stored (an edit in progress or a refused value), and the
+// revision lets a save that finishes after a newer edit leave that edit alone.
+const networkProxyDrafts = {
+  proxyUrl: { revision: 0, dirty: false },
+  noProxy: { revision: 0, dirty: false }
+};
+// The last refused save, kept until that field is edited again so the next
+// settings push does not wipe the reason off screen.
+let networkProxyError = null;
+const PROXY_SETTING_ERROR_CODES = ['proxy_invalid_url', 'proxy_unsupported_scheme', 'proxy_credentials_unsupported', 'proxy_bypass_unsupported', 'proxy_bypass_too_long'];
+
+function networkProxyInput(field) {
+  return field === 'proxyUrl' ? els.proxyUrlInput : els.noProxyInput;
+}
+
+function syncNetworkProxyControls() {
+  if (!els.proxyUrlInput) return;
+  for (const field of Object.keys(networkProxyDrafts)) {
+    const input = networkProxyInput(field);
+    if (input && document.activeElement !== input && !networkProxyDrafts[field].dirty) {
+      input.value = state.settings?.[field] || '';
+    }
+  }
+  if (els.networkProxySource) {
+    const source = state.settings?.networkProxySource || 'system';
+    els.networkProxySource.textContent = t(`settings.proxy.source.${source}`);
+  }
+  if (els.proxyUrlError) {
+    els.proxyUrlError.hidden = !networkProxyError;
+    els.proxyUrlError.textContent = networkProxyError ? t(`settings.proxy.error.${networkProxyError.code}`) : '';
+  }
+}
+
+function markNetworkProxyDraft(field) {
+  networkProxyDrafts[field].revision += 1;
+  networkProxyDrafts[field].dirty = true;
+  if (networkProxyError?.field !== field) return;
+  networkProxyError = null;
+  syncNetworkProxyControls();
+}
+
+async function saveNetworkProxySetting(field) {
+  const draft = networkProxyDrafts[field];
+  const revision = draft.revision;
+  let code = '';
+  try {
+    await saveSettings({ [field]: networkProxyInput(field).value });
+  } catch (error) {
+    const message = String(error?.message || '');
+    code = PROXY_SETTING_ERROR_CODES.find((candidate) => message.includes(candidate)) || 'save_failed';
+  }
+  // A newer edit owns the field now; this outcome no longer describes it.
+  if (draft.revision !== revision) return;
+  // A refused value stays dirty, so it is left in place to be corrected.
+  draft.dirty = Boolean(code);
+  networkProxyError = code ? { field, code } : (networkProxyError?.field === field ? null : networkProxyError);
+  preserveSettingsPanelScroll(syncNetworkProxyControls);
+}
+
 function renderAutomaticAppUpdateControl() {
   if (!els.automaticAppUpdatesInput) return;
   const control = appUpdatePresentationApi.automaticAppUpdateControlState({
@@ -1943,6 +2025,7 @@ function settleRowNumberAnimations() {
 function applyReduceMotionPreference(value) {
   const preference = motionPreferenceApi.normalize(value);
   document.documentElement.dataset.reduceMotion = preference;
+  pluginViewHost?.refreshMotion();
   if (motionPreferenceApi.shouldReduceMotion(preference, reducedMotionMedia?.matches)) settleMotionAnimations();
   return preference;
 }
@@ -3268,20 +3351,22 @@ function availableBreakdownIds() {
   const order = ['home', baseBreakdownOrder[0], 'status', 'trends', ...baseBreakdownOrder.slice(1)];
   let available = state.settings?.historyEnabled === false ? order.filter((id) => id !== 'trends') : order;
   if (state.settings?.projectsEnabled === false) available = available.filter((id) => id !== 'project');
-  return limitViewAvailable() ? [...available, 'limits'] : available;
+  return [...(limitViewAvailable() ? [...available, 'limits'] : available), ...pluginPageOptions().map(page => page.id)];
 }
 
 function visibleBreakdownOrder() {
-  return viewDisplayPreferencesApi.visibleViewOrder({
+  return [...viewDisplayPreferencesApi.visibleViewOrder({
     views: VIEW_DISPLAY_OPTIONS,
     orderValue: effectiveViewDisplayOrderValue(),
     hiddenValue: state.settings?.hiddenViews,
     availableIds: availableBreakdownIds(),
     includeIds: directBreakdownOverride ? [directBreakdownOverride] : []
-  });
+  }), ...pluginPageOptions().map(page => page.id)];
 }
 
 function ensureBreakdownVisible() {
+  if (pluginPageOptions().some(page => page.id === state.breakdown)) return;
+  if (!state.pluginCatalog && pluginPlacementsApi.isHomeToken(state.breakdown)) return;
   const availableIds = availableBreakdownIds();
   if (directBreakdownOverride === state.breakdown && availableIds.includes(state.breakdown)) return;
   directBreakdownOverride = null;
@@ -5708,6 +5793,8 @@ function renderTrends() {
 }
 
 function viewLabelById(id) {
+  const page = pluginPageOptions().find(page => page.id === id);
+  if (page) return page.title;
   const view = VIEW_DISPLAY_OPTIONS.find((option) => option.id === id);
   return view ? viewLabel(view) : id;
 }
@@ -6105,10 +6192,27 @@ function syncPeriodMenu() {
   }
 }
 
+// Built-in Home modules plus the plugin views the user has placed on Home.
+// Only placed views count as known: an active plugin's other views must not be
+// appended to the order the way a newly shipped built-in module would be.
+function homeModuleOptions() {
+  const placed = new Set(String(state.settings?.homeModuleOrder || '').split(',').map((id) => id.trim().toLowerCase()));
+  const extra = [];
+  for (const plugin of state.pluginCatalog?.plugins || []) {
+    if (plugin.status !== 'active') continue;
+    for (const view of plugin.views || []) {
+      const id = pluginPlacementsApi.homeToken(view.ref);
+      if (!view.surfaces.includes('home') || !placed.has(id)) continue;
+      extra.push({ id, label: view.title, ref: view.ref, pluginName: plugin.name, icon: view.icon });
+    }
+  }
+  return [...HOME_MODULE_OPTIONS, ...extra];
+}
+
 function homeModuleIds() {
   const hidden = hiddenHomeModuleSet();
   return homeModulePreferencesApi
-    .orderedHomeModules(HOME_MODULE_OPTIONS, state.settings?.homeModuleOrder)
+    .orderedHomeModules(homeModuleOptions(), state.settings?.homeModuleOrder)
     .map((module) => module.id)
     .filter((id) => !hidden.has(id));
 }
@@ -6121,8 +6225,10 @@ function nextBreakdown(value) {
 }
 
 function viewSwitcherIcon(id) {
+  const page = pluginPageOptions().find(page => page.id === id);
+  if (page) return window.TokenMonitorPluginViews.navigationIcon(document, page, 14);
   const icon = document.createElement('span');
-  icon.className = `view-switcher-icon ${VIEW_ICON_CLASSES[id] || 'view-icon-home'}`;
+  icon.className = `view-switcher-icon ${VIEW_ICON_CLASSES[id] || (pluginPlacementsApi.isHomeToken(id) ? 'view-icon-plugin' : 'view-icon-home')}`;
   icon.setAttribute('aria-hidden', 'true');
   return icon;
 }
@@ -6159,8 +6265,12 @@ function updateViewSwitcherOpenState({ focusMenu = false, focusDisclosure = fals
   for (const item of menu.querySelectorAll('.view-switcher-menu-item')) {
     item.tabIndex = state.viewSwitcherOpen && item.classList.contains('is-current') ? 0 : -1;
   }
+  if (state.viewSwitcherOpen) requestAnimationFrame(() => menu.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' }));
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
   if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
+  if (visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed) {
+    pluginContent?.render('main.navigation.content', els.viewSwitcher, { surface: 'page', navigate: openViewFromTray });
+  }
   return true;
 }
 
@@ -6285,26 +6395,39 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   els.viewSwitcher.classList.toggle('is-open', state.viewSwitcherOpen);
   els.viewSwitcher.classList.toggle('has-opened', state.viewSwitcherHasOpened);
   els.viewSwitcher.replaceChildren(current, disclosure, menu);
+  if (state.viewSwitcherOpen) requestAnimationFrame(() => menu.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' }));
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
   if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
+  if (visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed) {
+    pluginContent?.render('main.navigation.content', els.viewSwitcher, { surface: 'page', navigate: openViewFromTray });
+  }
 }
 
 function homeModuleShell(kind, title, viewId, meta = '') {
-  const module = document.createElement('section');
+  // A content outlet sits beside its native anchor. Keep that connected shell
+  // while refreshing the native fallback; retaining only author children after
+  // removing their ancestor is too late to preserve focus and scroll anchoring.
+  // Standalone plugin modules already retain their own shell by view ref.
+  const retained = kind === 'plugin' ? null : [...els.homePanel.children].find(node => node.classList.contains(`home-module-${kind}`)
+    && [node, ...node.children].some(anchor => pluginContent?.hasAnchor(anchor)));
+  const module = retained || document.createElement('section');
   module.className = `home-module home-module-${kind}`;
-  module.tabIndex = 0;
-  module.setAttribute('role', 'button');
   module.setAttribute('aria-label', title);
-  module.addEventListener('click', (event) => {
-    if (event.target.closest('.home-activity-scroll')) return;
-    renderBreakdownChange(viewId, { fromHome: true });
-  });
-  module.addEventListener('keydown', (event) => {
-    if (event.target !== module) return;
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    renderBreakdownChange(viewId, { fromHome: true });
-  });
+  // Plugin modules have no detail view to jump to.
+  if (viewId && !retained) {
+    module.tabIndex = 0;
+    module.setAttribute('role', 'button');
+    module.addEventListener('click', (event) => {
+      if (event.target.closest('.home-activity-scroll')) return;
+      renderBreakdownChange(viewId, { fromHome: true });
+    });
+    module.addEventListener('keydown', (event) => {
+      if (event.target !== module) return;
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      renderBreakdownChange(viewId, { fromHome: true });
+    });
+  }
   const head = document.createElement('div');
   head.className = 'home-module-head';
   const titleWrap = document.createElement('div');
@@ -6321,13 +6444,22 @@ function homeModuleShell(kind, title, viewId, meta = '') {
     metaText.textContent = meta;
     end.append(metaText);
   }
-  const icon = document.createElement('span');
-  icon.className = `home-module-jump ${VIEW_ICON_CLASSES[viewId] || ''}`;
-  icon.setAttribute('aria-hidden', 'true');
-  end.append(icon);
+  if (viewId) {
+    const icon = document.createElement('span');
+    icon.className = `home-module-jump ${VIEW_ICON_CLASSES[viewId] || ''}`;
+    icon.setAttribute('aria-hidden', 'true');
+    end.append(icon);
+  }
   head.append(titleWrap, end);
   const body = document.createElement('div');
   body.className = 'home-module-body';
+  if (retained) {
+    const nativeHead = module.querySelector('.home-module-head');
+    const nativeBody = module.querySelector('.home-module-body');
+    nativeHead.replaceChildren(...head.childNodes);
+    nativeBody.replaceChildren();
+    return { module, body: nativeBody };
+  }
   module.append(head, body);
   return { module, body };
 }
@@ -6620,7 +6752,7 @@ function scheduleHomeSessionRepaint(rows) {
     const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
     const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
     const next = renderHomeSessionModule(nextRows);
-    current.replaceWith(next);
+    if (current !== next) current.replaceWith(next);
     if (hadFocus) next.focus();
     if (hadHeadFocus) next.querySelector('.home-module-head')?.focus({ preventScroll: true });
     if (focusedKey) {
@@ -7194,6 +7326,27 @@ function renderHomeTrendsModule() {
   return module;
 }
 
+// A plugin view on Home: the shell is ours, the body is the plugin's resolved
+// view, repainted in place by plugin pushes without re-rendering Home.
+function renderHomePluginModule(id) {
+  const option = homeModuleOptions().find((entry) => entry.id === id);
+  const ref = pluginPlacementsApi.refFromHomeToken(id);
+  const existing = [...els.homePanel.children].find(node => node.dataset.pluginRef === ref);
+  if (existing) {
+    existing.setAttribute('aria-label', option?.label || ref);
+    const label = existing.querySelector('.home-module-label'); if (label) label.textContent = option?.label || ref;
+    const meta = existing.querySelector('.home-module-meta'); if (meta) meta.textContent = option?.pluginName || '';
+    return existing;
+  }
+  const { module, body } = homeModuleShell('plugin', option?.label || ref, null, option?.pluginName || '');
+  module.dataset.pluginRef = ref;
+  const mount = document.createElement('div');
+  mount.className = 'home-plugin-body';
+  body.append(mount);
+  pluginViewHost?.mount(mount, ref, 'home');
+  return module;
+}
+
 function renderHome() {
   if (!els.homePanel) return;
   if (sessionTooltipShouldHoldRender()) {
@@ -7239,9 +7392,25 @@ function renderHome() {
       sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
       return renderHomeSessionModule(sessionRows);
     }
+    if (homeModulePreferencesApi.isPluginModuleId(id)) return renderHomePluginModule(id);
     return renderHomeTrendsModule();
   });
-  els.homePanel.replaceChildren(...nodes);
+  // Reconcile siblings without detaching retained plugin controls. Collector
+  // pushes must not discard focused drafts or cancel captured drawing gestures.
+  // A module-level selector places author controls beside the module. Reorder
+  // those outlets with their anchor instead of moving them back after rendering.
+  const ordered = nodes.flatMap(node => [node, ...pluginContent?.nodesFor(node) || []]);
+  ordered.forEach((node, index) => {
+    const current = els.homePanel.children[index];
+    if (node === current) return;
+    if (node.parentNode === els.homePanel && els.homePanel.moveBefore) els.homePanel.moveBefore(node, current || null);
+    else els.homePanel.insertBefore(node, current || null);
+  });
+  // Attach replacements before removing obsolete siblings: a synchronous layout
+  // must never observe the page with its retained content/scroll range missing.
+  for (const child of [...els.homePanel.children]) {
+    if (!ordered.includes(child)) child.remove();
+  }
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
@@ -7276,6 +7445,7 @@ function setRendererSettings(next) {
     !== tokenNumberAnimationApi.normalize(next.tokenNumberAnimation);
   state.settings = next;
   if (animationChanged) {
+    pluginViewHost?.refreshMotion();
     cancelNumberAnimation();
     settleRowNumberAnimations();
     numberAnimValue = state.currentTotal;
@@ -7292,10 +7462,51 @@ function setRendererSettings(next) {
   if (titlesChanged) refreshSessionDetailHeading();
 }
 
+function periodContentAvailability() {
+  const derived = fixedPeriodRangesApi.isDerived(state.period);
+  return {
+    fixedUnavailable: derived && state.fixedPeriodSnapshot?.status !== 'ready',
+    detailUnavailable: derived && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
+      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+    })
+  };
+}
+
 function render() {
+  renderAppContent();
+  // Composition supplies current native anchors/context below. Do not dispatch
+  // an extra update with the previous composition options first.
+  pluginViewHost?.refreshContext({ includeContent: false });
+  if (pluginContent) {
+    const target = `main.${state.breakdown}.content`;
+    const roots = { home: els.homePanel, limits: els.limitsPanel, trends: els.trendsPanel, status: els.serviceStatusPanel };
+    const native = state.breakdown === 'session' && state.openSession ? els.sessionDetail : roots[state.breakdown] || els.breakdown;
+    const visible = visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed;
+    pluginContent.retain(visible ? [target, 'main.navigation.content'] : []);
+    if (visible && !state.breakdown.startsWith('plugin:')) pluginContent.render(target, native, {
+      surface: 'page', period: state.period, source: state.settings?.hubMode, stats: state.stats,
+      navigate: openViewFromTray, session: state.openSession
+    });
+  }
+
+}
+function renderAppContent() {
   const surface = visibleStatsSurface();
   if (surface !== 'main') {
     if (!surface) statsRenderScheduler.request();
+    return;
+  }
+  ensureBreakdownVisible();
+  const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
+  els.shell.classList.toggle('plugin-page-mode', pluginPage);
+  if (pluginPage) {
+    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip();
+    cancelNumberAnimation();
+    state.openSession = null;
+    for (const panel of [els.homePanel, els.breakdown, els.limitsPanel, els.trendsPanel, els.serviceStatusPanel,
+      els.sessionDetail, els.sessionDetailHead, els.sessionPagerHost, els.toolDetailFooter, els.projectBreakdownFooter, els.fixedPeriodMessage, els.viewBackRow]) panel?.classList.add('hidden');
+    els.shell.classList.remove('home-mode', 'session-mode');
+    renderViewSwitcher(); signalContentReady();
     return;
   }
   if (!state.stats) return;
@@ -7328,11 +7539,7 @@ function render() {
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
-  const fixedUnavailable = derivedPeriod && state.fixedPeriodSnapshot?.status !== 'ready';
-  const detailUnavailable = derivedPeriod
-    && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
-      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
-    });
+  const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
@@ -8008,7 +8215,7 @@ function renderThemePresetChips() {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'theme-preset-chip';
-    chip.classList.toggle('active', preset.id === activeId);
+    chip.classList.toggle('active', !state.settings?.pluginAuthorSkin && preset.id === activeId);
     chip.dataset.presetId = preset.id;
     const dot = document.createElement('span');
     dot.className = 'theme-preset-dot';
@@ -8018,6 +8225,28 @@ function renderThemePresetChips() {
     chip.append(dot, label);
     chip.addEventListener('click', () => selectThemePreset(preset.id));
     els.themePresetChips.appendChild(chip);
+  }
+  // Skins from active plugins sit beside the built-in presets; applying one
+  // writes ordinary theme colours, so it survives the plugin being removed.
+  for (const plugin of state.pluginCatalog?.plugins || []) {
+    if (plugin.status !== 'active') continue;
+    for (const skin of plugin.skins || []) {
+      const colors = themePresetsApi.mergeThemeColors({ ...state.settings?.themeColors, ...skin.colors });
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'theme-preset-chip theme-preset-chip-plugin';
+      chip.dataset.pluginSkin = JSON.stringify(skin);
+      chip.classList.toggle('active', state.settings?.pluginAuthorSkin?.ref === skin.ref);
+      chip.setAttribute('aria-description', t('settings.plugins.skinFrom', { name: plugin.name }));
+      const dot = document.createElement('span');
+      dot.className = 'theme-preset-dot';
+      dot.style.background = colors.accent;
+      const label = document.createElement('span');
+      label.textContent = skin.name;
+      chip.append(dot, label);
+      chip.addEventListener('click', () => void applyAppearancePluginSkin(skin, chip));
+      els.themePresetChips.appendChild(chip);
+    }
   }
 }
 
@@ -8113,15 +8342,15 @@ async function selectThemePreset(presetId) {
   for (const key of themePresetsApi.INTERFACE_COLOR_KEYS) {
     if (preset.colors[key] !== themePresetsApi.DEFAULT_THEME[key]) next[key] = preset.colors[key];
   }
-  await commitThemeColors(next);
+  await commitThemeColors(next, true);
 }
 
-async function commitThemeColors(overrides) {
+async function commitThemeColors(overrides, resetPluginStyle = false) {
   state.settings.themeColors = overrides;
   applyThemeColors(overrides);
   buildAppearanceColorControls();
   renderSettingsSummaries();
-  await saveSettings({ themeColors: overrides });
+  await saveSettings({ themeColors: overrides, ...(resetPluginStyle ? { pluginSkinRef: null } : {}) });
 }
 
 function showThemeCodeStatus(key, type = '') {
@@ -8323,6 +8552,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   const wasCollapsed = state.floatingBubble.collapsed;
   const side = payload?.collapsed && ['left', 'right'].includes(payload.side) ? payload.side : null;
   state.floatingBubble = { collapsed: Boolean(side), side };
+  syncPluginTrayDemand();
   if (isRendererWindowHidden()) {
     statsRenderScheduler.request();
     return;
@@ -9453,6 +9683,7 @@ function syncSettingsForm() {
   const modelRankingMetric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
   for (const input of els.modelRankingMetricInputs || []) input.checked = input.value === modelRankingMetric;
   syncCurrencyRateControls();
+  syncNetworkProxyControls();
   syncHubDraftFields();
   els.limitsRefreshInput.value = state.settings.limitsRefreshMode === 'adaptive'
     ? 'adaptive'
@@ -9623,7 +9854,7 @@ function disabledViewIds() {
 }
 
 function hiddenHomeModuleSet() {
-  return new Set(homeModulePreferencesApi.normalizeHiddenHomeModules(state.settings?.hiddenHomeModules, HOME_MODULE_OPTIONS).split(',').filter(Boolean));
+  return new Set(homeModulePreferencesApi.normalizeHiddenHomeModules(state.settings?.hiddenHomeModules, homeModuleOptions()).split(',').filter(Boolean));
 }
 
 function hiddenHomeLimitProviderSet() {
@@ -9819,7 +10050,16 @@ function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, get
     applyOrder: (order) => applyPreferenceOrder(kind, order),
     preserveScroll: preserveSettingsPanelScroll,
     mirrorOrder: (order) => {
-      const value = order.join(',');
+      // Inactive plugin placements are absent from the rendered Home rows.
+      // Refill only visible slots so a drag cannot silently remove a placement.
+      let merged = order;
+      if (kind === 'homeModule') {
+        const visible = new Set(order);
+        let index = 0;
+        merged = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS)
+          .map((id) => visible.has(id) ? order[index++] : id);
+      }
+      const value = merged.join(',');
       state.settings = { ...state.settings, [settingKey]: value };
       return value;
     },
@@ -10251,8 +10491,9 @@ function renderHomeSettingsList() {
   wrap.id = 'homeSettingsList';
   wrap.className = 'settings-nested-list home-settings-list';
   const hidden = hiddenHomeModuleSet();
-  const modules = homeModulePreferencesApi.orderedHomeModules(HOME_MODULE_OPTIONS, state.settings?.homeModuleOrder);
-  const hasCustomOrder = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS).join(',') !== homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER;
+  const modules = homeModulePreferencesApi.orderedHomeModules(homeModuleOptions(), state.settings?.homeModuleOrder);
+  const hasCustomOrder = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS)
+    .filter((id) => !homeModulePreferencesApi.isPluginModuleId(id)).join(',') !== homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER;
   const header = document.createElement('div');
   header.className = 'settings-note-row home-settings-header';
   const note = document.createElement('p');
@@ -10282,7 +10523,7 @@ function renderHomeSettingsList() {
   wrap.append(header);
   for (const moduleOption of modules) {
     const id = moduleOption.id;
-    const label = t(moduleOption.labelKey);
+    const label = moduleOption.label || t(moduleOption.labelKey);
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
     row.className = 'home-module-preference-row';
@@ -12492,21 +12733,24 @@ async function onHomeModuleVisibilityToggle(moduleId) {
 }
 
 async function onHomeModuleMove(moduleId, direction) {
-  const next = homeModulePreferencesApi.moveHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS, moduleId, direction);
+  const next = homeModulePreferencesApi.moveHomeModuleOrder(state.settings?.homeModuleOrder, homeModuleOptions(), moduleId, direction);
   await saveSettings({ homeModuleOrder: next });
   renderHomeIfVisible();
 }
 
 async function onHomeModuleReorder(moduleId, targetIndex) {
-  const current = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS).join(',');
-  const next = homeModulePreferencesApi.reorderHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS, moduleId, targetIndex);
+  const current = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, homeModuleOptions()).join(',');
+  const next = homeModulePreferencesApi.reorderHomeModuleOrder(state.settings?.homeModuleOrder, homeModuleOptions(), moduleId, targetIndex);
   if (next === current) return;
   await saveSettings({ homeModuleOrder: next });
   renderHomeIfVisible();
 }
 
 async function resetHomeModuleOrder() {
-  await saveSettings({ homeModuleOrder: homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER });
+  // Resetting the built-in order keeps placed plugin views, after the built-ins.
+  const pluginModules = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS)
+    .filter((id) => homeModulePreferencesApi.isPluginModuleId(id));
+  await saveSettings({ homeModuleOrder: [homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER, ...pluginModules].join(',') });
   renderHomeIfVisible();
 }
 
@@ -12744,6 +12988,228 @@ window.addEventListener('blur', () => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
 });
 
+function renderNotchPageChoices() {
+  window.TokenMonitorNotchPageSettings?.render({ document, container: document.getElementById('notchPageChoices'),
+    settings: state.settings, catalog: state.pluginCatalog, t,
+    resetButton: document.getElementById('resetNotchPageOrderButton'),
+    save: async patch => { await saveSettings(patch); },
+    place: async (ref, placed) => { await pluginApi.place(ref, 'notch', placed); },
+    pluginIcon: (name, identityIcon) => window.TokenMonitorPluginViews?.navigationIcon(document, { icon: name, identityIcon }, 14),
+    createRowDrag: config => rowDragControllerApi.createRowDragController({
+      dragSort: verticalDragSortApi, getScrollPanel: () => els.settingsPanel,
+      preserveScroll: preserveSettingsPanelScroll, ...config
+    }),
+    formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
+  });
+}
+
+// ---- Plugins -------------------------------------------------------------
+// The catalog (from main) decides which plugin views exist; the view host
+// paints resolved views into Home and reports what is visible, so main only
+// samples sources something on screen, or a background rule, needs.
+const pluginBridge = window.tokenMonitor.plugins || null;
+pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginViewHost({
+  document,
+  window,
+  t,
+  services: {
+    app: window.tokenMonitor,
+    native: {
+      quota: limitWindowsView,
+      usageRow: data => { const node = rowTemplate(data); updateRow(node, { ...data, barValue: data.barValue ?? data.value, max: data.max ?? data.value, color: data.color || 'var(--accent)' }); return node; },
+      updateUsageRow: updateRow,
+      quotaProvider: (id, label, record, color) => renderLimitProviderSolo(id, label, record, color),
+      quotaGroup: (id, label, records, color) => renderLimitProviderGroup(id, label, records, color)
+    },
+    navigate: openViewFromTray
+  },
+  getContext: () => ({ period: state.period, source: state.settings?.hubMode, stats: state.stats }),
+  onLoaded: () => { void maybeUpdateBarsIcon(); renderFloatingBubbleContent(); },
+  onDemand: (surface, refs) => pluginBridge.setDemand(surface, refs),
+  motionAllowed: () => !prefersReducedMotion(),
+  motionMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
+  isSurfaceActive: (surface, container) => !isRendererWindowHidden() && !state.floatingBubble.collapsed
+    && (surface === 'settings' ? isSettingsPanelOpen() : !isSettingsPanelOpen()
+      || (surface === 'page' && Boolean(container?.closest('#pluginMainPanel'))))
+}) : null;
+pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ document,
+  host: { mount: (container, view, context) => pluginViewHost.mount(container, view.ref, 'page', context), unmount: container => pluginViewHost.unmount(container) },
+  getViews: () => (state.pluginCatalog?.plugins || []).filter(plugin => plugin.status === 'active').flatMap(plugin => plugin.views || []),
+  selection: target => state.pluginCatalog?.contentSelections?.[target]
+}) : null;
+pluginMainPages = pluginViewHost ? window.TokenMonitorPluginMainPages.create({
+  document, container: document.getElementById('pluginMainPanel'), headingContainer: document.getElementById('pluginPageHeading'), actionsContainer: document.getElementById('pluginPageActions'), host: pluginViewHost, t,
+  openWindow: ref => pluginBridge.openPage(ref),
+  formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
+}) : null;
+if (pluginViewHost) new MutationObserver(() => pluginViewHost.refreshDemand()).observe(els.shell, { attributes: true, attributeFilter: ['class'] });
+let pluginCatalogKey = '';
+
+function applyPluginCatalog(list) {
+  if (!list) return list;
+  state.pluginCatalog = list;
+  // Home and the theme chips depend only on which plugins and views are
+  // active; process metrics refresh every few seconds and must not re-render.
+  const key = JSON.stringify([list.contentSelections, list.contentOrder, (list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.revision,
+    (plugin.views || []).map((view) => [view.ref, view.title, view.surfaces, view.placements?.page, view.placements?.notch]), plugin.skins, plugin.revision])]);
+  if (key !== pluginCatalogKey) {
+    pluginCatalogKey = key;
+    render();
+    renderViewSwitcher();
+    renderThemePresetChips();
+    renderNotchPageChoices();
+    if (isSettingsSurfaceVisible()) preserveSettingsPanelScroll(renderViewPreferences);
+  }
+  return list;
+}
+
+async function loadPluginCatalog() {
+  try {
+    const list = applyPluginCatalog(await pluginBridge.list());
+    try { applyPluginCatalogUpdates(await pluginBridge.catalog()); } catch (_) {}
+    return list;
+  }
+  catch (error) {
+    // Initial failure must resolve the pending restored page. Later transient
+    // failures retain the last known catalog until a successful refresh.
+    if (!state.pluginCatalog) applyPluginCatalog({ enabled: false, plugins: [] });
+    throw error;
+  }
+}
+
+function applyPluginCatalogUpdates(catalog) {
+  pluginUpdateCount = catalog.entries.filter(entry => entry.status === 'update').length;
+  renderSettingsSummaries();
+  return catalog;
+}
+
+pluginApi = pluginBridge ? {
+  list: loadPluginCatalog,
+  orderContent: async (target, refs) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.orderContent(target, refs)),
+  selectContent: async (target, ref) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.selectContent(target, ref)),
+  setEnabled: async (id, enabled, initialSetup) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled, initialSetup)),
+  setBackground: async (id, enabled) => applyPluginCatalog(await pluginBridge.setBackground(id, enabled)),
+  restart: async (id) => applyPluginCatalog(await pluginBridge.restart(id)),
+  reload: async () => applyPluginCatalog(await pluginBridge.reload()),
+  place: async (ref, surface, placed) => applyPluginCatalog(await pluginBridge.place(ref, surface, placed)),
+  openPage: async ref => {
+    const page = pluginPageOptions().find(page => page.ref === ref);
+    if (!page) throw new Error(t('plugins.page.enableFirst'));
+    openViewFromTray(page.id);
+    document.querySelector('#pluginPageHeading .plugin-main-heading:not(.hidden) h2')?.focus({ preventScroll: true });
+  },
+  getSettings: id => pluginBridge.getSettings(id),
+  updateSettings: (id, input) => pluginBridge.updateSettings(id, input),
+  catalog: async () => applyPluginCatalogUpdates(await pluginBridge.catalog()),
+  discoverCatalog: async force => applyPluginCatalogUpdates(await pluginBridge.discoverCatalog(force)),
+  catalogDetails: (source, id) => pluginBridge.catalogDetails(source, id),
+  closeCatalogDetails: () => pluginBridge.closeCatalogDetails(),
+  catalogReadmeImage: (documentId, index) => pluginBridge.catalogReadmeImage(documentId, index),
+  catalogPreview: (source, id, version) => pluginBridge.catalogPreview(source, id, version),
+  addSource: async input => applyPluginCatalogUpdates(await pluginBridge.addSource(input)),
+  refreshSource: async id => applyPluginCatalogUpdates(await pluginBridge.refreshSource(id)),
+  removeSource: async id => applyPluginCatalogUpdates(await pluginBridge.removeSource(id)),
+  importPackage: kind => pluginBridge.importPackage(kind),
+  install: async (token, options) => applyPluginCatalog(await pluginBridge.install(token, options)),
+  cancelInstall: token => pluginBridge.cancelInstall(token),
+  rollback: async id => applyPluginCatalog(await pluginBridge.rollback(id)),
+  uninstall: async (id, options) => applyPluginCatalog(await pluginBridge.uninstall(id, options)),
+  openFolder: () => pluginBridge.openFolder()
+} : null;
+
+pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
+  ? window.TokenMonitorPluginSettings.createPluginSettingsPanel({
+    mountSettings: (container, view) => pluginViewHost.mount(container, view.ref, 'settings', { descriptor: view }),
+    unmountSettings: container => pluginViewHost.unmount(container),
+    document,
+    container: document.getElementById('pluginSettingsList'),
+    t,
+    api: pluginApi,
+    getLocale: currentLocale,
+    onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
+    onCopyText: (text) => window.tokenMonitor.copyText(text),
+    setDetailTooltip: limitWindowsView.setDetailTooltip,
+    onApplySkin: (skin) => applyPluginSkin(skin),
+    onPlaced: () => renderSettingsSummaries(),
+    getEnabled: () => state.settings.pluginsEnabled !== false,
+    onSetEnabled: async (enabled) => {
+      await saveSettings({ pluginsEnabled: enabled });
+      renderSettingsSummaries();
+      return pluginApi.list();
+    }
+  }) : null;
+
+async function refreshPluginCatalog() {
+  if (!pluginApi) return;
+  if (state.settingsSections?.plugins && pluginSettingsPanel && !pluginSettingsPanel.isInteracting()) {
+    await pluginSettingsPanel.refresh();
+    renderSettingsSummaries();
+    return;
+  }
+  try { await pluginApi.list(); } catch (_) {}
+}
+
+// The tray bitmap has no DOM to observe, so its demand is the plugin items in
+// the custom layout whenever that layout is the one being drawn.
+function syncPluginTrayDemand() {
+  if (!pluginViewHost) return;
+  const refs = state.settings?.showTrayIcon !== false && state.settings?.trayContent === 'custom'
+    ? trayLayoutApi.trayLayoutPluginRefs(state.settings?.trayCustomLayout) : [];
+  if (!isRendererWindowHidden() && state.floatingBubble.collapsed && state.settings?.floatingBubbleContent === 'custom') {
+    refs.push(...trayLayoutApi.trayLayoutPluginRefs(state.settings.floatingBubbleCustomLayout));
+  }
+  pluginViewHost.setExplicitDemand('tray', [...new Set(refs)]);
+}
+
+function pluginTrayViews(layout) {
+  const views = {};
+  for (const ref of trayLayoutApi.trayLayoutPluginRefs(layout)) {
+    views[ref] = pluginViewHost?.state('tray', ref) || null;
+  }
+  return views;
+}
+
+async function applyPluginSkin(skin) {
+  // Main resolves the active author manifest and commits palette + tokens
+  // together. Never send the renderer's copy of the skin as trusted settings.
+  await saveSettings({ pluginSkinRef: skin.ref });
+  buildAppearanceColorControls();
+  renderSettingsSummaries();
+}
+
+async function applyAppearancePluginSkin(skin, chip) {
+  const container = els.themePresetChips;
+  if (container.getAttribute('aria-busy') === 'true') return;
+  container.querySelector('.plugin-action-error')?.remove();
+  for (const control of container.querySelectorAll('button')) control.removeAttribute('aria-describedby');
+  const skinKey = JSON.stringify(skin), settingsRevision = state.settingsPushRevision;
+  const restoreFocus = document.activeElement === chip;
+  container.setAttribute('aria-busy', 'true');
+  try { await applyPluginSkin(skin); }
+  catch (error) {
+    // saveSettings refreshes the form before rethrowing. Reattach to the same
+    // skin after that refresh, but discard failures from superseded settings.
+    if (state.settingsPushRevision !== settingsRevision) return;
+    const target = container.contains(chip) ? chip
+      : [...container.querySelectorAll('button')].find(control => control.dataset.pluginSkin === skinKey);
+    if (!target) return;
+    const notice = document.createElement('p'); notice.className = 'plugin-action-error';
+    notice.id = 'theme-plugin-skin-error';
+    notice.setAttribute('role', 'alert'); notice.setAttribute('aria-atomic', 'true');
+    notice.textContent = window.TokenMonitorPluginSettings.actionErrorMessage(error, t);
+    target.setAttribute('aria-describedby', notice.id); container.append(notice);
+    if (restoreFocus && (document.activeElement === document.body || document.activeElement === chip)) target.focus({ preventScroll: true });
+  } finally { container.setAttribute('aria-busy', 'false'); }
+}
+
+if (pluginBridge) {
+  pluginBridge.onViews((payload) => {
+    pluginViewHost?.update(payload);
+    if (payload?.surface === 'tray') { void maybeUpdateBarsIcon(); renderFloatingBubbleContent(); }
+  });
+  pluginBridge.onChanged(() => void refreshPluginCatalog());
+}
+
 async function init() {
   // Subscribe before querying: a native appearance/accessibility change can
   // arrive while the initial state round trip is in flight.
@@ -12794,6 +13260,8 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  try { await pluginApi?.list(); } catch (_) {}
+  syncPluginTrayDemand();
   syncContentForm?.syncSettings();
   await syncContentForm?.refresh(false);
   applyEffectiveCurrencyRates();
@@ -13349,7 +13817,7 @@ els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
 els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
 void loadBackgroundImage();
-els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
+els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}, true));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
 els.textSizeInput?.addEventListener('change', async () => {
   await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
@@ -13404,6 +13872,7 @@ for (const input of els.reduceMotionInputs || []) {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
     state.settings.reduceMotion = applyReduceMotionPreference(input.value);
+    pluginViewHost?.refreshMotion();
     await saveAppearanceFromControls();
   });
 }
@@ -13553,6 +14022,7 @@ function syncDockControls() {
   els.notchFeature?.classList.toggle('hidden', !notchAvailable);
   if (els.notchInput) els.notchInput.checked = notchEnabled;
   els.notchOptions?.classList.toggle('hidden', !notchEnabled);
+  renderNotchPageChoices();
   syncNotchStyleInput();
   for (const input of els.notchShapeInputs) input.checked = input.value === (state.settings?.notchShape || 'auto');
   syncNotchSummaryMode();
@@ -13589,6 +14059,8 @@ function createDockItemsComposer(root, itemsKey) {
       presentationApi: window.TokenMonitorEdgeDockPresentation,
       getSettings: () => state.settings,
       getStats: () => state.stats,
+      pluginLabel: (ref) => (state.pluginCatalog?.plugins || [])
+        .flatMap((plugin) => plugin.views || []).find((view) => view.ref === ref)?.title || ref,
       save: (patch) => saveSettings(patch),
       providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
       providerColor: (id) => limitProviderColor(id),
@@ -13788,6 +14260,10 @@ els.windowToggleShortcutValue?.addEventListener('click', startWindowShortcutReco
 els.windowToggleShortcutClearButton?.addEventListener('click', () => setWindowToggleShortcut('').catch(() => {}));
 els.startAtLoginInput?.addEventListener('change', () => saveSettings({ startAtLogin: els.startAtLoginInput.checked }));
 els.automaticAppUpdatesInput?.addEventListener('change', () => saveSettings({ automaticAppUpdates: els.automaticAppUpdatesInput.checked }));
+els.proxyUrlInput?.addEventListener('input', () => markNetworkProxyDraft('proxyUrl'));
+els.proxyUrlInput?.addEventListener('change', () => saveNetworkProxySetting('proxyUrl'));
+els.noProxyInput?.addEventListener('input', () => markNetworkProxyDraft('noProxy'));
+els.noProxyInput?.addEventListener('change', () => saveNetworkProxySetting('noProxy'));
 els.glassInput.addEventListener('change', saveAppearanceFromControls);
 els.blurInput.addEventListener('change', saveAppearanceFromControls);
 els.backgroundImageOpacityInput?.addEventListener('change', saveAppearanceFromControls);
@@ -13971,6 +14447,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     if (JSON.stringify(next[key]) !== JSON.stringify(state.settings?.[key])) delete appearancePreview[key];
   }
   setRendererSettings(next);
+  syncPluginTrayDemand();
   applyEffectiveCurrencyRates();
   observeDisplayLiveTokenRates(state.stats);
   preserveSettingsPanelScroll(syncSettingsForm);
@@ -14078,6 +14555,8 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
 function handleWindowVisibilityChange() {
+  syncPluginTrayDemand();
+  pluginViewHost?.refreshDemand();
   if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
   if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();
@@ -14098,11 +14577,15 @@ function handleWindowVisibilityChange() {
 }
 document.addEventListener('visibilitychange', handleWindowVisibilityChange);
 document.addEventListener('visibilitychange', hideTrendTooltip);
+const windowActivationFocus = window.TokenMonitorWindowActivationFocus.create({ document, shell: els.shell, header: document.querySelector('.titlebar') });
 window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
+  if (!visible) windowActivationFocus.cancel();
   if (!visible) hideTrendTooltip();
   state.windowVisible = visible;
   handleWindowVisibilityChange();
 });
+window.tokenMonitor.onWindowSummoned(() => windowActivationFocus.summon());
+window.tokenMonitor.onWindowSummonCancelled(() => windowActivationFocus.cancel());
 
 window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;
@@ -14667,6 +15150,8 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
   const textColor = colors.text || fillColor;
   const h = Math.max(16, Math.round(height));
 
+  if (item.type === 'plugin') return renderPluginTrayItemCanvas(item, h, { trackColor, textColor });
+
   if (item.type === 'spacer') {
     const isDot = item.variant === 'dot';
 
@@ -14845,6 +15330,18 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
   return canvas;
 }
 
+// Author drawing uses the App's bitmap composition; the OS still owns the menu.
+function renderPluginTrayItemCanvas(item, h, { trackColor, textColor }) {
+  const view = item.plugin;
+  const canvas = document.createElement('canvas'); canvas.width = h; canvas.height = h;
+  if (view?.entry && pluginViewHost?.renderTray(view, canvas, { height: h, textColor, trackColor })) return canvas;
+  const size = Math.round(h * 0.7);
+  pluginViewsApi.drawIcon(canvas.getContext('2d'), view?.icon || 'dot', {
+    x: (h - size) / 2, y: (h - size) / 2, size, color: textColor
+  });
+  return canvas;
+}
+
 function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options = {}) {
   const codexProviders = (stats?.limits?.providers || []).filter((provider) => provider?.provider === 'codex');
   const selectedCodexKey = String(state.codexActiveAccount?.accountKey || '').trim();
@@ -14859,9 +15356,10 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     activeAccountKeys: activeCodexKey ? { codex: activeCodexKey } : {},
     availableProviderIds: Object.keys(trayProviderImages),
     liveTokenRates: options.liveTokenRates || displayLiveTokenRateSamples(),
-    liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value))
+    liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value)),
+    pluginViews: pluginTrayViews(layout)
   });
-  const items = resolved.items.map((item) => (
+  const items = resolved.items.filter(item => item.type !== 'plugin' || item.available).map((item) => (
     item.type === 'text'
       && item.metric === 'account'
       && state.settings?.maskLimitAccountEmails === true
@@ -15212,6 +15710,8 @@ function createTrayComposer(surface) {
     getPreview: () => trayComposerPreview(surface),
     isEditable: () => isNotch || state.settings?.[contentKey] === 'custom',
     onCustomize: () => activateTrayComposer(surface),
+    pluginChoices: () => (state.pluginCatalog?.plugins || []).filter(plugin => plugin.status === 'active')
+      .flatMap(plugin => (plugin.views || []).filter(view => view.surfaces.includes('tray')).map(view => ({ ref: view.ref, title: `${plugin.name} · ${view.title || view.ref}` }))),
     providerChoices: trayComposerProviderChoices,
     accountChoices: trayComposerAccountChoices,
     windowChoices: trayComposerWindowChoices,

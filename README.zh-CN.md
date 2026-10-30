@@ -14,7 +14,7 @@
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/v/release/Javis603/token-monitor?include_prereleases&style=flat-square&label=release&color=22c55e" alt="最新发布" /></a>
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/downloads/Javis603/token-monitor/total?style=flat-square&color=22c55e" alt="总下载量" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 或更新" />
-    <img src="https://img.shields.io/badge/macOS-12%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 12 或更新" />
+    <img src="https://img.shields.io/badge/macOS-13%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 13 或更新" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
     <a href="https://discord.gg/HmdNVVvw5P"><img src="https://img.shields.io/discord/1344259784219689031?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="许可证：MIT" /></a>
@@ -196,6 +196,12 @@ brew install --cask token-monitor
 - **可录制全局快捷键**：可从任何地方快速显示或隐藏窗口
 - **Discord Rich Presence**：将今日 Token、花费与主要工具广播到你的 Discord 个人资料（需手动开启）
 
+### 插件（实验性）
+
+用自定义内容扩展桌面页面、新增插件页面与设置，并将内容放到刘海、Edge Dock、菜单栏／系统托盘或悬浮小窗。作者可以设计自己的界面，并选用本机 Node 后端接入数据源及执行计算。
+
+在“设置 → 插件”管理插件。参阅[使用指南](https://javis-ai.com/token-monitor/docs/plugins.html?lang=zh-CN)、[社区插件](https://github.com/Javis603/token-monitor-plugins)、[开发指南](docs/plugins/author-quickstart.md)及[插件 API](docs/plugins/README.md)。插件 API 属于实验性功能，日后可能变更，插件可能需要更新。只启用你信任的代码：插件并非沙盒隔离，Node 后端以你的操作系统用户权限运行。
+
 ## 支持工具详情
 
 Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
@@ -286,10 +292,11 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 | 每次提示／回复的用量与工具调用 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 明细仅在本地读取，不会同步。 |
 | 上下文用量／剩余空间 | Claude Code, Codex, DeepSeek Harness | Claude Code 的上下文上限根据模型估算。 |
 | 缓存用量／会话缓存命中率 | 提供缓存字段的来源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 有缓存用量数据时才显示命中率。 |
-| 缓存剩余时间估算 | Claude Code, Codex | Claude Code：5 分钟或 1 小时；Codex：约 30 分钟（估算）。 |
+| 缓存剩余时间估算 | Claude Code | 根据记录中的缓存层级估算为 5 分钟或 1 小时。 |
 | 输出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 为输出速度，`tok/min` 为总 Token 消耗速率；计时可能包含等待。 |
 | 推理强度设置 | Claude Code, Codex | 仅显示会话中明确记录的设置值。 |
 | 推理 Token 数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| 回合开始／完成识别 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | 依据工具记录的回合信号。其他工具或缺少有效信号时，最后活动后约 10 分钟内估算为运行中。 |
 | 原生运行中／等待输入状态 | Claude Code, Codex | — |
 | 父会话／子代理分组 | Codex, Antigravity, Oh My Pi, ZCode；具有可验证父会话链接的 T3 Code 会话 | Claude Code 的分组通过 T3 Code 提供。 |
 | 同一对话的续接记录分组 | Codex；具有已验证线程链接的 T3 Code 会话 | — |
