@@ -13,7 +13,7 @@ const response = data => new Response(JSON.stringify(data));
 test('public topic discovery is disabled by default, including saved cache and forced requests', async t => {
   const root = temp(t);
   fs.writeFileSync(path.join(root, 'github-discovery.json'), JSON.stringify({ at: Date.now(), raw: raw() }));
-  const catalog = createPluginCatalog({ root, manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: () => assert.fail('disabled discovery must not fetch') });
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root, manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: () => assert.fail('disabled discovery must not fetch') });
   t.after(() => catalog.dispose());
   for (const snapshot of [catalog.list(), await catalog.discover(), await catalog.discover(true)]) {
     assert.equal(snapshot.github.enabled, false);
@@ -64,7 +64,7 @@ test('catalog presentation keeps repository and ignores retired gallery fields a
 });
 test('catalog lists saved repositories separately and README image IPC cannot fetch arbitrary URLs', async t => {
   let calls = 0;
-  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async () => { calls++; return response(raw()); } });
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async () => { calls++; return response(raw()); } });
   t.after(() => catalog.dispose());
   assert.equal(catalog.list().entries.length, 0); assert.equal(calls, 0);
   const next = await catalog.discover(); assert.equal(next.github.entries.length, 1); assert.equal(next.entries.length, 0);
@@ -82,7 +82,7 @@ test('README Markdown preserves layout, resolves relative images and cannot inje
   assert.match(result.html, /&lt;script&gt;/); assert.match(result.html, /href="https:\/\/github.com\/author\/project\/blob\/main\/docs\/guide.md"/);
 });
 test('README image access is scoped to the active detail document, after another detail is opened', async t => {
-  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async url => response(url.endsWith('/readme') ? { download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', html_url: 'https://github.com/author/project/blob/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') } : raw()) });
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async url => response(url.endsWith('/readme') ? { download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', html_url: 'https://github.com/author/project/blob/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') } : raw()) });
   t.after(() => catalog.dispose()); await catalog.discover();
   const first = await catalog.details('github-discovery', 'author/project');
   assert.equal(first.imageCount, 1); assert.match(first.html, /data-readme-image/);
@@ -95,7 +95,7 @@ test('README images stay lazy, duplicate IPC shares a load, and closing aborts t
   const bytes = Buffer.alloc(33); Buffer.from([137,80,78,71,13,10,26,10]).copy(bytes); bytes.writeUInt32BE(13,8); bytes.write('IHDR',12); bytes.writeUInt32BE(20,16); bytes.writeUInt32BE(10,20); bytes[24]=8; bytes[25]=2;
   let images = 0, deferred = false, finish, imageSignal;
   const image = { isEmpty: () => false, getSize: () => ({ width: 20, height: 10 }), toPNG: () => Buffer.from('png') };
-  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, nativeImage: { createFromBuffer: () => image }, fetchImpl: async (url, init) => {
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, nativeImage: { createFromBuffer: () => image }, fetchImpl: async (url, init) => {
     if (url.includes('/search/')) return response(raw());
     if (url.endsWith('/readme')) return response({ download_url: 'https://raw.githubusercontent.com/author/project/main/README.md', html_url: 'https://github.com/author/project/blob/main/README.md', encoding: 'base64', content: Buffer.from('![Shot](image.png)').toString('base64') });
     images++; imageSignal = init.signal;
@@ -113,7 +113,7 @@ test('README images stay lazy, duplicate IPC shares a load, and closing aborts t
 });
 test('closing details also aborts a pending README and prevents a late result reopening it', async t => {
   let finish, signal;
-  const catalog = createPluginCatalog({ githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async (url, init) => {
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), githubDiscoveryEnabled: true, root: temp(t), manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} }, fetchImpl: async (url, init) => {
     if (url.includes('/search/')) return response(raw());
     signal = init.signal; return new Promise(resolve => { finish = resolve; });
   } }); t.after(() => catalog.dispose()); await catalog.discover();
@@ -169,7 +169,7 @@ test('catalog details select the plugin README language and keep its nested link
   const paths = { en: 'plugins/one/README.md', 'zh-TW': 'plugins/one/README.zh-TW.md', 'pt-BR': 'plugins/one/README.pt-BR.md' };
   const entry = { id: 'one-plugin', name: 'One', repository: 'https://github.com/author/project', readmePaths: paths,
     versions: [{ version: '1.0.0', url: 'https://example.test/package', sha256: 'a'.repeat(64), changelog: { en: 'English update', 'zh-TW': '更新內容' } }] };
-  const catalog = createPluginCatalog({ root: temp(t), getLocale: () => locale,
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root: temp(t), getLocale: () => locale,
     manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
     maintainerSources: [{ id: 'maintainer-paths', url }], fetchImpl: async target => {
       calls.push(target);
@@ -192,7 +192,7 @@ test('catalog details select the plugin README language and keep its nested link
 
 test('custom catalogs use the default README unless they explicitly declare localized plugin paths', async t => {
   const url = 'https://catalog.example/custom.json', calls = [];
-  const catalog = createPluginCatalog({ root: temp(t), getLocale: () => 'zh-TW',
+  const catalog = createPluginCatalog({ catalogDirectory: temp(t), root: temp(t), getLocale: () => 'zh-TW',
     manager: { list: () => ({ plugins: [] }) }, managed: { describe() {}, cancelSource() {} },
     fetchImpl: async target => {
       calls.push(target);

@@ -1,0 +1,10 @@
+{
+  "quota-alerts": {
+    "en": "plugins/quota-alerts/README.md",
+    "zh-CN": "plugins/quota-alerts/README.zh-CN.md",
+    "zh-TW": "plugins/quota-alerts/README.zh-TW.md",
+    "ko": "plugins/quota-alerts/README.ko.md",
+    "ja": "plugins/quota-alerts/README.ja.md",
+    "pt-BR": "plugins/quota-alerts/README.pt-BR.md"
+  }
+}
