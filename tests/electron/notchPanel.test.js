@@ -409,7 +409,7 @@ test('session context retains shared eligibility, tooltips and small meters with
   assert.equal(page.querySelector('.notch-active-context-fill'), null);
   assert.equal(page.querySelector('.notch-active-cost'), null, 'both priced and partially priced sessions omit cost');
   const runningContext = active[0].querySelector('.notch-session-context');
-  assert.deepEqual(runningContext.tooltipEntries.map(entry => entry.full), ['74K / 200K', 'Cache ~29m left']);
+  assert.deepEqual(runningContext.tooltipEntries.map(entry => entry.full), ['74K / 200K']);
   const recent = page.querySelectorAll('.notch-recent');
   assert.equal(recent[0].querySelector('.notch-session-context-value').textContent, '37%', 'a freshly ended turn retains context');
   assert.equal(recent[1].querySelector('.notch-session-cache').textContent, 'Cache 20m');

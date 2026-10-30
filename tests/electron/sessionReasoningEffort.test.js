@@ -25,9 +25,10 @@ for (const client of ['codex', 'claude']) test(`${client} effort stays visible a
   const context = render(row);
   assert.equal(text(context), '60%');
   assert.equal(sessionReasoningEffortForRow(row, at), 'high');
-  assert.equal(context.entries.length, 2, 'context/cache tooltip does not repeat effort');
+  assert.equal(context.entries.length, client === 'codex' ? 1 : 2, 'context/cache tooltip does not repeat effort');
   const cached = render(row, at + 600_001);
-  assert.match(text(cached), /20m/);
+  if (client === 'codex') assert.equal(cached, null, 'legacy Codex cache is hidden');
+  else assert.match(text(cached), /20m/);
   assert.doesNotMatch(text(cached), /high/);
   assert.equal(sessionReasoningEffortForRow(row, at + 600_001), 'high');
   assert.equal(sessionReasoningEffortForRow(row, at + 1800_000), 'high');
@@ -40,7 +41,7 @@ for (const client of ['codex', 'claude']) test(`${client} effort stays visible a
     assert.doesNotMatch(text(render(session({ reasoningEffort: effort }))), /high|script/);
   }
   for (const locale of Object.keys(MESSAGES)) {
-    assert.equal(render(row, at, locale).entries.length, 2);
+    assert.equal(render(row, at, locale).entries.length, client === 'codex' ? 1 : 2);
     assert.notEqual(translate(locale, 'session.reasoningEffortLabel', { effort: 'high' }), 'session.reasoningEffortLabel');
   }
 });
