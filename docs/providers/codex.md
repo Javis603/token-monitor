@@ -65,7 +65,7 @@ The optional `reasoningEffort` snapshot follows fresh Today metadata into anchor
 
 Rollout filenames are transcript lookup keys and can contain multiple UUIDs; do not treat every UUID as a resumable conversation or assume a fixed UUID position. Session Details takes its copyable identity from the first `session_meta.id` during the existing on-demand transcript parse, without an extra read or background preload. A multi-UUID key has no copyable ID until that metadata is available. This display identity never replaces the usage/grouping key.
 
-Codex does not expose a per-request cache expiration time in its rollout metadata. Cache read/write counts describe observed usage, not a deadline, and neither the model name nor the current login method establishes retention for a historical request. Session metadata explicitly clears the former fixed 30-minute `promptCache` estimate; shared presentation also ignores Codex estimates from older producers. Actual cached-token and cache-hit-rate statistics remain based on recorded usage. Recent context counts keep their existing ten-minute visibility window; there is no cache-countdown handoff after inactivity.
+Cache read/write counts and cache-hit-rate statistics are based on recorded usage. Recent context counts keep their existing ten-minute visibility window.
 
 ## Output-rate timing
 
