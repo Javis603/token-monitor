@@ -63,7 +63,8 @@ function evaluate(rows, threshold, alerted, now, observations) {
       if (!alerted.has(group.key)) {
         alerted.add(group.key); triggered.push({ ...alert, event: 'low' });
       }
-    } else if (group.complete && (!previous?.windows || previous.windows === JSON.stringify([...group.sessionKeys].sort()))) {
+    } else if (group.complete) {
+      // A complete high baseline rearms lows even when recovery must stay silent.
       alerted.delete(group.key);
     }
     if (!group.complete) {

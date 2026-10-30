@@ -70,6 +70,19 @@ test('web/local source changes do not change pool identity or prevent legitimate
   assert.deepEqual(scan([{ ...window('Session', 7), metric: 'tokens', source: 'web' }], 0), ['low']);
   assert.deepEqual(scan([{ ...window('Session', 100), metric: 'tokens', source: 'local' }], 1), ['full']);
 });
+for (const [name, initial, replacement] of [
+  ['metric replacement', [{ ...window('Session', 5), metric: 'requests' }], [{ ...window('Session', 100), metric: 'tokens' }]],
+  ['same-name removal', [window('Session', 5), window('Session', 100)], [window('Session', 100)]],
+  ['same-name addition', [window('Session', 5)], [window('Session', 100), window('Session', 100)]],
+  ['renamed window at threshold', [window('5-hour', 5)], [window('Session', 10)]]
+]) test(`a complete high baseline rearms low alerts immediately after ${name}`, () => {
+  const scan = sequence();
+  assert.deepEqual(scan(initial, 0), ['low']);
+  assert.deepEqual(scan(replacement, 1), [], 'a changed pool must not announce recovery');
+  const low = replacement.map((w, index) => index === 0 ? { ...w, remainingPercent: 5 } : w);
+  assert.deepEqual(scan(low, 2), ['low'], 'no second high reading is needed to rearm');
+  assert.deepEqual(scan(low, 3), [], 'the new low episode still deduplicates');
+});
 for (const usageTime of [new Date(start).toISOString(), null]) test(`fresh quota updates work independently of the usage snapshot clock (${usageTime})`, async t => {
   let now = start;
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-fresh-limits-'));

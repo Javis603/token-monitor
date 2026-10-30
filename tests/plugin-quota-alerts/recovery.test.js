@@ -55,6 +55,22 @@ test('losing a same-name reading across account rows does not prove recovery', (
   assert.deepEqual(scan(s, [row(100, 3)], 3).triggered.map(a => a.event), ['full']);
 });
 
+test('changed high baselines rearm only after timestamp and completeness checks pass', () => {
+  const s = state();
+  const quota = (metric, remaining, seconds) => row(remaining, seconds, {
+    windows: [{ kind: 'session', displayLabel: 'Session', metric, remainingPercent: remaining }]
+  });
+  assert.deepEqual(scan(s, [quota('requests', 5, 10)], 10).triggered.map(a => a.event), ['low']);
+  assert.equal(scan(s, [quota('tokens', 100, 9)], 11).triggered.length, 0);
+  assert.equal(s.low.size, 1, 'an older replacement reading cannot rearm');
+  assert.equal(scan(s, [quota('tokens', 100, 12), quota('tokens', null, 12)], 12).triggered.length, 0);
+  assert.equal(s.low.size, 1, 'an incomplete replacement reading cannot rearm');
+  assert.equal(scan(s, [quota('requests', 5, 10)], 12).triggered.length, 0, 'replayed low stays deduplicated');
+  assert.equal(scan(s, [quota('tokens', 100, 13)], 13).triggered.length, 0, 'a complete new baseline stays silent');
+  assert.equal(s.low.size, 0, 'the complete high baseline rearms independently of recovery events');
+  assert.deepEqual(scan(s, [quota('tokens', 5, 14)], 14).triggered.map(a => a.event), ['low']);
+});
+
 for (const baseline of [false, true]) for (const unknownAt of [5, 20]) {
   test(`incomplete low readings fence older recovery and replay (baseline=${baseline}, unknownAt=${unknownAt})`, () => {
     const s = state();
