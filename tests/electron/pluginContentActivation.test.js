@@ -290,6 +290,30 @@ test('awaiting a draft inspection does not overwrite a concurrent choice for a d
   assert.equal(f.settings.pluginContentSelections[TARGET], undefined);
 });
 
+test('a content race still reloads a host after approved resume recovery', { timeout: 5000 }, async t => {
+  const { f, file, manifest } = await setupUpdate(t, { third: true });
+  f.lifecycle(f.main, async ({ action }) => {
+    if (action === 'resume') {
+      await f.invoke('plugins:setEnabled', { id: 'third-fixture', enabled: true });
+      throw new Error('resume failed');
+    }
+    return { loaded: true, unsaved: false };
+  });
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+  manifest.version = '2.0.0'; manifest.views.push({ id: 'content', mode: 'replace', targets: [TARGET] });
+  fs.writeFileSync(file, JSON.stringify(manifest));
+  const preview = await f.invoke('plugins:import', 'directory');
+  await f.invoke('plugins:install', preview.token, { trustUpdate: true });
+  await assert.rejects(f.invoke('plugins:setEnabled', {
+    id: 'trusted-fixture', enabled: true, initialSetup: { [contentKey(TARGET)]: REF }
+  }), /Content selection changed/);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(f.settings.pluginContentSelections[TARGET], 'third-fixture/content');
+  assert.equal(f.runtime.manager.active('trusted-fixture'), false);
+  assert.equal(f.main.webContents.reloads, 1, 'approved recovery must run even when activation is rejected');
+  assert.equal(f.notch.webContents.reloads, 0, 'unaffected hosts must stay live');
+});
+
 for (const operation of ['enable', 'update']) for (const sameTarget of [true, false]) {
   test(`${operation} revalidates confirmed selections after lifecycle waits, same target=${sameTarget}`, { timeout: 5000 }, async t => {
     const { f, file, manifest } = await setupUpdate(t, { third: true });

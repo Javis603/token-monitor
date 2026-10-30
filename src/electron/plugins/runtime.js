@@ -566,12 +566,16 @@ function createPluginRuntime({
       checkContent?.(getSettings());
       const finish = enabled ? await resumeHosts(event, [id]) : await prepareDisable(event, [id]);
       if (enabled === true) {
-        checkContent(getSettings());
-        const patch = initialSetupPlan(getSettings(), plugin, choices, { context: placementContext() }).patch;
-        if (Object.keys(patch).length) persistManagementSettings(patch);
+        try {
+          checkContent(getSettings());
+          const patch = initialSetupPlan(getSettings(), plugin, choices, { context: placementContext() }).patch;
+          if (Object.keys(patch).length) persistManagementSettings(patch);
+          manager.setEnabled(id, true);
+        } finally { await finish(); }
+      } else {
+        manager.setEnabled(id, false);
+        await finish();
       }
-      manager.setEnabled(id, enabled === true);
-      await finish();
       return listWithPlacements();
     });
     handle('plugins:setBackground', (event, { id, enabled } = {}) => {
