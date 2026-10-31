@@ -22,6 +22,55 @@ The Node hub is header-only. The Cloudflare Worker still accepts `?secret=` as a
 
 During Node Hub shutdown, new requests are rejected with `503`, `{ "error": "hub_stopping" }` and `Connection: close`, including requests completed on previously connected sockets. A client still sending a request body may instead observe a closed or reset connection before it receives the response. Already-admitted uploads can finish during the drain period; remaining HTTP connections are force-closed after a five-second timer target. Pending usage is saved before and after draining. This lifecycle response does not apply to the Cloudflare Worker.
 
+## `POST /api/live-activities/register`
+
+Registers an iOS ActivityKit push token with the authenticated Hub. The token
+is stored as private Hub state and is never included in `/api/stats` or device
+records. The Hub uses the registered data preferences to construct the
+ActivityKit `content-state` payload when new usage data arrives. Presentation
+(layout, currency, language) stays on the device: the widget extension reads it
+from the app group, so the Hub never needs to know about a new layout option.
+
+Example payload:
+
+```json
+{
+  "activityID": "7C4D9D4A-0A57-4E7A-AF7B-4A2D5C3A0D8F",
+  "token": "<hex ActivityKit push token>",
+  "preferences": {
+    "liveActivityEnabled": true,
+    "hiddenLimitProviders": ["cursor"],
+    "providerIDs": ["codex"],
+    "accountKeys": ["<accountKey>"]
+  }
+}
+```
+
+Like the desktop menu bar, each Live Activity surface pairs an appearance with a data source chosen on the device (an automatic condition or a named AI tool, an account, a quota window, remaining or used, a period and a tool scope). The Hub does not resolve those sources; it sends the records they can resolve against. `providerIDs` and `accountKeys` (at most eight each) name the providers and accounts the device layout references explicitly. `hiddenLimitProviders` removes providers entirely.
+
+Quota records are ranked "most constrained first": providers whose `status` is `ok` and that are not stale come first, ordered by their lowest canonical window remaining percent; ties and meterless rows fall back to the default catalog order, and unhealthy providers follow in the same order. Selection reserves explicit `accountKeys` first, then up to three ranked records, one record per named provider/recent client, and supplementary accounts (up to three per provider), at most eight records. The emitted records retain the health/ranking order.
+
+The builder measures serialized UTF-8 bytes and caps `content-state` at 3,500 bytes, reserving space for the fixed Activity attributes and APNs envelope. If necessary, explicit accounts and named providers are admitted before supplementary records; optional plan labels are removed globally before any record is omitted. A record that cannot fit is absent, never substituted for an explicitly named account. Both transports also check the complete APNs body against 4,096 bytes. The device applies the same content-state budget to local updates.
+
+Pushes carry a structured, data-only `content-state`. ActivityKit caps the whole push at 4 KB, so null and empty fields are omitted rather than sent as `null`:
+
+- `updatedAt`, `sourceStale` — the usage feed's freshness.
+- `usage.today` / `usage.month` — `tokens`, `costUSD` and `outputTPS` (timed output tokens per second, the same rule as the app's average speed).
+- `recent` — the most recently used client (latest session `lastUsedAt`) as `client`, with its own `today` / `month` `tokens` and `costUSD` from the period's `clients` / `clientCosts`. Absent when no session has a timestamp.
+- `quotas` — the records above, each with `providerID`, `accountKey`, `planLabel`, `updatedAt`, `stale` and at most three canonical `windows` (`label`, `kind`, `remainingPercent`, `resetsAt`, `windowMinutes`, `creditsAmount`, `creditsCurrency`). `kind` lets a source ask for a specific window; `windowMinutes` gives the window length.
+- `agents` — `running` is the number of sessions currently running (the same three-state rule as the Sessions list), `clients` the distinct client ids of those sessions, most recent first, at most three.
+
+All dates are seconds since the 2001-01-01 Cocoa reference date (`aps` epoch minus 978307200), including `quotas[].updatedAt` and `windows[].resetsAt`. `aps.stale-date` is `content-state.updatedAt` + 15 minutes, or earlier when the source is already flagged stale. Because a session that goes quiet writes nothing, both backends schedule the next push at the earliest transcript inactivity deadline or canonical provider activity-lease expiry (including waiting/idle observations that can fall back to running) (the Worker uses a Durable Object alarm).
+
+A successful registration returns `{ "ok": true, "activityID": "…", "pushEnabled": true }`. `pushEnabled` reports whether the Hub has APNs configuration; it does not confirm delivery. Registering the same activity ID replaces its token and data preferences. Activity IDs must contain 1–128 ASCII letters, digits, underscores or hyphens; tokens must be even-length hexadecimal strings of 32–4096 characters. Malformed registrations return `400`. Node applies the same request-body limit as ingest and returns `413` when exceeded.
+
+Both backends coalesce remote updates independently of SSE connections, send the latest snapshot at dispatch and serialize batches. Invalid APNs tokens are removed only if that registration has not been replaced. Network failures leave registrations available for the next data update.
+
+## `DELETE /api/live-activities/{activityID}`
+
+Removes a previously registered ActivityKit push token. The iOS app calls this
+when the Live Activity is disabled or ended.
+
 ## `GET /api/health`
 
 Health check. Does not require authentication.
@@ -44,6 +93,7 @@ Example response:
   },
   "deviceCount": 2,
   "secretRequired": true,
+  "liveActivityPushEnabled": true,
   "now": "2026-05-18T00:00:00.000Z"
 }
 ```

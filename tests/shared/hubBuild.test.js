@@ -51,7 +51,9 @@ function localDependencySpecifiers(file, source) {
   const messages = linter.verify(source, [{
     languageOptions: {
       ecmaVersion: 'latest',
-      sourceType: file === 'worker/src/index.js' ? 'module' : 'commonjs'
+      sourceType: file.startsWith('worker/src/') && !file.startsWith('worker/src/shared/')
+        ? 'module'
+        : 'commonjs'
     }
   }], { filename: file });
   assert.deepEqual(messages.filter((message) => message.fatal), [], `cannot parse dependencies in ${file}`);

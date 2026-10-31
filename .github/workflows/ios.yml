@@ -1,0 +1,94 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/ios/**'
+      - 'src/shared/**'
+      - 'src/hub/**'
+      - 'worker/src/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'apps/ios/**'
+      - 'src/shared/**'
+      - 'src/hub/**'
+      - 'worker/src/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      # Explicitly select Swift 6.2 / iOS 26; macos-15 defaults to older Xcode.
+      # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select an available iPhone simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          xcodebuild -version
+          xcrun simctl list devices available --json > artifacts/simulators.json
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+
+          candidates = []
+          for runtime, devices in json.loads(Path('artifacts/simulators.json').read_text())['devices'].items():
+              match = re.search(r'\.iOS-(\d+(?:-\d+)*)$', runtime)
+              if not match:
+                  continue
+              version = tuple(map(int, match[1].split('-')))
+              if version[0] < 26:
+                  continue
+              for device in devices:
+                  if device.get('isAvailable') and device['name'].startswith('iPhone'):
+                      candidates.append((version, device['name'], device['udid']))
+          if not candidates:
+              raise SystemExit('No available iPhone simulator with iOS 26 or later. Check the runner image.')
+          version, name, udid = max(candidates)
+          print(f'Testing {name}, iOS {".".join(map(str, version))}: {udid}')
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              stream.write(f'IOS_SIMULATOR_ID={udid}\n')
+          PY
+      - name: Run native tests (unsigned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project apps/ios/TokenMonitor.xcodeproj -scheme TokenMonitor \
+            -configuration Debug -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_ID" \
+            -derivedDataPath "$RUNNER_TEMP/ios-tests" \
+            -resultBundlePath artifacts/NativeTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO test 2>&1 | tee artifacts/tests.log
+      - name: Build device archive (unsigned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project apps/ios/TokenMonitor.xcodeproj -scheme TokenMonitor \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios-release" \
+            -archivePath "$RUNNER_TEMP/TokenMonitor.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO archive 2>&1 | tee artifacts/archive.log
+          plutil -lint "$RUNNER_TEMP/TokenMonitor.xcarchive/Products/Applications/Token Monitor.app/PrivacyInfo.xcprivacy"
+          plutil -lint "$RUNNER_TEMP/TokenMonitor.xcarchive/Products/Applications/Token Monitor.app/PlugIns/TokenMonitorWidgets.appex/PrivacyInfo.xcprivacy"
+      - name: Save test results and build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-validation
+          path: artifacts/
+          retention-days: 7
+          if-no-files-found: warn

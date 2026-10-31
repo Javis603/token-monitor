@@ -15,6 +15,10 @@ const BUILD_ID_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const WORKER_SHARED_MODULES = Object.freeze([
   'limits/providers.js',
   'limits/core.js',
+  'limits/windowLabels.js',
+  'liveActivity.js',
+  'limits/balanceDisplay.js',
+  'compactTokens.js',
   'providers/workbuddy/identity.js',
   'usage.js',
   'sessionLive.js',
@@ -42,11 +46,13 @@ const WORKER_SHARED_PACKAGE = Object.freeze({
 const CORE_SOURCE_FILES = WORKER_SHARED_MODULES.map((name) => `src/shared/${name}`);
 const NODE_RUNTIME_SOURCE_FILES = Object.freeze([
   'src/hub/server.js',
+  'src/hub/liveActivityPush.js',
   'src/shared/http.js',
   'src/shared/config.js'
 ]);
 const WORKER_RUNTIME_SOURCE_FILES = Object.freeze([
   'worker/src/index.js',
+  'worker/src/liveActivityPush.js',
   'worker/wrangler.toml'
 ]);
 

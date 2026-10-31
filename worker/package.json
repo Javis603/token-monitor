@@ -17,6 +17,15 @@
       },
       "PUBLIC_STATS_ENABLED": {
         "description": "Optional. Set to 1 to expose the unauthenticated GET /api/public/stats endpoint. Leave blank to keep it off."
+      },
+      "TOKEN_MONITOR_APNS_KEY_ID": {
+        "description": "Optional ActivityKit APNs key id used to update iOS Live Activities."
+      },
+      "TOKEN_MONITOR_APNS_TEAM_ID": {
+        "description": "Optional Apple Developer team id used for ActivityKit APNs authentication."
+      },
+      "TOKEN_MONITOR_APNS_PRIVATE_KEY": {
+        "description": "Optional ActivityKit APNs .p8 private key. Store it as a Worker secret."
       }
     }
   },

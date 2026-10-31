@@ -401,6 +401,10 @@ A saída vai para `dist/`. Windows e Linux usam o script `dist:*` correspondente
 
 Os scripts de execução e de empacotamento garantem explicitamente o binário fixado do tokscale em cada alvo com um build vendorizado. As demais plataformas de origem mantêm o binário do npm e filtram os clientes que ele não suporta; `npm install`, o lint e os testes não baixam esse binário.
 
+### App complementar para iOS (experimental)
+
+O app nativo para iOS se conecta ao seu Hub para mostrar uso, limites de IA, widgets e Atividades ao Vivo. No momento, é necessário compilar o código-fonte; ainda não há download anunciado na App Store ou no TestFlight. Consulte o [guia de configuração, capturas e CI do iOS](apps/ios/README.md) e a [preparação para distribuição](apps/ios/RELEASING.md).
+
 ## Como funciona
 
 ```text

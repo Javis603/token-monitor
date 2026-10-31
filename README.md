@@ -403,6 +403,10 @@ Runtime and packaging scripts explicitly ensure the pinned tokscale binary on ev
 
 For lint and tests, run `npm run verify`. Run `npm run test:coverage` for JavaScript coverage reports; see [testing and coverage](docs/testing.md) for scope, report files and interpretation limits.
 
+### iOS companion (experimental)
+
+The native iOS app connects to your Hub to show usage, AI limits, widgets and Live Activities. It is currently a source build; no App Store or TestFlight download is advertised. See the [iOS setup, screenshots and CI guide](apps/ios/README.md) and [distribution preparation](apps/ios/RELEASING.md).
+
 ## How it works
 
 ```text
