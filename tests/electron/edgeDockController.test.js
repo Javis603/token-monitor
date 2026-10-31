@@ -2192,3 +2192,28 @@ test('cancelling mid-morph restores the renderer shape even when it matches the 
   advance(300);
   assert.equal(paintedShape(), attached, 'a stopped morph cannot repaint an intermediate shape later');
 });
+
+for (const railX of [350, 800]) {
+  test(`floating refresh preserves the bottom-centred design beside an open last-cell card (x=${railX})`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({
+      canRefreshLimits: () => true,
+      settings: { edgeDockFloatingX: (railX - 8) / 1120 },
+      displays: [{ id: 1, bounds: { x: 0, y: 0, width: 1200, height: 800 }, workArea: { x: 0, y: 0, width: 1200, height: 800 } }]
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const bubble = fixture.windowFor('bubble');
+    const refresh = fixture.windowFor('peek');
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 211 };
+    advance(100);
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 2 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'cursor', height: 180 });
+    fixture.paintPeek();
+    assert.equal(refresh.ignoreMouse, false, 'refresh is actually shown');
+    assert.equal(bubble.opacity, 1, 'the last-cell card is actually shown');
+    assert.equal(refresh.bounds.x + refresh.bounds.width / 2, rail.bounds.x + rail.bounds.width / 2);
+    assert.equal(refresh.bounds.y, rail.bounds.y + rail.bounds.height - Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) + EDGE_DOCK_METRICS.refreshGap);
+    assert.ok(refresh.bounds.x + refresh.bounds.width <= bubble.bounds.x || bubble.bounds.x + bubble.bounds.width <= refresh.bounds.x, 'bottom refresh and the side-opening card cannot overlap');
+  });
+}

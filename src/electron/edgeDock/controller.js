@@ -308,10 +308,6 @@ function createEdgeDockController(deps) {
       ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * dockScale()), workArea, side, metrics: { ...m, bubbleWidth } })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
-    if (floatingX !== null) {
-      refresh.x = side === 'left' ? rail.x + rail.width + m.refreshGap : rail.x - m.refreshGap - refresh.width;
-      refresh.y = rail.y + rail.height - refresh.height;
-    }
     return { side, workArea, rail, peek, handle, restingHandle, trigger: floatingX === null ? trigger : null, wake: floatingX === null ? zones?.wake || null : null, approach: floatingX === null ? zones?.approach || null : null, bubble, bubbleWidth, refresh };
   }
 
