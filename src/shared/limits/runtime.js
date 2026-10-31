@@ -132,7 +132,10 @@ function isAccountScope(scope) {
 
 function normalizedScope(scope) {
   if (!scope || typeof scope !== 'object') return { provider: '' };
-  return { ...cloneValue(scope), provider: providerId(scope.provider) };
+  const provider = providerId(scope.provider);
+  // Muse rows identify local sources, not accounts. Display labels cannot
+  // address one source, so all its refresh/clear scopes stay provider-wide.
+  return provider === 'muse' ? { provider } : { ...cloneValue(scope), provider };
 }
 
 function rowIdentityKey(row) {
@@ -370,11 +373,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     resetTimer = setTimer(() => {
       resetTimer = null;
       for (const key of next.keys || []) attemptedResetBoundaries.add(key);
-      for (const scope of next.scopes || []) {
+      const scopes = new Map((next.scopes || []).map((scope) => {
+        const normalized = normalizedScope(scope);
+        return [JSON.stringify(normalized), normalized];
+      }));
+      for (const scope of scopes.values()) {
         const provider = providerId(scope.provider);
         const rows = snapshot.providers.filter((row) => row.provider === provider);
         const strongIdentity = clean(scope.accountKey || scope.accountEmail || scope.accountName);
-        if (!configuredProviders.has(provider) || (rows.length > 1 && !strongIdentity)) continue;
+        if (!configuredProviders.has(provider) || (provider !== 'muse' && rows.length > 1 && !strongIdentity)) continue;
         void refresh(scope, 'reset-boundary');
       }
       scheduleResetTimer();
@@ -430,11 +437,12 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       // Recorded for every key rather than only the dispatched ones, so a scope
       // skipped below still consumes its deadline instead of re-firing at once.
       recordLimitsUrgencyAttempt(burnState, due.keys, now());
-      for (const [index, scope] of (due.scopes || []).entries()) {
+      for (const [index, inputScope] of (due.scopes || []).entries()) {
+        const scope = normalizedScope(inputScope);
         const provider = providerId(scope.provider);
         const rows = snapshot.providers.filter((row) => row.provider === provider);
         const strongIdentity = clean(scope.accountKey || scope.accountEmail || scope.accountName);
-        if (!configuredProviders.has(provider) || (rows.length > 1 && !strongIdentity)) continue;
+        if (!configuredProviders.has(provider) || (provider !== 'muse' && rows.length > 1 && !strongIdentity)) continue;
         // A lane already running a probe is skipped whatever queued it: an
         // intent superseded by another refresh resolves its promise at once
         // while the physical probe keeps running, so inFlight alone would let an
