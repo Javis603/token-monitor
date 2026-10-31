@@ -21,6 +21,7 @@ const {
   edgeDockTriggerBounds,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockFloatingX,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
@@ -43,6 +44,7 @@ const REFRESH_RESULT_HOLD_MS = 900;
 const REFRESH_FADE_OUT_MS = 200;
 const FADE_STEP_MS = 16;
 const WAKE_TOPMOST_RETRY_MS = 500;
+const RAIL_MORPH_MS = 160;
 
 function edgeDockSupported(platform = process.platform) {
   return platform === 'darwin' || platform === 'win32';
@@ -155,6 +157,10 @@ function createEdgeDockController(deps) {
   let refreshFeedbackUntil = 0;
   let refreshFeedbackWindow = null;
   let drag = null;
+  let railMotion = null;
+  let railMotionTimer = null;
+  let railHitPolygons = [];
+  let railPointerMode = null;
   let placementOverride = null;
   let fullScreen = false;
   let fullScreenCheckedAt = -Infinity;
@@ -170,6 +176,7 @@ function createEdgeDockController(deps) {
   }
 
   function alwaysVisible() {
+    if (placement().floatingX !== null) return true;
     const mode = normalizeEdgeDockMode(settings().edgeDockMode);
     return mode === 'always' || (mode === 'alwaysExceptFullScreen' && !fullScreen);
   }
@@ -221,6 +228,7 @@ function createEdgeDockController(deps) {
     return {
       side: normalizeEdgeDockSide(current.edgeDockSide),
       offset: normalizeEdgeDockOffset(current.edgeDockOffset),
+      floatingX: normalizeEdgeDockFloatingX(current.edgeDockFloatingX),
       displayId: normalizeEdgeDockDisplayId(current.edgeDockDisplayId)
     };
   }
@@ -283,10 +291,13 @@ function createEdgeDockController(deps) {
   function layout() {
     const current = display();
     if (!current) return null;
-    const { side, offset } = placement();
+    const { side: dockSide, offset, floatingX } = placement();
     const workArea = current.workArea;
     const m = metrics();
-    const rail = edgeDockRailBounds({ workArea, side, offset, cellKinds: cellKinds(), metrics: m });
+    const rail = edgeDockRailBounds({ workArea, side: dockSide, offset, floatingX, cellKinds: cellKinds(), metrics: m });
+    const side = floatingX === null ? dockSide : rail.x + rail.width / 2 < workArea.x + workArea.width / 2 ? 'left' : 'right';
+    const cardSpace = side === 'left' ? workArea.x + workArea.width - rail.x - rail.width : rail.x - workArea.x;
+    const bubbleWidth = floatingX === null ? m.bubbleWidth : Math.min(m.bubbleWidth, cardSpace - m.bubbleGap - m.bubbleTail - m.screenMargin);
     const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail, metrics: m });
     // The handle as drawn takes the pointer; the resting handle alone decides the
     // fast reveal, so how soon the rail opens never depends on how far the
@@ -296,10 +307,10 @@ function createEdgeDockController(deps) {
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail, metrics: m });
     const zones = edgeDockHandleZones({ side, peekBounds: peek, metrics: m });
     const bubble = bubbleCell !== null
-      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * dockScale()), workArea, side, metrics: m })
+      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * dockScale()), workArea, side, metrics: { ...m, bubbleWidth } })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
-    return { side, workArea, rail, peek, handle, restingHandle, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
+    return { side, workArea, rail, peek, handle, restingHandle, trigger: floatingX === null ? trigger : null, wake: floatingX === null ? zones?.wake || null : null, approach: floatingX === null ? zones?.approach || null : null, bubble, bubbleWidth, refresh };
   }
 
   function alive(win) {
@@ -367,6 +378,7 @@ function createEdgeDockController(deps) {
     onWebSurfaceChanged();
     const ignore = !(visible && (surface !== 'peek' || peekTakesPointer()));
     if (surface === 'peek') setPeekIgnoresMouse(win, ignore, visible);
+    else if (surface === 'rail' && platform === 'darwin') syncRailPointer();
     else win.setIgnoreMouseEvents(ignore);
     if (!win.isVisible()) {
       setOpacity(win, 0);
@@ -462,6 +474,33 @@ function createEdgeDockController(deps) {
     if (alive(win) && peekMode === 'handle' && peekTargetVisible && !peekPaintPending) setPeekIgnoresMouse(win, !peekTakesPointer(), true);
   }
 
+  function syncRailPointer() {
+    const win = windows.rail;
+    if (platform !== 'darwin' || !alive(win)) return;
+    let takesPointer = visibleTargets.rail;
+    if (takesPointer && !drag && (placement().floatingX !== null || railMotion)
+      && !(railPointerMode === 'capture' && primaryButtonDown() === true)) {
+      const bounds = win.getBounds();
+      const point = screen.getCursorScreenPoint();
+      const x = point.x - bounds.x, y = point.y - bounds.y;
+      takesPointer = railHitPolygons.some(polygon => {
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+          const [xi, yi] = polygon[i], [xj, yj] = polygon[j];
+          if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+        }
+        return inside;
+      });
+    }
+    // macOS masks only clip paint. Forward moves through the transparent canvas
+    // so entering the painted capsule can restore input before the next poll.
+    const mode = takesPointer ? 'capture' : visibleTargets.rail ? 'forward' : 'ignore';
+    if (railPointerMode === mode) return;
+    railPointerMode = mode;
+    if (mode === 'forward') win.setIgnoreMouseEvents(true, { forward: true });
+    else win.setIgnoreMouseEvents(!takesPointer);
+  }
+
   function setPointerOnHandle(on) {
     if (on === pointerOnHandle) return;
     pointerOnHandle = on;
@@ -531,7 +570,7 @@ function createEdgeDockController(deps) {
   }
 
   function renderPayload(surface) {
-    const { side } = placement();
+    const side = layout()?.side || placement().side;
     const shapedGlass = nativeMaterial[surface] === true && glasses[surface] !== null
       && (surface !== 'peek' || peekMode === 'refresh');
     const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface], zoom: dockScale() };
@@ -554,6 +593,7 @@ function createEdgeDockController(deps) {
         ...base,
         cell: bubbleCell !== null ? cells[bubbleCell] || null : null,
         placed: bubblePlaced,
+        cardWidth: layout()?.bubbleWidth / dockScale(),
         maxCardHeight: maxCardHeight()
       };
     }
@@ -702,6 +742,9 @@ function createEdgeDockController(deps) {
   }
 
   function destroyWindows() {
+    cancelRailMotion();
+    railHitPolygons = [];
+    railPointerMode = null;
     for (const surface of SURFACES) {
       const win = windows[surface];
       backdrops.get(win)?.dispose();
@@ -765,7 +808,7 @@ function createEdgeDockController(deps) {
       };
       return { closed: peekCommands(options), outline: peekCommands({ ...options, open: true }) };
     }
-    const options = { width: bounds.width, height: bounds.height, side, shoulder: m.shoulder, radius: m.railRadius };
+    const options = { width: bounds.width, height: bounds.height, side, floatingProgress: railMorphProgress(), shoulder: m.shoulder, radius: m.railRadius };
     return { closed: railCommands(options), outline: railCommands({ ...options, open: true }) };
   }
 
@@ -786,14 +829,15 @@ function createEdgeDockController(deps) {
     if (previousBounds.x !== x || previousBounds.y !== y || previousBounds.width !== width || previousBounds.height !== height) {
       win.setBounds({ x, y, width, height });
     }
-    const { side } = placement();
+    const side = layout()?.side || placement().side;
     const currentDisplay = display();
     const displayKey = `${currentDisplay?.id ?? ''}:${currentDisplay?.scaleFactor ?? ''}`;
-    const key = `${displayKey}:${side}:${width}x${height}:${bounds.tailY ?? ''}:${surface === 'peek' ? `${peekMode}${peekMode === 'handle' ? `:${handleSize().width}x${handleSize().length}` : ''}` : ''}`;
+    const key = `${displayKey}:${side}:${surface === 'rail' ? railMorphProgress() : ''}:${width}x${height}:${bounds.tailY ?? ''}:${surface === 'peek' ? `${peekMode}${peekMode === 'handle' ? `:${handleSize().width}x${handleSize().length}` : ''}` : ''}`;
     if (shapes[surface]?.key === key) return;
     const built = commandsFor(surface, bounds, side);
     const closed = Array.isArray(built) ? built : built.closed;
     const outline = Array.isArray(built) ? built : built.outline;
+    if (surface === 'rail' && platform === 'darwin') railHitPolygons = toPolygons(closed);
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline) };
     backdrops.get(win)?.update({ key, commands: closed });
     if (glasses[surface] && (surface !== 'peek' || peekMode === 'refresh') && shapeGlass(surface, closed, width, height)) {
@@ -826,7 +870,37 @@ function createEdgeDockController(deps) {
         syncPeekPointer();
       }
     }
-    render(surface);
+    if (surface === 'rail' && railMotion) {
+      // A shape-only frame changes renderer state outside the full-payload cache.
+      lastSent.rail = '';
+      send('rail', 'edgeDock:shapeFrame', { shape: shapes.rail, side });
+    } else render(surface);
+  }
+
+  function railMotionEase() {
+    const t = Math.min(1, (Date.now() - railMotion.startedAt) / RAIL_MORPH_MS);
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function railMorphProgress() {
+    const target = placement().floatingX === null ? 0 : 1;
+    return railMotion ? railMotion.from + (target - railMotion.from) * railMotionEase() : target;
+  }
+
+  function cancelRailMotion() {
+    clearInterval(railMotionTimer);
+    railMotionTimer = null;
+    railMotion = null;
+  }
+
+  function animateRailPlacement(from, fromX) {
+    cancelRailMotion();
+    if (prefersReducedMotion()) return;
+    railMotion = { from, fromX, startedAt: Date.now() };
+    railMotionTimer = setInterval(() => {
+      if (Date.now() - railMotion.startedAt >= RAIL_MORPH_MS) cancelRailMotion();
+      positionRail();
+    }, FADE_STEP_MS);
   }
 
   function buildWindows() {
@@ -911,11 +985,12 @@ function createEdgeDockController(deps) {
   function syncRefresh(current = layout()) {
     if (!current || !alive(windows.peek)) return;
     const visible = settings().edgeDockRefreshEnabled === true
-      && railVisible && !drag && canRefreshLimits() === true
+      && railVisible && !drag && !railMotion && canRefreshLimits() === true
       && (!alwaysVisible() || refreshHovered || refreshKeepsButtonVisible());
     if (!visible) {
-      if (!windows.peek.isVisible() || refreshVisible) {
-        showPeekWindow(false, alwaysVisible() ? REFRESH_FADE_OUT_MS : FADE_OUT_MS);
+      if (railMotion || !windows.peek.isVisible() || refreshVisible) {
+        // Finish any old fade before the rail moves away from the button.
+        showPeekWindow(false, railMotion ? 0 : alwaysVisible() ? REFRESH_FADE_OUT_MS : FADE_OUT_MS);
       }
       refreshVisible = false;
       if (settings().edgeDockRefreshEnabled !== true) {
@@ -935,7 +1010,9 @@ function createEdgeDockController(deps) {
   function positionRail(current = layout()) {
     if (!current || !alive(windows.rail)) return;
     syncPageZoom();
-    placeSurface('rail', current.rail);
+    const rail = railMotion ? { ...current.rail, x: Math.round(railMotion.fromX + (current.rail.x - railMotion.fromX) * railMotionEase()) } : current.rail;
+    placeSurface('rail', rail);
+    syncRailPointer();
     if (peekMode === 'handle' && !railVisible) placeSurface('peek', current.peek);
     if (railVisible) syncRefresh(current);
     if (bubbleCell !== null) placeBubble();
@@ -1056,10 +1133,14 @@ function createEdgeDockController(deps) {
     try {
       const point = screen.getCursorScreenPoint();
       const current = layout();
+      syncRailPointer();
+      const buttonDown = drag ? primaryButtonDown() : null;
       // The renderer can miss the pointerup of a drag, because the window it is
       // dragging moves out from under the captured pointer; the OS button
       // state is the authoritative end of the gesture.
-      if (drag && primaryButtonDown() === false && Date.now() - drag.startedAt > 80) {
+      if (drag?.captureLost && buttonDown === null) {
+        handleDragEnd({ cancelled: true });
+      } else if (drag && buttonDown === false && Date.now() - drag.startedAt > 80) {
         handleDragEnd();
       } else if (current && drag) {
         followDrag(point, current);
@@ -1128,6 +1209,7 @@ function createEdgeDockController(deps) {
     const next = edgeDockPlacementForDrop({
       workArea,
       pointer: point,
+      grabOffsetX: drag.grabOffsetX * scale,
       grabOffsetY: drag.grabOffsetY * scale,
       cellKinds: cellKinds(),
       metrics: scaledEdgeDockMetrics(scale)
@@ -1135,15 +1217,18 @@ function createEdgeDockController(deps) {
     if (!next) return;
     next.displayId = normalizeEdgeDockDisplayId(targetDisplay?.id);
     const previous = placement();
-    const changedSide = next.side !== previous.side || next.displayId !== previous.displayId;
+    const from = railMorphProgress();
+    const changedMode = (next.floatingX === null) !== (previous.floatingX === null);
+    const changedSide = next.side !== previous.side || next.displayId !== previous.displayId || changedMode;
     placementOverride = next;
+    if (changedMode) animateRailPlacement(from, windows.rail.getBounds().x);
     positionRail();
     if (changedSide) render('rail');
   }
 
-  function handleDragStart(grabOffsetY) {
+  function handleDragStart(grabOffsetY, grabOffsetX, gestureId) {
     if (!railVisible) return;
-    drag = { grabOffsetY: Math.max(0, Number(grabOffsetY) || 0), startedAt: Date.now() };
+    drag = { gestureId, grabOffsetX: Number.isFinite(grabOffsetX) ? Math.max(0, grabOffsetX) : EDGE_DOCK_METRICS.railWidth / 2, grabOffsetY: Math.max(0, Number(grabOffsetY) || 0), startedAt: Date.now() };
     placementOverride = placement();
     hideBubble();
     syncRefresh();
@@ -1151,14 +1236,20 @@ function createEdgeDockController(deps) {
     schedulePoll();
   }
 
-  function handleDragEnd() {
+  function handleDragEnd({ cancelled = false } = {}) {
     if (!drag) return;
-    const final = placementOverride;
+    const current = layout();
+    if (!cancelled && current) followDrag(screen.getCursorScreenPoint(), current);
+    const gestureId = drag.gestureId;
+    const final = cancelled ? null : placementOverride;
     drag = null;
     placementOverride = null;
+    if (cancelled) cancelRailMotion();
     if (final) {
       try { onPlacementChange?.(final); } catch (error) { logger(`[edge-dock] placement save failed: ${error.message}`); }
     }
+    applyEffects(intent.setAlways(alwaysVisible()));
+    send('rail', 'edgeDock:dragEnded', cancelled ? { gestureId, cancelled: true } : { gestureId });
     positionRail();
     render('rail');
     render('peek');
@@ -1200,7 +1291,9 @@ function createEdgeDockController(deps) {
       }
     });
     ipcMain.on('edgeDock:pointer', (event) => {
-      if (surfaceFor(event.sender) !== 'peek' || peekMode !== 'handle' || drag) return;
+      const surface = surfaceFor(event.sender);
+      if (surface === 'rail') { syncRailPointer(); return; }
+      if (surface !== 'peek' || peekMode !== 'handle' || drag) return;
       const current = layout();
       if (current) trackHandlePointer(screen.getCursorScreenPoint(), current);
     });
@@ -1242,11 +1335,18 @@ function createEdgeDockController(deps) {
     });
     ipcMain.on('edgeDock:dragStart', (event, payload) => {
       if (surfaceFor(event.sender) !== 'rail') return;
-      handleDragStart(payload?.grabOffsetY);
+      handleDragStart(payload?.grabOffsetY, payload?.grabOffsetX, payload?.gestureId);
     });
     ipcMain.on('edgeDock:dragEnd', (event) => {
       if (surfaceFor(event.sender) !== 'rail') return;
       handleDragEnd();
+    });
+    ipcMain.on('edgeDock:dragCaptureLost', (event, payload) => {
+      if (surfaceFor(event.sender) !== 'rail' || !drag || drag.gestureId !== payload?.gestureId) return;
+      drag.captureLost = true;
+      // Without capture or a readable native button state, a release outside
+      // the clamped rail cannot be observed. Cancel instead of following forever.
+      if (primaryButtonDown() === null) handleDragEnd({ cancelled: true });
     });
     ipcMain.on('edgeDock:bubbleSize', (event, payload) => {
       if (surfaceFor(event.sender) !== 'bubble') return;
@@ -1304,6 +1404,7 @@ function createEdgeDockController(deps) {
 
   function onDisplayChange() {
     if (!running) return;
+    cancelRailMotion();
     repark();
     if (bubbleCell !== null) invalidateBubblePlacement();
     positionRail();

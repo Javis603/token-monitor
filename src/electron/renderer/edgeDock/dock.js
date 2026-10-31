@@ -666,13 +666,13 @@ if (surface === 'peek') root.addEventListener('click', () => {
   if (state.payload?.peekMode !== 'refresh') bridge.click(null);
 });
 
-// On macOS the handle's window passes the pointer through with its moves still
+// On macOS the handle and floating rail pass the pointer through with moves still
 // forwarded here, so reporting them lets the main process take the pointer as
 // it reaches the handle rather than at its next cursor poll. The report carries
 // no position: the main process reads the cursor itself.
-if (surface === 'peek') {
+if (surface === 'peek' || surface === 'rail') {
   const reportPointer = () => {
-    if (state.payload?.peekMode !== 'refresh') bridge.pointer();
+    if (surface === 'rail' ? state.payload?.platform === 'darwin' : state.payload?.peekMode !== 'refresh') bridge.pointer();
   };
   document.addEventListener('mousemove', reportPointer);
   document.documentElement.addEventListener('mouseleave', reportPointer);
@@ -1297,26 +1297,42 @@ function renderRail(payload) {
 }
 
 let gesture = null;
+let nextGestureId = 0;
+
+bridge.onDragEnded?.(({ gestureId }) => {
+  if (gesture?.id !== gestureId) return;
+  gesture = null;
+  railNode?.classList.remove('is-dragging');
+});
 
 function bindRailGestures(rail) {
   rail.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || gesture) return;
     gesture = {
+      id: ++nextGestureId,
       pointerId: event.pointerId,
       startX: event.screenX,
       startY: event.screenY,
       grabOffsetY: event.clientY,
+      grabOffsetX: event.clientX,
       cellIndex: indexFromTarget(event.target),
       dragging: false
     };
     rail.setPointerCapture(event.pointerId);
   });
   rail.addEventListener('pointermove', (event) => {
-    if (!gesture || gesture.pointerId !== event.pointerId || gesture.dragging) return;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    // A later move can prove release even if capture was lost and the native
+    // button reader is unavailable. Capture loss alone still proves nothing.
+    if (event.buttons === 0) {
+      finish(event);
+      return;
+    }
+    if (gesture.dragging) return;
     if (Math.hypot(event.screenX - gesture.startX, event.screenY - gesture.startY) < DRAG_THRESHOLD_PX) return;
     gesture.dragging = true;
     rail.classList.add('is-dragging');
-    bridge.dragStart(gesture.grabOffsetY);
+    bridge.dragStart(gesture.grabOffsetY, gesture.grabOffsetX, gesture.id);
   });
   const finish = (event) => {
     if (!gesture || gesture.pointerId !== event.pointerId) return;
@@ -1327,8 +1343,15 @@ function bindRailGestures(rail) {
     else if (event.type === 'pointerup') bridge.click(ended.cellIndex);
   };
   rail.addEventListener('pointerup', finish);
-  rail.addEventListener('pointercancel', finish);
-  rail.addEventListener('lostpointercapture', finish);
+  // Cancellation and capture loss do not prove physical release. Main continues
+  // while native tracking works, or restores saved placement when it cannot.
+  const captureLost = (event) => {
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (gesture.dragging) bridge.dragCaptureLost?.(gesture.id);
+    else finish(event);
+  };
+  rail.addEventListener('pointercancel', captureLost);
+  rail.addEventListener('lostpointercapture', captureLost);
 }
 
 function indexFromTarget(target) {
@@ -1913,6 +1936,7 @@ function fitCardTotal(card, scale = 1) {
 
 function renderBubble(payload) {
   root.dataset.side = payload.side;
+  root.style.setProperty('--edge-dock-card-width', `${payload.cardWidth || 280}px`);
   const cell = payload.cell;
   if (!cell) {
     if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
@@ -2009,6 +2033,12 @@ function deferBubbleRender() {
 }
 
 bridge.onRender(render);
+bridge.onShapeFrame?.(({ shape, side }) => {
+  if (surface !== 'rail' || !state.payload) return;
+  state.payload = { ...state.payload, shape, side };
+  root.dataset.side = side;
+  updateShape(state.payload);
+});
 // A repaint that no push triggers, because two readings here move on a clock
 // rather than on data: a session stops being running when its window expires
 // (sessionLive.RUNNING_WINDOW_MS) even with no new stats at all, and reset
