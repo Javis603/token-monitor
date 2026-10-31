@@ -199,11 +199,11 @@
     const namedA = keysA.size > 0 || Boolean(emailA);
     const namedB = keysB.size > 0 || Boolean(emailB);
     if (namedA || namedB) return false;
-    // Anonymous Muse rows name a device, not an account: the CLI exposes no
+    // Anonymous Muse rows name a device, not an account: neither source exposes a
     // stable account id (limits/core.js scopes them by device for the same
     // reason). Trimmed, case-sensitive device ids decide; a missing id is one
     // unknown bucket, equal only to another unknown — never to a known device.
-    if (provider === 'muse') return sourceDeviceKey(a) === sourceDeviceKey(b);
+    if (provider === 'muse' || provider === 'museai') return sourceDeviceKey(a) === sourceDeviceKey(b);
     return true;
   }
 
@@ -319,7 +319,7 @@
           // Anonymous Muse rows are device observations (see sameAccount):
           // one survivor per trimmed device id, with every missing id in a
           // single unknown bucket that never absorbs a known device row.
-          if (provider === 'muse') {
+          if (provider === 'muse' || provider === 'museai') {
             const deviceKey = sourceDeviceKey(record);
             if (keptMuseDevices.has(deviceKey)) continue;
             keptMuseDevices.add(deviceKey);
@@ -393,7 +393,7 @@
     // mutate the caller's stats, and leave every other row by reference.
     const effectiveDeviceId = String(local?.deviceId || '').trim();
     if (!effectiveDeviceId) return providers;
-    const needsStamp = (record) => String(record?.provider || '').trim().toLowerCase() === 'muse'
+    const needsStamp = (record) => ['muse', 'museai'].includes(String(record?.provider || '').trim().toLowerCase())
       && !sourceDeviceKey(record);
     if (!providers.some(needsStamp)) return providers;
     return providers.map((record) => (needsStamp(record)

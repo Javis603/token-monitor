@@ -10,7 +10,7 @@ read_when:
 
 ## Identity and ids
 
-`muse` is both the tracked Muse Code client and its limits provider; the display name is Muse Code. This integration does not collect the separate muse.ai personal agent allowance. `meta` is the model vendor mark; it does not represent a separate account or collection source. Muse Spark, Wonder, Glimmer, Image and Voice names resolve to Meta in both the Electron charts and native macOS widget.
+`muse` is both the tracked Muse Code client and its limits provider; the display name is Muse Code. The separate muse.ai personal agent allowance uses the independent [`museai` provider](museai.md). `meta` is the model vendor mark; it does not represent a separate account or collection source. Muse Spark, Wonder, Glimmer, Image and Voice names resolve to Meta in both the Electron charts and native macOS widget.
 
 ## Data sources
 

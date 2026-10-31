@@ -602,10 +602,10 @@ function providerAggregateKey(provider) {
   ) {
     return `${provider.provider}:${identity}:device:${provider.sourceDeviceId || ''}`;
   }
-  // Muse exposes no stable account id, so every row is a device-local
+  // Muse Code and Muse (Meta) expose no stable account id, so every row is a device-local
   // observation. Scoping by device keeps two different Muse accounts on
   // synced devices from silently coalescing into one quota row.
-  if (provider.provider === 'muse') {
+  if (provider.provider === 'muse' || provider.provider === 'museai') {
     return `${provider.provider}:${identity}:device:${provider.sourceDeviceId || ''}`;
   }
   // One Alibaba Cloud account can hold a Team and a Personal subscription at the
@@ -633,9 +633,9 @@ function providerCollapseKey(provider) {
   // proves the identity. Anonymous RPC fallback keys are local observations,
   // so keep the device scope established by providerAggregateKey().
   if (provider.provider === 'antigravity') return providerAggregateKey(provider);
-  // Muse rows carry no portable identity (see providerAggregateKey), so the
+  // Muse Code and Muse (Meta) rows carry no portable identity (see providerAggregateKey), so the
   // collapse pass must keep the device scope instead of merging by name.
-  if (provider.provider === 'muse') return providerAggregateKey(provider);
+  if (provider.provider === 'muse' || provider.provider === 'museai') return providerAggregateKey(provider);
   if (
     (provider.provider === 'claude'
       || provider.provider === 'codex'

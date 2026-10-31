@@ -2810,3 +2810,13 @@ test('summary allocation and width fitting need only ordered items and measured 
   assert.deepEqual(Array.from(hidden.visible), []);
   assert.equal(hidden.overflow, false, 'unknown or occupied clearance admits no optional overflow');
 });
+
+test('Meta Muse renders its weekly allowance and separate additional money balance', () => {
+  const { parseMuseaiSubscription } = require('../../src/shared/providers/museai/limits');
+  const { paid } = require('../fixtures/museai');
+  const provider = normalizeLimitProvider({ provider: 'museai', status: 'ok', ...parseMuseaiSubscription(paid) });
+  const rendered = dockView().renderProviderWindows(provider, '#0866FF');
+  assert.match(rendered.text, /97%/);
+  assert.match(rendered.text, /\$60\.00/);
+  assert.equal(dockView().limitProviderUsageItems([provider]).length, 2);
+});
