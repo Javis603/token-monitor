@@ -3,58 +3,58 @@
   "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative \u2014 but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them \u2014 it tracks the installed dependency in both modes (see baseVersionNote). While the client catalog has forkOnly clients (CatPaw, Qoder CN), \"upstream\" fails verify-vendored-tokscale-clients.js by design: no upstream release parses them, and failing closed beats silently reporting zero usage for them.",
   "upstream": "junhoyeo/tokscale",
   "fork": "Javis603/tokscale",
-  "commit": "151313d0d966b9cadd86268612819ce6c144178f",
-  "commitTitle": "fix(codex): exclude empty completions from output rate",
+  "commit": "b5703fef2314fcd8123e5c7988787e3547fa13bf",
+  "commitTitle": "fix(codex): preserve untimed output evidence",
   "baseVersion": "4.20.1",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file \u2014 either pin a new build or flip the mode \u2014 instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
-  "releaseTag": "token-monitor-151313d0",
-  "reason": "Pinned to upstream 39ecb83ab045a300c6f502f9c9319acf5c80e764 (main after v4.20.1), retaining the downstream session/workspace report, parent links, request-performance timing, custom-price authority, and fork-owned clients. Proma moves from the fork to upstream's native client, which reads the Agent journals and both SDK transcript trees under ~/.proma and ~/.proma-dev; session ids come from the record or Pi session header, falling back to the transcript file stem, instead of the fork's path-hashed ids. This alignment also inherits machine labels, offline reports, streamed DSH transcripts, Cursor usage events counted once across snapshots with recount-proof cache rows, OpenCode V2 provider configs and UTF-8 BOM configs, pre-5.6 OpenAI cache-write pricing, legacy OpenCode/MiMo cache replay fixes, Qwen cached/reasoning double-count fixes, Pi standalone usage entries, Grok Build per-inference timing, OpenCodex strict-then-late matching, the Codex review-parent diagnostic exemption, and the rustls-webpki/webpki-roots emSign distrust fix. Custom rates use raw model and billing evidence and remain final without Fast or hosted markup; incomplete coverage preserves reported costs. Combined cache generations remain shared 14, MiMo 15 and Claude/Copilot 16. Codex parser generation 22 joins upstream review-mode state with downstream timing/parent state and excludes explicitly empty completions without reasoning from performance while preserving usage and activity; DSH generation 12 retains the seed/keepalive fixes over upstream streaming; Codex, DSH, Cursor, Grok, Qwen and Pi sources reparse once. Token Monitor preserves manually authored provider_overrides in its pricing file. OpenCodex ledger-only changes and Proma index-only edits have no dedicated App watcher and wait for normal collection/full-period reconciliation. Upstream usage-dashboard additions do not change Token Monitor limits UI. Codex archives whose first frame declares decoded output above the existing per-file limit are rejected before decoding; unknown sizes and concatenated frames retain bounded streaming checks, with usage accounting and archive-limit diagnostics unchanged.",
+  "releaseTag": "token-monitor-b5703fef",
+  "reason": "Pinned to upstream 39ecb83ab045a300c6f502f9c9319acf5c80e764 (main after v4.20.1), retaining the downstream session/workspace report, parent links, request-performance timing, custom-price authority, and fork-owned clients. Proma moves from the fork to upstream's native client, which reads the Agent journals and both SDK transcript trees under ~/.proma and ~/.proma-dev; session ids come from the record or Pi session header, falling back to the transcript file stem, instead of the fork's path-hashed ids. This alignment also inherits machine labels, offline reports, streamed DSH transcripts, Cursor usage events counted once across snapshots with recount-proof cache rows, OpenCode V2 provider configs and UTF-8 BOM configs, pre-5.6 OpenAI cache-write pricing, legacy OpenCode/MiMo cache replay fixes, Qwen cached/reasoning double-count fixes, Pi standalone usage entries, Grok Build per-inference timing, OpenCodex strict-then-late matching, the Codex review-parent diagnostic exemption, and the rustls-webpki/webpki-roots emSign distrust fix. Custom rates use raw model and billing evidence and remain final without Fast or hosted markup; incomplete coverage preserves reported costs. Combined cache generations remain shared 14, MiMo 15 and Claude/Copilot 16. Codex parser generation 23 joins upstream review-mode state with downstream timing/parent state and excludes explicitly empty completions without reasoning from performance while preserving usage and activity, retaining tool/reasoning/nonempty output evidence even when an item timestamp is missing or invalid; DSH generation 12 retains the seed/keepalive fixes over upstream streaming; Codex, DSH, Cursor, Grok, Qwen and Pi sources reparse once. Token Monitor preserves manually authored provider_overrides in its pricing file. OpenCodex ledger-only changes and Proma index-only edits have no dedicated App watcher and wait for normal collection/full-period reconciliation. Upstream usage-dashboard additions do not change Token Monitor limits UI. Codex archives whose first frame declares decoded output above the existing per-file limit are rejected before decoding; unknown sizes and concatenated frames retain bounded streaming checks, with usage accounting and archive-limit diagnostics unchanged.",
   "platforms": {
     "android-arm64": {
       "package": "@tokscale/cli-android-arm64",
       "asset": "tokscale-android-arm64",
-      "sha256": "7d6d19425cf3d3473a9a01ac9b11db39f4b35fcdfabdcc0771c8ac12b4930a64"
+      "sha256": "e403c49dafc3a37bc1fc1d916edbd19f6b11c1ace209cdf7c81ccd309d4458a6"
     },
     "darwin-arm64": {
       "package": "@tokscale/cli-darwin-arm64",
       "asset": "tokscale-darwin-arm64",
-      "sha256": "3151bec164ad70543b4d838aab78cd5a37f4e87bdf4c3e9e1adf95a45b32bee7"
+      "sha256": "935ca4aad662a872526217f9e3c761e0b1c9723e5d07071903f165c5408b206b"
     },
     "darwin-x64": {
       "package": "@tokscale/cli-darwin-x64",
       "asset": "tokscale-darwin-x64",
-      "sha256": "750bdd3d22746cd5f404ba0d9b2b54fcb83b4a1926cfbadb83c3d4981515fdd5"
+      "sha256": "46f53929318ba8f60eb18a6e6ed6a653b8f67f9c18ae8a7da4d7010485974707"
     },
     "linux-arm64": {
       "package": "@tokscale/cli-linux-arm64-gnu",
       "asset": "tokscale-linux-arm64",
-      "sha256": "8809aa0ca3138ea5e9adb3ed4ae087e30749536889cf3a66482037cbacbaf60d"
+      "sha256": "19d5d77719cba198804ab2247ebb189448a1796078f0fd5e0f354966705d1f13"
     },
     "linux-arm64-musl": {
       "package": "@tokscale/cli-linux-arm64-musl",
       "asset": "tokscale-linux-arm64-musl",
-      "sha256": "6e3c2f3857583c47f9f050f77929c62ae9fb439e283c349623841821fc30c6ef"
+      "sha256": "48ebfe180f25a7f70c194d732512b18399734d5726e38b9fb5b6a8f3d2bbf3b3"
     },
     "linux-x64": {
       "package": "@tokscale/cli-linux-x64-gnu",
       "asset": "tokscale-linux-x64",
-      "sha256": "4be7df3b4110ed9319113c491595ab374e46b0d0f4bbf323d68f159bf426383d"
+      "sha256": "96e19d9b1210dea8cc29b8805f32c5b6bfb3d1c27f6b73b834e59d61cfac8312"
     },
     "linux-x64-musl": {
       "package": "@tokscale/cli-linux-x64-musl",
       "asset": "tokscale-linux-x64-musl",
-      "sha256": "11799a4cb9d99403be32863ff6a27d5be1829a5c93d6e8560caf41821d088c49"
+      "sha256": "aae906820d92a679662cb9443a56873a5b2c53132f6f5bb63c90c455aad38007"
     },
     "win32-arm64": {
       "package": "@tokscale/cli-win32-arm64-msvc",
       "asset": "tokscale-win32-arm64.exe",
-      "sha256": "d4888d6802b426271e51c5f6b6a6361a9d9d596f7fb3e6ae1ba02a27c52787f7"
+      "sha256": "ccc37ac58e8565f9d9dc3d945523d0954b03a589391568e6809651bd23b96a36"
     },
     "win32-x64": {
       "package": "@tokscale/cli-win32-x64-msvc",
       "asset": "tokscale-win32-x64.exe",
-      "sha256": "dfe59a51cc2cb3196593d6c6108316d7001d757cf03ff6b3e2c0a818c50a8d8c"
+      "sha256": "c0920f276cc6fe8c869d2801c80d2f3ad28762fdaff5d5862c344f722999957c"
     }
   }
 }
