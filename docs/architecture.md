@@ -83,6 +83,8 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 
 `src/shared/usage/usageHost.js` moves collection, transforms and session-archive writes off Electron's main thread. Its summaries are already transformed (`{ transformed: true }`); `DeviceRuntime` must not transform or archive them again.
 
+Archive projection can share canonical live session rows read-only while copying mutable period and session maps. Replay must replace rows rather than mutate them; `DeviceState` detaches the published record. The default archive APIs still return complete JSON copies for callers outside this internal projection path.
+
 - Replacement and archive clearing wait for worker exit, preventing overlapping collectors, descriptor sets and archive writers.
 - After a transformed worker delivery, Electron releases its cold-anchor archive and SQLite connection without deleting persisted rows. In-process fallback must fully reload the archive and revision before capturing.
 - Widget previews read snapshots from their own store without capture, migration or pruning. Archive read/write failures reject normal widget and headless publication; external-agent reads use the same strict rule, and genuinely empty archives remain valid. Failed cold-anchor reads skip publication. Headless `--dry-run` uses best-effort reads, which may fall back to an empty archive, and writes neither the archive nor Hub data. Remove the private scan-completion hint before publication.

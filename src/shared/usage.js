@@ -2042,11 +2042,13 @@ function deltaValue(base, fresh, anchor, key) {
     if (baseMs && freshMs) return baseMs >= freshMs ? base : fresh;
     return base || fresh || '';
   }
-  const sample = [base, fresh, anchor].find((value) => value !== undefined && value !== null);
+  const sample = base ?? fresh ?? anchor;
   if (typeof sample === 'number') return Math.max(0, asNumber(base) + asNumber(fresh) - asNumber(anchor));
   if (typeof sample === 'string') return base ?? fresh;
   if (sample && typeof sample === 'object') {
-    const keys = new Set([...Object.keys(base || {}), ...Object.keys(fresh || {}), ...Object.keys(anchor || {})]);
+    const keys = fresh == null && anchor == null
+      ? Object.keys(base || {})
+      : new Set([...Object.keys(base || {}), ...Object.keys(fresh || {}), ...Object.keys(anchor || {})]);
     const result = Object.getPrototypeOf(sample) === null ? Object.create(null) : {};
     for (const childKey of keys) {
       result[childKey] = deltaValue(

@@ -8,7 +8,10 @@ const {
   createUsageTransform,
   usageTransformSettings
 } = require('../../src/shared/usage/usageTransform');
-const { normalizePeriod } = require('../../src/shared/usage');
+const { normalizePeriod, applyProjectRollups } = require('../../src/shared/usage');
+const { createDeviceState } = require('../../src/shared/usage/deviceState');
+const { applyArchivedClientUsage } = require('../../src/shared/usage/clientUsageArchive');
+const { applySessionUsageArchive, captureSessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
 
 const AT = '2026-07-09T08:15:00.000Z';
 
@@ -34,6 +37,45 @@ function fakeStore(overrides = {}) {
     ...overrides
   };
 }
+
+test('archive projection leaves collector rows read-only and publication detaches live and retained rows', () => {
+  const freeze = value => {
+    if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+      for (const child of Object.values(value)) freeze(child);
+      Object.freeze(value);
+    }
+    return value;
+  };
+  const source = freeze(summary());
+  const retained = summary(25);
+  for (const period of ['today', 'month', 'allTime']) {
+    const row = retained[period].sessions['codex:c1'];
+    row.sessionId = 'retained';
+    retained[period].sessions = { 'codex:retained': row };
+  }
+  const archive = freeze(captureSessionUsageArchive({}, retained, new Date(AT)));
+  const settings = { clients: 'codex', projectsEnabled: true };
+  const expected = applyProjectRollups(applySessionUsageArchive(
+    applyArchivedClientUsage(source, null, { activeClients: settings.clients, now: new Date(AT) }),
+    archive, { canonical: true, canonicalSummary: true, mutate: true, now: new Date(AT) }
+  ));
+  const transform = createUsageTransform({ getSettings: () => settings });
+  const visible = transform.project(source, archive, new Date(AT));
+  assert.deepEqual(JSON.parse(JSON.stringify(visible)), JSON.parse(JSON.stringify(expected)));
+  assert.equal(visible.allTime.sessions['codex:c1'], source.allTime.sessions['codex:c1']);
+  assert.equal(visible.allTime.sessions['codex:retained'].archived, true);
+  assert.equal(source.allTime.totalTokens, 100);
+  assert.deepEqual(Object.keys(source.allTime.sessions), ['codex:c1']);
+
+  const state = createDeviceState();
+  const published = state.updateUsage(visible);
+  published.allTime.sessions['codex:c1'].totalTokens = 1;
+  published.allTime.sessions['codex:retained'].totalTokens = 2;
+  const snapshot = state.getSnapshot();
+  assert.equal(snapshot.allTime.sessions['codex:c1'].totalTokens, 100);
+  assert.equal(snapshot.allTime.sessions['codex:retained'].totalTokens, 25);
+  assert.equal(archive.sessions['codex:retained'].periods.allTime.totalTokens, 25);
+});
 
 test('release forgets both owners and a failed fallback cannot publish even if the archive later reads', () => {
   let archive = { version: 1, sessions: {} };
