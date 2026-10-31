@@ -43,6 +43,7 @@ const REFRESH_RESULT_HOLD_MS = 900;
 const REFRESH_FADE_OUT_MS = 200;
 const FADE_STEP_MS = 16;
 const WAKE_TOPMOST_RETRY_MS = 500;
+const BUBBLE_IDLE_MS = 60_000;
 
 function edgeDockSupported(platform = process.platform) {
   return platform === 'darwin' || platform === 'win32';
@@ -111,6 +112,7 @@ function createEdgeDockController(deps) {
   let running = false;
   let pollTimer = null;
   let wakeTopmostTimer = null;
+  let bubbleIdleTimer = null;
   let cells = [];
   let appearance = {};
   let builtGlass = null;
@@ -653,6 +655,7 @@ function createEdgeDockController(deps) {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', (event) => event.preventDefault());
     win.webContents.on('did-finish-load', () => {
+      if (!running || windows[surface] !== win || !alive(win)) return;
       ready[surface] = true;
       lastSent[surface] = '';
       render(surface);
@@ -701,21 +704,36 @@ function createEdgeDockController(deps) {
     }
   }
 
-  function destroyWindows() {
-    for (const surface of SURFACES) {
-      const win = windows[surface];
-      backdrops.get(win)?.dispose();
-      backdrops.delete(win);
-      windows[surface] = null;
-      ready[surface] = false;
-      visibleTargets[surface] = false;
-      lastSent[surface] = '';
-      if (alive(win)) {
-        cancelFade(win);
-        disposeGlass(surface);
-        win.destroy();
-      }
+  function destroySurface(surface) {
+    const win = windows[surface];
+    backdrops.get(win)?.dispose();
+    backdrops.delete(win);
+    windows[surface] = null;
+    ready[surface] = false;
+    visibleTargets[surface] = false;
+    lastSent[surface] = '';
+    shapes[surface] = null;
+    nativeMaterial[surface] = false;
+    if (Object.hasOwn(parked, surface)) {
+      parked[surface] = false;
+      placed[surface] = null;
     }
+    if (surface === 'bubble') {
+      bubbleVisible = false;
+      bubblePlaced = null;
+      bubbleHeight = 0;
+    }
+    if (alive(win)) {
+      cancelFade(win);
+      disposeGlass(surface);
+      win.destroy();
+    }
+  }
+
+  function destroyWindows() {
+    clearTimeout(bubbleIdleTimer);
+    bubbleIdleTimer = null;
+    for (const surface of SURFACES) destroySurface(surface);
     railVisible = false;
     pointerOnRail = false;
     peeking = false;
@@ -734,10 +752,6 @@ function createEdgeDockController(deps) {
     bubblePlaced = null;
     builtGlass = null;
     builtMaterial = null;
-    for (const surface of SURFACES) {
-      shapes[surface] = null;
-      nativeMaterial[surface] = false;
-    }
     onWebSurfaceChanged();
   }
 
@@ -837,11 +851,11 @@ function createEdgeDockController(deps) {
     const materialKey = !glass ? 'none'
       : platform === 'win32' ? (windowsBackdrop ? 'win-host' : 'none')
         : platform === 'darwin' ? (liquidGlass() && createGlass ? 'mac-glass' : 'mac') : 'none';
-    if (builtMaterial === materialKey && SURFACES.every((surface) => alive(windows[surface]))) return;
+    if (builtMaterial === materialKey && ['peek', 'rail'].every((surface) => alive(windows[surface]))) return;
     destroyWindows();
     builtMaterial = materialKey;
     builtGlass = materialKey !== 'none';
-    for (const surface of SURFACES) windows[surface] = createSurface(surface, materialKey);
+    for (const surface of ['peek', 'rail']) windows[surface] = createSurface(surface, materialKey);
     intent.retract();
     // An always-visible dock stays revealed across a rebuild; the new rail
     // window picks this up when its page finishes loading.
@@ -982,6 +996,12 @@ function createEdgeDockController(deps) {
   }
 
   function showBubble(cellIndex) {
+    clearTimeout(bubbleIdleTimer);
+    bubbleIdleTimer = null;
+    if (!alive(windows.bubble)) {
+      destroySurface('bubble');
+      windows.bubble = createSurface('bubble', builtMaterial);
+    }
     bubbleCell = cellIndex;
     // Reopening the card that was last shown produces the same payload as the
     // one already sent, which the render de-duplication would swallow, and then
@@ -1012,6 +1032,18 @@ function createEdgeDockController(deps) {
     const bubble = windows.bubble;
     const hadCell = bubbleCell !== null;
     bubbleCell = null;
+    // Keep a warm card for quick returns, then release its renderer while the
+    // always-available peek and rail continue to work. Repeated hidden polls
+    // must not keep extending the idle period.
+    if (alive(bubble) && bubbleIdleTimer === null) {
+      bubbleIdleTimer = setTimeout(() => {
+        bubbleIdleTimer = null;
+        if (!running || bubbleCell !== null || windows.bubble !== bubble) return;
+        destroySurface('bubble');
+        onWebSurfaceChanged();
+      }, BUBBLE_IDLE_MS);
+      bubbleIdleTimer.unref?.();
+    }
     if (hadCell) render('rail');
     if (!alive(bubble) || !bubbleVisible) return;
     bubbleVisible = false;

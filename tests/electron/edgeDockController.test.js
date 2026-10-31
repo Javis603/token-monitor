@@ -90,7 +90,7 @@ class FakeBrowserWindow extends EventEmitter {
   setBackgroundMaterial(material) { this.backgroundMaterials.push(material); }
   setVibrancy(value) { this.vibrancyCalls.push(value); }
   setHasShadow(value) { this.hasShadowCalls.push(value); }
-  destroy() { this.destroyed = true; }
+  destroy() { this.destroyed = true; this.emit('closed'); }
 }
 
 class FakeIpcMain extends EventEmitter {
@@ -206,6 +206,15 @@ function createFixture(options = {}) {
     { id: 'cursor', kind: 'provider', label: 'Cursor' }
   ]);
   controller.sync();
+  // Surface-behavior cases start with a card that has been opened once.
+  // Lifecycle cases opt out and drive the first request/load explicitly.
+  const warmBubble = () => {
+    const rail = FakeBrowserWindow.instances.findLast(win => !win.destroyed && win.surface === 'rail');
+    ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+    const bubble = FakeBrowserWindow.instances.findLast(win => !win.destroyed && win.surface === 'bubble');
+    ipcMain.emit('edgeDock:dismiss', { sender: bubble.webContents });
+  };
+  if (options.warmBubble !== false) warmBubble();
   if (options.load !== false) for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
   const paintPeek = () => {
@@ -213,7 +222,131 @@ function createFixture(options = {}) {
     const payload = sentPayload(win, 'peek');
     ipcMain.emit('edgeDock:peekPainted', { sender: win.webContents }, { mode: payload.peekMode, shapeKey: payload.shape?.key });
   };
-  return { controller, hapticCalls, haptics, ipcMain, powerMonitor, maskWindows, placements, screen, settings, windowFor, paintPeek };
+  return { controller, hapticCalls, haptics, ipcMain, powerMonitor, maskWindows, placements, screen, settings, windowFor, paintPeek, warmBubble };
+}
+
+test('a cold Dock creates only peek and rail and loads the latest requested card before revealing it', (t) => {
+  const fixture = createFixture({ warmBubble: false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  assert.deepEqual(FakeBrowserWindow.instances.map(win => win.surface), ['peek', 'rail']);
+  fixture.controller.sync();
+  fixture.controller.setAppearance({ currency: 'HKD' });
+  assert.equal(fixture.windowFor('bubble'), undefined);
+
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  const bubble = fixture.windowFor('bubble');
+  assert.equal(bubble.visible, false);
+  assert.equal(sentPayload(bubble, 'bubble'), undefined);
+  fixture.controller.setCells([{ id: 'codex', kind: 'provider', remainingPercent: 42 }]);
+  bubble.webContents.emit('did-finish-load');
+  const payload = sentPayload(bubble, 'bubble');
+  assert.equal(payload.cell.id, 'codex');
+  assert.equal(payload.cell.remainingPercent, 42);
+  assert.equal(payload.appearance.currency, 'HKD');
+  assert.equal(payload.placed, null);
+  assert.equal(bubble.opacity, 0);
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+  assert.equal(bubble.opacity, 1);
+  assert.equal(bubble.bounds.height, 180);
+  assert.equal(bubble.ignoreMouse, false);
+});
+
+test('a warm card survives quick returns and releases after one uninterrupted hidden minute', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+  const fixture = createFixture();
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  fixture.screen.point = { x: 600, y: 400 };
+  t.mock.timers.tick(59_999);
+  assert.equal(bubble.destroyed, false);
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+  fixture.screen.point = { x: bubble.bounds.x + 30, y: bubble.bounds.y + 30 };
+  t.mock.timers.tick(60_001);
+  assert.equal(fixture.windowFor('bubble'), bubble, 'an open card has no idle deadline');
+  assert.equal(bubble.opacity, 1);
+  fixture.ipcMain.emit('edgeDock:dismiss', { sender: bubble.webContents });
+  fixture.screen.point = { x: 600, y: 400 };
+  t.mock.timers.tick(30_000);
+  fixture.controller.sync();
+  t.mock.timers.tick(30_000);
+  assert.equal(bubble.destroyed, true, 'polling and settings sync do not extend hidden retention');
+  assert.equal(fixture.windowFor('bubble'), undefined);
+  assert.equal(fixture.windowFor('rail'), rail);
+});
+
+test('a reclaimed card rejects late old-window events and remeasures current content', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+  const fixture = createFixture({ warmBubble: false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  const old = fixture.windowFor('bubble');
+  // Leave before the page finishes loading, then let the idle window expire.
+  fixture.ipcMain.emit('edgeDock:dismiss', { sender: rail.webContents });
+  fixture.screen.point = { x: 600, y: 400 };
+  t.mock.timers.tick(60_000);
+  assert.equal(old.destroyed, true);
+  fixture.controller.setCells([{ id: 'codex', kind: 'provider', remainingPercent: 31 }]);
+  fixture.controller.setAppearance({ currency: 'JPY' });
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+  const next = fixture.windowFor('bubble');
+  assert.notEqual(next, old);
+  old.webContents.emit('did-finish-load');
+  fixture.ipcMain.emit('edgeDock:ready', { sender: old.webContents });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: old.webContents }, { cellId: 'codex', height: 700 });
+  assert.equal(sentPayload(next, 'bubble'), undefined);
+  assert.equal(next.visible, false);
+  next.webContents.emit('did-finish-load');
+  assert.equal(sentPayload(next, 'bubble').cell.remainingPercent, 31);
+  assert.equal(sentPayload(next, 'bubble').appearance.currency, 'JPY');
+  assert.equal(sentPayload(next, 'bubble').placed, null);
+  assert.equal(next.opacity, 0);
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: next.webContents }, { cellId: 'codex', height: 210 });
+  assert.equal(next.bounds.height, 210);
+  assert.equal(next.opacity, 1);
+});
+
+for (const platform of ['darwin', 'win32']) {
+  test(`${platform} releases idle card native resources once and cancels old deadlines across a rebuild`, (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+    const disposed = [];
+    const fixture = createFixture({ platform, nativeGlass: true, liquidGlass: { dark: true },
+      createGlass: win => ({ update() {}, dispose() { disposed.push(win); } }),
+      windowsBackdrop: { attach: win => ({ update() {}, reorder() {}, setOpacity() {}, dispose() { disposed.push(win); } }) }
+    });
+    t.after(() => fixture.controller.stop());
+    const old = fixture.windowFor('bubble');
+    fixture.screen.point = { x: 600, y: 400 };
+    t.mock.timers.tick(60_000);
+    assert.equal(disposed.filter(win => win === old).length, 1);
+    assert.equal(old.destroyed, true);
+    fixture.warmBubble();
+    const warm = fixture.windowFor('bubble');
+    t.mock.timers.tick(30_000);
+    fixture.settings.edgeDockEnabled = false;
+    fixture.controller.sync();
+    fixture.settings.edgeDockEnabled = true;
+    fixture.controller.sync();
+    fixture.warmBubble();
+    const rebuilt = fixture.windowFor('bubble');
+    const rail = fixture.windowFor('rail');
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    rebuilt.webContents.emit('did-finish-load');
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: rebuilt.webContents }, { cellId: 'codex', height: 180 });
+    fixture.screen.point = { x: rebuilt.bounds.x + 30, y: rebuilt.bounds.y + 30 };
+    t.mock.timers.tick(60_000);
+    assert.equal(rebuilt.destroyed, false);
+    assert.equal(disposed.filter(win => win === warm).length, 1);
+    fixture.controller.stop();
+    assert.equal(disposed.filter(win => win === rebuilt).length, 1);
+    const count = FakeBrowserWindow.instances.length;
+    rebuilt.webContents.emit('did-finish-load');
+    t.mock.timers.tick(60_000);
+    assert.equal(FakeBrowserWindow.instances.length, count, 'stopped controllers do not recreate windows');
+  });
 }
 
 test('Windows Edge Dock installs non-activating input on every surface, including rebuilt windows', (t) => {
@@ -228,6 +361,7 @@ test('Windows Edge Dock installs non-activating input on every surface, includin
   fixture.controller.sync();
   fixture.settings.edgeDockEnabled = true;
   fixture.controller.sync();
+  fixture.warmBubble();
   assert.deepEqual(installed, FakeBrowserWindow.instances);
   assert.equal(installed.filter((win) => !win.destroyed).length, 3);
 });
@@ -262,6 +396,7 @@ test('Windows Edge Dock creates toolbar windows and reasserts taskbar exclusion 
 
   fixture.controller.stop();
   fixture.controller.sync();
+  fixture.warmBubble();
   for (const win of FakeBrowserWindow.instances.filter((win) => !win.destroyed)) {
     win.webContents.emit('did-finish-load');
   }
@@ -890,6 +1025,7 @@ test('Windows dock material switches independently and rebuilds native underlays
   assert.equal(fixture.settings.windowsBackdrop, 'acrylic', 'main-window choice is independent');
   fixture.settings.edgeDockWindowsBackdrop = 'host-backdrop';
   fixture.controller.sync();
+  fixture.warmBubble();
   assert.equal(adapters.length, 6, 'native glass can be restored without restarting the app');
   const rail = fixture.windowFor('rail');
   const native = adapters.find((adapter) => adapter.win === rail);
@@ -1008,6 +1144,7 @@ test('macOS Transparent drops the dock material while the widget keeps its glass
 
   fixture.settings.edgeDockMacBackdrop = 'transparent';
   fixture.controller.sync();
+  fixture.warmBubble();
   const plain = fixture.windowFor('rail');
   assert.notEqual(plain, glassy);
   assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
@@ -1018,6 +1155,7 @@ test('macOS Transparent drops the dock material while the widget keeps its glass
 
   fixture.settings.edgeDockMacBackdrop = 'inherit';
   fixture.controller.sync();
+  fixture.warmBubble();
   assert.equal(factory.glasses.length, 4, 'glass returns without restarting the app');
 });
 
@@ -1030,6 +1168,7 @@ test('macOS dock styles override System Glass while inherit follows it', (t) => 
 
   fixture.settings.edgeDockMacBackdrop = 'liquid-glass';
   fixture.controller.sync();
+  fixture.warmBubble();
   assert.equal(factory.glasses.length, 2, 'an explicit style brings its own glass');
   const rail = fixture.windowFor('rail');
   rail.webContents.emit('did-finish-load');
