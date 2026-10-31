@@ -15,7 +15,7 @@ const { createLiveRateResource } = require('./liveRate');
 // resource revision; a late result is discarded. No timers or loaders exist without demand.
 function createBusinessDataService({ identitySecret = randomBytes(32), loadHistory, loadAllTime, loadSubscriptions, now = Date.now, snapshotTtlMs = 60000, maxPayloadBytes = 56 * 1024 } = {}) {
   maxPayloadBytes = Math.max(1024, Math.min(56 * 1024, maxPayloadBytes));
-  let latest = { stats: null, extras: {}, revision: 0, sourceGeneration: 0, loaderVersions: {} };
+  let latest = { stats: null, extras: {}, revision: 0, sourceGeneration: 0, loaderVersions: {}, deviceScopes: new Map() };
   let disposed = false;
   let sequence = 0;
   const snapshots = new Map(), subscriptions = new Map(), epochs = new Map(), loaders = new Map();
@@ -193,8 +193,15 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
   const queryKey = q => sign({ ...q, page: { limit: q.page.limit } });
   function liveRateScope(captured, q, pluginId) {
     if (!q.filter.deviceId) return null;
-    const opaque = id => `device_${sign([pluginId, captured.extras.sourceId || 'default', captured.extras.identityEpoch || '1', 'device', String(id)])}`;
-    return captured.stats?.devices?.find(d => opaque(d.deviceId) === q.filter.deviceId)?.deviceId;
+    let scopes = captured.deviceScopes.get(pluginId);
+    if (!scopes) {
+      // Resolve opaque IDs once per plugin and captured source, not once per
+      // subscription/dependency check. A publication replaces this snapshot.
+      const identity = [pluginId, captured.extras.sourceId || 'default', captured.extras.identityEpoch || '1', 'device'];
+      scopes = new Map((captured.stats?.devices || []).map(d => [`device_${sign([...identity, String(d.deviceId)])}`, d.deviceId]));
+      captured.deviceScopes.set(pluginId, scopes);
+    }
+    return scopes.get(q.filter.deviceId);
   }
   function syncLiveRates() {
     const scopes = new Set();
@@ -542,7 +549,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       if (disposed) return;
       const previous = latest;
       const sourceChanged = (extras.sourceId || 'default') !== (previous.extras.sourceId || 'default') || (extras.identityEpoch || '1') !== (previous.extras.identityEpoch || '1');
-      latest = { stats, extras: { ...extras, preferences: extras.preferences ? { ...extras.preferences } : undefined, subscriptionContext: extras.subscriptionContext ? { date: extras.subscriptionContext.date, rates: Object.fromEntries(CURRENCY_CODES.map(code => [code, extras.subscriptionContext.rates?.[code]])) } : undefined }, revision: previous.revision + 1, sourceGeneration: previous.sourceGeneration + Number(sourceChanged), loaderVersions: {} };
+      latest = { stats, extras: { ...extras, preferences: extras.preferences ? { ...extras.preferences } : undefined, subscriptionContext: extras.subscriptionContext ? { date: extras.subscriptionContext.date, rates: Object.fromEntries(CURRENCY_CODES.map(code => [code, extras.subscriptionContext.rates?.[code]])) } : undefined }, revision: previous.revision + 1, sourceGeneration: previous.sourceGeneration + Number(sourceChanged), loaderVersions: {}, deviceScopes: new Map() };
       for (const name of ['history', 'allTime', 'subscriptions']) latest.loaderVersions[name] = sourceChanged || loaderDependency(previous, name) !== loaderDependency(latest, name) ? latest.revision : previous.loaderVersions[name];
       sweep();
       syncLiveRates();
@@ -600,8 +607,9 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       for (const s of subscriptions.values()) if (s.pluginId === pluginId) stop(s);
       for (const [id, snapshot] of snapshots) if (snapshot.pluginId === pluginId) deleteSnapshot(id);
       for (const [id, projection] of projections) if (projection.pluginId === pluginId) projections.delete(id);
+      latest.deviceScopes.delete(pluginId);
     },
-    dispose() { disposed = true; for (const request of requests) request.cancel(); for (const s of subscriptions.values()) stop(s); liveRates.dispose(); for (const id of snapshots.keys()) deleteSnapshot(id); projections.clear(); budgets.clear(); loaders.clear(); latest = { stats: null, extras: {}, revision: latest.revision + 1 }; }
+    dispose() { disposed = true; for (const request of requests) request.cancel(); for (const s of subscriptions.values()) stop(s); liveRates.dispose(); for (const id of snapshots.keys()) deleteSnapshot(id); projections.clear(); budgets.clear(); loaders.clear(); latest = { stats: null, extras: {}, revision: latest.revision + 1, deviceScopes: new Map() }; }
   };
 }
 module.exports = { createBusinessDataService };

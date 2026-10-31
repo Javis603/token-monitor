@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 const { createRequire } = require('node:module');
 const { createLiveRateResource } = require('../../src/electron/plugins/liveRate');
 
@@ -109,15 +110,18 @@ test('the rate reader only retains subscribed scopes and releases their timer', 
 
 function setup(t) {
   const time = clock(), module = { exports: {} };
+  let hmacCount = 0;
   const file = path.resolve(__dirname, '../../src/electron/plugins/businessData.js');
   const requireService = createRequire(file);
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), { module, exports: module.exports,
-    require: name => name === './liveRate' ? { createLiveRateResource: options => createLiveRateResource({ ...options, setTimer: time.setTimer, clearTimer: time.clearTimer }) } : requireService(name),
+    require: name => name === './liveRate' ? { createLiveRateResource: options => createLiveRateResource({ ...options, setTimer: time.setTimer, clearTimer: time.clearTimer }) }
+      : name === 'node:crypto' ? { ...crypto, createHmac(...args) { hmacCount++; return crypto.createHmac(...args); } } : requireService(name),
     Buffer, AbortController, setTimeout: time.setTimer, clearTimeout: time.clearTimer });
   const service = module.exports.createBusinessDataService({ now: time.now });
   t.after(() => service.dispose());
   const auth = { active: true, pluginId: 'example' };
-  return { service, time, auth, read: async (query = {}, as = auth) => JSON.parse(JSON.stringify(await service.query({ version: 1, resource: 'liveRate', ...query }, as, { owner: 'window' }))) };
+  return { service, time, auth, hmacs: { count: () => hmacCount, reset: () => { hmacCount = 0; } },
+    read: async (query = {}, as = auth) => JSON.parse(JSON.stringify(await service.query({ version: 1, resource: 'liveRate', ...query }, as, { owner: 'window' }))) };
 }
 const flush = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 
@@ -311,4 +315,59 @@ test('the final subscription releases its baseline without a parallel query leas
   assert.equal((await read()).rows[0].state, 'live');
   service.unsubscribe('window', id);
   assert.equal((await read()).rows[0].reason, 'waitingForSample');
+});
+
+test('publication resolves device identities once per plugin instead of once per subscription', async t => {
+  const { service, time, auth, hmacs } = setup(t);
+  const fleet = n => ({ devices: Array.from({ length: 64 }, (_, i) => ({ deviceId: `device-${i}`,
+    periods: { today: period(n, n * 10) } })) });
+  service.publish(fleet(0));
+  assert.equal(hmacs.count(), 0, 'publications without readers do not build identity indexes');
+  const devices = await service.query({ version: 1, resource: 'devices' }, auth);
+  for (const d of devices.rows.slice(-16)) {
+    service.subscribe('window', { version: 1, resource: 'liveRate', filter: { deviceId: d.id } }, auth, () => {});
+  }
+  await flush(); time.advance(101);
+  hmacs.reset();
+  service.publish(fleet(100));
+  assert.ok(hmacs.count() <= 96, `64 devices and 16 scopes should not multiply identity work: ${hmacs.count()} HMACs`);
+  time.advance(101);
+  const result = await service.query({ version: 1, resource: 'liveRate', filter: { deviceId: devices.rows.at(-1).id } }, auth);
+  assert.equal(result.rows[0].speed, 100);
+});
+
+test('a disappeared device returning invalidates its subscription and establishes a fresh baseline', async t => {
+  const { service, time, auth } = setup(t), events = [];
+  const fleet = n => ({ devices: n === null ? [] : [{ deviceId: 'returning', periods: { today: period(n, n * 10) } }] });
+  service.publish(fleet(0));
+  const devices = await service.query({ version: 1, resource: 'devices' }, auth);
+  const query = { version: 1, resource: 'liveRate', filter: { deviceId: devices.rows[0].id } };
+  service.subscribe('window', query, auth, event => events.push(event));
+  await flush(); time.advance(101);
+  service.publish(fleet(100)); time.advance(101);
+  assert.equal((await service.query(query, auth)).rows[0].speed, 100);
+  events.length = 0;
+  service.publish(fleet(null)); time.advance(101);
+  assert.equal(events.length, 1);
+  assert.equal((await service.query(query, auth)).availability, 'scopeUnavailable');
+  events.length = 0;
+  service.publish(fleet(200)); time.advance(101);
+  assert.equal(events.length, 1, 'the returning scope must notify without requiring an extra query');
+  assert.equal((await service.query(query, auth)).rows[0].reason, 'waitingForSample');
+  service.publish(fleet(300)); time.advance(101);
+  assert.equal((await service.query(query, auth)).rows[0].speed, 100);
+});
+
+for (const field of ['sourceId', 'identityEpoch']) test(`device identity resolution refreshes after a ${field} change with the same device array`, async t => {
+  const { service, auth } = setup(t);
+  const snapshot = { devices: [{ deviceId: 'private', periods: { today: period() } }] };
+  service.publish(snapshot);
+  const devices = await service.query({ version: 1, resource: 'devices' }, auth);
+  const query = { version: 1, resource: 'liveRate', filter: { deviceId: devices.rows[0].id } };
+  assert.equal((await service.query(query, auth)).availability, 'available');
+  service.publish(snapshot, { [field]: 'changed' });
+  assert.equal((await service.query(query, auth)).availability, 'scopeUnavailable');
+  const nextDevices = await service.query({ version: 1, resource: 'devices' }, auth);
+  assert.notEqual(nextDevices.rows[0].id, query.filter.deviceId);
+  assert.equal((await service.query({ ...query, filter: { deviceId: nextDevices.rows[0].id } }, auth)).availability, 'available');
 });

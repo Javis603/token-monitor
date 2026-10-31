@@ -103,7 +103,7 @@ Use `subscribe` to maintain live tracking. A `query` only reads the current snap
 
 Tracking uses existing host publications, with no additional scans or provider calls. Subscriptions also receive coalesced invalidations when readings expire without another publication. Samples become idle after their active lifetime and the retained reading clears later; use the returned state and timestamps instead of hard-coding those deadlines.
 
-This query reads current state, not pre-installation history or a lossless per-token stream:
+With an active subscription for the same scope, this query reads the current snapshot:
 
 ```js
 const result = await ctx.data.query({ resource: 'liveRate' });

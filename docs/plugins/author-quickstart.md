@@ -57,7 +57,7 @@ For a mounted data display, use the [complete live UI example](author-data-setti
 
 For a complete replacement `ui.mjs` with live updates and unsubscribe cleanup, plus a copyable manifest settings schema and update example, see [Data and settings API](author-data-settings.md). That reference covers query options, result metadata, cursor recovery and save conflicts. You do not need a backend for these operations.
 
-Before choosing chart values, check the [resource fields and coverage](author-data-resources.md). Missing data is not zero; use the [live-rate resource](author-data-resources.md#live-token-rate) for host-computed speed and idle state rather than dividing cumulative tokens by refresh time. Query IDs are scoped references, not permanent keys for saved pins or labels.
+Before choosing chart values, check the [resource fields and coverage](author-data-resources.md). Missing data is not zero; use the [live-rate resource](author-data-resources.md#live-token-rate) for host-computed speed and idle state rather than dividing cumulative tokens by refresh time.
 
 For local files, external APIs or computations, add `backend.cjs` to `files` and declare `backend`; use `ctx.backend.call` and the [backend contract](README.md#local-backend). The UI cannot import Node modules. Ship prebundled dependencies; installation does not run npm scripts.
 
