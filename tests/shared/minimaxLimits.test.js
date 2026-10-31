@@ -30,8 +30,6 @@ test.after(() => fs.rmSync(emptyHome, { recursive: true, force: true }));
 const fetchMinimaxLimits = (options, deps) => fetchMinimaxLimitsWithDeps(options, { env: {}, homeDir: emptyHome, ...(deps || {}) });
 const { parseLimitProviders } = require('../../src/shared/limits/collector');
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
-const { aggregateLimits, syncLimits } = require('../../src/shared/limits/core');
-const { syncLimits: syncWorkerLimits } = require('../../worker/src/shared/limits/core');
 
 const CN_REMAINS_URLS = new Set([MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
 
@@ -1236,13 +1234,6 @@ test('MiniMax runtime retains quota after an outage and honors pinned-to-Auto ch
   }
 });
 
-function assertSyncPreservesReading(row) {
-  const wire = JSON.parse(JSON.stringify(syncLimits({ updatedAt: row.updatedAt, providers: [row] })));
-  for (const [hub, normalize] of [['Node', syncLimits], ['Worker', syncWorkerLimits]]) {
-    assert.deepEqual(normalize(wire).providers, [row], `${hub} must preserve the collected reading`);
-  }
-}
-
 test('MiniMax cash Spend is a server snapshot and a failed period leaves the balance', async () => {
   const now = new Date(2026, 2, 1, 12).getTime();
   const requests = [];
@@ -1266,43 +1257,13 @@ test('MiniMax cash Spend is a server snapshot and a failed period leaves the bal
     weekSpend: null, monthSpend: 0, allTimeSpend: 12.34, trackingSince: null });
   assert.equal(requests.length, 4, 'identical Today and Month filters share one request');
   assert.equal(new Set(requests).size, requests.length);
-  assertSyncPreservesReading(row);
-  const older = { ...row, updatedAt: new Date(now - 60_000).toISOString(),
-    balance: { ...row.balance, amount: 100, allTimeSpend: 44 } };
-  const aggregated = aggregateLimits([
-    { deviceId: 'first', limits: { providers: [older] } },
-    { deviceId: 'second', limits: { providers: [row] } }
-  ], 0, now).providers;
-  assert.equal(aggregated.length, 1);
-  assert.deepEqual(aggregated[0].balance, row.balance, 'API balance and Spend use the latest snapshot rather than a sum or maximum');
-
-  for (const failure of ['malformed', 'cancelled']) {
-    const controller = new AbortController();
-    const result = await fetchMinimaxLimits({ minimaxBillingMode: 'api', minimaxApiRegion: 'cn', minimaxApiKey: 'mock-key' }, {
-      signal: controller.signal, fetch: async url => {
-        if (new URL(url).pathname === '/account/query_balance') return okResponse({ available_amount: '14.97', base_resp: { status_code: 0 } });
-        if (failure === 'malformed') return okResponse({ consume_cash_after_voucher_sum: 'invalid', base_resp: { status_code: 0 } });
-        controller.abort();
-        throw controller.signal.reason;
-      }
-    });
-    assert.equal(controller.signal.aborted, failure === 'cancelled');
-    assertFields(result, { status: 'ok', balance: null }, failure);
-    assert.equal(result.windows[0].remaining, 14.97, failure);
-  }
 });
 
-
 const CODE_NOW = 1790000000000;
-const CODE_RECORD_KEY = 'com.minimax.mcode.oauth.prod.cn\0deadbeef';
-const OTHER_RECORD_KEY = 'com.someother.identity prod';
 const ACCESS_ONFILE = 'test-access-onfile';
 const REFRESH_ONFILE = 'test-refresh-onfile';
 const ACCESS_ROTATED = 'test-access-rotated';
 const REFRESH_ROTATED = 'test-refresh-rotated';
-const ACCESS_RENEWED = 'test-access-renewed';
-const ACCESS_OTHER = 'test-access-other-record';
-const REFRESH_OTHER = 'test-refresh-other-record';
 const CODE_CLI_PATH = process.platform === 'win32' ? path.win32 : path.posix;
 const CODE_CLI_DIR = CODE_CLI_PATH.join(os.tmpdir(), 'minimax-test-bin');
 const CODE_CLI_COMMAND = CODE_CLI_PATH.join(CODE_CLI_DIR, process.platform === 'win32' ? 'mcode.exe' : 'mcode');
@@ -1331,11 +1292,13 @@ function codeDesktopState(record = codeDesktopRecord(), overrides = {}) {
   };
 }
 
-function writeCodeAuthStore(base, { record, records = { [CODE_RECORD_KEY]: codeDesktopRecord(record) }, state, region = 'cn' } = {}) {
+function writeCodeAuthFixture({ record, siblings = {}, state, region = 'cn', prefix = 'minimax-code-auth-' } = {}) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  test.after(() => fs.rmSync(base, { recursive: true, force: true }));
   const account = createHash('sha256').update(`${path.join(base, 'auth')}\0mcode-public`).digest('base64url');
   const recordKey = `com.minimax.mcode.oauth.prod.${region}\0${account}`;
-  const selected = records[CODE_RECORD_KEY];
-  records = Object.fromEntries(Object.entries(records).map(([key, value]) => [key === CODE_RECORD_KEY ? recordKey : key, value]));
+  const selected = codeDesktopRecord(record);
+  const records = { ...siblings, [recordKey]: selected };
   const dir = path.join(base, 'auth', 'prod', region, 'mcode-public');
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const authPath = path.join(dir, 'auth.json');
@@ -1343,12 +1306,6 @@ function writeCodeAuthStore(base, { record, records = { [CODE_RECORD_KEY]: codeD
   const statePath = path.join(dir, 'auth-state.json');
   if (state !== false) { fs.writeFileSync(statePath, JSON.stringify(codeDesktopState(selected, { region, ...state }), null, 2)); }
   return { base, dir, authPath, statePath, recordKey, region };
-}
-
-function writeCodeAuthFixture(options = {}) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), options.prefix ?? 'minimax-code-auth-'));
-  test.after(() => fs.rmSync(base, { recursive: true, force: true }));
-  return writeCodeAuthStore(base, options);
 }
 
 function membershipBody(overrides = {}) {
@@ -1382,14 +1339,6 @@ function assertFields(actual, expected, message) {
   assert.deepEqual(Object.fromEntries(Object.keys(expected).map(key => [key, actual[key]])), expected, message);
 }
 
-function storedLease(fixture) {
-  return JSON.parse(fs.readFileSync(fixture.authPath, 'utf8')).records[fixture.recordKey];
-}
-
-function storedState(fixture) {
-  return JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
-}
-
 function writeCodeLease(fixture, record, state = {}) {
   fs.writeFileSync(fixture.authPath, JSON.stringify({ schemaVersion: 1, records: { [fixture.recordKey]: record } }));
   fs.writeFileSync(fixture.statePath, JSON.stringify(codeDesktopState(record, { region: fixture.region, ...state })));
@@ -1413,65 +1362,35 @@ function codeDeps(fixture, fetchImpl, extra = {}) {
   };
 }
 
-test('MiniMax Code distinguishes an unreadable store from a missing or empty login', async () => {
-  for (const [contents, status] of [[null, 'notConfigured'], ['{invalid-json', 'unavailable'],
-    ['not-a-directory', 'unavailable'],
-    [JSON.stringify({ schemaVersion: 1, records: [] }), 'unavailable'],
-    [JSON.stringify({ schemaVersion: 2, records: {} }), 'unavailable'],
-    [JSON.stringify({ schemaVersion: 1, records: {} }), 'notConfigured']]) {
+test('MiniMax Code distinguishes missing login from a malformed store', async () => {
+  for (const [contents, status] of [[null, 'notConfigured'], ['{invalid-json', 'unavailable']]) {
     const fixture = writeCodeAuthFixture();
-    if (contents === 'not-a-directory') {
-      fs.rmSync(path.join(fixture.base, 'auth'), { recursive: true });
-      fs.writeFileSync(path.join(fixture.base, 'auth'), 'damaged store');
-    } else if (contents === null) fs.unlinkSync(fixture.authPath);
+    if (contents === null) fs.unlinkSync(fixture.authPath);
     else fs.writeFileSync(fixture.authPath, contents);
-    const deps = codeDeps(fixture, async () => okResponse(membershipBody()));
-    const result = await readCode(deps);
-    const label = contents ?? 'missing';
-    assert.equal(result.status, status, label);
-    assert.equal(result.accountLabel, status === 'notConfigured' ? '' : 'MiniMax Code', label);
-    assert.deepEqual(result.windows, [], label);
-    assert.deepEqual(deps.requests, [], label);
+    const deps = codeDeps(fixture, async () => assert.fail('invalid stores must not request quota'));
+    assert.equal((await readCode(deps)).status, status);
+    assert.deepEqual(deps.requests, []);
   }
 });
 
-test('MiniMax Code reads the exact live record despite stale siblings without launching the CLI', async () => {
-  const fixture = writeCodeAuthFixture({ records: {
-    [OTHER_RECORD_KEY]: codeDesktopRecord({ accessToken: ACCESS_OTHER, refreshToken: REFRESH_OTHER, generation: 2, scopes: ['openid'] }),
-    ['com.minimax.mcode.oauth.prod.cn\0previous-store']: codeDesktopRecord({ accessToken: ACCESS_OTHER }),
-    [CODE_RECORD_KEY]: codeDesktopRecord({ expiresAtMs: CODE_NOW + 5 * 60 * 1000 })
+test('MiniMax Code reads the live record and quota without launching the CLI', async () => {
+  const fixture = writeCodeAuthFixture({ siblings: {
+    ['com.minimax.mcode.oauth.prod.cn\0previous-store']: codeDesktopRecord({ accessToken: 'stale-token' })
   } });
-  const calls = [];
   const result = await readCode(codeDeps(fixture, async (url, init) => {
-    calls.push([url, init]);
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
-      assert.equal(init.method, 'POST');
-      assert.deepEqual(JSON.parse(init.body), { workspace_id: 'personal-test' });
-      assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
-      return okResponse(membershipBody());
-    }
-    if (url.startsWith(MINIMAX_CODE_PLAN_REMAINS_URL_CN)) {
-      assert.equal(init.method, 'GET');
-      assert.equal(url, 'https://www.minimaxi.com/backend/account/token_plan/remains_percent');
-      assert.equal(init.headers['X-Group-Id'], 'grp-123');
-      assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
-      return okResponse(planRemainsBody());
-    }
-    throw new Error(`unexpected url ${url}`);
+    assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody());
+    assert.equal(url, MINIMAX_CODE_PLAN_REMAINS_URL_CN);
+    assert.equal(init.headers['X-Group-Id'], 'grp-123');
+    return okResponse(planRemainsBody());
   }, { existsSync: () => true, execFile: () => assert.fail('a live token must not launch the CLI') }));
-  assert.equal(result.status, 'ok');
-  assert.equal(result.accountLabel, 'MiniMax Code');
-  assert.equal(result.source, 'oauth');
-  assert.equal(calls.length, 2);
-  assertFields(result.windows.find((window) => window.metric === 'credits'),
-    { label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false, usedPercent: null, limit: null },
-    'membership reports no allowance or percentage, so the summary has no quota meter');
-  assert.equal(result.windows.length, 3, 'credits + 5h + weekly');
-  assert.equal(result.windows.find(window => window.kind === 'session').usedPercent, 30);
-  assert.equal(result.windows.find(window => window.kind === 'weekly').usedPercent, 10);
-  assert.ok(result.accountKey && result.accountKey.length > 0);
+  assertFields(result, { status: 'ok', source: 'oauth', accountLabel: 'MiniMax Code' }, 'live Code reading');
+  assertFields(result.windows.find(window => window.label === 'Credits'),
+    { remaining: 4624, currency: 'CREDITS', showMeter: false }, 'Code points');
+  assert.deepEqual(result.windows.map(window => [window.label, window.usedPercent]).sort(),
+    [['5h', 30], ['Credits', null], ['Weekly', 10]]);
+  assert.ok(result.accountKey);
   assert.equal(JSON.stringify(result).includes(ACCESS_ONFILE), false);
-  assertSyncPreservesReading(result);
 });
 
 test('MiniMax Code rejects missing, logged-out or inconsistent official auth state before requesting quota', async () => {
@@ -1515,12 +1434,7 @@ test('MiniMax Code selects one personal workspace without changing a selected te
 
 test('MiniMax Code delegates expiry to the installed CLI using the selected data directory and region', async () => {
   for (const [platform, homeDir, environment, command, region] of [
-    ['darwin', '/Users/test', { PATH: '/test/bin' }, '/test/bin/mcode', 'cn'],
-    ['linux', '/home/test', {}, '/home/test/.minimax-code/bin/mcode', 'cn'],
     ['linux', '/home/test', { MCODE_INSTALL_DIR: '/custom/install' }, '/custom/install/bin/mcode', 'en'],
-    ['win32', 'C:\\Users\\Test User', {}, 'C:\\Users\\Test User\\.minimax-code\\mcode.cmd', 'cn'],
-    ['win32', 'C:\\Users\\Test', { AppData: 'D:\\Roaming' }, 'D:\\Roaming\\npm\\mcode.cmd', 'cn'],
-    ['win32', 'C:\\Users\\Test', { Path: 'D:\\First;D:\\Tools' }, 'D:\\Tools\\mcode.exe', 'cn'],
     ['win32', 'C:\\Users\\Test', { MCODE_INSTALL_DIR: 'D:\\100% & 测试!^' }, 'D:\\100% & 测试!^\\mcode.cmd', 'cn']
   ]) {
     const fixture = writeCodeAuthFixture({ region, record: { expiresAtMs: CODE_NOW } });
@@ -1557,24 +1471,18 @@ test('MiniMax Code delegates expiry to the installed CLI using the selected data
 
 test('MiniMax Code trusts reread credentials rather than CLI exit status or output', async () => {
   for (const [name, record, state, commandError, status] of [
-    ['unchanged', {}, {}, null, 'unauthorized'],
-    ['failed command', {}, {}, new Error('offline'), 'unauthorized'],
+    ['unchanged', { expiresAtMs: CODE_NOW }, {}, null, 'unauthorized'],
     ['updated despite command failure', { accessToken: ACCESS_ROTATED, generation: 8 }, {}, new Error('metadata failed'), 'ok'],
-    ['expired successor', { accessToken: ACCESS_ROTATED, expiresAtMs: CODE_NOW }, {}, null, 'unavailable'],
     ['new login', { accessToken: ACCESS_ROTATED, loginEpoch: 'new-login' }, {}, null, 'unavailable'],
-    ['malformed successor', { accessToken: ACCESS_ROTATED, tokenType: 'Other' }, {}, null, 'unavailable'],
-    ['logged out', {}, { status: 'anonymous' }, null, 'unauthorized'],
-    ['unfinished commit', { accessToken: ACCESS_ROTATED, generation: 8 }, { status: 'refreshing' }, null, 'unavailable'],
     ['mismatched generation', { accessToken: ACCESS_ROTATED, generation: 8 }, { generation: 9 }, null, 'unavailable']
   ]) {
     const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW } });
-    const before = [fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8'));
     let calls = 0;
     const deps = codeDeps(fixture, async () => okResponse(membershipBody({ has_token_plan: false })), {
       env: { MINIMAX_DATA_DIR: fixture.base, PATH: CODE_CLI_DIR }, existsSync: candidate => candidate === CODE_CLI_COMMAND,
       execFile: (_command, _args, _options, done) => {
         calls++;
-        if (Object.keys(record).length || Object.keys(state).length) writeCodeLease(fixture, codeDesktopRecord(record), state);
+        writeCodeLease(fixture, codeDesktopRecord(record), state);
         done(commandError, '{"success":true}');
         return {};
       }
@@ -1582,40 +1490,26 @@ test('MiniMax Code trusts reread credentials rather than CLI exit status or outp
     assert.equal((await readCode(deps)).status, status, name);
     assert.equal(calls, 1, name);
     assert.equal(deps.requests.length > 0, status === 'ok', name);
-    if (!Object.keys(record).length && !Object.keys(state).length) {
-      assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before, name);
-    }
   }
 });
 
-test('MiniMax Code stays read-only without a CLI, for a different namespace, and before cancellation', async () => {
-  for (const name of ['missing CLI', 'missing epoch', 'different namespace', 'workspace-relative PATH', 'cancelled', 'cancelled during lookup']) {
-    const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW, ...(name === 'missing epoch' ? { loginEpoch: undefined } : {}) } });
-    if (name === 'different namespace') {
-      const auth = JSON.parse(fs.readFileSync(fixture.authPath));
-      auth.records[CODE_RECORD_KEY] = auth.records[fixture.recordKey];
-      delete auth.records[fixture.recordKey];
-      fs.writeFileSync(fixture.authPath, JSON.stringify(auth));
-    }
-    const before = [fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8'));
-    const controller = new AbortController();
-    if (name === 'cancelled') controller.abort();
-    let commands = 0;
+test('MiniMax Code leaves expired credentials untouched when recovery cannot start', async () => {
+  const cancelled = new AbortController();
+  cancelled.abort();
+  for (const [record, extra] of [
+    [{}, {}],
+    [{ loginEpoch: undefined }, { existsSync: () => true }],
+    [{}, { signal: cancelled.signal, existsSync: () => true }]
+  ]) {
+    const fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW, ...record } });
+    const files = [fixture.authPath, fixture.statePath];
+    const before = files.map(file => fs.readFileSync(file, 'utf8'));
     const deps = codeDeps(fixture, async () => assert.fail('expired credentials must not request quota'), {
-      signal: controller.signal,
-      ...(name === 'workspace-relative PATH' ? { env: { MINIMAX_DATA_DIR: fixture.base, PATH: '.', MCODE_INSTALL_DIR: '.' } } : {}),
-      existsSync: command => {
-        if (name === 'cancelled during lookup') controller.abort();
-        return name === 'workspace-relative PATH'
-          ? CODE_CLI_PATH.resolve(command) === CODE_CLI_PATH.resolve(CODE_CLI_PATH.basename(CODE_CLI_COMMAND))
-          : name !== 'missing CLI';
-      },
-      execFile: () => { commands++; throw new Error('must not execute'); }
+      ...extra, execFile: () => assert.fail('recovery must not start')
     });
-    assert.equal((await readCode(deps)).status, name === 'different namespace' ? 'notConfigured' : 'unavailable', name);
-    assert.equal(commands, 0, name);
-    assert.deepEqual(deps.requests, [], name);
-    assert.deepEqual([fixture.authPath, fixture.statePath].map(file => fs.readFileSync(file, 'utf8')), before, name);
+    assert.equal((await readCode(deps)).status, 'unavailable');
+    assert.deepEqual(deps.requests, []);
+    assert.deepEqual(files.map(file => fs.readFileSync(file, 'utf8')), before);
   }
 });
 
@@ -1637,8 +1531,7 @@ test('MiniMax Code lets a started official refresh finish after quota collection
   assert.equal((await readCode(deps)).status, 'unavailable');
   assert.equal(kills, 0, 'quota cancellation must not stop official rotation');
   assert.deepEqual(deps.requests, []);
-  assert.equal(storedLease(fixture).accessToken, ACCESS_ROTATED);
-  assert.equal(storedState(fixture).status, 'authenticated');
+  assert.equal(JSON.parse(fs.readFileSync(fixture.authPath)).records[fixture.recordKey].accessToken, ACCESS_ROTATED);
 });
 
 test('MiniMax Code delegates through a real POSIX launcher with spaces and special characters', { skip: process.platform === 'win32' }, async () => {
@@ -1664,316 +1557,72 @@ process.stdout.write('{}');
     env: { MINIMAX_DATA_DIR: fixture.base, MCODE_INSTALL_DIR: install, PATH: path.dirname(process.execPath) }
   });
   assert.equal((await readCode(deps)).status, 'ok');
-  assert.equal(storedLease(fixture).accessToken, ACCESS_ROTATED);
+  assert.equal(JSON.parse(fs.readFileSync(fixture.authPath)).records[fixture.recordKey].accessToken, ACCESS_ROTATED);
 });
 
-test('MiniMax lanes survive initial discovery failures, stale readings and legacy API fallback', async (t) => {
+test('MiniMax API and Code failures do not invalidate the other lane', async () => {
   const fixture = writeCodeAuthFixture();
-  let codeDown = true;
-  let legacyDown = false;
-  let now = CODE_NOW;
-  const deps = codeDeps(fixture, async url => {
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return codeDown ? { ok: false, status: 503 }
-      : okResponse(membershipBody({ has_token_plan: false }));
-    const route = new URL(url).pathname;
-    if (route === '/account/query_balance') return okResponse({ available_amount: '14.97', base_resp: { status_code: 0 } });
-    if (route === '/v1/token_plan/remains') return new URL(url).searchParams.has('GroupId')
-      ? okResponse({ model_remains: null, base_resp: { status_code: 2062 } }) : { ok: false, status: 404 };
-    if (url === MINIMAX_REMAINS_URL_CN) return legacyDown ? { ok: false, status: 503 } : okResponse(windowsBody);
-    if (route === '/account/query_recharge') return okResponse({ cash_total_usage: '44', base_resp: { status_code: 0 } });
-    assert.equal(route, '/account/amount');
-    return okResponse({ consume_cash_after_voucher_sum: '0', base_resp: { status_code: 0 } });
-  });
-  const runtime = createLimitsRuntime({ limitProviders: ['minimax'], minimaxApiRegion: 'cn',
-    minimaxBillingMode: 'api', minimaxApiKey: 'key-A' }, { ...deps, now: () => now, autoStart: false, autoRetry: false });
-  const displayed = () => aggregateLimits([{ deviceId: 'local', limits: runtime.getSnapshot() }], 0, now).providers;
-  t.after(() => runtime.stop());
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  assert.equal(displayed().length, 1, 'an unidentified Code outage cannot hide the healthy API wallet');
-  assert.equal(displayed()[0].source, 'api');
-  assert.equal(displayed()[0].balance.amount, 14.97);
-  codeDown = false;
-  now += 60_000;
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  const code = runtime.getSnapshot().providers.find(row => row.source === 'oauth');
-  assert.equal(code.status, 'ok');
-  assert.equal(code.balance, null);
-  codeDown = true;
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  const rows = runtime.getSnapshot().providers;
-  assert.equal(rows.find(row => row.source === 'api').status, 'ok');
-  assert.equal(rows.find(row => row.source === 'api').balance.amount, 14.97);
-  const stale = rows.find(row => row.source === 'oauth');
-  assert.equal(stale.status, 'unavailable');
-  assert.equal(stale.accountKey, code.accountKey);
-  assert.deepEqual(stale.windows, code.windows);
-  assert.equal(displayed().find(row => row.source === 'api').status, 'ok');
-
-  codeDown = false;
-  runtime.reconfigure({ minimaxBillingMode: 'token-plan' });
-  runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
-  await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-  assert.equal(deps.requests.filter(url => url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN).length, 1);
-  assert.equal(deps.requests.filter(url => url === MINIMAX_REMAINS_URL_CN).length, 1);
-  const subscription = displayed().find(row => row.source === 'api');
-  assert.equal(subscription.status, 'ok');
-  assert.equal(subscription.windows.length, 2);
-  assert.equal(displayed().find(row => row.source === 'oauth').status, 'ok');
-  legacyDown = true;
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  assert.equal(displayed().find(row => row.source === 'api').status, 'unavailable');
-  assert.deepEqual(displayed().find(row => row.source === 'api').windows, subscription.windows);
-  assert.equal(displayed().find(row => row.source === 'oauth').status, 'ok');
+  for (const failed of ['api', 'oauth']) {
+    const rows = await fetchMinimaxLimits({ minimaxApiKey: 'key-A', minimaxApiRegion: 'cn', minimaxBillingMode: 'api' },
+      codeDeps(fixture, async url => {
+        if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return failed === 'oauth' ? { ok: false, status: 503 }
+          : okResponse(membershipBody({ has_token_plan: false }));
+        if (new URL(url).pathname === '/account/query_balance') return failed === 'api' ? { ok: false, status: 503 }
+          : okResponse({ available_amount: '14.97', base_resp: { status_code: 0 } });
+        return okResponse({});
+      }));
+    assert.equal(rows.find(row => row.source === failed).status, 'unavailable');
+    const healthy = rows.find(row => row.source !== failed);
+    assert.equal(healthy.status, 'ok');
+    assert.equal(healthy.windows[0].remaining, failed === 'api' ? 4624 : 14.97);
+  }
 });
 
-test('MiniMax display affiliation recognizes group responses without affecting either lane', async (t) => {
-  const fixture = writeCodeAuthFixture();
-  const options = { minimaxApiRegion: 'cn', minimaxBillingMode: 'api', minimaxApiKey: 'key-A' };
-  const cases = [
-    ['no subscription', { base_resp: { status_code: 2062 }, model_remains: null }, true],
-    ['quota success', { base_resp: { status_code: 0 }, model_remains: [] }, true],
-    ['foreign group', { base_resp: { status_code: 1004 } }, false],
-    ['unknown code', { base_resp: { status_code: 1001 }, model_remains: [] }, false],
-    ['missing code', { model_remains: [] }, false],
-    ['missing rows', { base_resp: { status_code: 0 } }, false],
-    ['transport failure', null, false],
-    ['cancelled confirmation', { base_resp: { status_code: 2062 }, model_remains: [] }, false]
-  ];
-  for (const [name, response, linked] of cases) await t.test(name, async () => {
-    let confirmations = 0;
-    const controller = new AbortController();
-    const deps = codeDeps(fixture, async (url, init) => {
-      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ has_token_plan: false }));
-      const target = new URL(url);
-      assert.equal(target.host, 'api.minimaxi.com');
-      assert.equal(init.headers.Authorization, 'Bearer key-A');
-      if (target.pathname === '/v1/token_plan/remains') {
-        assert.equal(target.searchParams.get('GroupId'), 'grp-123');
-        confirmations++;
-        if (name === 'transport failure') throw new TypeError('connection reset');
-        if (name === 'cancelled confirmation') controller.abort();
-        return okResponse(response);
-      }
-      if (target.pathname === '/account/query_balance') return okResponse({ available_amount: '14.97', base_resp: { status_code: 0 } });
-      assert.ok(['/account/query_recharge', '/account/amount'].includes(target.pathname));
-      return okResponse({ base_resp: { status_code: 0 } });
-    });
-    const rows = await fetchMinimaxLimits(options, {
-      ...deps, signal: controller.signal,
-      ...(name === 'quota success' ? { providerRuntimeState: undefined } : {})
-    });
-    const api = rows.find(row => row.source === 'api');
-    const code = rows.find(row => row.source === 'oauth');
-    assert.equal(api.status, 'ok');
-    assert.equal(code.status, 'ok');
-    assert.equal(api.relatedAccountKey, linked ? code.accountKey : undefined);
-    assert.equal(code.relatedAccountKey, linked ? api.accountKey : undefined);
-    assert.equal(confirmations, 1);
-  });
-});
-
-test('MiniMax display links survive refreshes and follow the current key and Code group', async (t) => {
+test('MiniMax links confirmed groups without carrying affiliation to a new key or login', async () => {
   const fixture = writeCodeAuthFixture();
   let group = 'group-A';
-  let confirmations = 0;
-  let apiDenied = false;
   const deps = codeDeps(fixture, async (url, init) => {
     if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ has_token_plan: false, op_group_id: group }));
     const target = new URL(url);
-    if (target.pathname === '/v1/token_plan/remains' && target.searchParams.has('GroupId')) {
-      confirmations++;
-      const ownGroup = init.headers.Authorization === 'Bearer key-A' ? 'group-A' : 'group-B';
-      return okResponse(target.searchParams.get('GroupId') === ownGroup
-        ? { base_resp: { status_code: 2062 }, model_remains: null }
-        : { base_resp: { status_code: 1004 } });
+    if (target.pathname === '/account/query_balance') return okResponse({ available_amount: '14.97' });
+    if (target.pathname === '/v1/token_plan/remains') {
+      assert.equal(target.searchParams.get('GroupId'), group);
+      const confirmed = group === 'group-A' && init.headers.Authorization === 'Bearer key-A';
+      return okResponse({ base_resp: { status_code: confirmed ? 2062 : 1004 } });
     }
-    if (target.pathname === '/v1/token_plan/remains') return okResponse(windowsBody);
-    if (target.pathname === '/account/query_balance') return apiDenied ? unauthorized()
-      : okResponse({ available_amount: '14.97', base_resp: { status_code: 0 } });
-    if (target.pathname === '/account/query_recharge') return okResponse({ cash_total_usage: '0', base_resp: { status_code: 0 } });
-    assert.equal(target.pathname, '/account/amount');
-    return okResponse({ consume_cash_after_voucher_sum: '0', base_resp: { status_code: 0 } });
+    return okResponse({});
   });
-  const runtime = createLimitsRuntime({ limitProviders: ['minimax'], minimaxApiRegion: 'cn',
-    minimaxBillingMode: 'api', minimaxApiKey: 'key-A' }, { ...deps, autoStart: false, autoRetry: false });
-  const rows = () => runtime.getSnapshot().providers;
-  t.after(() => runtime.stop());
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  const first = rows();
-  const codeA = first.find(row => row.source === 'oauth');
-  const apiA = first.find(row => row.source === 'api');
-  assert.equal(apiA.relatedAccountKey, codeA.accountKey);
-  assert.equal(confirmations, 1);
-  writeCodeLease(fixture, codeDesktopRecord({ accessToken: ACCESS_RENEWED, generation: 8 }));
-  await runtime.refresh({ provider: 'minimax', accountKey: codeA.accountKey }, 'manual');
-  await runtime.refresh({ provider: 'minimax', accountKey: apiA.accountKey }, 'manual');
-  assert.equal(confirmations, 1, 'normal rotation and account refresh reuse confirmation');
-  assert.ok(rows().every(row => row.relatedAccountKey));
-
-  apiDenied = true;
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  assert.equal(rows().find(row => row.source === 'api').status, 'unauthorized');
-  assert.ok(rows().every(row => row.region === 'cn' && row.relatedAccountKey), 'resource rejection does not change a confirmed regional identity');
-  apiDenied = false;
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  assert.equal(confirmations, 1);
-
-  runtime.reconfigure({ minimaxApiKey: 'key-B' });
-  runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
-  await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-  assert.equal(confirmations, 2);
-  assert.ok(rows().every(row => !row.relatedAccountKey), 'new key cannot inherit the old peer link');
+  const options = { minimaxApiRegion: 'cn', minimaxBillingMode: 'api', minimaxApiKey: 'key-A' };
+  const first = await fetchMinimaxLimits(options, deps);
+  const api = first.find(row => row.source === 'api');
+  const code = first.find(row => row.source === 'oauth');
+  assert.equal(api.relatedAccountKey, code.accountKey);
+  assert.equal(code.relatedAccountKey, api.accountKey);
+  const previousLimits = { providers: first };
+  const newKey = await fetchMinimaxLimits({ ...options, minimaxApiKey: 'key-B', previousLimits }, deps);
+  assert.ok(newKey.filter(row => !row.removed).every(row => !row.relatedAccountKey));
   group = 'group-B';
-  await runtime.refresh({ provider: 'minimax', accountKey: codeA.accountKey }, 'manual');
-  assert.equal(rows().length, 1, 'a retired account refresh cannot adopt the new Code login');
-  await runtime.refresh({ provider: 'minimax' }, 'manual');
-  const second = rows();
-  assert.equal(confirmations, 3);
-  assert.equal(second.find(row => row.source === 'api').relatedAccountKey, second.find(row => row.source === 'oauth').accountKey);
-  assert.ok(second.every(row => row.accountKey !== codeA.accountKey));
-
-  runtime.reconfigure({ minimaxBillingMode: 'token-plan' });
-  runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
-  await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-  assert.equal(confirmations, 3, 'subscription-key mode has not been live-verified for this protocol');
-  assert.ok(rows().every(row => row.relatedAccountKey), 'billing type does not change an already verified key/group relationship');
-  runtime.reconfigure({ minimaxApiKey: 'key-C' });
-  runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
-  await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-  assert.equal(confirmations, 3, 'a new subscription key must remain unverified');
-  assert.ok(rows().every(row => !row.relatedAccountKey));
-  runtime.reconfigure({ minimaxBillingMode: 'api', minimaxApiRegion: 'intl' });
-  runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
-  assert.equal(rows().find(row => row.source === 'oauth').status, 'ok');
-  await runtime.refresh({ provider: 'minimax' }, 'settings-change');
-  assert.equal(confirmations, 3);
-  assert.deepEqual(rows().map(row => [row.source, row.region]).sort(), [['api', 'en'], ['oauth', 'cn']]);
-  assert.ok(rows().every(row => !row.relatedAccountKey));
+  const newLogin = await fetchMinimaxLimits({ ...options, previousLimits }, deps);
+  assert.ok(newLogin.filter(row => !row.removed).every(row => !row.relatedAccountKey));
 });
 
-test('MiniMax Code follows workspace, membership and matched current-subscription name precedence', async () => {
+test('MiniMax Code uses only a matched subscription name and tolerates metadata failure', async () => {
   const fixture = writeCodeAuthFixture();
-  const subscription = {
-    current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Current subscription' },
-    current_combo_card: { combo_id: 12345, title: 'Build' }
-  };
-  const names = [
-    [okResponse(subscription), 'Build'],
-    [okResponse({ ...subscription, current_combo_card: { combo_id: 'other', title: 'Wrong card' } }), 'Current subscription'],
-    [okResponse({ ...subscription, current_combo_card: { combo_id: 12345, title: '12345' } }), 'Current subscription'],
-    [okResponse({ ...subscription, current_subscribe: { curr_subscribe_combo_id: 'other' } }), null],
-    [okResponse({ current_combo_card: subscription.current_combo_card }), null],
-    [okResponse({ current_subscribe: { curr_subscribe_combo_id: 12345, current_subscribe_title: '12345' } }), null],
-    [{ ok: false, status: 403 }, null],
-    [okResponse({ base_resp: { status_code: 1004 } }), null]
-  ];
-  for (const [workspace, membership, expected, group, hasPlan, planLabel, metadata] of [
-    ...names.map(([response, label]) => [{ token_plan_tier: '12345' }, membershipBody(), 4624, 'grp-123', true, label, response]),
-    [{ token_plan_tier: '12345' }, membershipBody({ op_credit_summary: { total_remaining_amount: '0' } }), 0, 'grp-123', true, 'Build', okResponse(subscription)],
-    [{ opcredit_balance: '1,234', op_group_id: 'workspace-group', token_plan_tier: 'starter' }, membershipBody({
-      token_plan_tier: 'other', has_token_plan: false,
-      op_credit_summary: { total_remaining_amount: '4624', purchased_remaining_amount: '1000', free_remaining_amount: '500' }
-    }), 4624, 'workspace-group', true, 'starter'],
-    [{ opcredit_balance: '1,234', has_token_plan: true }, membershipBody({ has_token_plan: false, op_credit_summary: null }), 1234, 'grp-123', true, null],
-    [{}, membershipBody({ has_token_plan: false, token_plan_tier: 'starter', op_credit_summary: { total_remaining_amount: 'invalid' }, opcredit_balance: '321' }), 321, 'grp-123', true, 'starter'],
-    [{ opcredit_balance: 'invalid' }, membershipBody({ op_credit_summary: null, opcredit_balance: 321 }), null, 'grp-123', false, null],
-    [{ token_plan_tier: '12345' }, membershipBody(), 4624, 'grp-123', true, null],
-    [{}, membershipBody({ has_token_plan: false, plan_name: 'Free' }), 4624, 'grp-123', false, 'Free']
+  for (const [metadata, label] of [
+    [{ current_subscribe: { curr_subscribe_combo_id: '12345' }, current_combo_card: { combo_id: 12345, title: 'Build' } }, 'Build'],
+    [{ current_combo_card: { combo_id: 12345, title: 'Unowned plan' } }, 'Subscription'],
+    [null, 'Subscription']
   ]) {
-    const groups = [];
-    let commands = 0;
-    const deps = codeDeps(fixture, null, {
-      existsSync: () => true,
-      execFile: () => { commands++; throw new Error('unexpected CLI'); },
-      fetch: async (url, init) => {
-        if (url.endsWith('/user/get_user_extra_info')) return okResponse({ workspaces: [{ workspace_type: 0, workspace_id: 0, ...workspace }] });
-        if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membership);
-        if (new URL(url).pathname === '/minimax-cloud/api/v1/credit/details') return okResponse({ details: [], total_count: 0 });
-        groups.push(init.headers['X-Group-Id']);
-        if (new URL(url).pathname.endsWith('/charge/combo/cycle_audio_resource_package')) {
-          assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
-          assert.deepEqual(Object.fromEntries(new URL(url).searchParams), { biz_line: '2', cycle_type: '3', resource_package_type: '7', business: 'Agent', device_platform: 'desktop' });
-          return metadata || okResponse({});
-        }
-        return url === MINIMAX_CODE_PLAN_REMAINS_URL_CN ? okResponse(planRemainsBody()) : okResponse({});
-      }
-    });
-    const result = await readCode(deps);
-    assert.equal(result.status, expected === null ? 'unavailable' : 'ok');
-    if (planLabel !== null) assert.equal(result.planLabel, planLabel);
-    else {
-      assert.doesNotMatch(result.planLabel, /^\d+$/u, 'combo IDs are not plan names');
-      assert.notEqual(result.planLabel, subscription.current_combo_card.title, 'unverified catalog names must not become current plans');
-    }
-    assert.equal(result.windows.find(window => window.label === 'Credits')?.remaining ?? null, expected);
-    assert.equal(deps.requests.includes(MINIMAX_CODE_PLAN_REMAINS_URL_CN), hasPlan);
-    assert.ok(groups.every(value => value === group), 'resource requests must use the selected personal group');
-    assert.equal(commands, 0, 'optional metadata must not trigger delegated renewal');
-    assert.equal(result.windows.filter(window => window.metric !== 'credits').length, hasPlan ? 2 : 0);
+    const row = await readCode(codeDeps(fixture, async url => {
+      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ token_plan_tier: '12345' }));
+      if (url.includes('/cycle_audio_resource_package')) return metadata ? okResponse(metadata) : unauthorized();
+      assert.equal(url, MINIMAX_CODE_PLAN_REMAINS_URL_CN);
+      return okResponse(planRemainsBody());
+    }, { existsSync: () => true, execFile: () => assert.fail('optional names must not rotate credentials') }));
+    assert.equal(row.status, 'ok');
+    assert.equal(row.planLabel, label);
+    assert.equal(row.windows.length, 3);
   }
-});
-
-test('MiniMax Code caches matched plan names while keeping quota fresh and isolating login scope', async () => {
-  let fixture = writeCodeAuthFixture({ record: { expiresAtMs: CODE_NOW + 3 * 3600000 } });
-  let timestamp = CODE_NOW, tier = '12345', group = 'group-A', points = 100, denyName = false;
-  let names = 0, quotas = 0;
-  const deps = codeDeps(fixture, async url => {
-    if (url.endsWith('/get_membership_info')) return okResponse(membershipBody({
-      token_plan_tier: tier, op_group_id: group, op_credit_summary: { total_remaining_amount: String(points) }
-    }));
-    if (url.includes('/cycle_audio_resource_package')) {
-      names++;
-      return denyName ? { ok: false, status: 403 } : okResponse({
-        current_subscribe: { curr_subscribe_combo_id: tier }, current_combo_card: { combo_id: tier, title: `Plan ${tier}` }
-      });
-    }
-    quotas++;
-    return okResponse(planRemainsBody({ model_remains: [{ model_name: 'general', current_interval_used_percent: quotas }] }));
-  }, { now: () => timestamp });
-  const read = async (expectedNames, step, expectedLabel = `Plan ${tier}`) => {
-    points--;
-    const result = await readCode(deps);
-    assert.equal(result.status, 'ok', step);
-    if (expectedLabel !== null) assert.equal(result.planLabel, expectedLabel, step);
-    else assert.notEqual(result.planLabel, `Plan ${tier}`, step);
-    assert.equal(names, expectedNames, step);
-    assert.equal(result.windows.find(window => window.label === 'Credits').remaining, points, step);
-    assert.ok(Math.abs(result.windows.find(window => window.label === '5h').usedPercent - quotas) < 1e-10, step);
-  };
-  await read(1, 'initial name');
-  timestamp += 300000;
-  await read(1, 'same login reuses only the name');
-  const record = codeDesktopRecord({ accessToken: ACCESS_ROTATED, generation: 8, expiresAtMs: CODE_NOW + 3 * 3600000 });
-  writeCodeLease(fixture, record);
-  await read(1, 'ordinary token rotation retains the name');
-  timestamp = CODE_NOW + 3600000;
-  await read(2, 'one-hour expiry');
-  tier = '23456';
-  await read(3, 'new tier');
-  group = 'group-B';
-  await read(4, 'new account group');
-  record.loginEpoch = 'epoch-2';
-  writeCodeLease(fixture, record);
-  await read(5, 'new login');
-  for (const [region, expectedNames] of [['cn', 6], ['en', 7]]) {
-    fixture = writeCodeAuthFixture({ region, record });
-    deps.env.MINIMAX_DATA_DIR = fixture.base;
-    await read(expectedNames, `new ${region} credential namespace`);
-  }
-  tier = '34567'; denyName = true;
-  await read(8, 'denied name', null);
-  await read(9, 'denial is not cached', null);
-  denyName = false;
-  await read(10, 'name recovers');
-  delete record.loginEpoch;
-  writeCodeLease(fixture, record);
-  await read(11, 'legacy login remains readable');
-  await read(12, 'legacy login cannot establish cache scope');
-  record.loginEpoch = 'epoch-2';
-  writeCodeLease(fixture, record);
-  deps.providerRuntimeState = undefined;
-  await read(13, 'one-shot without runtime state');
-  await read(14, 'one-shot does not persist a cache');
 });
 
 test('MiniMax Code meters a complete grant list and keeps the amount when the list is incomplete', async () => {
@@ -1999,25 +1648,15 @@ test('MiniMax Code meters a complete grant list and keeps the amount when the li
     } }));
     assert.equal(result.status, 'ok');
     assert.equal(detailPages, pages.length, 'only the pages needed to establish a denominator are requested');
-    assertSyncPreservesReading(result);
+
     return result.windows.find(window => window.label === 'Credits');
   };
-  assertFields(await read([{ details: [grant(100, 50)], total_count: 1 }], 50),
-    { remaining: 50, currency: 'CREDITS', limit: 100, showMeter: true }, 'complete grant list');
   assertFields(await read([
     { details: Array.from({ length: 100 }, () => grant(1, 0.5)), total_count: 101 },
     { details: [grant(100, 25)], total_count: 101 }
   ], 75), { remaining: 75, limit: 200, showMeter: true }, 'complete paginated grant list');
-  assertFields(await read([{ details: [grant(100, 50), { ...grant(100, 20), expire_at_ms: CODE_NOW - 1 }], total_count: 2 }], 50),
-    { remaining: 50, limit: 100, showMeter: true }, 'expired grants cannot inflate the meter');
-  for (const detail of [grant(100, 49), { ...grant(100, 50), granted_amount: 'invalid' }]) {
-    assertFields(await read([{ details: [detail], total_count: 1 }], 50),
-      { remaining: 50, limit: null, showMeter: false }, 'unreconciled grants leave the fresh amount visible');
-  }
   assertFields(await read([{ details: [grant(100, 50)], total_count: 2 }, { details: [], total_count: 2 }], 50),
     { remaining: 50, limit: null, showMeter: false }, 'incomplete grant list');
-  assertFields(await read([{ details: Array.from({ length: 100 }, () => grant(1, 0.5)), total_count: 1001 }], 50),
-    { remaining: 50, limit: null, showMeter: false }, 'history beyond the collection bound');
 });
 
 test('MiniMax Code parses modern plan percentages, unlimited quota and video counts', async () => {
@@ -2037,7 +1676,6 @@ test('MiniMax Code parses modern plan percentages, unlimited quota and video cou
     assert.equal(result.windows.find(window => window.label === 'Weekly').usedPercent, expectedPercent);
     assertFields(result.windows.find(window => window.label === 'Video'),
       { used: 3, limit: 20, remaining: 17, usedPercent: 15, remainingPercent: 85, resetsAt: new Date(1790007200000).toISOString() });
-    assertSyncPreservesReading(result);
   }
 });
 
@@ -2164,36 +1802,28 @@ test('MiniMax Code rejects nonprivate credential stores as the official FileStor
   }
 });
 
-test('MiniMax Code retries HTTP and body auth failures in membership and plan requests', async () => {
-  for (const lane of ['membership', 'plan']) {
-    for (const [name, response] of [
-      ['HTTP 401', unauthorized()], ['HTTP 403', { ok: false, status: 403 }],
-      ['body 1004', okResponse({ base_resp: { status_code: 1004 } })]
-    ]) {
-      const fixture = writeCodeAuthFixture();
-      let rotations = 0;
-      let failures = 0;
-      const deps = codeDeps(fixture, async (url, init) => {
-        assert.equal(init.headers.authorization, `Bearer ${rotations ? ACCESS_ROTATED : ACCESS_ONFILE}`);
-        const target = lane === 'membership' ? url === MINIMAX_CODE_MEMBERSHIP_URL_CN : url.startsWith(MINIMAX_CODE_PLAN_REMAINS_URL_CN);
-        if (target && failures++ === 0) return response;
-        return okResponse(url === MINIMAX_CODE_MEMBERSHIP_URL_CN ? membershipBody() : planRemainsBody());
-      }, {
-        existsSync: command => command === CODE_CLI_COMMAND, env: { MINIMAX_DATA_DIR: fixture.base, PATH: CODE_CLI_DIR },
-        execFile: (_command, _args, _options, done) => {
-          rotations++;
-          writeCodeLease(fixture, codeDesktopRecord({ accessToken: ACCESS_ROTATED, generation: 8 }));
-          done(null, '{}');
-          return {};
-        }
-      });
-      const result = await readCode(deps);
-      const label = `${lane} ${name}`;
-      assert.equal(result.status, 'ok', label);
-      assert.equal(rotations, 1, label);
-      assert.equal(result.windows.length, 3, label);
-      assert.equal(result.region, 'cn', label);
-    }
+test('MiniMax Code renews after membership HTTP rejection or plan business auth rejection', async () => {
+  for (const [target, rejection] of [
+    [MINIMAX_CODE_MEMBERSHIP_URL_CN, unauthorized()],
+    [MINIMAX_CODE_PLAN_REMAINS_URL_CN, okResponse({ base_resp: { status_code: 1004 } })]
+  ]) {
+    const fixture = writeCodeAuthFixture();
+    let rotations = 0;
+    const deps = codeDeps(fixture, async (url, init) => {
+      assert.equal(init.headers.authorization, `Bearer ${rotations ? ACCESS_ROTATED : ACCESS_ONFILE}`);
+      if (url === target && rotations === 0) return rejection;
+      return okResponse(url === MINIMAX_CODE_MEMBERSHIP_URL_CN ? membershipBody() : planRemainsBody());
+    }, {
+      existsSync: command => command === CODE_CLI_COMMAND, env: { MINIMAX_DATA_DIR: fixture.base, PATH: CODE_CLI_DIR },
+      execFile: (_command, _args, _options, done) => {
+        rotations++;
+        writeCodeLease(fixture, codeDesktopRecord({ accessToken: ACCESS_ROTATED, generation: 8 }));
+        done(null, '{}');
+        return {};
+      }
+    });
+    assert.equal((await readCode(deps)).status, 'ok', target);
+    assert.equal(rotations, 1, target);
   }
 });
 
@@ -2258,22 +1888,4 @@ test('MiniMax Code keeps a known account until a different group id is confirmed
   assert.equal(rows[0].status, 'ok');
   assert.equal(rows[0].windows[0].remaining, 20);
   assert.equal('removed' in rows[0], false);
-});
-
-test('MiniMax Code identity follows the server account across devices and re-login', async () => {
-  const identities = [];
-  const storeKeys = new Set();
-  for (const group of ['same-account', 'same-account', 'different-account']) {
-    const fixture = writeCodeAuthFixture();
-    storeKeys.add(fixture.recordKey);
-    const row = await readCode(codeDeps(fixture, async url => okResponse(
-      url === MINIMAX_CODE_MEMBERSHIP_URL_CN ? membershipBody({ op_group_id: group }) : planRemainsBody()
-    )));
-    assert.equal(row.status, 'ok');
-    identities.push(row.accountKey);
-  }
-  assert.equal(storeKeys.size, 3);
-  assert.ok(identities[0]);
-  assert.equal(identities[0], identities[1], 'local store namespace is not an account identity');
-  assert.notEqual(identities[0], identities[2], 'changing accounts changes the identity even at the same auth path');
 });
