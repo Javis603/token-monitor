@@ -778,6 +778,38 @@ function verifyCodexOutputRateContract(binPath) {
     assert.equal(tool.timedDurationMs, short.timedDurationMs + 6000);
     tracker.observe(tool);
     assert.equal(tracker.value('speed'), 4 / 6);
+
+    fs.appendFileSync(file, `${[
+      row(20.02, 'turn_context', { model: 'gpt-5.4' }),
+      row(20.03, 'response_item', { type: 'function_call', call_id: 'fast-turn-tool' }),
+      row(21.01, 'response_item', message('')), row(21.01, 'token_usage_record', { usage: usage(4) }), count(21.01, 115, 4)
+    ].join('\n')}\n`);
+    const fast = read();
+    assert.equal(fast.outputTokens, tool.outputTokens + 4);
+    assert.equal(fast.timedOutputTokens, tool.timedOutputTokens + 4, 'an explicit new turn must retain tool evidence inside the old flush window');
+    assert.equal(fast.timedDurationMs, tool.timedDurationMs + 990);
+    tracker.observe(fast);
+    assert.equal(tracker.value('speed'), 4 / 0.99);
+
+    fs.appendFileSync(file, `${[
+      row(21.03, 'response_item', { type: 'function_call', call_id: 'old-flush-tool' }),
+      row(27.01, 'response_item', message('')), row(27.01, 'token_usage_record', { usage: usage(4) }), count(27.01, 119, 4)
+    ].join('\n')}\n`);
+    const stale = read();
+    assert.equal(stale.outputTokens, fast.outputTokens + 4);
+    assert.equal(stale.timedOutputTokens, fast.timedOutputTokens, 'without a new turn, old flush evidence must remain suppressed');
+    assert.equal(stale.timedDurationMs, fast.timedDurationMs);
+
+    fs.appendFileSync(file, `${[
+      row(33.01, 'response_item', message('')),
+      row(33.01, 'event_msg', { type: 'token_count', info: { total_token_usage: usage(123) } })
+    ].join('\n')}\n`);
+    const totalOnly = read();
+    assert.equal(totalOnly.outputTokens, stale.outputTokens + 4);
+    assert.equal(totalOnly.timedOutputTokens, stale.timedOutputTokens, 'total-only usage must also exclude an empty speed sample');
+    assert.equal(totalOnly.timedDurationMs, stale.timedDurationMs);
+    tracker.observe(totalOnly);
+    assert.equal(tracker.value('speed'), 4 / 0.99);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
