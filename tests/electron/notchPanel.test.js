@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { panelFixture } = require('../helpers/notchPanel');
 const { buildNotchData, notchSummaryMode } = require('../../src/electron/notch/data');
 const { notchPanelItems, notchWeek } = require('../../src/electron/notch/panel');
@@ -753,6 +754,24 @@ test('limits give every account its own column with the Limits view plan and Hom
   assert.equal(f.all('notch-window-page').length, 0);
   // Three slots fill one page exactly, so there is nothing to page through.
   assert.equal(f.all('notch-pager').length, 0);
+});
+
+test('verified MiniMax readings retain separate amounts without numbered accounts', t => {
+  const f = panelFixture(t);
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const apiKey = `sha256:${'b'.repeat(64)}`;
+  const records = [
+    { provider: 'minimax', source: 'oauth', status: 'ok', region: 'cn', accountKey: codeKey, accountLabel: 'MiniMax Code',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
+    { provider: 'minimax', source: 'api', status: 'ok', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey, accountLabel: 'Pay-as-you-go',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
+  ].map(normalizeLimitProvider);
+  const cells = buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider: 'minimax' }] });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  assert.equal(f.all('notch-limit').length, 2);
+  assert.ok(f.all('notch-limit').every(node => node.querySelector('.notch-limit-name')?.textContent.trim()));
+  assert.ok(f.all('notch-limit-account').every(node => !/\bAccount [12]\b/.test(node.textContent)));
+  assert.deepEqual(new Set(f.all('notch-limit-money').map(node => node.textContent)), new Set(['4624.00', '¥14.97']));
 });
 
 test('a grant measured against an allowance reads as a percentage while a bare balance keeps its money', t => {

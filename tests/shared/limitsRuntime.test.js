@@ -1430,3 +1430,21 @@ test('transient status (unavailable) preserves lastGood windows so stale data is
   assert.equal(row.windows[0].usedPercent, 20);
   runtime.stop();
 });
+
+test('clearing a source preserves sibling lastGood and fences a late provider-wide response', async () => {
+  const api = providerRow('minimax', 'api-A', 'Pay-as-you-go');
+  const code = { ...providerRow('minimax', 'code-A', 'MiniMax Code'), source: 'oauth' };
+  const job = deferred();
+  const runtime = createLimitsRuntime({ limitProviders: ['minimax'], previousLimits: { providers: [api, code] } },
+    runtimeDeps({ probeProvider: () => job.promise }));
+  try {
+    const pending = runtime.refresh({ provider: 'minimax' }, 'manual');
+    await waitFor(() => runtime.getDiagnostics().active === 1);
+    runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
+    assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountKey), ['code-A']);
+    job.resolve([api, { ...code, windows: [] }]);
+    assert.equal((await pending).superseded, true);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(runtime.getSnapshot().providers.map(row => [row.accountKey, row.windows.length]), [['code-A', 1]]);
+  } finally { job.resolve([]); runtime.stop(); }
+});

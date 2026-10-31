@@ -475,6 +475,12 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   border-bottom: 0;
   padding-bottom: 0;
 }
+/* Parallel lanes are wrapped in a group, so the card's last child is that group
+   and the page rule still sits on the last row inside it. */
+.edge-dock-accounts > .limit-row-group > .limit-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
 
 /* Separators are the Limits view's feathered hairline (fading out at both
    ends), not a solid rule. */

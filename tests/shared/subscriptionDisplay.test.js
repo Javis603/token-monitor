@@ -270,12 +270,23 @@ test('matchProviderAccount claims the sole account when every candidate misses',
   assert.equal(needsRebinding(sub, providers), false);
 });
 
-test('WorkBuddy stable context bindings never heal onto a sibling with matching display metadata', () => {
-  const sub = subscription({ provider: 'workbuddy', binding: { accountKey: 'saved-c', profileName: 'Same name', accountEmail: 'same@example.com' } });
-  const sibling = { provider: 'workbuddy', accountKey: 'live-a', accountName: 'Same name', accountEmail: 'same@example.com' };
-  assert.equal(matchProviderAccount(sub, [sibling]), null);
-  const unavailable = { ...sibling, accountKey: 'saved-c', status: 'notConfigured' };
-  assert.equal(matchProviderAccount(sub, [sibling, unavailable]), unavailable);
+for (const provider of ['workbuddy', 'minimax']) {
+  test(`${provider} keyed bindings never heal onto a sibling with matching display metadata`, () => {
+    const sub = subscription({ provider, binding: { accountKey: 'saved-c', profileName: 'Same name', accountEmail: 'same@example.com' } });
+    const sibling = { provider, accountKey: 'live-a', accountName: 'Same name', accountEmail: 'same@example.com' };
+    assert.equal(matchProviderAccount(sub, [sibling]), null);
+    assert.equal(needsRebinding(sub, []), false);
+    const unavailable = { ...sibling, accountKey: 'saved-c', status: 'notConfigured' };
+    assert.equal(matchProviderAccount(sub, [sibling, unavailable]), unavailable);
+    assert.equal(needsRebinding(sub, [sibling, unavailable]), false);
+  });
+}
+
+test('MiniMax bindings without a stable key do not adopt a sole or similarly named lane', () => {
+  const api = { provider: 'minimax', source: 'api', accountKey: 'api-key', accountName: 'Same name', accountEmail: 'same@example.com' };
+  for (const binding of [{}, { profileName: api.accountName, accountEmail: api.accountEmail }]) {
+    assert.equal(matchProviderAccount(subscription({ provider: 'minimax', binding }), [api]), null);
+  }
 });
 
 test('needsRebinding only fires on a genuine ambiguity', () => {

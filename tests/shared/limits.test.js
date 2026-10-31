@@ -828,6 +828,25 @@ test('publicLimits strips Codex account identity fields', () => {
   assert.equal(Object.hasOwn(payload.providers[0], 'workspaceKind'), false);
 });
 
+test('MiniMax peer links survive sync without merging identities or leaking through public stats', () => {
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const apiKey = `sha256:${'b'.repeat(64)}`;
+  const limits = { providers: [
+    { provider: 'minimax', accountKey: codeKey, source: 'oauth', status: 'ok', region: 'cn', windows: [] },
+    { provider: 'minimax', accountKey: apiKey, relatedAccountKey: codeKey, source: 'api', status: 'ok', region: 'cn', windows: [] }
+  ] };
+  assert.equal(syncLimits(limits).providers[1].relatedAccountKey, codeKey);
+  assert.equal(Object.hasOwn(publicLimits(limits).providers[1], 'relatedAccountKey'), false);
+  for (const relatedAccountKey of ['raw-group-id', 'sk-api-secret', apiKey]) {
+    assert.equal(Object.hasOwn(normalizeLimitProvider({ ...limits.providers[1], relatedAccountKey }), 'relatedAccountKey'), false);
+  }
+  assert.equal(Object.hasOwn(normalizeLimitProvider({ ...limits.providers[1], provider: 'deepseek' }), 'relatedAccountKey'), false);
+  const aggregate = aggregateLimits([{ deviceId: 'mini', limits, receivedAt: new Date().toISOString() }]);
+  assert.equal(aggregate.providers.length, 2);
+  assert.deepEqual(new Set(aggregate.providers.map(row => row.accountKey)), new Set([codeKey, apiKey]));
+  assert.equal(aggregate.providers.find(row => row.source === 'api').relatedAccountKey, codeKey);
+});
+
 test('OpenCode sync keeps the legacy profile label and explicit plan while public stats scrub both', () => {
   const limits = {
     providers: [{
@@ -1415,68 +1434,67 @@ for (const [runtime, aggregate] of [
   ['Node Hub', aggregateNodeDevices],
   ['Worker', aggregateWorkerDevices]
 ]) {
-  test(`${runtime} keeps Cline credential identities apart and merges matching identities`, () => {
-    const now = '2026-06-24T10:00:00.000Z';
-    const nowMs = Date.parse('2026-06-24T10:02:00.000Z');
-    const clineRow = (accountKey, accountEmail, source = 'api') => ({
-      provider: 'cline',
-      accountKey,
-      accountLabel: '',
-      accountEmail,
-      status: 'ok',
-      source,
-      updatedAt: now,
-      windows: [{ kind: 'weekly', used: 1, limit: 10 }]
-    });
-    const device = (deviceId, ...providers) => ({ deviceId, updatedAt: now, limits: { updatedAt: now, providers } });
-    const rows = (devices) => aggregate(devices, 0, nowMs).limits.providers
-      .filter((provider) => provider.provider === 'cline')
-      .map(({ accountKey, accountEmail, source }) => ({ accountKey, accountEmail, source }))
-      .sort((a, b) => a.accountKey.localeCompare(b.accountKey));
-    const keyA = hashKey('cline', 'key-a');
-    const keyB = hashKey('cline', 'key-b');
-    const signInKey = hashKey('cline', 'usr-account-a');
+  for (const provider of ['cline', 'minimax']) {
+    test(`${runtime} keeps ${provider} credential identities apart and merges matching identities`, () => {
+      const now = '2026-06-24T10:00:00.000Z';
+      const nowMs = Date.parse('2026-06-24T10:02:00.000Z');
+      const accountRow = (accountKey, accountEmail, source = 'api') => ({
+        provider,
+        accountKey,
+        accountLabel: '',
+        accountEmail,
+        status: 'ok',
+        source,
+        updatedAt: now,
+        windows: [{ kind: 'weekly', used: 1, limit: 10 }]
+      });
+      const device = (deviceId, ...providers) => ({ deviceId, updatedAt: now, limits: { updatedAt: now, providers } });
+      const rows = (devices) => aggregate(devices, 0, nowMs).limits.providers
+        .filter((row) => row.provider === provider)
+        .map(({ accountKey, accountEmail, source }) => ({ accountKey, accountEmail, source }))
+        .sort((a, b) => a.accountKey.localeCompare(b.accountKey));
+      const keyA = hashKey(provider, 'key-a');
+      const keyB = hashKey(provider, 'key-b');
+      const signInKey = hashKey(provider, 'usr-account-a');
 
-    assert.deepEqual(
-      rows([device('sg', clineRow(keyA, 'a@example.com'), clineRow(keyB, 'b@example.com'))]),
-      [
-        { accountKey: keyA, accountEmail: 'a@example.com', source: 'api' },
-        { accountKey: keyB, accountEmail: 'b@example.com', source: 'api' }
-      ].sort((a, b) => a.accountKey.localeCompare(b.accountKey))
-    );
+      assert.deepEqual(
+        rows([device('sg', accountRow(keyA, 'a@example.com'), accountRow(keyB, 'b@example.com'))]),
+        [
+          { accountKey: keyA, accountEmail: 'a@example.com', source: 'api' },
+          { accountKey: keyB, accountEmail: 'b@example.com', source: 'api' }
+        ].sort((a, b) => a.accountKey.localeCompare(b.accountKey))
+      );
 
-    // Each identity is portable within its own lane.
-    for (const [accountKey, source] of [[keyA, 'api'], [signInKey, 'oauth']]) {
+      // Each identity is portable within its own lane.
+      for (const [accountKey, source] of [[keyA, 'api'], [signInKey, 'oauth']]) {
+        assert.deepEqual(
+          rows([
+            device('mac', accountRow(accountKey, 'a@example.com', source)),
+            device('sg', accountRow(accountKey, 'a@example.com', source))
+          ]),
+          [{ accountKey, accountEmail: 'a@example.com', source }]
+        );
+      }
+
+      // Display email cannot join an API-key identity to a sign-in identity.
       assert.deepEqual(
         rows([
-          device('mac', clineRow(accountKey, 'a@example.com', source)),
-          device('sg', clineRow(accountKey, 'a@example.com', source))
+          device('mac', accountRow(keyA, 'a@example.com')),
+          device('sg', accountRow(signInKey, 'a@example.com', 'oauth'))
         ]),
-        [{ accountKey, accountEmail: 'a@example.com', source }]
+        [
+          { accountKey: keyA, accountEmail: 'a@example.com', source: 'api' },
+          { accountKey: signInKey, accountEmail: 'a@example.com', source: 'oauth' }
+        ].sort((a, b) => a.accountKey.localeCompare(b.accountKey))
       );
-    }
-
-    // Display email cannot join an API-key identity to a sign-in identity.
-    assert.deepEqual(
-      rows([
-        device('mac', clineRow(keyA, 'a@example.com')),
-        device('sg', clineRow(signInKey, 'a@example.com', 'oauth'))
-      ]),
-      [
-        { accountKey: keyA, accountEmail: 'a@example.com', source: 'api' },
-        { accountKey: signInKey, accountEmail: 'a@example.com', source: 'oauth' }
-      ].sort((a, b) => a.accountKey.localeCompare(b.accountKey))
-    );
-  });
+    });
+  }
 }
 
-// Regression guard for the renderer's localProviderStatus(): a sync-mode account
-// card (DeepSeek/Minimax/Grok) must read the local device's RAW limits from
-// stats.devices, not stats.limits.providers. This test pins the root cause:
-// aggregateLimits collapses a local `unauthorized` row out in favor of a remote
-// `ok`, so the local row is GONE from the aggregate. If the card read the
-// aggregate, an invalid local key would be validated by the remote ok and the
-// UI would falsely report "Linked".
+
+// Settings status must still use this device's raw rows: legacy providers can
+// collapse by name, while multi-account providers retain each credential's own
+// failure instead of treating a healthy sibling as evidence that it is linked.
 function apikeyProvider(name, accountKey, status, updatedAt) {
   return {
     provider: name,
@@ -1488,32 +1506,6 @@ function apikeyProvider(name, accountKey, status, updatedAt) {
     windows: []
   };
 }
-
-test('aggregateLimits drops a local unauthorized row when a remote device has ok (deepseek/minimax/grok collapse by name)', () => {
-  const aggregate = aggregateLimits([
-    {
-      deviceId: 'this-mac',
-      limits: {
-        updatedAt: '2026-06-24T10:00:00.000Z',
-        providers: [apikeyProvider('minimax', 'sha256:local-bad-key', 'unauthorized', '2026-06-24T10:00:00.000Z')]
-      }
-    },
-    {
-      deviceId: 'office-pc',
-      limits: {
-        updatedAt: '2026-06-24T10:01:00.000Z',
-        providers: [apikeyProvider('minimax', 'sha256:remote-good-key', 'ok', '2026-06-24T10:01:00.000Z')]
-      }
-    }
-  ], 0, Date.parse('2026-06-24T10:02:00.000Z'));
-
-  const minimaxRows = aggregate.providers.filter((provider) => provider.provider === 'minimax');
-  assert.equal(minimaxRows.length, 1);
-  // The local unauthorized row is gone; only the remote ok survives.
-  assert.equal(minimaxRows[0].status, 'ok');
-  assert.equal(minimaxRows[0].sourceDeviceId, 'office-pc');
-  assert.equal(minimaxRows[0].accountKey, 'sha256:remote-good-key');
-});
 
 test('the local device raw limits still carry the unauthorized row the aggregate dropped', () => {
   // This is the data the renderer's localDeviceLimitsProviders() reads. It proves

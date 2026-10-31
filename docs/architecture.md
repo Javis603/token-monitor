@@ -99,6 +99,7 @@ Archive projection can share canonical live session rows read-only while copying
 
 `src/shared/usage/deviceRuntime.js` separates usage from limits. `LimitsRuntime` owns scheduling, bounded concurrency, per-provider latest-wins lanes, deadlines, backoff and last-good/last-attempt retention. Credential changes refresh only the affected lane, without restarting usage; provider exceptions are documented in their notes.
 
+- Account fields may declare `invalidationSource` when an edit affects only one independently observed source. Source-scoped clearing fences in-flight provider work but preserves sibling accounts; shared setting edits still clear the provider. Refresh and account identity semantics are unchanged.
 - Fixed/adaptive mode is separate from the interval value. Local token usage never triggers a limits refresh, and `burn-rate` never bypasses cooldowns. Manual refresh waits for usage while limits run in the background; successful button feedback is not proof that every provider succeeded.
 - `limits/collector.js` dispatches through `limits/registry.js`; require-free provider `account.js` leaves declare account/credential metadata. Main-process `electron/limits/accountSettings.js` binds normalization and redaction. Forms receive serializable display/action DTOs, never store paths, resolvers or secrets.
 - Only registry-declared forms may save credentials. Probes use the injected transport with write-backs disabled. Reject incomplete, invalid or unauthorized drafts; persist a probe-renewed credential instead of its stale input. Forms declaring mutually exclusive credentials replace saved siblings in main; other multi-credential forms retain partial-write semantics. Fixed-credential saves use `applySettingsPatch()` for ordinary invalidation/reconfiguration; managed account services can reuse the same validator with an injected commit callback, then own credential/metadata transactions and account-scoped invalidation. Same-provider revisions discard superseded probes.
@@ -117,7 +118,7 @@ Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies 
 
 ### Balance quotas
 
-`windows[].metric === 'credits'` identifies a money quota with `remaining` and `currency`. `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. Callers may explicitly disable balance inference for wallets without a quota denominator; `showMeter: false` alone does not change existing display-layer estimates such as Sub2API's.
+`windows[].metric === 'credits'` identifies a monetary or points balance with `remaining` and `currency` (`CREDITS` for points). `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. Callers may explicitly disable balance inference for wallets without a quota denominator; `showMeter: false` alone does not change existing display-layer estimates such as Sub2API's.
 
 ## Session relationships
 

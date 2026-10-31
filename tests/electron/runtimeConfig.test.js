@@ -615,3 +615,13 @@ test('WorkBuddy managed field is private and owned by the managed service', () =
   assert.ok(rendererOmittedAccountKeys().includes('workbuddyManagedAccounts'));
   assert.equal(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.workbuddy.includes('workbuddyManagedAccounts'), false);
 });
+
+test('MiniMax key, billing and API region edits invalidate only API readings', () => {
+  const previous = { minimaxApiKey: 'key-A', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' };
+  for (const patch of [
+    { minimaxApiKey: 'key-B' },
+    { minimaxBillingMode: 'token-plan' },
+    { minimaxApiRegion: 'intl' },
+    { minimaxApiKey: 'key-B', minimaxBillingMode: 'token-plan', minimaxApiRegion: 'intl' }
+  ]) assert.deepEqual(classifySettingsChange(previous, { ...previous, ...patch }).limitScopes, [{ provider: 'minimax', source: 'api' }]);
+});

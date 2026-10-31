@@ -480,6 +480,9 @@ function normalizeLimitProvider(input) {
   const provider = normalizeProviderId(input.provider);
   if (!provider) return null;
   const accountKey = input.accountKey ? String(input.accountKey) : '';
+  const relatedAccountKey = provider === 'minimax' && typeof input.relatedAccountKey === 'string'
+    && /^sha256:[a-f0-9]{64}$/.test(input.relatedAccountKey) && input.relatedAccountKey !== accountKey
+    ? input.relatedAccountKey : '';
   const accountKeyAliases = provider === 'opencode'
     ? normalizeOpenCodeAccountKeyAliases(input.accountKeyAliases, accountKey)
     : [];
@@ -531,6 +534,7 @@ function normalizeLimitProvider(input) {
     provider,
     ...(adapterId ? { adapterId } : {}),
     accountKey,
+    ...(relatedAccountKey ? { relatedAccountKey } : {}),
     ...(provider === 'opencode' && input.webAccountKey
       ? { webAccountKey: String(input.webAccountKey) }
       : {}),
@@ -638,6 +642,9 @@ function providerCollapseKey(provider) {
   if (provider.provider === 'muse') return providerAggregateKey(provider);
   if (
     (provider.provider === 'claude'
+      // Code carries a regional group identity; API keys carry a credential
+      // identity. Neither proves that a differently keyed row is the same account.
+      || provider.provider === 'minimax'
       || provider.provider === 'codex'
       || provider.provider === 'opencode'
       || provider.provider === 'openrouter'
@@ -1059,6 +1066,7 @@ function publicLimits(limits) {
     refreshMs: normalized.refreshMs,
     providers: normalized.providers.map(({
       accountKey,
+      relatedAccountKey,
       webAccountKey,
       accountKeyAliases,
       accountEmail,

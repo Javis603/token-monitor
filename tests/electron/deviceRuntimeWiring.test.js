@@ -342,3 +342,20 @@ test('limits-only refresh waits for completion and reports errors without scanni
   assert.equal(completed, true);
   assert.deepEqual(errors, ['quota offline']);
 });
+
+test('pending source edits cannot narrow an already queued provider-wide clear', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const start = main.indexOf('function limitInvalidationKey(');
+  const end = main.indexOf('function queueLimitInvalidation(', start);
+  const context = { pendingLimitInvalidations: new Map() };
+  require('node:vm').runInNewContext(main.slice(start, end), context);
+  const broad = { provider: 'minimax' };
+  const source = { provider: 'minimax', source: 'api' };
+  for (const scopes of [[broad, source], [source, broad]]) {
+    context.pendingLimitInvalidations.clear();
+    for (const scope of scopes) context.rememberPendingLimitInvalidation(scope, 'settings-change', { clear: true });
+    const pending = [...context.pendingLimitInvalidations.values()];
+    assert.ok(pending.some(entry => entry.clear && entry.scope.provider === 'minimax' && !entry.scope.source),
+      'a source edit must not replace the broader clear');
+  }
+});

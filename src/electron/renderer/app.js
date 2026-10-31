@@ -106,6 +106,7 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
+  minimax: 'settings.minimax.codeNote',
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
@@ -6517,6 +6518,7 @@ function homeLimitRows() {
         : providerEntries.length;
       if (accountCount > 1) {
         const accountTitle = limitAccountTitle(id, provider, index, providerEntries);
+        if (!accountTitle) return providerTitle;
         return showProviderTitle ? `${providerTitle} · ${accountTitle}` : accountTitle;
       }
       if (id === 'mimo') {
@@ -12156,7 +12158,6 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   }
   renderExternalProviderStatus(id);
   await refreshStats();
-  setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
   renderExternalProviderStatus(id);
   return result;
 }
@@ -16166,15 +16167,8 @@ async function refreshCodexAccounts() {
   renderCodexAccounts();
 }
 
-// Account cards reflect THIS machine's configured credential, so read the
-// local device's RAW limits from state.stats.devices — NOT the collapsed
-// state.stats.limits.providers. In sync mode, aggregateLimits() collapses a
-// local `unauthorized` row out in favor of a remote `ok` (providerCollapseKey
-// for deepseek/minimax/grok is just the provider name; pickBetterProvider keeps
-// the higher statusRank). Searching the aggregate would miss the local row and
-// fall back to the remote `ok`, falsely reporting an invalid local key as
-// Linked. Only legacy/non-aggregated stats without a `devices` array may fall
-// back to the aggregate; once raw device rows are present they are authoritative.
+// A remote account's health cannot validate this device's credential.
+// Raw device rows are authoritative; only legacy stats without them use aggregation.
 function localDeviceLimitsProviders() {
   return accountIdentityApi.localDeviceLimitsProviders(
     state.stats,
@@ -16729,7 +16723,11 @@ function clearDisabledLimitProviderPendingChecks(enabledProviders) {
 }
 
 function externalProviderForAccount(providerName) {
-  const provider = localProviderStatus(providerName);
+  // MiniMax's settings pill belongs to the API-key lane. Code/OAuth is an
+  // independent source and must never make a key look linked or invalid.
+  const provider = providerName === 'minimax'
+    ? localProviderStatuses(providerName).find((entry) => entry.source === 'api') || null
+    : localProviderStatus(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
@@ -16795,7 +16793,8 @@ function clearExternalProviderCheckPending(providerName) {
 
 function clearExternalProviderPendingStatus(providerName) {
   if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
+  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName
+    || (providerName === 'minimax' && provider.source !== 'api'));
 }
 
 function nextCopilotSignInFlowId() {
@@ -17128,8 +17127,13 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
+  // Leave the form unchanged during a check, and while a configured key still
+  // has no row and that check has not settled.
+  const readingPending = pending || (enabled && !settled && configured && !provider);
+  if (!readingPending) {
+    manualPanel.classList.toggle('hidden', linked);
+    openBtn.classList.toggle('hidden', linked);
+  }
   if (providerName === 'claude') {
     const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
     manualPanel.classList.toggle('hidden', !showForm);
