@@ -264,7 +264,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'trends', labelKey: 'views.trends' },
   { id: 'status', labelKey: 'views.status' }
 ];
-const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
+const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'cycle', 'allTime']);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
@@ -406,6 +406,7 @@ Object.assign(els, {
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
   periodMonthModeInput: document.getElementById('periodMonthModeInput'),
+  billingCycleStartDayInput: document.getElementById('billingCycleStartDayInput'),
   modelRankingMetricInputs: Array.from(document.querySelectorAll('input[name="modelRankingMetric"]'))
 });
 Object.assign(els, {
@@ -3161,7 +3162,8 @@ function buildFixedPeriodSourcesSnapshot() {
     historyEnabled: state.settings?.historyEnabled !== false,
     historyAvailable: meta.historyTransportAvailable === true,
     todayKey: fixedPeriodTodayKey(),
-    locale: currentCalendarLocale()
+    locale: currentCalendarLocale(),
+    cycleStartDay: state.settings?.billingCycleStartDay
   });
 }
 
@@ -9679,6 +9681,9 @@ function syncSettingsForm() {
   if (els.periodMonthModeInput) {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
   }
+  if (els.billingCycleStartDayInput && document.activeElement !== els.billingCycleStartDayInput) {
+    els.billingCycleStartDayInput.value = String(fixedPeriodRangesApi.normalizeCycleStartDay(state.settings?.billingCycleStartDay));
+  }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
   const modelRankingMetric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
   for (const input of els.modelRankingMetricInputs || []) input.checked = input.value === modelRankingMetric;
@@ -13389,6 +13394,17 @@ els.periodMonthModeInput?.addEventListener('change', async () => {
   syncPeriodTabs();
   render();
   await saveSettings({ periodMonthMode: selection });
+});
+
+els.billingCycleStartDayInput?.addEventListener('change', async () => {
+  const day = fixedPeriodRangesApi.normalizeCycleStartDay(els.billingCycleStartDayInput.value);
+  els.billingCycleStartDayInput.value = String(day);
+  state.settings.billingCycleStartDay = day;
+  if (state.period === 'cycle') {
+    state.rowSignature = '';
+    render();
+  }
+  await saveSettings({ billingCycleStartDay: day });
 });
 
 document.addEventListener('click', (event) => {

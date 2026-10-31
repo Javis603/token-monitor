@@ -3,14 +3,15 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorFixedPeriodRanges = api;
 })(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi() {
-  const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30']);
+  const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30', 'cycle']);
   const LABELS = Object.freeze({
     today: 'DAY',
     month: 'MONTH',
     allTime: 'TOTAL',
     week: 'WEEK',
     last7: '7D',
-    last30: '30D'
+    last30: '30D',
+    cycle: 'CYCLE'
   });
 
   function finiteNumber(value) {
@@ -62,6 +63,18 @@
     return 1;
   }
 
+  function normalizeCycleStartDay(value) {
+    const day = Math.trunc(Number(value));
+    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : 1;
+  }
+
+  // The billing cycle starts on the same day each month; months without that
+  // day (a 31st in April, a 29th in a common February) start on their last day.
+  function cycleStartKey(year, monthIndex, startDay) {
+    const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(year, monthIndex, Math.min(startDay, lastDay))).toISOString().slice(0, 10);
+  }
+
   function normalizeMonthMode(value) {
     return MONTH_MODES.includes(value) ? value : 'month';
   }
@@ -86,7 +99,7 @@
   }
 
   function isDerived(value) {
-    return value === 'week' || value === 'last7' || value === 'last30';
+    return value === 'week' || value === 'last7' || value === 'last30' || value === 'cycle';
   }
 
   function slotForSelection(value) {
@@ -107,6 +120,14 @@
     }
     if (selection === 'last7') return { start: dayKeyAddDays(todayKey, -6), end: todayKey };
     if (selection === 'last30') return { start: dayKeyAddDays(todayKey, -29), end: todayKey };
+    if (selection === 'cycle') {
+      const startDay = normalizeCycleStartDay(options.cycleStartDay);
+      const today = new Date(`${todayKey}T00:00:00Z`);
+      const year = today.getUTCFullYear();
+      const month = today.getUTCMonth();
+      const current = cycleStartKey(year, month, startDay);
+      return { start: current <= todayKey ? current : cycleStartKey(year, month - 1, startDay), end: todayKey };
+    }
     return null;
   }
 
@@ -711,6 +732,7 @@
     joinDeviceHistorySources,
     localDayKey,
     handlePeriodMenuNavigation,
+    normalizeCycleStartDay,
     normalizeMonthMode,
     periodMenuTargetIndex,
     readySnapshotForSelection,
