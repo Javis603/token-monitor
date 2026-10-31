@@ -46,6 +46,8 @@ When first enabling aliases or prices, choose the current server settings or pub
 
 In the **Projects** view, expand a project to reveal the **Tools / Models** toggle at the bottom right. It changes both the project bars and expanded breakdown, and hides when all projects are collapsed. **Tools** is the default; the choice is saved locally as `projectBreakdownMode` (`tool` or `model`) and is independent of the Tools view’s **Tokens / Models** choice. Model display aliases are respected; usage without model attribution appears as **Unknown model**. Project token and cost totals stay the same.
 
+Usage cost is a public API list-price estimate, not an invoice. Subscription, credit-plan, free, regional, and time-tiered routes can charge differently. A custom model-price override applies to every provider that reports that bare model id; the form therefore auto-fills only Tokscale matches marked safe for submission. Provider-ambiguous or fuzzy matches stay blank and require the vendor's exact price.
+
 The `⇧` button in the title bar cycles the window behavior.
 
 ---
