@@ -5,8 +5,7 @@
 // through providerFetchers() in src/shared/limits/collector.js, which re-exports
 // the handful of names the widget and the tests use.
 
-const { spawn } = require('node:child_process');
-const { runCapturedCliProcess } = require('../../limits/cliProcess');
+const { spawn, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -1864,7 +1863,7 @@ except (OSError, RuntimeError):
 # Version and printed usage share the same isolated interpreter and cwd pin.
 # exec preserves the CLI exit status and pipes, without opening a terminal.
 if os.environ.get("TOKEN_MONITOR_CLAUDE_NONINTERACTIVE") == "1":
-    # The parent spawn is not detached, so isolate wrapper descendants here.
+    # execFile has no detached option: isolate ordinary wrapper descendants here.
     os.setsid()
     os.execvp(cmd, [cmd] + json.loads(os.environ["TOKEN_MONITOR_CLAUDE_PROBE_ARGS"]))
 master, slave = pty.openpty()
@@ -2108,17 +2107,77 @@ function runClaudeDirectCommand(args, deps = {}, timeoutMs = 12000, captured = f
   });
 }
 
-// A timed-out print must be gone before fallback; SIGTERM may be ignored.
+// execFile bounds capture and waits for close after its timeout kill. A timed-out
+// print must be gone before fallback; SIGTERM can be ignored by the child.
 function runClaudeCapturedCommand(command, args, options) {
-  // The POSIX Python runner creates its own session; do not detach it twice.
-  return runCapturedCliProcess(command, args, { ...options, platform: options.platform || process.platform, detached: false }).then(({ error, stdout, stderr }) => {
-    const failure = errorWithStatus('unavailable', [stderr, stdout].filter(Boolean).join('\n') || 'Claude printed no output');
-    if (error?.code) failure.code = error.code;
-    if (claudeProbeMustStop(failure, options) || error || !stdout.trim()) throw failure;
-    return stdout;
-  }).catch(error => {
-    if (error.code === 'CLI_PROCESS_CLEANUP_FAILED') error.code = 'CLAUDE_PROBE_CLEANUP_FAILED';
-    throw error;
+  if (options.signal?.aborted) return Promise.reject(abortError(options.signal));
+  return new Promise((resolve, reject) => {
+    const execute = options.execFile || execFile;
+    const platform = options.platform || process.platform;
+    let cleanup = Promise.resolve(null);
+    // Node's execFile abort callback can precede exit and uses SIGTERM. Own the
+    // cancellation so the same hard/tree kill runs, and settle only on close.
+    const onAbort = () => child.kill('SIGKILL');
+    const child = execute(command, args, {
+      cwd: options.cwd, env: options.env, encoding: 'utf8', windowsHide: true,
+      windowsVerbatimArguments: options.windowsVerbatimArguments,
+      timeout: options.timeoutMs, killSignal: 'SIGKILL', maxBuffer: 256 * 1024
+    }, async (error, stdout = '', stderr = '') => {
+      options.signal?.removeEventListener('abort', onAbort);
+      // cmd.exe may close while taskkill is still working. Both must finish
+      // before allowing fallback, including when cleanup eventually fails.
+      const cleanupError = await cleanup;
+      if (cleanupError) { reject(cleanupError); return; }
+      if (options.signal?.aborted) { reject(abortError(options.signal)); return; }
+      // Preserve stdout too: some CLI builds report rejected flags there.
+      const failure = errorWithStatus('unavailable', [stderr, stdout].filter(Boolean).join('\n') || 'Claude printed no output');
+      if (error?.code) failure.code = error.code;
+      if (claudeProbeMustStop(failure, options)) reject(failure);
+      else if (error) reject(failure);
+      else if (stdout.trim()) resolve(stdout);
+      else reject(failure);
+    });
+    if (child.pid) {
+      const kill = child.kill.bind(child);
+      if (platform !== 'win32') {
+        child.kill = signal => {
+          // The isolated group includes ordinary shell-wrapper descendants.
+          try { process.kill(-child.pid, signal); }
+          catch (error) {
+            if (error.code !== 'ESRCH') {
+              const failure = errorWithStatus('unavailable', 'Claude probe process group could not be stopped');
+              failure.code = 'CLAUDE_PROBE_CLEANUP_FAILED';
+              cleanup = Promise.resolve(failure);
+            }
+          }
+          return kill(signal);
+        };
+      } else if (options.windowsVerbatimArguments) {
+        // A .cmd shim owns another process: terminating cmd.exe alone leaves it alive.
+        let stopping = false;
+        child.kill = signal => {
+          if (stopping) return true;
+          stopping = true;
+          let complete;
+          cleanup = new Promise(resolve => { complete = resolve; });
+          const root = envValue(options.env, 'SystemRoot') || 'C:\\Windows';
+          const finished = error => {
+            const failure = error && errorWithStatus('unavailable', 'Claude probe process tree could not be stopped');
+            if (failure) failure.code = 'CLAUDE_PROBE_CLEANUP_FAILED';
+            complete(failure || null);
+            kill(signal);
+          };
+          try {
+            execute(path.win32.join(root, 'System32', 'taskkill.exe'), ['/pid', String(child.pid), '/t', '/f'],
+              { windowsHide: true, timeout: 2000, killSignal: 'SIGKILL' }, finished);
+          } catch (error) { finished(error); }
+          return true;
+        };
+      }
+    }
+    child.stdin?.end();
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
   });
 }
 
