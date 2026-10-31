@@ -546,7 +546,7 @@
 
   function accountAdjustedDaily(snapshots) {
     if (!snapshots.some(source => source.history?.cursorAccountUsage || sourcePeriod(source, 'today')?.cursorAccountUsage)) return snapshots;
-    const rowsByDate = new Map();
+    const entries = [];
     const dayRanges = new Map();
     for (const snapshot of snapshots) {
       const today = sourcePeriod(snapshot, 'today');
@@ -579,16 +579,13 @@
         }
         const entry = { deviceId: snapshot.deviceId, row, usage,
           scope: usage && scope && range ? { ...scope, range } : null };
-        if (!rowsByDate.has(row.date)) rowsByDate.set(row.date, []);
-        rowsByDate.get(row.date).push(entry);
+        entries.push(entry);
       }
     }
-    const adjusted = [];
-    for (const entries of rowsByDate.values()) {
-      const duplicate = accounts.accountUsageWinners(entries, entry => entry.scope);
-      for (const entry of entries) adjusted.push(duplicate(entry)
-        ? accounts.subtractCounters(entry.row, entry.usage) : entry.row);
-    }
+    // Equal UTC windows can have different local date labels across the dateline.
+    const duplicate = accounts.accountUsageWinners(entries, entry => entry.scope);
+    const adjusted = entries.map(entry => duplicate(entry)
+      ? accounts.subtractCounters(entry.row, entry.usage) : entry.row);
     return [{ daily: adjusted }];
   }
 

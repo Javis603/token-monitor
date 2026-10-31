@@ -638,3 +638,43 @@ test('a rejected targeted Cursor partition never survives the selected full-scan
     assert.equal(JSON.stringify(f.anchor), before);
   }
 });
+
+test('daily winners compete across date labels for the same UTC window, including zero corrections', () => {
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  const clock = new Date('2026-10-31T00:00:00Z');
+  const boundary = '2026-10-30T10:00:00.000Z:2026-10-31T10:00:00.000Z';
+  for (const live of [false, true]) {
+    for (const latestTokens of [1000, 0]) {
+      const sources = [
+        ['A', 'Pacific/Kiritimati', '2026-10-31', 1000, 5, 20, 2000],
+        ['B', 'Pacific/Honolulu', '2026-10-30', latestTokens, 0, 0, 1000]
+      ].map(([deviceId, timeZone, date, tokens, residue, codex, age]) => {
+        const whole = mergePeriods(period('cursor', tokens + residue, (tokens + residue) / 1000), period('codex', codex, codex / 1000));
+        const history = (cursor, other = 0) => normalizeHistory(parseGraphResult({ contributions: [{ date, clients: [
+          { client: 'cursor', modelId: 'shared', tokens: { input: cursor }, cost: cursor / 1000 },
+          ...(other ? [{ client: 'codex', modelId: 'shared', tokens: { input: other }, cost: other / 1000 }] : [])
+        ] }] }), { todayKey: date });
+        const scope = { accountKey: key, observedAt: new Date(now - age).toISOString() };
+        const source = { deviceId, updatedAt: new Date(now).toISOString(), historyAvailable: true,
+          periodWindows: { timeZone, today: { key: date, endsAt: '2026-10-31T10:00:00.000Z' } },
+          today: live ? whole : null, history: history(tokens + residue, codex) };
+        source.history.cursorAccountUsage = { ...scope, range: `history:${timeZone}`, usage: history(tokens) };
+        if (live) source.today.cursorAccountUsage = { ...scope, range: `today:${boundary}`, usage: accountingCounters(period('cursor', tokens, tokens / 1000)) };
+        return source;
+      });
+      if (live) assert.equal(aggregateDevices(sources, 0, clock.getTime()).periods.today.totalTokens, latestTokens + 25);
+      for (const selection of ['week', 'last7', 'last30']) {
+        for (const devices of [sources, [...sources].reverse()]) {
+          const result = ranges.fixedPeriodSnapshotFromDevices(selection, devices, { now: clock, historyAvailable: true });
+          assert.equal(result.status, 'ready');
+          assert.equal(result.period.totalTokens, latestTokens + 25, `${selection} live=${live} latest=${latestTokens}`);
+          assert.equal(result.period.clients.cursor, latestTokens + 5);
+          assert.equal(result.period.clients.codex, 20);
+          assert.ok(Math.abs(result.period.costUsd - (latestTokens + 25) / 1000) < 1e-8);
+          assert.equal(result.devices.find(row => row.deviceId === 'A').period.totalTokens, 1025);
+          assert.equal(result.devices.find(row => row.deviceId === 'B').period.totalTokens, latestTokens);
+        }
+      }
+    }
+  }
+});
