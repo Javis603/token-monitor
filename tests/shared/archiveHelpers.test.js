@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const {
   cloneJson,
+  cloneSummaryWithSharedSessions,
   hasSummaryPeriod,
   localDay,
   localMonth,
@@ -77,6 +78,23 @@ test('cloneJson detaches nested values from the source', () => {
   copy.periods.today.clients.codex = 99;
   assert.equal(source.periods.today.clients.codex, 1);
   assert.deepEqual(cloneJson(null), {});
+});
+
+test('canonical projection shares read-only rows while isolating mutable maps and partial periods', () => {
+  const row = Object.freeze({ client: 'codex', sessionId: 'one', totalTokens: 7 });
+  const period = Object.freeze({ totalTokens: 7, clients: Object.freeze({ codex: 7 }), sessions: Object.freeze({ 'codex:one': row }) });
+  for (const nested of [false, true]) {
+    const source = Object.freeze(nested ? { periods: Object.freeze({ today: period }) } : { today: period });
+    const copy = cloneSummaryWithSharedSessions(source);
+    const periods = nested ? copy.periods : copy;
+    assert.deepEqual(JSON.parse(JSON.stringify(copy)), cloneJson(source));
+    assert.equal(periods.today.sessions['codex:one'], row);
+    assert.equal(Object.hasOwn(periods, 'month'), false);
+    periods.today.clients.codex = 99;
+    periods.today.sessions['codex:other'] = { totalTokens: 1 };
+    assert.equal(period.clients.codex, 7);
+    assert.deepEqual(Object.keys(period.sessions), ['codex:one']);
+  }
 });
 
 test('targetPeriod normalizes in place for both summary shapes', () => {

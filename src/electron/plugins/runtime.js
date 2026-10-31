@@ -13,6 +13,7 @@ const { createManagedPlugins } = require('./managed');
 const { normalizeAppearance } = require('../../shared/plugins/appearance');
 const { createPluginCatalog } = require('./catalog');
 const maintainerSources = require('./maintainerSources');
+const officialSources = require('./officialSources');
 const { createPluginManager } = require('./manager');
 const { initialSetupReview, initialSetupPlan, recordSetupChoice, placementKey, contentKey, contentSelectionGuard } = require('./initialSetup');
 const { translate } = require('../renderer/i18n');
@@ -155,7 +156,7 @@ function createPluginRuntime({
     dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), manager, getSettings, saveSettings: persistManagementSettings, getLocale, placementContext });
   try { managed.recover(); }
   catch (error) { log(`[plugins] Plugin management unavailable: ${error.message}`); }
-  const catalog = createPluginCatalog({ nativeImage: electron.nativeImage, manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch, maintainerSources });
+  const catalog = createPluginCatalog({ nativeImage: electron.nativeImage, manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch, maintainerSources, officialSources });
   let catalogRefreshTimer = null;
   const refreshCatalog = async () => {
     try {

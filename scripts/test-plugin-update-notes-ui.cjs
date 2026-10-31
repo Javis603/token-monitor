@@ -52,13 +52,20 @@ async function main() {
   };
   const checks = [];
   const check = async (name, expression) => checks.push({ name, ok: await win.webContents.executeJavaScript(expression) });
+  for (const version of ['0.4.0', '0.5.0']) {
+    await setup(version);
+    await check(`installed-${version}-has-no-update-action`, "![...document.querySelectorAll('.plugin-catalog-grid .settings-actions button')].some(button=>button.textContent==='更新') && Boolean(document.querySelector('.plugin-installed-check'))");
+    await win.capturePage().then(image => fs.writeFileSync(path.join(scratch, `installed-${version}.png`), image.toPNG()));
+  }
   await setup(null);
+  await check('uninstalled-card-offers-install', "[...document.querySelectorAll('.plugin-catalog-grid .settings-actions button')].some(button=>button.textContent==='安裝' && !button.disabled)");
   await win.webContents.executeJavaScript("document.querySelector('.plugin-catalog-title').click();new Promise(resolve=>setTimeout(resolve,30))");
   await check('uninstalled-details-show-introduction-without-release-notes', "Boolean(document.querySelector('dialog .plugin-catalog-readme')) && !document.querySelector('dialog').textContent.includes('新增請求篩選')");
   await win.capturePage().then(image => fs.writeFileSync(path.join(scratch, 'uninstalled-details.png'), image.toPNG()));
   await win.webContents.executeJavaScript("document.querySelector('dialog .plugin-allow').click();new Promise(resolve=>setTimeout(resolve,30))");
   await check('first-install-review-has-no-update-notes', "!document.querySelector('.plugin-update-notes') && !document.querySelector('.plugin-catalog-review').textContent.includes('新增請求篩選')");
   await setup('0.1.0');
+  await check('older-install-offers-enabled-update', "[...document.querySelectorAll('.plugin-catalog-grid .settings-actions button')].some(button=>button.textContent==='更新' && !button.disabled)");
   await win.webContents.executeJavaScript("document.querySelector('.plugin-catalog-title').click();new Promise(resolve=>setTimeout(resolve,30))");
   await check('installed-details-also-remain-introduction-only', "!document.querySelector('dialog').textContent.includes('新增請求篩選')");
   await win.webContents.executeJavaScript("document.querySelector('dialog .plugin-allow').click();new Promise(resolve=>setTimeout(resolve,30))");

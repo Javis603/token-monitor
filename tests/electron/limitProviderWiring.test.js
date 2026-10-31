@@ -117,6 +117,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     volcengineAgentSecretAccessKey: ['providers', 'volcengine', 'agentSecretAccessKey'],
     ollamaApiKey: ['providers', 'ollama', 'apiKey'],
     ollamaCookie: ['providers', 'ollama', 'cookie'],
+    traeCookie: ['providers', 'trae', 'cookie'],
     traeAccessToken: ['providers', 'trae', 'accessToken'],
     traeDeviceId: ['providers', 'trae', 'deviceId'],
     alibabaCookie: ['providers', 'alibaba', 'cookie'],
@@ -172,7 +173,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
       'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
     ],
     ollama: ['ollamaApiKey', 'ollamaCookie'],
-    trae: ['traeAccessToken', 'traeDeviceId'],
+    trae: ['traeCookie', 'traeAccessToken', 'traeDeviceId'],
     alibaba: ['alibabaCookie', 'alibabaVariant'],
     thirdparty: ['thirdPartyProfiles']
   });
@@ -279,7 +280,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
-    'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
+    'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
     'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId'
   ].sort());
   for (const key of normalizedKeys) {
@@ -571,4 +572,18 @@ test('MiniMax billing choice survives reload and clears only its provider quota'
   assert.equal(change.usageStructural, false);
   const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
   assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
+});
+
+test('Trae credential source follows the usable credential after a malformed stored value', () => {
+  for (const [key, envKey] of [['traeCookie', 'TRAE_COOKIE'], ['traeAccessToken', 'TRAE_ACCESS_TOKEN']]) {
+    const settings = { [key]: 'invalid\r\ncredential' };
+    const fallback = accountStatusProjection(settings, { [envKey]: 'usable-env-credential' });
+    assert.equal(fallback.traeAccessTokenConfigured, true);
+    assert.equal(fallback.traeAccessTokenSource, 'env');
+    const missing = accountStatusProjection(settings, {});
+    assert.equal(missing.traeAccessTokenConfigured, false);
+    assert.equal(missing.traeAccessTokenSource, '');
+    const saved = accountStatusProjection({ [key]: 'usable-stored-credential' }, { [envKey]: 'usable-env-credential' });
+    assert.equal(saved.traeAccessTokenSource, 'settings');
+  }
 });

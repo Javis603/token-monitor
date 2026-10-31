@@ -459,12 +459,13 @@ test('runtime refreshes only the curated index at startup and six hours, notifyi
   } });
   f.invoke('plugins:list');
   for (let i = 0; i < 10; i++) await tick();
-  assert.equal(calls, 1); assert.equal(f.invoke('plugins:catalog').entries[0].origin.kind, 'maintainer');
+  const curatedEntries = () => f.invoke('plugins:catalog').entries.filter(entry => entry.origin.kind === 'maintainer');
+  assert.equal(calls, 1); assert.deepEqual(curatedEntries().map(entry => entry.id), ['remote-plugin']);
   assert.equal(f.runtime.manager.list().plugins.length, 0);
   assert.ok(f.main.webContents.sent.some(event => event.channel === 'plugins:changed'));
   offline = true;
   t.mock.timers.tick(6 * 60 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
-  assert.equal(calls, 2); assert.equal(f.invoke('plugins:catalog').entries.length, 1);
+  assert.equal(calls, 2); assert.deepEqual(curatedEntries().map(entry => entry.id), ['remote-plugin']);
   t.mock.timers.tick(5 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
   assert.equal(calls, 3);
   await f.runtime.dispose(); t.mock.timers.tick(6 * 60 * 60 * 1000); assert.equal(calls, 3);

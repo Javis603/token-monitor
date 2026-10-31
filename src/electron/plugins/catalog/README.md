@@ -1,14 +1,5 @@
-# App-distributed catalog
+# Optional offline catalog
 
-This directory is the offline official catalog. It intentionally contains no
-production plugin packages while the platform is experimental. Official
-attribution comes from inclusion in the App, not a publisher-supplied flag.
+This directory supports optional App-distributed offline `.tmplugin` packages. No production plugin is bundled here. Official source stays in the repository’s `plugins/` directory and is published to `dist`; `officialSources.js` selects the remote catalog. Tests use their own fixture directories.
 
-Use numeric `.tmplugin` filename prefixes to set the official display order within
-Featured plugins. A manifest `homepage` pointing to a GitHub repository supplies
-its README details. This does not load images until details open.
-
-Future curated `.tmplugin` files use the same package parser, disabled install,
-revision trust, origin pinning and transactional updates as imported packages.
-Tests supply synthetic packages in a temporary catalog directory; fixtures must
-not be copied here or shipped as showcase plugins.
+Offline packages are listed in filename order. Installation identity comes from the manifest and source, independently of the archive filename.
