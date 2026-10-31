@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const { normalizePluginAuthorSkin } = require('../../src/electron/plugins/runtime');
+const { networkProxySource } = require('../../src/electron/networkProxy');
 const { CREDENTIAL_SETTING_PATHS, credentialSettingsForRenderer } = require('../../src/shared/credentialStore');
 const {
   accountFieldProjection,
@@ -43,7 +44,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
   // are fixtures; this is not an Electron runtime test. The extracted source has
   // no source map and deliberately receives no credit against main.js coverage.
   const project = vm.runInNewContext(`${main.slice(start, end)}; settingsForRenderer`, {
-    settings, normalizePluginAuthorSkin, credentialSettingsForRenderer, accountFieldProjection, accountStatusProjection,
+    settings, networkProxySource, normalizePluginAuthorSkin, credentialSettingsForRenderer, accountFieldProjection, accountStatusProjection,
     limitAccountFormsForRenderer, rendererOmittedAccountKeys, process: { env: {} },
     getSyncContentRuntime: () => ({ status: () => ({ enabled: {} }) }),
     trayMenuLocale: () => 'en', effectiveSubscriptions: () => [], subscriptionsAreShared: () => false,
