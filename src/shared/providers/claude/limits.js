@@ -1718,7 +1718,9 @@ function parseClaudeCliUsageText(text, now = new Date()) {
   const accountEmail = (clean.match(/(?:Account|Email):\s*([^\s@]+@[^\s@]+)/i) || [])[1] || '';
   const accountOrganization = ((clean.match(/(?:Org|Organization):\s*(.+)/i) || [])[1] || '').trim();
   const accountLabel = claudePlanLabelFromParts((clean.match(/(?:Plan|Subscription):\s*([A-Za-z][A-Za-z0-9 _-]{0,30})/i) || [])[1] || '');
-  if (sessionPercentLeft === null) throw errorWithStatus('unavailable', 'Claude CLI usage missing current session');
+  if (sessionPercentLeft === null && weeklyPercentLeft === null) {
+    throw errorWithStatus('unavailable', 'Claude CLI usage missing quota');
+  }
   return {
     sessionPercentLeft,
     weeklyPercentLeft,
@@ -2249,7 +2251,7 @@ async function runClaudeUsageCli(deps = {}) {
     // Preparation and cwd pinning run again, never with weaker security flags.
   }
   if ((deps.platform || process.platform) === 'win32') return runClaudeDirectUsageCli(deps);
-  return runClaudePosixProbe('/usage', 'currentsession.*?[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
+  return runClaudePosixProbe('/usage', '(?:currentsession.*?|currentweek(?:allmodels)?)[0-9]{1,3}(?:\\.[0-9]+)?%', deps);
 }
 
 async function runClaudeDirectUsageCli(deps = {}) {

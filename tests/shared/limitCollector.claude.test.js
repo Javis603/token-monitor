@@ -1626,20 +1626,25 @@ test('Claude CLI usage preserves time-only resets in their own quota sections', 
   assert.equal(typeof weekly.resetsAt, 'string');
 });
 
-test('Claude CLI usage never borrows the weekly percentage for a missing session', () => {
-  assert.throws(
-    () => mapClaudeCliUsageToProvider([
-      'Current session',
-      'Current week',
-      '80% left',
-      'Resets Jul 22'
-    ].join('\n'), {
-      now: new Date('2026-07-15T00:00:00Z'),
-      updatedAt: '2026-07-15T00:00:00Z'
-    }),
-    (error) => error?.status === 'unavailable'
-      && error?.message === 'Claude CLI usage missing current session'
-  );
+test('Claude CLI usage keeps weekly quota without inventing a missing session', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    'Current week',
+    '80% left',
+    'Resets Jul 22'
+  ].join('\n'), {
+    now: new Date('2026-07-15T00:00:00Z'),
+    updatedAt: '2026-07-15T00:00:00Z'
+  });
+  assert.deepEqual(provider.windows.map(window => window.kind), ['weekly']);
+  assert.equal(provider.windows[0].remainingPercent, 80);
+});
+
+test('Claude CLI usage rejects output without session or all-model weekly quota', () => {
+  for (const text of ['Plan: Ultra', '65% left', 'Current week (Sonnet only)\n65% left']) {
+    assert.throws(() => mapClaudeCliUsageToProvider(text),
+      error => error?.status === 'unavailable' && error?.message === 'Claude CLI usage missing quota');
+  }
 });
 
 test('Claude CLI usage never borrows Sonnet-only data for a missing all-model weekly window', () => {
