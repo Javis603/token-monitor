@@ -573,7 +573,7 @@ function createTray({
     press = null;
     releasedPress = null;
     if (completedPress?.canceled) return;
-    onToggle(tray, pointerPoint(position, electron, platform), completedPress?.visible ?? null, completedPress?.matchedBlur === true);
+    onToggle(tray, pointerPoint(position, electron, platform), completedPress?.visible ?? null, completedPress?.matchedBlur === true, Boolean(completedPress));
   });
   tray.on('double-click', () => {
     press = null;

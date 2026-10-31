@@ -97,7 +97,8 @@ function createUsageTransform(options = {}) {
     };
     const withArchivedClients = applyArchivedClientUsage(summary, settings.archivedClientUsage, {
       activeClients: settings.clients,
-      ...archiveOptions
+      ...archiveOptions,
+      shareSessions: true
     });
     const visibleSummary = settings.sessionUsageArchiveEnabled === false
       ? withArchivedClients

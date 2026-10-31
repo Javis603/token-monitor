@@ -14,7 +14,7 @@
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/v/release/Javis603/token-monitor?include_prereleases&style=flat-square&label=release&color=22c55e" alt="최신 릴리스" /></a>
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/downloads/Javis603/token-monitor/total?style=flat-square&color=22c55e" alt="총 다운로드" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 이상" />
-    <img src="https://img.shields.io/badge/macOS-12%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 12 or later" />
+    <img src="https://img.shields.io/badge/macOS-13%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 13 or later" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
     <a href="https://discord.gg/HmdNVVvw5P"><img src="https://img.shields.io/discord/1344259784219689031?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="라이선스: MIT" /></a>
@@ -201,7 +201,7 @@ brew install --cask token-monitor
 
 데스크톱 페이지에 맞춤 콘텐츠를 추가하고 플러그인 페이지와 설정을 만들 수 있습니다. Notch, Edge Dock, 메뉴 막대/시스템 트레이, 플로팅 버블에도 콘텐츠를 배치할 수 있습니다. 제작자는 자체 UI와 데이터 수집 및 계산을 위한 선택적 로컬 Node 백엔드를 개발할 수 있습니다.
 
-설정 → 플러그인에서 관리하세요. [사용 가이드](https://javis-ai.com/token-monitor/docs/plugins.html?lang=ko), [개발 가이드](docs/plugins/author-quickstart.md), [플러그인 API](docs/plugins/README.md)를 참고하세요. 플러그인 API는 실험적이며 향후 변경으로 플러그인 업데이트가 필요할 수 있습니다. 신뢰하는 코드만 활성화하세요. 플러그인은 샌드박스로 격리되지 않으며 Node 백엔드는 OS 사용자 권한으로 실행됩니다.
+설정 → 플러그인에서 관리하세요. [사용 가이드](https://javis-ai.com/token-monitor/docs/plugins.html?lang=ko), [커뮤니티 플러그인](https://github.com/Javis603/token-monitor-plugins), [개발 가이드](docs/plugins/author-quickstart.md), [플러그인 API](docs/plugins/README.md)를 참고하세요. 플러그인 API는 실험적이며 향후 변경으로 플러그인 업데이트가 필요할 수 있습니다. 신뢰하는 코드만 활성화하세요. 플러그인은 샌드박스로 격리되지 않으며 Node 백엔드는 OS 사용자 권한으로 실행됩니다.
 
 ## 지원 도구 상세
 
@@ -294,10 +294,11 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 | 프롬프트／응답별 사용량 및 도구 호출 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 상세 정보는 로컬에서만 읽으며 동기화하지 않습니다. |
 | 컨텍스트 사용량／남은 공간 | Claude Code, Codex, DeepSeek Harness | Claude Code의 컨텍스트 한도는 모델을 기준으로 추정합니다. |
 | 캐시 사용량／세션 캐시 적중률 | 캐시 필드를 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 캐시 사용량 데이터가 있을 때 적중률을 표시합니다. |
-| 예상 캐시 잔여 시간 | Claude Code, Codex | Claude Code: 5분 또는 1시간. Codex: 약 30분(추정). |
+| 예상 캐시 잔여 시간 | Claude Code | 기록된 캐시 유형에 따라 5분 또는 1시간으로 추정합니다. |
 | 출력 속도／토큰 소비 속도 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 출력 속도는 `tok/s`, 전체 토큰 소비 속도는 `tok/min`이며, 측정 시간에 대기가 포함될 수 있습니다. |
 | 추론 강도 설정 | Claude Code, Codex | 세션에 명시적으로 기록된 설정값만 표시합니다. |
 | 추론 토큰 수 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| 턴 시작／완료 감지 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | 도구가 기록한 턴 신호를 사용합니다. 기타 도구나 유효한 신호가 없는 경우 마지막 활동 후 약 10분 동안 실행 중으로 추정합니다. |
 | 네이티브 실행 중／입력 대기 상태 | Claude Code, Codex | — |
 | 부모 세션／하위 에이전트 그룹화 | Codex, Antigravity, Oh My Pi, ZCode; 부모 세션 연결을 검증할 수 있는 T3 Code 세션 | Claude Code의 그룹화는 T3 Code를 통해 제공합니다. |
 | 동일 대화의 이어진 기록 그룹화 | Codex; 검증된 스레드 연결이 있는 T3 Code 세션 | — |

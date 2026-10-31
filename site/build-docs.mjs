@@ -6,7 +6,11 @@ import { Marked, Renderer } from "marked";
 export const references = [
   { source: "docs/plugins/README.md", page: "plugin-reference", title: "Plugin API reference" },
   { source: "docs/plugins/author-ui-options.md", page: "plugin-ui-reference", title: "UI integration reference" },
-  { source: "docs/plugins/distribution-design.md", page: "plugin-distribution-reference", title: "Package and catalog reference" }
+  { source: "docs/plugins/distribution-design.md", page: "plugin-distribution-reference", title: "Package and catalog reference" },
+  { source: "docs/plugins/author-data-settings.md", page: "plugin-data-reference", title: "Data and settings reference" },
+  { source: "docs/plugins/author-data-resources.md", page: "plugin-resources-reference", title: "Resource fields and measurement coverage" },
+  { source: "docs/plugins/publishing.md", page: "plugin-publishing-reference", title: "Publishing guide" },
+  { source: "docs/plugins/validation.md", page: "plugin-testing-reference", title: "Author testing and platform acceptance" }
 ];
 const repository = "https://github.com/Javis603/token-monitor/blob/main/";
 const escape = value => String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -57,7 +61,7 @@ export function referencePage(template, reference, body) {
   const first = template.indexOf('<article class="doc-lang');
   const last = template.lastIndexOf("</article>") + "</article>".length;
   if (first < 0 || last < first) throw new Error("Documentation shell has no language articles");
-  const notice = `<p data-i18n="docs.referenceLanguage">This reference is generated from the canonical English repository document. Navigation and guides follow your selected language.</p><p><a href="${reference.page}.md" data-i18n="docs.referenceMarkdown">Read Markdown for agents</a> · <a href="${repository + reference.source}" data-i18n="docs.referenceSource">Repository source</a></p>`;
+  const notice = `<p data-i18n="docs.referenceLanguage">This reference is generated from the canonical English repository document. Navigation and guides follow your selected language.</p><p><a href="https://raw.githubusercontent.com/Javis603/token-monitor/main/${reference.source}" data-i18n="docs.referenceMarkdown">Read Markdown for agents</a> · <a href="${repository + reference.source}" data-i18n="docs.referenceSource">Repository source</a></p>`;
   const content = body.replace(/(<\/h1>)/, "$1" + notice);
   let html = template.slice(0, first) + `<article class="docs-article" data-docs-shared lang="en">${content}</article>` + template.slice(last);
   html = html.replace(/<title>[\s\S]*?<\/title>/, `<title>${escape(reference.title)} · Token Monitor Docs</title>`)
@@ -76,6 +80,8 @@ export async function buildReferences({ siteRoot, outputRoot, rewrite }) {
     const markdown = await readFile(new URL("../" + reference.source, siteRoot), "utf8");
     const html = referencePage(template, reference, renderReference(markdown, reference.source));
     await writeFile(new URL(`docs/${reference.page}.html`, outputRoot), rewrite(html));
-    await writeFile(new URL(`docs/${reference.page}.md`, outputRoot), markdown);
+    // Keep published agent bookmarks without relocating source-relative links.
+    const moved = `# ${reference.title}\n\nThis document has moved to the [canonical Markdown](https://raw.githubusercontent.com/Javis603/token-monitor/main/${reference.source}).\n`;
+    await writeFile(new URL(`docs/${reference.page}.md`, outputRoot), moved);
   }
 }

@@ -10,13 +10,14 @@
     <link rel="stylesheet" href="pluginViews.css" />
   </head>
   <body>
-    <main class="shell">
+    <main class="shell" tabindex="-1">
       <header class="titlebar">
         <div>
-          <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" aria-label="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
+          <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" aria-label="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><div id="pluginPageHeading" class="plugin-page-heading hidden"></div><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
           <div id="status" class="status">Starting</div>
         </div>
         <div class="title-controls">
+          <div id="pluginPageActions" class="plugin-page-actions hidden"></div>
           <nav class="tabs" aria-label="Period tabs">
             <span class="tab-indicator" aria-hidden="true"></span>
             <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
@@ -125,6 +126,13 @@
                       <div id="tokscaleBundledBuildRow" class="maintenance-version-item hidden"><span data-i18n="settings.tokscale.bundledBuild">Bundled build</span><strong id="tokscaleBundledBuild"></strong></div>
                     </div>
                     <p class="settings-note"><span data-i18n="settings.tokscale.noteBefore">Token Monitor uses tokscale (MIT, open-source) to read token data.</span> <button id="openTokscaleLinkButton" type="button" class="inline-link" data-i18n="settings.tokscale.learnMore">Learn more</button></p>
+                  </div>
+                  <div id="networkProxyGroup" class="settings-group advanced-settings-block maintenance-panel">
+                    <div class="settings-group-header maintenance-header"><span data-i18n="settings.proxy.title">Network proxy</span><span id="networkProxySource"></span></div>
+                    <label><span data-i18n="settings.proxy.url">Proxy URL</span><input id="proxyUrlInput" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890" aria-describedby="networkProxyNote" /></label>
+                    <label><span data-i18n="settings.proxy.noProxy">Bypass proxy for</span><input id="noProxyInput" type="text" spellcheck="false" autocomplete="off" placeholder="example.com, .internal.net, 10.0.0.1:8080" data-i18n-placeholder="settings.proxy.noProxyPlaceholder" /></label>
+                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Used only for Token Monitor's own limit and account requests; sign-ins in your browser or a CLI are not affected. While set, it replaces HTTP(S)_PROXY and NO_PROXY for these requests, so list any hosts to bypass here; local addresses always stay direct. Leave empty to use the environment or system proxy.</p>
+                    <div id="proxyUrlError" class="hub-status error" role="alert" hidden></div>
                   </div>
                   <div class="settings-group advanced-settings-block advanced-config-row">
                     <p class="settings-note"><span data-i18n="settings.advanced.note">Additional options are available in</span> <code>settings.json</code>.</p>
@@ -1828,6 +1836,7 @@
     <script src="pluginSettings.js"></script>
 
     <script src="pluginMainPages.js"></script>
+    <script src="windowActivationFocus.js"></script>
 
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>

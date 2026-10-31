@@ -361,6 +361,33 @@ time.sleep(10)
   assert.equal(fs.readFileSync(path.join(dir, '.claude', 'settings.local.json'), 'utf8'), planted);
 });
 
+test('real PTY completes weekly-only usage before the process timeout', { skip: !hasPython }, async t => {
+  const f = fixture(t);
+  const fake = path.join(f.root, 'weekly-claude.py');
+  fs.writeFileSync(fake, `#!/usr/bin/python3
+import signal, sys, time
+signal.signal(signal.SIGTERM, lambda *args: sys.exit(143))
+print('Claude Code v2.1.309\\r\\n❯ ', flush=True)
+while sys.stdin.readline().strip() != '/usage':
+    pass
+print('Current week (all models)\\n65% left\\nPlan: Ultra', flush=True)
+time.sleep(30)
+`, { mode: 0o700 });
+  const result = await fetchClaudeLimits({}, {
+    env: { ...f.env, TOKEN_MONITOR_CLAUDE_COMMAND: fake },
+    claudeProbeDir: path.join(f.root, 'probe'), platform: process.platform, pythonCommand: python,
+    readMacKeychain: false, readWindowsCredential: false,
+    stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+    isClaudeCliAuthenticated: async () => true, runClaudeVersion: async () => '',
+    fetch: async () => { throw new Error('network forbidden'); },
+    claudeCliTimeoutMs: 15000
+  });
+  assert.equal(result.source, 'cli');
+  assert.equal(result.accountLabel, 'Ultra');
+  assert.deepEqual(result.windows.map(window => window.kind), ['weekly']);
+  assert.equal(result.windows[0].remainingPercent, 65);
+});
+
 test('PTY trust selection waits for a complete menu and selected Yes before confirming', { skip: !hasPython }, async t => {
   for (const mode of ['default-no', 'default-yes', 'fragmented', 'paused-after-menu', 'paused-during-guard', 'premature-input', 'slow-start', 'no-color-env', 'trusted']) {
     for (const command of ['slow-start', 'no-color-env', 'paused-after-menu', 'premature-input'].includes(mode) ? ['status'] : ['usage', 'status']) await t.test(`${mode}: /${command}`, async t => {

@@ -127,7 +127,7 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
   const state = { breakdown: 'home', stats: { revision: 1 } };
   const context = {
     homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
-    state, prefersReducedMotion: () => false, visibleStatsSurface: () => 'main',
+    state, pluginContent: null, prefersReducedMotion: () => false, visibleStatsSurface: () => 'main',
     requestAnimationFrame: callback => frames.push(callback),
     document,
     window: {

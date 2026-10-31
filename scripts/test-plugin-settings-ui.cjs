@@ -17,6 +17,7 @@ async function main() {
   fs.writeFileSync(path.join(scratch, 'ui.mjs'), "export function mount(container){const input=document.createElement('input');input.value='saved';container.append(input);return {dispose(){input.remove()}}}");
   win = new BrowserWindow({ show: false, width: 361, height: 799, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   const appHtml=fs.readFileSync(path.join(root,'src/electron/renderer/index.html'),'utf8');
+  const appHeader=appHtml.slice(appHtml.indexOf('<header class="titlebar">'),appHtml.indexOf('</header>')+9);
   assert.ok(!appHtml.includes('id="pluginsEnabledInput"')&&!appHtml.includes('data-i18n="settings.plugins.intro"'));
   const i18n=require(path.join(root,'src/electron/renderer/i18n.js'));
   for (const locale of i18n.LANGUAGE_OPTIONS.filter(item=>item.value!=='auto').map(item=>item.value)) assert.ok(!i18n.translate(locale,'plugins.package.import').includes('…'));
@@ -31,12 +32,15 @@ async function main() {
     const tick = () => new Promise(r => setTimeout(r, 20));
     const data = {enabled:true, plugins:[{id:'alpha',trusted:true,types:['widget','page'],name:'Alpha',description:'Plugin description',version:'1.0.0',source:'user',status:'active',enabled:true,views:[{ref:'alpha/view',title:'View',surfaces:['home','page'],placements:{home:false}}],background:{supported:true,enabled:false},logs:[{at:0,level:'info',text:'Fixture ready'}],runtime:{state:'idle',cpuPercent:null,memoryMB:null}},{id:'beta',name:'Beta',source:'user',status:'disabled',enabled:false,views:[]}]};
     let pending, reject, previewPending, catalogCalls = 0, importResult = null, copyFailure = false;
-    let catalogMode = 'deferred', previewMode = 'success', globalMode = 'success', savedMasterEnabled = true;
-    const catalog = {entries:[{id:'demo',types:['page'],name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'custom-fixture',kind:'community'},versions:[{version:'1.0.0',compatible:true,installable:true},{version:'2.0.0',compatible:true,installable:true}],status:'available'}],sources:[]};
+    let catalogMode = 'success', previewMode = 'success', globalMode = 'success', savedMasterEnabled = true;
+    const catalog = {entries:[{id:'demo',types:['page'],name:'Demo',description:'Example',author:'Author',version:'1.0.0',origin:{id:'custom-fixture',kind:'community'},versions:[{version:'1.0.0',compatible:true,installable:true,updateNotes:[]},{version:'2.0.0',compatible:true,installable:true,updateNotes:[]}],status:'available'}],sources:[]};
     const tooltips = TokenMonitorLimitWindowsView.createLimitWindowsView({document,tooltip:{hasOpened:()=>false,markOpened:()=>{},release:()=>{}}});
     const panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:box,setDetailTooltip:tooltips.setDetailTooltip,getEnabled:()=>savedMasterEnabled,onCopyText:async text=>{if(copyFailure)throw Error('clipboard unavailable');calls.push(['copy',text])},onOpenExternal:async url=>{calls.push(['guide',url])},onSetEnabled:async enabled=>{calls.push(['global',enabled]);if(globalMode==='error')throw Error('settings write failed');savedMasterEnabled=enabled;data.enabled=enabled&&!data.safeMode;return structuredClone(data)},t:(key,args)=>key==='plugins.authoring.prompt'?'Fixture prompt with exact punctuation:':key==='plugins.ui.locationCount'?String(args.count)+' locations':key==='settings.plugins.actionFailed'?args.error:key,api:{
       list:async()=>structuredClone(data),
       catalog:()=>{catalogCalls++;return catalogMode==='deferred'?new Promise((yes,no)=>{pending=yes;reject=no}):Promise.resolve(catalog)},
+      refreshSource:async id=>{calls.push(['refreshSource',id]);const source=catalog.sources.find(s=>s.id===id);source.error=source.nextError||'';return catalog},
+      catalogDetails:async()=>({html:'',imageCount:0}),
+      closeCatalogDetails:async()=>{},
       place:async(ref,surface,on)=>{calls.push(['place',ref,surface,on]);data.plugins[0].views[0].placements.home=on;return structuredClone(data)},
       setEnabled:async(id,on)=>{const p=data.plugins.find(p=>p.id===id);p.enabled=on;p.status=on?'active':'disabled';return structuredClone(data)},
       catalogPreview:async(source,id,version)=>{calls.push(['preview',version]);if(previewMode==='error')throw Error('preview rejected');if(previewMode==='deferred')await new Promise(resolve=>{previewPending=resolve});return {token:'token-'+version,id,name:'Demo',description:'Example',version,author:'Author',origin:{id:source,kind:'community'},operation:'install',sha256:'abc'}},
@@ -54,12 +58,14 @@ async function main() {
     check('author-text-never-gets-a-trust-shield',!sourceIdentity.querySelector('.plugin-shield'));
     data.plugins[0].installation={origin:{kind:'community'}};await panel.refresh();
     check('community-author-cannot-spoof-official-shield',!box.querySelector('[data-plugin-id="alpha"] .plugin-shield')&&box.querySelector('[data-plugin-id="alpha"] .plugin-origin-label').textContent==='plugins.origin.community');
+    data.plugins[0].installation={origin:{kind:'official'}};await panel.refresh();
+    check('official-installed-identity-has-host-publisher-and-shield',Boolean(box.querySelector('[data-plugin-id="alpha"] .plugin-shield'))&&box.querySelector('[data-plugin-id="alpha"] .plugin-origin-official').textContent==='Token Monitor plugins.origin.official'&&!box.querySelector('[data-plugin-id="alpha"] .plugin-author'));
     delete data.plugins[0].installation;
     data.plugins[0].views[0].placements={home:true,page:false,tray:true};
     data.plugins[0].views[0].surfaces=['home','page','tray'];await panel.refresh();
     let locations=box.querySelector('.plugin-location-count');locations.focus({preventScroll:true});await tick();
     let locationTip=locations.querySelector('[role="tooltip"]');
-    check('location-count-and-tooltip-list-selected-not-supported-surfaces',locations.firstChild.textContent==='2 locations'&&locationTip.textContent.includes('settings.plugins.surface.home')&&locationTip.textContent.includes('settings.plugins.surface.tray')&&!locationTip.textContent.includes('settings.plugins.surface.page')&&locations.getAttribute('aria-describedby')===locationTip.id);
+    check('location-count-and-tooltip-list-selected-not-supported-surfaces',locations.firstChild.textContent==='2 locations'&&locationTip.textContent.includes('views.home')&&locationTip.textContent.includes('settings.plugins.surface.tray')&&!locationTip.textContent.includes('plugins.initial.purpose.page')&&locations.getAttribute('aria-describedby')===locationTip.id);
     check('location-tooltip-opens-on-keyboard-focus-and-holds-refresh',locationTip.matches(':popover-open')&&panel.isInteracting(),{open:locationTip.matches(':popover-open'),hold:panel.isInteracting(),focus:document.activeElement.outerHTML});
     locations.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
     check('location-tooltip-dismisses-with-escape',!locationTip.matches(':popover-open'));
@@ -83,6 +89,7 @@ async function main() {
     delete data.plugins[0].identityIcon;await panel.refresh();
     const tab = id=>box.querySelector('[data-tab="'+id+'"]');
     const click = text=>[...box.querySelectorAll('button')].find(n=>n.textContent===text).click();
+    catalogMode='deferred';catalogCalls=0;
     scroll.scrollTop=60;
     const official=tab('discover');official.focus({preventScroll:true});const y=official.getBoundingClientRect().y;
     official.click();const during={y:official.getBoundingClientRect().y,focus:document.activeElement===official,connected:official.isConnected};
@@ -129,6 +136,20 @@ async function main() {
     check('discover-shows-bundled-without-custom-sources',box.querySelectorAll('[data-catalog-id]').length===1&&box.querySelector('.plugin-type')?.textContent==='plugins.type.page'&&!box.querySelector('.plugin-source-route'));
     catalog.entries.push({id:'third-party',name:'Third party',description:'Custom listing',version:'1.0.0',types:['appearance'],origin:{id:'custom',kind:'community',label:'Example source'},status:'incompatible'});await panel.refresh();
     check('discover-combines-origins-with-distinct-attribution',box.querySelectorAll('[data-catalog-id]').length===2&&box.querySelector('[data-catalog-id="third-party"] .plugin-origin-note')?.textContent==='Example source'&&!box.querySelector('[data-catalog-id="third-party"] .plugin-shield'));
+    check('incompatible-card-explains-unavailability',box.querySelector('[data-catalog-id="third-party"] .plugin-card-meta').textContent.includes('plugins.catalog.incompatible'));
+    const incompatibleAction=box.querySelector('[data-catalog-id="third-party"] .settings-actions button');
+    check('incompatible-card-keeps-disabled-install-action',incompatibleAction.textContent==='plugins.package.install'&&incompatibleAction.disabled);
+    box.querySelector('[data-catalog-id="third-party"] .plugin-catalog-title').click();await tick();
+    check('incompatible-details-explain-unavailability-without-install',box.querySelector('dialog footer .plugin-risk')?.textContent==='plugins.catalog.incompatible'&&!box.querySelector('dialog .plugin-allow'));
+    box.querySelector('.plugin-dialog-close').click();await tick();
+    catalog.sources=[{id:'custom',kind:'community',label:'Cached source',nextError:'request failed'},{id:'empty',kind:'community',label:'Empty source',nextError:'invalid catalog'},{id:'healthy',kind:'community',label:'Healthy source'}];await panel.refresh();
+    box.querySelector('.plugin-catalog-refresh button').click();await tick();
+    check('discover-shows-each-returned-source-error-and-keeps-cached-entries',box.querySelector('.plugin-catalog').textContent.includes('Cached source: request failed')&&box.querySelector('.plugin-catalog').textContent.includes('Empty source: invalid catalog')&&box.querySelectorAll('[data-catalog-id]').length===2&&calls.filter(c=>c[0]==='refreshSource').length===3);
+    await panel.refresh();
+    check('discover-retains-source-errors-on-panel-refresh',box.querySelector('.plugin-catalog').textContent.includes('Cached source: request failed'));
+    for(const source of catalog.sources)source.nextError='';box.querySelector('.plugin-catalog-refresh button').click();await tick();
+    check('discover-clears-source-errors-after-successful-refresh',!box.querySelector('.plugin-catalog').textContent.includes('request failed')&&!box.querySelector('.plugin-catalog').textContent.includes('invalid catalog'));
+    catalog.sources=[];
     const search=box.querySelector('.plugin-catalog-search');search.value='third party';search.dispatchEvent(new Event('input'));
     check('discover-search-spans-all-origins',box.querySelectorAll('[data-catalog-id]').length===1&&box.querySelector('[data-catalog-id="third-party"]'));
     search.value='';search.dispatchEvent(new Event('input'));catalog.entries.pop();await panel.refresh();
@@ -144,6 +165,14 @@ async function main() {
     previewMode='error';select=box.querySelector('.plugin-version-picker select');select.value='1.0.0';select.dispatchEvent(new Event('change'));await tick();
     check('failed-version-preview-removes-stale-install-consent',!box.querySelector('.plugin-package-preview')&&box.querySelector('.plugin-catalog-review .plugin-action-error')?.textContent==='preview rejected'&&calls.some(c=>c[0]==='cancel'&&c[1]==='token-2.0.0'));
     click('plugins.ui.backCatalog');await tick();previewMode='success';
+    catalog.entries[0].version='2.0.0';await panel.refresh();
+    click('plugins.package.install');await tick();
+    check('card-reentry-retains-selected-old-version-and-preview',box.querySelector('.plugin-version-picker select').value==='1.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='1.0.0'&&calls.at(-1)[1]==='1.0.0');
+    click('plugins.ui.backCatalog');await tick();box.querySelector('.plugin-catalog-title').click();await tick();box.querySelector('dialog .plugin-allow').click();await tick();
+    check('detail-reentry-retains-selected-old-version-and-preview',box.querySelector('.plugin-version-picker select').value==='1.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='1.0.0');
+    click('plugins.ui.backCatalog');await tick();catalog.entries[0].versions[0].installable=false;await panel.refresh();click('plugins.package.install');await tick();
+    check('unavailable-remembered-version-falls-back-to-current-installable-version',box.querySelector('.plugin-version-picker select').value==='2.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='2.0.0');
+    click('plugins.ui.backCatalog');await tick();catalog.entries[0].versions[0].installable=true;catalog.entries[0].version='1.0.0';await panel.refresh();
     box.querySelector('.plugin-toolbar .plugin-more').click();await tick();click('plugins.catalog.sources');await tick();
     check('sources-open-as-route-without-nested-disclosures',Boolean(box.querySelector('.plugin-sources .plugin-source-form'))&&!box.querySelector('.plugin-sources details')&&document.activeElement===box.querySelector('.plugin-back'));
     const sourceUrl=box.querySelector('.plugin-source-form input');sourceUrl.value='https://example.test/catalog.json';sourceUrl.dispatchEvent(new Event('input'));click('plugins.ui.backCatalog');await tick();
@@ -212,7 +241,7 @@ async function main() {
     const shortTab=tab('discover');shortTab.focus({preventScroll:true});const shortTabY=shortTab.getBoundingClientRect().y, shortScroll=scroll.scrollTop;
     shortTab.click();await tick();
     check('short-tab-keeps-rail-position-without-downstream-spacer',scroll.scrollTop===shortScroll&&shortTab.getBoundingClientRect().y===shortTabY,{before:shortScroll,after:scroll.scrollTop,beforeY:shortTabY,afterY:shortTab.getBoundingClientRect().y});
-    catalog.entries[0].versions.push({version:'3.0.0',compatible:true,installable:true,changelog:'Version three'});
+    catalog.entries[0].versions.push({version:'3.0.0',compatible:true,installable:true,changelog:'Version three',updateNotes:[]});
     click('plugins.package.install');await tick();previewMode='deferred';
     let rapid=box.querySelector('.plugin-version-picker select');rapid.focus({preventScroll:true});rapid.value='2.0.0';rapid.dispatchEvent(new Event('change'));await tick();
     rapid.value='3.0.0';rapid.dispatchEvent(new Event('change'));
@@ -221,21 +250,195 @@ async function main() {
     const rapidAligned=box.querySelector('.plugin-version-picker select').value==='3.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='3.0.0';
     box.querySelector('.plugin-allow').click();await tick();previewMode='success';
     check('rapid-version-changes-align-selection-preview-and-installed-token',rapidAligned&&calls.filter(c=>c[0]==='install').at(-1)?.[1]==='token-3.0.0',{lastInstall:calls.filter(c=>c[0]==='install').at(-1)});
-    const pageBox=document.createElement('div');document.body.append(pageBox);
+    const pageShell=document.createElement('main');pageShell.className='shell plugin-page-mode title-icon-only';
+    pageShell.innerHTML=${JSON.stringify(appHeader)};
+    const pageBox=document.createElement('section');pageBox.id='pluginMainPanel';pageBox.className='plugin-main-panel';pageShell.append(pageBox);document.body.append(pageShell);
     window.tokenMonitorTrustedPlugins={views:async()=>({views:{}}),subscribe:()=>()=>{}};
     const demands=[], pageHost=TokenMonitorPluginViews.createPluginViewHost({document,window,t:k=>k,onDemand:(s,r)=>demands.push([s,r])});
-    const pages=TokenMonitorPluginMainPages.create({document,container:pageBox,host:pageHost,t:k=>k,openWindow:()=>{}});
+    const headingContainer=pageShell.querySelector('#pluginPageHeading'),actionsContainer=pageShell.querySelector('#pluginPageActions');
+    const pages=TokenMonitorPluginMainPages.create({document,container:pageBox,headingContainer,actionsContainer,host:pageHost,t:k=>k,openWindow:()=>{}});
     const routes=[{id:'plugin:alpha/view',ref:'alpha/view',title:'Alpha'},{id:'plugin:beta/view',ref:'beta/view',title:'Beta'}];
     const payload={surface:'page',views:Object.fromEntries(routes.map(route=>[route.ref,{id:'view',ref:route.ref,pluginId:route.ref.split('/')[0],revision:'test',status:'active',entry:'file://${scratch}/ui.mjs',css:[]}]))};
     pageHost.update(payload);pages.render(routes,'plugin:alpha/view');await tick();
+    check('main-page-title-and-detach-use-native-header',headingContainer.querySelector('h2')?.textContent==='Alpha'&&Boolean(actionsContainer.querySelector('.plugin-main-detach'))&&!pageBox.querySelector('.plugin-main-detach'));
     const draft=pageBox.querySelector('input');draft.value='unsubmitted';
     pages.render(routes,'plugin:beta/view');await tick();pages.render(routes,'plugin:alpha/view');pageHost.update(payload);await tick();
     check('main-page-draft-survives-ordinary-page-switch-and-context-update',draft.isConnected&&draft.value==='unsubmitted'&&draft===pageBox.querySelector('input'));
     pages.render(routes.filter(p=>p.ref!=='alpha/view'),'home');
     check('removed-page-releases-retained-dom',!draft.isConnected&&pageBox.classList.contains('hidden'));
-    await pageHost.dispose();
+    await pageHost.dispose();pageShell.remove();
+    // Network freshness must never hold the management UI or its drafts.
+    const backgroundBox=document.createElement('div');document.body.append(backgroundBox);
+    const backgroundCatalog={github:{enabled:true},entries:[{...catalog.entries[0],version:'1.0.0',status:'available'}],sources:Array.from({length:16},(_,i)=>({id:'source-'+i,kind:'community',label:'Source '+i}))};
+    let finishDiscovery,discoveryCalls=0,activeSources=0,maxSources=0,sourceCalls=0;
+    const waitingSources=[];
+    const backgroundPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:backgroundBox,t:(key,args)=>key==='settings.plugins.actionFailed'?args.error:key,api:{
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>structuredClone(backgroundCatalog),
+      discoverCatalog:()=>{discoveryCalls++;return new Promise(resolve=>{finishDiscovery=()=>resolve(structuredClone(backgroundCatalog))})},
+      refreshSource:async id=>{sourceCalls++;activeSources++;maxSources=Math.max(maxSources,activeSources);try{await new Promise((resolve,reject)=>waitingSources.push({id,resolve,reject}))}finally{activeSources--}},
+      catalogDetails:async()=>({html:'',imageCount:0}),
+      closeCatalogDetails:async()=>{},
+      catalogPreview:async(source,id,version)=>({token:'background-'+version,id,name:'Background package',version,origin:{id:source,kind:'community'},operation:'install',sha256:'abc'}),cancelInstall:async()=>{}
+    }});
+    const backgroundTab=id=>backgroundBox.querySelector('[data-tab="'+id+'"]');
+    const backgroundClick=text=>[...backgroundBox.querySelectorAll('button')].find(n=>n.textContent===text).click();
+    await backgroundPanel.refresh();backgroundTab('discover').click();await tick();
+    check('discover-shows-cache-before-github-completes',backgroundTab('discover').getAttribute('aria-selected')==='true'&&Boolean(backgroundBox.querySelector('.plugin-card'))&&backgroundBox.getAttribute('aria-busy')==='false'&&discoveryCalls===1);
+    backgroundTab('installed').click();await tick();backgroundTab('discover').click();await tick();
+    check('pending-discovery-allows-navigation-and-coalesces-refresh',backgroundTab('discover').getAttribute('aria-selected')==='true'&&discoveryCalls===1);
+    const backgroundSearch=backgroundBox.querySelector('.plugin-catalog-search');backgroundSearch.value='Example';backgroundSearch.dispatchEvent(new Event('input'));backgroundSearch.focus();backgroundSearch.setSelectionRange(2,2);
+    backgroundCatalog.entries[0].description='Example refreshed';finishDiscovery();await tick();
+    check('background-results-preserve-search-node-value-and-focus',backgroundSearch===backgroundBox.querySelector('.plugin-catalog-search')&&document.activeElement===backgroundSearch&&backgroundSearch.value==='Example'&&backgroundSearch.selectionStart===2&&backgroundBox.querySelector('.plugin-card .plugin-description').textContent==='Example refreshed');
+    backgroundBox.querySelector('.plugin-catalog-refresh button').click();await tick();
+    check('manual-refresh-bounds-custom-concurrency-without-blocking-github',activeSources===4&&maxSources===4&&discoveryCalls===2&&backgroundBox.getAttribute('aria-busy')==='false');
+    backgroundClick('plugins.package.install');await tick();const backgroundPreview=backgroundBox.querySelector('.plugin-package-preview');
+    check('package-review-stays-usable-during-network-refresh',Boolean(backgroundPreview)&&!backgroundPreview.querySelector('.plugin-allow').disabled);
+    for(let wave=0;wave<4;wave++){
+      for(const task of waitingSources.splice(0)){if(task.id==='source-0')task.reject(Error('IPC refresh failed'));else task.resolve()}
+      await tick();
+    }
+    finishDiscovery();await tick();
+    check('all-sources-refresh-after-one-ipc-failure-and-review-is-retained',sourceCalls===16&&maxSources===4&&backgroundBox.querySelector('.plugin-package-preview')===backgroundPreview);
+    backgroundClick('plugins.ui.backCatalog');await tick();
+    check('refresh-ipc-failure-is-visible-after-return',backgroundBox.querySelector('.plugin-catalog').textContent.includes('Source 0: IPC refresh failed')&&!backgroundBox.querySelector('.plugin-catalog-refresh button').disabled);
+    backgroundTab('installed').click();await tick();backgroundTab('discover').click();await tick();
+    const backgroundTitle=backgroundBox.querySelector('.plugin-catalog-title');backgroundTitle.focus();backgroundTitle.click();await tick();const backgroundDialog=backgroundBox.querySelector('dialog');
+    backgroundCatalog.entries[0].description='Example after details';finishDiscovery();await tick();
+    check('background-results-wait-for-open-details-to-close',backgroundBox.querySelector('.plugin-catalog-title')===backgroundTitle&&backgroundDialog.open);
+    backgroundBox.querySelector('.plugin-dialog-close').click();await tick();
+    check('closing-details-applies-fresh-results-and-restores-logical-focus',backgroundBox.querySelector('.plugin-card .plugin-description').textContent==='Example after details'&&document.activeElement===backgroundBox.querySelector('.plugin-catalog-title'));
+    backgroundTab('installed').click();await tick();backgroundTab('discover').click();await tick();
+    backgroundPanel.dispose();const disposedContent=backgroundBox.innerHTML;finishDiscovery();await tick();
+    check('disposed-panel-ignores-late-catalog-completion',backgroundBox.innerHTML===disposedContent);backgroundBox.remove();
+    const presetBox=document.createElement('div');document.body.append(presetBox);let presetDiscoverCalls=[];
+    const presetData={entries:[],sources:[{id:'maintainer-fixture',kind:'maintainer',cached:false}],github:{enabled:false,entries:[]}};
+    const presetPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:presetBox,t:key=>key,api:{
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>presetData,
+      discoverCatalog:async force=>{presetDiscoverCalls.push(force);presetData.sources[0].cached=true;return presetData}
+    }});
+    await presetPanel.refresh();presetBox.querySelector('[data-tab="discover"]').click();await tick();
+    check('maintainer-source-bootstraps-with-public-github-disabled',presetDiscoverCalls.length===1&&presetDiscoverCalls[0]===false);
+    presetBox.querySelector('.plugin-catalog-refresh button').click();await tick();
+    check('maintainer-only-refresh-checks-preset-source',presetDiscoverCalls.length===2&&presetDiscoverCalls[1]===true);
+    presetPanel.dispose();presetBox.remove();
+    const officialBox=document.createElement('div');document.body.append(officialBox);
+    let officialPreview={id:'official-fixture',name:'Official fixture',version:'1.0.0',token:'official-token',operation:'install',origin:{id:'bundled',kind:'official'},sha256:'abc'};
+    const officialList={enabled:true,plugins:[]};const officialActions=[];
+    const officialCatalog={entries:[],sources:[],github:{enabled:false,entries:[{id:'cached/external',name:'Hidden cached repo',origin:{id:'github-discovery',kind:'community'}}]}};
+    const officialPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:officialBox,t:key=>key,api:{
+      list:async()=>officialList,catalog:async()=>officialCatalog,discoverCatalog:()=>{throw Error('disabled discovery reached')},
+      importPackage:async()=>officialPreview,cancelInstall:async()=>{},install:async(token,options)=>{officialActions.push({token,options});return officialList},
+      setEnabled:async(id,enabled)=>{officialActions.push({id,enabled});officialList.plugins[0].enabled=enabled;officialList.plugins[0].trusted=true;return officialList}
+    }});
+    const officialClick=text=>[...officialBox.querySelectorAll('button')].find(n=>n.textContent===text).click();
+    await officialPanel.refresh();officialBox.querySelector('[data-tab="discover"]').click();await tick();
+    check('disabled-public-discovery-hides-section-cached-repos-and-unused-refresh',!officialBox.textContent.includes('plugins.catalog.github')&&!officialBox.textContent.includes('Hidden cached repo')&&!officialBox.textContent.includes('plugins.catalog.lastChecked')&&!officialBox.querySelector('.plugin-catalog-refresh'));
+    officialClick('plugins.package.import');await tick();
+    check('official-install-has-simple-copy-and-explicit-action',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.installEnable'&&!officialBox.querySelector('.plugin-package-preview .plugin-risk')&&officialBox.textContent.includes('plugins.package.officialInstall'));
+    officialClick('plugins.package.installEnable');await tick();
+    check('official-install-still-approves-exact-preview-token',officialActions.at(-1).token==='official-token'&&officialActions.at(-1).options.trustInstall===true&&officialActions.at(-1).options.trustUpdate===false);
+    officialPreview.operation='update';officialPreview.token='update-token';officialClick('plugins.package.import');await tick();
+    check('official-update-has-simple-copy',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.update'&&!officialBox.querySelector('.plugin-package-preview .plugin-risk'));
+    officialClick('plugins.package.update');await tick();
+    check('official-update-still-approves-exact-revision',officialActions.at(-1).token==='update-token'&&officialActions.at(-1).options.trustUpdate===true);
+    officialPreview.operation='install';officialList.enabled=false;await officialPanel.refresh();officialClick('plugins.package.import');await tick();
+    check('official-master-off-install-stays-off',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.installOnly'&&officialBox.textContent.includes('plugins.package.officialEnableLater'));
+    officialClick('plugins.package.installOnly');await tick();check('official-master-off-does-not-grant-trust',officialActions.at(-1).options.trustInstall===false);
+    officialList.enabled=true;officialPreview.origin={id:'custom',kind:'community'};await officialPanel.refresh();officialClick('plugins.package.import');await tick();
+    check('community-package-retains-trust-warning-and-action',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.trustInstall'&&officialBox.querySelector('.plugin-package-preview .plugin-risk')?.textContent==='plugins.trusted.warning');
+    officialClick('settings.plugins.cancel');await tick();
+    officialPreview.origin={id:'maintainer-fixture',kind:'maintainer'};await officialPanel.refresh();officialClick('plugins.package.import');await tick();
+    check('maintainer-package-uses-simple-action-and-shield',officialBox.querySelector('.plugin-allow').textContent==='plugins.package.installEnable'&&!officialBox.querySelector('.plugin-package-preview .plugin-risk')&&Boolean(officialBox.querySelector('.plugin-package-preview .plugin-shield')));
+    officialClick('settings.plugins.cancel');await tick();
+    officialList.plugins=[{id:'official-fixture',name:'Official fixture',version:'1.0.0',source:'user',status:'needsApproval',enabled:false,trusted:false,installation:{origin:{kind:'official'}},views:[]}];await officialPanel.refresh();
+    check('official-pending-revision-uses-enable-labels',officialBox.querySelector('.plugin-manage').textContent==='settings.plugins.enable'&&officialBox.querySelector('.plugin-status').textContent==='plugins.package.enableRequired');
+    officialBox.querySelector('.plugin-enable').click();await tick();
+    check('official-enable-confirmation-uses-simple-copy',officialBox.querySelector('.plugin-allow').textContent==='settings.plugins.enable'&&!officialBox.querySelector('.plugin-consent .plugin-risk'));
+    officialClick('settings.plugins.enable');await tick();check('official-enable-remains-explicit',officialActions.at(-1).id==='official-fixture'&&officialActions.at(-1).enabled===true);
+    officialPanel.dispose();officialBox.remove();
+    // New discovery details remain inert until explicit package review.
+    catalogMode='success';
+    let imageResolve;
+    const detailsBox=document.createElement('div');document.body.append(detailsBox);
+    const shot=canvas.toDataURL('image/png');
+    const officialEntry={...catalog.entries[0],id:'official-detail',name:'Official detail',author:'Hidden credit',origin:{id:'official',kind:'official'},repository:'https://github.com/owner/repo'};
+    const maintainerEntry={...officialEntry,id:'maintainer-detail',name:'Maintainer detail',origin:{id:'maintainer-fixture',kind:'maintainer'},installedVersion:'0.9.0'};
+    const customEntry={...officialEntry,id:'custom-detail',author:'Token Monitor 社群',origin:{id:'custom-fixture',kind:'community',label:'Token Monitor 官方'},featured:true,official:true};
+    const repoEntry={id:'owner/repo',name:'Community repo',author:'owner',description:'Repository',origin:{id:'github-discovery',kind:'community'},status:'repository',stars:42};
+    let shotCalls=0,readmeCalls=0,closeCalls=0,longReadme=false;
+    const detailsPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:detailsBox,t:key=>key,api:{
+      list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[maintainerEntry,customEntry,officialEntry],github:{enabled:true,entries:[repoEntry],lastFetched:1700000000000},sources:[]}),
+      closeCatalogDetails:async()=>{closeCalls++},
+      catalogReadmeImage:()=>{shotCalls++;return new Promise(resolve=>{imageResolve=resolve})},
+      catalogDetails:async()=>{readmeCalls++;return {documentId:'fixture',imageCount:longReadme?3:1,html:longReadme?'<p><span data-readme-image="0">First</span></p><div style="height:2000px"></div><p><span data-readme-image="1">Second</span></p><p><span data-readme-image="2">Third</span></p>':'<h1>README heading</h1><p>Before image.</p><p><span data-readme-image="0" aria-label="Author image"></span></p><p>After image.</p>&lt;script&gt;untrusted&lt;/script&gt;'}}
+    }});
+    await detailsPanel.refresh();detailsBox.querySelector('[data-tab="discover"]').click();await tick();
+    const refreshButton=detailsBox.querySelector('.plugin-catalog-refresh button').getBoundingClientRect(),refreshTime=detailsBox.querySelector('.plugin-catalog-refresh .settings-note').getBoundingClientRect();
+    check('catalog-refresh-time-aligns-with-button',Math.abs(refreshButton.y+refreshButton.height/2-refreshTime.y-refreshTime.height/2)<1);
+    check('details-media-is-lazy-and-official-credit-hidden',shotCalls===0&&!detailsBox.textContent.includes('Hidden credit'));
+    check('official-card-shows-host-publisher-community-card-shows-owner-only',detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-shield'))&&detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-source')?.textContent==='owner');
+    check('github-stars-only-on-community-card',detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-stars')?.textContent.includes('42')&&!detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-stars'));
+    check('featured-group-official-first-and-installed-maintainer-keeps-position',JSON.stringify([...detailsBox.querySelector('.plugin-catalog-group').querySelectorAll('[data-catalog-id]')].map(n=>n.dataset.catalogId))===JSON.stringify(['official-detail','maintainer-detail'])&&detailsBox.querySelector('.plugin-catalog-group h3').textContent==='plugins.catalog.featured');
+    check('maintainer-shield-brand-hides-personal-credit',detailsBox.querySelector('[data-catalog-id="maintainer-detail"] .plugin-source')?.textContent==='Token Monitor plugins.origin.maintainer'&&Boolean(detailsBox.querySelector('[data-catalog-id="maintainer-detail"] .plugin-shield')));
+    check('custom-title-author-flags-cannot-get-shield-or-featured-group',!detailsBox.querySelector('[data-catalog-id="custom-detail"] .plugin-shield')&&detailsBox.querySelector('[data-catalog-id="custom-detail"]').closest('section').querySelector('h3').textContent==='plugins.catalog.custom');
+    const title=detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-catalog-title');title.focus();title.click();await tick();
+    const dialog=detailsBox.querySelector('dialog');
+    const surfaceProbe=document.createElement('div');surfaceProbe.className='view-switcher-menu';document.body.append(surfaceProbe);
+    for(const liquid of [false,true]){
+      document.documentElement.classList.toggle('native-liquid-glass',liquid);
+      const menuStyle=getComputedStyle(surfaceProbe),dialogStyle=getComputedStyle(dialog);
+      check('details-reuses-shared-menu-surface-'+liquid,['backgroundImage','backgroundColor','borderTopColor','boxShadow','backdropFilter'].every(key=>dialogStyle[key]===menuStyle[key]));
+    }
+    document.documentElement.classList.remove('native-liquid-glass');surfaceProbe.remove();
+    check('official-detail-shows-same-host-publisher',dialog.querySelector('.plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(dialog.querySelector('.plugin-shield')));
+    check('details-opens-with-version-before-types',dialog.open&&dialog.querySelector('.plugin-card-meta').firstChild.className==='plugin-version');
+    await new Promise(r=>setTimeout(r,80));
+    check('official-visible-readme-images-load-automatically-once',!dialog.querySelector('.plugin-readme-load')&&shotCalls===1);
+    imageResolve(shot);await tick();
+    check('small-readme-image-keeps-intrinsic-width',dialog.querySelector('.plugin-screenshot img')?.getBoundingClientRect().width===32);
+    dialog.querySelector('.plugin-screenshot').click();await tick();
+    check('image-opens-above-parent-details',detailsBox.querySelectorAll('dialog[open]').length===2);
+    detailsBox.querySelector('.plugin-image-dialog .plugin-dialog-close').click();await tick();
+    check('image-close-keeps-parent-open',dialog.open&&detailsBox.querySelectorAll('dialog').length===1&&closeCalls===0);
+    const rect=dialog.getBoundingClientRect();
+    check('narrow-details-header-footer-fit',rect.left>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight&&dialog.querySelector('footer').getBoundingClientRect().bottom<=innerHeight);
+    dialog.dispatchEvent(new PointerEvent('pointerdown',{clientX:0,clientY:0}));dialog.dispatchEvent(new MouseEvent('click',{clientX:0,clientY:0}));await tick();
+    check('outside-dismiss-restores-title-focus',!dialog.isConnected&&document.activeElement===title&&closeCalls===1);
+    title.click();await new Promise(r=>setTimeout(r,80));detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
+    check('late-image-cannot-resurrect-closed-details',!detailsBox.querySelector('dialog'));
+    detailsBox.querySelector('[data-catalog-id="maintainer-detail"] .plugin-catalog-title').click();await new Promise(r=>setTimeout(r,80));
+    check('maintainer-images-also-load-automatically',shotCalls===3&&!detailsBox.querySelector('.plugin-readme-load'));
+    imageResolve(shot);await tick();detailsBox.querySelector('.plugin-dialog-close').click();await tick();
+    detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-catalog-title').click();await tick();
+    check('github-detail-name-only-shows-owner',detailsBox.querySelector('dialog .plugin-source')?.textContent==='owner'&&!detailsBox.querySelector('dialog .plugin-shield'));
+    check('repository-readme-preserves-markdown-order-and-inert-html',readmeCalls===4&&detailsBox.querySelector('.plugin-catalog-readme h1')?.textContent==='README heading'&&detailsBox.querySelector('.plugin-catalog-readme').textContent.includes('<script>untrusted</script>')&&!detailsBox.querySelector('.plugin-catalog-readme script'));
+    check('third-party-images-still-require-explicit-load',Boolean(detailsBox.querySelector('.plugin-readme-load'))&&shotCalls===3);
+    detailsBox.querySelector('.plugin-readme-load').click();await tick();
+    check('third-party-click-starts-image-load',shotCalls===4);imageResolve(shot);await tick();
+    detailsBox.querySelector('.plugin-dialog-close').click();await tick();
+    detailsBox.querySelector('[data-catalog-id="custom-detail"] .plugin-catalog-title').click();await tick();
+    check('spoofed-custom-author-still-needs-explicit-images',shotCalls===4&&Boolean(detailsBox.querySelector('.plugin-readme-load')));
+    detailsBox.querySelector('.plugin-dialog-close').click();await tick();
+    longReadme=true;title.click();await new Promise(r=>setTimeout(r,80));
+    check('featured-offscreen-images-wait-for-scroll',shotCalls===5);
+    imageResolve(shot);await new Promise(r=>setTimeout(r,80));
+    check('featured-below-fold-not-fetched-after-first-image',shotCalls===5);
+    const scrollBody=detailsBox.querySelector('.plugin-catalog-dialog-body');scrollBody.scrollTop=scrollBody.scrollHeight;await new Promise(r=>setTimeout(r,80));
+    check('featured-scroll-starts-next-image-serially',shotCalls===6);
+    detailsBox.querySelector('.plugin-dialog-close').click();await tick();imageResolve(shot);await tick();
+    check('closing-featured-details-cancels-queued-offscreen-image',shotCalls===6&&!detailsBox.querySelector('dialog'));
+    longReadme=false;
+    title.click();await new Promise(r=>setTimeout(r,80));imageResolve(shot);await tick();detailsBox.querySelector('.plugin-screenshot').click();await tick();
+    window.finishDetailsTest=()=>{detailsPanel.dispose();detailsBox.remove()};
     return {checks};
   })()`);
+  for (let depth=1;depth>=0;depth--) {
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+    await new Promise(r=>setTimeout(r,40));
+    result.checks.push({name:'native-escape-details-depth-'+depth,ok:await win.webContents.executeJavaScript('document.querySelectorAll("dialog[open]").length === '+depth)});
+  }
+  await win.webContents.executeJavaScript('window.finishDetailsTest()');
   // Exercise Chromium's actual pointer/keyboard modality, not just synthetic DOM clicks.
   const point = await win.webContents.executeJavaScript(`(async()=>{
     document.querySelector('[data-tab="installed"]').click();
@@ -324,6 +527,36 @@ async function main() {
     }
     host.dispose(); box.remove(); return checks;
   })()`);
+  // Actual input modality on the Plugins disclosure: pointer focus is not badge hover.
+  const disclosurePoint=await win.webContents.executeJavaScript(`(async()=>{
+    document.querySelectorAll('[data-settings-section="plugins"]').forEach(node=>node.removeAttribute('data-settings-section'));
+    const host=document.createElement('div');host.id='tooltip-fixture';host.style.cssText='position:fixed;inset:0;z-index:9999;background:#17191c;padding:20px';
+    host.innerHTML='<button id="tip-before">Before</button><button data-settings-section="plugins" style="display:block;margin-top:50px;width:300px;height:42px;text-align:left">Plugins <span class="plugin-section-experimental">Experimental</span></button><div id="tip-settings"></div>';
+    document.body.append(host);
+    const tips=TokenMonitorLimitWindowsView.createLimitWindowsView({document,tooltip:{hasOpened:()=>false,markOpened:()=>{},release:()=>{}}});
+    window.tipPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:host.querySelector('#tip-settings'),t:key=>key,setDetailTooltip:tips.setDetailTooltip,api:{list:async()=>({enabled:true,plugins:[]}),catalog:async()=>({entries:[],sources:[]})}});
+    await tipPanel.refresh();const button=host.querySelector('[data-settings-section]');const rect=button.getBoundingClientRect();
+    return {x:rect.left+8,y:rect.top+rect.height/2};
+  })()`);
+  const pointerAt=async(point,click=false)=>{
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...point});
+    if(click)for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,...point,button:'left',clickCount:1});
+    await new Promise(resolve=>setTimeout(resolve,30));
+  };
+  const tipOpen=()=>win.webContents.executeJavaScript('Boolean(document.querySelector("#plugin-experimental-tip:popover-open"))');
+  await pointerAt(disclosurePoint,true);
+  result.checks.push({name:'pointer-disclosure-focus-does-not-open-experimental-tooltip',ok:!(await tipOpen())});
+  const badgePoint=await win.webContents.executeJavaScript(`(()=>{const r=document.querySelector('.plugin-experimental-tooltip').getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+  await pointerAt(badgePoint);
+  result.checks.push({name:'badge-hover-still-opens-experimental-tooltip',ok:await tipOpen()});
+  await pointerAt({x:350,y:25});
+  result.checks.push({name:'leaving-badge-closes-experimental-tooltip',ok:!(await tipOpen())});
+  await win.webContents.executeJavaScript('document.getElementById("tip-before").focus()');
+  for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
+  result.checks.push({name:'keyboard-disclosure-focus-retains-accessible-tooltip',ok:await tipOpen()});
+  await pointerAt(disclosurePoint,true);
+  result.checks.push({name:'pointer-on-keyboard-focused-disclosure-closes-unrelated-tooltip',ok:!(await tipOpen())});
+  await win.webContents.executeJavaScript('tipPanel.dispose();document.getElementById("tooltip-fixture").remove()');
   result.checks.push(...authorChecks);
   result.checks.push(...scrollChecks);
   for (const check of result.checks) console.log(`${check.ok ? 'PASS' : 'FAIL'} ${check.name}`, check.evidence || '');

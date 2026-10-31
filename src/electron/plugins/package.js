@@ -92,7 +92,8 @@ function unpackPackage(pkg, dir) {
 function describePackage(pkg, { locale = 'en' } = {}) {
   const m = pkg.manifest;
   return { id: m.id, version: m.version, name: localize(m.name, locale), description: localize(m.description, locale), author: m.author,
-    types: pluginTypes(m), identityIcon: m.identityIcon, icon: m.views[0]?.icon || 'dot',
+    views: m.views.map(view => ({ ref: `${m.id}/${view.id}`, title: localize(view.title, locale), surfaces: view.surfaces, defaultSurfaces: view.defaultSurfaces, targets: view.targets, mode: view.mode })),
+    types: pluginTypes(m), defaults: m.defaults, skins: m.skins.map(skin => ({ ref: `${m.id}/${skin.id}`, name: localize(skin.name, locale) })), background: { supported: Boolean(m.backend && m.background), description: localize(m.backgroundDescription, locale) }, identityIcon: m.identityIcon, icon: m.views[0]?.icon || 'dot',
     trustedCode: true, hasCode: Boolean(m.ui || m.backend), hasBackend: Boolean(m.backend), sha256: pkg.hash };
 }
 module.exports = { MAX_PACKAGE_BYTES, ID_RE, digest, contentDigest, readBounded, parsePackage, packageDirectory, unpackPackage, describePackage };

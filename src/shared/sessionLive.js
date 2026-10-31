@@ -198,7 +198,8 @@
   }
 
   function sessionPromptCacheForRow(session, now = Date.now()) {
-    if (isArchivedSession(session) || !['claude', 'claude-desktop', 'codex'].includes(session?.client)) return null;
+    // Ignore legacy Codex estimates received from older devices or archives.
+    if (isArchivedSession(session) || !['claude', 'claude-desktop'].includes(session?.client)) return null;
     const observedAt = timestampMs(session?.promptCache?.observedAt);
     const ttlSeconds = session?.promptCache?.ttlSeconds;
     if (!observedAt || ![300, 1800, 3600].includes(ttlSeconds)) return null;
