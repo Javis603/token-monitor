@@ -1,8 +1,10 @@
 (function exposeFixedPeriodRanges(root, factory) {
-  const api = factory();
+  const accounts = typeof module === 'object' && module.exports
+    ? require('../../shared/cursorAccountUsage') : root.TokenMonitorCursorAccountUsage;
+  const api = factory(accounts);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorFixedPeriodRanges = api;
-})(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi() {
+})(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi(accounts) {
   const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30']);
   const LABELS = Object.freeze({
     today: 'DAY',
@@ -392,6 +394,9 @@
   }
 
   function sourceParticipatesInUsage(source) {
+    // Complete owned zero observations can supersede another device's usage.
+    if (accounts.cursorUsageIdentity(source?.history?.cursorAccountUsage)
+      || accounts.cursorUsageIdentity(sourcePeriod(source, 'today')?.cursorAccountUsage)) return true;
     for (const periodName of ['today', 'month', 'allTime']) {
       const period = sourcePeriod(source, periodName);
       if (finiteNumber(period?.totalTokens) > 0 || finiteNumber(period?.costUsd) > 0) return true;
@@ -509,6 +514,81 @@
     return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
   }
 
+  function dayRangeInTimeZone(date, timeZone) {
+    if (!timeZone) return null;
+    try {
+      const formatter = new Intl.DateTimeFormat('en', {
+        timeZone, year: 'numeric', month: '2-digit', day: '2-digit'
+      });
+      const keyAt = value => {
+        const parts = Object.fromEntries(formatter.formatToParts(value).map(part => [part.type, part.value]));
+        return `${parts.year}-${parts.month}-${parts.day}`;
+      };
+      // Find the first instant of each local date. Looking up the date itself
+      // handles midnight transitions and 23/25-hour days without today's offset.
+      const boundary = key => {
+        const midnight = Date.parse(`${key}T00:00:00Z`);
+        let low = midnight - 36 * 3600000;
+        let high = midnight + 36 * 3600000;
+        while (low < high) {
+          const middle = Math.floor((low + high) / 2);
+          if (keyAt(middle) < key) low = middle + 1;
+          else high = middle;
+        }
+        return low;
+      };
+      const start = boundary(date);
+      const end = boundary(dayKeyAddDays(date, 1));
+      if (keyAt(start) !== date || keyAt(end - 1) !== date) return null;
+      return `day:${new Date(start).toISOString()}:${new Date(end).toISOString()}`;
+    } catch (_) { return null; }
+  }
+
+  function accountAdjustedDaily(snapshots) {
+    if (!snapshots.some(source => source.history?.cursorAccountUsage || sourcePeriod(source, 'today')?.cursorAccountUsage)) return snapshots;
+    const entries = [];
+    const dayRanges = new Map();
+    for (const snapshot of snapshots) {
+      const today = sourcePeriod(snapshot, 'today');
+      const todayKey = snapshot.periodWindows?.today?.key;
+      const historyRows = new Map((snapshot.history?.daily || []).map(row => [row.date, row]));
+      const accountRows = new Map((snapshot.history?.cursorAccountUsage?.usage?.daily || []).map(row => [row.date, row]));
+      for (const row of snapshot.daily) {
+        const previous = historyRows.get(row.date);
+        const usesToday = row.date === todayKey && today
+          && finiteNumber(today.totalTokens) >= finiteNumber(previous?.tokens);
+        const scope = usesToday ? today.cursorAccountUsage : snapshot.history?.cursorAccountUsage;
+        const usage = usesToday && scope
+          ? rowFromLivePeriod(scope.usage, row.date)
+          // A compatible History snapshot covers zero-usage days too. Keep
+          // its scope in winner selection when a removed day has no bucket.
+          : scope ? accountRows.get(row.date) || {} : undefined;
+        let range = null;
+        if (scope) {
+          const liveRange = usesToday && /^today:(\d{4}-[\dT:.-]+Z):(\d{4}-[\dT:.-]+Z)$/.exec(scope.range);
+          if (liveRange && Date.parse(liveRange[1]) < Date.parse(liveRange[2])) {
+            range = `day:${new Date(liveRange[1]).toISOString()}:${new Date(liveRange[2]).toISOString()}`;
+          } else {
+            // Retained History can predate a live timezone change.
+            const timeZone = usesToday ? snapshot.periodWindows?.timeZone
+              : scope.range.startsWith('history:') ? scope.range.slice('history:'.length) : '';
+            const key = `${timeZone}:${row.date}`;
+            if (!dayRanges.has(key)) dayRanges.set(key, dayRangeInTimeZone(row.date, timeZone));
+            range = dayRanges.get(key);
+          }
+        }
+        const entry = { deviceId: snapshot.deviceId, row, usage,
+          scope: usage && scope && range ? { ...scope, range } : null };
+        entries.push(entry);
+      }
+    }
+    // Equal UTC windows can have different local date labels across the dateline.
+    const duplicate = accounts.accountUsageWinners(entries, entry => entry.scope);
+    const adjusted = entries.map(entry => duplicate(entry)
+      ? accounts.subtractCounters(entry.row, entry.usage) : entry.row);
+    return [{ daily: adjusted }];
+  }
+
   function fixedPeriodSnapshotFromDevices(selection, sources, options = {}) {
     if (!isDerived(selection)) return { status: 'native', period: null, range: null, devices: [] };
     if (options.historyEnabled === false) {
@@ -554,7 +634,7 @@
       snapshots.push({ ...source, ...snapshot });
     }
 
-    const daily = mergeSelectedDaily(snapshots);
+    const daily = mergeSelectedDaily(accountAdjustedDaily(snapshots));
     const range = {
       start: snapshots.reduce((value, snapshot) => !value || snapshot.range.start < value ? snapshot.range.start : value, ''),
       end: snapshots.reduce((value, snapshot) => !value || snapshot.range.end > value ? snapshot.range.end : value, '')

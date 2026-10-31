@@ -1,0 +1,89 @@
+'use strict';
+
+(function exposeCursorAccountUsage(root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (root) root.TokenMonitorCursorAccountUsage = api;
+})(typeof window !== 'undefined' ? window : null, function createCursorAccountUsageApi() {
+
+const KEY = /^sha256:[a-f0-9]{64}$/;
+
+function cursorUsageIdentity(value) {
+  if (!value || !KEY.test(value.accountKey) || typeof value.range !== 'string'
+    || !value.range || value.range.length > 256) return null;
+  const time = Date.parse(value.observedAt);
+  if (!Number.isFinite(time) || time > Date.now()) return null;
+  return { accountKey: value.accountKey, range: value.range, observedAt: new Date(time).toISOString() };
+}
+
+// Only additive accounting fields enter a contribution. Text, session detail
+// and transient observations stay in the ordinary device record.
+function accountingCounters(period) {
+  return Object.fromEntries(Object.entries(period).filter(([key]) => ![
+    'sessions', 'cursorAccountUsage', 'capabilities'
+  ].includes(key)));
+}
+
+function fitsCounters(part, whole) {
+  for (const [key, value] of Object.entries(part || {})) {
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value) || value < 0 || value > (whole?.[key] || 0) + 1e-8) return false;
+    } else if (value && typeof value === 'object' && !fitsCounters(value, whole?.[key])) return false;
+  }
+  return true;
+}
+
+function subtractCounters(whole, part) {
+  const result = Object.assign(Object.create(null), whole);
+  for (const [key, value] of Object.entries(part || {})) {
+    if (typeof value === 'number') result[key] = Math.max(0, (whole?.[key] || 0) - value);
+    else if (value && typeof value === 'object') result[key] = subtractCounters(whole?.[key], value);
+  }
+  return result;
+}
+
+function accountUsageWinners(records, readScope) {
+  const winners = new Map();
+  for (const record of records) {
+    const scope = readScope(record);
+    if (!scope) continue;
+    const key = `${scope.accountKey}:${scope.range}`;
+    const previous = winners.get(key);
+    const time = Date.parse(scope.observedAt);
+    if (!previous || time > previous.time || (time === previous.time
+      && String(record.deviceId || '').localeCompare(String(previous.record.deviceId || '')) < 0)) {
+      winners.set(key, { record, time });
+    }
+  }
+  return (record) => {
+    const scope = readScope(record);
+    return scope && winners.get(`${scope.accountKey}:${scope.range}`)?.record !== record;
+  };
+}
+
+function historyRowCounters(row) {
+  return Object.fromEntries(Object.entries(row).filter(([key]) => ![
+    'intensity', 'tokenIntensity', 'costIntensity'
+  ].includes(key)));
+}
+
+function fitsHistory(part, whole) {
+  return ['daily', 'monthly'].every(tier => {
+    const key = tier === 'daily' ? 'date' : 'month';
+    const rows = new Map((whole?.[tier] || []).map(row => [row[key], row]));
+    return (part?.[tier] || []).every(row => fitsCounters(historyRowCounters(row), rows.get(row[key])));
+  });
+}
+
+function subtractHistory(whole, part) {
+  const result = { ...whole };
+  for (const tier of ['daily', 'monthly']) {
+    const key = tier === 'daily' ? 'date' : 'month';
+    const rows = new Map((part?.[tier] || []).map(row => [row[key], row]));
+    result[tier] = (whole?.[tier] || []).map(row => subtractCounters(row, rows.has(row[key]) ? historyRowCounters(rows.get(row[key])) : null));
+  }
+  return result;
+}
+
+return { fitsHistory, subtractHistory, cursorUsageIdentity, accountingCounters, fitsCounters, subtractCounters, accountUsageWinners };
+});
