@@ -181,6 +181,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'catpaw-db',
   'cherrystudio-db',
   'cherrystudio-transcripts',
+  'claude-desktop-app',
   'claude-desktop-cache',
   'claude-desktop-transcripts',
   'claude-projects',

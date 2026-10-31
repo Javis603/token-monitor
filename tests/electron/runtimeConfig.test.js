@@ -137,6 +137,7 @@ test('every usage structural setting maps to an effective fingerprint change', (
     historyIntervalMs: { historyIntervalMs: 30 * 60 * 1000 },
     sessionUsageArchiveEnabled: { sessionUsageArchiveEnabled: false },
     projectsEnabled: { projectsEnabled: false },
+    claudeDesktopSplitEnabled: { claudeDesktopSplitEnabled: false },
     wslScanEnabled: { wslScanEnabled: false }
   };
 

@@ -652,6 +652,19 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       // Marks the row as measurable by this runtime, so a persisted seed for a
       // provider that has not answered yet can never become a burn baseline.
       if (committedRow.status === 'ok') markLimitsProbeSuccess(burnState, committedRow);
+      // A successful account-keyed reading supersedes the generic provider:*
+      // placeholder left by an earlier notConfigured/unauthorized probe. Leaving
+      // that placeholder around lets aggregateLimits treat it as a fresh
+      // observation and drop the real (often older-timestamped) local reading —
+      // Claude Desktop local-only rows use the sample time as updatedAt, so they
+      // go stale within minutes while the empty failure stays "fresh".
+      if (committedRow.status === 'ok' && identityKey !== `${lane.provider}:*`) {
+        const genericKey = `${lane.provider}:*`;
+        if (lane.identities.has(genericKey)) {
+          lane.identities.delete(genericKey);
+          represented.add(genericKey);
+        }
+      }
     }
 
     if (!dispatch.accountScoped && !genericTerminal) {

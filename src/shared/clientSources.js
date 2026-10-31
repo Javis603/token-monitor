@@ -7,6 +7,7 @@ const { simpleHostSourceRoots } = require('./clientSourceRegistration');
 const { normalizeCustomScanPaths } = require('./customScanPaths');
 const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
+const { claudeDesktopUserDataCandidates } = require('./providers/claude/desktopPaths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { catpawDataSources, nativeWindowsFolders } = require('./providers/catpaw/paths');
@@ -201,9 +202,21 @@ function clientSourceRoots(clientsCsv, options = {}) {
     }
   };
   const claudeRoots = claudeSessionRoots({ homeDir: home });
-  add('claude', ['claude-projects', claudeRoots.projects], ['claude-transcripts', claudeRoots.transcripts],
+  const claudeScanRoots = [['claude-projects', claudeRoots.projects], ['claude-transcripts', claudeRoots.transcripts],
     ...simpleHostSourceRoots('claude', tokscaleHomeDir({ env, platform, homeDir: home }))
-      .map(([id, dir]) => [id, dir, null, true]));
+      .map(([id, dir]) => [id, dir, null, true])];
+  add('claude', ...claudeScanRoots);
+  // Claude Desktop is a derived row: its usage comes out of the `claude` scan
+  // above (whose roots already cover Desktop's transcript trees and are what
+  // the watcher follows). Its own check is only "is the first-party app
+  // installed here" — the userData roots, including Windows MSIX — and is
+  // interval-only so the same trees are not watched twice. Claude-3p is not
+  // this row (see clientCatalog.js). Tracking Desktop without Claude Code
+  // still needs the transcript trees watched, so they move here then.
+  add('claude-desktop', ...claudeDesktopUserDataCandidates({ env, platform, homeDir: home })
+    .filter((root) => root.variant === '1p')
+    .map((root) => ['claude-desktop-app', root.dir, null, true]),
+  ...(enabled.has('claude') ? [] : claudeScanRoots));
   const codexHome = nonBlankEnvPath('CODEX_HOME', path.join(home, '.codex'));
   add(
     'codex',

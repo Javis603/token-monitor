@@ -646,6 +646,7 @@ function defaultSettings() {
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
     modelRankingMetric: 'tokens',
+    modelClientBreakdown: true,
     homeActiveDaysWindow: 'all',
     // How a live session's context gauge reads. That direction is a choice the
     // gauge cannot make on its own, so it is stated here rather than assumed:
@@ -763,6 +764,13 @@ function defaultSettings() {
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
+    // Carve Claude Desktop sessions out of the Claude Code usage row (default on).
+    // Off restores upstream behaviour: Desktop transcripts stay under `claude`.
+    claudeDesktopSplitEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_SPLIT, true),
+    // Seed from the kill-switch env so a first launch with the var set already
+    // has the flag in settings before any UI toggle. Account field initial is
+    // null (omit); this line is what makes the env visible on a fresh install.
+    claudeDesktopLocalOnly: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY, false),
     // The key OpenCode stores for itself needs no setup, so tracking it is the
     // default. This turns that off for a machine that is signed in to an account
     // the user does not want reported.
@@ -1041,6 +1049,10 @@ function electronLimitsDeps() {
         json: () => result.json()
       };
     },
+    // Prefer the real process env. Never pass a blank env object here: an empty
+    // deps.env is truthy and would hide TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY
+    // from claudeDesktopLocalOnly()'s first lane.
+    env: process.env,
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
     onClaudeWebAccountResolved: (observation) => claudeAccountService().resolved(observation),
@@ -2672,7 +2684,10 @@ function readSettings() {
     // Evaluating unconditionally is also cheap: with the split client already
     // present nothing is inserted, and the marker is what makes that a decision
     // rather than an absence.
-    const seeded = seedSplitClients(merged.clients, { applied: merged.seededClientSplits });
+    const seeded = seedSplitClients(merged.clients, {
+      applied: merged.seededClientSplits,
+      claudeDesktopSplitEnabled: merged.claudeDesktopSplitEnabled !== false
+    });
     // The marker records that this install has been through the migration, not
     // that it gained a client. Recording it only on a successful insert would
     // leave an install that tracks the parent later still un-migrated, so the
@@ -2732,6 +2747,11 @@ function readSettings() {
     merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
     merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
     merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
+    merged.claudeDesktopSplitEnabled = parseBoolean(merged.claudeDesktopSplitEnabled, true);
+    if (merged.claudeDesktopLocalOnly !== undefined && merged.claudeDesktopLocalOnly !== null) {
+      merged.claudeDesktopLocalOnly = merged.claudeDesktopLocalOnly === true
+        || /^(1|true|yes|on)$/i.test(String(merged.claudeDesktopLocalOnly).trim());
+    }
     delete merged.workbuddyLocalAppEnabled;
     merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
@@ -2764,6 +2784,7 @@ function readSettings() {
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
+    merged.modelClientBreakdown = parseBoolean(merged.modelClientBreakdown, true);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
@@ -2983,7 +3004,9 @@ function localArchiveSourceDevice() {
 
 function updateArchivedClientUsage(previousClients, nextClients) {
   const removedClients = removedTrackedClients(previousClients, nextClients);
-  let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
+  let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients, {
+    claudeDesktopSplitEnabled: settings.claudeDesktopSplitEnabled !== false
+  });
   if (removedClients.length > 0) {
     archive = captureArchivedClientUsage(archive, localArchiveSourceDevice(), removedClients);
   }
@@ -8292,6 +8315,7 @@ app.whenReady().then(() => {
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      modelClientBreakdown: parseBoolean(patch.modelClientBreakdown ?? settings.modelClientBreakdown, true),
       sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
@@ -8311,6 +8335,11 @@ app.whenReady().then(() => {
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
+      claudeDesktopSplitEnabled: parseBoolean(patch.claudeDesktopSplitEnabled ?? settings.claudeDesktopSplitEnabled, true),
+      // Persist explicitly (not only via account persist:spread) so an unrelated
+      // settings:update cannot drop the flag, and so limitsConfigFromSettings
+      // always sees a boolean rather than an absent key.
+      claudeDesktopLocalOnly: parseBoolean(patch.claudeDesktopLocalOnly ?? settings.claudeDesktopLocalOnly, false),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),
       showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),

@@ -47,8 +47,19 @@
   // not honour TOKSCALE_EXTRA_DIRS. This is an axis of its own, not a
   // collection "mode": self-synced clients (cursor, antigravity) are tracked
   // separately in collector.js.
+  //
+  // `derivedFrom: '<client>'` marks a row tokscale never emits by itself: it is
+  // carved out of the parent client's session rows by Token Monitor (see
+  // claudeDesktopSessions.js for `claude-desktop`). It is scanned with the
+  // parent's tokscale id, takes no custom scan roots, and its rows belonged to
+  // the parent before the split (clientIdentitySplits.js folds old data).
   const CLIENT_CATALOG = Object.freeze([
     { id: 'claude', label: 'Claude Code' },
+    // Sessions Claude Desktop started (its Code tab and Cowork). Third-party
+    // inference builds (Claude-3p / `claude-desktop-3p`) stay under `claude`:
+    // they are not billed against the claude.ai subscription, so keeping them
+    // out keeps this row a clean proxy for the official 5h/7d quota.
+    { id: 'claude-desktop', label: 'Claude Desktop', derivedFrom: 'claude' },
     { id: 'codex', label: 'Codex' },
     { id: 'opencode', label: 'OpenCode' },
     { id: 'hermes', label: 'Hermes Agent' },
@@ -124,6 +135,10 @@
   const FORK_ONLY_CLIENT_IDS = Object.freeze(
     CLIENT_CATALOG.filter((client) => client.forkOnly).map((client) => client.id)
   );
+  const DERIVED_CLIENT_PARENTS = Object.freeze(Object.fromEntries(
+    CLIENT_CATALOG.filter((client) => client.derivedFrom).map((client) => [client.id, client.derivedFrom])
+  ));
+  const DERIVED_CLIENT_IDS = Object.freeze(Object.keys(DERIVED_CLIENT_PARENTS));
 
   // Renderer-facing projections. CLIENT_LABELS carries the non-catalog ids too
   // because it is a lookup, while KNOWN_CLIENT_LIST is a display list.
@@ -141,6 +156,8 @@
     CLIENT_IDS,
     DEFAULT_CLIENT_IDS,
     FORK_ONLY_CLIENT_IDS,
+    DERIVED_CLIENT_IDS,
+    DERIVED_CLIENT_PARENTS,
     CLIENT_LABELS,
     KNOWN_CLIENT_LIST
   };

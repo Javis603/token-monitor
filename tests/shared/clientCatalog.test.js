@@ -51,7 +51,7 @@ test('derived KNOWN_CLIENTS keeps the established id order', () => {
   assert.equal(KNOWN_CLIENTS, CLIENT_IDS.join(','));
   assert.equal(
     KNOWN_CLIENTS,
-    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,senpi,goose,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,catpaw,qodercn,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
+    'claude,claude-desktop,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,senpi,goose,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,catpaw,qodercn,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
   );
 });
 
@@ -59,8 +59,18 @@ test('derived DEFAULT_CLIENTS keeps the existing default-tracked CSV', () => {
   assert.equal(DEFAULT_CLIENTS, DEFAULT_CLIENT_IDS.join(','));
   assert.equal(
     DEFAULT_CLIENTS,
-    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,senpi,goose,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
+    'claude,claude-desktop,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,senpi,goose,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode'
   );
+});
+
+test('derived clients name a catalog parent and are not fork-only', () => {
+  const { CLIENT_CATALOG, DERIVED_CLIENT_IDS, DERIVED_CLIENT_PARENTS } = require('../../src/shared/clientCatalog');
+  assert.deepEqual([...DERIVED_CLIENT_IDS], ['claude-desktop']);
+  assert.equal(DERIVED_CLIENT_PARENTS['claude-desktop'], 'claude');
+  for (const client of CLIENT_CATALOG.filter(({ derivedFrom }) => derivedFrom)) {
+    assert.ok(CLIENT_IDS.includes(client.derivedFrom), `${client.id} parent`);
+    assert.equal(client.forkOnly, false, `${client.id} is scanned through its parent`);
+  }
 });
 
 test('derived FORK_ONLY_CLIENT_IDS lists exactly the clients the tokscale fork owns', () => {
