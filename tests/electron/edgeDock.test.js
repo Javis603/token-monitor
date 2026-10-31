@@ -3082,38 +3082,44 @@ test('floating placement rejects malformed persisted coordinates and closes its 
   assert.equal(Math.max(...points.map(point => point[1])), 272);
 });
 
-test('losing capture while moving the rail does not end the held native drag', () => {
-  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('let gesture = null;'), dock.indexOf('function indexFromTarget('));
-  const handlers = new Map();
-  const rail = { addEventListener: (name, fn) => handlers.set(name, fn), setPointerCapture() {}, classList: { add() {}, remove() {} } };
-  const starts = [], ends = [], captureLosses = [];
-  let acknowledge;
-  const bind = Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', `${source}; return bindRailGestures;`)(
-    { dragStart: (...args) => starts.push(args), dragEnd: () => ends.push(true), dragCaptureLost: id => captureLosses.push(id), onDragEnded: fn => { acknowledge = fn; } }, rail, () => 0, 5);
-  bind(rail);
-  const event = { button: 0, pointerId: 1, screenX: 10, screenY: 20, clientX: 25, clientY: 40 };
-  handlers.get('pointerdown')(event);
-  handlers.get('pointermove')({ ...event, screenX: 100 });
-  assert.deepEqual(starts[0].slice(0, 2), [40, 25]);
-  handlers.get('lostpointercapture')({ ...event, type: 'lostpointercapture' });
-  assert.equal(ends.length, 0, 'capture loss is not a release');
-  assert.deepEqual(captureLosses, [starts[0][2]], 'main receives the matching lost-capture gesture');
-  handlers.get('lostpointercapture')({ ...event, pointerId: 2, type: 'lostpointercapture' });
-  assert.equal(captureLosses.length, 1, 'another pointer cannot report capture loss for this drag');
-  acknowledge({ gestureId: starts[0][2] + 1 });
-  handlers.get('pointerup')({ ...event, type: 'pointerup' });
-  assert.equal(ends.length, 1, 'a stale acknowledgement cannot clear this drag');
-  handlers.get('pointerdown')(event);
-  handlers.get('pointermove')({ ...event, screenX: 100 });
-  acknowledge({ gestureId: starts[1][2] });
-  handlers.get('pointerup')({ ...event, type: 'pointerup' });
-  assert.equal(ends.length, 1, 'native completion clears the renderer gesture');
-  handlers.get('pointerdown')(event);
-  handlers.get('pointermove')({ ...event, screenX: 100, buttons: 1 });
-  handlers.get('lostpointercapture')({ ...event, type: 'lostpointercapture' });
-  handlers.get('pointermove')({ ...event, pointerId: 2, buttons: 0 });
-  assert.equal(ends.length, 1, 'another pointer cannot finish this drag');
-  handlers.get('pointermove')({ ...event, buttons: 0 });
-  assert.equal(ends.length, 2, 'an unpressed move finishes even without native button-state support');
-});
+for (const eventType of ['lostpointercapture', 'pointercancel']) {
+  test(`${eventType} while moving the rail does not end the held native drag`, () => {
+    const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+    const source = dock.slice(dock.indexOf('let gesture = null;'), dock.indexOf('function indexFromTarget('));
+    const handlers = new Map();
+    const rail = { addEventListener: (name, fn) => handlers.set(name, fn), setPointerCapture() {}, classList: { add() {}, remove() {} } };
+    const starts = [], ends = [], captureLosses = [];
+    let acknowledge;
+    const bind = Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', `${source}; return bindRailGestures;`)(
+      { dragStart: (...args) => starts.push(args), dragEnd: () => ends.push(true), dragCaptureLost: id => captureLosses.push(id), onDragEnded: fn => { acknowledge = fn; } }, rail, () => 0, 5);
+    bind(rail);
+    const event = { button: 0, pointerId: 1, screenX: 10, screenY: 20, clientX: 25, clientY: 40 };
+    handlers.get('pointerdown')(event);
+    handlers.get(eventType)({ ...event, type: eventType });
+    handlers.get('pointermove')({ ...event, screenX: 100 });
+    assert.equal(starts.length, 0, 'an interrupted click cannot leave a pending drag');
+    handlers.get('pointerdown')(event);
+    handlers.get('pointermove')({ ...event, screenX: 100 });
+    assert.deepEqual(starts[0].slice(0, 2), [40, 25]);
+    handlers.get(eventType)({ ...event, type: eventType });
+    assert.equal(ends.length, 0, 'capture loss is not a release');
+    assert.deepEqual(captureLosses, [starts[0][2]], 'main receives the matching lost-capture gesture');
+    handlers.get(eventType)({ ...event, pointerId: 2, type: eventType });
+    assert.equal(captureLosses.length, 1, 'another pointer cannot report capture loss for this drag');
+    acknowledge({ gestureId: starts[0][2] + 1 });
+    handlers.get('pointerup')({ ...event, type: 'pointerup' });
+    assert.equal(ends.length, 1, 'a stale acknowledgement cannot clear this drag');
+    handlers.get('pointerdown')(event);
+    handlers.get('pointermove')({ ...event, screenX: 100 });
+    acknowledge({ gestureId: starts[1][2] });
+    handlers.get('pointerup')({ ...event, type: 'pointerup' });
+    assert.equal(ends.length, 1, 'native completion clears the renderer gesture');
+    handlers.get('pointerdown')(event);
+    handlers.get('pointermove')({ ...event, screenX: 100, buttons: 1 });
+    handlers.get(eventType)({ ...event, type: eventType });
+    handlers.get('pointermove')({ ...event, pointerId: 2, buttons: 0 });
+    assert.equal(ends.length, 1, 'another pointer cannot finish this drag');
+    handlers.get('pointermove')({ ...event, buttons: 0 });
+    assert.equal(ends.length, 2, 'an unpressed move finishes even without native button-state support');
+  });
+}

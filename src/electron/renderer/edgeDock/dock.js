@@ -1343,15 +1343,15 @@ function bindRailGestures(rail) {
     else if (event.type === 'pointerup') bridge.click(ended.cellIndex);
   };
   rail.addEventListener('pointerup', finish);
-  rail.addEventListener('pointercancel', finish);
-  // Moving a non-activating window can drop capture while the button is still
-  // held. Main can continue while native tracking works; otherwise it cancels
-  // rather than relying on a renderer event from outside the clamped rail.
-  rail.addEventListener('lostpointercapture', (event) => {
+  // Cancellation and capture loss do not prove physical release. Main continues
+  // while native tracking works, or restores saved placement when it cannot.
+  const captureLost = (event) => {
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     if (gesture.dragging) bridge.dragCaptureLost?.(gesture.id);
     else finish(event);
-  });
+  };
+  rail.addEventListener('pointercancel', captureLost);
+  rail.addEventListener('lostpointercapture', captureLost);
 }
 
 function indexFromTarget(target) {

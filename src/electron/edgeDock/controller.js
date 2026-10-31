@@ -952,11 +952,12 @@ function createEdgeDockController(deps) {
   function syncRefresh(current = layout()) {
     if (!current || !alive(windows.peek)) return;
     const visible = settings().edgeDockRefreshEnabled === true
-      && railVisible && !drag && canRefreshLimits() === true
+      && railVisible && !drag && !railMotion && canRefreshLimits() === true
       && (!alwaysVisible() || refreshHovered || refreshKeepsButtonVisible());
     if (!visible) {
-      if (!windows.peek.isVisible() || refreshVisible) {
-        showPeekWindow(false, alwaysVisible() ? REFRESH_FADE_OUT_MS : FADE_OUT_MS);
+      if (railMotion || !windows.peek.isVisible() || refreshVisible) {
+        // Finish any old fade before the rail moves away from the button.
+        showPeekWindow(false, railMotion ? 0 : alwaysVisible() ? REFRESH_FADE_OUT_MS : FADE_OUT_MS);
       }
       refreshVisible = false;
       if (settings().edgeDockRefreshEnabled !== true) {
@@ -1183,7 +1184,7 @@ function createEdgeDockController(deps) {
     const previous = placement();
     const from = railMorphProgress();
     const changedMode = (next.floatingX === null) !== (previous.floatingX === null);
-    const changedSide = next.side !== previous.side || next.displayId !== previous.displayId || (next.floatingX === null) !== (previous.floatingX === null);
+    const changedSide = next.side !== previous.side || next.displayId !== previous.displayId || changedMode;
     placementOverride = next;
     if (changedMode) animateRailPlacement(from, windows.rail.getBounds().x);
     positionRail();

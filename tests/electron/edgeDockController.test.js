@@ -2217,3 +2217,93 @@ for (const railX of [350, 800]) {
     assert.ok(refresh.bounds.x + refresh.bounds.width <= bubble.bounds.x || bubble.bounds.x + bubble.bounds.width <= refresh.bounds.x, 'bottom refresh and the side-opening card cannot overlap');
   });
 }
+
+for (const buttonState of [true, false, null]) {
+  test(`renderer pointercancel defers placement to native button state (${buttonState})`, (t) => {
+    const advance = mockDockClock(t);
+    let down = true;
+    const fixture = createFixture({ primaryButtonDown: () => down });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const saved = { ...rail.bounds };
+    const handlers = new Map();
+    const node = { addEventListener: (name, fn) => handlers.set(name, fn), setPointerCapture() {}, classList: { add() {}, remove() {} } };
+    const dock = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+    const source = dock.slice(dock.indexOf('let gesture = null;'), dock.indexOf('function indexFromTarget('));
+    const emit = (channel, payload) => fixture.ipcMain.emit(channel, { sender: rail.webContents }, payload);
+    let acknowledge;
+    Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', `${source}; bindRailGestures(railNode);`)(
+      {
+        dragStart: (grabOffsetY, grabOffsetX, gestureId) => emit('edgeDock:dragStart', { grabOffsetY, grabOffsetX, gestureId }),
+        dragEnd: () => emit('edgeDock:dragEnd'),
+        dragCaptureLost: (gestureId) => emit('edgeDock:dragCaptureLost', { gestureId }),
+        onDragEnded: (fn) => { acknowledge = fn; }
+      }, node, () => 0, 5);
+    const event = { button: 0, buttons: 1, pointerId: 1, screenX: rail.bounds.x + 20, screenY: rail.bounds.y + 30, clientX: 20, clientY: 30 };
+    handlers.get('pointerdown')(event);
+    fixture.screen.point = { x: 600, y: 300 };
+    handlers.get('pointermove')({ ...event, screenX: 600, screenY: 300 });
+    advance(100);
+    assert.notDeepEqual(rail.bounds, saved);
+    down = buttonState;
+    handlers.get('pointercancel')({ ...event, type: 'pointercancel' });
+    handlers.get('lostpointercapture')({ ...event, type: 'lostpointercapture' });
+    assert.equal(fixture.placements.length, 0, 'cancellation itself cannot commit a placement');
+    if (down === true) {
+      advance(100);
+      assert.equal(fixture.placements.length, 0, 'a held native button continues tracking');
+      fixture.screen.point = { x: 700, y: 400 };
+      down = false;
+    }
+    advance(100);
+    const ended = rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:dragEnded').at(-1)?.payload;
+    assert.ok(ended, 'main acknowledges completion without further renderer input');
+    acknowledge(ended);
+    if (buttonState === null) {
+      assert.deepEqual(rail.bounds, saved, 'unreadable native state restores persisted placement');
+      assert.equal(fixture.placements.length, 0);
+      assert.equal(ended.cancelled, true);
+    } else {
+      assert.equal(fixture.placements.length, 1, 'only confirmed native release saves once');
+      assert.equal(rail.bounds.x, buttonState === true ? 680 : 580);
+    }
+    handlers.get('pointerup')({ ...event, type: 'pointerup' });
+    assert.equal(fixture.placements.length, buttonState === null ? 0 : 1, 'acknowledged gesture cannot save again');
+  });
+}
+
+for (const direction of ['detach', 'redock']) {
+  test(`refresh waits for ${direction} morph completion before returning below the rail`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({
+      canRefreshLimits: () => true,
+      prefersReducedMotion: () => false,
+      primaryButtonDown: () => true,
+      settings: { edgeDockFloatingX: direction === 'redock' ? 0.5 : null }
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const refresh = fixture.windowFor('peek');
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 60 };
+    advance(120);
+    fixture.paintPeek();
+    advance(160);
+    assert.equal(refresh.ignoreMouse, false);
+    assert.equal(refresh.opacity, 1, 'start with a fully painted refresh so its fade-out is exercised');
+    fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 32, grabOffsetY: 60, gestureId: 11 });
+    fixture.screen.point = { x: direction === 'redock' ? 1190 : 600, y: 300 };
+    advance(32);
+    fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
+    advance(32);
+    fixture.paintPeek();
+    assert.equal(refresh.ignoreMouse, true, 'refresh cannot appear at the destination while the rail is still moving');
+    assert.equal(refresh.opacity, 0, 'refresh is fully hidden during the morph');
+    advance(220);
+    fixture.paintPeek();
+    advance(160);
+    assert.equal(refresh.ignoreMouse, false, 'hovered refresh returns after the morph');
+    assert.equal(refresh.opacity, 1);
+    assert.equal(refresh.bounds.x + refresh.bounds.width / 2, rail.bounds.x + rail.bounds.width / 2);
+    assert.equal(refresh.bounds.y, rail.bounds.y + rail.bounds.height - Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) + EDGE_DOCK_METRICS.refreshGap);
+  });
+}
