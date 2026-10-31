@@ -28,20 +28,7 @@ This reference describes the current experimental API contract; backward compati
 
 For normalized period totals, inspect `capabilities` before interpreting default component/timing counters. Session or bucket producers may not carry these flags: `null` means unknown, not permission to assume full measurement. For narrower observed evidence, use the explicitly provided model timing or session/model component records below.
 
-```js
-const result = await ctx.data.query({ resource: 'usage', period: 'today' });
-if (result.availability === 'available') {
-  for (const row of result.rows) {
-    const timingSupported = row.capabilities?.throughput === true;
-    // No division when timing is unsupported, unknown or has no measured duration.
-    const measuredAverage = timingSupported && row.timedDurationMs > 0
-      && row.timedOutputTokens !== null
-      ? row.timedOutputTokens * 1000 / row.timedDurationMs : null;
-    // This is the row's measured average, not the App's live tok/s reading.
-    console.log(measuredAverage);
-  }
-}
-```
+A ratio of cumulative timing counters is a period average, not the [live token rate](#live-token-rate); do not calculate it from unsupported, unknown or zero-duration timing.
 
 ## Resource catalogue
 
@@ -79,7 +66,11 @@ The top-up forecast reports its own `status` and `reason`, matched `accountId`, 
 
 ## Live token rate
 
-Query or subscribe with `{resource: 'liveRate'}`. Omit `deviceId` for the selected source: local mode uses the local device, shared modes sum independently active device rates. For a specific device, use its opaque ID from `devices` as `filter.deviceId`; an ID outside the current plugin/source scope returns `scopeUnavailable`. The resource works independently of native footer, Tray and Bubble rate-display settings.
+Use `{resource: 'liveRate'}` for the selected source: local mode uses the local device, shared modes sum independently active device rates. For a specific device, use its opaque ID from `devices` as `filter.deviceId`; an ID outside the current plugin/source scope returns `scopeUnavailable`. The resource works independently of native footer, Tray and Bubble rate-display settings.
+
+Use `subscribe` to maintain live tracking. A `query` only reads the current snapshot; it does not start tracking. Without an active subscription for the same source/device scope, supported timing returns `waitingForSample`. Subscriptions for the same scope share tracking; the last subscription leaving releases its baseline and expiry timer. Closing the owner or disabling the plugin also releases its subscriptions.
+
+For a mounted chart, start with the [complete subscription lifecycle example](author-data-settings.md#live-updates-with-cleanup). Set its query to `{resource: 'liveRate'}` and adapt `show` to display the first row's state and speed described below. The example handles the initial snapshot, refetching on invalidation, reset and unsubscribe cleanup. Device-scoped subscriptions invalidate only when their own reading changes; aggregate subscriptions also follow changes in contributing devices.
 
 The usual result envelope contains one row when the source exists. `availability: 'available'` means the resource can describe its state, not that it necessarily has a rate. Check the row's `state` before interpreting values:
 
@@ -91,7 +82,7 @@ The usual result envelope contains one row when the source exists. `availability
 | `burn` | Matched timed-token consumption per minute (`TPM`), not currency spend |
 | `sampledAt` | Unix milliseconds of the accepted observation, not a claim about when an individual token was generated |
 | `expiresAt` | Unix milliseconds of the next sample expiry; expiry can change the rate or move it to idle/unavailable |
-| `sampleRevision` | Accepted-sample revision within the current tracker lifetime. Idle transitions do not create a new observed sample. Clear saved chart history on a reset. |
+| `sampleRevision` | Accepted-sample revision within the current tracker lifetime. Idle transitions do not create a new observed sample. |
 | `deviceCount` | Number of contributing devices in this reading. An idle retained reading describes its last contribution set, not currently active devices. |
 | `id`, `deviceId`, `period` | Opaque row identity, `null` aggregate or selected opaque device ID, and `today` |
 
@@ -99,33 +90,13 @@ For `unavailable`, the numeric rate/timestamp/revision fields are `null` and `de
 
 The first observed snapshot establishes a baseline; a subsequent positive matched-duration delta can produce a reading. Counter regressions and source/client-selection changes reset tracking. New devices establish their own baselines without clearing other devices' active samples; departed/stale devices are removed from both active and retained aggregate readings. Unsupported/incomplete timing does not become a valid zero. Shared-source output sums active per-device samples rather than dividing fleet token totals by summed busy time; this is not proof that every device or token has timing coverage. A shared source containing only stale devices reports `reason: 'stale'`, distinct from an empty source's `missingData`.
 
-Use `subscribe` to maintain live tracking. A `query` only reads the current snapshot; it does not start tracking. Without an active subscription for the same source/device scope, supported timing returns `waitingForSample`. Subscriptions for the same scope share tracking; the last subscription leaving releases its baseline and expiry timer. Unsubscribe when hidden/disposed; closing the owner or disabling the plugin also releases its subscriptions.
+Subscriptions follow host publications and sample expiry, including expiry without a new publication. Samples become idle after their active lifetime and the retained reading clears later; use the returned state and timestamps instead of hard-coding those deadlines.
 
-Tracking uses existing host publications, with no additional scans or provider calls. Subscriptions also receive coalesced invalidations when readings expire without another publication. Samples become idle after their active lifetime and the retained reading clears later; use the returned state and timestamps instead of hard-coding those deadlines.
-
-With an active subscription for the same scope, this query reads the current snapshot:
-
-```js
-const result = await ctx.data.query({ resource: 'liveRate' });
-if (result.availability === 'available') {
-  const rate = result.rows[0];
-  const label = rate.state === 'unavailable'
-    ? `No reading: ${rate.reason}`
-    : `${rate.speed} tok/s${rate.state === 'idle' ? ' (idle, last reading)' : ''}`;
-  console.log(label);
-}
-```
-
-For a mounted chart, use `{resource: 'liveRate'}` in the [subscription lifecycle example](author-data-settings.md#live-updates-with-cleanup), adapt its `show` function to this row shape, and refetch on invalidation. Device-scoped subscriptions invalidate only when their own reading changes; aggregate subscriptions also follow changes in contributing devices.
-
-Refresh the displayed rate, device count and state after every invalidation, even if `sampleRevision` is unchanged. In a shared source, one device can expire while another stays active: the aggregate might drop from 90 to 50 tok/s without a new observation. Distinguish these time-driven transitions from newly observed samples in chart history; do not label expiry transitions as new measurements or skip redrawing them. Clear old readings on reset before refetching.
+Refresh the displayed rate, device count and state after every invalidation, even if `sampleRevision` is unchanged. In a shared source, one device can expire while another stays active: the aggregate might drop from 90 to 50 tok/s without a new observation. Distinguish these time-driven transitions from newly observed samples in chart history; do not label expiry transitions as new measurements or skip redrawing them. On reset, clear chart history before refetching.
 
 ## Identity and unsupported data
 
 - Query IDs are opaque and scoped to the plugin, selected source and privacy identity. They support joins within that scope, but have no cross-restart persistence guarantee. Do not save them as permanent pin, label or mapping keys, or try to recover raw IDs from them. No formal durable-identity API is currently provided.
-- `ctx.data.subscribe` invalidates snapshots; it is not a lossless event log or a per-token stream. Neither collector wall time nor renderer refresh time is a generation duration.
 - Limits/subscription account identity does not prove which account produced a session's usage. Sessions do not expose a complete account-usage attribution contract.
 - Full transcripts, raw credentials and universal TTFT/per-request timelines are not business-data resources. A total token count or session start/end timestamp cannot reconstruct them.
 - Host-specific renderer services and DOM extensions are separate from this portable query contract. Reading internal files or inventing missing observations does not establish API support.
-
-On source/privacy reset, clear retained rows, cursors and derived displays before refetching. Release subscriptions on disposal and unnecessary work when hidden; follow the [complete lifecycle example](author-data-settings.md#live-updates-with-cleanup).
