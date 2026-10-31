@@ -35,7 +35,14 @@ function runtimePlatformKey() {
   if (process.platform !== 'linux') return platformKey();
   try {
     const glibcVersion = process.report?.getReport()?.header?.glibcVersionRuntime;
-    if (!glibcVersion) return `${process.platform}-${process.arch}-musl`;
+    if (!glibcVersion) {
+      // Statically linked glibc Node can omit the runtime version. GNU ldd
+      // identifies the host libc without relying on Node's compiler version.
+      try {
+        if (fs.readFileSync('/usr/bin/ldd', 'utf8').includes('GNU C Library')) return platformKey();
+      } catch (_) {}
+      return `${process.platform}-${process.arch}-musl`;
+    }
   } catch (_) {}
   return platformKey();
 }
@@ -50,7 +57,7 @@ function resolvePackageBinDir(packageName) {
 }
 
 function resolveManifestEntry(manifest, requestedKey = null) {
-  const key = requestedKey || platformKey();
+  const key = requestedKey || runtimePlatformKey();
   const entry = manifest.platforms[key];
   if (!entry) {
     throw new Error(`No vendored tokscale binary recorded for platform ${key} in scripts/vendor/tokscale.json`);
