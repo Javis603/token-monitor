@@ -117,6 +117,9 @@ function createEdgeDockController(deps) {
   let builtMaterial = null;
   let bubbleCell = null;
   let bubbleHeight = 0;
+  // The top edge the card is pinned to while it grows for a tooltip. Null means
+  // the bubble is centred on its cell as usual.
+  let bubbleHoldTop = null;
   // The card the bubble window is currently sized and shaped for. The renderer
   // measures a new card off-screen and only swaps it in once this matches, so a
   // card never paints into a window still at the previous card's size.
@@ -296,7 +299,15 @@ function createEdgeDockController(deps) {
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail, metrics: m });
     const zones = edgeDockHandleZones({ side, peekBounds: peek, metrics: m });
     const bubble = bubbleCell !== null
-      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * dockScale()), workArea, side, metrics: m })
+      ? edgeDockBubbleBounds({
+        railBounds: rail,
+        cellIndex: bubbleCell,
+        height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * dockScale()),
+        workArea,
+        side,
+        anchorTop: bubbleHoldTop,
+        metrics: m
+      })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
     return { side, workArea, rail, peek, handle, restingHandle, trigger, wake: zones?.wake || null, approach: zones?.approach || null, bubble, refresh };
@@ -983,6 +994,7 @@ function createEdgeDockController(deps) {
 
   function showBubble(cellIndex) {
     bubbleCell = cellIndex;
+    bubbleHoldTop = null;
     // Reopening the card that was last shown produces the same payload as the
     // one already sent, which the render de-duplication would swallow, and then
     // nothing would ever report a size to reveal it. Send it again, and reveal
@@ -1012,6 +1024,7 @@ function createEdgeDockController(deps) {
     const bubble = windows.bubble;
     const hadCell = bubbleCell !== null;
     bubbleCell = null;
+    bubbleHoldTop = null;
     if (hadCell) render('rail');
     if (!alive(bubble) || !bubbleVisible) return;
     bubbleVisible = false;
@@ -1255,6 +1268,12 @@ function createEdgeDockController(deps) {
       const height = Math.round(Number(payload?.height));
       if (!Number.isFinite(height) || height <= 0) return;
       const maxHeight = Math.max(40, maxCardHeight() ?? 720);
+      // A card growing to fit a tooltip holds the top edge it has right now, so
+      // the card does not jump under the pointer; any other report goes back to
+      // being centred on its cell.
+      bubbleHoldTop = payload?.holdTop === true && bubbleVisible && alive(windows.bubble)
+        ? windows.bubble.getBounds().y
+        : null;
       bubbleHeight = Math.min(height, maxHeight);
       // Store the clamped height: reopening this card restores it verbatim, so
       // keeping the raw value here would place a card taller than the work area.

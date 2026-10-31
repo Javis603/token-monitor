@@ -980,6 +980,39 @@ test('a third-party tooltip keeps account details above spend without duplicate 
   assert.equal(spoken.match(/Month/g)?.length, 1);
 });
 
+test('the dock card asks for room instead of dropping tooltip rows', () => {
+  // The bubble is only as tall as the card, so the card is what grows: the
+  // tooltip keeps every row the Limits page shows, and the host is asked for the
+  // height it needs rather than the rows being trimmed to fit the window.
+  const requested = [];
+  const card = dockView({}, {
+    tooltipSpace: {
+      request: (height) => requested.push(height),
+      release: () => {}
+    }
+  }).renderProviderWindows({
+    provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 11.42, limit: 30, currency: 'USD' }],
+    balance: {
+      amount: 11.42, currency: 'USD', todaySpend: 0, weekSpend: 1.44,
+      monthSpend: 1.44, allTimeSpend: 18.58, requestCount: 12_345, quotaGroup: 'default'
+    },
+    usageSummary: {
+      period: 'month', requests: 21, totalTokens: 1940, inputTokens: 1234,
+      outputTokens: 456, averageDurationMs: 850, standardCost: 3
+    }
+  }, '#888888');
+  const rows = card.find('limit-detail-tooltip').children.map((row) => row.text);
+  assert.deepEqual(rows, [
+    'Total quota $30.00', 'Requests 12,345', 'Group default',
+    'Month requests 21', 'Month tokens 1,940', 'Input tokens 1,234',
+    'Output tokens 456', 'Avg response 850 ms', 'Standard cost $3.00', '',
+    'Today $0.00', 'Week $1.44', 'Month $1.44', 'All time $18.58'
+  ]);
+  // Nothing is requested until the tooltip actually opens.
+  assert.deepEqual(requested, []);
+});
+
 test('a third-party card falls back to all-time when dashboard periods are unknown', () => {
   const card = dockView().renderProviderWindows({
     provider: 'thirdparty', adapterId: 'newapi-account', status: 'ok', planLabel: 'Account',

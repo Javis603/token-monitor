@@ -452,6 +452,28 @@ function limitTooltipShouldHoldRender() {
   return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
 
+// Room for a tooltip the card's own window cannot hold. The card is measured by
+// the main process to size the window, so growing it here and reporting the new
+// height is the same handshake a session group's expansion uses; `holdTop` keeps
+// the window's top edge where it is while the height changes, which is what
+// stops the card jumping under the pointer.
+const cardTooltipSpace = {
+  request(height) {
+    const cell = state.payload?.cell;
+    const card = contentLayer.querySelector('.edge-dock-card');
+    if (!cell || !card || !(height > 0)) return;
+    card.style.minHeight = `${Math.ceil(height)}px`;
+    bridge.reportBubbleSize(cell.id, Math.ceil(height), true);
+  },
+  release() {
+    const cell = state.payload?.cell;
+    const card = contentLayer.querySelector('.edge-dock-card');
+    if (!cell || !card) return;
+    card.style.minHeight = '';
+    bridge.reportBubbleSize(cell.id, Math.ceil(card.getBoundingClientRect().height));
+  }
+};
+
 function createCardWindowsView(cell = () => state.payload?.cell, forecast = () => cardForecast) {
   return limitWindowsViewApi.createLimitWindowsView({
     document,
@@ -491,6 +513,12 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
       value, currency, appearance().compactTokenUnits, state.locale
     ),
     formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
+    // The bubble is sized to the card it draws, so a popover cannot open past
+    // the window. A tooltip that needs more room grows the card instead, and the
+    // main process holds the card's top edge while the window grows downward, so
+    // neither the card nor the pointer under it moves. Only the bubble needs
+    // this: the notch panel and the Limits page have the whole window.
+    tooltipSpace: surface === 'bubble' ? cardTooltipSpace : null,
     formatDuration: presentation.formatResetDuration,
     formatLimitBoundary: limitPresentationApi.limitBoundaryText,
     limitFillPercent,

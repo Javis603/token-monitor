@@ -343,7 +343,7 @@ function edgeDockCellAt(point, railBounds, cellCount, metrics = EDGE_DOCK_METRIC
   return null;
 }
 
-function edgeDockBubbleBounds({ railBounds, cellIndex, height, workArea, side, metrics = EDGE_DOCK_METRICS }) {
+function edgeDockBubbleBounds({ railBounds, cellIndex, height, workArea, side, anchorTop = null, metrics = EDGE_DOCK_METRICS }) {
   if (!railBounds || !workArea || !Number.isInteger(cellIndex)) return null;
   const bubbleHeight = Math.max(40, Math.round(Number(height) || 0));
   const layout = railBounds.cells || edgeDockCellLayout(null, cellKindsFrom(null, cellIndex + 1), metrics);
@@ -351,7 +351,11 @@ function edgeDockBubbleBounds({ railBounds, cellIndex, height, workArea, side, m
   const cellCenter = railBounds.y + top + (layout.heights[cellIndex] ?? metrics.cellHeight) / 2;
   const minY = workArea.y + metrics.screenMargin;
   const maxY = workArea.y + workArea.height - bubbleHeight - metrics.screenMargin;
-  const y = Math.round(Math.max(minY, Math.min(Math.max(minY, maxY), cellCenter - bubbleHeight / 2)));
+  // Centred on the cell, unless the caller is holding a top edge it already
+  // occupies — a card growing for a tooltip keeps its top and grows downward,
+  // so the card and the pointer on it stay where they are.
+  const desired = Number.isFinite(anchorTop) ? anchorTop : cellCenter - bubbleHeight / 2;
+  const y = Math.round(Math.max(minY, Math.min(Math.max(minY, maxY), desired)));
   // The window carries the tail as well as the card, so it is wider than the
   // card by the tail length; the tail tip points at the cell's centre even when
   // the card itself had to be clamped to stay on screen.

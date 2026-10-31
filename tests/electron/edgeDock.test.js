@@ -1482,6 +1482,26 @@ test('bubble opens inward with its tail aimed at the cell, even when clamped', (
   assert.equal(tall.y + tall.tailY, top.y + m.shoulder + m.padding + m.cellHeight / 2);
 });
 
+test('a bubble growing for a tooltip keeps the top edge it is holding', () => {
+  const m = EDGE_DOCK_METRICS;
+  const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0.5, cellCount: 3 });
+  const small = edgeDockBubbleBounds({ railBounds: rail, cellIndex: 1, height: 120, workArea, side: 'right' });
+  const grown = edgeDockBubbleBounds({
+    railBounds: rail, cellIndex: 1, height: 400, workArea, side: 'right', anchorTop: small.y
+  });
+  assert.equal(grown.y, small.y, 'the card must not move while the window grows');
+  assert.equal(grown.height, 400);
+  // The tail still aims at the cell's centre now that the top edge is fixed.
+  const cellCenter = rail.y + m.shoulder + m.padding + m.cellHeight + m.cellGap + m.cellHeight / 2;
+  assert.equal(grown.y + grown.tailY, cellCenter);
+
+  // A hold that would run off the bottom of the work area is clamped instead.
+  const clamped = edgeDockBubbleBounds({
+    railBounds: rail, cellIndex: 1, height: 600, workArea, side: 'right', anchorTop: workArea.y + 400
+  });
+  assert.equal(clamped.y + clamped.height, workArea.y + workArea.height - m.screenMargin);
+});
+
 test('rail silhouette starts and ends on the screen edge and mirrors for the left', () => {
   const right = railCommands({ width: 64, height: 300, side: 'right', shoulder: 28, radius: 20 });
   assert.deepEqual(right[0], ['M', 64, 0]);
