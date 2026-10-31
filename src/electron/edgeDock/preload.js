@@ -9,8 +9,18 @@ contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   ready: () => ipcRenderer.send('edgeDock:ready'),
   click: (cellIndex) => ipcRenderer.send('edgeDock:click', { cellIndex }),
   pointer: () => ipcRenderer.send('edgeDock:pointer'),
-  dragStart: (grabOffsetY) => ipcRenderer.send('edgeDock:dragStart', { grabOffsetY }),
+  dragStart: (grabOffsetY, grabOffsetX, gestureId) => ipcRenderer.send('edgeDock:dragStart', { grabOffsetY, grabOffsetX, gestureId }),
   dragEnd: () => ipcRenderer.send('edgeDock:dragEnd'),
+  onDragEnded: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('edgeDock:dragEnded', listener);
+    return () => ipcRenderer.removeListener('edgeDock:dragEnded', listener);
+  },
+  onShapeFrame: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('edgeDock:shapeFrame', listener);
+    return () => ipcRenderer.removeListener('edgeDock:shapeFrame', listener);
+  },
   reportBubbleSize: (cellId, height) => ipcRenderer.send('edgeDock:bubbleSize', { cellId, height }),
   dismiss: () => ipcRenderer.send('edgeDock:dismiss'),
   toggleRateMode: () => ipcRenderer.send('edgeDock:toggleRateMode'),

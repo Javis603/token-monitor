@@ -1297,15 +1297,24 @@ function renderRail(payload) {
 }
 
 let gesture = null;
+let nextGestureId = 0;
+
+bridge.onDragEnded?.(({ gestureId }) => {
+  if (gesture?.id !== gestureId) return;
+  gesture = null;
+  railNode?.classList.remove('is-dragging');
+});
 
 function bindRailGestures(rail) {
   rail.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
     gesture = {
+      id: ++nextGestureId,
       pointerId: event.pointerId,
       startX: event.screenX,
       startY: event.screenY,
       grabOffsetY: event.clientY,
+      grabOffsetX: event.clientX,
       cellIndex: indexFromTarget(event.target),
       dragging: false
     };
@@ -1316,7 +1325,7 @@ function bindRailGestures(rail) {
     if (Math.hypot(event.screenX - gesture.startX, event.screenY - gesture.startY) < DRAG_THRESHOLD_PX) return;
     gesture.dragging = true;
     rail.classList.add('is-dragging');
-    bridge.dragStart(gesture.grabOffsetY);
+    bridge.dragStart(gesture.grabOffsetY, gesture.grabOffsetX, gesture.id);
   });
   const finish = (event) => {
     if (!gesture || gesture.pointerId !== event.pointerId) return;
@@ -1328,7 +1337,11 @@ function bindRailGestures(rail) {
   };
   rail.addEventListener('pointerup', finish);
   rail.addEventListener('pointercancel', finish);
-  rail.addEventListener('lostpointercapture', finish);
+  // Moving a non-activating window can drop capture while the button is still
+  // held. Main keeps following the native button state and acknowledges release.
+  rail.addEventListener('lostpointercapture', (event) => {
+    if (!gesture?.dragging) finish(event);
+  });
 }
 
 function indexFromTarget(target) {
@@ -1913,6 +1926,7 @@ function fitCardTotal(card, scale = 1) {
 
 function renderBubble(payload) {
   root.dataset.side = payload.side;
+  root.style.setProperty('--edge-dock-card-width', `${payload.cardWidth || 280}px`);
   const cell = payload.cell;
   if (!cell) {
     if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
@@ -2009,6 +2023,12 @@ function deferBubbleRender() {
 }
 
 bridge.onRender(render);
+bridge.onShapeFrame?.(({ shape, side }) => {
+  if (surface !== 'rail' || !state.payload) return;
+  state.payload = { ...state.payload, shape, side };
+  root.dataset.side = side;
+  updateShape(state.payload);
+});
 // A repaint that no push triggers, because two readings here move on a clock
 // rather than on data: a session stops being running when its window expires
 // (sessionLive.RUNNING_WINDOW_MS) even with no new stats at all, and reset
