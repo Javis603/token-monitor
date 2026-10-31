@@ -128,3 +128,40 @@ test('negative Muse usage is unavailable rather than a full allowance', async ()
   assert.deepEqual(row.windows, []);
   assert.equal(state.size, 0);
 });
+
+test('Muse discovery skips an unrelated failed chunk and reaches valid later batches', async () => {
+  const { chunks } = require('../fixtures/museWeb');
+  for (const failure of ['http404', 'network']) {
+    const paths = ['gone', ...Array.from({ length: 7 }, (_, i) => `other${i}`), 'app', 'loader'];
+    const requests = [];
+    const fetch = async (url, init) => {
+      const path = new URL(url).pathname;
+      requests.push(path);
+      if (init.method === 'POST') return new Response(free);
+      if (path === '/') return new Response(paths.map((name) => `<script src="/_next/static/chunks/${name}.js"></script>`).join(''));
+      assert.equal(init.headers.Cookie, undefined);
+      if (path.endsWith('/gone.js')) {
+        if (failure === 'network') throw new Error('fixture network failure');
+        return new Response('', { status: 404 });
+      }
+      return new Response(chunks[path] || '');
+    };
+    const row = await fetchMuseWebLimits(options, { fetch });
+    assert.equal(row.status, 'ok', failure);
+    assert.equal(row.windows[0].usedPercent, 28);
+    assert.ok(requests.includes('/_next/static/chunks/settings.js'));
+  }
+});
+
+test('skipping failed chunks never swallows Muse discovery cancellation', async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const row = await fetchMuseWebLimits(options, { signal: controller.signal, fetch: async () => {
+    requests++;
+    if (requests === 1) return new Response('<script src="/_next/static/chunks/app.js"></script>');
+    controller.abort();
+    throw new Error('cancelled chunk fixture');
+  } });
+  assert.equal(row.status, 'unavailable');
+  assert.equal(requests, 2);
+});

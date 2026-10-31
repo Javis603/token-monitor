@@ -83,9 +83,13 @@ async function fetchMuseWebLimits(options = {}, deps = {}) {
         return { status: response.status, text: await response.text() };
       };
       const chunks = async (paths) => Promise.all(paths.map(async (path) => {
-        const response = await request(path, { headers: { Accept: '*/*' } });
-        if (response.status !== 200) throw invalidResponse();
-        return response.text;
+        try {
+          const response = await request(path, { headers: { Accept: '*/*' } });
+          return response.status === 200 ? response.text : '';
+        } catch {
+          signal.throwIfAborted();
+          return '';
+        }
       }));
       const discover = async () => {
         const page = await request('/', { headers: { Cookie: cookie, Accept: 'text/html' } });
