@@ -4,8 +4,8 @@ const { createLiveTokenRateGroupTracker, selectLiveTokenRatePeriods } = require(
 
 // A host-owned, demand-driven reader of captured snapshots. It uses the native
 // matched-counter tracker, never collector/renderer elapsed time or new scans.
-function createLiveRateResource({ now, leaseMs, onChange, setTimer = setTimeout, clearTimer = clearTimeout }) {
-  const groups = new Map(), owners = new Map();
+function createLiveRateResource({ now, onChange, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  const groups = new Map();
   let stats = null, context = {}, identity = '', revision = 0, timer = null;
 
   function selection(deviceId) {
@@ -20,10 +20,18 @@ function createLiveRateResource({ now, leaseMs, onChange, setTimer = setTimeout,
     const allStale = selected.source === 'devices:all' && stats?.devices?.length > 0 && stats.devices.every(d => d.stale === true);
     return { ...selected, reason: allStale ? 'stale' : 'missingData' };
   }
-  function refresh(group, observe) {
+  function value(deviceId, selected, sample = null, hadSample = false) {
+    const supported = selected.entries.some(({ period }) => period?.capabilities?.throughput !== false
+      && ['timedTokens', 'timedOutputTokens', 'timedDurationMs'].every(k => typeof period?.[k] === 'number' && Number.isFinite(period[k]) && period[k] >= 0));
+    return { deviceId, state: sample ? sample.idle ? 'idle' : 'live' : 'unavailable',
+      reason: sample ? null : !selected.entries.length ? selected.reason : !supported ? 'unsupportedTiming' : hadSample ? 'expired' : 'waitingForSample',
+      speed: sample?.speed ?? null, burn: sample?.burn ?? null, sampledAt: sample?.sampledAt ?? null,
+      expiresAt: sample?.expiresAt ?? null, sampleRevision: sample?.revision ?? null, deviceCount: sample?.deviceCount ?? 0 };
+  }
+  function refresh(group, observe, reset = false) {
     const selected = selection(group.deviceId);
     const boundary = selected.source ?? null;
-    if (boundary !== group.boundary) {
+    if (reset || boundary !== group.boundary) {
       group.tracker.reset(selected.entries);
       group.boundary = boundary;
       group.hadSample = false;
@@ -40,30 +48,23 @@ function createLiveRateResource({ now, leaseMs, onChange, setTimer = setTimeout,
     group.members = selected.entries.map(e => e.id);
     const sample = group.tracker.getSample();
     group.hadSample ||= !!sample;
-    const supported = selected.entries.some(({ period }) => period?.capabilities?.throughput !== false
-      && ['timedTokens', 'timedOutputTokens', 'timedDurationMs'].every(k => typeof period?.[k] === 'number' && Number.isFinite(period[k]) && period[k] >= 0));
-    const value = { deviceId: group.deviceId, state: sample ? sample.idle ? 'idle' : 'live' : 'unavailable',
-      reason: sample ? null : !selected.entries.length ? selected.reason : !supported ? 'unsupportedTiming' : group.hadSample ? 'expired' : 'waitingForSample',
-      speed: sample?.speed ?? null, burn: sample?.burn ?? null, sampledAt: sample?.sampledAt ?? null,
-      expiresAt: sample?.expiresAt ?? null, sampleRevision: sample?.revision ?? null, deviceCount: sample?.deviceCount ?? 0 };
-    const signature = JSON.stringify(value);
-    if (signature !== group.signature) { group.value = value; group.signature = signature; group.revision = ++revision; }
+    const reading = value(group.deviceId, selected, sample, group.hadSample);
+    const signature = JSON.stringify(reading);
+    if (reset || signature !== group.signature) { group.value = reading; group.signature = signature; group.revision = ++revision; }
   }
-  function prune() {
-    for (const [key, owner] of owners) if (!owner.subscription && now() >= owner.expiresAt) owners.delete(key);
-    const used = new Set([...owners.values()].map(o => o.scope));
-    for (const key of groups.keys()) if (!used.has(key)) groups.delete(key);
+  function addScope(deviceId) {
+    const group = { deviceId, tracker: createLiveTokenRateGroupTracker({ now }), boundary: undefined, members: [], hadSample: false };
+    groups.set(deviceId, group);
+    refresh(group, false);
   }
   function schedule() {
     if (timer !== null) clearTimer(timer);
     timer = null;
-    const scopes = new Set([...owners.values()].filter(o => o.subscription).map(o => o.scope));
     let deadline = Infinity;
-    for (const scope of scopes) deadline = Math.min(deadline, groups.get(scope)?.value?.expiresAt ?? Infinity);
+    for (const group of groups.values()) deadline = Math.min(deadline, group.value.expiresAt ?? Infinity);
     if (!Number.isFinite(deadline)) return;
     timer = setTimer(() => {
       timer = null;
-      prune();
       const before = revision;
       for (const group of groups.values()) refresh(group, false);
       schedule();
@@ -71,45 +72,26 @@ function createLiveRateResource({ now, leaseMs, onChange, setTimer = setTimeout,
     }, Math.max(0, deadline - now()) + 1);
     timer?.unref?.();
   }
-  function release(predicate) {
-    for (const [key, owner] of owners) if (predicate(owner, key)) owners.delete(key);
-    prune(); schedule();
-  }
   return {
-    revision(deviceRef = null) {
-      // Owners already bind plugin-scoped device refs to shared device trackers.
-      const scope = deviceRef === null ? JSON.stringify(null) : [...owners.values()].find(o => o.deviceRef === deviceRef)?.scope;
-      return groups.get(scope)?.revision ?? 0;
+    revision: deviceId => groups.get(deviceId)?.revision ?? JSON.stringify(value(deviceId, selection(deviceId))),
+    setScopes(scopes) {
+      for (const id of groups.keys()) if (!scopes.has(id)) groups.delete(id);
+      for (const id of scopes) if (!groups.has(id)) addScope(id);
+      schedule();
     },
     publish(next, extras) {
       const nextContext = extras.liveRateContext || {};
       const nextIdentity = JSON.stringify([extras.sourceId, extras.identityEpoch, nextContext.hubMode, nextContext.deviceId, nextContext.clients]);
-      if (identity !== nextIdentity) { groups.clear(); owners.clear(); identity = nextIdentity; revision++; }
-      stats = next; context = nextContext;
-      prune();
-      for (const group of groups.values()) refresh(group, true);
+      const reset = identity !== nextIdentity;
+      stats = next; context = nextContext; identity = nextIdentity;
+      for (const group of groups.values()) refresh(group, true, reset);
       schedule();
     },
-    read(deviceId, owner) {
-      prune();
-      const scope = JSON.stringify(deviceId);
-      if (!groups.has(scope)) {
-        if (groups.size >= 128) throw new Error('budgetExceeded');
-        groups.set(scope, { deviceId, tracker: createLiveTokenRateGroupTracker({ now }), boundary: undefined, members: [], hadSample: false });
-      }
-      if (!owners.has(owner.key) && owners.size >= 512) throw new Error('budgetExceeded');
-      owners.set(owner.key, { ...owner, scope, expiresAt: now() + leaseMs });
-      const group = groups.get(scope);
-      const before = revision, hadValue = !!group.value;
-      refresh(group, false); schedule();
-      if (hadValue && revision !== before) onChange();
-      return { ...group.value };
+    read(deviceId) {
+      return { ...(groups.get(deviceId)?.value ?? value(deviceId, selection(deviceId))) };
     },
-    releaseSubscription: id => release(o => o.subscription === id),
-    releaseOwner: owner => release(o => o.owner === owner),
-    revoke: pluginId => release(o => o.pluginId === pluginId),
-    dispose() { if (timer !== null) clearTimer(timer); timer = null; groups.clear(); owners.clear(); stats = null; },
-    inspect: () => ({ groups: groups.size, owners: owners.size, timer: timer !== null })
+    dispose() { if (timer !== null) clearTimer(timer); timer = null; groups.clear(); stats = null; },
+    inspect: () => ({ groups: groups.size, timer: timer !== null })
   };
 }
 

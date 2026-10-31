@@ -28,27 +28,28 @@ function clock() {
 const period = (n = 0, duration = 0, output = n) => ({ capabilities: { throughput: true },
   timedTokens: n, timedOutputTokens: output, timedDurationMs: duration });
 const stats = p => ({ updatedAt: '2026-10-31T00:00:00Z', periods: { today: p } });
-const owner = { key: 'sub', subscription: 'sub', owner: 'window', pluginId: 'plugin' };
 
 test('live-rate demand baselines once, retains idle values, and expires without another publication', () => {
   const time = clock(); let changes = 0;
-  const resource = createLiveRateResource({ ...time, leaseMs: 60000, onChange: () => changes++ });
+  const resource = createLiveRateResource({ ...time, onChange: () => changes++ });
   resource.publish(stats(period()), {});
-  assert.deepEqual(resource.inspect(), { groups: 0, owners: 0, timer: false });
-  assert.equal(resource.read(null, owner).reason, 'waitingForSample');
+  assert.equal(resource.read(null).reason, 'waitingForSample');
+  assert.deepEqual(resource.inspect(), { groups: 0, timer: false });
+  resource.setScopes(new Set([null]));
+  assert.equal(resource.read(null).reason, 'waitingForSample');
   time.advance(3000);
   resource.publish(stats(period(100, 1000, 40)), {});
-  const live = resource.read(null, owner);
+  const live = resource.read(null);
   assert.deepEqual([live.state, live.speed, live.burn, live.deviceCount], ['live', 40, 6000, 1]);
   resource.publish(stats(period(100, 1000, 40)), {});
-  assert.equal(resource.read(null, owner).sampleRevision, live.sampleRevision, 'identical snapshots are not new samples');
+  assert.equal(resource.read(null).sampleRevision, live.sampleRevision, 'identical snapshots are not new samples');
   time.advance(8001);
-  const idle = resource.read(null, owner);
+  const idle = resource.read(null);
   assert.equal(idle.state, 'idle'); assert.equal(idle.speed, 40);
   assert.equal(idle.sampledAt, live.sampledAt);
   assert.equal(changes, 1);
   time.advance(172000);
-  const expired = resource.read(null, owner);
+  const expired = resource.read(null);
   assert.deepEqual([expired.state, expired.reason, expired.speed], ['unavailable', 'expired', null]);
   assert.equal(changes, 2); assert.equal(time.timers.size, 0);
   resource.dispose();
@@ -56,55 +57,53 @@ test('live-rate demand baselines once, retains idle values, and expires without 
 
 test('unsupported, missing, stale, reset and measured-zero readings remain distinct', () => {
   const time = clock();
-  const resource = createLiveRateResource({ ...time, leaseMs: 60000, onChange() {} });
+  const resource = createLiveRateResource({ ...time, onChange() {} });
   resource.publish(stats({ ...period(), capabilities: { throughput: false } }), {});
-  assert.equal(resource.read(null, owner).reason, 'unsupportedTiming');
+  resource.setScopes(new Set([null]));
+  assert.equal(resource.read(null).reason, 'unsupportedTiming');
   resource.publish(stats(period()), {});
   time.advance(1000); resource.publish(stats(period(100, 1000, 0)), {});
-  assert.deepEqual([resource.read(null, owner).state, resource.read(null, owner).speed], ['live', 0]);
+  assert.deepEqual([resource.read(null).state, resource.read(null).speed], ['live', 0]);
   resource.publish(stats(period()), {});
-  assert.equal(resource.read(null, owner).reason, 'waitingForSample', 'counter regression clears previous samples');
+  assert.equal(resource.read(null).reason, 'waitingForSample', 'counter regression clears previous samples');
   resource.publish({ ...stats(period()), stale: true }, {});
-  assert.equal(resource.read(null, owner).reason, 'stale');
+  assert.equal(resource.read(null).reason, 'stale');
   resource.publish(null, {});
-  assert.equal(resource.read(null, owner).reason, 'missingData');
+  assert.equal(resource.read(null).reason, 'missingData');
   resource.dispose();
 });
 
 test('shared-source rate sums independently active devices and clears on source switches', () => {
   const time = clock();
-  const resource = createLiveRateResource({ ...time, leaseMs: 60000, onChange() {} });
+  const resource = createLiveRateResource({ ...time, onChange() {} });
   const context = { sourceId: 'a', liveRateContext: { hubMode: 'client' } };
   const fleet = (a, b) => ({ devices: [{ deviceId: 'a', hostname: 'a', periods: { today: a } }, { deviceId: 'b', hostname: 'b', periods: { today: b } }] });
-  resource.publish(fleet(period(), period()), context); resource.read(null, owner);
+  resource.publish(fleet(period(), period()), context); resource.setScopes(new Set([null]));
   resource.publish(fleet(period(100, 1000, 40), period(200, 2000, 100)), context);
-  assert.equal(resource.read(null, owner).speed, 90, '40 + 50 tok/s, not a ratio of fleet totals');
+  assert.equal(resource.read(null).speed, 90, '40 + 50 tok/s, not a ratio of fleet totals');
   resource.publish({ devices: fleet(period(100, 1000, 40), period(200, 2000, 100)).devices.reverse() }, context);
-  assert.equal(resource.read(null, owner).speed, 90, 'device ordering is not a new scope');
+  assert.equal(resource.read(null).speed, 90, 'device ordering is not a new scope');
   resource.publish(fleet(period(100, 1000, 40), period(200, 2000, 100)), { ...context, sourceId: 'b' });
-  assert.equal(resource.read(null, owner).reason, 'waitingForSample');
+  assert.equal(resource.read(null).reason, 'waitingForSample');
   resource.publish({ devices: [] }, context);
-  assert.equal(resource.read(null, owner).reason, 'missingData', 'sync mode never falls back to aggregate counters');
+  assert.equal(resource.read(null).reason, 'missingData', 'sync mode never falls back to aggregate counters');
   resource.dispose();
 });
 
-test('unsubscribe/release/revoke drop demand and one-shot leases never create expiry timers', () => {
+test('the rate reader only retains subscribed scopes and releases their timer', () => {
   const time = clock();
-  const resource = createLiveRateResource({ ...time, leaseMs: 60000, onChange() {} });
-  resource.publish(stats(period()), {}); resource.read(null, owner);
+  const resource = createLiveRateResource({ ...time, onChange() {} });
+  resource.publish(stats(period()), {});
+  resource.setScopes(new Set([null])); resource.read(null);
   resource.publish(stats(period(100, 1000)), {});
   assert.equal(time.timers.size, 1);
-  resource.releaseSubscription('sub');
-  assert.deepEqual(resource.inspect(), { groups: 0, owners: 0, timer: false });
-  resource.read(null, { ...owner, subscription: undefined });
+  resource.setScopes(new Set());
+  assert.deepEqual(resource.inspect(), { groups: 0, timer: false });
+  resource.setScopes(new Set([null]));
   resource.publish(stats(period(200, 2000)), {});
-  assert.equal(time.timers.size, 0);
-  time.advance(60001); resource.publish(stats(period(300, 3000)), {});
+  assert.equal(time.timers.size, 1);
+  resource.setScopes(new Set());
   assert.equal(resource.inspect().groups, 0);
-  resource.read(null, owner); resource.releaseOwner('window');
-  assert.equal(resource.inspect().owners, 0);
-  resource.read(null, owner); resource.revoke('plugin');
-  assert.deepEqual(resource.inspect(), { groups: 0, owners: 0, timer: false });
   resource.dispose();
 });
 
@@ -128,6 +127,8 @@ test('formal API projects state and device scope without raw IDs and keeps permi
   publish(period());
   const devices = await service.query({ version: 1, resource: 'devices' }, auth);
   const filter = { deviceId: devices.rows[0].id };
+  service.subscribe('window', { version: 1, resource: 'liveRate', filter }, auth, () => {});
+  await flush();
   assert.equal((await read({ filter })).rows[0].reason, 'waitingForSample');
   time.advance(1000); publish(period(100, 1000, 40));
   const result = await read({ filter });
@@ -182,32 +183,32 @@ test('two subscriptions in the same window retain independent live-rate demand',
 });
 
 for (const change of ['join', 'leave', 'stale']) test(`device ${change} preserves another device's active rate without retaining departed rates`, () => {
-  const time = clock(), resource = createLiveRateResource({ ...time, leaseMs: 60000, onChange() {} });
+  const time = clock(), resource = createLiveRateResource({ ...time, onChange() {} });
   const extras = { liveRateContext: { hubMode: 'client' } };
   const device = (deviceId, p, stale = false) => ({ deviceId, periods: { today: p }, stale });
   const a = device('a', period(100, 1000, 40)), b = device('b', period(200, 2000, 100));
   resource.publish({ devices: [device('a', period()), device('b', period())] }, extras);
-  resource.read(null, owner);
+  resource.setScopes(new Set([null]));
   resource.publish({ devices: [a, b] }, extras);
-  assert.equal(resource.read(null, owner).speed, 90);
+  assert.equal(resource.read(null).speed, 90);
   const next = change === 'join' ? [a, b, device('c', period())] : change === 'leave' ? [b] : [{ ...a, stale: true }, b];
   resource.publish({ devices: next }, extras);
-  assert.equal(resource.read(null, owner).speed, change === 'join' ? 90 : 50);
+  assert.equal(resource.read(null).speed, change === 'join' ? 90 : 50);
   time.advance(8001);
-  const idle = resource.read(null, owner);
+  const idle = resource.read(null);
   assert.equal(idle.state, 'idle'); assert.equal(idle.speed, change === 'join' ? 90 : 50);
   resource.publish({ devices: change === 'join' ? [device('c', period())] : [] }, extras);
-  assert.equal(resource.read(null, owner).state, 'unavailable', 'departed devices cannot survive in the idle reading');
+  assert.equal(resource.read(null).state, 'unavailable', 'departed devices cannot survive in the idle reading');
   resource.dispose();
 });
 
 test('a shared source with only stale devices reports stale instead of missing data', () => {
-  const time = clock(), resource = createLiveRateResource({ ...time, leaseMs: 60000, onChange() {} });
+  const time = clock(), resource = createLiveRateResource({ ...time, onChange() {} });
   const extras = { liveRateContext: { hubMode: 'client' } };
   resource.publish({ devices: [{ deviceId: 'a', stale: true, periods: { today: period() } }] }, extras);
-  assert.equal(resource.read(null, owner).reason, 'stale');
+  assert.equal(resource.read(null).reason, 'stale');
   resource.publish({ devices: [] }, extras);
-  assert.equal(resource.read(null, owner).reason, 'missingData');
+  assert.equal(resource.read(null).reason, 'missingData');
   resource.dispose();
 });
 
@@ -239,4 +240,75 @@ test('live-rate publications and expiry invalidate only affected device scopes a
   assert.equal(after.rows[0].speed, 50);
   assert.equal(after.rows[0].deviceCount, 1);
   assert.equal(after.rows[0].sampleRevision, before.rows[0].sampleRevision, 'expiry changes output without a new observation');
+});
+
+test('queries read snapshots without starting a baseline or expiry timer', async t => {
+  const { service, time, auth, read } = setup(t);
+  service.publish(stats(period())); await read();
+  service.publish(stats(period(100, 1000)));
+  assert.equal((await read()).rows[0].reason, 'waitingForSample');
+  assert.equal(time.timers.size, 0);
+  service.subscribe('producer', { version: 1, resource: 'liveRate' }, auth, () => {});
+  await flush(); time.advance(101);
+  service.publish(stats(period(200, 2000))); time.advance(101);
+  assert.equal((await read()).rows[0].speed, 100);
+  service.releaseOwner('producer');
+  assert.equal((await read()).rows[0].reason, 'waitingForSample');
+  assert.equal(time.timers.size, 0);
+});
+
+test('queries without subscriptions still refresh unsupported and stale state', async t => {
+  const { service, time, read } = setup(t);
+  service.publish(stats({ ...period(), capabilities: { throughput: false } }));
+  assert.equal((await read()).rows[0].reason, 'unsupportedTiming');
+  service.publish(stats(period()));
+  assert.equal((await read()).rows[0].reason, 'waitingForSample');
+  service.publish({ ...stats(period()), stale: true });
+  assert.equal((await read()).rows[0].reason, 'stale');
+  assert.equal(time.timers.size, 0);
+});
+
+test('plugins share device tracking while retaining separate opaque IDs and subscription lifetimes', async t => {
+  const { service, auth } = setup(t);
+  const other = { ...auth, pluginId: 'other' };
+  const publish = p => service.publish({ devices: [{ deviceId: 'private', periods: { today: p } }] });
+  const request = async as => ({ version: 1, resource: 'liveRate',
+    filter: { deviceId: (await service.query({ version: 1, resource: 'devices' }, as)).rows[0].id } });
+  publish(period());
+  const one = await request(auth), two = await request(other);
+  assert.notEqual(one.filter.deviceId, two.filter.deviceId);
+  service.subscribe('one', one, auth, () => {});
+  await flush(); publish(period(100, 1000));
+  service.subscribe('two', two, other, () => {});
+  await flush();
+  assert.equal((await service.query(two, other)).rows[0].speed, 100, 'same raw device reuses its existing baseline');
+  service.revoke(auth.pluginId);
+  publish(period(300, 2000));
+  assert.equal((await service.query(two, other)).rows[0].speed, 200);
+  service.releaseOwner('two');
+  assert.equal((await service.query(two, other)).rows[0].reason, 'waitingForSample');
+});
+
+test('releasing a query owner leaves another owner subscription and baseline intact', async t => {
+  const { service, auth } = setup(t);
+  const query = { version: 1, resource: 'liveRate' };
+  const read = owner => service.query(query, auth, { owner });
+  service.publish(stats(period()));
+  service.subscribe('producer', query, auth, () => {});
+  await flush(); await read('reader');
+  service.publish(stats(period(100, 1000)));
+  assert.equal((await read('reader')).rows[0].speed, 100);
+  service.releaseOwner('reader');
+  service.publish(stats(period(300, 2000)));
+  assert.equal((await read('producer')).rows[0].speed, 200);
+});
+
+test('the final subscription releases its baseline without a parallel query lease', async t => {
+  const { service, auth, read } = setup(t);
+  service.publish(stats(period()));
+  const id = service.subscribe('window', { version: 1, resource: 'liveRate' }, auth, () => {});
+  await flush(); service.publish(stats(period(100, 1000)));
+  assert.equal((await read()).rows[0].state, 'live');
+  service.unsubscribe('window', id);
+  assert.equal((await read()).rows[0].reason, 'waitingForSample');
 });

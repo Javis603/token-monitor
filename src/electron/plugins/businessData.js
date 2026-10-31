@@ -21,10 +21,10 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
   const snapshots = new Map(), subscriptions = new Map(), epochs = new Map(), loaders = new Map();
   const projections = new Map(), budgets = new Map();
   const requests = new Set(), builds = new Map(), pagePins = new Map();
-  const liveRates = createLiveRateResource({ now, leaseMs: snapshotTtlMs, onChange: () => {
+  const liveRates = createLiveRateResource({ now, onChange: () => {
     latest = { ...latest, revision: latest.revision + 1 };
     for (const s of subscriptions.values()) if (s.query.resource === 'liveRate') {
-      const stamp = dependency(latest, s.query);
+      const stamp = dependency(latest, s.query, s.pluginId);
       if (stamp !== s.stamp) { s.stamp = stamp; invalidate(s); }
     }
   } });
@@ -56,10 +56,10 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
           : e.subscriptionsRevision ?? (e.subscriptions !== undefined ? null : ref(captured.stats)), ref(e[name])]);
   }
   const loaderRevision = (captured, name) => `${name}:${captured.loaderVersions[name] ?? 0}`;
-  function dependency(captured, q) {
+  function dependency(captured, q, pluginId) {
     const { stats, extras: e } = captured;
     const base = [captured.sourceGeneration, e.sourceId || 'default', e.identityEpoch || '1', !!stats, q.resource, q.period];
-    if (q.resource === 'liveRate') return JSON.stringify([...base, liveRates.revision(q.filter.deviceId ?? null)]);
+    if (q.resource === 'liveRate') return JSON.stringify([...base, liveRates.revision(liveRateScope(captured, q, pluginId))]);
     if (q.resource === 'history') return JSON.stringify([...base, loaderRevision(captured, 'history'), ref(stats?.history)]);
     if (q.resource === 'subscriptions') return JSON.stringify([...base, loaderRevision(captured, 'subscriptions'), ref(stats?.subscriptions), e.subscriptionContext?.date, CURRENCY_CODES.map(code => e.subscriptionContext?.rates?.[code]), stats?.stale, ref(stats?.limits)]);
     if (q.resource === 'status') return JSON.stringify([...base, ref(stats?.devices), stats?.updatedAt, stats?.projectsIncomplete, fields(e.status, 'collection sync availability'), fields(e.preferences, 'currency timeZone locale sessionTitlesEnabled historyEnabled projectsEnabled')]);
@@ -82,7 +82,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       q.resource === 'sessions' ? e.preferences?.sessionTitlesEnabled !== false : null,
       q.period === 'allTime' && periodResources.includes(q.resource) ? loaderRevision(captured, 'allTime') : null]);
   }
-  const live = (q, stamp) => !disposed && dependency(latest, q) === stamp;
+  const live = (q, stamp, pluginId) => !disposed && dependency(latest, q, pluginId) === stamp;
   // Traversal is immutable, including when a Hub sends fresh JSON objects.
   // Relevant data changes invalidate subscriptions/new first pages, but cannot
   // restart an admitted traversal. Privacy/source changes are immediate fences.
@@ -163,13 +163,13 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       for (const d of devices.filter(allowed)) inspect(d.clientHealth);
     }
   }
-  const snapshotPriority = s => s.traversed ? 2 : live(s.query, s.stamp) ? 1 : 0;
+  const snapshotPriority = s => s.traversed ? 2 : live(s.query, s.stamp, s.pluginId) ? 1 : 0;
   function retainProjection(value) {
     // Retire obsolete first-page caches before an admitted traversal. When all
     // candidates are traversed, original creation order remains the fallback.
     // Only this plugin's entries are candidates, even at global saturation.
     const traversed = new Set([...snapshots.values()].filter(s => s.traversed).map(s => s.projectionId));
-    const priority = p => traversed.has(p.id) ? 2 : live(p.query, p.stamp) ? 1 : 0;
+    const priority = p => traversed.has(p.id) ? 2 : live(p.query, p.stamp, p.pluginId) ? 1 : 0;
     const own = [...projections.values()].filter(p => p.pluginId === value.pluginId).sort((a, b) => priority(a) - priority(b));
     let ownBytes = own.reduce((n, p) => n + p.bytes, 0);
     while (own.length && (own.length >= 4 || ownBytes + value.bytes > MAX_OWNER_BYTES)) {
@@ -191,6 +191,20 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
   // Binds plugin ownership and generation; this is not a password hash.
   const authorityFingerprint = a => sign(a);
   const queryKey = q => sign({ ...q, page: { limit: q.page.limit } });
+  function liveRateScope(captured, q, pluginId) {
+    if (!q.filter.deviceId) return null;
+    const opaque = id => `device_${sign([pluginId, captured.extras.sourceId || 'default', captured.extras.identityEpoch || '1', 'device', String(id)])}`;
+    return captured.stats?.devices?.find(d => opaque(d.deviceId) === q.filter.deviceId)?.deviceId;
+  }
+  function syncLiveRates() {
+    const scopes = new Set();
+    for (const s of subscriptions.values()) if (s.query.resource === 'liveRate') {
+      const scope = liveRateScope(latest, s.query, s.pluginId);
+      if (scope !== undefined) scopes.add(scope);
+    }
+    liveRates.setScopes(scopes);
+  }
+
   function envelope(code, revision = latest.revision) {
     return { version: 1, schemaVersion: 1, snapshotRevision: revision, availability: code, rows: [], pageInfo: { nextCursor: null, hasMore: false }, aggregateCoverage: { kind: 'unavailable', totalRows: null } };
   }
@@ -402,26 +416,12 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       }
       if (q.filter.deviceId && ['history', 'subscriptions'].includes(q.resource)) return envelope('scopeUnavailable');
       let captured = latest;
-      let liveRateBudget;
       if (q.resource === 'liveRate') {
-        liveRateBudget = admit(a.pluginId, 1);
-        const opaque = (kind, value) => `${kind}_${sign([a.pluginId, captured.extras.sourceId || 'default', captured.extras.identityEpoch || '1', kind, String(value)])}`;
-        const deviceId = q.filter.deviceId
-          ? captured.stats?.devices?.find(d => opaque('device', d.deviceId) === q.filter.deviceId)?.deviceId : null;
+        const deviceId = liveRateScope(captured, q, a.pluginId);
         if (deviceId === undefined) return envelope('scopeUnavailable');
-        const subscribers = [...subscriptions.values()].filter(s => s.pluginId === a.pluginId && s.owner === request.owner
-          && s.query.resource === 'liveRate' && s.query.filter.deviceId === q.filter.deviceId);
-        let rate;
-        for (const subscription of subscribers.length ? subscribers : [null]) {
-          rate = liveRates.read(deviceId, { pluginId: a.pluginId, owner: request.owner,
-            deviceRef: q.filter.deviceId ?? null,
-            key: subscription ? `subscription:${subscription.id}` : JSON.stringify([a.pluginId, request.owner, deviceId]),
-            subscription: subscription?.id });
-        }
-        captured = { ...latest, extras: { ...latest.extras, liveRate: rate } };
-        for (const s of subscribers) if (!s.initialized) s.stamp = dependency(captured, s.query);
+        captured = { ...latest, extras: { ...latest.extras, liveRate: liveRates.read(deviceId) } };
       }
-      const stamp = dependency(captured, q), qKey = queryKey(q), capturedAt = now();
+      const stamp = dependency(captured, q, a.pluginId), qKey = queryKey(q), capturedAt = now();
       const reusable = [...snapshots.values()].find(s => s.stamp === stamp && s.authorityFingerprint === key && s.queryKey === qKey);
       if (reusable) return reusable.lazy ? await lazyPage(reusable, 0, q, request) : page(reusable, 0, q);
       const neutral = { ...q, filter: q.filter.deviceId ? { deviceId: q.filter.deviceId } : {}, sort: { field: 'id', direction: 'asc' }, page: { limit: 100, cursor: null } };
@@ -430,7 +430,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       if (projection?.error) return envelope(projection.error);
       const pendingBuild = builds.get(sign([key, stamp, qKey]));
       if (pendingBuild) { captured = null; return await lazyQuery(null, null, q, a, key, stamp, null, request, null); }
-      const budget = liveRateBudget || admit(a.pluginId, projection ? 0 : 1);
+      const budget = admit(a.pluginId, projection ? 0 : 1);
       let extras = { ...captured.extras };
       if (!projection && q.resource === 'history' && !captured.stats?.history) extras.history = await load('history', loadHistory, captured, auth, key);
       if (!projection && q.period === 'allTime' && periodResources.includes(q.resource)) extras.allTime = await load('allTime', loadAllTime, captured, auth, key, q.resource === 'sessions');
@@ -451,7 +451,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
           return await lazyQuery(plan, metadata, q, a, key, stamp, opaque, request, budget);
         }
       }
-      if (!live(q, stamp)) return envelope('snapshotExpired');
+      if (!live(q, stamp, a.pluginId)) return envelope('snapshotExpired');
       const started = performance.now();
       // An awaited loader may have been shared by another query.
       projection = projections.get(projectionId);
@@ -504,7 +504,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
     subscription.closed = true; subscriptions.delete(subscription.id);
     if (subscription.timer) clearTimeout(subscription.timer);
     subscription.timer = null; subscription.retryAt = 0;
-    liveRates.releaseSubscription(subscription.id);
+    syncLiveRates();
   }
   function deliver(subscription, value) {
     if (subscription.closed || disposed) return;
@@ -543,9 +543,10 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       const previous = latest;
       const sourceChanged = (extras.sourceId || 'default') !== (previous.extras.sourceId || 'default') || (extras.identityEpoch || '1') !== (previous.extras.identityEpoch || '1');
       latest = { stats, extras: { ...extras, preferences: extras.preferences ? { ...extras.preferences } : undefined, subscriptionContext: extras.subscriptionContext ? { date: extras.subscriptionContext.date, rates: Object.fromEntries(CURRENCY_CODES.map(code => [code, extras.subscriptionContext.rates?.[code]])) } : undefined }, revision: previous.revision + 1, sourceGeneration: previous.sourceGeneration + Number(sourceChanged), loaderVersions: {} };
-      liveRates.publish(stats, extras);
       for (const name of ['history', 'allTime', 'subscriptions']) latest.loaderVersions[name] = sourceChanged || loaderDependency(previous, name) !== loaderDependency(latest, name) ? latest.revision : previous.loaderVersions[name];
       sweep();
+      syncLiveRates();
+      liveRates.publish(stats, extras);
       for (const request of requests) {
         try { request.check(); } catch (error) { request.cancel(error.message); }
       }
@@ -553,11 +554,11 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       // Retained pages share their original projection. Keep those bytes in the
       // same owner/global ledger until the final cursor releases them or expires.
       const retained = new Set([...snapshots.values()].map(s => s.projectionId));
-      for (const [id, p] of projections) if (!live(p.query, p.stamp) && !retained.has(id)) projections.delete(id);
+      for (const [id, p] of projections) if (!live(p.query, p.stamp, p.pluginId) && !retained.has(id)) projections.delete(id);
       const loaderKeys = new Set(['history', 'allTime', 'subscriptions'].map(name => loaderRevision(latest, name)));
       for (const id of loaders.keys()) if (!loaderKeys.has(id)) loaders.delete(id);
       for (const subscription of subscriptions.values()) {
-        const stamp = dependency(latest, subscription.query), fence = cursorFence(latest, subscription.query);
+        const stamp = dependency(latest, subscription.query, subscription.pluginId), fence = cursorFence(latest, subscription.query);
         const reset = fence !== subscription.fence;
         if (stamp !== subscription.stamp || reset) {
           subscription.stamp = stamp; subscription.fence = fence; invalidate(subscription, reset);
@@ -572,20 +573,21 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       if (q.page.cursor) throw new Error('denied');
       const id = requestedId || `business-${++sequence}`;
       if (!/^[a-zA-Z0-9_-]{1,80}$/.test(id) || subscriptions.has(id) || subscriptions.size >= 128 || [...subscriptions.values()].filter(s => s.owner === owner).length >= 16) throw new Error('subscriptionLimit');
-      const subscription = { controller: new AbortController(), id, owner, query: q, queryKey: queryKey(q), retryAt: 0, timerAt: 0, stamp: dependency(latest, q), fence: cursorFence(latest, q), reset: false, pluginId: a.pluginId, getAuth, callback, authorityFingerprint: authorityFingerprint(a), initialized: false, closed: false, timer: null, sequence: 0 };
+      const subscription = { controller: new AbortController(), id, owner, query: q, queryKey: queryKey(q), retryAt: 0, timerAt: 0, stamp: dependency(latest, q, a.pluginId), fence: cursorFence(latest, q), reset: false, pluginId: a.pluginId, getAuth, callback, authorityFingerprint: authorityFingerprint(a), initialized: false, closed: false, timer: null, sequence: 0 };
       subscriptions.set(id, subscription);
+      syncLiveRates();
+      if (q.resource === 'liveRate') subscription.stamp = dependency(latest, q, a.pluginId);
       const initialStamp = subscription.stamp;
       Promise.resolve().then(() => subscription.closed ? null : query(q, getAuth, { owner, signal: subscription.controller.signal })).then(value => {
         if (subscription.closed) return;
         deliver(subscription, { type: 'snapshot', version: 1, value, sequence: ++subscription.sequence });
         subscription.initialized = true;
-        if (initialStamp !== dependency(latest, q) || subscription.reset || subscription.retryAt) invalidate(subscription);
+        if (initialStamp !== dependency(latest, q, a.pluginId) || subscription.reset || subscription.retryAt) invalidate(subscription);
       });
       return id;
     },
     unsubscribe(owner, id) { const s = subscriptions.get(id); if (!s || s.owner !== owner) return false; stop(s); return true; },
     releaseOwner(owner) {
-      liveRates.releaseOwner(owner);
       for (const s of subscriptions.values()) if (s.owner === owner) stop(s);
       for (const request of requests) if (request.owner === owner) request.cancel();
       for (const [id, s] of snapshots) if (s.lazy) {
@@ -593,7 +595,6 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       }
     },
     revoke(pluginId) {
-      liveRates.revoke(pluginId);
       for (const request of requests) if (request.pluginId === pluginId) request.cancel();
       epochs.set(pluginId, (epochs.get(pluginId) || 0) + 1);
       for (const s of subscriptions.values()) if (s.pluginId === pluginId) stop(s);

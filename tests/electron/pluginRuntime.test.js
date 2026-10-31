@@ -92,13 +92,16 @@ test('formal data source changes refresh results; disabled calls reject and host
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
   await assert.rejects(f.invoke('plugins:host', 'trusted-fixture', 'data.query', {}), /disabled/);
 });
-for (const boundary of ['disable', 'navigation']) test(`live-rate query demand clears on ${boundary} without a subscription`, async t => {
+for (const boundary of ['disable', 'navigation']) test(`live-rate subscription demand clears on ${boundary}`, async t => {
   const f = await runtimeFixture(t, { businessAdapters: { now: () => 100000 } });
   await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
   const publish = n => f.runtime.publishStats({ periods: { today: { capabilities: { throughput: true },
     timedTokens: n, timedOutputTokens: n, timedDurationMs: n * 10 } } });
   const read = () => f.invoke('plugins:host', 'trusted-fixture', 'data.query', { resource: 'liveRate' });
-  publish(0); assert.equal((await read()).rows[0].reason, 'waitingForSample');
+  publish(0);
+  await f.invoke('plugins:subscribe', 'trusted-fixture', { resource: 'liveRate' });
+  await tick(); await tick();
+  assert.equal((await read()).rows[0].reason, 'waitingForSample');
   publish(100); assert.equal((await read()).rows[0].speed, 100);
   if (boundary === 'disable') {
     await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
