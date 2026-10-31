@@ -478,8 +478,8 @@ function createEdgeDockController(deps) {
     const win = windows.rail;
     if (platform !== 'darwin' || !alive(win)) return;
     let takesPointer = visibleTargets.rail;
-    const heldPress = railPointerMode === 'capture' && primaryButtonDown() === true;
-    if (takesPointer && !drag && !heldPress && (placement().floatingX !== null || railMotion)) {
+    if (takesPointer && !drag && (placement().floatingX !== null || railMotion)
+      && !(railPointerMode === 'capture' && primaryButtonDown() === true)) {
       const bounds = win.getBounds();
       const point = screen.getCursorScreenPoint();
       const x = point.x - bounds.x, y = point.y - bounds.y;
