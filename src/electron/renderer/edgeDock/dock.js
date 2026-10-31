@@ -1307,7 +1307,7 @@ bridge.onDragEnded?.(({ gestureId }) => {
 
 function bindRailGestures(rail) {
   rail.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || gesture) return;
     gesture = {
       id: ++nextGestureId,
       pointerId: event.pointerId,

@@ -3104,6 +3104,12 @@ for (const eventType of ['lostpointercapture', 'pointercancel']) {
     handlers.get(eventType)({ ...event, type: eventType });
     assert.equal(ends.length, 0, 'capture loss is not a release');
     assert.deepEqual(captureLosses, [starts[0][2]], 'main receives the matching lost-capture gesture');
+    handlers.get('pointerdown')({ ...event, clientX: 8, clientY: 12 });
+    handlers.get('pointermove')({ ...event, buttons: 1, screenX: 200 });
+    assert.equal(starts.length, 1, 'a new press before native completion cannot replace the active drag');
+    handlers.get('pointerdown')({ ...event, pointerId: 2 });
+    handlers.get('pointermove')({ ...event, pointerId: 2, buttons: 1, screenX: 200 });
+    assert.equal(starts.length, 1, 'another pointer cannot replace the active drag either');
     handlers.get(eventType)({ ...event, pointerId: 2, type: eventType });
     assert.equal(captureLosses.length, 1, 'another pointer cannot report capture loss for this drag');
     acknowledge({ gestureId: starts[0][2] + 1 });
