@@ -10,7 +10,7 @@ const { limitWindowLabel } = require('../limits/windowLabels');
 const LIMIT_TOOL_LABELS = new Map(LIMIT_PROVIDER_CATALOG.map(({ id, label, settingsLabel }) => [id, settingsLabel || label]));
 const { CURRENCY_CODES } = require('../currency');
 const VERSION = 1;
-const RESOURCES = Object.freeze({ usage: 'usage', models: 'usage', tools: 'usage', devices: 'devices', sessions: 'sessions', projects: 'projects', history: 'history', limits: 'limits', subscriptions: 'subscriptions', status: 'status' });
+const RESOURCES = Object.freeze({ usage: 'usage', models: 'usage', tools: 'usage', devices: 'devices', sessions: 'sessions', projects: 'projects', history: 'history', limits: 'limits', subscriptions: 'subscriptions', status: 'status', liveRate: 'liveRate' });
 const MAX_ROWS = 100000;
 const text = value => typeof value === 'string' ? value.slice(0, 512) : null;
 const number = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -30,7 +30,7 @@ function entries(value) {
 function usage(value, normalized = true) {
   const knownUsd = number(value?.costUsd ?? value?.cost ?? value?.totalCost);
   const unpricedTokens = number(value?.unpricedTokens) ?? (normalized && knownUsd !== null ? 0 : null);
-  return { ...pick(value, '', 'inputTokens outputTokens cacheReadTokens cacheWriteTokens reasoningTokens unclassifiedTokens messageCount timedTokens timedOutputTokens timedDurationMs contextTokens contextWindow activeTimeMs', 'tokenComponentsAvailable'), totalTokens: number(value?.totalTokens ?? value?.tokens), cost: { knownUsd, unpricedTokens, currency: 'USD', completeness: knownUsd === null || unpricedTokens === null ? 'unknown' : unpricedTokens > 0 ? 'partial' : 'complete' } };
+  return { ...pick(value, '', 'inputTokens outputTokens cacheReadTokens cacheWriteTokens reasoningTokens unclassifiedTokens messageCount timedTokens timedOutputTokens timedDurationMs contextTokens contextWindow activeTimeMs', 'tokenComponentsAvailable'), capabilities: pick(value?.capabilities, '', '', 'tokenComponents throughput'), totalTokens: number(value?.totalTokens ?? value?.tokens), cost: { knownUsd, unpricedTokens, currency: 'USD', completeness: knownUsd === null || unpricedTokens === null ? 'unknown' : unpricedTokens > 0 ? 'partial' : 'complete' } };
 }
 // Relations retain the accounting identity, including cross-client links. Do
 // not truncate an identity before hashing it or fabricate a parent row.
@@ -143,6 +143,7 @@ function normalizeQuery(raw) {
   for (const key of Object.keys(raw)) if (!['version', 'resource', 'period', 'filter', 'sort', 'page', 'resolution', 'groupBy'].includes(key)) failure('invalidQuery');
   const period = raw.period ?? 'today';
   if (!['today', 'month', 'allTime'].includes(period)) failure('invalidPeriod');
+  if (raw.resource === 'liveRate' && period !== 'today') failure('invalidPeriod');
   const filter = {};
   for (const [key, value] of Object.entries(raw.filter || {})) {
     if (!['id', 'deviceId', 'accountId', 'projectId', 'client', 'model', 'provider', 'from', 'to', 'search'].includes(key) || typeof value !== 'string' || value.length > 256) failure('invalidFilter');
@@ -155,7 +156,7 @@ function normalizeQuery(raw) {
     projects: ['id', 'deviceId', 'client', 'model', 'search'],
     history: ['id', 'deviceId', 'from', 'to', 'client', 'model'],
     limits: ['id', 'deviceId', 'accountId', 'provider', 'search'],
-    subscriptions: ['id', 'accountId', 'provider', 'search'], status: ['id', 'deviceId']
+    subscriptions: ['id', 'accountId', 'provider', 'search'], status: ['id', 'deviceId'], liveRate: ['id', 'deviceId']
   };
   if (Object.keys(filter).some(key => !filters[raw.resource].includes(key))) failure('invalidFilter');
   const sort = { field: raw.sort?.field ?? 'id', direction: raw.sort?.direction ?? 'asc' };
@@ -223,7 +224,9 @@ function projectSessionRow(locator, plan, id, visit = entries) {
     projectPath: text(session.projectId),
     promptCache: pick(session.promptCache, 'observedAt', 'ttlSeconds'), liveActivity: locator.liveActivity ?? projectSessionActivity(locator),
     waitingForInput: typeof session.waitingForInput === 'boolean' ? session.waitingForInput : null,
-    models: visit(session.models).map(([model, tokens]) => ({ model: text(model), totalTokens: number(tokens), knownUsd: number(session.modelCosts?.[model]) })),
+    models: visit(session.models).map(([model, tokens]) => ({ model: text(model), totalTokens: number(tokens), knownUsd: number(session.modelCosts?.[model]),
+      tokenComponents: session.modelTokenComponents?.[model]
+        ? pick(session.modelTokenComponents[model], '', 'totalTokens inputTokens cacheReadTokens cacheWriteTokens outputTokens') : null })),
     providers: visit(session.providers).map(([provider, tokens]) => ({ provider: text(provider), totalTokens: number(tokens) })) };
 }
 function sessionModelMatches(session, model) {
@@ -251,6 +254,12 @@ function projectResource(stats, extras, query, auth, opaque) {
   const boundedEntries = entries;
   function visit(value) { const items = boundedEntries(value); work += items.length; if (work > MAX_ROWS * 4) failure('budgetExceeded'); return items; }
   if (auth.active !== true) failure('denied');
+  if (query.resource === 'liveRate') {
+    const rate = extras.liveRate;
+    return { rows: stats && rate ? [{ ...rate, id: opaque('liveRate', rate.deviceId ?? 'aggregate'),
+      deviceId: rate.deviceId === null ? null : opaque('device', rate.deviceId), period: 'today' }] : [],
+    availability: stats ? 'available' : 'notCollected', redacted: false, incomplete: false };
+  }
   if (query.resource === 'sessions') {
     const plan = sessionSources(stats, extras, query, opaque), rows = [];
     for (const locator of sessionEntries(plan)) {
@@ -295,7 +304,8 @@ function projectResource(stats, extras, query, auth, opaque) {
           const dto = usage({ totalTokens: tokens, costUsd: period[`${prefix}Costs`]?.[key], unpricedTokens: period[`${prefix}UnpricedTokens`]?.[key], cacheReadTokens: period[`${prefix}CacheReads`]?.[key], cacheWriteTokens: period[`${prefix}CacheWrites`]?.[key], outputTokens: period[`${prefix}Outputs`]?.[key], unclassifiedTokens: period[`${prefix}UnclassifiedTokens`]?.[key] }, false);
           // Sparse normalized unknown maps mean zero only if the parent has no unknown cost.
           if (dto.cost.unpricedTokens === null && parentUnpriced === 0 && dto.cost.knownUsd !== null) dto.cost = { ...dto.cost, unpricedTokens: 0, completeness: 'complete' };
-          add({ id: id(prefix, `${scopeKey}:${key}`), ...base, [model ? 'model' : 'client']: text(key), label: text(key), ...dto, throughput: pick(period.modelThroughput?.[key], '', 'timedOutputTokens timedDurationMs timedTokens'), ...(model ? {} : { models: visit(period.clientModels?.[key]).map(([name, totalTokens]) => ({ model: text(name), totalTokens: number(totalTokens), knownUsd: number(period.clientModelCosts?.[key]?.[name]) })) }) });
+          // Model attribution cannot prove a client's timing, even if their names match.
+          add({ id: id(prefix, `${scopeKey}:${key}`), ...base, [model ? 'model' : 'client']: text(key), label: text(key), ...dto, throughput: pick(model ? period.modelThroughput?.[key] : null, '', 'timedOutputTokens timedDurationMs timedTokens'), ...(model ? {} : { models: visit(period.clientModels?.[key]).map(([name, totalTokens]) => ({ model: text(name), totalTokens: number(totalTokens), knownUsd: number(period.clientModelCosts?.[key]?.[name]) })) }) });
         }
       }
       if (query.resource === 'projects') {

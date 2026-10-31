@@ -269,17 +269,8 @@ function minimaxAttemptSpecs(options = {}, env = {}) {
   return minimaxRegionOrder(options, env).flatMap((region) => minimaxUrlsForRegion(region, options.minimaxBillingMode));
 }
 
-function minimaxAttemptOrder(options = {}, env = {}) {
-  return minimaxAttemptSpecs(options, env).map((attempt) => attempt.url);
-}
-
-function minimaxRegionForUrl(url) {
-  if (url === MINIMAX_REMAINS_URL_EN || url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN || url === MINIMAX_BALANCE_URL_EN) return 'en';
-  if (url === MINIMAX_REMAINS_URL_CN || url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN || url === MINIMAX_BALANCE_URL_CN) return 'cn';
-  return '';
-}
-
-// Legacy callers use a single coding-plan URL without region retry.
+// Pick a single URL for callers that want a forced region without retry
+// behavior (legacy `minimaxBaseUrl` shape). Default is the global endpoint.
 function minimaxBaseUrl(options = {}, env = {}) {
   return minimaxRegion(options, env) === 'cn' ? MINIMAX_REMAINS_URL_CN : MINIMAX_REMAINS_URL_EN;
 }
@@ -860,12 +851,10 @@ module.exports = {
   MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
   isMinimaxTransportError,
   minimaxToken,
-  minimaxAttemptOrder,
   minimaxBaseUrl,
   minimaxRegion,
   normalizeMinimaxRegionSetting,
   normalizeMinimaxBillingMode,
-  minimaxRegionForUrl,
   parseMinimaxTiers,
   fetchMinimaxLimits
 };
