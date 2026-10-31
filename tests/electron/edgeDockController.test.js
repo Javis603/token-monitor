@@ -2074,6 +2074,38 @@ test('floating cards choose the available side and fit a scaled narrow display',
   assert.ok(bubble.bounds.x < rail.bounds.x);
 });
 
+test('Windows drag frames follow the native cursor between polls and reject stale or foreign frames', (t) => {
+  const advance = mockDockClock(t);
+  let down = true;
+  const fixture = createFixture({ primaryButtonDown: () => down });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const emitFrame = (win, gestureId) => fixture.ipcMain.emit('edgeDock:dragFrame', { sender: win.webContents }, { gestureId });
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30, gestureId: 7 });
+  const saved = rail.getBounds();
+  advance(4);
+  fixture.screen.point = { x: 700, y: 300 };
+  emitFrame(rail, 6);
+  emitFrame(fixture.windowFor('peek'), 7);
+  assert.deepEqual(rail.getBounds(), saved);
+  emitFrame(rail, 7);
+  assert.equal(rail.bounds.x, 680, 'a frame moves the rail before the 16ms poll');
+  advance(4);
+  fixture.screen.point = { x: 500, y: 400 };
+  emitFrame(rail, 7);
+  assert.equal(rail.bounds.x, 480, 'high refresh displays are not limited to the poll rate');
+  advance(100);
+  down = false;
+  fixture.screen.point = { x: 20, y: 500 };
+  emitFrame(rail, 7);
+  assert.equal(rail.bounds.x, 0);
+  assert.equal(fixture.placements.length, 1, 'native release saves the final position');
+  fixture.screen.point = { x: 900, y: 300 };
+  emitFrame(rail, 7);
+  assert.equal(rail.bounds.x, 0, 'queued frames cannot move a completed gesture');
+  assert.equal(fixture.placements.length, 1);
+});
+
 test('native release finishes a held drag at its final location and acknowledges its gesture', (t) => {
   const advance = mockDockClock(t);
   let down = true;
@@ -2232,13 +2264,13 @@ for (const buttonState of [true, false, null]) {
     const source = dock.slice(dock.indexOf('let gesture = null;'), dock.indexOf('function indexFromTarget('));
     const emit = (channel, payload) => fixture.ipcMain.emit(channel, { sender: rail.webContents }, payload);
     let acknowledge;
-    Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', `${source}; bindRailGestures(railNode);`)(
+    Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', 'state', `${source}; bindRailGestures(railNode);`)(
       {
         dragStart: (grabOffsetY, grabOffsetX, gestureId) => emit('edgeDock:dragStart', { grabOffsetY, grabOffsetX, gestureId }),
         dragEnd: () => emit('edgeDock:dragEnd'),
         dragCaptureLost: (gestureId) => emit('edgeDock:dragCaptureLost', { gestureId }),
         onDragEnded: (fn) => { acknowledge = fn; }
-      }, node, () => 0, 5);
+      }, node, () => 0, 5, { payload: { platform: 'darwin' } });
     const event = { button: 0, buttons: 1, pointerId: 1, screenX: rail.bounds.x + 20, screenY: rail.bounds.y + 30, clientX: 20, clientY: 30 };
     handlers.get('pointerdown')(event);
     fixture.screen.point = { x: 600, y: 300 };

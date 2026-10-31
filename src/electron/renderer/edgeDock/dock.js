@@ -1299,6 +1299,20 @@ function renderRail(payload) {
 let gesture = null;
 let nextGestureId = 0;
 
+function startDragFrames() {
+  if (state.payload?.platform !== 'win32') return;
+  // Windows can round a main-process 16ms timeout up to two system ticks
+  // (~31ms). Follow the display's paint clock while dragging instead; the
+  // main process still reads the native cursor and owns release/cancellation.
+  const id = gesture.id;
+  const frame = () => {
+    if (gesture?.id !== id || !gesture.dragging) return;
+    bridge.dragFrame(id);
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
 bridge.onDragEnded?.(({ gestureId }) => {
   if (gesture?.id !== gestureId) return;
   gesture = null;
@@ -1333,6 +1347,7 @@ function bindRailGestures(rail) {
     gesture.dragging = true;
     rail.classList.add('is-dragging');
     bridge.dragStart(gesture.grabOffsetY, gesture.grabOffsetX, gesture.id);
+    startDragFrames();
   });
   const finish = (event) => {
     if (!gesture || gesture.pointerId !== event.pointerId) return;
