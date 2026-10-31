@@ -142,7 +142,7 @@ test('a card commits after its reported height is clamped to the work area', () 
         ${source}
         return renderBubble;
       `)({
-        root: { dataset: {}, classList: { toggle() {} } },
+        root: { dataset: {}, style: { setProperty() {} }, classList: { toggle() {} } },
         stagingLayer: { replaceChildren() {} },
         providerCard: () => card,
         statCard: () => card,
@@ -3051,4 +3051,96 @@ test('full plugin cards expose header actions beside identity while compact rail
   const railSource = source.slice(source.indexOf('function pluginCellNode('), source.indexOf('function pluginCard(')).trim();
   Function('el', 'pluginHost', 'pluginCellLabel', `return (${railSource})`)(el, pluginHost, () => 'Routes')({ ref: 'demo/routes' });
   assert.deepEqual(mounts[1][3], { variant: 'compact' });
+});
+
+test('free drops retain the grab point on either axis and snap only near an edge', () => {
+  const area = { x: -1200, y: 40, width: 1200, height: 860 };
+  const drop = (x) => edgeDockPlacementForDrop({ workArea: area, pointer: { x, y: 400 }, grabOffsetX: 20, grabOffsetY: 30, cellCount: 3 });
+  const free = drop(-600);
+  const bounds = edgeDockRailBounds({ workArea: area, ...free, cellCount: 3 });
+  assert.equal(bounds.x, -620);
+  assert.equal(bounds.y, 370);
+  assert.equal(drop(-1180).floatingX, null);
+  assert.equal(drop(-20).floatingX, null);
+  const resized = edgeDockRailBounds({ workArea: { x: 100, y: 0, width: 700, height: 500 }, ...free, cellCount: 3 });
+  assert.ok(resized.x >= 108 && resized.x + resized.width <= 792);
+  assert.ok(resized.y >= 8 && resized.y + resized.height <= 492);
+});
+
+test('floating placement rejects malformed persisted coordinates and closes its complete outline', () => {
+  const { normalizeEdgeDockFloatingX } = require('../../src/electron/edgeDock/geometry');
+  for (const input of [undefined, null, '', '0.5', NaN, Infinity, {}, false]) assert.equal(normalizeEdgeDockFloatingX(input), null);
+  assert.equal(normalizeEdgeDockFloatingX(0), 0);
+  assert.equal(normalizeEdgeDockFloatingX(2), 1);
+  const options = { width: 64, height: 300, floating: true, shoulder: 28, radius: 20 };
+  const commands = railCommands(options);
+  assert.deepEqual(commands, railCommands({ ...options, open: true }));
+  assert.deepEqual(commands.at(-1), ['Z']);
+  assert.deepEqual(commands[0], ['M', 64, 60]);
+  const points = toPolygons(commands)[0];
+  assert.equal(Math.min(...points.map(point => point[1])), 28);
+  assert.equal(Math.max(...points.map(point => point[1])), 272);
+});
+
+for (const eventType of ['lostpointercapture', 'pointercancel']) {
+  test(`${eventType} while moving the rail does not end the held native drag`, () => {
+    const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+    const source = dock.slice(dock.indexOf('let gesture = null;'), dock.indexOf('function indexFromTarget('));
+    const handlers = new Map();
+    const rail = { addEventListener: (name, fn) => handlers.set(name, fn), setPointerCapture() {}, classList: { add() {}, remove() {} } };
+    const starts = [], ends = [], captureLosses = [];
+    let acknowledge;
+    const bind = Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', `${source}; return bindRailGestures;`)(
+      { dragStart: (...args) => starts.push(args), dragEnd: () => ends.push(true), dragCaptureLost: id => captureLosses.push(id), onDragEnded: fn => { acknowledge = fn; } }, rail, () => 0, 5);
+    bind(rail);
+    const event = { button: 0, pointerId: 1, screenX: 10, screenY: 20, clientX: 25, clientY: 40 };
+    handlers.get('pointerdown')(event);
+    handlers.get(eventType)({ ...event, type: eventType });
+    handlers.get('pointermove')({ ...event, screenX: 100 });
+    assert.equal(starts.length, 0, 'an interrupted click cannot leave a pending drag');
+    handlers.get('pointerdown')(event);
+    handlers.get('pointermove')({ ...event, screenX: 100 });
+    assert.deepEqual(starts[0].slice(0, 2), [40, 25]);
+    handlers.get(eventType)({ ...event, type: eventType });
+    assert.equal(ends.length, 0, 'capture loss is not a release');
+    assert.deepEqual(captureLosses, [starts[0][2]], 'main receives the matching lost-capture gesture');
+    handlers.get('pointerdown')({ ...event, clientX: 8, clientY: 12 });
+    handlers.get('pointermove')({ ...event, buttons: 1, screenX: 200 });
+    assert.equal(starts.length, 1, 'a new press before native completion cannot replace the active drag');
+    handlers.get('pointerdown')({ ...event, pointerId: 2 });
+    handlers.get('pointermove')({ ...event, pointerId: 2, buttons: 1, screenX: 200 });
+    assert.equal(starts.length, 1, 'another pointer cannot replace the active drag either');
+    handlers.get(eventType)({ ...event, pointerId: 2, type: eventType });
+    assert.equal(captureLosses.length, 1, 'another pointer cannot report capture loss for this drag');
+    acknowledge({ gestureId: starts[0][2] + 1 });
+    handlers.get('pointerup')({ ...event, type: 'pointerup' });
+    assert.equal(ends.length, 1, 'a stale acknowledgement cannot clear this drag');
+    handlers.get('pointerdown')(event);
+    handlers.get('pointermove')({ ...event, screenX: 100 });
+    acknowledge({ gestureId: starts[1][2] });
+    handlers.get('pointerup')({ ...event, type: 'pointerup' });
+    assert.equal(ends.length, 1, 'native completion clears the renderer gesture');
+    handlers.get('pointerdown')(event);
+    handlers.get('pointermove')({ ...event, screenX: 100, buttons: 1 });
+    handlers.get(eventType)({ ...event, type: eventType });
+    handlers.get('pointermove')({ ...event, pointerId: 2, buttons: 0 });
+    assert.equal(ends.length, 1, 'another pointer cannot finish this drag');
+    handlers.get('pointermove')({ ...event, buttons: 0 });
+    assert.equal(ends.length, 2, 'an unpressed move finishes even without native button-state support');
+  });
+}
+
+test('macOS rail forwards pointer reports using the existing bridge without affecting Windows', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const start = dock.indexOf('// On macOS the handle');
+  const source = dock.slice(start, dock.indexOf('// The notch window', start));
+  for (const platform of ['darwin', 'win32']) {
+    const handlers = new Map();
+    const reports = [];
+    const document = { addEventListener: (name, fn) => handlers.set(name, fn), documentElement: { addEventListener: (name, fn) => handlers.set(name, fn) } };
+    Function('surface', 'state', 'document', 'bridge', source)('rail', { payload: { platform } }, document, { pointer: () => reports.push(true) });
+    handlers.get('mousemove')?.();
+    handlers.get('mouseleave')?.();
+    assert.equal(reports.length, platform === 'darwin' ? 2 : 0);
+  }
 });
