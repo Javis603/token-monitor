@@ -788,6 +788,53 @@
     return windows.find((window) => window?.metric === 'credits') || null;
   }
 
+  // A local coercion rather than the injected optionalFiniteNumber: every host
+  // that renders WorkBuddy totals must be able to sum them, including ones
+  // that inject only the presentation API.
+  function spendNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  // The combined row keeps the per-account Spend figures: sum every period
+  // at least one account reports, keep the earliest tracking start, and stay
+  // partial while any account's month is still filling in. Rows from a device
+  // that predates spend tracking contribute nothing rather than zeros.
+  function combinedWorkbuddyBalance(providers, remaining) {
+    const spend = {};
+    let tracked = false;
+    for (const field of ['todaySpend', 'weekSpend', 'monthSpend', 'allTimeSpend']) {
+      let sum = null;
+      for (const provider of providers) {
+        const value = spendNumber(provider?.balance?.[field]);
+        if (value === null) continue;
+        sum = (sum === null ? 0 : sum) + value;
+      }
+      if (sum !== null) {
+        spend[field] = sum;
+        tracked = true;
+      }
+    }
+    const trackingStarts = providers
+      .map((provider) => Date.parse(provider?.balance?.trackingSince || ''))
+      .filter((ms) => Number.isFinite(ms))
+      .sort((a, b) => a - b);
+    if (trackingStarts.length > 0) {
+      spend.trackingSince = new Date(trackingStarts[0]).toISOString();
+      tracked = true;
+    }
+    if (tracked) {
+      // A definite flag whenever the row carries spend: partial while any
+      // account's month is still filling in, or while any account reports no
+      // tracking at all — a row from a device that predates spend tracking
+      // contributes nothing to the sum, so the month figure is understated.
+      spend.monthSinceTracking = providers.some((provider) => provider?.balance?.monthSinceTracking === true
+        || !Number.isFinite(Date.parse(provider?.balance?.trackingSince || '')));
+    }
+    return { amount: remaining, currency: 'CREDITS', ...(tracked ? spend : {}) };
+  }
+
   function workbuddyCombinedProvider(providers) {
     if (settings()?.workbuddyQuotaTotalEnabled !== true) return null;
     const windows = presentationApi.workbuddyCreditTotals(providers);
@@ -799,7 +846,7 @@
       accountGroup: true, groupAccounts: providers,
       updatedAt: providers.map((provider) => provider.updatedAt || '').sort()[0],
       windows,
-      balance: { amount: remaining, currency: 'CREDITS' }
+      balance: combinedWorkbuddyBalance(providers, remaining)
     };
   }
 
