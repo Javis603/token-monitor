@@ -1,6 +1,6 @@
 # Plugin API
 
-Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review. No official plugins ship with the platform; the repository's minimal fixtures are tests, not a store.
+Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review.
 
 Choose a guide for your next step:
 
@@ -33,17 +33,49 @@ Module-private variables and another process's memory are not automatically avai
   "views": [
     {"id": "panel", "title": "My panel", "surfaces": ["home", "page", "notch", "edgeDock", "settings"], "defaultSurfaces": ["page", "notch"]},
     {"id": "layout", "title": "My layout", "targets": ["main.limits.content"], "mode": "replace"}
-  ]
+  ],
+  "background": true,
+  "defaults": {
+    "content": {"main.limits.content": "layout"},
+    "background": false,
+    "skin": null
+  }
 }
 ```
 
-`ui`, `backend`, `css`, `views`, `trayMenu`, `settings`, `skins` and `background` are optional; at least UI, backend or skins is required. UI views require `ui`. List every distributed file explicitly. Paths are package-relative, portable and cannot traverse parents or symlinks. Dependencies must be bundled beforehand; installation never runs npm or lifecycle scripts. Native addons require compatible OS/architecture/Electron ABI, and utility-process loading must be tested in a packaged build; arbitrary addons are not universally supported.
+`ui`, `backend`, `css`, `views`, `trayMenu`, `settings`, `skins`, `background` and `defaults` are optional; at least UI, backend or skins is required. UI views require `ui`. List every distributed file explicitly. Paths are package-relative, portable and cannot traverse parents or symlinks. Dependencies must be bundled beforehand; installation never runs npm or lifecycle scripts. Native addons require compatible OS/architecture/Electron ABI, and utility-process loading must be tested in a packaged build; arbitrary addons are not universally supported.
 
 `name`, `description` and view titles support localized strings. Optional `author`, HTTPS `homepage` and validated `identityIcon` provide attribution, not trust. The App uses `identityIcon` in main-page navigation and Notch tabs (and their settings choices) before loading the plugin UI. Without artwork, navigation keeps its built-in fallback; image decode failures also fall back. Do not rely on UI CSS loading to supply navigation artwork. `engines.tokenMonitor` can constrain the App version. `tmApi` identifies the plugin API contract, not the plugin release or package format. Only `tmApi: 1` is accepted; other values fail with `incompatible-plugin-api` and are not converted. This experimental API can break; authors must follow release changes.
 
-Each view may declare `defaultSurfaces`, a duplicate-free subset of its `surfaces` (`home`, `page`, `notch`, `edgeDock`, `tray`; never `settings`). These are initial placement suggestions, not automatic permission grants. The install confirmation lists supported locations and preselects the author's suggestions; the user can change or clear them. Trust-and-install applies the confirmed choices. Install-only stores them for first enable, including across restarts. No defaults are applied to previously installed plugins lacking a first-install record.
+### Plugin labels
 
-After first enable, updates and enable/disable cycles preserve the user's layout, including an explicit choice of no locations. Uninstall with kept placements preserves that decision; removing placements resets it for a later fresh install. Locations that are full are skipped without evicting existing items. The `tray` default places the bitmap in the system Tray; Floating Bubble and Notch-summary custom layouts still use their existing manual composers. Defaults do not select native content replacements or enable Notch, Edge Dock, Tray or background-work master switches. Pending defaults for views or surfaces removed by an update are skipped. Local packages and catalog packages use the same confirmation and transaction. The API remains experimental.
+The App displays labels beside the version to describe the plugin's interfaces and purpose:
+
+| Label | Manifest declaration |
+| --- | --- |
+| Widgets | A view supports `home`, `tray`, `edgeDock` or `notch` |
+| Pages | A view supports `page` or declares content `targets` |
+| Appearance | At least one skin is declared in `skins` |
+| Automation | `category: "automation"` for monitoring, reminders or scheduled tasks |
+
+A plugin can have more than one label. `category` is optional. See [catalog metadata](distribution-design.md#create-a-community-catalog) for discovery type hints.
+
+### First-use settings
+
+Authors suggest first-use settings; the user reviews them before enabling. These choices remain independent after setup:
+
+| Declaration | Initial suggestion when omitted | Allowed values |
+| --- | --- | --- |
+| View `defaultSurfaces` | No placements | Duplicate-free subset of that view's `surfaces`, excluding `settings` |
+| `defaults.content` | The plugin's replacement for each target | Map of a declared replacement target to its view ID, or `null` for native content |
+| `defaults.background` | `false` | Boolean; `true` requires a backend and `background: true` |
+| `defaults.skin` | Keep current appearance | Declared skin ID, or `null` to keep current appearance |
+
+Install-and-enable applies the confirmed choices together. Install-only stores them for review on first enable, including across restarts. If another enabled, trusted plugin is the selected source, the App asks before switching; the user can keep its content and still enable the new plugin.
+
+Updates and enable/disable cycles preserve confirmed choices, including no placements, native content, background off and unchanged appearance. Newly declared locations, targets or capabilities receive their own first-use review; existing choices stay intact. Changing author defaults does not reset user decisions. Locations that are full are skipped without evicting existing items. Pending suggestions for removed views or surfaces are ignored. Defaults do not enable the host's Notch, Edge Dock or Tray master switches. The `tray` suggestion places a bitmap in the system Tray; Floating Bubble and Notch-summary custom layouts use their manual composers.
+
+Uninstall with kept placements retains placement and content choices; removing placements resets those choices for a fresh install. Reinstall reviews background execution and appearance again. An already applied appearance remains until the user changes it. See [content replacement behavior](author-ui-options.md#original-content-targets) for independent content selection.
 
 Bitmap views declaring `tray` can be added from the existing Tray, Floating Bubble and custom Notch-summary composers after the plugin is enabled. They use the same reorder, duplicate, remove and save controls as native items. Notch “Same as tray” follows the active Tray layout; its custom layout stays independent. Uninstall with placement removal also clears bubble/summary entries and mixed Notch page-order entries. Keeping placements retains them for a later reinstall and explicit enable.
 
@@ -84,6 +116,8 @@ exports.activate = async ({ dataDirectory, publish, host, log }) => {
 
 The backend is optional and starts on visible demand, an explicit pending call, or separately opted-in background execution. All locations of the same plugin share one process. The final demand disappearing stops it; teardown receives a cooperative grace period before termination. Startup and calls have finite deadlines. Failures remain visible until explicit restart; there is no automatic crash loop. A hidden UI can still have active JS because it shares the renderer: authors must honor visibility and dispose their own work. The host cannot promise that arbitrary trusted code stops all work merely because its mount is hidden.
 
+With a backend and `background: true`, optional `backgroundDescription` explains what the plugin does in the background, such as periodic data updates. It accepts the same localized string format as `description`. Plugin details show this author-supplied purpose. Without author text, the App shows a short generic explanation. This text does not change execution behavior or grant trust.
+
 `dataDirectory` is an App-managed plugin directory. Store private plugin preferences/files there; it is not a filesystem jail. `publish(value)` broadcasts structured data to UI instances. `host.call` uses the same formal host operations as UI. Backend dependencies and native modules are the author's responsibility. No host system-monitoring sampler is provided; plugins implement and share their own sampling.
 
 ## Host data and settings
@@ -100,7 +134,7 @@ Subscriptions deliver `{type:'snapshot', value, sequence}` then coalesced invali
 
 ## Installation and recovery
 
-[Installation, revision trust, atomic updates, rollback and catalogs](distribution-design.md) are independent of execution freedom. Official packages use Install and enable / Update; other sources use Trust, install and enable / Trust and update. Both approve the exact revision in one explicit action. Install only leaves code disabled and untrusted. The master switch and safe mode are respected; background execution remains off. Reload discovers changed package bytes and requires approval before running them. Unchanged trusted code re-enables directly. Normal disable awaits mount/module cleanup and stops its backend without reloading. Mounts reporting `hasUnsavedChanges()` prompt before disable; cleanup failure or an unresponsive host offers recovery reload. Package updates and removal also cooperatively release affected UI; unsaved mounts prompt first. The package review offers one explicit trust-and-update action for the exact new revision, preserving the enabled/background choices. Failed cleanup or an unresponsive host may still require affected-window recovery. Rollback restores code, not arbitrary migrations a trusted backend performed on its data.
+[Installation, revision trust, atomic updates, rollback and catalogs](distribution-design.md) are independent of execution freedom. Official packages use Install and enable / Update; other sources use Trust, install and enable / Trust and update. Both approve the exact revision in one explicit action. Install only leaves code disabled and untrusted. The master switch and safe mode are respected; background execution follows the confirmed first-use setting. Reload discovers changed package bytes and requires approval before running them. Unchanged trusted code re-enables directly. Normal disable awaits mount/module cleanup and stops its backend without reloading. Mounts reporting `hasUnsavedChanges()` prompt before disable; cleanup failure or an unresponsive host offers recovery reload. Package updates and removal also cooperatively release affected UI; unsaved mounts prompt first. The package review offers one explicit trust-and-update action for the exact new revision, preserving the enabled/background choices. Failed cleanup or an unresponsive host may still require affected-window recovery. Rollback restores code, not arbitrary migrations a trusted backend performed on its data.
 
 The native tray menu offers **Restart without plugins**. Alternatively launch with `--plugins-safe-mode` or `TOKEN_MONITOR_PLUGINS_SAFE_MODE=1`. Safe mode lists packages and permits management without starting author UI/backends. This recovery route does not depend on a responsive renderer. It cannot undo arbitrary filesystem changes made by trusted code.
 

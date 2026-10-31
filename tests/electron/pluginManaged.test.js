@@ -14,7 +14,7 @@ function bytes(version = '1.0.0', extra = {}) {
 }
 function fixture(t, fault) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-managed-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  let settings = { pluginPlacementDefaults: {}, pluginMainPages: [], trayContent: 'tokens', trayCustomLayout: { version: 1, items: [] }, floatingBubbleCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchPageOrder: ['plugin:test-plugin/page', 'home', 'plugin:other/page'], pluginContentOrder: { 'main.model.content': ['test-plugin/page', 'other/page'] }, pluginContentSelections: { 'main.limits.content': 'test-plugin/page', 'main.home.content': 'other/page' }, pluginStates: {}, homeModuleOrder: 'summary,plugin:test-plugin/page,plugin:other/page', hiddenHomeModules: '', edgeDockItems: [], notchPluginPages: ['test-plugin/page', 'other/page'] };
+  let settings = { pluginInitialSetup: {}, pluginMainPages: [], trayContent: 'tokens', trayCustomLayout: { version: 1, items: [] }, floatingBubbleCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchCustomLayout: { version: 1, items: [{ id: 'own', type: 'plugin', ref: 'test-plugin/page' }, { id: 'other', type: 'plugin', ref: 'other/page' }] }, notchPageOrder: ['plugin:test-plugin/page', 'home', 'plugin:other/page'], pluginContentOrder: { 'main.model.content': ['test-plugin/page', 'other/page'] }, pluginContentSelections: { 'main.limits.content': 'test-plugin/page', 'main.home.content': 'other/page' }, pluginStates: {}, homeModuleOrder: 'summary,plugin:test-plugin/page,plugin:other/page', hiddenHomeModules: '', edgeDockItems: [], notchPluginPages: ['test-plugin/page', 'other/page'] };
   let stopped = 0;
   const manager = { list: () => ({ plugins: [] }), beginMutation: () => stopped++, endMutation() {}, reload() {} };
   const args = { root: path.join(dir, 'manager'), userDir: path.join(dir, 'plugins'), dataDir: path.join(dir, 'data'), settingsDir: path.join(dir, 'author-settings'), manager,
@@ -27,6 +27,7 @@ async function historyFixture(t, fault) {
   const f = fixture(t, fault); await f.install('1.0.0'); await f.install('2.0.0');
   f.settings.pluginStates['test-plugin'] = { enabled: true, background: false, trustedRevision: 'a'.repeat(64) };
   // Include every placement key in the rollback baseline.
+  f.settings.pluginContentSelections['main.limits.content'] = 'test-plugin/page';
   f.settings.trayCustomLayout = { version: 1, items: [] };
   f.settings.pluginMainPages = ['test-plugin/page', 'other/page'];
   for (const dir of [f.args.dataDir, f.args.settingsDir]) {
@@ -47,6 +48,55 @@ function snapshot(f) {
   visit(f.dir);
   return { files, settings: structuredClone(f.settings) };
 }
+
+for (const invalidate of ['cancel', 'expire']) test(`a preview ${invalidate}d while consent is open cannot be committed`, async t => {
+  const f = fixture(t);
+  let clock = 1;
+  f.args.manager.list = () => ({ enabled: true, plugins: [] });
+  const api = createManagedPlugins({ ...f.args, now: () => clock }); api.recover();
+  t.after(() => api.dispose());
+  const preview = api.preview(parsePackage(bytes()));
+  const before = snapshot(f);
+  await assert.rejects(api.install(preview.token, { trustInstall: true, beforeEnable() {
+    if (invalidate === 'cancel') api.cancel(preview.token); else clock += 10 * 60 * 1000 + 1;
+  } }), /preview expired/);
+  assert.deepEqual(snapshot(f), before);
+});
+
+test('an update preserves a newer content choice made while its backend is stopping', { timeout: 5000 }, async t => {
+  const f = fixture(t); await f.install('1.0.0');
+  f.args.manager.list = () => ({ enabled: true, plugins: [] });
+  f.settings.pluginStates['test-plugin'] = { enabled: true };
+  f.settings.pluginContentSelections['main.model.content'] = 'other/view';
+  let started, finish;
+  const entered = new Promise(resolve => { started = resolve; });
+  const gate = new Promise(resolve => { finish = resolve; });
+  f.args.manager.beginMutation = () => { started(); return gate; };
+  const pkg = parsePackage(bytes('2.0.0', { views: [{ id: 'content', mode: 'replace', targets: ['main.model.content'] }] }));
+  const pending = f.api.install(f.api.preview(pkg).token, { trustUpdate: true, initialSetup: { 'content:main.model.content': 'test-plugin/content' } }).then(() => null, error => error);
+  await entered;
+  delete f.settings.pluginContentSelections['main.model.content'];
+  finish();
+  assert.match((await pending)?.message || '', /Content selection changed/);
+  assert.equal(f.settings.pluginContentSelections['main.model.content'], undefined);
+  assert.equal(f.api.describe('test-plugin').version, '1.0.0');
+  assert.equal(fs.existsSync(path.join(f.args.root, 'transaction.json')), false);
+});
+
+for (const keepPlacements of [false, true]) for (const hasSetup of [false, true]) {
+  test(`constructor plugin uninstalls with keepPlacements=${keepPlacements}, own setup=${hasSetup}`, async t => {
+    const f = fixture(t);
+    await f.install('1.0.0', { id: 'constructor', views: [] });
+    if (hasSetup) f.settings.pluginInitialSetup.constructor = { values: { background: true, skin: null, 'content:main.home.content': null }, applied: ['background', 'skin', 'content:main.home.content'] };
+    await f.api.uninstall('constructor', { keepPlacements });
+    assert.equal(f.api.describe('constructor'), null);
+    assert.equal(fs.existsSync(path.join(f.args.userDir, 'constructor')), false);
+    assert.equal(Object.hasOwn(f.settings.pluginInitialSetup, 'constructor'), keepPlacements && hasSetup);
+    if (keepPlacements && hasSetup) assert.deepEqual(f.settings.pluginInitialSetup.constructor, {
+      values: { 'content:main.home.content': null }, applied: ['content:main.home.content']
+    });
+  });
+}
 async function operation(api, name, token) {
   if (name === 'preview') return api.preview(parsePackage(bytes('3.0.0', {})));
   if (name === 'update') return await api.install(token);
@@ -58,6 +108,34 @@ function assetPackage(version) {
   const raw = JSON.parse(bytes(version, { files: ['main.js', 'ui/page.js', 'ui/index.html'] }));
   Object.assign(raw.files, { 'ui/page.js': Buffer.from('console.log(1)').toString('base64'), 'ui/index.html': Buffer.from('<p>Original</p>').toString('base64') });
   return parsePackage(JSON.stringify(raw, null, 2));
+}
+
+for (const phase of ['settings-written', 'reloaded']) {
+  test(`first-use transaction restores locations, content, background and appearance after ${phase} failure`, async t => {
+    let changed;
+    const f = fixture(t, step => {
+      if (step === phase) { changed = structuredClone(f.settings); throw new Error('setup interrupted'); }
+    });
+    Object.assign(f.settings, { themeColors: { accent: '#123456' }, vendorColors: { codex: '#654321' }, pluginAuthorSkin: null });
+    f.args.manager.list = () => ({ enabled: true, plugins: [] });
+    const pkg = parsePackage(bytes('1.0.0', { background: true,
+      views: [{ id: 'page', title: 'Page', surfaces: ['page'], defaultSurfaces: ['page'] },
+        { id: 'content', title: 'Content', targets: ['main.model.content'], mode: 'replace' }],
+      skins: [{ id: 'blue', name: 'Blue', colors: { accent: '#abcdef' }, vendorColors: { codex: '#fedcba' }, appearance: { font: 'mono' } }],
+      defaults: { background: true, skin: 'blue' } }));
+    const before = structuredClone(f.settings);
+    await assert.rejects(f.api.install(f.api.preview(pkg).token, { trustInstall: true }), /setup interrupted/);
+    assert.deepEqual(changed.pluginMainPages, ['test-plugin/page']);
+    assert.equal(changed.pluginContentSelections['main.model.content'], 'test-plugin/content');
+    assert.equal(changed.pluginStates['test-plugin'].background, true);
+    assert.equal(changed.themeColors.accent, '#abcdef');
+    assert.equal(changed.vendorColors.codex, '#fedcba');
+    assert.equal(changed.pluginAuthorSkin.ref, 'test-plugin/blue');
+    assert.ok(changed.pluginInitialSetup['test-plugin'].applied.includes('skin'));
+    assert.deepEqual(f.settings, before);
+    assert.equal(fs.existsSync(path.join(f.args.userDir, 'test-plugin')), false);
+    assert.deepEqual(f.api.list(), []);
+  });
 }
 function changeInstalled(f, kind) {
   const dir = path.join(f.args.userDir, 'test-plugin');
@@ -485,9 +563,10 @@ for (const keepPlacements of [false, true]) test(`compact placement transaction 
       throw new Error('compact placement interruption');
     }
   });
+  f.settings.pluginInitialSetup = { 'test-plugin': { values: { 'content:main.home.content': null }, applied: ['content:main.home.content'] }, other: { values: { 'content:main.model.content': null }, applied: ['content:main.model.content'] } };
   const before = snapshot(f); armed = true;
   await assert.rejects(f.api.uninstall('test-plugin', { keepData: true, keepPlacements }), /compact placement interruption/);
-  for (const key of ['floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder']) assert.deepEqual(journal.settings[key], before.settings[key]);
+  for (const key of ['floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'pluginInitialSetup']) assert.deepEqual(journal.settings[key], before.settings[key]);
   assert.deepEqual(snapshot(f), before);
   const restarted = createManagedPlugins(f.args); restarted.recover();
   assert.deepEqual(snapshot(f), before);
@@ -500,6 +579,34 @@ for (const enabled of [true, false]) test(`trusted update preserves enabled=${en
   await f.api.install(f.api.preview(pkg).token, { trustUpdate: true });
   assert.deepEqual(f.settings.pluginStates['test-plugin'], { enabled, background: true, trustedRevision: require('../../src/electron/plugins/package').contentDigest(pkg) });
 });
+
+for (const missing of ['map', 'record', 'enabled']) test(`an update with missing plugin state (${missing}) saves first-use choices without applying them`, async t => {
+  const f = fixture(t);
+  f.args.manager.list = () => ({ enabled: true, plugins: [] });
+  await f.install('1.0.0', { views: [] });
+  if (missing === 'map') delete f.settings.pluginStates;
+  else if (missing === 'record') delete f.settings.pluginStates['test-plugin'];
+  else f.settings.pluginStates['test-plugin'] = { background: false };
+  Object.assign(f.settings, { pluginInitialSetup: {}, pluginContentSelections: { 'main.home.content': 'other/page' },
+    themeColors: { accent: '#123456' }, vendorColors: {}, pluginAuthorSkin: null });
+  const before = structuredClone(f.settings);
+  const pkg = parsePackage(bytes('2.0.0', { background: true,
+    views: [{ id: 'dashboard', surfaces: ['page'], defaultSurfaces: ['page'] },
+      { id: 'content', mode: 'replace', targets: ['main.model.content'] }],
+    skins: [{ id: 'blue', name: 'Blue', colors: { accent: '#abcdef' } }],
+    defaults: { background: true, skin: 'blue' } }));
+  let confirmations = 0;
+  await f.api.install(f.api.preview(pkg).token, { trustUpdate: true, beforeEnable() { confirmations++; } });
+  assert.equal(f.api.describe('test-plugin').version, '2.0.0');
+  assert.equal(confirmations, 0);
+  assert.notEqual(f.settings.pluginStates['test-plugin'].enabled, true);
+  assert.equal(f.settings.pluginStates['test-plugin'].background, before.pluginStates?.['test-plugin']?.background);
+  for (const key of ['pluginMainPages', 'pluginContentSelections', 'themeColors', 'vendorColors', 'pluginAuthorSkin']) assert.deepEqual(f.settings[key], before[key], key);
+  assert.deepEqual(f.settings.pluginInitialSetup['test-plugin'], { values: {
+    'placement:test-plugin/dashboard:page': true, 'content:main.model.content': 'test-plugin/content', background: true, skin: 'test-plugin/blue'
+  }, applied: [] });
+});
+
 for (const point of ['settings-written', 'reloaded']) test(`failed trusted update restores previous trust at ${point}`, async t => {
   let armed = false;
   const f = fixture(t, step => { if (armed && step === point) throw Error('interrupted'); });

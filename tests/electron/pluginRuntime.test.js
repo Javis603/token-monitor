@@ -74,9 +74,9 @@ test('trust is revision-specific and missing installs remain manageable after re
 });
 test('replacement selection requires an active declared replacement; cancelling code changes preserves execution', async t => {
   const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
-  const selected = f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/content');
+  const selected = await f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/content');
   assert.equal(selected.contentSelections['main.limits.content'], 'trusted-fixture/content');
-  assert.throws(() => f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/panel'));
+  await assert.rejects(f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/panel'));
   f.lifecycle(f.main, () => ({ loaded: true, unsaved: true }));
   f.cancel(); await assert.rejects(f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false }), /cancelled/);
   assert.equal(f.runtime.manager.active('trusted-fixture'), true);
@@ -97,7 +97,7 @@ test('descriptor subscription receives first content selection without foregroun
   const first = f.handlers.get('plugins:views')(f.event(f.notch), { surface: 'notch' });
   assert.ok(first.views['trusted-fixture/content']); assert.equal(f.children.length, 0);
   f.notch.webContents.sent.length = 0;
-  f.invoke('plugins:selectContent', 'notch.home.content', 'trusted-fixture/content');
+  await f.invoke('plugins:selectContent', 'notch.home.content', 'trusted-fixture/content');
   assert.ok(f.notch.webContents.sent.some(item => item.channel === 'plugins:views' && item.value.surface === 'notch'));
   assert.equal(f.children.length, 0);
 });
@@ -219,10 +219,8 @@ test('master pause checks drafts before mutation and disposes after persistence;
   const actions=[]; f.lifecycle(f.main, request=>{actions.push(request.action);return {loaded:true,unsaved:true};});
   f.cancel(); await assert.rejects(f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:false}),/cancelled/);
   assert.equal(f.settings.pluginsEnabled,true); assert.ok(!actions.includes('release'));
-  f.accept(); const finish=await f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:false});
-  f.settings.pluginsEnabled=false;f.runtime.settingsChanged();await finish();assert.ok(actions.includes('release'));
-  const resume=await f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:true});
-  f.settings.pluginsEnabled=true;f.runtime.settingsChanged();await resume();
+  f.accept(); await f.setMasterEnabled(false); assert.ok(actions.includes('release'));
+  await f.setMasterEnabled(true);
   assert.equal(f.runtime.manager.active('trusted-fixture'),true);assert.equal(f.main.webContents.reloads,0);
 });
 
@@ -245,7 +243,8 @@ test('ownership of another plugin does not join lifecycle operations; navigation
   const folder = path.join(f.dir, 'plugins', 'other-fixture');
   fs.cpSync(path.join(f.dir, 'plugins', 'trusted-fixture'), folder, { recursive: true });
   const file = path.join(folder, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file));
-  manifest.id = 'other-fixture'; fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
+  manifest.id = 'other-fixture'; manifest.views.find(view => view.mode === 'replace').targets = ['main.status.content'];
+  fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
   f.events.get('plugins:lifecycleHost')(f.event(f.notch), true);
   f.events.get('plugins:uiLoading')?.(f.event(f.notch), 'other-fixture');
@@ -282,10 +281,8 @@ test('master pause and resume send only each hosts loaded plugin ids', async t =
   const file = path.join(folder, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file)); manifest.id = 'other-fixture'; fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
   const calls = []; f.lifecycle(f.main, request => { calls.push(request); return { loaded: true }; });
-  const finish = await f.runtime.beforeSettingsChange(f.event(f.main), { pluginsEnabled: false });
-  f.settings.pluginsEnabled = false; f.runtime.settingsChanged(); await finish();
-  const resume = await f.runtime.beforeSettingsChange(f.event(f.main), { pluginsEnabled: true });
-  f.settings.pluginsEnabled = true; f.runtime.settingsChanged(); await resume();
+  await f.setMasterEnabled(false);
+  await f.setMasterEnabled(true);
   assert.deepEqual(calls.map(request => request.ids), [['trusted-fixture'], ['trusted-fixture'], ['trusted-fixture']]);
 });
 
@@ -462,12 +459,13 @@ test('runtime refreshes only the curated index at startup and six hours, notifyi
   } });
   f.invoke('plugins:list');
   for (let i = 0; i < 10; i++) await tick();
-  assert.equal(calls, 1); assert.equal(f.invoke('plugins:catalog').entries[0].origin.kind, 'maintainer');
+  const curatedEntries = () => f.invoke('plugins:catalog').entries.filter(entry => entry.origin.kind === 'maintainer');
+  assert.equal(calls, 1); assert.deepEqual(curatedEntries().map(entry => entry.id), ['remote-plugin']);
   assert.equal(f.runtime.manager.list().plugins.length, 0);
   assert.ok(f.main.webContents.sent.some(event => event.channel === 'plugins:changed'));
   offline = true;
   t.mock.timers.tick(6 * 60 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
-  assert.equal(calls, 2); assert.equal(f.invoke('plugins:catalog').entries.length, 1);
+  assert.equal(calls, 2); assert.deepEqual(curatedEntries().map(entry => entry.id), ['remote-plugin']);
   t.mock.timers.tick(5 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
   assert.equal(calls, 3);
   await f.runtime.dispose(); t.mock.timers.tick(6 * 60 * 60 * 1000); assert.equal(calls, 3);

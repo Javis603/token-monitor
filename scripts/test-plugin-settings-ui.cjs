@@ -65,7 +65,7 @@ async function main() {
     data.plugins[0].views[0].surfaces=['home','page','tray'];await panel.refresh();
     let locations=box.querySelector('.plugin-location-count');locations.focus({preventScroll:true});await tick();
     let locationTip=locations.querySelector('[role="tooltip"]');
-    check('location-count-and-tooltip-list-selected-not-supported-surfaces',locations.firstChild.textContent==='2 locations'&&locationTip.textContent.includes('settings.plugins.surface.home')&&locationTip.textContent.includes('settings.plugins.surface.tray')&&!locationTip.textContent.includes('settings.plugins.surface.page')&&locations.getAttribute('aria-describedby')===locationTip.id);
+    check('location-count-and-tooltip-list-selected-not-supported-surfaces',locations.firstChild.textContent==='2 locations'&&locationTip.textContent.includes('views.home')&&locationTip.textContent.includes('settings.plugins.surface.tray')&&!locationTip.textContent.includes('plugins.initial.purpose.page')&&locations.getAttribute('aria-describedby')===locationTip.id);
     check('location-tooltip-opens-on-keyboard-focus-and-holds-refresh',locationTip.matches(':popover-open')&&panel.isInteracting(),{open:locationTip.matches(':popover-open'),hold:panel.isInteracting(),focus:document.activeElement.outerHTML});
     locations.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
     check('location-tooltip-dismisses-with-escape',!locationTip.matches(':popover-open'));

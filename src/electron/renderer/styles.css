@@ -8495,6 +8495,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-permission-network { color: var(--orange); }
 .plugin-risk { margin: 0; font-size: 0.6875rem; color: var(--orange); }
 .plugin-consent-actions { justify-content: flex-end; }
+.plugin-consent-actions button { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; padding-block: 6px; }
 .settings-actions button.plugin-allow { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
 .plugin-views { display: flex; flex-direction: column; gap: 6px; }
 .plugin-view-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
@@ -8621,6 +8622,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-type-widget { color: light-dark(#34627f, #94bdd8); }
 .plugin-type-page { color: light-dark(#735687, #bca5d8); }
 .plugin-type-appearance { color: light-dark(#85601f, #d6b77d); }
+.plugin-type-automation { color: light-dark(#226b5c, #8bcab9); }
 .plugin-card-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-size: .625rem; color: var(--muted); }
 .plugin-origin-note { overflow-wrap: anywhere; }
 .plugin-catalog-results .plugin-description { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -8776,9 +8778,16 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   overflow: visible;
 }
 
-.plugin-default-placements { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; }
+.plugin-initial-setup { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; }
+.plugin-choice-group { min-width: 0; border: 0; padding: 0; margin: 12px 0; }
+.plugin-choice-group legend { padding: 0; margin-bottom: 2px; }
+.plugin-initial-choices > .plugin-choice-group { margin: 0; }
+.plugin-initial-choices .plugin-placement-choice { min-height: 1.5em; }
 .settings-panel label.plugin-placement-choice { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.plugin-placement-choice > input[type="checkbox"] { flex: 0 0 14px; width: 14px; height: 14px; margin: 0; }
+.settings-panel label.plugin-placement-choice.plugin-tagged-choice { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; }
+.plugin-choice-name { min-width: 0; overflow-wrap: anywhere; }
+.plugin-purpose-tag { justify-self: end; white-space: nowrap; padding: 0 6px; border-radius: 4px; background: rgba(var(--overlay-rgb), .07); color: var(--muted); font-size: .6875rem; line-height: 1.5; }
+.plugin-placement-choice > input[type="checkbox"], .plugin-placement-choice > input[type="radio"] { flex: 0 0 14px; width: 14px; height: 14px; margin: 0; }
 
 /* Catalog detail is a host-owned dialog. Only its body scrolls; image zoom
    uses a second native dialog so Escape dismisses only the top layer. */
