@@ -139,9 +139,11 @@ Windows 11 Edge Dock uses a single helper with HostBackdrop clipped to the rende
 
 Windows rail dragging follows renderer animation frames: a nominal 16 ms main-process timeout can round up to about 31 ms on Windows. Main still owns native cursor coordinates, placement and button-state checks; cursor polling remains a fallback if frame delivery stops.
 
+The input subclass lives in `TokenMonitor.WindowInput.dll`. It returns `MA_NOACTIVATE` without eating the press and forwards other messages directly to Chromium on the Windows UI stack. Do not route `DefSubclassProc` through a JavaScript FFI call: move/resize events can synchronously re-enter V8 and trigger garbage collection on the FFI's alternate stack. Native window destruction removes the subclass.
+
 Share renderer curves at physical display scale and position against `GetWindowRect`, not rounded Electron DIP bounds. Unchanged hover updates must not re-show underlays. Lower the tinted fallback only after native attachment succeeds; a failed generation retries only after all its surfaces are disposed. EOF, parent exit and content-window closure must remove native windows.
 
-Local Windows development requires `npm run build:windows-dock`. Packaging builds the helper with the OS .NET compiler/WinRT metadata and includes it outside ASAR, so Windows artifacts require a Windows build host. User-facing material settings are covered in [configuration](configuration.md#widget-gui).
+Local Windows development requires `npm run build:windows-dock`. This builds the backdrop helper with the OS .NET compiler/WinRT metadata and the input DLL with Visual Studio C++ Build Tools (Desktop development with C++), or a Windows x64 MinGW-w64 C compiler selected by `CC`. Windows verification also builds the DLL for native input tests. Packaging runs the same build and includes both artifacts outside ASAR, so Windows artifacts require a Windows build host. After building, `node_modules/.bin/electron scripts/test-windows-input-gc.cjs` checks move-event garbage collection across window lifetimes. User-facing material settings are covered in [configuration](configuration.md#widget-gui).
 
 ## Native tooltips
 
