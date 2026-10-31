@@ -118,7 +118,7 @@ function ensureMimoExchangeFetch() {
 // global fetch refuses to save an account on exactly the machines this
 // transport exists for.
 function electronProviderDeps(deps = {}) {
-  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch(), museaiFetch: ensureMimoExchangeFetch() };
+  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch(), museWebFetch: ensureMimoExchangeFetch() };
 }
 const {
   DEFAULT_CLIENTS,
@@ -1036,7 +1036,7 @@ function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
     mimoExchangeFetch: ensureMimoExchangeFetch(),
-    museaiFetch: ensureMimoExchangeFetch(),
+    museWebFetch: ensureMimoExchangeFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     workbuddyFetch: async (url, init = {}, expectedSession = null) => {
       const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);

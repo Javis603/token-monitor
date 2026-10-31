@@ -109,7 +109,6 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
-  muse: 'settings.limits.connection.muse',
   kiro: 'settings.limits.connection.kiro',
   manus: 'settings.limits.connection.manus',
   workbuddy: 'settings.limits.connection.workbuddy'
@@ -16731,7 +16730,10 @@ function clearDisabledLimitProviderPendingChecks(enabledProviders) {
 }
 
 function externalProviderForAccount(providerName) {
-  const provider = localProviderStatus(providerName);
+  // Muse's manual credential panel owns only the web session, not its CLI login.
+  const provider = providerName === 'muse'
+    ? localProviderStatuses('muse').find((row) => row.source === 'web') || null
+    : localProviderStatus(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;

@@ -137,6 +137,7 @@ function normalizedScope(scope) {
 
 function rowIdentityKey(row) {
   const provider = providerId(row?.provider);
+  if (provider === 'muse' && row?.source) return `${provider}:source:${row.source}`;
   const identity = accountIdentityPart(row);
   return identity ? `${provider}:${identity}` : `${provider}:*`;
 }

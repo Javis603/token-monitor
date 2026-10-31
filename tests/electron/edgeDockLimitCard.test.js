@@ -2812,9 +2812,9 @@ test('summary allocation and width fitting need only ordered items and measured 
 });
 
 test('Meta Muse renders its weekly allowance and separate additional money balance', () => {
-  const { parseMuseaiSubscription } = require('../../src/shared/providers/museai/limits');
-  const { paid } = require('../fixtures/museai');
-  const provider = normalizeLimitProvider({ provider: 'museai', status: 'ok', ...parseMuseaiSubscription(paid) });
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { paid } = require('../fixtures/museWeb');
+  const provider = normalizeLimitProvider({ provider: 'muse', status: 'ok', ...parseMuseWebSubscription(paid) });
   const rendered = dockView().renderProviderWindows(provider, '#0866FF');
   assert.match(rendered.text, /97%/);
   assert.match(rendered.text, /\$60\.00/);

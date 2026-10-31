@@ -9,7 +9,7 @@ const { runWithProbeDeadline } = require('../../probeDeadline');
 const ORIGIN = 'https://muse.ai';
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
-function normalizeMuseaiCookieHeader(value) {
+function normalizeMuseWebCookieHeader(value) {
   if (typeof value !== 'string' || /[\u0000-\u001f\u007f]/u.test(value)) return '';
   const raw = value.trim().replace(/^cookie\s*:\s*/iu, '');
   const pairs = raw.split(';').map((part) => part.trim());
@@ -17,15 +17,15 @@ function normalizeMuseaiCookieHeader(value) {
   return pairs.join('; ');
 }
 
-function museaiCookie(env = process.env, options = {}) {
-  return normalizeMuseaiCookieHeader(options.museaiCookie || env.TOKEN_MONITOR_MUSEAI_COOKIE || env.MUSEAI_COOKIE || '');
+function museWebCookie(env = process.env, options = {}) {
+  return normalizeMuseWebCookieHeader(options.museWebCookie || env.TOKEN_MONITOR_MUSE_WEB_COOKIE || env.MUSE_WEB_COOKIE || '');
 }
 
 function invalidResponse() {
   return errorWithStatus('unavailable', 'Muse subscription response changed');
 }
 
-function parseMuseaiSubscription(text) {
+function parseMuseWebSubscription(text) {
   let sub;
   for (const line of text.split('\n')) {
     const match = /^[0-9a-f]+:(\{.*\})\s*$/u.exec(line);
@@ -58,19 +58,19 @@ function parseMuseaiSubscription(text) {
 
 const chunkPaths = (text) => [...new Set((text.match(/static\/chunks\/[\w~.-]+\.js/gu) || []).map((path) => `/_next/${path}`))];
 
-async function fetchMuseaiLimits(options = {}, deps = {}) {
-  const base = { provider: 'museai', source: 'web', updatedAt: new Date((deps.now || Date.now)()).toISOString(), windows: [] };
-  const cookie = museaiCookie(deps.env || process.env, options);
+async function fetchMuseWebLimits(options = {}, deps = {}) {
+  const base = { provider: 'muse', source: 'web', accountLabel: 'Muse (Meta)', updatedAt: new Date((deps.now || Date.now)()).toISOString(), windows: [] };
+  const cookie = museWebCookie(deps.env || process.env, options);
   if (!cookie) return normalizeLimitProvider({ ...base, status: 'notConfigured' });
   // No portable account identity is present in this response. The limits core
   // keeps observations on different devices separate rather than hashing cookies.
   const state = deps.providerRuntimeState;
-  const cacheKey = 'museai:actionID';
+  const cacheKey = 'muse:web:actionID';
   try {
     const parsed = await runWithProbeDeadline(async ({ signal }) => {
       const request = async (path, init = {}) => {
         signal.throwIfAborted();
-        const response = await (deps.museaiFetch || deps.fetch || fetch)(`${ORIGIN}${path}`, {
+        const response = await (deps.museWebFetch || deps.fetch || fetch)(`${ORIGIN}${path}`, {
           ...init, headers: { 'User-Agent': BROWSER_USER_AGENT, ...init.headers },
           credentials: 'omit', redirect: 'manual', signal
         });
@@ -125,15 +125,15 @@ async function fetchMuseaiLimits(options = {}, deps = {}) {
         response = await post(actionID);
       }
       if (response.status !== 200) throw errorWithStatus(statusForHttp(response.status), 'Muse subscription unavailable');
-      const result = parseMuseaiSubscription(response.text);
+      const result = parseMuseWebSubscription(response.text);
       signal.throwIfAborted();
       state?.set(cacheKey, actionID);
       return result;
-    }, { signal: deps.signal, deadlineMs: deps.museaiFetchTimeoutMs || 20000 });
+    }, { signal: deps.signal, deadlineMs: deps.museWebFetchTimeoutMs || 20000 });
     return normalizeLimitProvider({ ...base, ...parsed, status: 'ok' });
   } catch (error) {
     return normalizeLimitProvider({ ...base, status: ['unauthorized', 'sourceRateLimited'].includes(error?.status) ? error.status : 'unavailable' });
   }
 }
 
-module.exports = { normalizeMuseaiCookieHeader, museaiCookie, parseMuseaiSubscription, fetchMuseaiLimits };
+module.exports = { normalizeMuseWebCookieHeader, museWebCookie, parseMuseWebSubscription, fetchMuseWebLimits };
