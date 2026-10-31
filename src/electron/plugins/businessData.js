@@ -7,6 +7,7 @@ const { normalizeQuery, projectResource, sessionSources, projectSessionRow, matc
 
 const { setImmediate: immediate } = require('node:timers/promises');
 const { createSessionBacking, buildSessionIndex, isLargeSessionPlan, PAGE_SCRATCH_BYTES } = require('./lazySessions');
+const { createLiveRateResource } = require('./liveRate');
 
 // Loaders reuse host-owned caches/resolvers. History may read the authenticated
 // host history endpoint. They never collect, probe providers, refresh credentials,
@@ -20,6 +21,12 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
   const snapshots = new Map(), subscriptions = new Map(), epochs = new Map(), loaders = new Map();
   const projections = new Map(), budgets = new Map();
   const requests = new Set(), builds = new Map(), pagePins = new Map();
+  const liveRates = createLiveRateResource({ now, leaseMs: snapshotTtlMs, onChange: () => {
+    latest = { ...latest, revision: latest.revision + 1 };
+    for (const s of subscriptions.values()) if (s.query.resource === 'liveRate') {
+      s.stamp = dependency(latest, s.query); invalidate(s);
+    }
+  } });
   const backing = createSessionBacking({ admit(bytes) {
     if (backing.bytes() + lazyBytes() + bytes > 128 * 1024 * 1024) throw new Error('budgetExceeded');
   } });
@@ -51,6 +58,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
   function dependency(captured, q) {
     const { stats, extras: e } = captured;
     const base = [captured.sourceGeneration, e.sourceId || 'default', e.identityEpoch || '1', !!stats, q.resource, q.period];
+    if (q.resource === 'liveRate') return JSON.stringify([...base, liveRates.revision()]);
     if (q.resource === 'history') return JSON.stringify([...base, loaderRevision(captured, 'history'), ref(stats?.history)]);
     if (q.resource === 'subscriptions') return JSON.stringify([...base, loaderRevision(captured, 'subscriptions'), ref(stats?.subscriptions), e.subscriptionContext?.date, CURRENCY_CODES.map(code => e.subscriptionContext?.rates?.[code]), stats?.stale, ref(stats?.limits)]);
     if (q.resource === 'status') return JSON.stringify([...base, ref(stats?.devices), stats?.updatedAt, stats?.projectsIncomplete, fields(e.status, 'collection sync availability'), fields(e.preferences, 'currency timeZone locale sessionTitlesEnabled historyEnabled projectsEnabled')]);
@@ -61,7 +69,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       // their original collectedAt/asOf; status/devices expose current freshness.
       const meta = [source?.deviceId, source?.stale, !!p];
       if (q.resource === 'limits') return [source?.deviceId, ref(source?.limits)];
-      if (q.resource === 'usage') return [...meta, fields(p, usageFields), ref(source?.periodWindows)];
+      if (q.resource === 'usage') return [...meta, fields(p, usageFields), fields(p?.capabilities, 'tokenComponents throughput'), ref(source?.periodWindows)];
       if (q.resource === 'models' || q.resource === 'tools') {
         const prefix = q.resource === 'models' ? 'model' : 'client';
         return [...meta, p?.unpricedTokens, fields(p, 'costUsd cost totalCost'), ref(p?.[prefix === 'model' ? 'models' : 'clients']), fields(p, `${prefix}Costs ${prefix}UnpricedTokens ${prefix}CacheReads ${prefix}CacheWrites ${prefix}Outputs ${prefix}UnclassifiedTokens modelThroughput clientModels clientModelCosts`)];
@@ -78,6 +86,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
   // Relevant data changes invalidate subscriptions/new first pages, but cannot
   // restart an admitted traversal. Privacy/source changes are immediate fences.
   const cursorFence = (captured, q) => JSON.stringify([captured.sourceGeneration,
+    q.resource === 'liveRate' ? fields(captured.extras.liveRateContext, 'hubMode deviceId clients') : null,
     q.resource === 'sessions' ? captured.extras.preferences?.sessionTitlesEnabled !== false : null,
     q.resource === 'history' ? captured.extras.preferences?.historyEnabled !== false : null,
     q.resource === 'projects' ? captured.extras.preferences?.projectsEnabled !== false : null]);
@@ -392,6 +401,23 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       }
       if (q.filter.deviceId && ['history', 'subscriptions'].includes(q.resource)) return envelope('scopeUnavailable');
       let captured = latest;
+      let liveRateBudget;
+      if (q.resource === 'liveRate') {
+        liveRateBudget = admit(a.pluginId, 1);
+        const opaque = (kind, value) => `${kind}_${sign([a.pluginId, captured.extras.sourceId || 'default', captured.extras.identityEpoch || '1', kind, String(value)])}`;
+        const deviceId = q.filter.deviceId
+          ? captured.stats?.devices?.find(d => opaque('device', d.deviceId) === q.filter.deviceId)?.deviceId : null;
+        if (deviceId === undefined) return envelope('scopeUnavailable');
+        const subscribers = [...subscriptions.values()].filter(s => s.pluginId === a.pluginId && s.owner === request.owner
+          && s.query.resource === 'liveRate' && s.query.filter.deviceId === q.filter.deviceId);
+        let rate;
+        for (const subscription of subscribers.length ? subscribers : [null]) {
+          rate = liveRates.read(deviceId, { pluginId: a.pluginId, owner: request.owner,
+            key: subscription ? `subscription:${subscription.id}` : JSON.stringify([a.pluginId, request.owner, deviceId]),
+            subscription: subscription?.id });
+        }
+        captured = { ...latest, extras: { ...latest.extras, liveRate: rate } };
+      }
       const stamp = dependency(captured, q), qKey = queryKey(q), capturedAt = now();
       const reusable = [...snapshots.values()].find(s => s.stamp === stamp && s.authorityFingerprint === key && s.queryKey === qKey);
       if (reusable) return reusable.lazy ? await lazyPage(reusable, 0, q, request) : page(reusable, 0, q);
@@ -401,7 +427,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       if (projection?.error) return envelope(projection.error);
       const pendingBuild = builds.get(sign([key, stamp, qKey]));
       if (pendingBuild) { captured = null; return await lazyQuery(null, null, q, a, key, stamp, null, request, null); }
-      const budget = admit(a.pluginId, projection ? 0 : 1);
+      const budget = liveRateBudget || admit(a.pluginId, projection ? 0 : 1);
       let extras = { ...captured.extras };
       if (!projection && q.resource === 'history' && !captured.stats?.history) extras.history = await load('history', loadHistory, captured, auth, key);
       if (!projection && q.period === 'allTime' && periodResources.includes(q.resource)) extras.allTime = await load('allTime', loadAllTime, captured, auth, key, q.resource === 'sessions');
@@ -475,6 +501,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
     subscription.closed = true; subscriptions.delete(subscription.id);
     if (subscription.timer) clearTimeout(subscription.timer);
     subscription.timer = null; subscription.retryAt = 0;
+    liveRates.releaseSubscription(subscription.id);
   }
   function deliver(subscription, value) {
     if (subscription.closed || disposed) return;
@@ -513,6 +540,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       const previous = latest;
       const sourceChanged = (extras.sourceId || 'default') !== (previous.extras.sourceId || 'default') || (extras.identityEpoch || '1') !== (previous.extras.identityEpoch || '1');
       latest = { stats, extras: { ...extras, preferences: extras.preferences ? { ...extras.preferences } : undefined, subscriptionContext: extras.subscriptionContext ? { date: extras.subscriptionContext.date, rates: Object.fromEntries(CURRENCY_CODES.map(code => [code, extras.subscriptionContext.rates?.[code]])) } : undefined }, revision: previous.revision + 1, sourceGeneration: previous.sourceGeneration + Number(sourceChanged), loaderVersions: {} };
+      liveRates.publish(stats, extras);
       for (const name of ['history', 'allTime', 'subscriptions']) latest.loaderVersions[name] = sourceChanged || loaderDependency(previous, name) !== loaderDependency(latest, name) ? latest.revision : previous.loaderVersions[name];
       sweep();
       for (const request of requests) {
@@ -554,6 +582,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
     },
     unsubscribe(owner, id) { const s = subscriptions.get(id); if (!s || s.owner !== owner) return false; stop(s); return true; },
     releaseOwner(owner) {
+      liveRates.releaseOwner(owner);
       for (const s of subscriptions.values()) if (s.owner === owner) stop(s);
       for (const request of requests) if (request.owner === owner) request.cancel();
       for (const [id, s] of snapshots) if (s.lazy) {
@@ -561,13 +590,14 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
       }
     },
     revoke(pluginId) {
+      liveRates.revoke(pluginId);
       for (const request of requests) if (request.pluginId === pluginId) request.cancel();
       epochs.set(pluginId, (epochs.get(pluginId) || 0) + 1);
       for (const s of subscriptions.values()) if (s.pluginId === pluginId) stop(s);
       for (const [id, snapshot] of snapshots) if (snapshot.pluginId === pluginId) deleteSnapshot(id);
       for (const [id, projection] of projections) if (projection.pluginId === pluginId) projections.delete(id);
     },
-    dispose() { disposed = true; for (const request of requests) request.cancel(); for (const s of subscriptions.values()) stop(s); for (const id of snapshots.keys()) deleteSnapshot(id); projections.clear(); budgets.clear(); loaders.clear(); latest = { stats: null, extras: {}, revision: latest.revision + 1 }; }
+    dispose() { disposed = true; for (const request of requests) request.cancel(); for (const s of subscriptions.values()) stop(s); liveRates.dispose(); for (const id of snapshots.keys()) deleteSnapshot(id); projections.clear(); budgets.clear(); loaders.clear(); latest = { stats: null, extras: {}, revision: latest.revision + 1 }; }
   };
 }
 module.exports = { createBusinessDataService };

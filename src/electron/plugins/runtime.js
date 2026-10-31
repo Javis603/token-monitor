@@ -76,6 +76,7 @@ function createPluginRuntime({
   };
   const safeMode = safeModeRequested(process.argv, env);
   const businessData = createBusinessDataService(businessAdapters);
+  const businessReaders = new Set();
   let businessStatsSnapshot = null;
   let businessSource = businessAdapters.sourceId?.() || 'local';
   // With no active plugin nothing reads host data, so pushes are only kept
@@ -122,9 +123,12 @@ function createPluginRuntime({
     : createElectronNetFetch({ fetch: (input, init) => session.fromPartition(NET_PARTITION, { cache: false }).fetch(input, init) });
 
   const auth = id => () => ({ pluginId: id, active: manager.active(id) });
-  async function hostCall(id, method, args) {
+  async function hostCall(id, method, args, owner = id) {
     if (!manager.active(id)) throw new Error('Plugin is disabled');
-    if (method === 'data.query') return businessData.query({ version: 1, ...args }, auth(id), { owner: id });
+    if (method === 'data.query') {
+      businessReaders.add(id);
+      return businessData.query({ version: 1, ...args }, auth(id), { owner });
+    }
     if (method === 'settings.get') return manager.getAuthorSettings(id);
     if (method === 'settings.update') return manager.updateAuthorSettings(id, args);
     if (method === 'app.context') return getContext();
@@ -259,6 +263,9 @@ function createPluginRuntime({
   const listListeners = new Set();
   manager.onChanged(() => {
     if (disposed) return;
+    for (const id of businessReaders) if (!manager.active(id)) {
+      businessData.revoke(id); businessReaders.delete(id);
+    }
     observeBusinessSource();
     if (manager.hasActive()) {
       resetPublishedSource();
@@ -685,10 +692,15 @@ function createPluginRuntime({
       if (pending?.host === event.sender && (!event.senderFrame || event.senderFrame === event.sender.mainFrame)) pending.finish(reply.error, reply.value);
     });
     handle('plugins:call', (event, id, method, args) => { requireHost(event); return manager.call(id, method, args); });
-    handle('plugins:host', (event, id, method, args) => { requireHost(event); return hostCall(id, method, args); });
+    handle('plugins:host', (event, id, method, args) => {
+      requireHost(event);
+      if (method === 'data.query') registerSubscriber(event.sender);
+      return hostCall(id, method, args, String(event.sender.id));
+    });
     handle('plugins:subscribe', (event, id, query) => {
       requireHost(event);
       registerSubscriber(event.sender);
+      businessReaders.add(id);
       const subscription = businessData.subscribe(String(event.sender.id), { version: 1, ...query }, auth(id), value => {
         if (!event.sender.isDestroyed()) event.sender.send('plugins:data', { id, subscription, value });
       });
