@@ -2912,9 +2912,9 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
         const costPart = Number(tool.cost) > 0 ? ` · ${formatCost(tool.cost)}` : '';
         tokens.textContent = `${formatNumber(tool.value)}${costPart}`;
         if (tool.name) {
-          tokens.title = costPart
+          tokens.setAttribute('aria-label', costPart
             ? `${tool.name}: ${formatNumber(tool.value)}${costPart}`
-            : `${tool.name}: ${formatNumber(tool.value)}`;
+            : `${tool.name}: ${formatNumber(tool.value)}`);
         }
         item.append(label, tokens);
         content.append(item);
