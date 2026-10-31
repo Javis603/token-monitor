@@ -17,60 +17,64 @@ struct OverviewView: View {
         Group {
             if let stats = store.stats {
                 ScrollViewReader { proxy in
-                    ScrollView {
+                    DashboardScrollView { columns in
                         LazyVStack(
                             alignment: .leading,
                             spacing: DesignTokens.sectionSpacing
                         ) {
                             ConnectionStatusNotice(phase: store.connectionNoticePhase, retry: refresh)
-                            ForEach(visibleSections) { section in
-                                switch section {
-                                case .summary:
-                                    HeroSummaryCard(period: store.currentPeriod)
-                                    SystemSurfacesHint(widgetCount: surfaceStatus.widgetCount)
-                                case .limits:
-                                    LimitPreviewSection(
-                                        groups: Array(limitGroups.prefix(preferences.homeLimitCount)),
-                                        showAll: showLimits
-                                    )
-                                case .sessions:
-                                    SessionsPreviewSection(
-                                        sessions: sessionPeriod.sessions ?? [:],
-                                        activity: sessionPeriod.sessionActivity,
-                                        grokBotIDs: SessionListEntry.grokBotIDs(
-                                            stats.periods ?? [:],
-                                            authoritative: stats.grokBotSessionIds),
-                                        limit: preferences.homeCount("session"),
-                                        showAll: showSessions
-                                    )
-                                case .trend:
-                                    self.section("Trend") {
-                                        InsightTrendCard(history: store.currentHistory, compact: true)
-                                    }
-                                    .id("overview-trend")
-                                case .tools:
-                                    self.section("Tools", destination: .tool) {
-                                        BreakdownCard(
-                                            kind: .tool,
-                                            entries: store.currentPeriod.clientEntries,
-                                            total: store.currentPeriod.totalTokens ?? 0, limit: preferences.homeCount("tool")
-                                        )
-                                    }
-                                case .models:
-                                    self.section("Models", destination: .model) {
-                                        BreakdownCard(
-                                            kind: .model,
-                                            entries: store.currentPeriod.modelEntries,
-                                            total: store.currentPeriod.totalTokens ?? 0, limit: preferences.homeCount("model")
-                                        )
-                                    }
-                                case .devices:
-                                    VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
-                                        SectionHeader("Devices") {
-                                            SectionNavigationLink(title: "Devices") { DevicesView() }
+                            DashboardCardLayout(columns: columns) {
+                                ForEach(visibleSections) { section in
+                                    switch section {
+                                    case .summary:
+                                        VStack(alignment: .leading, spacing: DesignTokens.sectionSpacing) {
+                                            HeroSummaryCard(period: store.currentPeriod)
+                                            SystemSurfacesHint(widgetCount: surfaceStatus.widgetCount)
                                         }
-                                        SurfaceCard {
-                                            DeviceListCard(devices: stats.usageDevices(for: store.selectedPeriod), period: store.selectedPeriod, limit: preferences.homeCount("device"))
+                                    case .limits:
+                                        LimitPreviewSection(
+                                            groups: Array(limitGroups.prefix(preferences.homeLimitCount)),
+                                            showAll: showLimits
+                                        )
+                                    case .sessions:
+                                        SessionsPreviewSection(
+                                            sessions: sessionPeriod.sessions ?? [:],
+                                            activity: sessionPeriod.sessionActivity,
+                                            grokBotIDs: SessionListEntry.grokBotIDs(
+                                                stats.periods ?? [:],
+                                                authoritative: stats.grokBotSessionIds),
+                                            limit: preferences.homeCount("session"),
+                                            showAll: showSessions
+                                        )
+                                    case .trend:
+                                        self.section("Trend") {
+                                            InsightTrendCard(history: store.currentHistory, compact: true)
+                                        }
+                                        .id("overview-trend")
+                                    case .tools:
+                                        self.section("Tools", destination: .tool) {
+                                            BreakdownCard(
+                                                kind: .tool,
+                                                entries: store.currentPeriod.clientEntries,
+                                                total: store.currentPeriod.totalTokens ?? 0, limit: preferences.homeCount("tool")
+                                            )
+                                        }
+                                    case .models:
+                                        self.section("Models", destination: .model) {
+                                            BreakdownCard(
+                                                kind: .model,
+                                                entries: store.currentPeriod.modelEntries,
+                                                total: store.currentPeriod.totalTokens ?? 0, limit: preferences.homeCount("model")
+                                            )
+                                        }
+                                    case .devices:
+                                        VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
+                                            SectionHeader("Devices") {
+                                                SectionNavigationLink(title: "Devices") { DevicesView() }
+                                            }
+                                            SurfaceCard {
+                                                DeviceListCard(devices: stats.usageDevices(for: store.selectedPeriod), period: store.selectedPeriod, limit: preferences.homeCount("device"))
+                                            }
                                         }
                                     }
                                 }

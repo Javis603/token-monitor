@@ -21,6 +21,10 @@ The source is available here under the repository's [MIT license](../../LICENSE)
 
 The app does not collect usage by itself: run Token Monitor Desktop or the headless agent on the machines running your tools. Remote Live Activity updates additionally require Hub APNs configuration; ordinary foreground usage/limits and cached widgets do not.
 
+## iPad dashboard layout
+
+Overview, AI Limits and Insights arrange cards in two equal columns when the iPad content viewport is at least 900 points wide and wider than it is tall. Portrait, narrower multitasking windows, iPhone and accessibility text sizes retain one column. Overview keeps the configured section order, and connection notices and footer controls remain full width. Cards follow the shortest column in the configured order, leaving no row-height gaps beneath shorter neighbors.
+
 ## Screenshots
 
 Debug sample data on an iPhone Simulator; the readings are illustrative. These are repository previews, not App Store screenshots or physical-device acceptance evidence.
