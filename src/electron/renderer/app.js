@@ -502,6 +502,7 @@ Object.assign(els, {
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
   collectionCadenceNote: document.getElementById('collectionCadenceNote'),
+  collectionCadenceQuickOptions: Array.from(document.querySelectorAll('input[name="collectionCadenceQuickInterval"]')),
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
   sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
   reduceMotionInputs: Array.from(document.querySelectorAll('input[name="reduceMotionOption"]')),
@@ -9703,7 +9704,7 @@ function syncSettingsForm() {
   }
   if (els.collectionCadenceInput) {
     const value = Number(state.settings.collectionIntervalMs);
-    const allowed = [300000, 900000, 1800000];
+    const allowed = [15000, 300000, 900000, 1800000];
     els.collectionCadenceInput.value = state.settings.collectionMode === 'smart'
       ? 'smart'
       : state.settings.collectionMode === 'interval'
@@ -9711,6 +9712,10 @@ function syncSettingsForm() {
         : 'live';
     if (els.collectionCadenceNote) {
       els.collectionCadenceNote.hidden = els.collectionCadenceInput.value === 'live';
+    }
+    for (const input of els.collectionCadenceQuickOptions || []) {
+      input.checked = state.settings.collectionMode === 'interval'
+        && Number(state.settings.collectionIntervalMs) === Number(input.value);
     }
   }
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
@@ -13705,6 +13710,15 @@ els.collectionCadenceInput?.addEventListener('change', async () => {
         : Number(value)
   });
 });
+for (const input of els.collectionCadenceQuickOptions || []) {
+  input.addEventListener('change', async () => {
+    if (!input.checked) return;
+    await saveSettings({
+      collectionMode: 'interval',
+      collectionIntervalMs: Number(input.value)
+    });
+  });
+}
 els.sessionUsageArchiveInput?.addEventListener('change', async () => {
   await saveSettings({ sessionUsageArchiveEnabled: els.sessionUsageArchiveInput.checked });
 });
