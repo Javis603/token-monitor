@@ -61,12 +61,12 @@ test('Codex plan labels compact common enterprise identifiers and humanize fallb
   assert.equal(codexProviderForPlan('self_serve_business_usage_based').accountLabel, 'Business');
 });
 
-test('Claude plan labels preserve Max multiplier tiers only for Max subscriptions', async () => {
+test('Claude plan labels use current names for legacy Max tiers without relabeling Team', async () => {
   const max = await claudeProviderForCredentials({
     subscriptionType: 'max',
     rateLimitTier: 'default_claude_max_20x'
   });
-  assert.equal(max.accountLabel, 'Max 20x');
+  assert.equal(max.accountLabel, 'Ultra');
 
   const team = await claudeProviderForCredentials({
     subscriptionType: 'team',
@@ -79,7 +79,18 @@ test('Claude plan labels can fall back to rate limit tier when subscription type
   const provider = await claudeProviderForCredentials({
     rateLimitTier: 'default_claude_max_5x'
   });
-  assert.equal(provider.accountLabel, 'Max 5x');
+  assert.equal(provider.accountLabel, 'Max');
+});
+
+test('Claude plan labels accept current names and legacy subscription labels', async () => {
+  for (const [subscriptionType, accountLabel] of [
+    ['max', 'Max'], ['ultra', 'Ultra'], ['max_5x', 'Max'], ['max_20x', 'Ultra']
+  ]) {
+    const provider = await claudeProviderForCredentials({ subscriptionType });
+    assert.equal(provider.accountLabel, accountLabel);
+  }
+  const provider = await claudeProviderForCredentials({ rateLimitTier: 'default_claude_max_20x' });
+  assert.equal(provider.accountLabel, 'Ultra');
 });
 
 test('Antigravity plan labels compact Google AI plan names for the provider row', async () => {
