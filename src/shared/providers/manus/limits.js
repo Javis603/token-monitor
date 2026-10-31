@@ -5,7 +5,7 @@ const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { numberOrNull, toIso } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
-const { readManusDesktopSession } = require('./desktop');
+const { readManusDesktopSession, manusSessionClaims, SESSION_TOKEN_PATTERN } = require('./desktop');
 
 const MANUS_FETCH_TIMEOUT_MS = 12_000;
 const MANUS_API_ORIGIN = 'https://api.manus.im';
@@ -14,7 +14,26 @@ const MANUS_API_ORIGIN = 'https://api.manus.im';
 // read-only request against a signed-in account.
 const MANUS_CREDITS_PATH = '/user.v1.UserService/GetAvailableCredits';
 
-const CREDIT_FIELDS = ['totalCredits', 'freeCredits', 'refreshCredits', 'maxRefreshCredits'];
+const CREDIT_FIELDS = ['totalCredits', 'freeCredits', 'refreshCredits', 'maxRefreshCredits', 'proMonthlyCredits', 'periodicCredits'];
+
+// Accept a bare session or a copied Cookie header; never forward other cookies.
+function normalizeManusSessionToken(value) {
+  const raw = String(value || '').trim();
+  if (/[\u0000-\u001f\u007f]/u.test(raw)) return '';
+  const header = raw.replace(/^cookie\s*:\s*/iu, '');
+  const match = /(?:^|;)\s*session_id\s*=\s*([^;]+)/u.exec(header);
+  const token = match ? match[1].trim() : header;
+  return SESSION_TOKEN_PATTERN.test(token) ? token : '';
+}
+
+function manusSessionValue(env, options) {
+  return options.manusSessionToken
+    || env?.TOKEN_MONITOR_MANUS_SESSION_TOKEN || env?.MANUS_SESSION_TOKEN || env?.MANUS_COOKIE;
+}
+
+function manusSessionToken(env = process.env, options = {}) {
+  return normalizeManusSessionToken(manusSessionValue(env, options));
+}
 
 function manusCreditsUrl() {
   return `${MANUS_API_ORIGIN}${MANUS_CREDITS_PATH}`;
@@ -43,6 +62,22 @@ function parseManusCredits(body) {
   const interval = typeof body.refreshInterval === 'string' ? body.refreshInterval.trim().toLowerCase() : '';
 
   const windows = [];
+  const monthlyLimit = creditCount(body, 'proMonthlyCredits');
+  const monthlyRemaining = creditCount(body, 'periodicCredits');
+  if (monthlyLimit > 0) {
+    const remaining = Math.max(0, Math.min(monthlyRemaining, monthlyLimit));
+    const used = monthlyLimit - remaining;
+    windows.push({
+      kind: 'billing',
+      label: 'Monthly credits',
+      used,
+      limit: monthlyLimit,
+      remaining,
+      usedPercent: used / monthlyLimit * 100,
+      remainingPercent: remaining / monthlyLimit * 100,
+      resetsAt: null
+    });
+  }
   // The refreshing allowance is the one that resets, so it gets the meter.
   // Without a positive ceiling there is no allowance to measure.
   if (maxRefresh > 0) {
@@ -94,13 +129,27 @@ function statusForResponse(status) {
   return 'unavailable';
 }
 
-async function fetchManusLimits(_options = {}, deps = {}) {
+async function fetchManusLimits(options = {}, deps = {}) {
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const base = { provider: 'manus', source: 'api', updatedAt, windows: [] };
 
   let session;
   try {
-    session = (deps.readManusDesktopSession || readManusDesktopSession)(deps.manusDesktopOptions || {});
+    // An explicit session selects that account, including during a save probe.
+    // Do not silently validate a different desktop account if it is rejected.
+    const supplied = manusSessionValue(deps.env || process.env, options);
+    const token = normalizeManusSessionToken(supplied);
+    if (supplied && !token) return normalizeLimitProvider({ ...base, status: 'unauthorized' });
+    if (token) {
+      const claims = manusSessionClaims(token);
+      session = {
+        token,
+        userId: typeof claims.user_id === 'string' || typeof claims.user_id === 'number' ? String(claims.user_id) : '',
+        email: typeof claims.email === 'string' ? claims.email.trim() : ''
+      };
+    } else {
+      session = (deps.readManusDesktopSession || readManusDesktopSession)(deps.manusDesktopOptions || {});
+    }
   } catch (error) {
     return normalizeLimitProvider({ ...base, status: error?.status || 'unavailable' });
   }
@@ -147,5 +196,7 @@ module.exports = {
   MANUS_FETCH_TIMEOUT_MS,
   fetchManusLimits,
   manusCreditsUrl,
+  manusSessionToken,
+  normalizeManusSessionToken,
   parseManusCredits
 };

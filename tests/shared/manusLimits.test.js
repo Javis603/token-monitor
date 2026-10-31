@@ -72,17 +72,17 @@ function sessionStatus(options) {
   }
 }
 
-test('Manus cookie store is located only where the macOS app keeps it', () => {
+test('Manus desktop discovery preserves the macOS store and skips unsupported Linux', () => {
   assert.deepEqual(manusDesktopCookieCandidates({ platform: 'darwin', home: '/Users/fixture' }), [
     path.join('/Users/fixture', 'Library', 'Application Support', 'Manus', 'Cookies')
   ]);
-  assert.deepEqual(manusDesktopCookieCandidates({ platform: 'win32', home: 'C:\\Users\\fixture' }), []);
   assert.deepEqual(manusDesktopCookieCandidates({ platform: 'linux', home: '/home/fixture' }), []);
 });
 
 test('Manus desktop session reads one host-scoped cookie, read-only, and decodes its identity', () => {
   const calls = [];
   const session = readManusDesktopSession({
+    platform: 'darwin',
     candidates: [DB],
     fs: fakeFs({ [DB]: 'file' }),
     sqlite: fakeSqlite({ value: ` ${FIXTURE_TOKEN} `, encrypted_value: Buffer.alloc(0) }, calls)
@@ -95,7 +95,7 @@ test('Manus desktop session reads one host-scoped cookie, read-only, and decodes
 });
 
 test('Manus desktop session failures map to the status the panel should show', () => {
-  const base = { candidates: [DB], fs: fakeFs({ [DB]: 'file' }) };
+  const base = { platform: 'darwin', candidates: [DB], fs: fakeFs({ [DB]: 'file' }) };
   assert.equal(sessionStatus({ ...base, candidates: [] }), 'notConfigured');
   assert.equal(sessionStatus({ ...base, fs: fakeFs({}) , sqlite: fakeSqlite(null) }), 'notConfigured');
   assert.equal(sessionStatus({ ...base, fs: fakeFs({ [DB]: Object.assign(new Error('denied'), { code: 'EACCES' }) }), sqlite: fakeSqlite(null) }), 'unavailable');
@@ -220,4 +220,99 @@ test('Manus fetch maps session and HTTP failures without leaking the token', asy
     assert.equal(provider.status, status);
   }
   assert.equal(fetched, false, 'no request goes out without a session');
+});
+
+test('Manus manual session accepts only a JWT or its session_id cookie', async () => {
+  const { normalizeManusSessionToken } = require('../../src/shared/providers/manus/limits');
+  assert.equal(normalizeManusSessionToken(FIXTURE_TOKEN), FIXTURE_TOKEN);
+  assert.equal(normalizeManusSessionToken(`Cookie: other=ignored; session_id=${FIXTURE_TOKEN}; tracking=ignored`), FIXTURE_TOKEN);
+  for (const invalid of ['not-a-token', `session_id=${FIXTURE_TOKEN}\r\nX-Injected: 1`, 'other=value']) {
+    assert.equal(normalizeManusSessionToken(invalid), '');
+  }
+  let desktopReads = 0;
+  const provider = await fetchManusLimits({ manusSessionToken: `session_id=${FIXTURE_TOKEN}` }, {
+    env: {},
+    readManusDesktopSession: () => { desktopReads++; throw new Error('must not read desktop'); },
+    fetch: async (_url, init) => {
+      assert.equal(init.headers.Authorization, `Bearer ${FIXTURE_TOKEN}`);
+      return response(creditsFixture);
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(desktopReads, 0);
+  assert.equal(provider.accountKey, hashKey('manus', 'fixture-user'));
+  assert.equal(JSON.stringify(provider).includes(FIXTURE_TOKEN), false);
+});
+
+test('Manus environment sessions work without a desktop app on every platform', async () => {
+  for (const key of ['TOKEN_MONITOR_MANUS_SESSION_TOKEN', 'MANUS_SESSION_TOKEN', 'MANUS_COOKIE']) {
+    const provider = await fetchManusLimits({}, {
+      env: { [key]: `session_id=${FIXTURE_TOKEN}` },
+      readManusDesktopSession: () => { throw new Error('no desktop app'); },
+      fetch: async () => response(creditsFixture)
+    });
+    assert.equal(provider.status, 'ok', key);
+  }
+});
+
+test('Manus monthly credits have a separate meter without an invented renewal date', () => {
+  const { windows } = parseManusCredits({ ...creditsFixture, proMonthlyCredits: 1000, periodicCredits: 650 });
+  const monthly = windows.find((window) => window.label === 'Monthly credits');
+  assert.equal(monthly.limit, 1000);
+  assert.equal(monthly.used, 350);
+  assert.equal(monthly.remaining, 650);
+  assert.equal(monthly.usedPercent, 35);
+  assert.equal(monthly.resetsAt, null);
+  assert.equal(windows.find((window) => window.metric === 'credits').remaining, creditsFixture.totalCredits);
+  assert.equal(parseManusCredits({ proMonthlyCredits: 1000 }).windows[0].remaining, 0);
+  assert.throws(() => parseManusCredits({ proMonthlyCredits: 'invalid' }), /not a number/);
+});
+
+test('Manus Windows discovery includes Store redirection and the regular desktop profile', () => {
+  const candidates = manusDesktopCookieCandidates({ platform: 'win32', home: '/fixture/home', env: { APPDATA: '/fixture/roaming', LOCALAPPDATA: '/fixture/local' } });
+  assert.ok(candidates.includes(path.join('/fixture/local', 'Packages', 'ManusAI.Manus_vajzd2mq3s8wj', 'LocalCache', 'Roaming', 'Manus', 'Network', 'Cookies')));
+  assert.ok(candidates.includes(path.join('/fixture/roaming', 'Manus', 'Network', 'Cookies')));
+});
+
+
+test('Manus Windows reads committed WAL cookies from a private snapshot without changing the source', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const { DatabaseSync } = require('node:sqlite');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-manus-test-'));
+  const dbPath = path.join(root, 'Cookies');
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec('PRAGMA journal_mode=WAL; CREATE TABLE cookies (host_key TEXT, name TEXT, value TEXT, encrypted_value BLOB)');
+    db.prepare('INSERT INTO cookies VALUES (?, ?, ?, ?)').run(MANUS_SESSION_COOKIE_HOST, MANUS_SESSION_COOKIE_NAME, FIXTURE_TOKEN, Buffer.alloc(0));
+    const original = fs.readFileSync(dbPath);
+    const wal = fs.readFileSync(`${dbPath}-wal`);
+    const session = readManusDesktopSession({ platform: 'win32', candidates: [dbPath] });
+    assert.equal(session.token, FIXTURE_TOKEN);
+    assert.deepEqual(fs.readFileSync(dbPath), original);
+    assert.deepEqual(fs.readFileSync(`${dbPath}-wal`), wal);
+  } finally {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Manus malformed explicit sessions never switch to the desktop account', async () => {
+  for (const [options, env] of [
+    [{ manusSessionToken: 'invalid-manual-token' }, {}],
+    [{}, { TOKEN_MONITOR_MANUS_SESSION_TOKEN: 'invalid-environment-token' }],
+    [{}, { MANUS_SESSION_TOKEN: 'invalid-environment-token' }],
+    [{}, { MANUS_COOKIE: 'other=value' }]
+  ]) {
+    let desktopReads = 0;
+    let requests = 0;
+    const provider = await fetchManusLimits(options, {
+      env,
+      readManusDesktopSession: () => { desktopReads++; return { token: FIXTURE_TOKEN, userId: 'different-account', email: '' }; },
+      fetch: async () => { requests++; return response(creditsFixture); }
+    });
+    assert.equal(provider.status, 'unauthorized');
+    assert.equal(desktopReads, 0);
+    assert.equal(requests, 0);
+  }
 });

@@ -426,6 +426,26 @@ test('Manus daily refresh credits and credits balance render in both display mod
   assert.equal(JSON.stringify(provider), before);
 });
 
+test('Manus monthly, periodic refresh and balance rows remain independently visible', () => {
+  const { windows } = parseManusCredits({ ...manusCreditsFixture, refreshInterval: 'weekly', proMonthlyCredits: 1000, periodicCredits: 650 });
+  const provider = normalizeLimitProvider({ provider: 'manus', status: 'ok', windows });
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#429DFA');
+    assert.equal(card.children.length, 3);
+    assert.match(card.children[0].text, /Monthly credits/);
+    assert.match(card.children[0].text, showLimitUsed ? /35% used/ : /65% left/);
+    assert.equal(Boolean(card.children[0].find('limit-reset')?.text), false);
+    assert.match(card.children[1].text, /Refresh credits/);
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 3);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { manus: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#429DFA').children.length, 2);
+    }
+  }
+});
+
 test('MiniMax API balances reach the shared Limits and dock renderer in both currencies', async () => {
   for (const [region, currency, symbol] of [['cn', 'CNY', '¥'], ['intl', 'USD', '$']]) {
     for (const amount of [98.25, 0, -1.5]) {

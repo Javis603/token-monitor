@@ -53,7 +53,7 @@
     trae: { api: 'Web' },
     alibaba: { web: 'Web' },
     stepfun: { web: 'Web' },
-    manus: { api: 'Desktop app' },
+    manus: { api: 'Session' },
     thirdparty: { api: 'API' }
   };
 
@@ -95,7 +95,7 @@
     alibaba: ['Token Plan', 'Web'],
     stepfun: ['Coding/Token Plan', 'Web'],
     notion: ['Web', 'Manual'],
-    manus: ['Auto', 'Desktop app'],
+    manus: ['Auto', 'Desktop app', 'Manual'],
     thirdparty: ['Relay', 'API']
   };
 

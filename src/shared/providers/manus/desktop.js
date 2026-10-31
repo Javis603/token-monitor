@@ -6,9 +6,8 @@ const path = require('node:path');
 
 const { errorWithStatus } = require('../../limits/providerHelpers');
 
-// Manus Studio (`im.manus.desktop`) keeps its Chromium profile in the `Manus`
-// userData directory. Only the macOS store has been observed; other platforms
-// have no verified location, so they report notConfigured rather than guess.
+// Manus Studio uses the Manus userData directory. The Windows Store build
+// redirects appData to its package LocalCache; its Chromium store is in Network.
 const MANUS_COOKIE_FILE = 'Cookies';
 
 // The app's API session lives in one host-only cookie on the API host. Reading
@@ -28,6 +27,16 @@ function manusDesktopCookieCandidates(options = {}) {
   if (platform === 'darwin') {
     return [path.join(home, 'Library', 'Application Support', 'Manus', MANUS_COOKIE_FILE)];
   }
+  if (platform === 'win32') {
+    const env = options.env || process.env;
+    const appData = String(env.APPDATA || '').trim() || path.join(home, 'AppData', 'Roaming');
+    const localData = String(env.LOCALAPPDATA || '').trim() || path.join(home, 'AppData', 'Local');
+    return [
+      path.join(localData, 'Packages', 'ManusAI.Manus_vajzd2mq3s8wj', 'LocalCache', 'Roaming', 'Manus', 'Network', MANUS_COOKIE_FILE),
+      path.join(appData, 'Manus', 'Network', MANUS_COOKIE_FILE)
+    ];
+  }
+  // Manus has no official Linux desktop client. Manual web sessions still work.
   return [];
 }
 
@@ -39,6 +48,23 @@ function readSessionCookieRow(dbPath, sqlite) {
       .get(MANUS_SESSION_COOKIE_HOST, MANUS_SESSION_COOKIE_NAME);
   } finally {
     database.close();
+  }
+}
+
+// Windows Chromium holds its cookie database open exclusively. Read a private
+// snapshot (including committed WAL data) instead; never open or change the
+// source database's SQLite sidecars. A racing/unreadable copy fails unavailable.
+function readWindowsSessionCookieRow(dbPath, sqlite, fsApi) {
+  const scratch = fsApi.mkdtempSync(path.join(os.tmpdir(), 'tm-manus-cookies-'));
+  try {
+    const copy = path.join(scratch, MANUS_COOKIE_FILE);
+    fsApi.copyFileSync(dbPath, copy);
+    try { fsApi.copyFileSync(`${dbPath}-wal`, `${copy}-wal`); } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    return readSessionCookieRow(copy, sqlite);
+  } finally {
+    fsApi.rmSync(scratch, { recursive: true, force: true });
   }
 }
 
@@ -88,7 +114,9 @@ function readManusDesktopSession(options = {}) {
 
   let row;
   try {
-    row = readSessionCookieRow(dbPath, sqlite);
+    row = (options.platform || process.platform) === 'win32'
+      ? readWindowsSessionCookieRow(dbPath, sqlite, fsApi)
+      : readSessionCookieRow(dbPath, sqlite);
   } catch (_) {
     throw errorWithStatus('unavailable', 'Manus cookie store could not be read');
   }
@@ -113,6 +141,7 @@ function readManusDesktopSession(options = {}) {
 }
 
 module.exports = {
+  SESSION_TOKEN_PATTERN,
   MANUS_SESSION_COOKIE_HOST,
   MANUS_SESSION_COOKIE_NAME,
   manusDesktopCookieCandidates,

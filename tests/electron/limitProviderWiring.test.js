@@ -101,6 +101,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
     stepfunToken: ['providers', 'stepfun', 'token'],
     notionCookie: ['providers', 'notion', 'cookie'],
+    manusSessionToken: ['providers', 'manus', 'sessionToken'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
     zaiApiKey: ['providers', 'zai', 'apiKey'],
     zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
@@ -166,6 +167,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     typesafe: ['typesafeCookie'],
     stepfun: ['stepfunToken'],
     notion: ['notionCookie', 'notionWorkspaceId'],
+    manus: ['manusSessionToken'],
     openrouter: ['openrouterProfiles'],
     minimax: ['minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
     volcengine: [
@@ -281,7 +283,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId'
+    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken'
   ].sort());
   for (const key of normalizedKeys) {
     const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
@@ -516,12 +518,12 @@ test('static account statuses refresh in both paths while descriptor panels use 
 test('every provider with an account panel has its group and status markup in index.html', () => {
   const nodes = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_NODES = {', '\nconst LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
   const groupIds = Object.fromEntries(Object.entries(nodes).map(([provider, node]) => [provider, node.group]));
-  // Not every catalog provider has a hand-written panel: grok, muse, kiro and manus
+  // Not every catalog provider has a hand-written panel: grok, muse and kiro
   // take their credentials from the tool itself, and the account-form providers
   // get theirs generated. The map is the list of those whose markup is static.
   assert.deepEqual(
     LIMIT_PROVIDER_IDS.filter((provider) => !groupIds[provider]).sort(),
-    ['grok', 'muse', 'kiro', 'manus', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
+    ['grok', 'muse', 'kiro', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
   );
   for (const [provider, id] of Object.entries(groupIds)) {
     assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);
