@@ -27,6 +27,7 @@ Credits are quota units, not tokens. Never copy credit deltas into `qodercn` usa
 | Current Qoder CN token usage | Claude-compatible JSONL transcripts under the configured `projects` directory |
 | Legacy Qoder CN token usage | `SharedClientCache/cache/db/local.db` under the platform QoderCN app-data root |
 | Credit quota and plan | Qoder's global or CN web API, authenticated with the separately configured `qoder` cookie |
+| Shared organization credits | `/api/v1/me/organization-shared-usages/big_model_credits` on the same origin and cookie; only `shared_quota` is this member's cap, while `organization_pool` is the whole team's pool |
 
 Token Monitor's tokscale fork parses Qoder CN (`crates/tokscale-core/src/token_monitor/qodercn.rs` in Javis603/tokscale); upstream tokscale has no `qodercn` client, so the catalog marks it `forkOnly`. The parser reads both usage layouts because an upgraded machine can retain historical SQLite data while new sessions are written to JSONL. JSONL token semantics differ from Anthropic's envelope: `input_tokens` already includes `cache_read_input_tokens`, so the parser subtracts the cached subset before emitting uncached input. Model display names and routing tiers (`auto`, `ultimate`, …) are normalized there too; routing tiers are never priced from the model catalog.
 
@@ -53,6 +54,7 @@ Local token usage needs no credential and stays on disk. The `qoder` limits prov
 ## Invariants and known gaps
 
 - Token history and credit quota remain separate units and surfaces.
+- A member's shared add-on credits come from the separate organization-shared-usages endpoint; never add `organization_pool`, which belongs to the whole team. Personal and shared allowances share one billing window, and when the personal allowance is zero the reset comes from the plan's `next_refresh_date` rather than the expired personal `next_reset_at`.
 - JSONL zero-token rows are not measured zero usage; they are uncountable with the currently persisted data.
 - JSONL reads are bounded and fail closed after source discovery begins.
 - The explicit Token Monitor projects override takes precedence over Qoder's config-root override.
