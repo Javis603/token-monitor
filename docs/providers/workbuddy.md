@@ -33,6 +33,8 @@ On-demand Session Detail uses the shared streaming line reader and CodeBuddy par
 
 The shared metadata scanner still skips records above 64 KiB, so oversized user or assistant records can leave turn status stale. This metadata limit is separate from Session Detail's record bound. The desktop credential-encryption boundary described below concerns quota access; it does not prevent reading local session transcripts.
 
+WorkBuddy rows get their tok/s reading from the shared CodeBuddy throughput pass: the reader sums each transcript's `turn-metrics` records into the raw counters a row divides at display time, exactly as [described for CodeBuddy](codebuddy.md#turn-throughput-toks). Nothing here is WorkBuddy-specific — it follows from sharing the transcript family.
+
 ## Limits and quota
 
 `fetchWorkbuddyLimits()` in `src/shared/providers/workbuddy/limits.js` owns the request and the response mapping. The existing CN discovery/headless billing paths post to `https://copilot.tencent.com` — `/v2/billing/meter/get-user-resource` for personal accounts and `/v2/billing/meter/get-enterprise-user-usage` when an enterprise id is present. The personal request mirrors the official client's package selection (`ProductCode: p_tcaca`, `Status: [0, 3]`) but aggregates only `Status 0` rows, because the `Status 3` history packages are not part of the spendable balance.

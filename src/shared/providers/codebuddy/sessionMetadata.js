@@ -31,6 +31,14 @@ function emptyState() {
     title: '',
     status: '',
     userSinceStop: false,
+    // Turn throughput. The client writes one `turn-metrics` record per turn,
+    // carrying that turn's wall-clock `durationMs` and the `tokenDelta` it
+    // processed. tokscale reports no `performance` block for this client, so
+    // these sums are the only duration evidence a transcript holds — kept as
+    // the same raw sums every other client's entries carry, so a row divides
+    // them into tok/s at display time like the rest.
+    timedDurationMs: 0,
+    timedTokens: 0,
     trailing: Buffer.alloc(0),
     droppingLongLine: false
   };
@@ -43,6 +51,20 @@ function applyLine(state, line) {
     entry = JSON.parse(line.toString('utf8'));
   } catch (_) {
     return; // a torn trailing write, or a record this reader has no use for
+  }
+  if (entry?.type === 'turn-metrics') {
+    // Only a stated, positive duration is evidence, and the turn's tokens ride
+    // with it: an unmeasured turn processed tokens on no clock, and counting
+    // them would inflate the numerator of a rate whose denominator ignores
+    // them. 0 is the client's "not measured"; a malformed record moves
+    // nothing.
+    const durationMs = Number(entry.durationMs);
+    if (Number.isFinite(durationMs) && durationMs > 0) {
+      state.timedDurationMs += durationMs;
+      const tokenDelta = Number(entry.tokenDelta);
+      if (Number.isFinite(tokenDelta) && tokenDelta > 0) state.timedTokens += tokenDelta;
+    }
+    return;
   }
   if (entry?.type === 'custom-title' || entry?.type === 'ai-title') {
     // WorkBuddy lets the user rename a conversation (`custom-title`), which
@@ -138,7 +160,7 @@ function turnEndedOf(state) {
 
 function readSessionMetadata(filePath, deps = {}) {
   const file = String(filePath || '');
-  if (!file) return { title: '', turnEnded: undefined };
+  if (!file) return { title: '', turnEnded: undefined, timedDurationMs: 0, timedTokens: 0 };
   const cache = deps.cache || metadataCache;
   const fsApi = deps.fs || fs;
   const cached = cache.get(file);
@@ -152,16 +174,31 @@ function readSessionMetadata(filePath, deps = {}) {
       && cached.size === stat.size
       && cached.mtimeMs === stat.mtimeMs
     ) {
-      return { title: cached.title, turnEnded: cached.turnEnded };
+      return {
+        title: cached.title,
+        turnEnded: cached.turnEnded,
+        timedDurationMs: cached.timedDurationMs || 0,
+        timedTokens: cached.timedTokens || 0
+      };
     }
     const state = emptyState();
     fd = fsApi.openSync(file, 'r');
     scanRange(fd, stat.size, state, fsApi);
-    const metadata = { title: state.customTitle || state.title, turnEnded: turnEndedOf(state) };
+    const metadata = {
+      title: state.customTitle || state.title,
+      turnEnded: turnEndedOf(state),
+      timedDurationMs: state.timedDurationMs,
+      timedTokens: state.timedTokens
+    };
     cache.set(file, { ...metadata, identity, size: stat.size, mtimeMs: stat.mtimeMs });
     return metadata;
   } catch (_) {
-    return { title: cached?.title || '', turnEnded: cached?.turnEnded };
+    return {
+      title: cached?.title || '',
+      turnEnded: cached?.turnEnded,
+      timedDurationMs: cached?.timedDurationMs || 0,
+      timedTokens: cached?.timedTokens || 0
+    };
   } finally {
     if (fd !== undefined) {
       try { fsApi.closeSync(fd); } catch (_) {}
@@ -196,7 +233,13 @@ function createProjectsResolver(projectsRoots, { extension = false } = {}) {
       result.set(sessionId, {
         ...meta,
         ...(local.title ? { title: local.title } : {}),
-        ...(local.turnEnded === undefined ? {} : { turnEnded: local.turnEnded })
+        ...(local.turnEnded === undefined ? {} : { turnEnded: local.turnEnded }),
+        // Only a transcript that actually measured turns carries throughput;
+        // a session with no `turn-metrics` record states nothing, and an
+        // explicit 0 must not be forwarded as a measured zero.
+        ...(local.timedDurationMs > 0
+          ? { timedDurationMs: local.timedDurationMs, timedTokens: local.timedTokens || 0 }
+          : {})
       });
     }
     if (extension) applyExtensionMetadata(sessionIds, context, result);

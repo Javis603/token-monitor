@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { applySessionMetadata, projectIdentity } = require('../../src/shared/sessionMetadata');
+const { mergePeriods } = require('../../src/shared/usage');
 const { readSessionMetadata } = require('../../src/shared/providers/codebuddy/sessionMetadata');
 
 const tmpDirs = [];
@@ -27,6 +28,7 @@ function fixture(lines) {
 }
 
 const title = (value) => JSON.stringify({ type: 'ai-title', aiTitle: value });
+const turnMetrics = (durationMs, tokenDelta) => JSON.stringify({ type: 'turn-metrics', durationMs, tokenDelta });
 const assistant = (status, messageId = `msg-${status}`) => JSON.stringify({
   type: 'message',
   role: 'assistant',
@@ -144,6 +146,34 @@ test('drops an oversized record instead of retaining it', () => {
   assert.equal(readSessionMetadata(promptFile, { cache: new Map() }).turnEnded, true);
 });
 
+test('sums turn-metrics into the raw throughput counters', () => {
+  // tokscale reports no `performance` block for this client, so the per-turn
+  // `durationMs`/`tokenDelta` records are the only duration evidence a
+  // transcript holds — kept as the same raw sums the scan's entries carry for
+  // every other client, so a row divides them into tok/s at display time.
+  const file = fixture([turnMetrics(48945, 226885), assistant('completed'), turnMetrics(31733, 148816)]);
+  const metadata = readSessionMetadata(file, { cache: new Map() });
+  assert.equal(metadata.timedDurationMs, 80678);
+  assert.equal(metadata.timedTokens, 375701);
+
+  // A transcript that never measured a turn states nothing; an explicit 0 is
+  // not forwarded as a measured zero.
+  const silent = fixture([assistant('completed'), title('named')]);
+  assert.equal(readSessionMetadata(silent, { cache: new Map() }).timedDurationMs, 0);
+
+  // Malformed or non-positive figures never move a sum a row divides into a
+  // headline tok/s.
+  const malformed = fixture([
+    turnMetrics(0, 5000),
+    turnMetrics(-100, 5000),
+    turnMetrics(1200, 'oops'),
+    turnMetrics(800, 4000)
+  ]);
+  const read = readSessionMetadata(malformed, { cache: new Map() });
+  assert.equal(read.timedDurationMs, 2000);
+  assert.equal(read.timedTokens, 4000);
+});
+
 test('caches by file identity, size and mtime, and refreshes on append', () => {
   const cache = new Map();
   const file = fixture([title('before')]);
@@ -155,10 +185,14 @@ test('caches by file identity, size and mtime, and refreshes on append', () => {
   assert.equal(readSessionMetadata(file, { cache }).title, 'before');
 
   // A transcript being written right now is re-read in full rather than resumed.
-  fs.appendFileSync(file, `${title('after')}\n${assistant('incomplete')}\n`);
+  fs.appendFileSync(file, `${title('after')}\n${assistant('incomplete')}\n${turnMetrics(2500, 9000)}\n`);
   const refreshed = readSessionMetadata(file, { cache });
   assert.equal(refreshed.title, 'after');
   assert.equal(refreshed.turnEnded, false);
+  // The new turn's duration rides the same refresh — a live session's rate
+  // follows the turn it is in the middle of.
+  assert.equal(refreshed.timedDurationMs, 2500);
+  assert.equal(refreshed.timedTokens, 9000);
 });
 
 test('decorates a session row through the shared metadata pass', () => {
@@ -192,4 +226,144 @@ test('decorates a session row through the shared metadata pass', () => {
   const identity = projectIdentity('/Users/remix');
   assert.equal(session.projectId, identity.projectId);
   assert.equal(session.projectLabel, identity.projectLabel);
+});
+
+test('fills the throughput counters the scan left empty', () => {
+  // tokscale reports no `performance` block for this client, so the row's
+  // counters arrive at 0 and the session would never show a tok/s reading.
+  // The transcript's per-turn durations fill exactly that gap, as the same
+  // raw sums every other client's entries carry.
+  const home = tmpDir('codebuddy-throughput-');
+  const sessionId = '01a1399e-7e04-7ae1-9e7e-6e922a4e73d3';
+  const dir = path.join(home, '.codebuddy', 'projects', 'demo');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${sessionId}.jsonl`),
+    `${turnMetrics(48945, 226885)}\n${turnMetrics(31733, 148816)}\n${assistant('completed')}\n`
+  );
+
+  const periods = {
+    today: {
+      timedDurationMs: 0,
+      timedTokens: 0,
+      timedOutputTokens: 0,
+      sessions: {
+        [`codebuddy:${sessionId}`]: {
+          client: 'codebuddy',
+          sessionId,
+          // The scan's own output total: the gate counts it whole against the
+          // measured turns, on the same scale as every other client's row.
+          outputTokens: 800,
+          timedDurationMs: 0,
+          timedTokens: 0,
+          timedOutputTokens: 0
+        }
+      }
+    },
+    month: { sessions: {} },
+    allTime: { sessions: {} }
+  };
+  const deps = { codebuddyMetadataDeps: { cache: new Map() } };
+  applySessionMetadata(periods, home, deps);
+
+  const session = periods.today.sessions[`codebuddy:${sessionId}`];
+  assert.equal(session.timedDurationMs, 80678);
+  // The session carries the two counters a row divides at display time;
+  // `timedTokens` is a period-level total only, so it lands on the period.
+  assert.equal(session.timedOutputTokens, 800);
+  // The row divides these into its own reading: ~10 output tokens per second
+  // of measured turn time, the scale a real session shows.
+  assert.equal(Math.round(session.timedOutputTokens * 1000 / session.timedDurationMs), 10);
+
+  // The period totals move with the session, so the footer's average and live
+  // readings cover this client too.
+  assert.equal(periods.today.timedDurationMs, 80678);
+  assert.equal(periods.today.timedTokens, 375701);
+  assert.equal(periods.today.timedOutputTokens, 800);
+
+  // One tick decorates `today` more than once (progress emissions, then the
+  // final pass); the guard skips a session the first pass filled, so the
+  // totals move exactly once.
+  applySessionMetadata(periods, home, deps);
+  assert.equal(periods.today.timedDurationMs, 80678);
+  assert.equal(periods.today.timedTokens, 375701);
+  assert.equal(periods.today.timedOutputTokens, 800);
+});
+
+test('keeps the filled counters through the merge and normalize paths', () => {
+  // A decorated session is rebuilt on its way out of the collector
+  // (`mergeSession` off `emptySession`, then `normalizeSession`), and only
+  // the fields those carry survive. The two display counters are exactly
+  // what they carry — `timedTokens` stays period-level on purpose.
+  const home = tmpDir('codebuddy-merge-throughput-');
+  const sessionId = '01a1399e-7e04-7ae1-9e7e-6e922a4e73d3';
+  const dir = path.join(home, '.codebuddy', 'projects', 'demo');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${sessionId}.jsonl`),
+    `${turnMetrics(48945, 226885)}\n${turnMetrics(31733, 148816)}\n${assistant('completed')}\n`
+  );
+
+  const periods = {
+    today: {
+      timedDurationMs: 0,
+      timedTokens: 0,
+      timedOutputTokens: 0,
+      sessions: {
+        [`codebuddy:${sessionId}`]: {
+          client: 'codebuddy',
+          sessionId,
+          outputTokens: 800,
+          timedDurationMs: 0,
+          timedOutputTokens: 0
+        }
+      }
+    },
+    month: { sessions: {} },
+    allTime: { sessions: {} }
+  };
+  applySessionMetadata(periods, home, { codebuddyMetadataDeps: { cache: new Map() } });
+
+  // The merge path the collector runs on its way out rebuilds every session
+  // off `emptySession`, so only the fields that path carries survive — and
+  // the two display counters are exactly what it carries.
+  const merged = mergePeriods(periods.today);
+  const rebuilt = merged.sessions[`codebuddy:${sessionId}`];
+  assert.equal(rebuilt.timedDurationMs, 80678);
+  assert.equal(rebuilt.timedOutputTokens, 800);
+});
+
+test('leaves throughput alone when the scan already measured the session', () => {
+  const home = tmpDir('codebuddy-scan-throughput-');
+  const sessionId = '01a13a0f-0000-7000-8000-000000000001';
+  const dir = path.join(home, '.codebuddy', 'projects', 'demo');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), `${turnMetrics(48945, 226885)}\n`);
+
+  const periods = {
+    today: {
+      timedDurationMs: 1234,
+      timedTokens: 5678,
+      timedOutputTokens: 90,
+      sessions: {
+        [`codebuddy:${sessionId}`]: {
+          client: 'codebuddy',
+          sessionId,
+          outputTokens: 84723,
+          timedDurationMs: 1234,
+          timedTokens: 5678,
+          timedOutputTokens: 90
+        }
+      }
+    },
+    month: { sessions: {} },
+    allTime: { sessions: {} }
+  };
+  applySessionMetadata(periods, home, { codebuddyMetadataDeps: { cache: new Map() } });
+
+  const session = periods.today.sessions[`codebuddy:${sessionId}`];
+  assert.equal(session.timedDurationMs, 1234);
+  assert.equal(session.timedTokens, 5678);
+  assert.equal(session.timedOutputTokens, 90);
+  assert.equal(periods.today.timedDurationMs, 1234);
 });

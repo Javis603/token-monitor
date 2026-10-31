@@ -546,6 +546,29 @@ function applySessionMetadata(periods, home, deps = {}) {
         session.contextTokens = 0;
         session.contextWindow = 0;
       }
+      // Throughput counters. tokscale reports no `performance` block for the
+      // buddy clients, so their rows arrive without any and never show a tok/s
+      // reading; their transcripts do record per-turn durations, which the
+      // provider readers sum into the same raw sums every other client's
+      // entries carry. A scan that measured the session itself always wins —
+      // this fills a gap rather than second-guessing the binary.
+      //
+      // The session carries the two counters a row divides at display time;
+      // `timedTokens` is a period-level total only (it feeds the per-minute
+      // reading), so it is summed straight onto the period here. The guard
+      // doubles as the idempotence lock: one tick decorates `today` more than
+      // once (progress emissions, then the final pass), and a session the
+      // first pass filled is skipped by every later one, so the period totals
+      // move exactly once per session.
+      if (meta.timedDurationMs > 0 && !(Number(session.timedDurationMs) > 0)) {
+        session.timedDurationMs = Math.max(0, Math.round(Number(meta.timedDurationMs) || 0));
+        // The gate every entry applies: a duration counts its entry's output
+        // whole, so numerator and denominator describe the same turns.
+        session.timedOutputTokens = Math.max(0, Math.round(Number(session.outputTokens) || 0));
+        period.timedDurationMs += session.timedDurationMs;
+        period.timedOutputTokens += session.timedOutputTokens;
+        period.timedTokens += Math.max(0, Math.round(Number(meta.timedTokens) || 0));
+      }
     }
   }
   return deps.deferT3SessionParents || applyT3SessionParents(periods, home, deps);
