@@ -406,6 +406,10 @@ npm run pack         # インストーラーなしのアプリディレクトリ
 
 ランタイムとパッケージングのスクリプトは、vendored ビルドがある各対象で pinned tokscale binary を明示的に確保します。それ以外のソースプラットフォームでは npm binary を使い、対応していない client をフィルタリングします。`npm install`、lint、テストではダウンロードしません。
 
+### iOS コンパニオンアプリ（実験版）
+
+ネイティブ iOS アプリから Hub に接続し、使用量、AI 制限、ウィジェット、ライブアクティビティを確認できます。現在はソースからのビルドが必要で、App Store や TestFlight のダウンロードはまだ案内していません。[iOS の設定・スクリーンショット・CI ガイド](apps/ios/README.md)と[配布準備](apps/ios/RELEASING.md)をご覧ください。
+
 ## 動作の仕組み
 
 ```text

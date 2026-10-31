@@ -406,6 +406,10 @@ npm run pack         # 未打包的 app 目录（无安装包），方便本机�
 
 运行和打包脚本会在每个有 vendored 构建的目标上明确确保使用 pinned tokscale binary。其他源码平台会保留 npm binary，并过滤它不支持的 clients；`npm install`、lint 和测试不会下载它。
 
+### iOS 配套 App（实验版）
+
+原生 iOS App 可连接你的 Hub，查看用量、AI 额度、小组件与实时活动。目前需要从源码构建，尚未提供 App Store 或 TestFlight 下载。请参阅 [iOS 设置、截图与 CI 指南](apps/ios/README.md)和[发布准备](apps/ios/RELEASING.md)。
+
 ## 工作原理
 
 ```text
