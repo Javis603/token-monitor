@@ -569,8 +569,11 @@
           if (liveRange && Date.parse(liveRange[1]) < Date.parse(liveRange[2])) {
             range = `day:${new Date(liveRange[1]).toISOString()}:${new Date(liveRange[2]).toISOString()}`;
           } else {
-            const key = `${snapshot.periodWindows?.timeZone}:${row.date}`;
-            if (!dayRanges.has(key)) dayRanges.set(key, dayRangeInTimeZone(row.date, snapshot.periodWindows?.timeZone));
+            // Retained History can predate a live timezone change.
+            const timeZone = usesToday ? snapshot.periodWindows?.timeZone
+              : scope.range.startsWith('history:') ? scope.range.slice('history:'.length) : '';
+            const key = `${timeZone}:${row.date}`;
+            if (!dayRanges.has(key)) dayRanges.set(key, dayRangeInTimeZone(row.date, timeZone));
             range = dayRanges.get(key);
           }
         }

@@ -938,14 +938,20 @@ async function collectUsageOnce(options) {
   let cursorOwnership = null;
   let captureCursorPartitions = true;
   const cursorPartitions = {};
+  let cursorTodayRequested = false;
   const runTokscaleFn = async (input) => {
+    const name = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
+    if (captureCursorPartitions) {
+      // A replacement scan must never inherit evidence from its rejected input.
+      delete cursorPartitions[name];
+      if (name === 'today' && normalizeClientsCsv(input.clients).split(',').includes('cursor')) cursorTodayRequested = true;
+    }
     let cursorScanned = false;
     const json = await runTokscaleScan({ ...input,
       onScanComplete: clients => { cursorScanned = clients.includes('cursor'); }
     });
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
     if (captureCursorPartitions && cursorScanned && Array.isArray(json?.entries)) {
-      const name = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
       const bundle = extractUsageBundleFromTokscale(json);
       if (!json.entries.length || !bundle.byClient[UNATTRIBUTED_USAGE_CLIENT]) {
         cursorPartitions[name] = bundle.byClient.cursor || emptyPeriod();
@@ -1328,7 +1334,8 @@ async function collectUsageOnce(options) {
     const scannedPeriods = new Set(Object.keys(cursorPartitions));
     const observedAt = {};
     for (const name of Object.keys(cursorPartitions)) observedAt[name] = cursorAfter.observedAt;
-    if (anchorUsed && anchorToday?.accountKey === cursorAfter.accountKey) {
+    if (anchorUsed && anchorToday?.accountKey === cursorAfter.accountKey
+      && (cursorPartitions.today || !cursorTodayRequested)) {
       // Another client's targeted tick did not scan Cursor. Never share mutable
       // counter containers with the anchor or promote its observation time.
       if (!cursorPartitions.today) {

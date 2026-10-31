@@ -364,9 +364,9 @@ test('fixed ranges admit a missing account day as zero while retaining unrelated
   }
   a.history = history([bucket(yesterday, 105, 20), bucket(windows.today.key, 1)]);
   b.history = history([bucket(windows.today.key, 1)]);
-  a.history.cursorAccountUsage = { ...a.today.cursorAccountUsage,
+  a.history.cursorAccountUsage = { ...a.today.cursorAccountUsage, range: `history:${windows.timeZone}`,
     usage: history([bucket(yesterday, 100), bucket(windows.today.key, 1)]) };
-  b.history.cursorAccountUsage = { ...b.today.cursorAccountUsage,
+  b.history.cursorAccountUsage = { ...b.today.cursorAccountUsage, range: `history:${windows.timeZone}`,
     usage: history([bucket(windows.today.key, 1)]) };
   for (const selection of ['week', 'last7', 'last30']) {
     const result = ranges.fixedPeriodSnapshotFromDevices(selection, [a, b], { now: clock, historyAvailable: true });
@@ -397,9 +397,9 @@ test('fixed ranges admit a complete all-zero source but never treat missing evid
   }
   // Retain five unowned Cursor tokens plus twenty from Codex.
   a.history = history(106, 20);
-  a.history.cursorAccountUsage = { ...record('A', 101, 2000).today.cursorAccountUsage, usage: history(101) };
+  a.history.cursorAccountUsage = { ...record('A', 101, 2000).today.cursorAccountUsage, range: `history:${windows.timeZone}`, usage: history(101) };
   b.history = history(0);
-  b.history.cursorAccountUsage = { ...record('B', 0, 1000).today.cursorAccountUsage, usage: history(0) };
+  b.history.cursorAccountUsage = { ...record('B', 0, 1000).today.cursorAccountUsage, range: `history:${windows.timeZone}`, usage: history(0) };
   for (const selection of ['week', 'last7', 'last30']) {
     for (const sources of [[a, b], [b, a]]) {
       const result = ranges.fixedPeriodSnapshotFromDevices(selection, sources, { now: clock, historyAvailable: true });
@@ -577,5 +577,64 @@ test('collector uploads a complete owned empty graph to replace Hub History, but
     assert.equal(aggregateHistory([previous, other]).summary.totalTokens, 0);
     hub.ingest(buildSyncPayload(empty));
     assert.equal(hub.getHistory().summary.totalTokens, 0);
+  }
+});
+
+test('retained History uses its recorded timezone after a history-less device timezone change', () => {
+  const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+  const date = '2026-10-29';
+  const original = calendarRecord('A', 'Europe/London', date);
+  const moved = mergeSyncDeviceRecord(original, { deviceId: 'A', updatedAt: new Date().toISOString(), historyAvailable: true,
+    periodWindows: { timeZone: 'Asia/Tokyo', today: { key: '2026-10-30', endsAt: '2026-10-30T15:00:00.000Z' } }
+  });
+  assert.equal(moved.history.cursorAccountUsage.range, 'history:Europe/London');
+  for (const [timeZone, expected] of [['Asia/Tokyo', 2000], ['Africa/Abidjan', 1000]]) {
+    const other = calendarRecord('B', timeZone, date);
+    for (const selection of ['week', 'last7', 'last30']) {
+      const result = ranges.fixedPeriodSnapshotFromDevices(selection, [moved, other], {
+        now: new Date('2026-10-30T12:00:00Z'), historyAvailable: true
+      });
+      assert.equal(result.period.totalTokens, expected, `${timeZone} ${selection}`);
+      assert.deepEqual(result.devices.map(row => row.period.totalTokens), [1000, 1000]);
+    }
+  }
+  for (const range of ['legacy-range', 'history:Invalid/Zone']) {
+    const unknown = structuredClone(moved);
+    unknown.history.cursorAccountUsage.range = range;
+    for (const selection of ['week', 'last7', 'last30']) {
+      const result = ranges.fixedPeriodSnapshotFromDevices(selection, [unknown, calendarRecord('B', 'Asia/Tokyo', date)], {
+        now: new Date('2026-10-30T12:00:00Z'), historyAvailable: true
+      });
+      assert.equal(result.period.totalTokens, 2000, `${range} ${selection}`);
+    }
+  }
+});
+
+test('a rejected targeted Cursor partition never survives the selected full-scan fallback', async t => {
+  const f = await watchFixture(t);
+  const before = JSON.stringify(f.anchor);
+  for (const attributed of [false, true]) {
+    let scans = 0;
+    const result = await f.collect({ todayOnlyAnchor: f.anchor, targetClients: ['cursor'],
+      runTokscale: async input => {
+        input.onScanComplete(input.clients.split(','));
+        scans++;
+        return { entries: scans === 1 ? [
+          { client: 'cursor', sessionId: 's', model: 'shared', totalTokens: 600, costUsd: 0.6 },
+          { client: 'codex', sessionId: 'c', model: 'shared', totalTokens: 20, costUsd: 0.02 }
+        ] : [
+          { client: 'cursor', sessionId: 's', model: 'shared', totalTokens: 1000, costUsd: 1 },
+          ...(attributed ? [] : [{ totalTokens: 100, costUsd: 0.1, model: 'shared' }])
+        ] };
+      } });
+    assert.equal(scans, 2);
+    if (attributed) {
+      assert.equal(result.today.cursorAccountUsage.usage.totalTokens, 1000);
+    } else {
+      for (const name of ['today', 'month', 'allTime']) assert.equal(result[name].cursorAccountUsage, undefined, name);
+      const other = record('B', 800, 20000);
+      assert.equal(aggregateDevices([result, other], 0).periods.today.totalTokens, 2000);
+    }
+    assert.equal(JSON.stringify(f.anchor), before);
   }
 });
