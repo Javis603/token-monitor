@@ -1099,10 +1099,13 @@ function createEdgeDockController(deps) {
     try {
       const point = screen.getCursorScreenPoint();
       const current = layout();
+      const buttonDown = drag ? primaryButtonDown() : null;
       // The renderer can miss the pointerup of a drag, because the window it is
       // dragging moves out from under the captured pointer; the OS button
       // state is the authoritative end of the gesture.
-      if (drag && primaryButtonDown() === false && Date.now() - drag.startedAt > 80) {
+      if (drag?.captureLost && buttonDown === null) {
+        handleDragEnd({ cancelled: true });
+      } else if (drag && buttonDown === false && Date.now() - drag.startedAt > 80) {
         handleDragEnd();
       } else if (current && drag) {
         followDrag(point, current);
@@ -1198,19 +1201,20 @@ function createEdgeDockController(deps) {
     schedulePoll();
   }
 
-  function handleDragEnd() {
+  function handleDragEnd({ cancelled = false } = {}) {
     if (!drag) return;
     const current = layout();
-    if (current) followDrag(screen.getCursorScreenPoint(), current);
+    if (!cancelled && current) followDrag(screen.getCursorScreenPoint(), current);
     const gestureId = drag.gestureId;
-    const final = placementOverride;
+    const final = cancelled ? null : placementOverride;
     drag = null;
     placementOverride = null;
+    if (cancelled) cancelRailMotion();
     if (final) {
       try { onPlacementChange?.(final); } catch (error) { logger(`[edge-dock] placement save failed: ${error.message}`); }
     }
     applyEffects(intent.setAlways(alwaysVisible()));
-    send('rail', 'edgeDock:dragEnded', { gestureId });
+    send('rail', 'edgeDock:dragEnded', cancelled ? { gestureId, cancelled: true } : { gestureId });
     positionRail();
     render('rail');
     render('peek');
@@ -1299,6 +1303,13 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:dragEnd', (event) => {
       if (surfaceFor(event.sender) !== 'rail') return;
       handleDragEnd();
+    });
+    ipcMain.on('edgeDock:dragCaptureLost', (event, payload) => {
+      if (surfaceFor(event.sender) !== 'rail' || !drag || drag.gestureId !== payload?.gestureId) return;
+      drag.captureLost = true;
+      // Without capture or a readable native button state, a release outside
+      // the clamped rail cannot be observed. Cancel instead of following forever.
+      if (primaryButtonDown() === null) handleDragEnd({ cancelled: true });
     });
     ipcMain.on('edgeDock:bubbleSize', (event, payload) => {
       if (surfaceFor(event.sender) !== 'bubble') return;

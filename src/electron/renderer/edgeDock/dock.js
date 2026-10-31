@@ -1345,9 +1345,12 @@ function bindRailGestures(rail) {
   rail.addEventListener('pointerup', finish);
   rail.addEventListener('pointercancel', finish);
   // Moving a non-activating window can drop capture while the button is still
-  // held. Main keeps following the native button state and acknowledges release.
+  // held. Main can continue while native tracking works; otherwise it cancels
+  // rather than relying on a renderer event from outside the clamped rail.
   rail.addEventListener('lostpointercapture', (event) => {
-    if (!gesture?.dragging) finish(event);
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (gesture.dragging) bridge.dragCaptureLost?.(gesture.id);
+    else finish(event);
   });
 }
 

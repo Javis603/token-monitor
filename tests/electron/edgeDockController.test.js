@@ -2139,3 +2139,38 @@ test('stopping a morph cancels its native window updates', (t) => {
   advance(300);
   assert.equal(rail.webContents.messages.length, messages);
 });
+
+for (const initialButtonState of [null, true]) {
+  test(`capture loss with unreadable native state cancels an outside-work-area drag (${initialButtonState})`, (t) => {
+    const advance = mockDockClock(t);
+    let down = initialButtonState;
+    const fixture = createFixture({ primaryButtonDown: () => down });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const savedBounds = { ...rail.bounds };
+    fixture.screen.point = { x: 600, y: 300 };
+    fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30, gestureId: 9 });
+    advance(100);
+    assert.equal(rail.bounds.x, 580);
+    // A menu-bar release produces no further renderer pointerup/pointermove.
+    fixture.screen.point = { x: 600, y: -20 };
+    advance(32);
+    assert.ok(fixture.screen.point.y < rail.bounds.y, 'work-area clamping leaves the cursor outside the rail');
+    fixture.ipcMain.emit('edgeDock:dragCaptureLost', { sender: rail.webContents }, { gestureId: 8 });
+    advance(32);
+    assert.equal(rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:dragEnded').length, 0, 'stale capture loss cannot cancel a newer drag');
+    fixture.ipcMain.emit('edgeDock:dragCaptureLost', { sender: rail.webContents }, { gestureId: 9 });
+    if (down === true) {
+      advance(32);
+      assert.equal(rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:dragEnded').length, 0, 'known held button continues despite capture loss');
+      down = null;
+    }
+    advance(32);
+    assert.deepEqual(rail.bounds, savedBounds, 'cancel restores the last saved placement');
+    assert.equal(fixture.placements.length, 0, 'unknown release must not commit a new placement');
+    assert.deepEqual(rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:dragEnded').at(-1)?.payload, { gestureId: 9, cancelled: true });
+    fixture.screen.point = { x: 300, y: 600 };
+    advance(1000);
+    assert.deepEqual(rail.bounds, savedBounds, 'the rail no longer follows the cursor without renderer events');
+  });
+}

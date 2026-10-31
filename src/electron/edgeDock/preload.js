@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   pointer: () => ipcRenderer.send('edgeDock:pointer'),
   dragStart: (grabOffsetY, grabOffsetX, gestureId) => ipcRenderer.send('edgeDock:dragStart', { grabOffsetY, grabOffsetX, gestureId }),
   dragEnd: () => ipcRenderer.send('edgeDock:dragEnd'),
+  dragCaptureLost: (gestureId) => ipcRenderer.send('edgeDock:dragCaptureLost', { gestureId }),
   onDragEnded: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('edgeDock:dragEnded', listener);
