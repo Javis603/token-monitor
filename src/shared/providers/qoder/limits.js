@@ -110,6 +110,13 @@ function parseQoderPlanLabel(body) {
   return firstPlanLabel(current);
 }
 
+// The plan's next refresh is the shared add-on cycle; the personal quota payload
+// may only carry a reset for an allowance this account no longer has.
+function parseQoderPlanResetAt(body) {
+  const payload = body?.data && typeof body.data === 'object' ? body.data : body;
+  return toIso(read(payload, 'nextRefreshDate', 'next_refresh_date'));
+}
+
 function quotaSummary(container) {
   return read(container, 'quotaSummary', 'quota_summary') || null;
 }
@@ -132,16 +139,21 @@ function parseSummary(summary) {
   };
 }
 
-function parseQoderUsage(body) {
+function parseQoderUsage(body, sharedBody) {
   const payload = body?.data && typeof body.data === 'object' ? body.data : body;
+  const sharedPayload = sharedBody?.data && typeof sharedBody.data === 'object' ? sharedBody.data : sharedBody;
   const total = parseSummary(quotaSummary(read(payload, 'totalQuota', 'total_quota')));
   if (!total) throw new Error('missing totalQuota.quotaSummary');
-  const shared = parseSummary(quotaSummary(read(payload, 'sharedQuota', 'shared_quota')));
+  const shared = parseSummary(quotaSummary(
+    read(sharedPayload, 'sharedQuota', 'shared_quota') ?? read(payload, 'sharedQuota', 'shared_quota')
+  ));
   const usedCredits = total.used + (shared?.used || 0);
   const totalCredits = total.total + (shared?.total || 0);
   const remainingCredits = total.remaining + (shared?.remaining || 0);
   const usagePercentage = totalCredits > 0 ? (usedCredits / totalCredits) * 100 : total.usagePercentage;
-  const resetsAt = toIso(read(payload, 'nextResetAt', 'next_reset_at'));
+  // A zero personal allowance can retain an expired reset date. It does not
+  // describe the member's shared cap, whose endpoint may not supply a reset.
+  const resetsAt = toIso(read(total.total > 0 ? payload : sharedPayload, 'nextResetAt', 'next_reset_at'));
   const window = {
     kind: 'billing',
     label: 'Credits',
@@ -214,7 +226,23 @@ async function fetchQoderLimits(options = {}, deps = {}) {
         : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
       throw error;
     }
-    const usage = parseQoderUsage(body);
+    // Organization credits are reported separately from the personal allowance.
+    // Only shared_quota is this member's cap; organization_pool is the whole team.
+    const { response: sharedResponse, body: sharedBody } = await fetchJsonWithDeadline(
+      `${origin}/api/v1/me/organization-shared-usages/big_model_credits`,
+      { headers },
+      deps
+    );
+    // A personal account has no organization to report; only a session or
+    // service failure should suppress the personal window.
+    if (!sharedResponse.ok && sharedResponse.status !== 403 && sharedResponse.status !== 404) {
+      const error = new Error(`Qoder shared usage returned ${sharedResponse.status}`);
+      error.status = sharedResponse.status === 401
+        ? 'unauthorized'
+        : sharedResponse.status === 429 ? 'sourceRateLimited' : 'unavailable';
+      throw error;
+    }
+    const usage = parseQoderUsage(body, sharedBody);
     let accountLabel = '';
     try {
       const { response: planResponse, body: planBody } = await fetchJsonWithDeadline(
@@ -222,7 +250,14 @@ async function fetchQoderLimits(options = {}, deps = {}) {
         { headers },
         deps
       );
-      if (planResponse.ok) accountLabel = parseQoderPlanLabel(planBody);
+      if (planResponse.ok) {
+        accountLabel = parseQoderPlanLabel(planBody);
+        const planResetsAt = parseQoderPlanResetAt(planBody);
+        if (planResetsAt && !usage.resetsAt) {
+          usage.resetsAt = planResetsAt;
+          usage.window.resetsAt = planResetsAt;
+        }
+      }
     } catch (_) {}
     return normalizeLimitProvider({
       provider: 'qoder',
