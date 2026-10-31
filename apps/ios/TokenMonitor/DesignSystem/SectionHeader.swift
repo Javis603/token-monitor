@@ -32,7 +32,6 @@ struct RootPageHeader<Controls: View, BrandAccessory: View>: ViewModifier {
     let brandMark: String?
     let brandAccessory: BrandAccessory
     let controls: Controls
-    @State private var contentWidth: CGFloat = 0
 
     init(
         _ title: LocalizedStringKey,
@@ -60,17 +59,13 @@ struct RootPageHeader<Controls: View, BrandAccessory: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.width
-            } action: { width in
-                contentWidth = width
-            }
             .navigationTitle(Text(title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbarVisibility(.visible, for: .navigationBar)
             .toolbar {
+                // Let the navigation bar reserve room for window controls and trailing items.
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 0) {
+                    HStack(spacing: 12) {
                         Group {
                             if let brandMark {
                                 Text(verbatim: brandMark)
@@ -85,15 +80,13 @@ struct RootPageHeader<Controls: View, BrandAccessory: View>: ViewModifier {
                             .minimumScaleFactor(0.8)
                             .layoutPriority(1)
                             .accessibilityAddTraits(.isHeader)
-                        Spacer(minLength: 8)
                         brandAccessory
-                        Spacer(minLength: 8)
-                        controls
                     }
-                    .frame(width: contentWidth > 0
-                        ? max(0, contentWidth - 2 * DesignTokens.screenPadding)
-                        : nil)
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    controls
+                }
+                .sharedBackgroundVisibility(.hidden)
             }
     }
 }

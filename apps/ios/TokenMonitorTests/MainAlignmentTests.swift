@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import TokenMonitor
 
@@ -188,5 +189,170 @@ private actor AlignmentSubscriptionClient: HubDataClient {
     func fetchHistory(configuration: HubConfiguration) async throws -> UsageHistory { .empty }
     func statsStream(configuration: HubConfiguration) async -> AsyncThrowingStream<HubStats, any Error> {
         AsyncThrowingStream { $0.finish() }
+    }
+}
+
+// Exercise real card placement at landscape, portrait, narrow and accessibility sizes.
+@MainActor
+private final class DashboardFrameRecorder {
+    var frames: [Int: CGRect] = [:]
+}
+
+@MainActor
+@Suite(.serialized)
+struct DashboardLayoutTests {
+    @Test func cardColumnsFollowViewportAndTextSize() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        let cases: [(CGSize, DynamicTypeSize, Int, Int?)] = [
+            (CGSize(width: 1180, height: 760), .large, isPad ? 2 : 1, nil),
+            (CGSize(width: 820, height: 1100), .large, 1, nil),
+            (CGSize(width: 390, height: 760), .large, 1, nil),
+            (CGSize(width: 1180, height: 760), .accessibility3, 1, nil),
+            // Exercise uneven-height masonry even on CI's iPhone simulator.
+            (CGSize(width: 1180, height: 760), .large, 2, 2)
+        ]
+        for (size, typeSize, columnCount, forcedColumns) in cases {
+            let recorder = DashboardFrameRecorder()
+            let content = DashboardScrollView { columns in
+                DashboardCardLayout(columns: forcedColumns ?? columns) {
+                    ForEach(0..<4) { index in
+                        Color.blue.frame(height: [40.0, 160, 60, 80][index])
+                            .onGeometryChange(for: CGRect.self) { geometry in
+                                geometry.frame(in: .named("dashboard-grid-test"))
+                            } action: { frame in
+                                recorder.frames[index] = frame
+                            }
+                    }
+                }
+                .coordinateSpace(name: "dashboard-grid-test")
+            }
+            .environment(\.dynamicTypeSize, typeSize)
+            .environment(\.horizontalSizeClass, size.width >= 700 ? .regular : .compact)
+            .frame(width: size.width, height: size.height)
+            let host = UIHostingController(rootView: content)
+            host.safeAreaRegions = []
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: size)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+                previousKeyWindow?.makeKey()
+            }
+            host.view.frame = CGRect(origin: .zero, size: size)
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(400))
+            host.view.frame = CGRect(origin: .zero, size: size)
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(200))
+            let first = try #require(recorder.frames[0])
+            let second = try #require(recorder.frames[1])
+            let third = try #require(recorder.frames[2])
+            #expect(abs(first.width - second.width) < 1)
+            if columnCount == 2 {
+                #expect(abs(first.minY - second.minY) < 1)
+                #expect(second.minX > first.maxX)
+                #expect(first.width < size.width * 0.55)
+                // The next card follows the shorter column, not the tall neighbor.
+                #expect(abs(third.minX - first.minX) < 1)
+                #expect(abs(third.minY - first.maxY - 24) < 1)
+            } else {
+                #expect(abs(first.minX - second.minX) < 1)
+                #expect(second.minY > first.maxY)
+                #expect(first.width > size.width * 0.8)
+            }
+            print("DASHBOARD_GEOMETRY \(size) \(typeSize) columns=\(columnCount): \(first), \(second)")
+        }
+    }
+
+    // Keep both window-manipulating tests in this serialized suite.
+    // Toolbar controls stay inside the window while native leading items reserve space.
+    @Test func overviewPeriodPickerStaysInsideResizedWindow() async throws {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = try #require(scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first)
+        let previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
+        let actualSize = scene.coordinateSpace.bounds.size
+        let suiteName = "HeaderResize-\(UUID())"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let preferences = AppPreferences(defaults: defaults, snapshotStore: .init(fileURL: nil))
+        preferences.showsLiveTokenRate = true
+        let store = TokenMonitorStore.preview
+
+        func content(size: CGSize) -> some View {
+            NavigationStack {
+                OverviewView(selectedTab: .constant(.overview))
+                    .toolbar {
+                        // Reserve leading toolbar space, as window controls do on iPad.
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Back", systemImage: "chevron.left") {}
+                                .frame(width: 64)
+                        }
+                    }
+            }
+            .environment(store)
+            .environment(preferences)
+            .environment(\.locale, Locale(identifier: "en_US"))
+            .environment(\.colorScheme, .light)
+            .environment(\.dynamicTypeSize, .large)
+            .environment(\.horizontalSizeClass, size.width >= 700 ? .regular : .compact)
+            .frame(width: size.width, height: size.height)
+        }
+        let host = UIHostingController(rootView: content(size: actualSize))
+        host.safeAreaRegions = []
+        let window = UIWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let sizes: [(String, CGSize)] = [
+            ("actual-window", actualSize),
+            ("wide", CGSize(width: 1180, height: 775)),
+            ("narrow-500", CGSize(width: 500, height: 775)),
+            ("narrow-390", CGSize(width: 390, height: 775)),
+            ("restore-500", CGSize(width: 500, height: 775))
+        ]
+        for (name, size) in sizes {
+            // Keep one hosting controller / NavigationStack alive through resize.
+            host.rootView = content(size: size)
+            window.frame = CGRect(origin: .zero, size: size)
+            host.view.frame = CGRect(origin: .zero, size: size)
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(400))
+            // A managed iPad scene can reassert the physical UIWindow frame.
+            // Preserve an explicit viewport on the same hosted SwiftUI root.
+            host.view.frame = CGRect(origin: .zero, size: size)
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(250))
+
+            let pickers = segmentedControls(in: host.view)
+            print("HEADER_RESIZE \(name): scene=\(actualSize), requested=\(size), host=\(host.view.bounds), window=\(window.bounds), segments=\(pickers.count)")
+            // The narrowest viewport may use Overview's menu fallback.
+            if size.width >= 500 { #expect(!pickers.isEmpty) }
+            for picker in pickers {
+                let rect = picker.convert(picker.bounds, to: host.view)
+                print("HEADER_PICKER \(name): \(rect)")
+                #expect(rect.minX >= -1)
+                #expect(rect.maxX <= host.view.bounds.width + 1)
+                #expect(rect.minY >= -1)
+                #expect(rect.maxY <= host.view.bounds.height + 1)
+            }
+
+        }
+    }
+
+    private func segmentedControls(in view: UIView) -> [UISegmentedControl] {
+        guard !view.isHidden && view.alpha > 0.01 else { return [] }
+        return (view as? UISegmentedControl).map { [$0] } ?? view.subviews.flatMap { segmentedControls(in: $0) }
     }
 }
