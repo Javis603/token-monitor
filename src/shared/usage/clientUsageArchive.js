@@ -8,6 +8,7 @@ const {
 const {
   archivedSessionInput,
   cloneJson,
+  cloneSummaryWithSharedSessions,
   hasSummaryPeriod,
   localDay,
   localMonth,
@@ -494,7 +495,7 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
   const normalizedArchive = normalizeArchivedClientUsage(archive);
   const activeClients = clientSet(options.activeClients);
   const now = toDate(options.now);
-  const next = cloneJson(summary);
+  const next = options.shareSessions === true ? cloneSummaryWithSharedSessions(summary) : cloneJson(summary);
 
   // Merged snapshots replay after every ordinary entry. An archived split-id
   // entry and a merged snapshot can hold the same session under two ids, and
