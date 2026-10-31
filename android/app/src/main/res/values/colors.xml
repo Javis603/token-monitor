@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="window_background">#0B0F0C</color>
+    <color name="launcher_background">#24B4FF</color>
+    <color name="widget_secondary">#66000000</color>
+    <color name="widget_primary">#FF000000</color>
+    <color name="widget_accent">#FF15803D</color>
+    <color name="widget_bar">#FF3B82F6</color>
+    <color name="widget_warn">#FFB45309</color>
+</resources>
