@@ -1049,7 +1049,12 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
 .edge-dock-plugin-cell .pv-compact-value { max-width: 56px; overflow: hidden; font-size: 12px; font-weight: 650; letter-spacing: -0.01em; }
 .edge-dock-plugin-cell .pv-placeholder { justify-content: center; min-height: 0; }
 .edge-dock-plugin-cell .pv-placeholder span { display: none; }
-.edge-dock-card-plugin .edge-dock-card-head { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 8px; }
+.edge-dock-card-plugin .edge-dock-card-head { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
+.edge-dock-plugin-identity { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.edge-dock-plugin-identity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edge-dock-plugin-header-actions, .edge-dock-plugin-header-actions > .plugin-header-actions-mount { display: flex; align-items: center; justify-content: flex-end; min-width: 0; }
+.edge-dock-plugin-header-actions { flex: 0 1 auto; max-width: 70%; }
+.edge-dock-plugin-header-actions:not(:has(> .plugin-header-actions-mount:not(:empty))) { display: none; }
 .edge-dock-plugin-owner { font-size: 10px; color: var(--muted); }
 .edge-dock-plugin-card { margin-top: 10px; min-width: 0; }
 

@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { runtimeFixture } = require('../helpers/trustedPlugin');
 const tick = () => new Promise(setImmediate);
 test('bubble-only bitmap demand stops on native hide; system Tray demand survives it', async t => {
@@ -73,9 +74,9 @@ test('trust is revision-specific and missing installs remain manageable after re
 });
 test('replacement selection requires an active declared replacement; cancelling code changes preserves execution', async t => {
   const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
-  const selected = f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/content');
+  const selected = await f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/content');
   assert.equal(selected.contentSelections['main.limits.content'], 'trusted-fixture/content');
-  assert.throws(() => f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/panel'));
+  await assert.rejects(f.invoke('plugins:selectContent', 'main.limits.content', 'trusted-fixture/panel'));
   f.lifecycle(f.main, () => ({ loaded: true, unsaved: true }));
   f.cancel(); await assert.rejects(f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false }), /cancelled/);
   assert.equal(f.runtime.manager.active('trusted-fixture'), true);
@@ -91,12 +92,39 @@ test('formal data source changes refresh results; disabled calls reject and host
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
   await assert.rejects(f.invoke('plugins:host', 'trusted-fixture', 'data.query', {}), /disabled/);
 });
+for (const boundary of ['disable', 'navigation']) test(`live-rate subscription demand clears on ${boundary}`, async t => {
+  const f = await runtimeFixture(t, { businessAdapters: { now: () => 100000 } });
+  await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  const publish = n => f.runtime.publishStats({ periods: { today: { capabilities: { throughput: true },
+    timedTokens: n, timedOutputTokens: n, timedDurationMs: n * 10 } } });
+  const read = () => f.invoke('plugins:host', 'trusted-fixture', 'data.query', { resource: 'liveRate' });
+  publish(0);
+  await f.invoke('plugins:subscribe', 'trusted-fixture', { resource: 'liveRate' });
+  await tick(); await tick();
+  assert.equal((await read()).rows[0].reason, 'waitingForSample');
+  publish(100); assert.equal((await read()).rows[0].speed, 100);
+  if (boundary === 'disable') {
+    await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+    await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  } else f.main.webContents.emit('did-start-navigation', {}, 'file:///index.html', false, true);
+  assert.equal((await read()).rows[0].reason, 'waitingForSample', 'old rate cannot survive a released owner');
+  assert.equal(f.children.length, 0, 'rate queries never start a backend');
+});
+test('disabling a plugin revokes live-rate subscriptions immediately', async t => {
+  const f = await runtimeFixture(t); await f.install();
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  f.runtime.publishStats({ periods: { today: { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 } } });
+  const id = await f.invoke('plugins:subscribe', 'trusted-fixture', { resource: 'liveRate' });
+  await tick(); await tick();
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+  assert.equal(await f.invoke('plugins:unsubscribe', id), false, 'subscription was already revoked');
+});
 test('descriptor subscription receives first content selection without foreground demand', async t => {
   const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
   const first = f.handlers.get('plugins:views')(f.event(f.notch), { surface: 'notch' });
   assert.ok(first.views['trusted-fixture/content']); assert.equal(f.children.length, 0);
   f.notch.webContents.sent.length = 0;
-  f.invoke('plugins:selectContent', 'notch.home.content', 'trusted-fixture/content');
+  await f.invoke('plugins:selectContent', 'notch.home.content', 'trusted-fixture/content');
   assert.ok(f.notch.webContents.sent.some(item => item.channel === 'plugins:views' && item.value.surface === 'notch'));
   assert.equal(f.children.length, 0);
 });
@@ -218,10 +246,8 @@ test('master pause checks drafts before mutation and disposes after persistence;
   const actions=[]; f.lifecycle(f.main, request=>{actions.push(request.action);return {loaded:true,unsaved:true};});
   f.cancel(); await assert.rejects(f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:false}),/cancelled/);
   assert.equal(f.settings.pluginsEnabled,true); assert.ok(!actions.includes('release'));
-  f.accept(); const finish=await f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:false});
-  f.settings.pluginsEnabled=false;f.runtime.settingsChanged();await finish();assert.ok(actions.includes('release'));
-  const resume=await f.runtime.beforeSettingsChange(f.event(f.main),{pluginsEnabled:true});
-  f.settings.pluginsEnabled=true;f.runtime.settingsChanged();await resume();
+  f.accept(); await f.setMasterEnabled(false); assert.ok(actions.includes('release'));
+  await f.setMasterEnabled(true);
   assert.equal(f.runtime.manager.active('trusted-fixture'),true);assert.equal(f.main.webContents.reloads,0);
 });
 
@@ -244,7 +270,8 @@ test('ownership of another plugin does not join lifecycle operations; navigation
   const folder = path.join(f.dir, 'plugins', 'other-fixture');
   fs.cpSync(path.join(f.dir, 'plugins', 'trusted-fixture'), folder, { recursive: true });
   const file = path.join(folder, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file));
-  manifest.id = 'other-fixture'; fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
+  manifest.id = 'other-fixture'; manifest.views.find(view => view.mode === 'replace').targets = ['main.status.content'];
+  fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
   f.events.get('plugins:lifecycleHost')(f.event(f.notch), true);
   f.events.get('plugins:uiLoading')?.(f.event(f.notch), 'other-fixture');
@@ -281,10 +308,8 @@ test('master pause and resume send only each hosts loaded plugin ids', async t =
   const file = path.join(folder, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file)); manifest.id = 'other-fixture'; fs.writeFileSync(file, JSON.stringify(manifest)); await f.runtime.manager.reload();
   await f.invoke('plugins:setEnabled', { id: 'other-fixture', enabled: true });
   const calls = []; f.lifecycle(f.main, request => { calls.push(request); return { loaded: true }; });
-  const finish = await f.runtime.beforeSettingsChange(f.event(f.main), { pluginsEnabled: false });
-  f.settings.pluginsEnabled = false; f.runtime.settingsChanged(); await finish();
-  const resume = await f.runtime.beforeSettingsChange(f.event(f.main), { pluginsEnabled: true });
-  f.settings.pluginsEnabled = true; f.runtime.settingsChanged(); await resume();
+  await f.setMasterEnabled(false);
+  await f.setMasterEnabled(true);
   assert.deepEqual(calls.map(request => request.ids), [['trusted-fixture'], ['trusted-fixture'], ['trusted-fixture']]);
 });
 
@@ -306,3 +331,190 @@ for (const [name, inPlace, mainFrame, retained] of [['hash', true, true, true], 
     assert.equal(await f.invoke('plugins:unsubscribe', subscription), retained);
   });
 }
+
+for (const outcome of ['show', 'failed']) test(`notify waits for native ${outcome} instead of reporting submission as success`, async t => {
+  const { EventEmitter } = require('node:events');
+  let notification;
+  class Notification extends EventEmitter {
+    static isSupported() { return true; }
+    constructor(options) { super(); this.options = options; notification = this; }
+    show() {}
+  }
+  const f = await runtimeFixture(t, { Notification }); await f.install();
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  let settled = false;
+  const result = f.invoke('plugins:host', 'trusted-fixture', 'notify', { body: 'Hello' });
+  result.then(() => { settled = true; }, () => { settled = true; });
+  await tick(); assert.equal(settled, false);
+  assert.deepEqual(notification.options, { title: 'trusted-fixture', body: 'Hello' });
+  if (outcome === 'show') {
+    notification.emit('show'); assert.equal(await result, true);
+  } else {
+    notification.emit('failed', {}, 'UNErrorDomain error 1');
+    await assert.rejects(result, /UNErrorDomain error 1/);
+  }
+  assert.equal(notification.listenerCount('show'), 0);
+  assert.equal(notification.listenerCount('failed'), 0);
+});
+
+for (const operation of ['update', 'uninstall']) test(`cooperative ${operation} releases and resumes only its UI without reload`, async t => {
+  const source = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'tm-update-source-'));
+  t.after(() => fs.rmSync(source, { recursive: true, force: true }));
+  fs.cpSync(path.resolve(__dirname, '../fixtures/trusted-plugin'), source, { recursive: true });
+  const f = await runtimeFixture(t, { sourceDirectory: source }); await f.install();
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  const actions = []; f.lifecycle(f.main, request => { actions.push(request.action); return { loaded: true }; });
+  if (operation === 'update') {
+    const file = path.join(source, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file)); manifest.version = '9.0.0'; fs.writeFileSync(file, JSON.stringify(manifest));
+    const preview = await f.invoke('plugins:import', 'directory');
+    await f.invoke('plugins:install', preview.token, { trustUpdate: true });
+    assert.equal(f.runtime.manager.active('trusted-fixture'), true);
+  } else await f.invoke('plugins:uninstall', 'trusted-fixture', { keepData: true });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.deepEqual(actions, ['inspect', 'release', 'resume']);
+  assert.equal(f.dialogs.length, 0); assert.equal(f.main.webContents.reloads, 0);
+});
+
+test('package failure resumes released UI and unsaved cancellation never releases it', async t => {
+  const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id:'trusted-fixture', enabled:true });
+  const actions=[]; let unsaved=true;
+  f.lifecycle(f.main, request => { actions.push(request.action); return { loaded:true, unsaved }; });
+  f.cancel(); await assert.rejects(f.invoke('plugins:uninstall','trusted-fixture'), /cancelled/);
+  assert.deepEqual(actions,['inspect']); assert.equal(f.runtime.manager.active('trusted-fixture'),true);
+  unsaved=false; f.accept(); actions.length=0;
+  await assert.rejects(f.invoke('plugins:install','expired'), /expired/);
+  // A bad token cannot identify a loaded plugin and must not release others.
+  assert.deepEqual(actions,[]);
+  const target=path.join(f.dir,'plugins/trusted-fixture'); fs.renameSync(target,target+'-saved');
+  fs.writeFileSync(target,'not a directory');
+  await assert.rejects(f.invoke('plugins:uninstall','trusted-fixture'), /missing or replaced/);
+  assert.deepEqual(actions,['inspect','release','resume']);
+  fs.rmSync(target); fs.renameSync(target+'-saved',target);
+  assert.equal(f.main.webContents.reloads,0);
+});
+
+test('package cleanup failure cancels mutation and a later attempt offers only affected-host recovery', async t => {
+  const f=await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true});
+  let loaded=true;
+  f.lifecycle(f.main, request=>{
+    if(request.action==='release'){loaded=false;throw Error('cleanup failed');}
+    return {loaded};
+  });
+  f.cancel(); await assert.rejects(f.invoke('plugins:uninstall','trusted-fixture'), /cancelled/);
+  assert.ok(fs.existsSync(path.join(f.dir,'plugins/trusted-fixture')));
+  assert.equal(f.main.webContents.reloads,0);
+  f.accept(); await f.invoke('plugins:uninstall','trusted-fixture');
+  await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(f.dialogs.length,3); assert.equal(f.main.webContents.reloads,1); assert.equal(f.notch.webContents.reloads,0);
+});
+
+for (const operation of ['uninstall', 'update']) {
+  test(`cancel ${operation} after cleanup failure offers immediate affected-window recovery`, async t => {
+    const sourceDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-recovery-source-'));
+    fs.cpSync(path.resolve(__dirname, '../fixtures/trusted-plugin'), sourceDirectory, { recursive: true });
+    t.after(() => fs.rmSync(sourceDirectory, { recursive: true, force: true }));
+    const f = await runtimeFixture(t, { sourceDirectory }); await f.install();
+    await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+    const before = fs.readFileSync(path.join(f.dir, 'plugins/trusted-fixture/manifest.json'), 'utf8');
+    const manifest = JSON.parse(before); manifest.version = '9.0.0';
+    fs.writeFileSync(path.join(sourceDirectory, 'manifest.json'), JSON.stringify(manifest));
+    const preview = operation === 'update' ? await f.invoke('plugins:import', 'directory') : null;
+    let loaded = true;
+    const actions = [];
+    f.lifecycle(f.main, request => {
+      actions.push(request.action);
+      if (request.action === 'release') { loaded = false; throw Error('author dispose failed'); }
+      return { loaded };
+    });
+    f.respond(0, 1); // Cancel the mutation, then explicitly recover the affected window.
+    await assert.rejects(operation === 'update'
+      ? f.invoke('plugins:install', preview.token, { trustUpdate: true })
+      : f.invoke('plugins:uninstall', 'trusted-fixture'), /cancelled/);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(f.dialogs.length, 2);
+    assert.match(f.dialogs[1].message, /could not be restored/);
+    assert.deepEqual(f.dialogs[1].buttons, ['Later', 'Reload now']);
+    assert.deepEqual(actions, ['inspect', 'release']); // Failed author cleanup is not resumed in place.
+    assert.equal(fs.readFileSync(path.join(f.dir, 'plugins/trusted-fixture/manifest.json'), 'utf8'), before);
+    assert.equal(f.runtime.manager.active('trusted-fixture'), true);
+    assert.equal(f.main.webContents.reloads, 1);
+    assert.equal(f.notch.webContents.reloads, 0);
+  });
+}
+
+for (const proceed of [false, true]) {
+  test(`mixed reload and unsaved hosts use one warning before ${proceed ? 'continuing' : 'cancelling'} package cleanup`, async t => {
+    const f = await runtimeFixture(t); await f.install();
+    await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+    const actions = [];
+    f.lifecycle(f.main, request => {
+      actions.push(`main:${request.action}`);
+      if (request.action === 'inspect') throw Error('host inspection failed');
+      return {};
+    });
+    f.lifecycle(f.notch, request => {
+      actions.push(`notch:${request.action}`);
+      return { loaded: true, unsaved: true };
+    });
+    if (!proceed) f.cancel();
+    const operation = f.invoke('plugins:uninstall', 'trusted-fixture');
+    if (proceed) await operation;
+    else await assert.rejects(operation, /cancelled/);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(f.dialogs.length, 1);
+    const warning = [f.dialogs[0].message, f.dialogs[0].detail].join('\n');
+    assert.match(warning, /unsaved work/);
+    assert.match(warning, /discard that work/);
+    assert.match(warning, /reloads affected windows/);
+    assert.deepEqual(actions, proceed
+      ? ['main:inspect', 'notch:inspect', 'notch:release', 'notch:resume']
+      : ['main:inspect', 'notch:inspect']);
+    assert.equal(f.main.webContents.reloads, proceed ? 1 : 0);
+    assert.equal(f.notch.webContents.reloads, 0);
+    assert.equal(fs.existsSync(path.join(f.dir, 'plugins/trusted-fixture')), !proceed);
+    if (!proceed) assert.equal(f.runtime.manager.active('trusted-fixture'), true);
+  });
+}
+
+test('runtime refreshes only the curated index at startup and six hours, notifying update listeners', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const sources = require('../../src/electron/plugins/maintainerSources'); let calls = 0, offline = false;
+  const f = await runtimeFixture(t, { catalogFetch: async url => {
+    calls++; assert.equal(url, sources[0].url); if (offline) throw Error('offline');
+    return new Response(JSON.stringify({ format: 1, title: 'Community', plugins: [{ id: 'remote-plugin', name: 'Remote',
+      versions: [{ version: '1.0.0', url: 'https://example.test/plugin.tmplugin', sha256: 'a'.repeat(64) }] }] }));
+  } });
+  f.invoke('plugins:list');
+  for (let i = 0; i < 10; i++) await tick();
+  const curatedEntries = () => f.invoke('plugins:catalog').entries.filter(entry => entry.origin.kind === 'maintainer');
+  assert.equal(calls, 1); assert.deepEqual(curatedEntries().map(entry => entry.id), ['remote-plugin']);
+  assert.equal(f.runtime.manager.list().plugins.length, 0);
+  assert.ok(f.main.webContents.sent.some(event => event.channel === 'plugins:changed'));
+  offline = true;
+  t.mock.timers.tick(6 * 60 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
+  assert.equal(calls, 2); assert.deepEqual(curatedEntries().map(entry => entry.id), ['remote-plugin']);
+  t.mock.timers.tick(5 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
+  assert.equal(calls, 3);
+  await f.runtime.dispose(); t.mock.timers.tick(6 * 60 * 60 * 1000); assert.equal(calls, 3);
+});
+
+test('background refresh uses completion time and rechecks the deadline after manual refresh', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const sixHours = 6 * 60 * 60 * 1000; let calls = 0, finish;
+  const raw = { format: 1, title: 'Fixture', plugins: [] };
+  const f = await runtimeFixture(t, { catalogFetch: async () => {
+    calls++;
+    if (calls === 1) return new Promise(resolve => { finish = () => resolve(new Response(JSON.stringify(raw))); });
+    return new Response(JSON.stringify(raw));
+  } });
+  const settle = async () => { for (let i = 0; i < 10; i++) await tick(); };
+  assert.equal(calls, 1);
+  t.mock.timers.tick(1000); finish(); await settle();
+  t.mock.timers.tick(sixHours - 1000); await settle(); assert.equal(calls, 1);
+  t.mock.timers.tick(1000); await settle(); assert.equal(calls, 2);
+  // Manual refresh moves the expiry past the timer already scheduled by runtime.
+  t.mock.timers.tick(sixHours - 60000); await f.invoke('plugins:discoverCatalog', true); assert.equal(calls, 3);
+  t.mock.timers.tick(60000); await settle(); assert.equal(calls, 3);
+  t.mock.timers.tick(sixHours - 60000); await settle(); assert.equal(calls, 4);
+  await f.runtime.dispose(); t.mock.timers.tick(sixHours); await settle(); assert.equal(calls, 4);
+});

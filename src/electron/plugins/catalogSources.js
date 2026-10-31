@@ -10,6 +10,18 @@ const { ID_RE, readBounded, digest } = require('./package');
 const { normalizeLocalized, localize, cleanText } = require('../../shared/plugins/localized');
 const MAX_INDEX_BYTES = 1024 * 1024;
 const HOST_VERSION = require('../../../package.json').version;
+function normalizeReadmePaths(value) {
+  if (value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length > 16) throw new Error('README paths must be a locale map');
+  const paths = {};
+  for (const [locale, file] of Object.entries(value)) {
+    if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/.test(locale) || typeof file !== 'string' || file.length > 240 ||
+      !file.split('/').every(part => /^[A-Za-z0-9_.-]+$/.test(part) && part !== '.' && part !== '..') || !/\.md$/.test(file)) throw new Error('invalid repository README path');
+    paths[locale] = file;
+  }
+  if (!Object.keys(paths).length) throw new Error('README paths cannot be empty');
+  return paths;
+}
 function httpsUrl(value) {
   if (typeof value !== 'string' || value.length > 2048) throw new Error('source must be an HTTPS URL');
   const url = new URL(value);
@@ -41,6 +53,10 @@ function parseIndex(bytes, publicKey) {
     seen.add(entry.id);
     const name = normalizeLocalized(entry.name, 80);
     if (!name || !Array.isArray(entry.versions) || !entry.versions.length || entry.versions.length > 32) throw new Error(`${entry.id}: name and 1–32 versions are required`);
+    const repository = entry.repository === undefined ? '' : httpsUrl(entry.repository);
+    if (repository && !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/.test(repository)) throw new Error('repository must be a GitHub repository URL');
+    const readmePaths = normalizeReadmePaths(entry.readmePaths);
+    if (readmePaths && !repository) throw new Error('README paths require a repository');
     const versionsSeen = new Set();
     const versions = entry.versions.map(v => {
       if (typeof v?.version !== 'string' || !semver.valid(v.version) || versionsSeen.has(v.version)) throw new Error(`${entry.id}: invalid or duplicate version`);
@@ -51,13 +67,13 @@ function parseIndex(bytes, publicKey) {
       return { types: normalizeTypes(v.types), version: v.version, sha256: v.sha256, url: httpsUrl(v.url), compatible: !range || semver.satisfies(HOST_VERSION, range),
         changelog: normalizeLocalized(v.changelog, 2000), engines: range || '*' };
     }).sort((a, b) => semver.rcompare(a.version, b.version));
-    return { id: entry.id, name, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), versions };
+    return { id: entry.id, name, repository, readmePaths, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), versions };
   });
   return { title, plugins };
 }
-async function download(fetchImpl, url, limit, signal) {
+async function download(fetchImpl, url, limit, signal, accept = 'application/json') {
   const response = await fetchImpl(httpsUrl(url), { redirect: 'manual', credentials: 'omit', cache: 'no-store', signal,
-    headers: { Accept: 'application/json' } });
+    headers: { Accept: accept } });
   if (!response.ok || response.status < 200 || response.status >= 300) throw new Error(`download failed (HTTP ${response.status}); redirects are not followed`);
   if (Number(response.headers?.get('content-length')) > limit) { await response.body?.cancel(); throw new Error('download exceeds size limit'); }
   if (!response.body?.getReader) throw new Error('streaming download is unavailable');
@@ -73,13 +89,23 @@ async function download(fetchImpl, url, limit, signal) {
   } catch (error) { try { await reader.cancel(); } catch {} throw error; }
   return Buffer.concat(chunks);
 }
-function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getLocale = () => 'en', now = Date.now }) {
+function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getLocale = () => 'en', now = Date.now, maintainerSources = [], officialSources = [] }) {
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   const configFile = path.join(root, 'sources.json');
-  const sources = new Map(), cache = new Map(), active = new Map();
+  const sources = new Map(), cache = new Map(), activeRefreshes = new Map(), activePackages = new Map();
   let loadError = '';
   function cacheFile(id) { return path.join(root, `${id}.json`); }
-  function persist() { atomicJson(configFile, [...sources.values()].map(({ id, url, publicKey, fingerprint }) => ({ id, url, publicKey, fingerprint }))); }
+  function persist() { atomicJson(configFile, [...sources.values()].filter(s => !s.preset).map(({ id, url, publicKey, fingerprint }) => ({ id, url, publicKey, fingerprint }))); }
+  function loadCache(source) {
+    if (!fs.existsSync(cacheFile(source.id))) return;
+    try {
+      const saved = JSON.parse(readBounded(cacheFile(source.id), MAX_INDEX_BYTES * 2));
+      if (saved.url !== source.url) throw new Error('cached source does not match');
+      const index = parseIndex(Buffer.from(saved.bytes, 'base64'), source.publicKey);
+      cache.set(source.id, index);
+      source.lastFetched = Number.isSafeInteger(saved.at) && saved.at >= 0 && saved.at <= now() ? saved.at : null;
+    } catch (error) { source.error = `cached catalog unavailable: ${error.message}`; }
+  }
   try {
     const raw = fs.existsSync(configFile) ? JSON.parse(readBounded(configFile, 64 * 1024)) : [];
     if (!Array.isArray(raw) || raw.length > 16) throw new Error('invalid catalog source configuration');
@@ -88,24 +114,26 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
       const key = s.publicKey ? signingKey(s.publicKey) : null;
       const source = { id: s.id, url: httpsUrl(s.url), publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null };
       sources.set(s.id, source);
-      if (fs.existsSync(cacheFile(s.id))) {
-        try {
-          const saved = JSON.parse(readBounded(cacheFile(s.id), MAX_INDEX_BYTES * 2));
-          if (saved.url !== source.url) throw new Error('cached source does not match');
-          const index = parseIndex(Buffer.from(saved.bytes, 'base64'), source.publicKey);
-          cache.set(s.id, index); source.lastFetched = saved.at;
-        } catch (error) { source.error = `cached catalog unavailable: ${error.message}`; }
-      }
+      loadCache(source);
     }
   } catch (error) { loadError = `catalog sources could not be loaded: ${error.message}`; sources.clear(); cache.clear(); }
+  // Only the host constructor supplies these definitions. Persisted config,
+  // index titles, manifest authors and add-source IPC cannot opt into this role.
+  for (const [kind, definitions] of [['official', officialSources], ['maintainer', maintainerSources]]) for (const s of definitions) {
+    if (!new RegExp(`^${kind}-[a-z0-9-]+$`).test(s.id) || sources.has(s.id)) throw new Error(`invalid ${kind} source id`);
+    if (kind === 'official' && !cleanText(s.label, 80)) throw new Error('official source requires a host label');
+    const key = s.publicKey ? signingKey(s.publicKey) : null;
+    const source = { id: s.id, url: httpsUrl(s.url), publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null, preset: true, kind, label: kind === 'official' ? cleanText(s.label, 80) : '' };
+    sources.set(s.id, source); loadCache(source);
+  }
   function requireWritable() { if (loadError) throw new Error(loadError); }
   function list() {
-    return { error: loadError, sources: [...sources.values()].map(s => ({ id: s.id, kind: 'community', url: s.url,
-      label: localize(cache.get(s.id)?.title, getLocale()) || new URL(s.url).hostname,
+    return { error: loadError, sources: [...sources.values()].map(s => ({ id: s.id, kind: s.kind || 'community', url: s.url,
+      label: s.label || localize(cache.get(s.id)?.title, getLocale()) || new URL(s.url).hostname,
       fingerprint: s.fingerprint, signed: Boolean(s.publicKey && cache.has(s.id)), lastFetched: s.lastFetched,
-      cached: cache.has(s.id), error: s.error, refreshing: active.has(s.id) })) };
+      cached: cache.has(s.id), error: s.error, refreshing: activeRefreshes.has(s.id) })) };
   }
-  async function request(id, url, limit) {
+  async function request(id, url, limit, active) {
     const source = sources.get(id); if (!source) throw new Error('unknown catalog source');
     if (active.has(id)) throw new Error('this source already has a download in progress');
     const controller = new AbortController(); active.set(id, controller);
@@ -117,9 +145,11 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
     } finally { clearTimeout(timer); if (active.get(id) === controller) active.delete(id); }
   }
   async function refresh(id) {
-    requireWritable(); const s = sources.get(id); if (!s) throw new Error('unknown catalog source');
+    const s = sources.get(id);
+    if (!s) { requireWritable(); throw new Error('unknown catalog source'); }
+    if (!s.preset) requireWritable();
     try {
-      const bytes = await request(id, s.url, MAX_INDEX_BYTES);
+      const bytes = await request(id, s.url, MAX_INDEX_BYTES, activeRefreshes);
       const index = parseIndex(bytes, s.publicKey);
       atomicJson(cacheFile(id), { url: s.url, at: now(), bytes: bytes.toString('base64') });
       cache.set(id, index); s.lastFetched = now(); s.error = '';
@@ -127,13 +157,16 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
     return list();
   }
   return {
-    list, refresh, request,
+    list, refresh,
+    // Index refreshes and package previews may overlap. Keep each bounded to
+    // one request per source, with independent deadlines and cancellation.
+    request: (id, url, limit) => request(id, url, limit, activePackages),
     entries() { return [...sources.values()].flatMap(s => (cache.get(s.id)?.plugins || []).map(p => ({ ...p, origin: {
-      id: s.id, kind: 'community', label: localize(cache.get(s.id).title, getLocale()), url: s.url, fingerprint: s.fingerprint,
+      id: s.id, kind: s.kind || 'community', label: s.label || localize(cache.get(s.id).title, getLocale()), url: s.url, fingerprint: s.fingerprint,
       signed: Boolean(s.publicKey), cached: true, lastFetched: s.lastFetched, error: s.error } }))); },
     async add({ url, publicKey = '' } = {}) {
       requireWritable(); const normalized = httpsUrl(url);
-      if (sources.size >= 16 || [...sources.values()].some(s => s.url === normalized)) throw new Error('source already exists or source limit reached');
+      if ([...sources.values()].filter(s => !s.preset).length >= 16 || [...sources.values()].some(s => s.url === normalized)) throw new Error('source already exists or source limit reached');
       const key = publicKey ? signingKey(publicKey) : null;
       const source = { id: `custom-${crypto.randomUUID()}`, url: normalized, publicKey: key?.pem || '', fingerprint: key?.fingerprint || '', error: '', lastFetched: null };
       sources.set(source.id, source);
@@ -142,11 +175,12 @@ function createCatalogSources({ root, fetchImpl, cancelPreviews = () => {}, getL
     },
     remove(id) {
       requireWritable(); const source = sources.get(id); if (!source) throw new Error('unknown catalog source');
+      if (source.preset) throw new Error('App-distributed catalog sources cannot be removed');
       sources.delete(id); try { persist(); } catch (error) { sources.set(id, source); throw error; }
-      active.get(id)?.abort(); cache.delete(id); cancelPreviews(id);
+      activeRefreshes.get(id)?.abort(); activePackages.get(id)?.abort(); cache.delete(id); cancelPreviews(id);
       fs.rmSync(cacheFile(id), { force: true }); return list();
     },
-    dispose() { for (const controller of active.values()) controller.abort(); active.clear(); }
+    dispose() { for (const active of [activeRefreshes, activePackages]) { for (const controller of active.values()) controller.abort(); active.clear(); } }
   };
 }
 module.exports = { MAX_INDEX_BYTES, httpsUrl, signingKey, parseIndex, download, createCatalogSources };

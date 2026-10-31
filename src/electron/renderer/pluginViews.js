@@ -33,6 +33,22 @@
     for (const [key, value] of Object.entries({ d: path || ICON_PATHS[name] || ICON_PATHS.dot, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) shape.setAttribute(key, String(value));
     node.append(shape); return node;
   }
+  // Navigation uses validated manifest metadata, without loading author code/CSS.
+  function navigationIcon(document, view, size = 16) {
+    const node = document.createElement('span');
+    node.setAttribute('aria-hidden', 'true');
+    Object.assign(node.style, { display: 'inline-flex', width: `${size}px`, height: `${size}px`, flexShrink: '0' });
+    const fallback = () => node.replaceChildren(iconNode(document, view?.icon || 'dot', null, size));
+    if (view?.identityIcon) {
+      const image = document.createElement('img');
+      image.alt = ''; image.width = size; image.height = size;
+      image.style.objectFit = 'contain';
+      image.addEventListener('error', fallback, { once: true });
+      image.src = view.identityIcon;
+      node.append(image);
+    } else fallback();
+    return node;
+  }
   function drawIcon(ctx, name, { x, y, size, color }) {
     ctx.save();
     ctx.translate(x, y);
@@ -70,7 +86,12 @@
     function paint(mount) {
       applyAppearance(mount.container, appearance);
       const value = state(mount.surface, mount.ref) || (!latest.has(mount.surface) ? mount.options.descriptor : null);
-      if (value?.entry) void ui.mount(mount.container, value, { ...getContext(mount.surface), surface: mount.surface, ...mount.options });
+      if (value?.entry) {
+        const context = { ...mount.options, ...getContext(mount.surface), surface: mount.surface };
+        // A slot can refine the surface's generic variant (e.g. Notch summary).
+        if (Object.hasOwn(mount.options, 'surfaceVariant')) context.surfaceVariant = mount.options.surfaceVariant;
+        void ui.mount(mount.container, value, context);
+      }
       else { mount.options.onMountStatus?.(false); ui.unmount(mount.container); mount.container.textContent = value ? t?.('settings.plugins.status.' + value.status) || value.status : ''; }
     }
     function computeDemand() {
@@ -120,11 +141,13 @@
         for (const ref of refs) { const descriptor = state(surface, ref); if (descriptor?.entry) void ui.load(descriptor).catch(error => console.error(error)); }
         refreshDemand();
       },
-      refreshContext() { for (const mount of mounts.values()) paint(mount); },
+      refreshContext({ includeContent = true } = {}) {
+        for (const mount of mounts.values()) if (includeContent || !mount.options.target) paint(mount);
+      },
       refreshDemand, refreshMotion: refreshDemand,
       hasUnsavedChanges: ui.hasUnsavedChanges,
       dispose() { disposed = true; observer?.disconnect(); if (frame !== null) window.cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', refreshDemand); return ui.dispose(); }
     };
   }
-  return { iconNode, drawIcon, actionErrorMessage, createPluginViewHost };
+  return { iconNode, navigationIcon, drawIcon, actionErrorMessage, createPluginViewHost };
 });

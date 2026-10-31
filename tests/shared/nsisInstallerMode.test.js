@@ -11,7 +11,7 @@ const installerInclude = fs.readFileSync(
   path.join(ROOT, packageJson.build.nsis.include),
   'utf8'
 );
-const PINNED_BUILDER = '26.16.1';
+const PINNED_BUILDER = '26.18.1';
 
 function readBuilderFile(relativePath) {
   try {

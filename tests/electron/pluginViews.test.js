@@ -310,7 +310,7 @@ test('unmounted async redraw is cleared after release, including a connected pag
   assert.equal(node.isConnected, true); assert.equal(disposals, 1); assert.equal(node.children.length, 0);
   await host.dispose();
 });
-test('old asynchronous disposal never clears a newer mount in the same container', async () => {
+test('old asynchronous disposal settles before a newer mount owns the same container', async () => {
   const document = dom(), node = document.createElement('div'); document.body.append(node);
   let finish;
   const host = createHost({ document, window: {}, bridge: {}, importModule: async url => ({ mount(container) {
@@ -318,8 +318,10 @@ test('old asynchronous disposal never clears a newer mount in the same container
     return url.includes('/one/') ? { dispose: () => new Promise(resolve => { finish = resolve; }) } : {};
   } }) });
   await host.mount(node, descriptor); host.unmount(node);
-  await host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
-  const replacement = node.children[0]; finish(); await new Promise(setImmediate);
+  const next = host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
+  await new Promise(setImmediate); assert.equal(node.children.length, 0);
+  finish(); await next;
+  const replacement = node.children[0]; await new Promise(setImmediate);
   assert.equal(node.children[0], replacement); assert.equal(node.children.length, 1); await host.dispose();
 });
 test('host announces plugin ownership before import and again after release/resume', async () => {
@@ -357,7 +359,7 @@ for (const outcome of ['resolve', 'reject', 'dispose-reject']) test(`removed pen
   assert.equal((await lifecycle({ action: 'inspect', ids: ['fixture'] })).loaded, false);
   await host.dispose();
 });
-for (const rejected of [false, true]) test(`stale pending mount ${rejected ? 'rejection' : 'disposal'} preserves newer owner`, async () => {
+for (const rejected of [false, true]) test(`stale pending mount ${rejected ? 'rejection' : 'disposal'} drains before newer owner`, async () => {
   const document = dom(), node = document.createElement('div'); document.body.append(node);
   let finish, entered;
   const started = new Promise(resolve => { entered = resolve; });
@@ -370,9 +372,11 @@ for (const rejected of [false, true]) test(`stale pending mount ${rejected ? 're
     container.append(document.createElement('input')); return {};
   } }) });
   const old = host.mount(node, descriptor); await started; host.unmount(node);
-  await host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
+  const next = host.mount(node, { ...descriptor, revision: 'two', entry: 'tm-plugin://fixture/two/ui.mjs' });
+  await new Promise(setImmediate); assert.equal(node.children.length, 0);
+  finish(); await Promise.all([old, next]);
   const replacement = node.children[0]; replacement.value = 'new draft';
-  finish(); await old;
+  await new Promise(setImmediate);
   assert.equal(node.children.length, 1); assert.equal(node.children[0], replacement); assert.equal(replacement.value, 'new draft');
   await host.dispose();
 });
@@ -396,3 +400,178 @@ test('per-container activity parks native-page demand without disposing retained
   nodes[0].active = true; nodes[1].active = false; host.refreshDemand(); frame(); assert.deepEqual(demands.at(-1), [descriptor.ref]);
   await host.dispose();
 });
+
+test('navigation artwork is static metadata and decode errors restore the named fallback', () => {
+  const document = dom(); document.createElementNS = (_namespace, tag) => document.createElement(tag);
+  const { navigationIcon } = require('../../src/electron/renderer/pluginViews');
+  const icon = navigationIcon(document, { identityIcon: 'data:image/png;base64,bad', icon: 'cpu' }, 15);
+  const image = icon.querySelector('img');
+  assert.equal(image.src, 'data:image/png;base64,bad');
+  assert.equal(image.alt, '');
+  assert.equal(image.width, 15);
+  image.fire('error');
+  assert.equal(icon.querySelector('img'), null);
+  assert.deepEqual(icon.querySelector('path').attributes,
+    navigationIcon(document, { icon: 'cpu' }, 15).querySelector('path').attributes);
+});
+
+
+test('main navigation uses the named icon even without identity artwork', () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(source.indexOf('function viewSwitcherIcon('), source.indexOf('function clearViewSwitcherLongPress('));
+  const document = dom(); document.createElementNS = (_namespace, tag) => document.createElement(tag);
+  const views = require('../../src/electron/renderer/pluginViews');
+  const page = { id: 'plugin:fixture/panel', icon: 'cpu' };
+  const context = { document, window: { TokenMonitorPluginViews: views }, pluginPageOptions: () => [page], VIEW_ICON_CLASSES: {}, pluginPlacementsApi: { isHomeToken: () => true } };
+  vm.runInNewContext(body + ';this.icon=viewSwitcherIcon("plugin:fixture/panel")', context);
+  assert.ok(context.icon.querySelector('path'));
+  assert.deepEqual(context.icon.querySelector('path').attributes, views.navigationIcon(document, page, 14).querySelector('path').attributes);
+});
+
+test('header slots isolate late mounts and release actions on update failure', async () => {
+  const document = dom(), node = document.createElement('div'), actions = document.createElement('div');
+  document.body.append(node, actions);
+  let finish;
+  const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(_node, context) {
+    if (context.ref === descriptor.ref) return new Promise(resolve => { finish = () => {
+      context.headerActions.append(document.createElement('button')); resolve({});
+    }; });
+    context.headerActions.append(document.createElement('button'));
+    return { update() { throw Error('header update failed'); } };
+  } }) });
+  const pending = host.mount(node, descriptor, { headerActions: actions }); await new Promise(setImmediate);
+  host.unmount(node); assert.equal(actions.children.length, 0);
+  const next = { ...descriptor, ref: 'fixture/next' };
+  const replacement = host.mount(node, next, { headerActions: actions });
+  await new Promise(setImmediate); assert.equal(actions.children.length, 0);
+  finish(); await Promise.all([pending, replacement]); const owned = actions.children[0];
+  assert.equal(actions.children.length, 1); assert.equal(actions.children[0], owned);
+  await host.mount(node, next, {}); assert.equal(actions.children.length, 0);
+  await host.dispose();
+});
+
+test('reused mounts move header controls without replacing drafts and remove omitted slots', async () => {
+  const document = dom(), node = document.createElement('div'), a = document.createElement('div'), b = document.createElement('div');
+  document.body.append(node, a, b);
+  let latest;
+  const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(container, context) {
+    latest = context;
+    context.headerActions.append(document.createElement('button'));
+    container.append(document.createElement('input'));
+    return { update(value) { latest = value; } };
+  } }) });
+  await host.mount(node, descriptor, { headerActions: a });
+  const mount = latest.headerActions, button = mount.children[0], input = node.children[0]; input.value = 'draft';
+  await host.mount(node, descriptor, { headerActions: b });
+  assert.equal(a.children.length, 0); assert.equal(b.children[0], mount); assert.equal(mount.children[0], button);
+  assert.equal(latest.headerActions, mount); assert.equal(node.children[0], input); assert.equal(input.value, 'draft');
+  await host.mount(node, descriptor, {});
+  assert.equal(b.children.length, 0); assert.equal(latest.headerActions, undefined);
+  await host.mount(node, descriptor, { headerActions: a });
+  assert.equal(a.children[0], latest.headerActions); assert.notEqual(latest.headerActions, mount);
+  await host.dispose(); assert.equal(a.children.length, 0);
+});
+
+for (const target of ['main.home.content', 'main.tools.content', 'edgeDock.rail.stat.content', 'edgeDock.stat.content', 'notch.home.content', 'notch.summary.content']) {
+  test(`${target} keeps successful replacement hidden throughout a delayed same-view update`, async () => {
+    const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+    const view = { ...descriptor, targets: [target] }; let finish;
+    const host = createHost({ document, window: {}, bridge: {}, importModule: async () => ({ mount(container) {
+      container.append(document.createElement('input'));
+      return { update: () => new Promise(resolve => { finish = resolve; }) };
+    } }) });
+    const content = create({ document, host, getViews: () => [view], selection: () => view.ref });
+    content.render(target, native); await new Promise(setImmediate);
+    assert.equal(native.hidden, true);
+    const container = native.nextSibling, input = container.children[0]; input.value = 'retained draft';
+    content.render(target, native);
+    assert.equal(native.hidden, true, 'native rows must not reappear while the update awaits');
+    assert.equal(container.children[0], input); assert.equal(input.value, 'retained draft');
+    finish(); await new Promise(setImmediate); assert.equal(native.hidden, true);
+    const rebuilt = document.createElement('div'); rebuilt.hidden = false; native.parentNode.insertBefore(rebuilt, native); native.remove();
+    content.retain([target]);
+    content.render(target, rebuilt);
+    assert.equal(rebuilt.hidden, true, 'rebuilt Dock/Notch anchors retain the successful same-revision replacement');
+    assert.equal(rebuilt.nextSibling, container); assert.equal(container.children[0], input);
+    finish(); await new Promise(setImmediate); assert.equal(rebuilt.hidden, true);
+    content.dispose(); assert.equal(rebuilt.hidden, false); await host.dispose();
+  });
+}
+test('pending replacement update restores native on failure or deselection and cannot hide it after removal', async () => {
+  for (const outcome of ['failure', 'deselection']) {
+    const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+    let finish, fail, selected = descriptor.ref;
+    const host = createHost({ document, window: {}, bridge: {}, onError() {}, importModule: async () => ({ mount() {
+      return { update: () => new Promise((resolve, reject) => { finish = resolve; fail = reject; }) };
+    } }) });
+    const content = create({ document, host, getViews: () => [descriptor], selection: () => selected });
+    content.render('main.home.content', native); await new Promise(setImmediate);
+    content.render('main.home.content', native); assert.equal(native.hidden, true);
+    if (outcome === 'failure') fail(Error('update failed'));
+    else { selected = null; content.render('main.home.content', native); assert.equal(native.hidden, false); finish(); }
+    await new Promise(setImmediate); assert.equal(native.hidden, false);
+    content.dispose(); await host.dispose();
+  }
+});
+
+test('retain releases detached replacement mounts when their view is no longer selected', () => {
+  const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+  let selected = descriptor.ref, removed = 0;
+  const content = create({ document, getViews: () => [descriptor], selection: () => selected,
+    host: { mount(_node, _view, context) { context.onMountStatus(true); }, unmount() { removed++; } } });
+  content.render('main.home.content', native); native.remove(); selected = null;
+  content.retain(['main.home.content']); assert.equal(removed, 1); assert.equal(document.body.children.length, 0);
+  content.dispose();
+});
+
+for (const mode of ['append', 'decorate']) {
+  test(`${mode} preserves native visibility changed by the App between renders`, () => {
+    const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+    const view = { ...descriptor, mode };
+    const content = create({ document, getViews: () => [view], host: { mount() {}, unmount() {} } });
+    content.render('main.home.content', native);
+    native.hidden = true; content.render('main.home.content', native);
+    assert.equal(native.hidden, true);
+    native.hidden = false; content.render('main.home.content', native);
+    assert.equal(native.hidden, false);
+    content.dispose();
+  });
+}
+
+test('retain releases an inactive detached replacement while an append view uses the same target', () => {
+  const document = dom(), native = document.createElement('div'); native.hidden = false; document.body.append(native);
+  const append = { ...descriptor, ref: 'other/append', mode: 'append' };
+  let selected = descriptor.ref; const removed = [];
+  const content = create({ document, getViews: () => [descriptor, append], selection: () => selected,
+    host: { mount(_node, _view, context) { context.onMountStatus(true); }, unmount(node) { removed.push(node); } } });
+  content.render('main.home.content', native);
+  const replacementNode = native.nextSibling, appendNode = replacementNode.nextSibling;
+  native.remove(); selected = null;
+  content.retain(['main.home.content']);
+  assert.deepEqual(removed, [replacementNode]);
+  assert.equal(appendNode.isConnected, true);
+  content.dispose(); assert.deepEqual(removed, [replacementNode, appendNode]);
+});
+
+for (const initiallyHidden of [true, false]) {
+  test(`replacement captures App visibility after an append-only outlet starts hidden=${initiallyHidden}`, () => {
+    const document = dom(), native = document.createElement('div'); native.hidden = initiallyHidden; document.body.append(native);
+    const append = { ...descriptor, ref: 'other/append', mode: 'append' };
+    let selected = null, status;
+    const content = create({ document, getViews: () => [append, descriptor], selection: () => selected,
+      host: { mount(_node, view, context) { if (view.mode === 'replace') status = context.onMountStatus; }, unmount() {} } });
+    content.render('main.home.content', native);
+    native.hidden = !initiallyHidden; selected = descriptor.ref;
+    content.render('main.home.content', native);
+    assert.equal(native.hidden, !initiallyHidden, 'pending replacement preserves current App visibility');
+    status(false);
+    assert.equal(native.hidden, !initiallyHidden, 'failed mount restores current App visibility');
+    content.render('main.home.content', native); status(true);
+    assert.equal(native.hidden, true);
+    selected = null; content.render('main.home.content', native);
+    assert.equal(native.hidden, !initiallyHidden, 'deselection restores the replacement-start snapshot');
+    content.dispose();
+  });
+}

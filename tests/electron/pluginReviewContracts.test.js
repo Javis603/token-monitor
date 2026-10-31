@@ -77,7 +77,7 @@ test('main management persistence includes all compact layout and Notch order tr
   const context = vm.createContext({ settings: { pluginStates: {} }, normalizePluginStates, saveSettings() {}, pushSettingsToRenderer() {} });
   const start = main.indexOf('persistManagementSettings: ('), end = main.indexOf('\n        },', start);
   const callback = vm.runInContext(`({${main.slice(start, end)}\n}}).persistManagementSettings`, context);
-  const patch = { floatingBubbleCustomLayout: { version: 1, items: [] }, notchCustomLayout: { version: 1, items: [] }, notchPageOrder: ['home'] };
+  const patch = { floatingBubbleCustomLayout: { version: 1, items: [] }, notchCustomLayout: { version: 1, items: [] }, notchPageOrder: ['home'], pluginInitialSetup: { demo: { values: { 'content:main.home.content': null }, applied: ['content:main.home.content'] } } };
   callback(patch);
   for (const key of Object.keys(patch)) assert.deepEqual(context.settings[key], patch[key]);
 });

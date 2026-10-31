@@ -71,6 +71,7 @@
     const trailRail = el('div', 'notch-tab-rail is-trailing');
     trailRail.append(trailTrack);
     const status = el('div', 'notch-status');
+    const pluginMounts = new Map();
     const trailLane = el('div', 'notch-band-trailing');
     trailLane.append(trailRail, status);
     band.append(leadRail, el('div', 'notch-band-gap'), trailLane);
@@ -196,9 +197,9 @@
     function pluginPageState(page) {
       return pluginHost?.state('notch', page.slice(PLUGIN_PAGE_PREFIX.length));
     }
-    function pluginIconName(page) {
+    function pluginIconMetadata(page) {
       const ref = page.slice(PLUGIN_PAGE_PREFIX.length);
-      return pluginPageState(page)?.icon || payload?.panel?.pluginCatalog?.[ref]?.icon || 'dot';
+      return pluginPageState(page) || payload?.panel?.pluginCatalog?.[ref] || { icon: 'dot' };
     }
     function pageTitle(page) {
       if (!page.startsWith(PLUGIN_PAGE_PREFIX)) return t(`notch.tab.${page}`);
@@ -377,8 +378,17 @@
 
     // A plugin page is mounted only while selected, so the plugin samples
     // nothing for a page the user is not looking at.
+    function unmountPluginPage(page) {
+      const mount = pluginMounts.get(page);
+      if (mount) {
+        pluginMounts.delete(page);
+        mount.headerActions.remove();
+        pluginHost?.unmount?.(mount.body);
+      }
+    }
     function releasePluginPage(page) {
       if (!page?.startsWith(PLUGIN_PAGE_PREFIX)) return;
+      unmountPluginPage(page);
       pageNodes.get(page)?.replaceChildren();
       pageKeys.delete(page);
       pluginHost?.refreshDemand();
@@ -483,10 +493,11 @@
         button.setAttribute('aria-selected', String(selected));
         if (page.startsWith(PLUGIN_PAGE_PREFIX)) {
           const icon = button.querySelector('.notch-tab-plugin-icon');
-          const iconName = pluginIconName(page);
+          const metadata = pluginIconMetadata(page);
+          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon]);
           if (icon && icon.dataset.icon !== iconName && pluginViews) {
             icon.dataset.icon = iconName;
-            icon.replaceChildren(pluginViews.iconNode(document, iconName, null, 15));
+            icon.replaceChildren(pluginViews.navigationIcon(document, metadata, 15));
           }
         }
         button.setAttribute('aria-label', pageTitle(page));
@@ -497,6 +508,7 @@
         pageNode.inert = page !== view.page;
         pageNode.setAttribute('aria-hidden', String(page !== view.page));
       }
+      for (const [page, mount] of pluginMounts) mount.headerActions.hidden = page !== view.page || !shown;
       pluginHost?.refreshDemand();
     }
 
@@ -1309,24 +1321,21 @@
     }
 
     function renderPluginPage(pageNode, ref) {
-      const pluginState = pluginHost?.state('notch', ref);
-      const head = el('div', 'notch-kicker-row');
-      head.append(el('span', 'notch-kicker', pluginState?.title || t('notch.tab.plugin')));
-      if (pluginState?.pluginName && pluginState.pluginName !== pluginState.title) head.append(el('span', 'notch-plugin-owner', pluginState.pluginName));
+      const page = `${PLUGIN_PAGE_PREFIX}${ref}`;
+      unmountPluginPage(page);
+      const headerActions = el('div', 'notch-plugin-header-actions');
+      headerActions.hidden = page !== view.page || !shown;
+      trailLane.append(headerActions);
       const mount = el('div', 'notch-plugin-body');
-      pageNode.replaceChildren(head, mount);
-      pluginHost?.mount(mount, ref, 'notch');
+      pluginMounts.set(page, { body: mount, headerActions });
+      pageNode.replaceChildren(mount);
+      pluginHost?.mount(mount, ref, 'notch', { headerActions });
     }
 
     // Plugin pushes refresh tab titles and icons that arrived after mount.
     function pluginViewsChanged() {
       paintTabs();
       if (!view.page.startsWith(PLUGIN_PAGE_PREFIX)) renderPage(view.page, { force: true });
-      if (view.page.startsWith(PLUGIN_PAGE_PREFIX)) {
-        const kicker = pageNodes.get(view.page)?.querySelector('.notch-kicker');
-        const pluginState = pluginHost?.state('notch', view.page.slice(PLUGIN_PAGE_PREFIX.length));
-        if (kicker && pluginState?.title) kicker.textContent = pluginState.title;
-      }
     }
 
     function scrollEnv(hit) {

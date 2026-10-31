@@ -14,7 +14,7 @@
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/v/release/Javis603/token-monitor?include_prereleases&style=flat-square&label=release&color=22c55e" alt="最新リリース" /></a>
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/downloads/Javis603/token-monitor/total?style=flat-square&color=22c55e" alt="総ダウンロード数" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 以降" />
-    <img src="https://img.shields.io/badge/macOS-12%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 12 以降" />
+    <img src="https://img.shields.io/badge/macOS-13%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 13 以降" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
     <a href="https://discord.gg/HmdNVVvw5P"><img src="https://img.shields.io/discord/1344259784219689031?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="ライセンス: MIT" /></a>
@@ -201,7 +201,7 @@ brew install --cask token-monitor
 
 デスクトップのページに独自のコンテンツを追加し、プラグインのページや設定を作成できます。Notch、Edge Dock、メニューバー／システムトレイ、フローティングバブルにもコンテンツを配置できます。作者は独自の UI と、データ取得や計算用の任意のローカル Node バックエンドを開発できます。
 
-「設定 → プラグイン」で管理します。[利用ガイド](https://javis-ai.com/token-monitor/docs/plugins.html?lang=ja)、[開発ガイド](docs/plugins/author-quickstart.md)、[プラグイン API](docs/plugins/README.md)をご覧ください。プラグイン API は実験的で、今後の変更によりプラグインの更新が必要になる場合があります。信頼できるコードのみ有効にしてください。プラグインはサンドボックスで隔離されず、Node バックエンドは OS ユーザーの権限で実行されます。
+「設定 → プラグイン」で管理します。[利用ガイド](https://javis-ai.com/token-monitor/docs/plugins.html?lang=ja)、[コミュニティプラグイン](https://github.com/Javis603/token-monitor-plugins)、[開発ガイド](docs/plugins/author-quickstart.md)、[プラグイン API](docs/plugins/README.md)をご覧ください。プラグイン API は実験的で、今後の変更によりプラグインの更新が必要になる場合があります。信頼できるコードのみ有効にしてください。プラグインはサンドボックスで隔離されず、Node バックエンドは OS ユーザーの権限で実行されます。
 
 ## 対応ツールの詳細
 
@@ -295,10 +295,11 @@ Qoder CN のトークン使用量は API ではなくアプリのローカルデ
 | プロンプト／応答ごとの使用量とツール呼び出し | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 詳細はローカルで読み取り、同期されません。 |
 | コンテキスト使用量／残り容量 | Claude Code, Codex, DeepSeek Harness | Claude Code のコンテキスト上限はモデルから推定します。 |
 | キャッシュ使用量／セッションのキャッシュヒット率 | キャッシュ項目を提供するデータソース。例： Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | キャッシュ使用量のデータがある場合にヒット率を表示します。 |
-| キャッシュ残存時間の推定 | Claude Code, Codex | Claude Code：5 分または 1 時間。Codex：約 30 分（推定）。 |
+| キャッシュ残存時間の推定 | Claude Code | 記録されたキャッシュの種類に基づき、5 分または 1 時間と推定します。 |
 | 出力速度／トークン消費速度 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 出力速度は `tok/s`、総トークン消費速度は `tok/min`。計測時間には待機を含む場合があります。 |
 | 推論の effort 設定 | Claude Code, Codex | セッションに明示的に記録された設定値のみ表示します。 |
 | 推論トークン数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| ターンの開始／完了検出 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | ツールが記録したターンのシグナルを使用します。その他のツールや有効なシグナルがない場合は、最後のアクティビティから約 10 分間、実行中と推定します。 |
 | ネイティブの実行中／入力待ち状態 | Claude Code, Codex | — |
 | 親セッション／サブエージェントのグループ化 | Codex, Antigravity, Oh My Pi, ZCode；親セッションへのリンクを検証できる T3 Code セッション | Claude Code のグループ化は T3 Code 経由で提供します。 |
 | 同じ会話の継続レコードのグループ化 | Codex；検証済みのスレッドリンクを持つ T3 Code セッション | — |

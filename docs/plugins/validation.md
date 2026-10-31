@@ -1,4 +1,21 @@
-# Plugin platform validation
+# Plugin testing and platform validation
+
+## Author self-check
+
+Test your plugin in a disposable profile with synthetic or self-authored data. You do not need to run the host platform matrix to start writing a plugin. Before publishing, build and import the exact package you intend to distribute; a source-folder test alone does not verify its file list.
+
+- Check install-only does not execute code, then explicitly trust and enable the package. Check disable/re-enable and startup safe mode recovery.
+- Exercise each declared surface, keyboard access, narrow layouts, source/period changes and hidden/visible transitions. If extending native content, check fallback after failure or deselection and undo owned DOM changes on disposal.
+- For data/settings, handle unavailable, stale and unknown values, invalidated/expired cursors, save conflicts and read-only settings. Release subscriptions, timers and listeners, including when a mount closes during async work.
+- With a backend, test multiple locations/windows sharing it, no-demand shutdown and separately opted-in background execution. Test native dependencies on the actual supported OS/architecture/Electron build.
+- Test updates from the previous release with renewed revision trust, retained drafts, rollback, and uninstall with/without data and placement retention. Rollback restores code, not arbitrary data migrations.
+- For catalogs, check your actual hosted URL/digest and optional pinned signature; follow the [catalog release checks](distribution-design.md#test-before-sharing).
+
+Select checks matching the features you ship. Record tested App versions/platforms and state untested ones in your README. A package build or hash is not a safety audit.
+
+## Maintainer platform acceptance
+
+This section verifies changes to the Token Monitor plugin host. The repository fixtures below test the platform, not arbitrary third-party plugins, and are not prerequisites for author onboarding.
 
 Run `npm run verify` for lint and Node tests. `npm run verify:plugins` exercises the optional Node process and actual runtime installation/enablement. Native acceptance requires a usable desktop session and the repository's existing Electron build; it must not install third-party code or read a personal profile.
 

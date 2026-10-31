@@ -113,7 +113,7 @@ test('select and navigation popups share their regular and native glass surface'
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   const rule = selector => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .find(match => match[1].trim() === selector)?.[2];
-  const surface = rule('.plugin-menu,\n.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.settings-help-popover,\n.app-update-popover');
+  const surface = rule('.plugin-menu,\n.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.plugin-catalog-dialog,\n.settings-help-popover,\n.app-update-popover');
   assert.ok(surface);
   for (const property of ['border', 'border-radius', 'background', 'box-shadow', 'backdrop-filter']) {
     assert.ok(surface.includes(`${property}:`), property);
@@ -123,7 +123,7 @@ test('select and navigation popups share their regular and native glass surface'
   assert.doesNotMatch(rule('.select-control-popup'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.sync-content-dialog,\n.settings-help-popover'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.view-switcher-menu'), /background:|border-radius:|box-shadow:/);
-  assert.ok(rule('html.native-liquid-glass .plugin-menu,\nhtml.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .view-switcher-menu,\nhtml.native-liquid-glass .sync-content-dialog,\nhtml.native-liquid-glass .settings-help-popover,\nhtml.native-liquid-glass .app-update-popover'));
+  assert.ok(rule('html.native-liquid-glass .plugin-menu,\nhtml.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .view-switcher-menu,\nhtml.native-liquid-glass .sync-content-dialog,\nhtml.native-liquid-glass .plugin-catalog-dialog,\nhtml.native-liquid-glass .settings-help-popover,\nhtml.native-liquid-glass .app-update-popover'));
   assert.ok(rule('html.native-liquid-glass .plugin-menu button,\nhtml.native-liquid-glass .select-control-option,\nhtml.native-liquid-glass .view-switcher-menu-item'));
   const selected = '.select-control-option[data-selected="true"]';
   const highlighted = '.select-control-option[data-highlighted="true"]';

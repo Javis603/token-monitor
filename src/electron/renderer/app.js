@@ -284,6 +284,7 @@ let pluginMainPages = null;
 function pluginPageOptions() { return window.TokenMonitorPluginMainPages?.entries(state.pluginCatalog) || []; }
 let pluginApi = null;
 let pluginSettingsPanel = null;
+let pluginUpdateCount = 0;
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;
 const VIEW_SWITCHER_HOVER_CLOSE_MS = 160;
 const VIEW_ICON_CLASSES = {
@@ -545,6 +546,10 @@ Object.assign(els, {
   automaticAppUpdatesRow: document.getElementById('automaticAppUpdatesRow'),
   automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
   automaticAppUpdatesNote: document.getElementById('automaticAppUpdatesNote'),
+  proxyUrlInput: document.getElementById('proxyUrlInput'),
+  noProxyInput: document.getElementById('noProxyInput'),
+  networkProxySource: document.getElementById('networkProxySource'),
+  proxyUrlError: document.getElementById('proxyUrlError'),
   appUpdateLatest: document.getElementById('appUpdateLatest'),
   appUpdateCheckButton: document.getElementById('appUpdateCheckButton'),
   appUpdateViewReleaseButton: document.getElementById('appUpdateViewReleaseButton'),
@@ -895,10 +900,10 @@ function viewsSummary() {
 function settingsSectionSummary(section) {
   if (!state.settings) return '';
   if (section === 'plugins') {
-    if (state.settings.pluginsEnabled === false) return t('settings.summary.off');
     const plugins = state.pluginCatalog?.plugins || [];
-    if (!plugins.length) return '';
-    return t('settings.summary.plugins', { active: plugins.filter((plugin) => plugin.status === 'active').length, total: plugins.length });
+    const summary = state.settings.pluginsEnabled === false ? t('settings.summary.off') : plugins.length
+      ? t('settings.summary.plugins', { active: plugins.filter((plugin) => plugin.status === 'active').length, total: plugins.length }) : '';
+    return [summary, pluginUpdateCount ? t('plugins.catalog.updatesAvailable', { count: pluginUpdateCount }) : ''].filter(Boolean).join(' · ');
   }
   if (section === 'sync') {
     const modeKeys = { host: 'settings.sync.hostHub', client: 'settings.sync.connectHub', icloud: 'settings.sync.icloud' };
@@ -1793,6 +1798,66 @@ function renderSettingsAppUpdateRow() {
     els.appUpdateMessage.textContent = '';
     els.appUpdateMessage.classList.remove('error');
   }
+}
+
+// Per-field edit state. `dirty` keeps a settings push from overwriting text
+// that has not been stored (an edit in progress or a refused value), and the
+// revision lets a save that finishes after a newer edit leave that edit alone.
+const networkProxyDrafts = {
+  proxyUrl: { revision: 0, dirty: false },
+  noProxy: { revision: 0, dirty: false }
+};
+// The last refused save, kept until that field is edited again so the next
+// settings push does not wipe the reason off screen.
+let networkProxyError = null;
+const PROXY_SETTING_ERROR_CODES = ['proxy_invalid_url', 'proxy_unsupported_scheme', 'proxy_credentials_unsupported', 'proxy_bypass_unsupported', 'proxy_bypass_too_long'];
+
+function networkProxyInput(field) {
+  return field === 'proxyUrl' ? els.proxyUrlInput : els.noProxyInput;
+}
+
+function syncNetworkProxyControls() {
+  if (!els.proxyUrlInput) return;
+  for (const field of Object.keys(networkProxyDrafts)) {
+    const input = networkProxyInput(field);
+    if (input && document.activeElement !== input && !networkProxyDrafts[field].dirty) {
+      input.value = state.settings?.[field] || '';
+    }
+  }
+  if (els.networkProxySource) {
+    const source = state.settings?.networkProxySource || 'system';
+    els.networkProxySource.textContent = t(`settings.proxy.source.${source}`);
+  }
+  if (els.proxyUrlError) {
+    els.proxyUrlError.hidden = !networkProxyError;
+    els.proxyUrlError.textContent = networkProxyError ? t(`settings.proxy.error.${networkProxyError.code}`) : '';
+  }
+}
+
+function markNetworkProxyDraft(field) {
+  networkProxyDrafts[field].revision += 1;
+  networkProxyDrafts[field].dirty = true;
+  if (networkProxyError?.field !== field) return;
+  networkProxyError = null;
+  syncNetworkProxyControls();
+}
+
+async function saveNetworkProxySetting(field) {
+  const draft = networkProxyDrafts[field];
+  const revision = draft.revision;
+  let code = '';
+  try {
+    await saveSettings({ [field]: networkProxyInput(field).value });
+  } catch (error) {
+    const message = String(error?.message || '');
+    code = PROXY_SETTING_ERROR_CODES.find((candidate) => message.includes(candidate)) || 'save_failed';
+  }
+  // A newer edit owns the field now; this outcome no longer describes it.
+  if (draft.revision !== revision) return;
+  // A refused value stays dirty, so it is left in place to be corrected.
+  draft.dirty = Boolean(code);
+  networkProxyError = code ? { field, code } : (networkProxyError?.field === field ? null : networkProxyError);
+  preserveSettingsPanelScroll(syncNetworkProxyControls);
 }
 
 function renderAutomaticAppUpdateControl() {
@@ -6161,6 +6226,8 @@ function nextBreakdown(value) {
 }
 
 function viewSwitcherIcon(id) {
+  const page = pluginPageOptions().find(page => page.id === id);
+  if (page) return window.TokenMonitorPluginViews.navigationIcon(document, page, 14);
   const icon = document.createElement('span');
   icon.className = `view-switcher-icon ${VIEW_ICON_CLASSES[id] || (pluginPlacementsApi.isHomeToken(id) ? 'view-icon-plugin' : 'view-icon-home')}`;
   icon.setAttribute('aria-hidden', 'true');
@@ -6338,11 +6405,17 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
 }
 
 function homeModuleShell(kind, title, viewId, meta = '') {
-  const module = document.createElement('section');
+  // A content outlet sits beside its native anchor. Keep that connected shell
+  // while refreshing the native fallback; retaining only author children after
+  // removing their ancestor is too late to preserve focus and scroll anchoring.
+  // Standalone plugin modules already retain their own shell by view ref.
+  const retained = kind === 'plugin' ? null : [...els.homePanel.children].find(node => node.classList.contains(`home-module-${kind}`)
+    && [node, ...node.children].some(anchor => pluginContent?.hasAnchor(anchor)));
+  const module = retained || document.createElement('section');
   module.className = `home-module home-module-${kind}`;
   module.setAttribute('aria-label', title);
   // Plugin modules have no detail view to jump to.
-  if (viewId) {
+  if (viewId && !retained) {
     module.tabIndex = 0;
     module.setAttribute('role', 'button');
     module.addEventListener('click', (event) => {
@@ -6381,6 +6454,13 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   head.append(titleWrap, end);
   const body = document.createElement('div');
   body.className = 'home-module-body';
+  if (retained) {
+    const nativeHead = module.querySelector('.home-module-head');
+    const nativeBody = module.querySelector('.home-module-body');
+    nativeHead.replaceChildren(...head.childNodes);
+    nativeBody.replaceChildren();
+    return { module, body: nativeBody };
+  }
   module.append(head, body);
   return { module, body };
 }
@@ -6673,7 +6753,7 @@ function scheduleHomeSessionRepaint(rows) {
     const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
     const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
     const next = renderHomeSessionModule(nextRows);
-    current.replaceWith(next);
+    if (current !== next) current.replaceWith(next);
     if (hadFocus) next.focus();
     if (hadHeadFocus) next.querySelector('.home-module-head')?.focus({ preventScroll: true });
     if (focusedKey) {
@@ -7318,13 +7398,20 @@ function renderHome() {
   });
   // Reconcile siblings without detaching retained plugin controls. Collector
   // pushes must not discard focused drafts or cancel captured drawing gestures.
-  for (const child of [...els.homePanel.children]) if (!nodes.includes(child)) child.remove();
-  nodes.forEach((node, index) => {
+  // A module-level selector places author controls beside the module. Reorder
+  // those outlets with their anchor instead of moving them back after rendering.
+  const ordered = nodes.flatMap(node => [node, ...pluginContent?.nodesFor(node) || []]);
+  ordered.forEach((node, index) => {
     const current = els.homePanel.children[index];
     if (node === current) return;
     if (node.parentNode === els.homePanel && els.homePanel.moveBefore) els.homePanel.moveBefore(node, current || null);
     else els.homePanel.insertBefore(node, current || null);
   });
+  // Attach replacements before removing obsolete siblings: a synchronous layout
+  // must never observe the page with its retained content/scroll range missing.
+  for (const child of [...els.homePanel.children]) {
+    if (!ordered.includes(child)) child.remove();
+  }
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
@@ -7388,7 +7475,9 @@ function periodContentAvailability() {
 
 function render() {
   renderAppContent();
-  pluginViewHost?.refreshContext();
+  // Composition supplies current native anchors/context below. Do not dispatch
+  // an extra update with the previous composition options first.
+  pluginViewHost?.refreshContext({ includeContent: false });
   if (pluginContent) {
     const target = `main.${state.breakdown}.content`;
     const roots = { home: els.homePanel, limits: els.limitsPanel, trends: els.trendsPanel, status: els.serviceStatusPanel };
@@ -9595,6 +9684,7 @@ function syncSettingsForm() {
   const modelRankingMetric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
   for (const input of els.modelRankingMetricInputs || []) input.checked = input.value === modelRankingMetric;
   syncCurrencyRateControls();
+  syncNetworkProxyControls();
   syncHubDraftFields();
   els.limitsRefreshInput.value = state.settings.limitsRefreshMode === 'adaptive'
     ? 'adaptive'
@@ -12905,7 +12995,7 @@ function renderNotchPageChoices() {
     resetButton: document.getElementById('resetNotchPageOrderButton'),
     save: async patch => { await saveSettings(patch); },
     place: async (ref, placed) => { await pluginApi.place(ref, 'notch', placed); },
-    pluginIcon: name => window.TokenMonitorPluginViews?.iconNode(document, name, null, 14),
+    pluginIcon: (name, identityIcon) => window.TokenMonitorPluginViews?.navigationIcon(document, { icon: name, identityIcon }, 14),
     createRowDrag: config => rowDragControllerApi.createRowDragController({
       dragSort: verticalDragSortApi, getScrollPanel: () => els.settingsPanel,
       preserveScroll: preserveSettingsPanelScroll, ...config
@@ -12939,7 +13029,9 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
   onDemand: (surface, refs) => pluginBridge.setDemand(surface, refs),
   motionAllowed: () => !prefersReducedMotion(),
   motionMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
-  isSurfaceActive: surface => !isRendererWindowHidden() && !state.floatingBubble.collapsed && (surface === 'settings' ? isSettingsPanelOpen() : !isSettingsPanelOpen())
+  isSurfaceActive: (surface, container) => !isRendererWindowHidden() && !state.floatingBubble.collapsed
+    && (surface === 'settings' ? isSettingsPanelOpen() : !isSettingsPanelOpen()
+      || (surface === 'page' && Boolean(container?.closest('#pluginMainPanel'))))
 }) : null;
 pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ document,
   host: { mount: (container, view, context) => pluginViewHost.mount(container, view.ref, 'page', context), unmount: container => pluginViewHost.unmount(container) },
@@ -12947,7 +13039,7 @@ pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ docum
   selection: target => state.pluginCatalog?.contentSelections?.[target]
 }) : null;
 pluginMainPages = pluginViewHost ? window.TokenMonitorPluginMainPages.create({
-  document, container: document.getElementById('pluginMainPanel'), host: pluginViewHost, t,
+  document, container: document.getElementById('pluginMainPanel'), headingContainer: document.getElementById('pluginPageHeading'), actionsContainer: document.getElementById('pluginPageActions'), host: pluginViewHost, t,
   openWindow: ref => pluginBridge.openPage(ref),
   formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
 }) : null;
@@ -12973,7 +13065,11 @@ function applyPluginCatalog(list) {
 }
 
 async function loadPluginCatalog() {
-  try { return applyPluginCatalog(await pluginBridge.list()); }
+  try {
+    const list = applyPluginCatalog(await pluginBridge.list());
+    try { applyPluginCatalogUpdates(await pluginBridge.catalog()); } catch (_) {}
+    return list;
+  }
   catch (error) {
     // Initial failure must resolve the pending restored page. Later transient
     // failures retain the last known catalog until a successful refresh.
@@ -12982,11 +13078,17 @@ async function loadPluginCatalog() {
   }
 }
 
+function applyPluginCatalogUpdates(catalog) {
+  pluginUpdateCount = catalog.entries.filter(entry => entry.status === 'update').length;
+  renderSettingsSummaries();
+  return catalog;
+}
+
 pluginApi = pluginBridge ? {
   list: loadPluginCatalog,
   orderContent: async (target, refs) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.orderContent(target, refs)),
   selectContent: async (target, ref) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.selectContent(target, ref)),
-  setEnabled: async (id, enabled) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled)),
+  setEnabled: async (id, enabled, initialSetup) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled, initialSetup)),
   setBackground: async (id, enabled) => applyPluginCatalog(await pluginBridge.setBackground(id, enabled)),
   restart: async (id) => applyPluginCatalog(await pluginBridge.restart(id)),
   reload: async () => applyPluginCatalog(await pluginBridge.reload()),
@@ -12995,17 +13097,21 @@ pluginApi = pluginBridge ? {
     const page = pluginPageOptions().find(page => page.ref === ref);
     if (!page) throw new Error(t('plugins.page.enableFirst'));
     openViewFromTray(page.id);
-    document.querySelector('#pluginMainPanel .plugin-main-page:not(.hidden) h2')?.focus({ preventScroll: true });
+    document.querySelector('#pluginPageHeading .plugin-main-heading:not(.hidden) h2')?.focus({ preventScroll: true });
   },
   getSettings: id => pluginBridge.getSettings(id),
   updateSettings: (id, input) => pluginBridge.updateSettings(id, input),
-  catalog: () => pluginBridge.catalog(),
+  catalog: async () => applyPluginCatalogUpdates(await pluginBridge.catalog()),
+  discoverCatalog: async force => applyPluginCatalogUpdates(await pluginBridge.discoverCatalog(force)),
+  catalogDetails: (source, id) => pluginBridge.catalogDetails(source, id),
+  closeCatalogDetails: () => pluginBridge.closeCatalogDetails(),
+  catalogReadmeImage: (documentId, index) => pluginBridge.catalogReadmeImage(documentId, index),
   catalogPreview: (source, id, version) => pluginBridge.catalogPreview(source, id, version),
-  addSource: input => pluginBridge.addSource(input),
-  refreshSource: id => pluginBridge.refreshSource(id),
-  removeSource: id => pluginBridge.removeSource(id),
+  addSource: async input => applyPluginCatalogUpdates(await pluginBridge.addSource(input)),
+  refreshSource: async id => applyPluginCatalogUpdates(await pluginBridge.refreshSource(id)),
+  removeSource: async id => applyPluginCatalogUpdates(await pluginBridge.removeSource(id)),
   importPackage: kind => pluginBridge.importPackage(kind),
-  install: async token => applyPluginCatalog(await pluginBridge.install(token)),
+  install: async (token, options) => applyPluginCatalog(await pluginBridge.install(token, options)),
   cancelInstall: token => pluginBridge.cancelInstall(token),
   rollback: async id => applyPluginCatalog(await pluginBridge.rollback(id)),
   uninstall: async (id, options) => applyPluginCatalog(await pluginBridge.uninstall(id, options)),
@@ -14155,6 +14261,10 @@ els.windowToggleShortcutValue?.addEventListener('click', startWindowShortcutReco
 els.windowToggleShortcutClearButton?.addEventListener('click', () => setWindowToggleShortcut('').catch(() => {}));
 els.startAtLoginInput?.addEventListener('change', () => saveSettings({ startAtLogin: els.startAtLoginInput.checked }));
 els.automaticAppUpdatesInput?.addEventListener('change', () => saveSettings({ automaticAppUpdates: els.automaticAppUpdatesInput.checked }));
+els.proxyUrlInput?.addEventListener('input', () => markNetworkProxyDraft('proxyUrl'));
+els.proxyUrlInput?.addEventListener('change', () => saveNetworkProxySetting('proxyUrl'));
+els.noProxyInput?.addEventListener('input', () => markNetworkProxyDraft('noProxy'));
+els.noProxyInput?.addEventListener('change', () => saveNetworkProxySetting('noProxy'));
 els.glassInput.addEventListener('change', saveAppearanceFromControls);
 els.blurInput.addEventListener('change', saveAppearanceFromControls);
 els.backgroundImageOpacityInput?.addEventListener('change', saveAppearanceFromControls);
@@ -14468,11 +14578,15 @@ function handleWindowVisibilityChange() {
 }
 document.addEventListener('visibilitychange', handleWindowVisibilityChange);
 document.addEventListener('visibilitychange', hideTrendTooltip);
+const windowActivationFocus = window.TokenMonitorWindowActivationFocus.create({ document, shell: els.shell, header: document.querySelector('.titlebar') });
 window.tokenMonitor.onWindowVisibilityPush?.((visible) => {
+  if (!visible) windowActivationFocus.cancel();
   if (!visible) hideTrendTooltip();
   state.windowVisible = visible;
   handleWindowVisibilityChange();
 });
+window.tokenMonitor.onWindowSummoned(() => windowActivationFocus.summon());
+window.tokenMonitor.onWindowSummonCancelled(() => windowActivationFocus.cancel());
 
 window.tokenMonitor.onStatsPush?.((payload) => {
   if (!payload) return;

@@ -29,6 +29,7 @@ const {
   sseFrameForClient,
   hubStatsContentKey,
   wantsFreshnessEvents,
+  wantsDeltaEvents,
   wantsMinimalResponse
 } = require('../shared/hubProtocol');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
@@ -144,6 +145,8 @@ function createHub({
   const statsListeners = new Set();
   let broadcastTimer = null;
   let lastSseContentKey = '';
+  let lastSseStats = null;
+  let streamRevision = 0;
 
   function writeSseFrame(client, frame) {
     if (!frame) return false;
@@ -164,7 +167,9 @@ function createHub({
   }
 
   function fanoutSseFrames(frames) {
-    for (const client of sseClients) writeSseFrame(client, sseFrameForClient(frames, client));
+    for (const client of sseClients) {
+      if (writeSseFrame(client, sseFrameForClient(frames, client)) && client.deltaEvents) client.streamRevision = frames.revision;
+    }
   }
 
   function notifyStatsListeners(reason, stats = getStats(), at = new Date().toISOString()) {
@@ -187,13 +192,18 @@ function createHub({
         stats,
         at,
         lastContentKey: lastSseContentKey,
+        previousStats: lastSseStats,
+        revision: ++streamRevision,
         ...sseClientKinds(sseClients),
         allowFreshness: false
       });
       lastSseContentKey = frames.contentKey;
+      lastSseStats = stats;
       fanoutSseFrames(frames);
     }
-    notifyStatsListeners(reason, stats, at);
+    // Embedded widgets add local presentation metadata to their snapshot. Do
+    // not expose the immutable SSE delta baseline to those observers.
+    notifyStatsListeners(reason, sseClients.size > 0 && statsListeners.size > 0 ? getStats() : stats, at);
   }
 
   function flushQueuedStatsBroadcast() {
@@ -206,9 +216,12 @@ function createHub({
       stats,
       at,
       lastContentKey: lastSseContentKey,
+      previousStats: lastSseStats,
+      revision: ++streamRevision,
       ...sseClientKinds(sseClients)
     });
     lastSseContentKey = frames.contentKey;
+    lastSseStats = stats;
     fanoutSseFrames(frames);
   }
 
@@ -432,7 +445,7 @@ function createHub({
         'connection': 'keep-alive',
         'x-accel-buffering': 'no'
       });
-      const client = { res, freshnessEvents: wantsFreshnessEvents(req), blocked: false, needsSnapshot: false };
+      const client = { res, freshnessEvents: wantsFreshnessEvents(req), deltaEvents: wantsDeltaEvents(req), streamRevision: null, blocked: false, needsSnapshot: false };
       let heartbeat = null;
       client.cleanup = () => {
         clearInterval(heartbeat);
@@ -440,6 +453,7 @@ function createHub({
         sseClients.delete(client);
         if (sseClients.size === 0) {
           lastSseContentKey = '';
+          lastSseStats = null;
           if (broadcastTimer) clearTimeout(broadcastTimer);
           broadcastTimer = null;
         }
@@ -448,7 +462,8 @@ function createHub({
         client.blocked = false;
         if (!client.needsSnapshot) return;
         client.needsSnapshot = false;
-        // A skipped full frame makes later freshness events insufficient.
+        // A skipped frame invalidates both freshness and delta baselines.
+        client.streamRevision = null;
         try {
           writeSseFrame(client, encodeSseEvent('stats', {
             type: 'stats', reason: 'snapshot', stats: getStats(), at: new Date().toISOString()
@@ -457,12 +472,17 @@ function createHub({
       };
       res.on('close', client.cleanup);
       res.on('error', client.cleanup);
-      if (sseClients.size === 0) lastSseContentKey = hubStatsContentKey(stats);
+      if (sseClients.size === 0) {
+        lastSseContentKey = hubStatsContentKey(stats);
+        lastSseStats = stats;
+        if (client.deltaEvents) client.streamRevision = streamRevision;
+      }
       sseClients.add(client);
       heartbeat = setInterval(() => {
         if (!client.blocked) writeSseFrame(client, ': hb\n\n');
       }, 30000);
-      writeSseFrame(client, encodeSseEvent('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
+      writeSseFrame(client, encodeSseEvent('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
+        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {}) }));
       return;
     }
 

@@ -77,6 +77,7 @@ input, textarea, [contenteditable="true"] {
   user-select: text;
   -webkit-user-select: text;
 }
+.shell:focus { outline: none; }
 .shell {
   position: relative;
   display: flex;
@@ -3175,6 +3176,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .view-switcher-menu,
 .select-control-popup,
 .sync-content-dialog,
+.plugin-catalog-dialog,
 .settings-help-popover,
 .app-update-popover {
   border: 1px solid rgba(var(--line-rgb), 0.22);
@@ -3210,6 +3212,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   .view-switcher-menu,
   .select-control-popup,
   .sync-content-dialog,
+  .plugin-catalog-dialog,
   .settings-help-popover { background: rgb(var(--glass-rgb)); }
 }
 /* Chromium delegates an open <select> popup to a platform-specific surface.
@@ -6060,7 +6063,7 @@ html.is-windows .limit-live-badge {
   bottom: calc(100% + 6px);
   display: grid;
   width: 100%;
-  max-height: min(280px, calc(100vh - 84px));
+  max-height: calc(100vh - 84px);
   gap: 2px;
   overflow: hidden auto;
   transform-origin: left bottom;
@@ -6163,6 +6166,7 @@ html.native-liquid-glass .plugin-menu,
 html.native-liquid-glass .select-control-popup,
 html.native-liquid-glass .view-switcher-menu,
 html.native-liquid-glass .sync-content-dialog,
+html.native-liquid-glass .plugin-catalog-dialog,
 html.native-liquid-glass .settings-help-popover,
 html.native-liquid-glass .app-update-popover {
   border-color: rgba(var(--line-rgb), 0.16);
@@ -8465,6 +8469,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-detail-toolbar { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
 .plugin-detail-section { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
 .plugin-detail-heading { margin: 0; font-size: .6875rem; font-weight: 600; }
+.plugin-update-note { display: flex; flex-direction: column; gap: 4px; }
 .plugin-detail .settings-note { margin: 0; }
 .plugin-detail .plugin-views { gap: 10px; }
 .plugin-detail-utilities { border-top: 1px solid var(--line); padding-top: 14px; }
@@ -8490,6 +8495,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-permission-network { color: var(--orange); }
 .plugin-risk { margin: 0; font-size: 0.6875rem; color: var(--orange); }
 .plugin-consent-actions { justify-content: flex-end; }
+.plugin-consent-actions button { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; padding-block: 6px; }
 .settings-actions button.plugin-allow { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--accent); }
 .plugin-views { display: flex; flex-direction: column; gap: 6px; }
 .plugin-view-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
@@ -8572,15 +8578,35 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .shell.plugin-page-mode > .total-panel,
 .shell.plugin-page-mode .title-controls > .tabs,
 .shell.plugin-page-mode #liveTokenRate { display: none; }
+
 .plugin-main-panel { flex: 1; min-height: 0; overflow: hidden; }
-.plugin-main-page { height: 100%; display: flex; flex-direction: column; gap: 14px; padding-top: 8px; }
-.plugin-main-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.plugin-main-heading h2 { margin: 0; font-size: 1.12em; font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
-.plugin-main-detach { flex-shrink: 0; color: var(--muted); font: inherit; border: 0; background: transparent; padding: 6px 0 6px 6px; cursor: pointer; }
+.plugin-main-page:focus { outline: none; }
+.plugin-main-page { height: 100%; display: flex; flex-direction: column; gap: 8px; }
+.shell.plugin-page-mode .app-title-text, .shell.plugin-page-mode #tokenRateReveal { display: none; }
+.shell.plugin-page-mode .app-title { align-items: baseline; }
+.shell.plugin-page-mode .plugin-page-heading { margin-left: 8px; }
+.shell.plugin-page-mode .app-title-mark { display: inline; flex-shrink: 0; }
+.plugin-page-heading { display: flex; align-items: center; min-width: 0; overflow: hidden; }
+.plugin-main-heading { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+.plugin-main-heading h2 { margin: 0; font-size: 13px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shell.plugin-page-mode .title-controls { flex: 0 1 auto; width: auto; min-width: 114px; max-width: calc(100% - 64px); }
+.plugin-page-actions, .plugin-main-actions, .plugin-header-actions, .plugin-header-actions-mount { display: flex; align-items: center; justify-content: flex-end; min-width: 0; gap: 6px; }
+.plugin-page-actions { height: 30px; transition: opacity 160ms ease 140ms; }
+.plugin-page-actions .plugin-header-actions { flex: 1 1 auto; overflow: auto; max-height: 30px; justify-content: flex-start; }
+.plugin-page-actions .plugin-header-actions-mount { flex: 0 0 auto; }
+.plugin-header-actions:empty { display: none; }
+.shell.plugin-page-mode .plugin-page-actions button:focus-visible { outline-offset: -2px; }
+.title-controls:has(.actions-hotspot:hover) .plugin-page-actions,
+.title-controls:has(.window-actions:hover) .plugin-page-actions,
+.title-controls:has(.window-actions:focus-within) .plugin-page-actions,
+.shell.settings-open .plugin-page-actions { visibility: hidden; pointer-events: none; transition-delay: 0ms; }
+.plugin-main-detach { flex-shrink: 0; color: var(--muted); font: inherit; border: 0; background: transparent; padding: 4px; cursor: pointer; -webkit-app-region: no-drag; display: grid; place-items: center; }
+.plugin-main-detach svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.plugin-main-page > .plugin-action-error { order: -1; margin: 0; }
 .plugin-main-detach:hover { color: var(--text); }
 .plugin-main-content { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; padding: 2px; }
-.shell.settings-open > .plugin-main-panel { display: none; }
 .plugin-main-heading h2:focus-visible, .plugin-main-detach:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
 
 /* Plugin identity and task-specific tools share the compact settings scale. */
 .plugin-identity { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
@@ -8596,6 +8622,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-type-widget { color: light-dark(#34627f, #94bdd8); }
 .plugin-type-page { color: light-dark(#735687, #bca5d8); }
 .plugin-type-appearance { color: light-dark(#85601f, #d6b77d); }
+.plugin-type-automation { color: light-dark(#226b5c, #8bcab9); }
 .plugin-card-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-size: .625rem; color: var(--muted); }
 .plugin-origin-note { overflow-wrap: anywhere; }
 .plugin-catalog-results .plugin-description { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -8622,7 +8649,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-location-count.limit-detail-tooltip-wrap, .plugin-location-count { display: inline-flex; width: auto; height: auto; flex: 0 0 auto; min-height: 28px; padding: 3px 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .plugin-location-count:hover { color: var(--text); }
 .plugin-location-count:focus-visible, .plugin-views:focus-visible, .settings-actions button.plugin-installed-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.plugin-experimental-tooltip .limit-detail-tooltip,
 .plugin-location-count .limit-detail-tooltip { right: auto; left: anchor(center); translate: calc(-50% + var(--tooltip-shift, 0px)) 0; max-width: min(240px, calc(100vw - 32px)); grid-template-columns: minmax(0, 1fr); text-align: left; font-size: .6875rem; font-weight: 400; line-height: 1.45; white-space: normal; }
+.plugin-experimental-tooltip .limit-detail-tooltip::after,
 .plugin-location-count .limit-detail-tooltip::after { right: auto; left: calc(50% - 4px - var(--tooltip-shift, 0px)); }
 .plugin-location-count .is-heading { color: var(--text); }
 .plugin-identity .plugin-origin-official { display: inline-flex; align-items: center; gap: 3px; border: 0; padding: 0; color: var(--success); }
@@ -8740,3 +8769,54 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-about h3, .plugin-about .settings-note { margin: 0; }
 .settings-panel .plugin-author-prompt { height: auto; min-height: 220px; width: 100%; box-sizing: border-box; font: inherit; font-size: .6875rem; line-height: 1.6; overflow-wrap: anywhere; resize: vertical; user-select: text; }
 .plugin-copy-status { min-height: 1.6em; }
+
+.plugin-experimental-tooltip.limit-detail-tooltip-wrap {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.plugin-initial-setup { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px; }
+.plugin-choice-group { min-width: 0; border: 0; padding: 0; margin: 12px 0; }
+.plugin-choice-group legend { padding: 0; margin-bottom: 2px; }
+.plugin-initial-choices > .plugin-choice-group { margin: 0; }
+.plugin-initial-choices .plugin-placement-choice { min-height: 1.5em; }
+.settings-panel label.plugin-placement-choice { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.settings-panel label.plugin-placement-choice.plugin-tagged-choice { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; }
+.plugin-choice-name { min-width: 0; overflow-wrap: anywhere; }
+.plugin-purpose-tag { justify-self: end; white-space: nowrap; padding: 0 6px; border-radius: 4px; background: rgba(var(--overlay-rgb), .07); color: var(--muted); font-size: .6875rem; line-height: 1.5; }
+.plugin-placement-choice > input[type="checkbox"], .plugin-placement-choice > input[type="radio"] { flex: 0 0 14px; width: 14px; height: 14px; margin: 0; }
+
+/* Catalog detail is a host-owned dialog. Only its body scrolls; image zoom
+   uses a second native dialog so Escape dismisses only the top layer. */
+.plugin-catalog-group { min-width: 0; }
+.plugin-catalog-refresh { align-items: center; margin-top: 12px; gap: 8px 12px; }
+.plugin-catalog-refresh .settings-note { min-width: 0; }
+.plugin-catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 10px; margin-top: 10px; }
+.plugin-catalog-grid > .plugin-card { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(var(--overlay-rgb), .025); cursor: pointer; }
+.plugin-catalog-title { display: block; padding: 0; min-width: 0; text-align: start; border: 0; background: none; color: var(--text); font: inherit; cursor: pointer; }
+.plugin-catalog-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.plugin-stars { margin-inline-start: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.plugin-catalog-dialog { width: min(620px, calc(100vw - 32px)); max-width: none; max-height: calc(100dvh - 32px); padding: 0; margin: auto; border-radius: 12px; color: var(--text); overflow: hidden; -webkit-app-region: no-drag; }
+.plugin-catalog-dialog[open] { display: flex; flex-direction: column; }
+.plugin-catalog-dialog::backdrop { background: rgba(0, 0, 0, .48); }
+.plugin-catalog-dialog-head, .plugin-catalog-dialog-footer { display: flex; align-items: center; gap: 12px; padding: 12px 16px; flex: 0 0 auto; }
+.plugin-catalog-dialog-head { border-bottom: 1px solid var(--line); }
+.plugin-catalog-dialog-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px; scrollbar-width: thin; }
+.plugin-catalog-dialog-footer { border-top: 1px solid var(--line); justify-content: flex-end; }
+.plugin-catalog-dialog-footer button, .plugin-update-action { border: 1px solid var(--line); border-radius: 6px; background: rgba(var(--overlay-rgb), .05); color: var(--text); padding: 6px 10px; font: inherit; font-size: .6875rem; cursor: pointer; }
+.plugin-dialog-close { margin-inline-start: auto; width: 36px; height: 36px; flex-shrink: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 1.25rem; cursor: pointer; }
+.plugin-dialog-close:hover { background: rgba(var(--overlay-rgb), .06); color: var(--text); }
+.plugin-screenshot { display: block; margin: 12px 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; width: fit-content; max-width: 100%; box-sizing: border-box; padding: 4px; cursor: zoom-in; }
+.plugin-screenshot img { display: block; width: auto; max-width: 100%; height: auto; object-fit: contain; }
+.plugin-image-dialog .plugin-catalog-dialog-body img { display: block; max-width: 100%; height: auto; margin: auto; }
+.plugin-catalog-readme { margin-top: 16px; overflow-wrap: anywhere; font-size: .75rem; line-height: 1.6; }
+
+.plugin-catalog-readme h1, .plugin-catalog-readme h2, .plugin-catalog-readme h3 { margin: 18px 0 10px; font-size: 1em; }
+.plugin-catalog-readme pre { overflow: auto; padding: 10px; background: rgba(var(--overlay-rgb), .04); border-radius: 6px; }
+.plugin-catalog-readme blockquote { margin-inline: 0; padding-inline-start: 12px; border-inline-start: 2px solid var(--line); color: var(--muted); }
+.plugin-catalog-readme table { display: block; overflow: auto; border-collapse: collapse; }
+.plugin-catalog-readme th, .plugin-catalog-readme td { padding: 6px; border: 1px solid var(--line); }
+.plugin-catalog-readme a { color: var(--accent); }

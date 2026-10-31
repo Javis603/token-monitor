@@ -1,5 +1,7 @@
 # Packages, trust and recovery
 
+For release naming, GitHub discovery, README presentation and an author checklist, see the [publishing guide](publishing.md).
+
 ## Package format
 
 A `.tmplugin` is JSON `{format:2, manifest, files}`. `files` maps each manifest-declared relative filename to base64 bytes. Maximum encoded envelope is 64 MiB; maximum manifest is 256 KiB. All files are explicit, including prebuilt dependencies. Path traversal, symlinks, case-insensitive collisions and file/directory-prefix collisions are rejected. Exact code/asset bytes, including UTF-8 BOM, survive packing and unpacking. Installing never executes dependency installation or package scripts.
@@ -8,17 +10,15 @@ The package SHA-256 verifies downloaded bytes. A separate canonical manifest-plu
 
 ## Trust and activation
 
-Install records the package but leaves it disabled. Enablement trusts the discovered content revision. An update or Reload with changed bytes requires a new explicit trust decision; version and id alone are insufficient. Optional `engines.tokenMonitor` and required `tmApi:1` identify compatibility. Other `tmApi` values are rejected, not adapted.
+The package preview approves the exact content revision and can enable it in one transaction with the confirmed first-use settings for locations, content sources, background execution and appearance. Author suggestions are preselected for review; install-only retains them for first enable. Existing user choices are preserved on updates. Official packages use Install and enable / Update, with a short explanation of the resulting enabled state. Other sources use Trust, install and enable / Trust and update and display the third-party code warning. These labels share the same revision approval and integrity checks; official attribution does not grant automatic execution. Install only records the package disabled and untrusted. When the master switch is off or safe mode is active, installation remains disabled and untrusted. An update or Reload with changed bytes requires a new explicit decision; version and id alone are insufficient. Optional `engines.tokenMonitor` and required `tmApi:1` identify compatibility. Other `tmApi` values are rejected, not adapted.
 
 There is no granular capability consent. UI can change the shared renderer; a Node backend can access local files, credentials, network and subprocesses available to the OS user. Display location and background toggles control lifecycle, not containment. The App continues protecting its ordinary external interfaces and renderer secret projections, but these are not a security barrier against trusted local code.
 
-Executable updates, Reload and removal warn before reloading hosts with affected loaded UI. Normal disable preserves revision trust and cooperatively releases only that plugin; re-enabling unchanged code does not ask for trust again. Unsaved mounts prompt before disable. Failed cleanup leaves the plugin disabled and offers affected-window recovery; declining recovery does not re-enable partially disposed code. A disabled backend loses demand and is stopped before package files move. The host requests cooperative cleanup, then terminates if needed. Arbitrary external side effects or child processes created by an unrestricted plugin are the author's responsibility; package rollback is not an OS transaction.
+Package updates and removal cooperatively release affected UI before moving files. The package review’s explicit update action approves only the previewed content revision and preserves enabled/background choices; disabled plugins remain off. Unsaved mounts prompt first. Discovery Reload and rollback still warn before reloading affected hosts. Normal disable preserves revision trust and cooperatively releases only that plugin; re-enabling unchanged code does not ask for trust again. Unsaved mounts prompt before disable. Failed cleanup leaves the plugin disabled and offers affected-window recovery; declining recovery does not re-enable partially disposed code. A disabled backend loses demand and is stopped before package files move. The host requests cooperative cleanup, then terminates if needed. Arbitrary external side effects or child processes created by an unrestricted plugin are the author's responsibility; package rollback is not an OS transaction.
 
-## Atomic management
+## Updates, rollback and uninstall
 
 Transactions pause and rediscover only their target plugin, including during rollback; unrelated mounts, drafts and backends stay live. An explicit discovery Reload remains a full reload.
-
-The registry and prepared/committed journal remain authoritative. A prepared transaction recovers the previous package, registry, management settings and owned data copies. A committed transaction completes cleanup. Before replacement, the current managed directory and content digest are rechecked. Invalid registry/journal bytes block mutations and remain intact for diagnosis.
 
 One verified previous compatible package is retained for rollback. Rollback swaps code; it does not reverse backend data migrations. Missing managed directories retain management-only entries, with rollback/uninstall available and execution forbidden. A corrupt existing package is rejected early with repair guidance; uninstall/reinstall with retention is the recovery route.
 
@@ -26,9 +26,40 @@ Uninstall can retain plugin data/preferences and display locations independently
 
 ## Catalogs
 
-Discover combines the App-distributed offline official catalog with user-configured HTTPS catalogs. The official catalog is currently empty: no production example plugin ships. Only packages distributed with the App receive official attribution; this is provenance, not a safety guarantee. Official package updates arrive with an App update and use the same explicit preview, disabled installation, revision trust and rollback workflow. Install from file and folder remain available for private unpublished plugins. Catalog refresh and update preview do not execute code; installation is always explicit.
+Discover shows one Featured plugins group: official catalogs/packages first, then App-designated maintainer catalogs branded Token Monitor Community. Both brands show a shield identifying distribution provenance, not a safety audit. Their package actions use the simplified Install and enable / Update flow with the same exact-revision approval underneath. Other HTTPS catalogs stay in Custom sources and retain the third-party trust warning. In-app GitHub discovery is not yet available; when available, its separate Unofficial plugins · GitHub group shows repository owners without a shield.
+
+Featured placement and official attribution are host-assigned, not catalog fields authors can request. Custom URLs, author/title metadata and signing keys do not grant featured status. The App designates its official remote catalog separately from the community catalog. Both use the same package validation, compatibility, preview and same-source update checks. Compatible official plugin updates do not require an App update; users still explicitly choose and approve installation. Offline bundled packages, when present, update with the App.
+
+Install from file and folder remains available for private unpublished plugins. Catalog refresh and update preview do not execute code; installation is always explicit. The collapsed Plugins settings summary shows compatible updates from the installation's existing source, even while plugins are disabled. It reads local catalog state at startup and after catalog changes; it does not install updates automatically or introduce remote polling.
 
 Catalogs use bounded downloads, source pins, package hashes and optional Ed25519 signatures. A source is a configured catalog URL, not a GitHub repository crawler. Source changes cannot silently replace another installation's origin. Community labels and author descriptions are publisher claims, never an audit badge. Experimental API compatibility is checked against the downloaded package before installation.
+
+## Official catalog releases
+
+Official plugin source stays in this repository under `plugins/`. The App's designated catalog is `https://raw.githubusercontent.com/Javis603/token-monitor/dist/catalog.json`; the community catalog remains in `token-monitor-plugins`.
+
+The [Publish official plugins workflow](../../.github/workflows/publish-official-plugins.yml) validates packages on pull requests and publishes the catalog and packages to `dist` from `main`.
+
+To prepare local artifacts with dependencies installed, use fresh output directories:
+
+```sh
+node scripts/official-plugin-distribution.cjs build /tmp/token-monitor-official-plugins
+node scripts/official-plugin-distribution.cjs stage /tmp/token-monitor-official-plugins /tmp/token-monitor-plugin-dist
+```
+
+These commands only write local files. Building can target a newer App version than the checkout; installation still enforces the package's compatibility range.
+
+To publish an update, increase the plugin version and add matching localized CHANGELOG entries; these supply the catalog release notes. Keep the package's compatibility range and localized READMEs current. Published package bytes are immutable. The catalog retains the newest 32 versions by SemVer. Releases outside this range are rejected; previously published package files remain in `dist`. Full release history stays in the source CHANGELOG files.
+
+## Repository details and README
+
+In-app GitHub discovery is not yet available. A repository topic does not register an installable package. Use local import or an HTTPS catalog and document that route in your README.
+
+Catalog entries may set a GitHub `repository` URL and an optional `readmePaths` locale-to-path map, for example `{"en":"plugins/example/README.md","zh-TW":"plugins/example/README.zh-TW.md"}`. Paths must be repository-relative Markdown files, with no traversal, URL/query syntax or encoded separators. The host selects the current locale, then its language, English, or the first declared path. Without a map, it uses the repository default README without guessing localized filenames. Relative links and images resolve from the selected file's directory. Without a repository, basic description and package actions remain available.
+
+Keep release notes in each version's `changelog`. General details and first-install previews use the README; same-source update previews show retained catalog notes newer than the installed version and up to the selected target, newest first. Retain intervening versions so users skipping releases can read their notes.
+
+See the [README and image requirements](publishing.md#readme-content-and-images) for supported Markdown, image paths, formats and budgets. These requirements are shared by all catalog sources; source branding does not change image validation or grant trust.
 
 ## Create a community catalog
 
@@ -79,11 +110,11 @@ version.sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
 fs.writeFileSync(output, JSON.stringify(catalog, null, 2) + '\n', { flag: 'wx' });
 ```
 
-Required fields are `format`, `title`, `plugins`, each entry's unique `id`, `name`, and nonempty `versions`, and each version's unique SemVer `version`, direct HTTPS `url` and lowercase 64-character `sha256`. Optional entry fields are `description`, `author` and the manifest-compatible `identityIcon`; optional version fields are `types`, `engines.tokenMonitor` (a SemVer range) and `changelog`. Title/name/description/changelog can be strings or locale-to-string maps. `types` accepts `widget`, `page`, `appearance`; unknown values are ignored. These are display hints, not capabilities. Downloaded manifests determine actual installed types and API compatibility; keep catalog and package engine ranges aligned.
+Required fields are `format`, `title`, `plugins`, each entry's unique `id`, `name`, and nonempty `versions`, and each version's unique SemVer `version`, direct HTTPS `url` and lowercase 64-character `sha256`. Optional entry fields are `description`, `author`, the manifest-compatible `identityIcon`, and the `repository`/`readmePaths` presentation fields described above; optional version fields are `types`, `engines.tokenMonitor` (a SemVer range) and `changelog`. Title/name/description/changelog can be strings or locale-to-string maps. `types` accepts `widget`, `page`, `appearance`, `automation`; unknown values are ignored. These are display hints, not capabilities. Downloaded manifests determine actual installed types and API compatibility; keep catalog and package engine ranges aligned.
 
 Limits: 16 configured sources, 128 entries per index, 32 versions per entry, a 1 MiB downloaded index and 64 MiB package envelope. URLs must be HTTPS without credentials or fragments, at most 2048 normalized characters. Downloads omit cookies, reject redirects and have a 15-second request deadline. Serve actual file bytes, not a repository web page or a redirecting download link.
 
-Host `catalog.json`, then in Settings → Plugins → Discover → More actions → Custom catalog sources, add its URL without a public key. Refresh, inspect the package preview, install, then separately trust and enable it. This is a configured source, not an automatic marketplace. To offer an update, build a higher version, add its matching URL/digest to the same entry and refresh that same source. Source identity is pinned to the installation; changing catalogs is not a silent migration. Prefer stable releases: discovery chooses the newest compatible stable version before prereleases.
+Host `catalog.json`, then in Settings → Plugins → Discover → More actions → Custom catalog sources, add its URL without a public key. Refresh, inspect the package preview, choose Trust, install and enable, or Install only to leave it disabled. This is a configured source, not an automatic marketplace. To offer an update, build a higher version, add its matching URL/digest to the same entry and refresh that same source. Source identity is pinned to the installation; changing catalogs is not a silent migration. Prefer stable releases: discovery chooses the newest compatible stable version before prereleases.
 
 ## Optional Ed25519 signing
 
@@ -120,7 +151,7 @@ Host `catalog-signed.json` and configure its URL together with the contents of `
 
 ## Test before sharing
 
-Use a disposable profile and self-authored data. Check unsigned and pinned-source refresh, a tampered payload/signature, an incorrect package digest, and mismatched package id/version. Preview and installation must not execute code. Exercise explicit enablement, higher-version update with renewed trust, rollback and uninstall retention. See [validation](validation.md) for lifecycle and native acceptance; a successful build alone does not establish plugin safety or platform support.
+Use a disposable profile and self-authored data. Check unsigned and pinned-source refresh, a tampered payload/signature, an incorrect package digest, and mismatched package id/version. Preview and Install only must not execute code. Exercise explicit enablement, higher-version update with renewed trust, rollback and uninstall retention. See the [author self-check](validation.md#author-self-check) for lifecycle checks and the separate [maintainer section](validation.md#maintainer-platform-acceptance) for host acceptance; a successful build alone does not establish plugin safety or platform support.
 
 ## Recovery outside the renderer
 

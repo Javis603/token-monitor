@@ -1,6 +1,6 @@
 'use strict';
 // Real secondary renderer/preloads/runtime; synthetic native controller payloads.
-const { app, BrowserWindow, ipcMain, session, utilityProcess, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, session, utilityProcess, protocol, nativeImage } = require('electron');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const assert = require('node:assert/strict');
 const { createPluginRuntime, registerPluginScheme } = require('../src/electron/plugins/runtime');
@@ -10,6 +10,7 @@ const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 fs.mkdirSync(evidence, { recursive: true });
 const authorSource=path.join(scratch,'author-source');fs.cpSync(path.join(root,'tests/fixtures/trusted-plugin'),authorSource,{recursive:true});
 const authorManifest=JSON.parse(fs.readFileSync(path.join(authorSource,'manifest.json')));
+if (process.env.TM_NAV_ICONS === '1') authorManifest.identityIcon = nativeImage.createFromBitmap(Buffer.from(Array.from({length:16*16},(_,i)=>i%16 < 8 ? [80,180,240,255] : [240,160,70,255]).flat()),{width:16,height:16}).toDataURL();
 authorManifest.views.push({id:'bitmap',surfaces:['tray']});fs.writeFileSync(path.join(authorSource,'manifest.json'),JSON.stringify(authorManifest));
 app.setPath('userData', path.join(scratch, 'profile'));
 app.commandLine.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1');
@@ -83,6 +84,22 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(evidence, `${kind}-native.png`), (await win.webContents.capturePage()).toPNG());
   }
   assert.equal(runtime.manager.backendCount(), 0);
+  if (process.env.TM_NAV_ICONS === '1') {
+    await js("tokenMonitor.plugins.place('trusted-fixture/panel','notch',true)");
+    const payload = payloads.get('notch');
+    payload.panel.pluginPages = ['trusted-fixture/panel'];
+    payload.panel.pluginCatalog = Object.fromEntries(runtime.manager.surfaceCatalog('notch').map(view=>[view.ref,{title:view.title,icon:view.icon,identityIcon:view.identityIcon}]));
+    push('notch');
+    const win=windows.get('notch');
+    await wait(win,"document.querySelector('.notch-tab-plugin-icon img')?.naturalWidth > 0",'Notch artwork before opening plugin page');
+    assert.equal(await win.webContents.executeJavaScript("Boolean(document.querySelector('.notch-plugin-body input'))"),false);
+    assert.equal(runtime.manager.backendCount(),0);
+    await pause(200);
+    fs.writeFileSync(path.join(evidence,'notch-navigation.png'),(await win.webContents.capturePage()).toPNG());
+    assert.deepEqual(errors,[]);
+    for(const host of BrowserWindow.getAllWindows())host.destroy();
+    await runtime.dispose();clearTimeout(deadline);app.exit(0);return;
+  }
   for (const [kind, target] of [['rail', 'edgeDock.rail.stat.content'], ['bubble', 'edgeDock.stat.content'], ['notch', 'notch.home.content']]) {
     await js(`tokenMonitorTrustedPlugins.selectContent(${JSON.stringify(target)},'trusted-fixture/content')`);
     const win = windows.get(kind);

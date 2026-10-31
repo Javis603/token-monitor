@@ -8,6 +8,7 @@
   // conflict convention, not a DOM security boundary.
   function create({ document, host, getViews, selection = () => null }) {
     const outlets = new Map(), watchers = new Map();
+    let nextOutlet = 0;
     const MutationObserver = document.defaultView?.MutationObserver;
     const findAnchors = (native, selector) => [...native.querySelectorAll(selector)].filter(node => !node.closest('.plugin-content'));
     function unwatch(scope) { watchers.get(scope)?.observer.disconnect(); watchers.delete(scope); }
@@ -45,14 +46,23 @@
       let record = outlets.get(key);
       if (record?.native !== native) {
         if (record?.replaces) record.native.hidden = record.wasHidden;
-        record = { target, scope, native, wasHidden: native.hidden, nodes: record?.nodes || new Map() };
+        record = { target, scope, native, wasHidden: native.hidden, replacement: record?.replacement, nodes: record?.nodes || new Map() };
         outlets.set(key, record);
       }
       const wanted = new Set(views.map(view => view.ref));
       for (const [ref, node] of record.nodes) if (!wanted.has(ref)) { host.unmount(node); node.remove(); record.nodes.delete(ref); }
       const generation = record.generation = (record.generation || 0) + 1;
-      if (record.replaces) native.hidden = record.wasHidden;
-      record.replaces = views.some(view => view.mode === 'replace');
+      const replaces = views.some(view => view.mode === 'replace');
+      if (!record.replaces && replaces) record.wasHidden = native.hidden;
+      if (record.replaces && !replaces) native.hidden = record.wasHidden;
+      record.replaces = replaces;
+      const replacement = views.find(view => view.mode === 'replace');
+      if (replacement && (record.replacement?.ref !== replacement.ref || record.replacement?.revision !== replacement.revision)) {
+        native.hidden = record.wasHidden;
+        record.replacement = { ref: replacement.ref, revision: replacement.revision, ready: false };
+      }
+      if (!replacement) record.replacement = null;
+      if (record.replacement?.ready) native.hidden = true;
       for (const view of views) {
         let container = record.nodes.get(view.ref);
         if (!container) {
@@ -62,7 +72,10 @@
         pendingMounts.push(() => host.mount(container, view, { ...context, target, native, mode: view.mode, descriptor: view,
           onMountStatus(ok) {
             if (outlets.get(key) !== record || generation !== record.generation) return;
-            if (view.mode === 'replace') native.hidden = ok || record.wasHidden;
+            if (view.mode === 'replace') {
+              record.replacement.ready = ok;
+              native.hidden = ok || record.wasHidden;
+            }
           }
         }));
       }
@@ -83,10 +96,28 @@
         try { anchors = selector ? findAnchors(native, selector) : [native]; }
         catch (error) { console.error('[plugins] Invalid content selector:', selector, error.message); continue; }
         if (selector) selectors.push(selector);
+        const current = new Set(anchors);
+        const previous = [...outlets].filter(([, record]) => record.scope === scope && record.selector === selector);
+        const byNative = new Map(previous.map(([key, record]) => [record.native, { key, record }]));
+        const bySlot = new Map(previous.map(([key, record]) => [JSON.stringify([record.anchorKey, record.anchorIndex]), { key, record }]));
         anchors.forEach((anchor, index) => {
-          const key = JSON.stringify([scope, selector, anchor.dataset?.key || anchor.id || '', index]);
+          const anchorKey = anchor.dataset?.key || anchor.id || '';
+          const existing = byNative.get(anchor);
+          const same = existing?.record.anchorKey === anchorKey ? existing : null;
+          if (existing && !same) {
+            // Reset this logical identity before a new record captures native
+            // visibility; the old replacement may currently be hiding it.
+            clear(existing.record); outlets.delete(existing.key);
+          }
+          const slot = bySlot.get(JSON.stringify([anchorKey, index]));
+          // A surviving native anchor keeps its outlet even after a reorder.
+          // Reuse a rebuilt slot only if its former anchor is not still present;
+          // otherwise an insertion/removal could steal another anchor's draft.
+          const retained = same || (slot && !current.has(slot.record.native) ? slot : null);
+          const key = retained?.key || JSON.stringify([scope, selector, ++nextOutlet]);
           wanted.add(key);
           renderOne(target, anchor, { ...context, root: native, anchorIndex: index }, key, scope, views, pendingMounts);
+          Object.assign(outlets.get(key), { selector, anchorKey, anchorIndex: index });
         });
       }
       for (const [key, record] of outlets) if (record.scope === scope && !wanted.has(key)) { clear(record); outlets.delete(key); }
@@ -100,18 +131,38 @@
       for (const [anchor, nodes] of anchors) {
         let previous = anchor;
         for (const [, node] of nodes.sort((a, b) => ranks.get(a[0]) - ranks.get(b[0]))) {
-          if (node !== previous.nextSibling) anchor.parentNode.insertBefore(node, previous.nextSibling);
+          if (node !== previous.nextSibling) {
+            const parent = anchor.parentNode;
+            if (parent.moveBefore && parent.isConnected && node.isConnected) parent.moveBefore(node, previous.nextSibling);
+            else parent.insertBefore(node, previous.nextSibling);
+          }
           previous = node;
         }
       }
       for (const mount of pendingMounts) void mount();
       watch(scope, target, native, context, selectors);
     }
-    return { render,
-      hasTarget(target) { return getViews().some(view => view.targets?.includes(target) && (view.mode !== 'replace' || selection(target) === view.ref)); },
+    function hasTarget(target) { return getViews().some(view => view.targets?.includes(target) && (view.mode !== 'replace' || selection(target) === view.ref)); }
+    return { render, hasTarget,
+      hasAnchor(native) { return [...outlets.values()].some(record => record.native === native && record.nodes.size > 0); },
+      nodesFor(native) {
+        if (!native.parentNode) return [];
+        const owned = new Set([...outlets.values()].filter(record => record.native === native).flatMap(record => [...record.nodes.values()]));
+        return [...native.parentNode.children].filter(node => owned.has(node));
+      },
       retain(targets) {
         for (const [scope, watcher] of watchers) if (!targets.includes(watcher.target) || !watcher.native.isConnected) unwatch(scope);
-        for (const [target, record] of outlets) if (!targets.includes(record.target) || !record.native.isConnected) { clear(record); outlets.delete(target); }
+        for (const [key, record] of outlets) {
+          if (!targets.includes(record.target)) { clear(record); outlets.delete(key); continue; }
+          if (record.native.isConnected) continue;
+          const eligible = new Set(getViews().filter(view => view.targets?.includes(record.target) && (view.mode !== 'replace' || selection(record.target) === view.ref)).map(view => view.ref));
+          for (const [ref, node] of record.nodes) if (!eligible.has(ref)) { host.unmount(node); node.remove(); record.nodes.delete(ref); }
+          if (record.replacement && !eligible.has(record.replacement.ref)) {
+            record.native.hidden = record.wasHidden;
+            record.replaces = false; record.replacement = null;
+          }
+          if (!record.nodes.size) { clear(record); outlets.delete(key); }
+        }
       },
       dispose() { for (const scope of watchers.keys()) unwatch(scope); for (const record of outlets.values()) clear(record); outlets.clear(); }
     };

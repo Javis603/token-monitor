@@ -173,11 +173,14 @@ function pluginCard(cell) {
   card.dataset.pluginRef = cell.ref;
   const head = el('header', 'edge-dock-card-head');
   const view = pluginHost?.state('edgeDock', cell.ref);
-  head.append(el('span', 'edge-dock-stat-caption', view?.title || cell.ref));
-  if (view?.pluginName && view.pluginName !== view.title) head.append(el('span', 'edge-dock-plugin-owner', view.pluginName));
+  const identity = el('div', 'edge-dock-plugin-identity');
+  identity.append(el('span', 'edge-dock-stat-caption', view?.title || cell.ref));
+  if (view?.pluginName && view.pluginName !== view.title) identity.append(el('span', 'edge-dock-plugin-owner', view.pluginName));
+  const headerActions = el('div', 'edge-dock-plugin-header-actions');
+  head.append(identity, headerActions);
   const body = el('div', 'edge-dock-plugin-card');
   card.append(head, body);
-  pluginHost?.mount(body, cell.ref, 'edgeDock', { variant: 'full' });
+  pluginHost?.mount(body, cell.ref, 'edgeDock', { variant: 'full', headerActions });
   return card;
 }
 
@@ -1838,6 +1841,7 @@ function sessionsCard(cell, card, head) {
 // scroll on every clock tick - yanking the reader back to the top while they read it.
 const CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list';
 
+let observedPluginCard = null;
 const stagingLayer = document.createElement('div');
 stagingLayer.className = 'edge-dock-staging';
 if (surface === 'bubble') root.append(stagingLayer);
@@ -1911,6 +1915,11 @@ function renderBubble(payload) {
   root.dataset.side = payload.side;
   const cell = payload.cell;
   if (!cell) {
+    if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
+    observedPluginCard = null;
+    for (const body of root.querySelectorAll('.edge-dock-plugin-card')) pluginHost?.unmount(body);
+    pluginContent?.retain([]);
+    contentLayer.replaceChildren();
     stagingLayer.replaceChildren();
     return;
   }
@@ -1934,9 +1943,12 @@ function renderBubble(payload) {
     pluginContent.render(target, native, { surface: 'edgeDock', cell, nativeData: payload });
   }
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
+  if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
+  observedPluginCard = cell.kind === 'plugin' ? card : null;
   stagingLayer.replaceChildren(card);
   fitCardTotal(card);
   clampBreakdownList(card);
+  if (observedPluginCard) bubbleSizeObserver?.observe(observedPluginCard);
   if (cell.kind === 'provider') reserveAccountHeight(card, payload.maxCardHeight);
   const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
   if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
@@ -1947,14 +1959,16 @@ function renderBubble(payload) {
 }
 
 
-if (surface === 'bubble' && window.ResizeObserver) new ResizeObserver(() => {
-  const card = contentLayer.querySelector('.edge-dock-card') || stagingLayer.querySelector('.edge-dock-card');
+const bubbleSizeObserver = surface === 'bubble' && window.ResizeObserver ? new ResizeObserver(() => {
+  const card = observedPluginCard?.isConnected ? observedPluginCard : contentLayer.querySelector('.edge-dock-card') || stagingLayer.querySelector('.edge-dock-card');
   const payload = state.payload;
   if (card && payload?.cell?.id === card.dataset.cellId) {
     const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
     if (height > 0 && payload.placed?.height !== height) bridge.reportBubbleSize(card.dataset.cellId, height);
   }
-}).observe(root);
+}) : null;
+bubbleSizeObserver?.observe(root);
+window.addEventListener('pagehide', () => bubbleSizeObserver?.disconnect(), { once: true });
 
 const notchRenderer = surface === 'notch'
   ? window.TokenMonitorNotchRenderer.createNotchRenderer({

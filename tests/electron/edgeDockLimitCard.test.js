@@ -807,6 +807,7 @@ function renderHomeLimitFixture(rows) {
   }).join('\n');
   const context = {
     document: { createElement: (tag) => new FakeElement(tag) }, homeLimitRows: () => rows,
+    els: { homePanel: { children: [] } }, pluginContent: null,
     state: { settings: { homeLimitDisplayMode: 'bars' } }, VIEW_ICON_CLASSES: {}, renderBreakdownChange() {},
     t: (key) => i18n.translate('en', key), applyHomeListMark() {}, iconKindFor: () => '',
     limitWindowsView: dockView(), limitProviderPresentationApi: limitPresentationApi,

@@ -39,6 +39,17 @@ const {
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
+  createSessionProxyApplier,
+  createProxyReadyFetch,
+  networkProxySource,
+  normalizeNoProxy,
+  noProxyError,
+  normalizeProxyUrl,
+  outboundRouteForSettings,
+  proxyUrlError,
+  sessionProxyConfig
+} = require('./networkProxy');
+const {
   expandedBoundsForCollapse,
   normalWindowBounds,
   persistWindowState,
@@ -55,7 +66,7 @@ const {
 // a closed parent pipe turns the next log call into an unhandled 'error'
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
-const electronClaudeWebFetch = createClaudeWebFetch(net);
+const electronClaudeWebFetch = createProxyReadyFetch(createClaudeWebFetch(net), () => sessionProxy.ensureReady());
 const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
   fetch: electronLimitsFetch()
 });
@@ -67,14 +78,36 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
 // exchange on the mimoExchangeFetch below, which keeps undici for the per-hop
 // request it needs but still asks Chromium which proxy to use.
 function electronLimitsFetch() {
-  return createElectronLimitsFetch({ net, env: process.env });
+  return createElectronLimitsFetch({
+    net: { fetch: createProxyReadyFetch(net.fetch.bind(net), () => sessionProxy.ensureReady()) },
+    getRoute: networkProxyRoute
+  });
 }
+
+// Read per request: the app proxy setting can change after a caller captured
+// its fetch, and `settings` is still null while this module loads.
+function networkProxyRoute() {
+  return outboundRouteForSettings(settings || {}, process.env);
+}
+
+// The Chromium half of the app proxy setting, so net.fetch/net.request callers
+// and MiMo's resolveProxy route the same way as the Node-side transport.
+// Untouched until a proxy is configured, so an install without one keeps
+// Electron's own default; clearing it restores that default.
+const sessionProxy = createSessionProxyApplier({
+  getSession: () => session.defaultSession,
+  getConfig: () => sessionProxyConfig(settings || {}),
+  log: (message) => console.log(message)
+});
 
 // Lazy because `session.defaultSession` only exists once the app is ready, and
 // process-wide because the transport caches one proxy agent per proxy URL.
 let mimoExchangeFetch = null;
 function ensureMimoExchangeFetch() {
-  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({ session: session.defaultSession });
+  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({
+    session: { resolveProxy: createProxyReadyFetch((url) => session.defaultSession.resolveProxy(url), () => sessionProxy.ensureReady()) },
+    getRoute: networkProxyRoute
+  });
   return mimoExchangeFetch;
 }
 
@@ -278,7 +311,7 @@ const {
   HUB_RESPONSE_MINIMAL,
   HUB_STREAM_HEADER,
   HUB_STREAM_VERSION,
-  applyFreshnessEvent
+  createStatsStreamReceiver
 } = require('../shared/hubProtocol');
 const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
@@ -441,6 +474,7 @@ const {
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const edgeDockPresentationApi = require('./renderer/edgeDock/presentation');
 const { createPluginRuntime, registerPluginScheme, normalizePluginAuthorSkin } = require('./plugins/runtime');
+const { prepareSkinSettings } = require('./plugins/skinSettings');
 const { normalizePluginStates } = require('./plugins/manager');
 const pluginPlacements = require('../shared/plugins/placements');
 // Created after 'ready' by startPluginRuntime(); null in safe paths and tests.
@@ -665,6 +699,7 @@ function defaultSettings() {
     edgeDockItems: null,
     pluginsEnabled: true,
     pluginStates: {},
+    pluginInitialSetup: {},
     pluginAuthorSkin: null,
     notchPluginPages: [],
     notchPageOrder: [],
@@ -763,6 +798,8 @@ function defaultSettings() {
     currencyRates: {},
     startAtLogin: false,
     automaticAppUpdates: false,
+    proxyUrl: '',
+    noProxy: '',
     language: 'auto',
     ...initialAccountSettings(process.env),
     appUpdate: {
@@ -2818,6 +2855,7 @@ function readSettings() {
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
+    merged.pluginInitialSetup = require('./plugins/initialSetup').normalizeInitialSetup(merged.pluginInitialSetup);
     merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
     merged.pluginContentSelections = pluginPlacements.normalizeContentSelections(merged.pluginContentSelections);
     merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
@@ -5318,6 +5356,7 @@ async function startStatsStream(options = {}) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const blocks = createSseBlockReader();
+    const streamSnapshot = createStatsStreamReceiver();
     for (;;) {
       if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       const { value, done } = await reader.read();
@@ -5326,13 +5365,13 @@ async function startStatsStream(options = {}) {
       for (const block of blocks.push(decoder.decode(value, { stream: true }))) {
         const parsed = parseSseBlock(block);
         if (parsed) {
-          if ((parsed.event === 'stats' || parsed.event === 'snapshot') && parsed.data?.stats) {
-            setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
-            requestSyncDisplayStats({ reason: parsed.data.reason, at: parsed.data.at, generation, widgetProducerOwner });
-          } else if (parsed.event === 'freshness') {
-            const refreshed = applyFreshnessEvent(latestHubStats, parsed.data);
+          if (['snapshot', 'stats', 'freshness', 'delta'].includes(parsed.event)) {
+            const refreshed = streamSnapshot.receive(parsed.event, parsed.data);
             if (!refreshed) continue;
-            setLatestHubStatsCache(refreshed, 'client', generation, cacheIdentity);
+            // Presentation overlays mutate root/device metadata. The delta base
+            // belongs to the connection, so keep those containers private.
+            const displayCache = { ...refreshed, devices: refreshed.devices.map(device => ({ ...device })) };
+            setLatestHubStatsCache(displayCache, 'client', generation, cacheIdentity);
             requestSyncDisplayStats({ reason: parsed.data?.reason || 'ingest', at: parsed.data?.at, generation, widgetProducerOwner });
           } else {
             sendPush(parsed, { widgetProducerOwner });
@@ -5345,6 +5384,7 @@ async function startStatsStream(options = {}) {
     scheduleStreamRetry();
   } catch (error) {
     if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    controller.abort();
     sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
   }
@@ -5513,13 +5553,7 @@ function preparePluginSkinSettings(patch, current, runtime) {
   if (!skin) throw new Error('plugin skin is unavailable');
   const authorSkin = normalizePluginAuthorSkin({ ref: skin.ref, appearance: skin.appearance || {} });
   if (!authorSkin) throw new Error('invalid author skin');
-  return {
-    authorSkin,
-    patch: {
-      themeColors: { ...current.themeColors, ...skin.colors },
-      vendorColors: { ...current.vendorColors, ...skin.vendorColors }
-    }
-  };
+  return prepareSkinSettings(current, { ...skin, appearance: authorSkin.appearance });
 }
 
 function assertPluginSkinRequest(event, patch) {
@@ -5571,7 +5605,8 @@ function settingsForRenderer() {
     limitAccountForms: limitAccountFormsForRenderer(),
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
-    windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
+    windowToggleShortcutStatus: currentWindowToggleShortcutStatus(),
+    networkProxySource: networkProxySource(settings, process.env)
   };
 }
 
@@ -6102,7 +6137,7 @@ function pushNotchCells(visibleStats) {
   const data = notchDataFor(visibleStats, notchLastCells);
   // Tab names and icons are metadata; opening a page alone requests its data.
   if (pluginRuntime) data.panel.pluginCatalog = Object.fromEntries(pluginRuntime.manager.surfaceCatalog('notch')
-    .map(view => [view.ref, { title: view.title, icon: view.icon }]));
+    .map(view => [view.ref, { title: view.title, icon: view.icon, identityIcon: view.identityIcon }]));
   data.panel.pluginPages = data.panel.pluginPages.filter(ref => Object.hasOwn(data.panel.pluginCatalog || {}, ref));
   const history = notchHistory.read(visibleStats, { enabled: settings.historyEnabled !== false, generation: hubModeGeneration });
   if (history) data.panel.week = notchWeek(visibleStats, new Date(), history);
@@ -6285,12 +6320,16 @@ function handleWindowToggleShortcut() {
   else if (action === 'expandFloatingBubble') expandFloatingBubble();
   else if (action === 'hideWindow') pluginWindowActions.hide(mainWindow);
   else focusExistingWindow();
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
 }
 
-function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
+function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false, pointerActivation = false) {
   const action = trayToggleAction(settings);
   if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
   else if (action === 'focusWindow') focusExistingWindow();
+  // Explicit summons share one focus policy. OS app switching and accessibility
+  // activation preserve their existing focus without requesting a reset.
+  if (pointerActivation && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
 }
 
 function trayMenuLocale() {
@@ -7588,6 +7627,7 @@ function createWindow(boundsOverride, options = {}) {
   });
   win.on('blur', () => {
     nudgeTaskbarZOrder();
+    if (!suppressNextBlurHide) sendMainWindowEvent('window:summonCancelled');
     if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) {
       const wasVisible = win.isVisible();
       const point = wasVisible && process.platform === 'darwin' ? screen.getCursorScreenPoint() : null;
@@ -7845,6 +7885,7 @@ app.whenReady().then(() => {
   ensureSettingsLoaded();
   powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
   powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
@@ -7895,7 +7936,19 @@ app.whenReady().then(() => {
   regenerateTokscalePricing();
   if (widgetRuntimeSupported) ensureMacWidgetDemand();
   startMode();
-  void widgetRecovery.finally(() => {
+  void widgetRecovery.then((result) => {
+    if (result.status !== 'completed' || widgetRecoveryAbort?.signal.aborted) return;
+    const config = macWidgetConfiguration();
+    if (!config) return;
+    // The retained snapshot may be unchanged after an update, so publication
+    // deduplication alone cannot wake the newly registered extension. Do not
+    // require a recent demand heartbeat from the extension we just retired.
+    requestMacWidgetReload({
+      widgetKind: config.widgetKind,
+      isCurrent: () => !widgetRecoveryAbort?.signal.aborted,
+      logger: (message) => console.warn(message)
+    });
+  }).finally(() => {
     if (widgetRecoveryAbort) app.removeListener('before-quit', abortWidgetRecovery);
     if (!widgetRecoveryAbort?.signal.aborted) {
       macWidgetPublicationReady = true;
@@ -8060,6 +8113,7 @@ app.whenReady().then(() => {
     const previousStartAtLogin = settings.startAtLogin;
     const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
+    const previousProxyKey = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.windowMaximized;
@@ -8070,6 +8124,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.syncContentStatus;
     delete normalizedPatch.syncContentBase;
     delete normalizedPatch.pluginStates;
+    delete normalizedPatch.pluginInitialSetup;
     delete normalizedPatch.pluginContentSelections;
     delete normalizedPatch.pluginContentOrder;
     // Account fields declared persist:'never' (managed account lists, profile
@@ -8095,6 +8150,14 @@ app.whenReady().then(() => {
       const limitError = customScanPathLimitError(patch.customScanPaths);
       if (limitError) throw new Error(limitError);
       normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
+    }
+    if (patch.proxyUrl !== undefined) {
+      const proxyError = proxyUrlError(patch.proxyUrl);
+      if (proxyError) throw new Error(proxyError);
+    }
+    if (patch.noProxy !== undefined) {
+      const bypassError = noProxyError(patch.noProxy);
+      if (bypassError) throw new Error(bypassError);
     }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
@@ -8273,6 +8336,10 @@ app.whenReady().then(() => {
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
+      // A hand-edited settings.json value the form would refuse is kept as-is
+      // so the transport fails closed on it rather than silently going direct.
+      proxyUrl: patch.proxyUrl !== undefined ? normalizeProxyUrl(patch.proxyUrl) : String(settings.proxyUrl || ''),
+      noProxy: patch.noProxy !== undefined ? normalizeNoProxy(patch.noProxy) : String(settings.noProxy || ''),
       ...finalAccountSettings(patch, settings),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
@@ -8314,6 +8381,15 @@ app.whenReady().then(() => {
       settings.startAtLogin = applyLoginItem(settings.startAtLogin);
       saveSettings({ throwOnError: true });
     }
+    // Every save re-applies, so re-saving the same proxy retries a session
+    // apply that failed earlier. Every provider answer so far came over the
+    // previous route; ask again over the new one instead of waiting out each
+    // provider's interval.
+    const proxySettingChanged = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']) !== previousProxyKey;
+    void sessionProxy.apply().then((sessionChanged) => {
+      if (proxySettingChanged || sessionChanged) return queueLimitInvalidation({ all: true }, 'settings-change');
+      return null;
+    }).catch((error) => console.log(`[limits-runtime] proxy refresh failed: ${error.message}`));
     if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) {
       runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
     }
@@ -8713,8 +8789,8 @@ app.whenReady().then(() => {
   ipcMain.handle('usage:revealClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.revealClientSyncLock(clientId));
   ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
   ipcMain.handle('usage:repairClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.repairClientSyncLock(clientId));
-  ipcMain.handle('clipboard:write', (_event, text) => {
-    clipboard.writeText(String(text || ''));
+  ipcMain.handle('clipboard:write', async (_event, text) => {
+    await clipboard.writeText(String(text || ''));
     return true;
   });
   ipcMain.handle('app:openExternal', (_event, url) => {
@@ -9708,7 +9784,7 @@ app.whenReady().then(() => {
     try {
       pluginRuntime = createPluginRuntime({
         getAppSettings: settingsForRenderer,
-        electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, session, shell, dialog },
+        electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, nativeImage, session, shell, dialog },
         userDataDir: app.getPath('userData'),
         getSettings: () => settings,
         applySettingsPatch,
@@ -9719,10 +9795,11 @@ app.whenReady().then(() => {
         },
         persistManagementSettings: (patch) => {
           // Main-owned transaction state only; never exposed as generic renderer settings.
-          const allowed = ['pluginStates', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
+          const allowed = ['pluginStates', 'pluginInitialSetup', 'themeColors', 'vendorColors', 'pluginAuthorSkin', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
           settings = { ...settings, ...Object.fromEntries(allowed.filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]])) };
           settings.pluginStates = normalizePluginStates(settings.pluginStates);
           saveSettings({ throwOnError: true });
+          if (Object.hasOwn(patch, 'trayContent') || Object.hasOwn(patch, 'trayCustomLayout')) updateTrayDisplay();
           pushSettingsToRenderer();
         },
         getLocale: () => trayMenuLocale(),
@@ -9732,6 +9809,7 @@ app.whenReady().then(() => {
         businessAdapters: {
           sourceId: () => `${hubModeGeneration}:${mode}:${settings.hubMode}`,
           extras: stats => ({
+            liveRateContext: { hubMode: settings.hubMode, deviceId: settings.deviceId, clients: settings.clients },
             historyRevision: JSON.stringify([settings.historyEnabled !== false, stats?.deviceHistoryRevision || statsHistoryRevision(stats)]),
             subscriptions: effectiveSubscriptions(),
             subscriptionContext: { date: subscriptionDisplay.todayString(), rates: { ...(effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {})) } },
