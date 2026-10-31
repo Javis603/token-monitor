@@ -841,8 +841,11 @@ function createEdgeDockController(deps) {
         syncPeekPointer();
       }
     }
-    if (surface === 'rail' && railMotion) send('rail', 'edgeDock:shapeFrame', { shape: shapes.rail, side });
-    else render(surface);
+    if (surface === 'rail' && railMotion) {
+      // A shape-only frame changes renderer state outside the full-payload cache.
+      lastSent.rail = '';
+      send('rail', 'edgeDock:shapeFrame', { shape: shapes.rail, side });
+    } else render(surface);
   }
 
   function railMotionEase() {

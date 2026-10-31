@@ -2174,3 +2174,21 @@ for (const initialButtonState of [null, true]) {
     assert.deepEqual(rail.bounds, savedBounds, 'the rail no longer follows the cursor without renderer events');
   });
 }
+
+test('cancelling mid-morph restores the renderer shape even when it matches the cached pre-drag payload', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ prefersReducedMotion: () => false, primaryButtonDown: () => null });
+  t.after(() => fixture.controller.stop());
+  advance(200);
+  const rail = fixture.windowFor('rail');
+  const attached = sentPayload(rail, 'rail').shape.d;
+  const paintedShape = () => rail.webContents.messages.filter(entry => ['edgeDock:render', 'edgeDock:shapeFrame'].includes(entry.channel)).at(-1).payload.shape.d;
+  fixture.screen.point = { x: 600, y: 300 };
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30, gestureId: 10 });
+  advance(64);
+  assert.notEqual(paintedShape(), attached, 'the renderer received an intermediate frame');
+  fixture.ipcMain.emit('edgeDock:dragCaptureLost', { sender: rail.webContents }, { gestureId: 10 });
+  assert.equal(paintedShape(), attached, 'cancellation must deliver the restored shape, not retain the last frame');
+  advance(300);
+  assert.equal(paintedShape(), attached, 'a stopped morph cannot repaint an intermediate shape later');
+});
