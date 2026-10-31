@@ -50,7 +50,7 @@ function resolvePackageBinDir(packageName) {
 }
 
 function resolveManifestEntry(manifest, requestedKey = null) {
-  const key = requestedKey || platformKey();
+  const key = requestedKey || runtimePlatformKey();
   const entry = manifest.platforms[key];
   if (!entry) {
     throw new Error(`No vendored tokscale binary recorded for platform ${key} in scripts/vendor/tokscale.json`);
