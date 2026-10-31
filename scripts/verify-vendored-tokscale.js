@@ -768,6 +768,16 @@ function verifyCodexOutputRateContract(binPath) {
     assert.equal(tracker.value('speed'), 0.5, 'genuine short output is eligible even below 1 tok/s');
     assert.equal(short.outputTokens, before.outputTokens + 7);
     assert.deepEqual(read(), short, 'unchanged warm scan must not manufacture another delta');
+
+    fs.appendFileSync(file, `${[
+      JSON.stringify({ type: 'response_item', payload: { type: 'function_call', call_id: 'untimed-tool' } }),
+      row(20, 'response_item', message('')), row(20, 'token_usage_record', { usage: usage(4) }), count(20, 111, 4)
+    ].join('\n')}\n`);
+    const tool = read();
+    assert.equal(tool.timedOutputTokens, short.timedOutputTokens + 4, 'untimed tool evidence prevents empty-completion classification');
+    assert.equal(tool.timedDurationMs, short.timedDurationMs + 6000);
+    tracker.observe(tool);
+    assert.equal(tracker.value('speed'), 4 / 6);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
