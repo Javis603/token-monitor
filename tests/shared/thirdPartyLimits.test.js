@@ -96,17 +96,13 @@ function apiFetch(accounts, defaultStatusBody = { quota_per_unit: DEFAULT_QUOTA_
       const start = Number(parsed.searchParams.get('start_timestamp'));
       const end = Number(parsed.searchParams.get('end_timestamp'));
       assert.ok(Number.isInteger(start) && Number.isInteger(end) && end >= start);
-      // The fixture date keeps the three windows disjoint: today spans under
-      // a day, the rolling week seven, the month the rest.
-      const span = end - start;
-      const rows = span < 2 * 86_400
-        ? account.usageTodayRows
-        : span < 8 * 86_400
-          ? account.usageWeekRows
-          : account.usageMonthRows;
+      // One range read answers all three periods; callers assert on the count
+      // instead of on which window each request claimed to cover.
+      account.usageRequests = (account.usageRequests || 0) + 1;
+      account.usageStart = start * 1000;
       return response(account.usageStatus || 200, {
         success: (account.usageStatus || 200) < 300,
-        data: rows || []
+        data: account.usageRows || []
       });
     }
     assert.equal(init.headers.Authorization, `Bearer ${account.apiKey}`);
@@ -320,6 +316,19 @@ test('New API-compatible account adapter omits the user header when no ID is con
 
 test('New API account adapter reads Today and Month spend from the usage dashboard', async (t) => {
   fixtureTimezone(t);
+  // 2026-07-24T08:00Z in UTC: the local day starts at 00:00, the rolling week
+  // at 07-18, the month at 07-01. Three rows, one per nesting level, so each
+  // window's total says which rows it picked up.
+  const account = {
+    accessToken: 'system-access',
+    userId: '42',
+    accountBody: { group: 'default', quota: 25_000_000, used_quota: 5_000_000 },
+    usageRows: [
+      { created_at: Date.parse('2026-07-24T02:00:00Z') / 1000, quota: 500_000 },
+      { created_at: Date.parse('2026-07-22T10:00:00Z') / 1000, quota: 250_000 },
+      { created_at: Date.parse('2026-07-05T10:00:00Z') / 1000, quota: 1_250_000 }
+    ]
+  };
   const [provider] = await fetchThirdPartyLimits({
     thirdPartyProfiles: {
       production: {
@@ -332,18 +341,11 @@ test('New API account adapter reads Today and Month spend from the usage dashboa
   }, {
     env: {},
     now: () => Date.parse('2026-07-24T08:00:00Z'),
-    fetch: apiFetch({
-      'https://dashboard.example': {
-        accessToken: 'system-access',
-        userId: '42',
-        accountBody: { group: 'default', quota: 25_000_000, used_quota: 5_000_000 },
-        usageTodayRows: [{ quota: 250_000 }, { quota: 250_000 }],
-        usageWeekRows: [{ quota: 500_000 }, { quota: 250_000 }],
-        usageMonthRows: [{ quota: 1_000_000 }, { quota: 500_000 }, { quota: 500_000 }]
-      }
-    }, { quota_per_unit: 1_000_000 })
+    fetch: apiFetch({ 'https://dashboard.example': account }, { quota_per_unit: 1_000_000 })
   });
 
+  assert.equal(account.usageRequests, 1, 'one range read answers every period');
+  assert.equal(account.usageStart, Date.parse('2026-07-01T00:00:00Z'));
   assert.equal(provider.status, 'ok');
   assert.equal(provider.balance.amount, 25);
   assert.equal(provider.balance.todaySpend, 0.5);
@@ -391,7 +393,9 @@ for (const flag of [false, true, undefined]) {
         quota_per_unit: DEFAULT_QUOTA_PER_UNIT,
         ...(flag !== undefined ? { enable_data_export: flag } : {})
       };
-      const rows = staleRows ? [{ quota: 500_000 }] : [];
+      const rows = staleRows
+        ? [{ created_at: Date.parse('2026-07-24T03:00:00Z') / 1000, quota: 500_000 }]
+        : [];
       const [provider] = await fetchThirdPartyLimits({
         thirdPartyProfiles: { work: {
           adapter: NEWAPI_ACCOUNT_ADAPTER, baseUrl: 'https://export.example', accessToken: 'fixture'
@@ -401,7 +405,7 @@ for (const flag of [false, true, undefined]) {
         fetch: apiFetch({ 'https://export.example': {
           accessToken: 'fixture', statusBody,
           accountBody: { quota: 2_500_000, used_quota: 1_000_000 },
-          usageTodayRows: rows, usageWeekRows: rows, usageMonthRows: rows
+          usageRows: rows
         } })
       });
       assert.equal(provider.status, 'ok');
@@ -415,7 +419,11 @@ for (const flag of [false, true, undefined]) {
   }
 }
 
-test('New API spend rejects malformed periods without publishing zero or partial totals', () => {
+test('New API spend rejects malformed periods without publishing zero or partial totals', (t) => {
+  // The fixtures below pin instants, so the local windows they fall into have
+  // to be pinned too — otherwise a west-of-UTC runner files them under
+  // yesterday and the assertions read as a parser failure.
+  fixtureTimezone(t);
   const account = { quota: 2_500_000, used_quota: 1_000_000 };
   const malformed = [
     [{}], [null], [{ quota: null }], [{ quota: '' }], [{ quota: 'bad' }],
@@ -423,23 +431,44 @@ test('New API spend rejects malformed periods without publishing zero or partial
     [{ quota: 500_000 }, {}],
     [{ quota: Number.MAX_VALUE }, { quota: Number.MAX_VALUE }],
     // GPTNB returns a different dashboard schema; it is not a zero-quota row.
-    [{ date: '2026-10-20', sumQuota: 500_000, sumUsd: 1 }]
+    [{ date: '2026-10-20', sumQuota: 500_000, sumUsd: 1 }],
+    // Millisecond timestamps would land outside every window and read as zero.
+    [{ created_at: Date.parse('2026-07-24T03:00:00Z'), quota: 500_000 }]
   ];
+  const nowMs = Date.parse('2026-07-24T08:00:00Z');
   for (const rows of malformed) {
-    const result = newapiAccountQuota(account, DEFAULT_QUOTA_PER_UNIT, {
-      today: { success: true, data: rows },
-      week: { success: true, data: [] },
-      month: { success: true, data: [{ quota: '500000' }, { quota: 0 }] }
-    });
+    // A row that cannot be placed on the clock or cannot be summed makes the
+    // whole aggregate untrustworthy: the periods disappear rather than publish
+    // a total that silently dropped one bucket.
+    const result = newapiAccountQuota(account, DEFAULT_QUOTA_PER_UNIT, { success: true, data: rows }, nowMs);
     assert.equal(result.balance.todaySpend ?? null, null, `malformed rows: ${JSON.stringify(rows)}`);
-    assert.equal(result.balance.weekSpend, 0);
-    assert.equal(result.balance.monthSpend, 1);
+    assert.equal(result.balance.weekSpend ?? null, null);
+    assert.equal(result.balance.monthSpend ?? null, null);
     assert.equal(result.balance.amount, 5);
     assert.equal(result.balance.allTimeSpend, 2);
   }
-  assert.equal(newapiAccountQuota({ quota: 0, used_quota: 0 }, Number.MIN_VALUE, {
-    today: { data: [{ quota: 1 }] }
-  }).balance.todaySpend ?? null, null, 'a finite sum must not overflow during conversion');
+  const empty = newapiAccountQuota(account, DEFAULT_QUOTA_PER_UNIT, { success: true, data: [] }, nowMs);
+  assert.deepEqual(
+    [empty.balance.todaySpend, empty.balance.weekSpend, empty.balance.monthSpend],
+    [0, 0, 0],
+    'an empty range is a real zero, not an error'
+  );
+  const ahead = newapiAccountQuota(account, DEFAULT_QUOTA_PER_UNIT, {
+    success: true,
+    data: [
+      { created_at: Date.parse('2026-07-24T03:00:00Z') / 1000, quota: 500_000 },
+      { created_at: Date.parse('2026-07-25T03:00:00Z') / 1000, quota: 1_000_000 }
+    ]
+  }, nowMs);
+  assert.equal(ahead.balance.todaySpend, 1, 'a row stamped ahead of the clock stays out');
+  assert.equal(ahead.balance.monthSpend, 1);
+  const overflow = newapiAccountQuota(
+    { quota: 0, used_quota: 0 },
+    Number.MIN_VALUE,
+    { data: [{ created_at: Date.parse('2026-07-24T03:00:00Z') / 1000, quota: 1 }] },
+    nowMs
+  );
+  assert.equal(overflow.balance.todaySpend ?? null, null, 'a finite sum must not overflow during conversion');
 });
 
 const spendProfile = {
@@ -449,7 +478,7 @@ const spendProfile = {
 };
 
 for (const zone of ['UTC', 'Asia/Kathmandu', 'Asia/Kolkata', 'America/New_York', 'Australia/Lord_Howe']) {
-  test(`New API hourly buckets preserve exact local periods in ${zone}`, async (t) => {
+  test(`New API hourly buckets split one read into local periods in ${zone}`, async (t) => {
     fixtureTimezone(t, zone);
     const now = Date.parse(zone === 'America/New_York' ? '2026-11-02T08:00:00Z' : '2026-10-20T08:00:00Z');
     const date = new Date(now);
@@ -457,10 +486,20 @@ for (const zone of ['UTC', 'Asia/Kathmandu', 'Asia/Kolkata', 'America/New_York',
     const week = new Date(day); week.setDate(week.getDate() - 6);
     const month = new Date(date.getFullYear(), date.getMonth(), 1);
     const starts = [day, week, month].map(Number);
-    // Include transactions on BOTH sides of each midnight. The upstream stores
-    // floor(transaction timestamp / 3600), then filters those stored timestamps.
-    const transactions = starts.flatMap((start) => [start - 5 * 60_000, start + 5 * 60_000]);
-    const rows = transactions.map((at) => ({ created_at: Math.floor(at / 3_600_000) * 3600, quota: 500_000 }));
+    // Transactions sit five minutes either side of each boundary, and the
+    // upstream files them under whole UTC hours. A bucket therefore counts for
+    // a window only when the bucket's own timestamp is inside it — on a
+    // fractional-offset zone the straddling bucket lands before the boundary
+    // and stays out, exactly as New API's own hourly filter does.
+    const bucketAt = (at) => Math.floor(at / 3_600_000) * 3_600_000;
+    const buckets = new Map();
+    for (const start of starts) {
+      for (const at of [start - 5 * 60_000, start + 5 * 60_000]) {
+        const key = bucketAt(at);
+        buckets.set(key, (buckets.get(key) || 0) + 500_000);
+      }
+    }
+    const rows = [...buckets].map(([at, quota]) => ({ created_at: at / 1000, quota }));
     const requestedStarts = [];
     const [provider] = await fetchThirdPartyLimits(spendProfile, {
       env: {}, now: () => now,
@@ -474,18 +513,21 @@ for (const zone of ['UTC', 'Asia/Kathmandu', 'Asia/Kolkata', 'America/New_York',
         return response(200, { success: true, data: rows.filter((row) => row.created_at >= start && row.created_at <= end) });
       }
     });
+    assert.equal(requestedStarts.length, 1, 'one read covers every period');
+    assert.equal(requestedStarts[0], Math.min(...starts), 'the range starts at the earliest window');
     for (const [index, key] of ['todaySpend', 'weekSpend', 'monthSpend'].entries()) {
       const start = starts[index];
-      const aligned = start % 3_600_000 === 0;
-      assert.equal(provider.balance[key], aligned ? transactions.filter((at) => at >= start && at <= now).length : null, key);
-      assert.equal(requestedStarts.includes(start), aligned, 'do not query an ambiguous boundary or round it down');
+      const expected = [...buckets]
+        .filter(([at]) => at >= start && at <= now)
+        .reduce((sum, [, quota]) => sum + quota, 0) / 500_000;
+      assert.equal(provider.balance[key], expected, `${key} in ${zone}`);
     }
     assert.equal(provider.balance.amount, 10);
     assert.equal(provider.balance.allTimeSpend, 6);
   });
 }
 
-test('New API enrichment deadline preserves balance and completed periods when a transport ignores abort', async (t) => {
+test('New API enrichment deadline keeps the balance when the usage read hangs', async (t) => {
   fixtureTimezone(t);
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const signals = [];
@@ -496,23 +538,23 @@ test('New API enrichment deadline preserves balance and completed periods when a
       if (parsed.pathname === NEWAPI_STATUS_PATH) return response(200, { data: { quota_per_unit: 500_000 } });
       if (parsed.pathname === NEWAPI_ACCOUNT_PATH) return response(200, { data: { quota: 5_000_000, used_quota: 3_000_000 } });
       signals.push(init.signal);
-      // Keep one response body pending too: the deadline must cover JSON reads.
-      if (signals.length === 1) return { ok: true, json: () => new Promise(() => {}) };
-      if (signals.length === 2) return new Promise(() => {});
-      return response(200, { data: [{ quota: 500_000 }] });
+      // The deadline must cover JSON reads, not just the response headers.
+      return { ok: true, json: () => new Promise(() => {}) };
     }
   });
   await new Promise(setImmediate);
-  t.mock.timers.tick(3000);
+  t.mock.timers.tick(10_000);
   const [provider] = await pending;
   assert.equal(provider.status, 'ok');
   assert.equal(provider.balance.amount, 10);
   assert.equal(provider.balance.allTimeSpend, 6);
+  // The periods are all-or-nothing now: one read feeds all three, so a hung
+  // read drops all three instead of leaving a partial mix behind.
   assert.equal(provider.balance.todaySpend, null);
   assert.equal(provider.balance.weekSpend, null);
-  assert.equal(provider.balance.monthSpend, 1);
+  assert.equal(provider.balance.monthSpend, null);
+  assert.equal(signals.length, 1);
   assert.equal(signals[0].aborted, true);
-  assert.equal(signals[1].aborted, true);
 });
 
 test('New API enrichment propagates external cancellation even when transport ignores abort', async (t) => {
@@ -532,6 +574,7 @@ test('New API enrichment propagates external cancellation even when transport ig
   await new Promise(setImmediate);
   controller.abort(new Error('cancelled by owner'));
   await assert.rejects(pending, /cancelled by owner/);
+  assert.equal(signals.length, 1);
   assert.ok(signals.every((signal) => signal.aborted));
 });
 

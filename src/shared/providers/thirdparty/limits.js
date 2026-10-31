@@ -23,7 +23,11 @@ const THIRD_PARTY_ADAPTER_IDS = Object.freeze([
 const NEWAPI_STATUS_PATH = '/api/status';
 const NEWAPI_ACCOUNT_PATH = '/api/user/self';
 const NEWAPI_DATA_PATH = '/api/data/self';
-const NEWAPI_ENRICHMENT_DEADLINE_MS = 3000;
+// One dashboard read carries every period, so a single slow round trip no
+// longer splits into three independent failures. The budget is still bounded:
+// a proxy-routed hop to an overseas-hosted fork can take seconds, and dropping
+// the periods entirely is worse than waiting for them.
+const NEWAPI_ENRICHMENT_DEADLINE_MS = 10_000;
 const NEWAPI_TOKEN_USAGE_PATH = '/api/usage/token/';
 const SUB2API_ME_PATH = '/api/v1/auth/me';
 const SUB2API_REFRESH_PATH = '/api/v1/auth/refresh';
@@ -209,8 +213,9 @@ function quotaAmount(value, unit) {
 }
 
 // New API stores UTC-hour buckets and filters their timestamps, even with
-// default_time=day. A local midnight inside a bucket cannot be reconstructed:
-// rounding down would include the previous day, while rounding up loses spend.
+// default_time=day, so asking for a range and summing the rows is only sound
+// when the rows are bucketed locally afterwards. `default_time=day` is kept for
+// forks that really do aggregate: fewer rows to parse, same bucket semantics.
 function newapiUsagePath(startMs, endMs) {
   const start = Math.floor(startMs / 1000);
   const end = Math.max(start, Math.floor(endMs / 1000));
@@ -238,17 +243,42 @@ function startOfLocalMonth(nowMs) {
 }
 
 // An empty `data` array is a real answer ("nothing billed in this range") and
-// becomes 0, while a missing or malformed payload stays null so the Spend row
-// falls back to all-time spend on forks without the dashboard endpoint.
-function newapiUsageSpend(payload, unit) {
+// becomes an empty bucket map, while a missing or malformed payload stays null
+// so the Spend row falls back to all-time spend on forks without the endpoint.
+//
+// Rows are summed per `created_at` instead of per request window: one range
+// read then answers Today, Week and Month from the same numbers, and the three
+// figures can no longer disagree the way three separate queries could.
+function newapiUsageBuckets(payload) {
   const rows = responseData(payload);
   if (!Array.isArray(rows)) return null;
-  let quota = 0;
+  const buckets = new Map();
   for (const row of rows) {
-    const value = finiteNumber(row?.quota);
-    if (value === null || value < 0) return null;
-    quota += value;
-    if (!Number.isFinite(quota)) return null;
+    const quota = finiteNumber(row?.quota);
+    const createdAt = finiteNumber(row?.created_at);
+    if (quota === null || quota < 0 || createdAt === null || createdAt <= 0) return null;
+    // New API reports Unix seconds. A millisecond timestamp would silently
+    // place every row outside the window and read as zero spend, so an
+    // impossible magnitude is treated as an incompatible schema instead.
+    if (createdAt > 1e11) return null;
+    const at = Math.floor(createdAt * 1000);
+    const total = (buckets.get(at) || 0) + quota;
+    if (!Number.isFinite(total)) return null;
+    buckets.set(at, total);
+  }
+  return buckets;
+}
+
+// A bucket counts for a window when its own timestamp is inside it, ending at
+// the same instant the request's range ended: a row stamped ahead of the clock
+// cannot leak into today. Buckets that straddle a local midnight on a
+// fractional-offset zone (UTC+5:30) are counted from their start, matching how
+// New API itself filters by hour — the alternative, rounding up, would bill the
+// previous period's spend to this one.
+function newapiSpendSince(buckets, sinceMs, untilMs, unit) {
+  let quota = 0;
+  for (const [at, value] of buckets) {
+    if (at >= sinceMs && at <= untilMs) quota += value;
   }
   const spend = quota / unit;
   return Number.isFinite(spend) ? spend : null;
@@ -325,7 +355,7 @@ function quotaResult({
   };
 }
 
-function newapiAccountQuota(accountData, unit, enrichmentPayloads) {
+function newapiAccountQuota(accountData, unit, usagePayload, nowMs) {
   const rawQuota = finiteNumber(accountData?.quota);
   const unlimited = accountData?.unlimited_quota === true || rawQuota === -1;
   const quota = quotaResult({
@@ -337,12 +367,15 @@ function newapiAccountQuota(accountData, unit, enrichmentPayloads) {
     quotaGroup: accountData?.group
   });
   if (quota) {
-    const todaySpend = newapiUsageSpend(enrichmentPayloads?.today, unit);
-    const weekSpend = newapiUsageSpend(enrichmentPayloads?.week, unit);
-    const monthSpend = newapiUsageSpend(enrichmentPayloads?.month, unit);
-    if (todaySpend !== null) quota.balance.todaySpend = todaySpend;
-    if (weekSpend !== null) quota.balance.weekSpend = weekSpend;
-    if (monthSpend !== null) quota.balance.monthSpend = monthSpend;
+    const buckets = usagePayload ? newapiUsageBuckets(usagePayload) : null;
+    if (buckets) {
+      const todaySpend = newapiSpendSince(buckets, startOfLocalDay(nowMs), nowMs, unit);
+      const weekSpend = newapiSpendSince(buckets, startOfLocalWeek(nowMs), nowMs, unit);
+      const monthSpend = newapiSpendSince(buckets, startOfLocalMonth(nowMs), nowMs, unit);
+      if (todaySpend !== null) quota.balance.todaySpend = todaySpend;
+      if (weekSpend !== null) quota.balance.weekSpend = weekSpend;
+      if (monthSpend !== null) quota.balance.monthSpend = monthSpend;
+    }
   }
   return quota;
 }
@@ -453,32 +486,38 @@ const THIRD_PARTY_ADAPTERS = Object.freeze({
     },
     // The dashboard endpoint is New API's own billing aggregation, so the
     // Today/Week/Month figures are the instance's numbers rather than a local
-    // balance delta. Forks without it fail here and the collector simply
-    // drops the enrichment, leaving the all-time spend the account row
-    // already had.
+    // balance delta. One read covers the widest window: the rows carry a
+    // timestamp, so the three figures are split locally instead of paying for
+    // three round trips that can each fail on their own deadline. Forks
+    // without it fail here and the collector simply drops the enrichment,
+    // leaving the all-time spend the account row already had.
     enrichmentRequests(account, deps) {
       const nowMs = (deps.now || Date.now)();
       const headers = {
         Authorization: `Bearer ${account.accessToken}`,
         ...(account.userId ? { 'New-Api-User': account.userId } : {})
       };
-      return Object.fromEntries([
-        ['today', startOfLocalDay(nowMs)],
-        ['week', startOfLocalWeek(nowMs)],
-        ['month', startOfLocalMonth(nowMs)]
-      ].filter(([, startMs]) => startMs % 3_600_000 === 0)
-        .map(([key, startMs]) => [key, { path: newapiUsagePath(startMs, nowMs), headers }]));
+      // The week window reaches back past the month start on the first days of
+      // a month, so the range has to start at whichever is earlier.
+      const sinceMs = Math.min(
+        startOfLocalDay(nowMs),
+        startOfLocalWeek(nowMs),
+        startOfLocalMonth(nowMs)
+      );
+      return { usage: { path: newapiUsagePath(sinceMs, nowMs), headers } };
     },
     enrichmentDeadlineMs: NEWAPI_ENRICHMENT_DEADLINE_MS,
     unit(statusPayload) {
       return quotaPerUnit(statusPayload);
     },
-    quota(payload, unit, _account, statusPayload, enrichmentPayloads) {
+    quota(payload, unit, _account, statusPayload, enrichmentPayloads, deps = {}) {
       const data = responseData(payload);
       // Disabled exports leave the endpoint readable but its rows may be empty
       // or stale. Only an explicit false disables spend on compatible forks.
-      const usage = responseData(statusPayload)?.enable_data_export === false ? null : enrichmentPayloads;
-      return data ? newapiAccountQuota(data, unit, usage) : null;
+      const usage = responseData(statusPayload)?.enable_data_export === false
+        ? null
+        : enrichmentPayloads?.usage;
+      return data ? newapiAccountQuota(data, unit, usage, (deps.now || Date.now)()) : null;
     },
     planLabel() {
       return 'Account';
@@ -922,7 +961,14 @@ async function fetchThirdPartyAccount(account, deps = {}) {
 
   const statusPayload = statusResponse && statusResponse.fulfilled ? statusResponse.value : null;
   const unit = adapter.unit(statusPayload);
-  const quota = adapter.quota(quotaResultPayload, unit, account, statusPayload, enrichmentPayloads);
+  const quota = adapter.quota(
+    quotaResultPayload,
+    unit,
+    account,
+    statusPayload,
+    enrichmentPayloads,
+    deps
+  );
   if (!quota) {
     return normalizeLimitProvider({
       ...common,
