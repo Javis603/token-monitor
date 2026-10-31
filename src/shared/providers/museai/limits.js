@@ -36,7 +36,7 @@ function parseMuseaiSubscription(text) {
     } catch { /* Other Flight rows are not subscription data. */ }
   }
   const percent = sub?.usage?.percentUsed;
-  if (typeof percent !== 'number' || !Number.isFinite(percent)) throw invalidResponse();
+  if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0) throw invalidResponse();
   const resetsAt = sub.usage.resetsAt;
   if (typeof resetsAt !== 'number' || resetsAt <= 0 || !Number.isFinite(new Date(resetsAt * 1000).getTime())) throw invalidResponse();
   const tokensLeft = (label) => typeof label === 'string' ? /\(([^()]+ tokens left)\)/u.exec(label)?.[1] || '' : '';

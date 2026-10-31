@@ -119,3 +119,12 @@ test('anonymous Meta Muse rows stay separate on synced devices', async () => {
   assert.equal(summary.providers.length, 2);
   assert.deepEqual(summary.providers.map((entry) => entry.sourceDeviceId).sort(), ['a', 'b']);
 });
+
+test('negative Muse usage is unavailable rather than a full allowance', async () => {
+  const action = free.replace('"percentUsed":28', '"percentUsed":-1');
+  const state = new Map();
+  const row = await fetchMuseaiLimits(options, { providerRuntimeState: state, fetch: fixtureFetch({ action }) });
+  assert.equal(row.status, 'unavailable');
+  assert.deepEqual(row.windows, []);
+  assert.equal(state.size, 0);
+});
