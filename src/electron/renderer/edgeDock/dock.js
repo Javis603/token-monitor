@@ -1321,7 +1321,14 @@ function bindRailGestures(rail) {
     rail.setPointerCapture(event.pointerId);
   });
   rail.addEventListener('pointermove', (event) => {
-    if (!gesture || gesture.pointerId !== event.pointerId || gesture.dragging) return;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    // A later move can prove release even if capture was lost and the native
+    // button reader is unavailable. Capture loss alone still proves nothing.
+    if (event.buttons === 0) {
+      finish(event);
+      return;
+    }
+    if (gesture.dragging) return;
     if (Math.hypot(event.screenX - gesture.startX, event.screenY - gesture.startY) < DRAG_THRESHOLD_PX) return;
     gesture.dragging = true;
     rail.classList.add('is-dragging');

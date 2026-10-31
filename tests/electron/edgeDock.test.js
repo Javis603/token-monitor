@@ -3106,4 +3106,11 @@ test('losing capture while moving the rail does not end the held native drag', (
   acknowledge({ gestureId: starts[1][2] });
   handlers.get('pointerup')({ ...event, type: 'pointerup' });
   assert.equal(ends.length, 1, 'native completion clears the renderer gesture');
+  handlers.get('pointerdown')(event);
+  handlers.get('pointermove')({ ...event, screenX: 100, buttons: 1 });
+  handlers.get('lostpointercapture')({ ...event, type: 'lostpointercapture' });
+  handlers.get('pointermove')({ ...event, pointerId: 2, buttons: 0 });
+  assert.equal(ends.length, 1, 'another pointer cannot finish this drag');
+  handlers.get('pointermove')({ ...event, buttons: 0 });
+  assert.equal(ends.length, 2, 'an unpressed move finishes even without native button-state support');
 });
