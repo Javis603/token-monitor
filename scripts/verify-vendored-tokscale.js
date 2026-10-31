@@ -517,7 +517,7 @@ function hermeticEnv(home) {
   // overrides would do the same for the fork-only qodercn client, and the
   // MiniMax data-directory overrides for the fork's mcode supplement.
   for (const key of [
-    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
+    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'CODEX_HOME', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
     'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
     'SENPI_CODING_AGENT_DIR', 'SENPI_CODING_AGENT_SESSION_DIR'
@@ -728,6 +728,61 @@ function verifyGooseScannerContract(binPath) {
   }
 }
 
+function verifyCodexOutputRateContract(binPath) {
+  const assert = require('node:assert/strict');
+  const { createLiveTokenRateTracker } = require('../src/electron/renderer/tokenRatePresentation');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-codex-rate-contract-'));
+  const file = path.join(home, '.codex', 'sessions', 'rate.jsonl');
+  const row = (second, type, payload) => JSON.stringify({ timestamp: `2040-01-01T00:00:${String(second).padStart(2, '0')}Z`, type, payload });
+  const usage = output => ({ input_tokens: 100, output_tokens: output, reasoning_output_tokens: 0 });
+  const count = (second, total, last) => row(second, 'event_msg', { type: 'token_count', info: {
+    total_token_usage: usage(total), last_token_usage: usage(last)
+  } });
+  const message = text => ({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
+  const lines = [row(0, 'turn_context', { model: 'gpt-5.4' }), row(2, 'response_item', message('fixture')), count(2, 100, 100)];
+  const read = () => extractUsageFromTokscale(runAgainstFixture(binPath, home, 'client,session,model', 'codex'));
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, `${lines.join('\n')}\n`);
+    const before = read();
+    const tracker = createLiveTokenRateTracker({ now: () => 0 });
+    tracker.reset({ ...before, timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0, modelThroughput: {} });
+    tracker.observe(before);
+    assert.equal(tracker.value('speed'), 50);
+
+    fs.appendFileSync(file, `${[
+      row(8, 'response_item', message('')), row(8, 'token_usage_record', { usage: usage(4) }), count(8, 104, 4)
+    ].join('\n')}\n`);
+    const empty = read();
+    assert.equal(empty.outputTokens, before.outputTokens + 4, 'empty completion remains billable output');
+    assert.equal(empty.timedOutputTokens, before.timedOutputTokens, 'empty completion must not create a speed sample');
+    assert.equal(empty.timedDurationMs, before.timedDurationMs);
+    tracker.observe(empty);
+    assert.equal(tracker.value('speed'), 50, 'empty completion must not replace the previous useful rate');
+
+    fs.appendFileSync(file, `${[
+      row(14, 'response_item', message('ok')), row(14, 'token_usage_record', { usage: usage(3) }), count(14, 107, 3)
+    ].join('\n')}\n`);
+    const short = read();
+    tracker.observe(short);
+    assert.equal(tracker.value('speed'), 0.5, 'genuine short output is eligible even below 1 tok/s');
+    assert.equal(short.outputTokens, before.outputTokens + 7);
+    assert.deepEqual(read(), short, 'unchanged warm scan must not manufacture another delta');
+
+    fs.appendFileSync(file, `${[
+      JSON.stringify({ type: 'response_item', payload: { type: 'function_call', call_id: 'untimed-tool' } }),
+      row(20, 'response_item', message('')), row(20, 'token_usage_record', { usage: usage(4) }), count(20, 111, 4)
+    ].join('\n')}\n`);
+    const tool = read();
+    assert.equal(tool.timedOutputTokens, short.timedOutputTokens + 4, 'untimed tool evidence prevents empty-completion classification');
+    assert.equal(tool.timedDurationMs, short.timedDurationMs + 6000);
+    tracker.observe(tool);
+    assert.equal(tracker.value('speed'), 4 / 6);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 function main() {
   const manifest = loadManifest();
   const isUpstream = manifestMode(manifest) === 'upstream';
@@ -742,6 +797,7 @@ function main() {
   }
 
   verifyGooseScannerContract(binPath);
+  verifyCodexOutputRateContract(binPath);
 
   const home = writeFixtureHome();
   try {
@@ -783,4 +839,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract };
+module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract, verifyCodexOutputRateContract };
