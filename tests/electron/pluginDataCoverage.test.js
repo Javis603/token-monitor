@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { performance } = require('node:perf_hooks');
 const { createBusinessDataService } = require('../../src/electron/plugins/businessData');
 const { normalizePeriod } = require('../../src/shared/usage');
 
@@ -41,6 +42,9 @@ test('tool throughput never borrows a model with the same name as a client', asy
 });
 
 for (const count of [1, 5001]) test(`plugin session model components preserve observed coverage (${count} sessions)`, async t => {
+  // Coverage/invalidation is independent of machine speed. Keep both eager
+  // projection and lazy scan/page work from consuming the admission budget.
+  t.mock.method(performance, 'now', () => 0);
   const service = createBusinessDataService();
   t.after(() => service.dispose());
   const components = { totalTokens: 50, inputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 5, outputTokens: 10, secret: 'DO_NOT_COPY' };
@@ -60,6 +64,7 @@ for (const count of [1, 5001]) test(`plugin session model components preserve ob
   const next = { ...sessions, 0: { ...sessions[0], modelTokenComponents: { observed: { ...components, totalTokens: 60 } } } };
   service.publish({ periods: { today: { sessions: next } } });
   const after = await service.query(request, auth);
+  assert.equal(after.availability, 'available');
   assert.equal(after.rows.find(r => r.id === before.rows[0].id).models.find(m => m.model === 'observed').tokenComponents.totalTokens, 60);
   assert.equal(models.find(m => m.model === 'observed').tokenComponents.totalTokens, 50);
 });
