@@ -414,20 +414,21 @@ for (const mode of ['excluded', 'mixed', 'supported', 'failed', 'malformed', 'un
       scans++;
       if (mode === 'failed') return exitChild(1, 'synthetic scan failure');
       if (mode === 'malformed') return jsonChild({});
-      if (mode === 'unattributed') return jsonChild(args[0] === 'graph'
+      if (mode === 'unattributed') return jsonChild(args.includes('graph')
         ? { contributions: [{ date: '2026-10-30', tokens: 100 }] } : { entries: [{ totalTokens: 100 }] });
-      return jsonChild(args[0] === 'graph' ? { contributions: [] } : { entries: [] });
+      return jsonChild(args.includes('graph') ? { contributions: [] } : { entries: [] });
     });
     const collector = freshCollector();
     t.after(() => { collector.resetTokscaleCapabilityCache(); delete require.cache[collectorPath]; });
     const clients = mode === 'mixed' ? 'cursor,codex' : 'cursor';
     // Learn capabilities through the real rejection/probe/retry path. A later
     // all-excluded call must not spawn, and a mixed call scans only Codex.
-    if (!supported) await collector.collectHistoryOnce({ clients, homeDir: home, commandTimeoutMs: 1000 });
+    if (!supported) await collector.collectHistoryOnce({ clients, homeDir: home, env: {}, commandTimeoutMs: 1000 });
     scans = 0;
-    const owner = require('../../src/shared/providers/cursor/usageOwnership').readCursorUsageOwnership({ homeDir: home });
+    const owner = require('../../src/shared/providers/cursor/usageOwnership').readCursorUsageOwnership({ homeDir: home, env: {} });
+    assert.ok(owner, 'ownership must come from the isolated fixture, not the ambient Windows HOME');
     for (const retained of [false, true]) {
-      const history = await collector.collectHistoryOnce({ clients, homeDir: home, cursorOwnership: owner,
+      const history = await collector.collectHistoryOnce({ clients, homeDir: home, env: {}, cursorOwnership: owner,
         ...(mode === 'unreported' ? { runGraph: async () => ({ contributions: [] }) } : {}),
         dailyHistoryArchiveEnabled: retained,
         dailyHistoryArchiveOptions: { path: path.join(home, `history-${retained}.json`) } });
