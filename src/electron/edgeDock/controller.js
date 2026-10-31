@@ -1134,16 +1134,8 @@ function createEdgeDockController(deps) {
       const point = screen.getCursorScreenPoint();
       const current = layout();
       syncRailPointer();
-      const buttonDown = drag ? primaryButtonDown() : null;
-      // The renderer can miss the pointerup of a drag, because the window it is
-      // dragging moves out from under the captured pointer; the OS button
-      // state is the authoritative end of the gesture.
-      if (drag?.captureLost && buttonDown === null) {
-        handleDragEnd({ cancelled: true });
-      } else if (drag && buttonDown === false && Date.now() - drag.startedAt > 80) {
-        handleDragEnd();
-      } else if (current && drag) {
-        followDrag(point, current);
+      if (drag) {
+        tickDrag(point, current);
       } else if (current) {
         if (refreshFullScreen(Date.now())) {
           syncAlwaysVisible();
@@ -1196,6 +1188,19 @@ function createEdgeDockController(deps) {
       logger(`[edge-dock] poll failed: ${error.message}`);
     }
     schedulePoll();
+  }
+
+  function tickDrag(point, current) {
+    // A moving window can lose renderer pointerup/capture. Both paint frames
+    // and the fallback poll use the OS button state to finish the gesture.
+    const buttonDown = primaryButtonDown();
+    if (drag.captureLost && buttonDown === null) {
+      handleDragEnd({ cancelled: true });
+    } else if (buttonDown === false && Date.now() - drag.startedAt > 80) {
+      handleDragEnd();
+    } else if (current) {
+      followDrag(point, current);
+    }
   }
 
   function followDrag(point, current) {
@@ -1336,6 +1341,10 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:dragStart', (event, payload) => {
       if (surfaceFor(event.sender) !== 'rail') return;
       handleDragStart(payload?.grabOffsetY, payload?.grabOffsetX, payload?.gestureId);
+    });
+    ipcMain.on('edgeDock:dragFrame', (event, payload) => {
+      if (platform !== 'win32' || surfaceFor(event.sender) !== 'rail' || !drag || drag.gestureId !== payload?.gestureId) return;
+      tickDrag(screen.getCursorScreenPoint(), layout());
     });
     ipcMain.on('edgeDock:dragEnd', (event) => {
       if (surfaceFor(event.sender) !== 'rail') return;

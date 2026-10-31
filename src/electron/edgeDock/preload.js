@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   click: (cellIndex) => ipcRenderer.send('edgeDock:click', { cellIndex }),
   pointer: () => ipcRenderer.send('edgeDock:pointer'),
   dragStart: (grabOffsetY, grabOffsetX, gestureId) => ipcRenderer.send('edgeDock:dragStart', { grabOffsetY, grabOffsetX, gestureId }),
+  dragFrame: (gestureId) => ipcRenderer.send('edgeDock:dragFrame', { gestureId }),
   dragEnd: () => ipcRenderer.send('edgeDock:dragEnd'),
   dragCaptureLost: (gestureId) => ipcRenderer.send('edgeDock:dragCaptureLost', { gestureId }),
   onDragEnded: (callback) => {

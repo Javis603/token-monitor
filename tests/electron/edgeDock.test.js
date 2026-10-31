@@ -3082,6 +3082,43 @@ test('floating placement rejects malformed persisted coordinates and closes its 
   assert.equal(Math.max(...points.map(point => point[1])), 272);
 });
 
+for (const platform of ['win32', 'darwin']) {
+  test(`${platform} rail schedules drag frames only on Windows and stops after release or native completion`, () => {
+    const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+    const source = dock.slice(dock.indexOf('let gesture = null;'), dock.indexOf('function indexFromTarget('));
+    const handlers = new Map();
+    const rail = { addEventListener: (name, fn) => handlers.set(name, fn), setPointerCapture() {}, classList: { add() {}, remove() {} } };
+    const frames = [], starts = [], callbacks = [];
+    let acknowledge;
+    Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', 'state', 'requestAnimationFrame', `${source}; bindRailGestures(railNode);`)(
+      {
+        dragStart: (...args) => starts.push(args), dragFrame: id => frames.push(id), dragEnd() {},
+        dragCaptureLost() {}, onDragEnded: fn => { acknowledge = fn; }
+      }, rail, () => 0, 5, { payload: { platform } }, fn => callbacks.push(fn));
+    const event = { button: 0, buttons: 1, pointerId: 1, screenX: 10, screenY: 20, clientX: 25, clientY: 40 };
+    const start = () => {
+      handlers.get('pointerdown')(event);
+      assert.equal(callbacks.length, 0, 'a click does not start animation frames');
+      handlers.get('pointermove')({ ...event, screenX: 100 });
+    };
+    const paint = () => callbacks.shift()?.();
+    start();
+    paint();
+    assert.deepEqual(frames, platform === 'win32' ? [starts[0][2]] : []);
+    handlers.get('lostpointercapture')(event);
+    paint();
+    assert.equal(frames.length, platform === 'win32' ? 2 : 0, 'capture loss keeps frames running until main confirms release');
+    acknowledge({ gestureId: starts[0][2] });
+    paint();
+    assert.equal(callbacks.length, 0, 'native completion stops the loop');
+    start();
+    handlers.get('pointerup')({ ...event, type: 'pointerup' });
+    paint();
+    assert.equal(callbacks.length, 0, 'renderer release stops the loop');
+    assert.equal(frames.length, platform === 'win32' ? 2 : 0, 'no stale frame crosses into another gesture');
+  });
+}
+
 for (const eventType of ['lostpointercapture', 'pointercancel']) {
   test(`${eventType} while moving the rail does not end the held native drag`, () => {
     const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
@@ -3090,8 +3127,8 @@ for (const eventType of ['lostpointercapture', 'pointercancel']) {
     const rail = { addEventListener: (name, fn) => handlers.set(name, fn), setPointerCapture() {}, classList: { add() {}, remove() {} } };
     const starts = [], ends = [], captureLosses = [];
     let acknowledge;
-    const bind = Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', `${source}; return bindRailGestures;`)(
-      { dragStart: (...args) => starts.push(args), dragEnd: () => ends.push(true), dragCaptureLost: id => captureLosses.push(id), onDragEnded: fn => { acknowledge = fn; } }, rail, () => 0, 5);
+    const bind = Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', 'state', `${source}; return bindRailGestures;`)(
+      { dragStart: (...args) => starts.push(args), dragEnd: () => ends.push(true), dragCaptureLost: id => captureLosses.push(id), onDragEnded: fn => { acknowledge = fn; } }, rail, () => 0, 5, { payload: { platform: 'darwin' } });
     bind(rail);
     const event = { button: 0, pointerId: 1, screenX: 10, screenY: 20, clientX: 25, clientY: 40 };
     handlers.get('pointerdown')(event);
