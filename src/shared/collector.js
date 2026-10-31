@@ -30,6 +30,7 @@ const {
   extractUsageFromTokscale,
   mergePeriods,
   normalizeClientName,
+  projectRollupFromSessions,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
@@ -47,6 +48,8 @@ const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
+const { readCursorUsageOwnership } = require('./providers/cursor/usageOwnership');
+const { accountingCounters } = require('./cursorAccountUsage');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const {
   applySessionMetadata,
@@ -545,6 +548,8 @@ function runCursorAwareTokscale(clientFilter, operation, signal) {
   return includesCursor ? withCursorLifecycle(operation, { signal }) : operation();
 }
 
+// onScanComplete reports only the successful subprocess's final client filter.
+// Synthetic capability-filtered empties never acquire account overwrite rights.
 function runTokscale({
   clients,
   flags,
@@ -554,7 +559,8 @@ function runTokscale({
   onTerminationUnconfirmed,
   customScanPaths,
   homeDir,
-  workspaces = true
+  workspaces = true,
+  onScanComplete
 }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
@@ -596,7 +602,7 @@ function runTokscale({
       signal,
       subprocessOptions
     );
-  });
+  }).then(result => { onScanComplete?.(filter.split(',')); return result; });
   return runCursorAwareTokscale(clientFilter, () => (
     scan(clientFilter).catch((error) => (
       retryWithKnownCapabilities(error, requested, command, { entries: [] }, (filtered) => (
@@ -609,7 +615,7 @@ function runTokscale({
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, onScanComplete }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
@@ -622,11 +628,11 @@ function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOption
     terminationOptions,
     onTerminationUnconfirmed
   };
+  const scan = filter => spawnTokscaleJson(runArgs(filter), commandTimeoutMs, command, signal, subprocessOptions)
+    .then(result => { onScanComplete?.(filter.split(',')); return result; });
   return runCursorAwareTokscale(clientFilter, () => (
-    spawnTokscaleJson(runArgs(clientFilter), commandTimeoutMs, command, signal, subprocessOptions).catch((error) => (
-      retryWithKnownCapabilities(error, requested, command, { contributions: [] }, (filtered) => (
-        spawnTokscaleJson(runArgs(filtered), commandTimeoutMs, command, signal, subprocessOptions)
-      ), signal, {
+    scan(clientFilter).catch((error) => (
+      retryWithKnownCapabilities(error, requested, command, { contributions: [] }, scan, signal, {
         terminationOptions,
         onTerminationUnconfirmed
       })
@@ -815,6 +821,7 @@ async function collectHistoryOnce(options) {
   if (options.historyEnabled === false) return null;
   let liveHistory = null;
   const rawGraphs = [];
+  let cursorGraphScanned = false;
   const runGraph = options.runGraph || runTokscaleGraph;
   const capDays = Number.isFinite(options.capDays) ? options.capDays : HISTORY_CAP_DAYS;
   const todayKey = options.todayKey || localTodayKey();
@@ -823,7 +830,8 @@ async function collectHistoryOnce(options) {
       const graphJson = await runGraph({
         clients,
         commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS,
-        signal: options.signal
+        signal: options.signal,
+        onScanComplete: clients => { cursorGraphScanned = clients.includes('cursor'); }
       });
       throwIfAborted(options.signal);
       rawGraphs.push(graphJson);
@@ -840,9 +848,30 @@ async function collectHistoryOnce(options) {
     // A failed native scan without retained history is no update, not a new
     // Dots-only replacement for the device's last successful full history.
     if (!history && failureCode === 'history-graph-failed') return null;
-    return options.codexLocalGraph
+    const owner = options.cursorOwnership;
+    const ownedGraph = owner && failureCode === null && cursorGraphScanned
+      && rawGraphs.length === 1 && Array.isArray(rawGraphs[0]?.contributions)
+      && rawGraphs[0].contributions.every(row => Array.isArray(row?.clients)
+        && row.clients.every(client => typeof client?.client === 'string'))
+      && readCursorUsageOwnership(options)?.signature === owner.signature;
+    // A completed owned scan can explicitly correct History to zero. Missing,
+    // failed or unowned scans must keep the device's previous observation.
+    if (!history && ownedGraph) history = liveHistory;
+    const result = options.codexLocalGraph
       ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
       : history;
+    if (result && ownedGraph) {
+      const graph = rawGraphs[0];
+      const cursorGraph = { contributions: (graph.contributions || []).map(row => ({
+        ...row, activeTimeMs: 0,
+        clients: (row.clients || []).filter(client => normalizeClientName(client.client) === 'cursor'),
+        tokenComponentSummary: undefined
+      })) };
+      result.cursorAccountUsage = { accountKey: owner.accountKey, observedAt: owner.observedAt,
+        range: `history:${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
+        usage: normalizeHistory(parseGraphResult(cursorGraph), { capDays, todayKey }) };
+    }
+    return result;
   };
   if (options.dailyHistoryArchiveEnabled) {
     try {
@@ -906,9 +935,28 @@ async function collectUsageOnce(options) {
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
+  let cursorOwnership = null;
+  let captureCursorPartitions = true;
+  const cursorPartitions = {};
+  let cursorTodayRequested = false;
   const runTokscaleFn = async (input) => {
-    const json = await runTokscaleScan(input);
+    const name = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
+    if (captureCursorPartitions) {
+      // A replacement scan must never inherit evidence from its rejected input.
+      delete cursorPartitions[name];
+      if (name === 'today' && normalizeClientsCsv(input.clients).split(',').includes('cursor')) cursorTodayRequested = true;
+    }
+    let cursorScanned = false;
+    const json = await runTokscaleScan({ ...input,
+      onScanComplete: clients => { cursorScanned = clients.includes('cursor'); }
+    });
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
+    if (captureCursorPartitions && cursorScanned && Array.isArray(json?.entries)) {
+      const bundle = extractUsageBundleFromTokscale(json);
+      if (!json.entries.length || !bundle.byClient[UNATTRIBUTED_USAGE_CLIENT]) {
+        cursorPartitions[name] = bundle.byClient.cursor || emptyPeriod();
+      }
+    }
     return json;
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
@@ -1011,7 +1059,11 @@ async function collectUsageOnce(options) {
       onFailure: options.onSelfSyncFailed
     });
     throwIfAborted(options.signal);
-    throwIfAborted(options.signal);
+    // An injected scanner must declare its source home before local ownership
+    // can describe its output. This also keeps fixture scans off ambient data.
+    if (trackedClientSet.has('cursor') && (!options.runTokscale || options.homeDir)) {
+      cursorOwnership = readCursorUsageOwnership(options);
+    }
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -1134,6 +1186,7 @@ async function collectUsageOnce(options) {
   // 2. wslAnchor (watch anchored tick): reuse the frozen snapshot — WSL is heavy
   //    and watch ticks fire every few seconds.
   // 3. !anchorUsed (full scan): scan WSL as part of the complete rescan.
+  captureCursorPartitions = false;
   const windowsPeriods = { today, month, allTime };
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
@@ -1266,6 +1319,62 @@ async function collectUsageOnce(options) {
     wslDetected: wslStatus?.detected
   });
 
+  // Account contributions come from the scanner's existing client partitions,
+  // before local archives add identity-free residue. No extra token scan runs.
+  const cursorAfter = cursorOwnership && readCursorUsageOwnership(options);
+  // Delta reconstruction copies arbitrary metadata too. Re-admit ownership per
+  // period below; a failed fence or changed account must leave no old scope.
+  for (const [name, period] of Object.entries({ today, month, allTime })) {
+    delete period.cursorAccountUsage;
+    delete windowsPeriods[name].cursorAccountUsage;
+  }
+  if (cursorAfter?.signature === cursorOwnership?.signature && cursorAfter
+    && !['today', 'month', 'allTime'].some(name => wslBundle[name]?.clients?.cursor > 0)) {
+    const anchorToday = anchor?.today?.cursorAccountUsage;
+    const scannedPeriods = new Set(Object.keys(cursorPartitions));
+    const observedAt = {};
+    for (const name of Object.keys(cursorPartitions)) observedAt[name] = cursorAfter.observedAt;
+    if (anchorUsed && anchorToday?.accountKey === cursorAfter.accountKey
+      && (cursorPartitions.today || !cursorTodayRequested)) {
+      // Another client's targeted tick did not scan Cursor. Never share mutable
+      // counter containers with the anchor or promote its observation time.
+      if (!cursorPartitions.today) {
+        cursorPartitions.today = { ...anchorToday.usage };
+        observedAt.today = anchorToday.observedAt;
+      }
+      for (const name of ['month', 'allTime']) {
+        const prior = anchor[name]?.cursorAccountUsage;
+        if (prior?.accountKey === cursorAfter.accountKey) {
+          cursorPartitions[name] = applyPeriodDelta(prior.usage, cursorPartitions.today, anchorToday.usage);
+          // Today deltas cannot observe older-day corrections in these windows.
+          // Only a complete scan may advance their full-window freshness.
+          observedAt[name] = prior.observedAt;
+        }
+      }
+    }
+    for (const [name, period] of Object.entries({ today, month, allTime })) {
+      const partition = cursorPartitions[name];
+      if (!partition) continue;
+      const projects = projectsEnabled ? projectRollupFromSessions(Object.fromEntries(
+        Object.entries(windowsPeriods[name].sessions || {}).filter(([, row]) => row.client === 'cursor')
+      )) : {};
+      // The collection-time offset can change inside a day/month at DST.
+      // Compare the actual calendar boundaries, not that transient offset.
+      const start = name === 'allTime' ? null : new Date(
+        collectedAt.getFullYear(), collectedAt.getMonth(), name === 'today' ? collectedAt.getDate() : 1
+      );
+      const range = name === 'allTime' ? `since:${allTimeSince}`
+        : `${name}:${start.toISOString()}:${computePeriodWindows(collectedAt)[name].endsAt}`;
+      const prior = anchor?.[name]?.cursorAccountUsage;
+      if (anchorUsed && !scannedPeriods.has(name)
+        && prior?.range !== range) continue;
+      const scope = { accountKey: cursorAfter.accountKey, observedAt: observedAt[name], range,
+        usage: { ...accountingCounters(partition), projects } };
+      period.cursorAccountUsage = scope;
+      windowsPeriods[name].cursorAccountUsage = scope;
+    }
+  }
+
   const summary = {
     deviceId,
     hostname: os.hostname(),
@@ -1347,6 +1456,10 @@ async function collectUsageOnce(options) {
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: normalizedClients,
+      cursorOwnership: cursorAfter?.signature === cursorOwnership?.signature ? cursorAfter : null,
+      homeDir: options.homeDir,
+      env: options.env,
+      platform: platformValue,
       codexLocalGraph: codexLocalView?.graph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,

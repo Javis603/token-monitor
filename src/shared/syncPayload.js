@@ -41,6 +41,10 @@ function historyForSync(history, periodWindows) {
   if (!componentStart) return history;
   return {
     ...history,
+    ...(history.cursorAccountUsage ? { cursorAccountUsage: {
+      ...history.cursorAccountUsage,
+      usage: historyForSync(history.cursorAccountUsage.usage, periodWindows)
+    } } : {}),
     daily: history.daily.map((row) => {
       const date = String(row?.date || '').slice(0, 10);
       if (date >= componentStart && date <= todayKey) return row;
@@ -58,6 +62,10 @@ function historyWithoutTokenComponents(history) {
   if (!history || typeof history !== 'object' || !Array.isArray(history.daily)) return history;
   return {
     ...history,
+    ...(history.cursorAccountUsage ? { cursorAccountUsage: {
+      ...history.cursorAccountUsage,
+      usage: historyWithoutTokenComponents(history.cursorAccountUsage.usage)
+    } } : {}),
     daily: history.daily.map((row) => {
       const stripped = stripTokenComponents(row);
       stripped.perClient = Object.fromEntries(Object.entries(row?.perClient || {})
@@ -180,6 +188,7 @@ function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
   omitModelThroughput = false,
+  omitAccountUsage = false,
   syncSessionTitles = false,
   sessionTitleSyncGeneration
 } = {}) {
@@ -245,6 +254,32 @@ function buildSyncPayload(summary, {
       if (payload[period]) delete payload[period].modelThroughput;
     }
   }
+  // Both accepted period shapes can coexist and share the same period object.
+  // Clone each edited container so reductions never mutate the input snapshot.
+  const containers = [payload];
+  if (payload.periods && typeof payload.periods === 'object') {
+    payload.periods = { ...payload.periods };
+    containers.push(payload.periods);
+  }
+  for (const container of containers) {
+    for (const name of ['today', 'month', 'allTime']) {
+      const period = container[name];
+      if (!period?.cursorAccountUsage) continue;
+      const next = { ...period };
+      if (omitAccountUsage) delete next.cursorAccountUsage;
+      else {
+        const usage = { ...period.cursorAccountUsage.usage };
+        if (!projectsEnabled || (name === 'allTime' && omitAllTimeProjects)) delete usage.projects;
+        if (omitModelThroughput) delete usage.modelThroughput;
+        next.cursorAccountUsage = { ...period.cursorAccountUsage, usage };
+      }
+      container[name] = next;
+    }
+  }
+  if (omitAccountUsage && payload.history?.cursorAccountUsage) {
+    payload.history = { ...payload.history };
+    delete payload.history.cursorAccountUsage;
+  }
   return payload;
 }
 
@@ -261,6 +296,11 @@ function serializeSyncPayload(summary, options = {}) {
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes) {
+    buildOptions.omitAccountUsage = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
   if (Buffer.byteLength(body, 'utf8') > maxBytes
     && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
     // Optional live attribution must never evict aggregate usage or session detail.
@@ -323,6 +363,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
         ...syncOptions,
+        omitAccountUsage: true,
         omitHistoryTokenComponents: true,
         omitAllTimeProjects: true,
         omitModelThroughput: true
@@ -334,7 +375,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
     try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
     serialized = retrySerialized;
     if (typeof logger === 'function') {
-      logger('hub rejected the payload; retrying once without model timing detail, additive History components or all-time projects');
+      logger('hub rejected the payload; retrying once without account usage evidence, model timing detail, additive History components or all-time projects');
     }
     response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   }

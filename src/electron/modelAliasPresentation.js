@@ -183,6 +183,14 @@ function projectUsage(value, resolve) {
     if (result === value) result = { ...value };
     result[field] = projected;
   }
+  if (value.cursorAccountUsage) {
+    const scope = value.cursorAccountUsage;
+    const usage = projectUsage(scope.usage, resolve);
+    if (usage !== scope.usage) {
+      if (result === value) result = { ...value };
+      result.cursorAccountUsage = { ...scope, usage };
+    }
+  }
   // Keep source classification when a display alias erases the bot model id.
   // This flag belongs only to the Electron projection, never the wire record.
   if (isGrokBotSession(value) !== isGrokBotSession(result)) {
@@ -318,6 +326,11 @@ function projectHistory(history, resolve, semantics) {
   };
   for (const field of ['daily', 'monthly']) {
     if (Array.isArray(history[field])) set(field, mapRows(history[field], (row) => projectHistoryRow(row, resolve)));
+  }
+  if (history.cursorAccountUsage) {
+    const scope = history.cursorAccountUsage;
+    const usage = projectHistory(scope.usage, resolve, semantics);
+    if (usage !== scope.usage) set('cursorAccountUsage', { ...scope, usage });
   }
   if (history.summary) set('summary', projectSummary(history, resolve, semantics));
   if (Array.isArray(history.deviceHistories)) {
