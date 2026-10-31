@@ -1986,7 +1986,7 @@ test('account validation reads the local device raw limits, not the collapsed ag
   // not expose raw device rows at all.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
   // DeepSeek and MiniMax reach it through the shared account-form lane.
-  assert.match(functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked'), /const provider = localProviderStatus\(providerName\);/);
+  assert.match(functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked'), /localProviderStatus\(providerName\);/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {
