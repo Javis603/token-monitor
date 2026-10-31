@@ -24,7 +24,8 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
   const liveRates = createLiveRateResource({ now, leaseMs: snapshotTtlMs, onChange: () => {
     latest = { ...latest, revision: latest.revision + 1 };
     for (const s of subscriptions.values()) if (s.query.resource === 'liveRate') {
-      s.stamp = dependency(latest, s.query); invalidate(s);
+      const stamp = dependency(latest, s.query);
+      if (stamp !== s.stamp) { s.stamp = stamp; invalidate(s); }
     }
   } });
   const backing = createSessionBacking({ admit(bytes) {
@@ -58,7 +59,7 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
   function dependency(captured, q) {
     const { stats, extras: e } = captured;
     const base = [captured.sourceGeneration, e.sourceId || 'default', e.identityEpoch || '1', !!stats, q.resource, q.period];
-    if (q.resource === 'liveRate') return JSON.stringify([...base, liveRates.revision()]);
+    if (q.resource === 'liveRate') return JSON.stringify([...base, liveRates.revision(q.filter.deviceId ?? null)]);
     if (q.resource === 'history') return JSON.stringify([...base, loaderRevision(captured, 'history'), ref(stats?.history)]);
     if (q.resource === 'subscriptions') return JSON.stringify([...base, loaderRevision(captured, 'subscriptions'), ref(stats?.subscriptions), e.subscriptionContext?.date, CURRENCY_CODES.map(code => e.subscriptionContext?.rates?.[code]), stats?.stale, ref(stats?.limits)]);
     if (q.resource === 'status') return JSON.stringify([...base, ref(stats?.devices), stats?.updatedAt, stats?.projectsIncomplete, fields(e.status, 'collection sync availability'), fields(e.preferences, 'currency timeZone locale sessionTitlesEnabled historyEnabled projectsEnabled')]);
@@ -413,10 +414,12 @@ function createBusinessDataService({ identitySecret = randomBytes(32), loadHisto
         let rate;
         for (const subscription of subscribers.length ? subscribers : [null]) {
           rate = liveRates.read(deviceId, { pluginId: a.pluginId, owner: request.owner,
+            deviceRef: q.filter.deviceId ?? null,
             key: subscription ? `subscription:${subscription.id}` : JSON.stringify([a.pluginId, request.owner, deviceId]),
             subscription: subscription?.id });
         }
         captured = { ...latest, extras: { ...latest.extras, liveRate: rate } };
+        for (const s of subscribers) if (!s.initialized) s.stamp = dependency(captured, s.query);
       }
       const stamp = dependency(captured, q), qKey = queryKey(q), capturedAt = now();
       const reusable = [...snapshots.values()].find(s => s.stamp === stamp && s.authorityFingerprint === key && s.queryKey === qKey);

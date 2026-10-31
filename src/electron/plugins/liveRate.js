@@ -16,19 +16,28 @@ function createLiveRateResource({ now, leaseMs, onChange, setTimer = setTimeout,
         ? [{ id: `device:${deviceId}`, period: device.periods.today }] : [],
       reason: device?.stale ? 'stale' : 'missingData' };
     }
-    return { ...selectLiveTokenRatePeriods(stats, context.deviceId, context.hubMode, 'all'), reason: 'missingData' };
+    const selected = selectLiveTokenRatePeriods(stats, context.deviceId, context.hubMode, 'all');
+    const allStale = selected.source === 'devices:all' && stats?.devices?.length > 0 && stats.devices.every(d => d.stale === true);
+    return { ...selected, reason: allStale ? 'stale' : 'missingData' };
   }
   function refresh(group, observe) {
     const selected = selection(group.deviceId);
-    const boundary = JSON.stringify([selected.source, selected.entries.map(e => e.id).sort()]);
+    const boundary = selected.source ?? null;
     if (boundary !== group.boundary) {
       group.tracker.reset(selected.entries);
       group.boundary = boundary;
       group.hadSample = false;
     } else if (observe) {
       const result = group.tracker.observe(selected.entries);
-      if (result.changed && !result.sample) group.hadSample = false;
+      const present = new Set(selected.entries.map(e => e.id));
+      const removed = group.members.some(id => !present.has(id));
+      // Active survivors are already recomputed by observe(). Only clear the
+      // retained idle aggregate when it could still contain a departed device.
+      if (removed && result.sample?.idle) {
+        group.tracker.reset(selected.entries); group.hadSample = false;
+      } else if (result.changed && !result.sample) group.hadSample = false;
     }
+    group.members = selected.entries.map(e => e.id);
     const sample = group.tracker.getSample();
     group.hadSample ||= !!sample;
     const supported = selected.entries.some(({ period }) => period?.capabilities?.throughput !== false
@@ -38,7 +47,7 @@ function createLiveRateResource({ now, leaseMs, onChange, setTimer = setTimeout,
       speed: sample?.speed ?? null, burn: sample?.burn ?? null, sampledAt: sample?.sampledAt ?? null,
       expiresAt: sample?.expiresAt ?? null, sampleRevision: sample?.revision ?? null, deviceCount: sample?.deviceCount ?? 0 };
     const signature = JSON.stringify(value);
-    if (signature !== group.signature) { group.value = value; group.signature = signature; revision++; }
+    if (signature !== group.signature) { group.value = value; group.signature = signature; group.revision = ++revision; }
   }
   function prune() {
     for (const [key, owner] of owners) if (!owner.subscription && now() >= owner.expiresAt) owners.delete(key);
@@ -67,7 +76,11 @@ function createLiveRateResource({ now, leaseMs, onChange, setTimer = setTimeout,
     prune(); schedule();
   }
   return {
-    revision: () => revision,
+    revision(deviceRef = null) {
+      // Owners already bind plugin-scoped device refs to shared device trackers.
+      const scope = deviceRef === null ? JSON.stringify(null) : [...owners.values()].find(o => o.deviceRef === deviceRef)?.scope;
+      return groups.get(scope)?.revision ?? 0;
+    },
     publish(next, extras) {
       const nextContext = extras.liveRateContext || {};
       const nextIdentity = JSON.stringify([extras.sourceId, extras.identityEpoch, nextContext.hubMode, nextContext.deviceId, nextContext.clients]);
@@ -82,7 +95,7 @@ function createLiveRateResource({ now, leaseMs, onChange, setTimer = setTimeout,
       const scope = JSON.stringify(deviceId);
       if (!groups.has(scope)) {
         if (groups.size >= 128) throw new Error('budgetExceeded');
-        groups.set(scope, { deviceId, tracker: createLiveTokenRateGroupTracker({ now }), boundary: null, hadSample: false });
+        groups.set(scope, { deviceId, tracker: createLiveTokenRateGroupTracker({ now }), boundary: undefined, members: [], hadSample: false });
       }
       if (!owners.has(owner.key) && owners.size >= 512) throw new Error('budgetExceeded');
       owners.set(owner.key, { ...owner, scope, expiresAt: now() + leaseMs });

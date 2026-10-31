@@ -97,7 +97,7 @@ The usual result envelope contains one row when the source exists. `availability
 
 For `unavailable`, the numeric rate/timestamp/revision fields are `null` and `deviceCount` is zero. A supported measured zero can instead be `state: 'live', speed: 0`: do not replace it with a missing marker using `value || '—'`.
 
-The first observed snapshot establishes a baseline; a subsequent positive matched-duration delta can produce a reading. Counter regressions and source/client-selection changes reset tracking. A changed contributing device set also establishes a new baseline, so retained readings cannot include departed/stale devices. Unsupported/incomplete timing does not become a valid zero. Shared-source output sums active per-device samples rather than dividing fleet token totals by summed busy time; this is not proof that every device or token has timing coverage. Stale devices do not contribute new rates.
+The first observed snapshot establishes a baseline; a subsequent positive matched-duration delta can produce a reading. Counter regressions and source/client-selection changes reset tracking. New devices establish their own baselines without clearing other devices' active samples; departed/stale devices are removed from both active and retained aggregate readings. Unsupported/incomplete timing does not become a valid zero. Shared-source output sums active per-device samples rather than dividing fleet token totals by summed busy time; this is not proof that every device or token has timing coverage. A shared source containing only stale devices reports `reason: 'stale'`, distinct from an empty source's `missingData`.
 
 Tracking starts on reader demand, with no additional scans or provider calls. A subscription maintains continuity across normal host publications and receives coalesced invalidations when rates expire, including without another host publication. Native tracking currently marks samples idle after their active lifetime and clears the retained reading later; use the returned state and timestamps instead of hard-coding those deadlines. One-shot queries can share a short-lived baseline but do not keep expiry notification timers running. Unsubscribe when hidden/disposed; closing the owner or disabling the plugin releases its tracking demand.
 
@@ -114,7 +114,9 @@ if (result.availability === 'available') {
 }
 ```
 
-For a mounted chart, use `{resource: 'liveRate'}` in the [subscription lifecycle example](author-data-settings.md#live-updates-with-cleanup), adapt its `show` function to this row shape, and refetch on invalidation. Invalidation is not a new graph point by itself: record a new point only for a new observed sample, represent idle/gaps explicitly, and clear old readings on reset before refetching.
+For a mounted chart, use `{resource: 'liveRate'}` in the [subscription lifecycle example](author-data-settings.md#live-updates-with-cleanup), adapt its `show` function to this row shape, and refetch on invalidation. Device-scoped subscriptions invalidate only when their own reading changes; aggregate subscriptions also follow changes in contributing devices.
+
+Refresh the displayed rate, device count and state after every invalidation, even if `sampleRevision` is unchanged. In a shared source, one device can expire while another stays active: the aggregate might drop from 90 to 50 tok/s without a new observation. Distinguish these time-driven transitions from newly observed samples in chart history; do not label expiry transitions as new measurements or skip redrawing them. Clear old readings on reset before refetching.
 
 ## Identity and unsupported data
 

@@ -75,7 +75,7 @@ test('shared-source rate sums independently active devices and clears on source 
   const time = clock();
   const resource = createLiveRateResource({ ...time, leaseMs: 60000, onChange() {} });
   const context = { sourceId: 'a', liveRateContext: { hubMode: 'client' } };
-  const fleet = (a, b) => ({ devices: [{ deviceId: 'a', periods: { today: a } }, { deviceId: 'b', periods: { today: b } }] });
+  const fleet = (a, b) => ({ devices: [{ deviceId: 'a', hostname: 'a', periods: { today: a } }, { deviceId: 'b', hostname: 'b', periods: { today: b } }] });
   resource.publish(fleet(period(), period()), context); resource.read(null, owner);
   resource.publish(fleet(period(100, 1000, 40), period(200, 2000, 100)), context);
   assert.equal(resource.read(null, owner).speed, 90, '40 + 50 tok/s, not a ratio of fleet totals');
@@ -179,4 +179,64 @@ test('two subscriptions in the same window retain independent live-rate demand',
   assert.equal((await read()).rows[0].speed, 200, 'removing one subscription must not reset the other baseline');
   service.unsubscribe('window', second);
   assert.equal(time.timers.size, 0);
+});
+
+for (const change of ['join', 'leave', 'stale']) test(`device ${change} preserves another device's active rate without retaining departed rates`, () => {
+  const time = clock(), resource = createLiveRateResource({ ...time, leaseMs: 60000, onChange() {} });
+  const extras = { liveRateContext: { hubMode: 'client' } };
+  const device = (deviceId, p, stale = false) => ({ deviceId, periods: { today: p }, stale });
+  const a = device('a', period(100, 1000, 40)), b = device('b', period(200, 2000, 100));
+  resource.publish({ devices: [device('a', period()), device('b', period())] }, extras);
+  resource.read(null, owner);
+  resource.publish({ devices: [a, b] }, extras);
+  assert.equal(resource.read(null, owner).speed, 90);
+  const next = change === 'join' ? [a, b, device('c', period())] : change === 'leave' ? [b] : [{ ...a, stale: true }, b];
+  resource.publish({ devices: next }, extras);
+  assert.equal(resource.read(null, owner).speed, change === 'join' ? 90 : 50);
+  time.advance(8001);
+  const idle = resource.read(null, owner);
+  assert.equal(idle.state, 'idle'); assert.equal(idle.speed, change === 'join' ? 90 : 50);
+  resource.publish({ devices: change === 'join' ? [device('c', period())] : [] }, extras);
+  assert.equal(resource.read(null, owner).state, 'unavailable', 'departed devices cannot survive in the idle reading');
+  resource.dispose();
+});
+
+test('a shared source with only stale devices reports stale instead of missing data', () => {
+  const time = clock(), resource = createLiveRateResource({ ...time, leaseMs: 60000, onChange() {} });
+  const extras = { liveRateContext: { hubMode: 'client' } };
+  resource.publish({ devices: [{ deviceId: 'a', stale: true, periods: { today: period() } }] }, extras);
+  assert.equal(resource.read(null, owner).reason, 'stale');
+  resource.publish({ devices: [] }, extras);
+  assert.equal(resource.read(null, owner).reason, 'missingData');
+  resource.dispose();
+});
+
+test('live-rate publications and expiry invalidate only affected device scopes and the aggregate', async t => {
+  const { service, time, auth } = setup(t);
+  const extras = { liveRateContext: { hubMode: 'client' } };
+  const fleet = (a, b) => ({ devices: [{ deviceId: 'a', hostname: 'a', periods: { today: a } }, { deviceId: 'b', hostname: 'b', periods: { today: b } }] });
+  service.publish(fleet(period(), period()), extras);
+  const devices = await service.query({ version: 1, resource: 'devices' }, auth);
+  const a = devices.rows.find(d => d.hostname === 'a').id;
+  const b = devices.rows.find(d => d.hostname === 'b').id;
+  const events = { a: [], b: [], all: [] };
+  const queries = { a: { version: 1, resource: 'liveRate', filter: { deviceId: a } },
+    b: { version: 1, resource: 'liveRate', filter: { deviceId: b } }, all: { version: 1, resource: 'liveRate' } };
+  for (const key of Object.keys(events)) service.subscribe('window', queries[key], auth, event => events[key].push(event));
+  await flush(); time.advance(101);
+  for (const e of Object.values(events)) e.length = 0;
+  service.publish(fleet(period(100, 1000, 40), period()), extras); time.advance(101);
+  assert.equal(events.a.length, 1); assert.equal(events.all.length, 1);
+  assert.equal(events.b.length, 0, 'a changing rate does not refetch an unrelated device');
+  time.advance(3000);
+  service.publish(fleet(period(100, 1000, 40), period(100, 1000, 50)), extras); time.advance(101);
+  for (const e of Object.values(events)) e.length = 0;
+  const before = await service.query(queries.all, auth, { owner: 'window' });
+  time.advance(5000);
+  assert.equal(events.a.length, 1); assert.equal(events.all.length, 1);
+  assert.equal(events.b.length, 0, 'one device expiry leaves the other device subscription alone');
+  const after = await service.query(queries.all, auth, { owner: 'window' });
+  assert.equal(after.rows[0].speed, 50);
+  assert.equal(after.rows[0].deviceCount, 1);
+  assert.equal(after.rows[0].sampleRevision, before.rows[0].sampleRevision, 'expiry changes output without a new observation');
 });
