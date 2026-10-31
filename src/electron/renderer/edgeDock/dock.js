@@ -666,13 +666,13 @@ if (surface === 'peek') root.addEventListener('click', () => {
   if (state.payload?.peekMode !== 'refresh') bridge.click(null);
 });
 
-// On macOS the handle's window passes the pointer through with its moves still
+// On macOS the handle and floating rail pass the pointer through with moves still
 // forwarded here, so reporting them lets the main process take the pointer as
 // it reaches the handle rather than at its next cursor poll. The report carries
 // no position: the main process reads the cursor itself.
-if (surface === 'peek') {
+if (surface === 'peek' || surface === 'rail') {
   const reportPointer = () => {
-    if (state.payload?.peekMode !== 'refresh') bridge.pointer();
+    if (surface === 'rail' ? state.payload?.platform === 'darwin' : state.payload?.peekMode !== 'refresh') bridge.pointer();
   };
   document.addEventListener('mousemove', reportPointer);
   document.documentElement.addEventListener('mouseleave', reportPointer);

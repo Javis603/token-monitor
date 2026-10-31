@@ -2307,3 +2307,81 @@ for (const direction of ['detach', 'redock']) {
     assert.equal(refresh.bounds.y, rail.bounds.y + rail.bounds.height - Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) + EDGE_DOCK_METRICS.refreshGap);
   });
 }
+
+for (const scale of [0.85, 1, 1.25]) {
+  test(`macOS floating rail only captures its painted capsule at scale ${scale}`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({ platform: 'darwin', settings: { edgeDockFloatingX: 0.5, edgeDockSize: 'custom', edgeDockCustomScale: scale } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const m = scaledEdgeDockMetrics(scale);
+    const at = (x, y, sender = rail.webContents) => {
+      fixture.screen.point = { x: rail.bounds.x + x, y: rail.bounds.y + y };
+      fixture.ipcMain.emit('edgeDock:pointer', { sender });
+    };
+    assert.equal(rail.ignoreMouse, true, 'a visible floating window initially leaves background input alone');
+    assert.equal(rail.forwardMouse, true, 'forward moves so entering the capsule can capture without waiting for a poll');
+    const transparent = [
+      [rail.bounds.width / 2, m.shoulder / 2],
+      [rail.bounds.width / 2, rail.bounds.height - m.shoulder / 2],
+      [2, m.shoulder + 2], [rail.bounds.width - 2, m.shoulder + 2],
+      [2, rail.bounds.height - m.shoulder - 2], [rail.bounds.width - 2, rail.bounds.height - m.shoulder - 2]
+    ];
+    for (const [x, y] of transparent) {
+      at(rail.bounds.width / 2, rail.bounds.height / 2);
+      assert.equal(rail.ignoreMouse, false, 'the visible body takes input');
+      at(x, y);
+      assert.equal(rail.ignoreMouse, true, `transparent point ${x},${y} passes clicks and wheel through`);
+      assert.equal(rail.forwardMouse, true);
+    }
+    at(rail.bounds.width / 2, rail.bounds.height / 2, fixture.windowFor('bubble').webContents);
+    assert.equal(rail.ignoreMouse, true, 'another surface cannot capture the rail');
+    advance(100);
+    assert.equal(rail.ignoreMouse, false, 'the existing cursor poll also recovers capture');
+    fixture.controller.sync();
+    assert.equal(rail.ignoreMouse, false, 'ordinary settings/render sync preserves painted input');
+    at(rail.bounds.width / 2, m.shoulder / 2);
+    fixture.controller.sync();
+    assert.equal(rail.ignoreMouse, true, 'ordinary settings/render sync cannot recapture transparent input');
+  });
+}
+
+test('macOS floating capture stays active through a drag and resumes silhouette hit testing after cancellation', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'darwin', primaryButtonDown: () => null, settings: { edgeDockFloatingX: 0.5 } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 60 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: rail.webContents });
+  assert.equal(rail.ignoreMouse, false);
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 32, grabOffsetY: 60, gestureId: 31 });
+  fixture.screen.point = { x: 650, y: -20 };
+  advance(32);
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: rail.webContents });
+  assert.equal(rail.ignoreMouse, false, 'drag capture survives a pointer outside the painted rail');
+  fixture.ipcMain.emit('edgeDock:dragCaptureLost', { sender: rail.webContents }, { gestureId: 31 });
+  assert.equal(fixture.placements.length, 0);
+  assert.equal(rail.ignoreMouse, true, 'cancelled drag restores click-through at the saved capsule');
+  fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 60 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: rail.webContents });
+  assert.equal(rail.ignoreMouse, false, 'the restored capsule can be clicked again');
+});
+
+test('macOS floating rail retains a held press before the renderer crosses its drag threshold', (t) => {
+  let down = false;
+  const fixture = createFixture({ platform: 'darwin', primaryButtonDown: () => down, settings: { edgeDockFloatingX: 0.5 } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const report = (x) => {
+    fixture.screen.point = { x: rail.bounds.x + x, y: rail.bounds.y + 60 };
+    fixture.ipcMain.emit('edgeDock:pointer', { sender: rail.webContents });
+  };
+  report(2);
+  assert.equal(rail.ignoreMouse, false);
+  down = true;
+  report(-2);
+  assert.equal(rail.ignoreMouse, false, 'a 4px move outside the outline must not lose the press before dragStart');
+  down = false;
+  report(-2);
+  assert.equal(rail.ignoreMouse, true, 'release outside returns control to the background');
+});

@@ -3123,3 +3123,18 @@ for (const eventType of ['lostpointercapture', 'pointercancel']) {
     assert.equal(ends.length, 2, 'an unpressed move finishes even without native button-state support');
   });
 }
+
+test('macOS rail forwards pointer reports using the existing bridge without affecting Windows', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const start = dock.indexOf('// On macOS the handle');
+  const source = dock.slice(start, dock.indexOf('// The notch window', start));
+  for (const platform of ['darwin', 'win32']) {
+    const handlers = new Map();
+    const reports = [];
+    const document = { addEventListener: (name, fn) => handlers.set(name, fn), documentElement: { addEventListener: (name, fn) => handlers.set(name, fn) } };
+    Function('surface', 'state', 'document', 'bridge', source)('rail', { payload: { platform } }, document, { pointer: () => reports.push(true) });
+    handlers.get('mousemove')?.();
+    handlers.get('mouseleave')?.();
+    assert.equal(reports.length, platform === 'darwin' ? 2 : 0);
+  }
+});

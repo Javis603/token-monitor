@@ -159,6 +159,8 @@ function createEdgeDockController(deps) {
   let drag = null;
   let railMotion = null;
   let railMotionTimer = null;
+  let railHitPolygons = [];
+  let railPointerMode = null;
   let placementOverride = null;
   let fullScreen = false;
   let fullScreenCheckedAt = -Infinity;
@@ -376,6 +378,7 @@ function createEdgeDockController(deps) {
     onWebSurfaceChanged();
     const ignore = !(visible && (surface !== 'peek' || peekTakesPointer()));
     if (surface === 'peek') setPeekIgnoresMouse(win, ignore, visible);
+    else if (surface === 'rail' && platform === 'darwin') syncRailPointer();
     else win.setIgnoreMouseEvents(ignore);
     if (!win.isVisible()) {
       setOpacity(win, 0);
@@ -469,6 +472,33 @@ function createEdgeDockController(deps) {
   function syncPeekPointer() {
     const win = windows.peek;
     if (alive(win) && peekMode === 'handle' && peekTargetVisible && !peekPaintPending) setPeekIgnoresMouse(win, !peekTakesPointer(), true);
+  }
+
+  function syncRailPointer() {
+    const win = windows.rail;
+    if (platform !== 'darwin' || !alive(win)) return;
+    let takesPointer = visibleTargets.rail;
+    const heldPress = railPointerMode === 'capture' && primaryButtonDown() === true;
+    if (takesPointer && !drag && !heldPress && (placement().floatingX !== null || railMotion)) {
+      const bounds = win.getBounds();
+      const point = screen.getCursorScreenPoint();
+      const x = point.x - bounds.x, y = point.y - bounds.y;
+      takesPointer = railHitPolygons.some(polygon => {
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+          const [xi, yi] = polygon[i], [xj, yj] = polygon[j];
+          if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+        }
+        return inside;
+      });
+    }
+    // macOS masks only clip paint. Forward moves through the transparent canvas
+    // so entering the painted capsule can restore input before the next poll.
+    const mode = takesPointer ? 'capture' : visibleTargets.rail ? 'forward' : 'ignore';
+    if (railPointerMode === mode) return;
+    railPointerMode = mode;
+    if (mode === 'forward') win.setIgnoreMouseEvents(true, { forward: true });
+    else win.setIgnoreMouseEvents(!takesPointer);
   }
 
   function setPointerOnHandle(on) {
@@ -713,6 +743,8 @@ function createEdgeDockController(deps) {
 
   function destroyWindows() {
     cancelRailMotion();
+    railHitPolygons = [];
+    railPointerMode = null;
     for (const surface of SURFACES) {
       const win = windows[surface];
       backdrops.get(win)?.dispose();
@@ -805,6 +837,7 @@ function createEdgeDockController(deps) {
     const built = commandsFor(surface, bounds, side);
     const closed = Array.isArray(built) ? built : built.closed;
     const outline = Array.isArray(built) ? built : built.outline;
+    if (surface === 'rail' && platform === 'darwin') railHitPolygons = toPolygons(closed);
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline) };
     backdrops.get(win)?.update({ key, commands: closed });
     if (glasses[surface] && (surface !== 'peek' || peekMode === 'refresh') && shapeGlass(surface, closed, width, height)) {
@@ -979,6 +1012,7 @@ function createEdgeDockController(deps) {
     syncPageZoom();
     const rail = railMotion ? { ...current.rail, x: Math.round(railMotion.fromX + (current.rail.x - railMotion.fromX) * railMotionEase()) } : current.rail;
     placeSurface('rail', rail);
+    syncRailPointer();
     if (peekMode === 'handle' && !railVisible) placeSurface('peek', current.peek);
     if (railVisible) syncRefresh(current);
     if (bubbleCell !== null) placeBubble();
@@ -1099,6 +1133,7 @@ function createEdgeDockController(deps) {
     try {
       const point = screen.getCursorScreenPoint();
       const current = layout();
+      syncRailPointer();
       const buttonDown = drag ? primaryButtonDown() : null;
       // The renderer can miss the pointerup of a drag, because the window it is
       // dragging moves out from under the captured pointer; the OS button
@@ -1256,7 +1291,9 @@ function createEdgeDockController(deps) {
       }
     });
     ipcMain.on('edgeDock:pointer', (event) => {
-      if (surfaceFor(event.sender) !== 'peek' || peekMode !== 'handle' || drag) return;
+      const surface = surfaceFor(event.sender);
+      if (surface === 'rail') { syncRailPointer(); return; }
+      if (surface !== 'peek' || peekMode !== 'handle' || drag) return;
       const current = layout();
       if (current) trackHandlePointer(screen.getCursorScreenPoint(), current);
     });
