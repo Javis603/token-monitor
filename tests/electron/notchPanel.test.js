@@ -609,6 +609,55 @@ test('session titles use shared hover reading and hand it across live updates', 
   assert.ok(f.overflowText.stopped.includes(current));
 });
 
+test('home month follows the hovered or focused day and resets to the current month', t => {
+  const f = panelFixture(t), data = payload();
+  data.panel.week.days[0].date = '2026-09-30';
+  f.panel.render(data);
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+  f.all('notch-day')[0].fire('pointerenter');
+  assert.equal(f.find('notch-week-title').textContent, 'September');
+  f.find('notch-week-bars').fire('pointerleave');
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+  f.all('notch-day')[0].fire('focus');
+  assert.equal(f.find('notch-week-title').textContent, 'September');
+  f.all('notch-day')[0].fire('blur');
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+});
+
+test('hovering an unknown day retains its month across usage pushes', t => {
+  const f = panelFixture(t), data = payload();
+  data.panel.week.days[0] = { date: '2026-09-30', tokens: null };
+  f.panel.render(data);
+  f.all('notch-day')[0].fire('pointerenter');
+  assert.equal(f.find('notch-week-title').textContent, 'September');
+  data.cells[0].totalTokens = 200;
+  f.panel.render(data);
+  assert.equal(f.find('notch-week-title').textContent, 'September');
+  assert.equal(f.find('notch-big').textContent, '200');
+  f.find('notch-week-bars').fire('pointerleave');
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+});
+
+test('leaving a day after a month boundary shows the new current month', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  f.all('notch-day')[0].fire('pointerenter');
+  t.mock.timers.setTime(new Date(2026, 10, 1, 12).getTime());
+  f.find('notch-week-bars').fire('pointerleave');
+  assert.equal(f.find('notch-week-title').textContent, 'November');
+});
+
+test('returning Home clears the hovered month after a page change', t => {
+  const f = panelFixture(t), data = payload();
+  data.panel.week.days[0].date = '2026-09-30';
+  f.panel.render(data);
+  f.all('notch-day')[0].fire('pointerenter');
+  f.panel.selectPage('limits');
+  f.panel.selectPage('home');
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+  assert.equal(f.find('notch-big').textContent, '100');
+});
+
 test('scrubbing freezes the historical reading and returning applies the latest push immediately', t => {
   const f = panelFixture(t); f.panel.render(payload());
   f.all('notch-day')[0].fire('pointerenter');

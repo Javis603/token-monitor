@@ -1272,6 +1272,7 @@
       for (const billing of billingWindows) {
         const node = limitWindowNode(providerWindowLabel(provider, billing), billing, color, 0.68);
         node.classList.add('limit-window-wide');
+        if (!billing.resetsAt && !billing.resetDescription) node.classList.add('limit-window-no-reset');
         windows.append(node);
       }
     } else if (provider.provider === 'zed') {
@@ -1661,6 +1662,25 @@
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
+    } else if (provider.provider === 'manus') {
+      // The refreshing allowance is a quota with a reset; the spendable total is a
+      // points balance without a ceiling. The default branch renders neither a
+      // daily window nor a credits balance.
+      const balanceWindow = (provider.windows || []).find(isCreditsWindow) || null;
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => window !== balanceWindow && (window.kind === 'daily' || window.kind === 'billing'))
+        .map((window) => limitWindowNode(providerWindowLabel(provider, window), window, color, 0.78));
+      if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+      windows.append(...quotaNodes);
+      const balanceValue = balanceWindow ? creditsBalanceValue(provider, balanceWindow) : '';
+      if (balanceValue) {
+        const label = balanceWindow.label || 'Credits';
+        windows.append(tagUsageItem(limitNoteRowNode({
+          label,
+          summary: balanceValue,
+          ariaParts: [balanceValue]
+        }), 'credits', label));
+      }
     } else if (provider.provider === 'notion') {
       // Both included allowances are percentage quotas. Monthly is a billing
       // window, which the default session/weekly branch would omit.
@@ -1709,6 +1729,22 @@
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
       if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
+        // Muse supplies the token balance as display text; keep it ahead of the
+        // monetary fallback without changing the underlying credits reading.
+        if (provider.provider === 'muse' && creditsWindow.resetDescription?.endsWith(' tokens left')) {
+          const label = 'Additional tokens';
+          const tokenText = creditsWindow.resetDescription.replace(/ tokens left$/u, '');
+          const amount = /^(\d+(?:\.\d+)?)([KMB])?$/iu.exec(tokenText);
+          // Convert the displayed abbreviation only for unit formatting; this
+          // rounded website value never becomes a measured token count.
+          const tokenCount = amount && Number(amount[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[amount[2]?.toUpperCase()] || 1);
+          windows.append(tagUsageItem(limitNoteRowNode({
+            label,
+            summary: amount ? formatCompact(tokenCount) : tokenText,
+            ariaParts: [creditsWindow.resetDescription]
+          }), usageItems.limitUsageItemId(creditsWindow), label));
+          continue;
+        }
         const amount = creditsAmount(provider, creditsWindow);
         if (amount === null) continue;
         const balanceNode = limitWindowNode(
@@ -1722,6 +1758,7 @@
         if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
         windows.append(balanceNode);
       }
+      repairWindowPairs(windows);
     }
     if (!options.showAllUsageItems) {
       hideUsageItems(windows, usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, provider?.provider));
@@ -1794,6 +1831,7 @@
   // same account. Providers identified by email need no entry — the default below
   // already masks them.
   const LIMIT_ACCOUNT_TITLES = {
+    muse: museSourceTitle,
     codex: codexAccountTitle,
     opencode: opencodeAccountTitle,
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
@@ -2231,6 +2269,9 @@
     workbuddy: (provider, color, { grouped }) => ({
       options: grouped ? { showIcon: false } : {}
     }),
+    muse: (provider, color, { grouped }) => ({
+      options: grouped ? { showIcon: false } : provider?.source ? { title: limitAccountTitle('muse', provider, 0) } : {}
+    }),
     mimo: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
@@ -2353,6 +2394,14 @@
     }) || `Account ${index + 1}`;
   }
 
+  function museSourceTitle(provider, index, providers = [provider]) {
+    const title = provider?.source === 'cli' ? 'Muse Code' : provider?.source === 'web' ? 'Muse' : '';
+    if (!title) return limitAccountDefaultTitle(provider, index, providers);
+    if (providers.filter((row) => row.source === provider.source).length < 2) return title;
+    const device = presentationApi.limitProviderProvenance(provider, provenanceContext()).selectedDeviceLabel;
+    return [title, device].filter(Boolean).join(' · ');
+  }
+
   function codexAccountTitle(provider, index, providers = [provider]) {
     const label = accountIdentity.codexAccountDisplayLabel(provider, providers, {
       maskEmail: limitAccountEmailsMasked(),
@@ -2431,6 +2480,8 @@
   // one; leaving it to the caller is what let the dock card render a group with
   // no count at all while the page showed one.
   function limitGroupCountText(providerId, count) {
+    // Muse rows name product sources, not linked accounts.
+    if (providerId === 'muse') return '';
     const key = GROUP_COUNT_KEYS[providerId] || `settings.${providerId}.nAccounts`;
     const text = t(key, { count });
     // A provider with no key of its own would otherwise print the key itself.
@@ -2450,7 +2501,9 @@
       groupAccounts: providers
     };
     row.append(renderLimitProviderHead(providerId, label, groupProvider, color, {
-      planText: count ? limitGroupCountText(providerId, count) : '',
+      planText: providerId === 'muse' && subscriptionsForProviderGroup(providerId, providers).length
+        ? t('settings.subscriptions.title')
+        : count ? limitGroupCountText(providerId, count) : '',
       hideMeta: true,
       ...(markId ? { markId } : {})
     }));

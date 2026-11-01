@@ -1550,7 +1550,7 @@ test('aggregateHistory retains stored history from stale devices', () => {
     history: { daily: [{ date: '2026-06-07', tokens: 999, cost: 99, perClient: {}, perModel: {} }],
       monthly: [{ month: '2026-06', tokens: 999, cost: 99, perClient: {}, perModel: {} }], summary: {} }
   };
-  const merged = aggregateHistory([fresh, stale]);
+  const merged = aggregateHistory([fresh, stale], { todayKey: '2026-06-08' });
   assert.equal(merged.daily.length, 1);
   assert.equal(merged.daily[0].tokens, 1009);
   assert.equal(merged.summary.totalTokens, 1009);
@@ -1599,7 +1599,7 @@ test('a history-less local tick keeps the trends dashboard populated', () => {
       monthly: [{ month: '2026-06', tokens: 5, cost: 1, perClient: {}, perModel: {} }], summary: {} }
   };
   const second = carryDeviceHistory(first, { deviceId: 'm1', receivedAt: '2026-06-08T00:05:00.000Z' });
-  const agg = aggregateHistory([second]);
+  const agg = aggregateHistory([second], { todayKey: '2026-06-08' });
   assert.equal(agg.daily.length, 1);
   assert.equal(agg.daily[0].tokens, 5);
 });
