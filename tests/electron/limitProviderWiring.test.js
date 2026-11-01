@@ -343,6 +343,8 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://claude.ai/settings/billing',
     'https://cursor.com/settings',
     'https://www.cursor.com/settings',
+    'https://cursor.com/dashboard',
+    'https://www.cursor.com/dashboard',
     'https://opencode.ai/',
     'https://www.opencode.ai/auth',
     'https://openrouter.ai/settings/keys',
@@ -383,10 +385,29 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://www.javis-ai.com/token-monitor/'
   ];
   for (const url of allowed) assert.equal(isAllowedExternalUrl(url), true, url);
+
+  const cursorLoginStart = appSource.indexOf("  document.getElementById('cursorLoginButton').addEventListener");
+  const cursorLoginEnd = appSource.indexOf('\n  });', cursorLoginStart) + '\n  });'.length;
+  let cursorLogin;
+  const cursorUrls = [];
+  vm.runInNewContext(appSource.slice(cursorLoginStart, cursorLoginEnd), {
+    document: { getElementById: () => ({ addEventListener: (_event, handler) => { cursorLogin = handler; } }) },
+    window: { tokenMonitor: { openExternal: (url) => {
+      assert.equal(isAllowedExternalUrl(url), true, 'the Cursor login button must pass the main-process URL policy');
+      cursorUrls.push(url);
+    } } }
+  });
+  cursorLogin();
+  assert.deepEqual(cursorUrls, ['https://cursor.com/dashboard']);
+
   const denied = [
     'https://claude.ai/',
     'https://claude.ai/login',
     'https://cursor.com/',
+    'https://cursor.com/dashboard-other',
+    'https://cursor.com/dashboard/other',
+    'https://cursor.com.evil.com/dashboard',
+    'http://cursor.com/dashboard',
     'https://openrouter.ai/',
     'https://openrouter.ai/settings',
     'https://platform.deepseek.com/',
