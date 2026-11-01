@@ -7,10 +7,15 @@ const { envValue, errorWithStatus } = require('./providerHelpers');
 
 // execFile cannot create a process group for POSIX launcher descendants.
 function captureProcess(command, args, options, callback) {
-  const child = spawn(command, args, { ...options, detached: options.detached ?? process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+  const { timeout, ...spawnOptions } = options;
+  const child = spawn(command, args, { ...spawnOptions, detached: options.detached ?? process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
   const output = { stdout: '', stderr: '' };
   let failure;
   const stop = error => { failure ||= error; child.kill('SIGKILL'); };
+  // Keep the deadline until close: an exited launcher can leave inherited pipes open.
+  const timer = timeout > 0 ? setTimeout(() => {
+    stop(Object.assign(errorWithStatus('unavailable', 'CLI timed out'), { code: 'ETIMEDOUT' }));
+  }, timeout) : null;
   for (const name of ['stdout', 'stderr']) {
     child[name].setEncoding('utf8');
     child[name].on('data', text => {
@@ -23,6 +28,7 @@ function captureProcess(command, args, options, callback) {
   }
   child.on('error', error => { failure ||= error; });
   child.once('close', code => {
+    if (timer) clearTimeout(timer);
     callback(failure || (code !== 0 ? Object.assign(errorWithStatus('unavailable', 'CLI exited unsuccessfully'), { code }) : null), output.stdout, output.stderr);
   });
   return child;
