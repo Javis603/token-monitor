@@ -44,13 +44,14 @@ const UNKNOWN_AGENT_ENGINE_FLAG = [
   'Usage: kiro-cli chat [OPTIONS] [INPUT]'
 ].join('\n');
 
-function completedKiroProcess(output) {
+function completedKiroProcess(output, stderr = '') {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.kill = () => {};
   process.nextTick(() => {
     child.stdout.emit('data', output);
+    if (stderr) child.stderr.emit('data', stderr);
     child.emit('close', 0);
   });
   return child;
@@ -378,6 +379,24 @@ test('runKiroUsageCli falls back to the unpinned command on a CLI without --agen
     spawn: (_command, args) => {
       calls.push(args);
       return completedKiroProcess(calls.length === 1 ? UNKNOWN_AGENT_ENGINE_FLAG : LEGACY_BASIC);
+    }
+  });
+
+  assert.equal(output, LEGACY_BASIC);
+  assert.deepEqual(calls, [
+    ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
+    ['chat', '--no-interactive', '/usage']
+  ]);
+});
+
+test('runKiroUsageCli falls back when a wrapper prints to stdout and the flag error goes to stderr', async () => {
+  const calls = [];
+  const output = await runKiroUsageCli({
+    spawn: (_command, args) => {
+      calls.push(args);
+      return calls.length === 1
+        ? completedKiroProcess('kiro wrapper v1\n', UNKNOWN_AGENT_ENGINE_FLAG)
+        : completedKiroProcess(LEGACY_BASIC);
     }
   });
 

@@ -269,6 +269,11 @@ function existingKiroCli(env = process.env, platform = process.platform, deps = 
 // with stdout (or stderr when stdout is empty) regardless of exit code, because
 // kiro-cli sometimes prints the report and still exits non-zero.
 function runKiroUsageCliOnce(args, deps = {}) {
+  return spawnKiroUsageCli(args, deps)
+    .then(({ stdout, stderr }) => (stdout.trim() ? stdout : stderr));
+}
+
+function spawnKiroUsageCli(args, deps = {}) {
   const spawnFn = deps.spawn || spawn;
   const env = { ...(deps.env || process.env), TERM: 'xterm-256color' };
   const command = deps.kiroCliPath || 'kiro-cli';
@@ -312,7 +317,7 @@ function runKiroUsageCliOnce(args, deps = {}) {
     child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', (error) => finish(reject, error));
     child.on('close', () => {
-      finish(resolve, stdout.trim() ? stdout : stderr);
+      finish(resolve, { stdout, stderr });
     });
     signal?.addEventListener?.('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
@@ -329,13 +334,16 @@ function isKiroV2UsageSummary(text) {
 // kiro-cli builds that predate engine selection reject `--agent-engine` with a
 // clap usage error; they only have the slash-command engine, so the unpinned
 // command is safe there.
-function isUnknownAgentEngineFlag(text) {
-  return /unexpected argument '--agent-engine/.test(stripAnsi(text));
+// Check both streams: a wrapper set via TOKEN_MONITOR_KIRO_COMMAND may print to
+// stdout while the clap error lands on stderr.
+function isUnknownAgentEngineFlag({ stdout, stderr }) {
+  return /unexpected argument '--agent-engine/.test(stripAnsi(`${stdout}\n${stderr}`));
 }
 
 async function runKiroUsageCli(deps = {}) {
-  let output = await runKiroUsageCliOnce(['chat', '--no-interactive', '--agent-engine=v2', '/usage'], deps);
-  if (isUnknownAgentEngineFlag(output)) {
+  const pinned = await spawnKiroUsageCli(['chat', '--no-interactive', '--agent-engine=v2', '/usage'], deps);
+  let output = pinned.stdout.trim() ? pinned.stdout : pinned.stderr;
+  if (isUnknownAgentEngineFlag(pinned)) {
     output = await runKiroUsageCliOnce(['chat', '--no-interactive', '/usage'], deps);
   }
   if (!isKiroV2UsageSummary(output)) return output;
