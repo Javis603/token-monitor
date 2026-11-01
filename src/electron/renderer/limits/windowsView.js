@@ -2253,7 +2253,7 @@
       options: grouped ? { showIcon: false } : {}
     }),
     muse: (provider, color, { grouped }) => ({
-      options: grouped ? { showIcon: false } : { title: limitAccountTitle('muse', provider, 0) }
+      options: grouped ? { showIcon: false } : provider?.source ? { title: limitAccountTitle('muse', provider, 0) } : {}
     }),
     mimo: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }

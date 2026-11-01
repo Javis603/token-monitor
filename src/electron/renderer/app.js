@@ -16799,10 +16799,24 @@ function clearExternalProviderCheckPending(providerName) {
 }
 
 function clearExternalProviderPendingStatus(providerName) {
+  if (providerName === 'muse') {
+    // Only this device's Web Cookie changed. Keep its CLI and remote readings.
+    const localDeviceId = state.settings?.deviceId || '';
+    const keepSource = (provider) => provider.provider !== 'muse' || provider.source !== 'web';
+    const localDevice = state.stats?.devices?.find((device) => device.deviceId === localDeviceId);
+    if (Array.isArray(localDevice?.limits?.providers)) {
+      localDevice.limits.providers = localDevice.limits.providers.filter(keepSource);
+    }
+    if (Array.isArray(state.stats?.limits?.providers)) {
+      state.stats.limits.providers = state.stats.limits.providers.filter((provider) => keepSource(provider)
+        || (provider.sourceDeviceId
+          ? provider.sourceDeviceId !== localDeviceId
+          : Array.isArray(state.stats?.devices)));
+    }
+    return;
+  }
   if (!Array.isArray(state.stats?.limits?.providers)) return;
-  // Muse's Cookie panel changes only Web; its CLI allowance is independent.
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName
-    || (providerName === 'muse' && provider.source !== 'web'));
+  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
 }
 
 function nextCopilotSignInFlowId() {

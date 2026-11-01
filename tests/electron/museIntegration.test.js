@@ -153,7 +153,7 @@ test('Muse generic web account statuses are translated in every locale', () => {
   }
 });
 
-test('Muse Cookie save and clear preserve CLI quotas when the following stats refresh fails', async () => {
+test('Muse Cookie save and clear retire only local Web rows when the following stats refresh fails', async () => {
   const fs = require('node:fs');
   const vm = require('node:vm');
   const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
@@ -167,9 +167,15 @@ test('Muse Cookie save and clear preserve CLI quotas when the following stats re
   for (const action of ['save', 'clear']) {
     const cli = { provider: 'muse', source: 'cli', sourceDeviceId: 'local', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 35 }] };
     const remoteCli = { ...cli, sourceDeviceId: 'remote' };
-    const web = { provider: 'muse', source: 'web', status: 'ok' };
+    const web = { provider: 'muse', source: 'web', sourceDeviceId: 'local', status: 'ok' };
+    const remoteWeb = { ...web, sourceDeviceId: 'remote' };
+    const unknownWeb = { ...web, sourceDeviceId: '' };
     const other = { provider: 'manus', status: 'ok' };
-    const state = { stats: { limits: { providers: [cli, web, remoteCli, other] } } };
+    const localDevice = { deviceId: 'local', limits: { providers: [cli, web] } };
+    const remoteDevice = { deviceId: 'remote', limits: { providers: [remoteCli, remoteWeb] } };
+    const state = { settings: { deviceId: 'local' }, stats: {
+      devices: [localDevice, remoteDevice], limits: { providers: [cli, web, remoteCli, remoteWeb, unknownWeb, other] }
+    } };
     const context = {
       state, LIMIT_PROVIDERS: [{ id: 'muse', label: 'Muse' }], externalLimitAccountConfig: {},
       limitAccountForm: () => ({ status: { pendingKey: 'museWebPendingCheckSince' } }),
@@ -187,9 +193,16 @@ test('Muse Cookie save and clear preserve CLI quotas when the following stats re
     await assert.rejects(action === 'save'
       ? context.saveAccountCredential('muse', {})
       : context.clearAccountCredential('muse'), /stats unavailable/);
-    assert.deepEqual(state.stats.limits.providers, [cli, remoteCli, other], action);
+    assert.deepEqual(state.stats.limits.providers, [cli, remoteCli, remoteWeb, unknownWeb, other], action);
+    assert.deepEqual(localDevice.limits.providers, [cli], 'subscription choices cannot reuse the retired local Web reading');
+    assert.deepEqual(remoteDevice.limits.providers, [remoteCli, remoteWeb], 'remote device quotas stay intact');
     assert.equal(state.stats.limits.providers[0], cli, 'the existing CLI quota observation survives');
     context.clearExternalProviderPendingStatus('manus');
-    assert.deepEqual(state.stats.limits.providers, [cli, remoteCli], 'other providers retain their existing cleanup');
+    assert.deepEqual(state.stats.limits.providers, [cli, remoteCli, remoteWeb, unknownWeb], 'other providers retain their existing cleanup');
+    delete state.stats.devices;
+    const legacyWeb = { provider: 'muse', source: 'web', status: 'ok' };
+    state.stats.limits.providers = [cli, legacyWeb, remoteWeb];
+    context.clearExternalProviderPendingStatus('muse');
+    assert.deepEqual(state.stats.limits.providers, [cli, remoteWeb], 'legacy local snapshots without device rows still retire Web');
   }
 });

@@ -2860,6 +2860,15 @@ test('Muse duplicate product rows identify their devices with source display off
   assert.equal(fallback, 'Legacy source');
 });
 
+test('Muse source-less placeholders keep the catalog provider title', () => {
+  const view = dockView();
+  for (const status of ['notConfigured', 'unavailable', 'noSyncedData']) {
+    const row = view.renderLimitProviderSolo('muse', 'Muse', { provider: 'muse', status, windows: [] }, '#0866FF');
+    assert.equal(row.find('limit-name-title').textContent, 'Muse', status);
+    assert.ok(row.find('limit-icon'));
+  }
+});
+
 test('Muse group subscriptions retain a visible keyboard trigger without counting sources as accounts', () => {
   const providers = ['cli', 'web'].map((source) => ({ provider: 'muse', source, status: 'ok', windows: [] }));
   const subscription = {
