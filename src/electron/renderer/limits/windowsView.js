@@ -1661,6 +1661,25 @@
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
+    } else if (provider.provider === 'manus') {
+      // The refreshing allowance is a quota with a reset; the spendable total is a
+      // points balance without a ceiling. The default branch renders neither a
+      // daily window nor a credits balance.
+      const balanceWindow = (provider.windows || []).find(isCreditsWindow) || null;
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => window !== balanceWindow && (window.kind === 'daily' || window.kind === 'billing'))
+        .map((window) => limitWindowNode(providerWindowLabel(provider, window), window, color, 0.78));
+      if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+      windows.append(...quotaNodes);
+      const balanceValue = balanceWindow ? creditsBalanceValue(provider, balanceWindow) : '';
+      if (balanceValue) {
+        const label = balanceWindow.label || 'Credits';
+        windows.append(tagUsageItem(limitNoteRowNode({
+          label,
+          summary: balanceValue,
+          ariaParts: [balanceValue]
+        }), 'credits', label));
+      }
     } else if (provider.provider === 'notion') {
       // Both included allowances are percentage quotas. Monthly is a billing
       // window, which the default session/weekly branch would omit.
