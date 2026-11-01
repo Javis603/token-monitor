@@ -62,8 +62,7 @@ async function fetchMuseWebLimits(options = {}, deps = {}) {
   const base = { provider: 'muse', source: 'web', accountLabel: 'Muse (Meta)', updatedAt: new Date((deps.now || Date.now)()).toISOString(), windows: [] };
   const cookie = museWebCookie(deps.env || process.env, options);
   if (!cookie) return normalizeLimitProvider({ ...base, status: 'notConfigured' });
-  // No portable account identity is present in this response. The limits core
-  // keeps observations on different devices separate rather than hashing cookies.
+  // No portable account identity is present in this response; leave it unknown.
   const state = deps.providerRuntimeState;
   const cacheKey = 'muse:web:actionID';
   try {

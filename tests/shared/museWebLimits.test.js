@@ -110,14 +110,14 @@ test('action discovery is bounded and a second stale action is not cached', asyn
   assert.equal(state.size, 0);
 });
 
-test('anonymous Meta Muse rows stay separate on synced devices', async () => {
+test('anonymous Meta Muse web rows select one reading across synced devices', async () => {
   const row = await fetchMuseWebLimits(options, { fetch: fixtureFetch() });
   const summary = aggregateLimits([
     { deviceId: 'a', limits: { providers: [row] } },
     { deviceId: 'b', limits: { providers: [row] } }
   ]);
-  assert.equal(summary.providers.length, 2);
-  assert.deepEqual(summary.providers.map((entry) => entry.sourceDeviceId).sort(), ['a', 'b']);
+  assert.equal(summary.providers.length, 1);
+  assert.equal(summary.providers[0].sourceDeviceId, 'b');
 });
 
 test('negative Muse usage is unavailable rather than a full allowance', async () => {

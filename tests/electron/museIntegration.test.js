@@ -75,10 +75,10 @@ test('Muse keeps CLI and web quotas in one provider throughout runtime, sync and
   assert.deepEqual(rows.map((row) => [row.source, row.windows[0].usedPercent]).sort(), [['cli', 80], ['web', 28]]);
   const devices = ['a', 'b'].map((deviceId) => ({ deviceId, limits: { providers: rows } }));
   const synced = aggregateLimits(devices).providers;
-  assert.equal(synced.length, 4);
-  assert.equal(dedupeAccounts(synced).length, 4);
+  assert.equal(synced.length, 3);
+  assert.equal(dedupeAccounts(synced).length, 3);
   const local = localDeviceLimitsProviders({ devices }, 'a');
-  assert.equal(dedupeAccounts([...local, ...synced]).length, 4);
+  assert.equal(dedupeAccounts([...local, ...synced]).length, 3);
   assert.equal(sameAccount(local[0], local[1]), false);
   deps.museWebFetch = async () => new Response('', { status: 500 });
   await runtime.refresh({ provider: 'muse' }, 'credential-save');

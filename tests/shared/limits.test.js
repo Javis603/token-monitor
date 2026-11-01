@@ -1255,6 +1255,32 @@ test('aggregateLimits keeps Muse rows device-scoped because the CLI exposes no a
   );
 });
 
+test('Muse web selects one cross-device reading using shared ranking while CLI stays device-scoped', () => {
+  const row = (source, usedPercent, updatedAt, status = 'ok') => ({
+    provider: 'muse', source, status, updatedAt,
+    windows: [{ kind: 'weekly', usedPercent }]
+  });
+  const devices = [
+    { deviceId: 'a', limits: { providers: [
+      row('cli', 40, '2026-11-01T10:00:00.000Z'),
+      row('web', 20, '2026-11-01T10:02:00.000Z')
+    ] } },
+    { deviceId: 'b', limits: { providers: [
+      row('cli', 70, '2026-11-01T10:02:00.000Z'),
+      row('web', 10, '2026-11-01T10:00:00.000Z')
+    ] } },
+    { deviceId: 'failed', limits: { providers: [row('web', 90, '2026-11-01T10:03:00.000Z', 'unauthorized')] } },
+    { deviceId: 'stale', stale: true, limits: { providers: [row('web', 99, '2026-11-01T10:04:00.000Z')] } }
+  ];
+  for (const input of [devices, [...devices].reverse()]) {
+    const aggregate = aggregateLimits(input);
+    const cli = aggregate.providers.filter(p => p.source === 'cli');
+    assert.deepEqual(cli.map(p => p.sourceDeviceId).sort(), ['a', 'b']);
+    assert.deepEqual(aggregate.providers.filter(p => p.source === 'web').map(p => [p.sourceDeviceId, p.windows[0].usedPercent]), [['a', 20]]);
+    assert.deepEqual(require('../../worker/src/shared/limits/core').aggregateLimits(input).providers, aggregate.providers);
+  }
+});
+
 test('aggregateLimits does not merge anonymous Antigravity RPC with managed OAuth', () => {
   const sharedFallbackKey = 'sha256:antigravity-shared-fallback';
   const aggregate = aggregateLimits([
