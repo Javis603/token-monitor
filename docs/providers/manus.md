@@ -15,6 +15,8 @@ read_when:
 
 ## Data sources
 
+Desktop-discovered sessions report `source: local` with `sourceDetail: app`, matching MiMo and WorkBuddy. Manually supplied web cookies (including environment sessions) report `source: web` with `sourceDetail: managed`, matching MiMo’s manually configured accounts. Both query the same credits endpoint; the source identifies the credential origin.
+
 1. **Session.** A saved `manusSessionToken` or environment session takes precedence over desktop discovery. Accept a bare JWT or a Cookie header containing `session_id`; only that token is forwarded. The widget uses its shared credential store and account form. Headless collection accepts `TOKEN_MONITOR_MANUS_SESSION_TOKEN`, `MANUS_SESSION_TOKEN` or `MANUS_COOKIE`.
    - macOS: Manus Studio (`im.manus.desktop`, observed at 2.0.9) uses `~/Library/Application Support/Manus/Cookies`.
    - Windows: the official Store package (observed at 2.1.0, family `ManusAI.Manus_vajzd2mq3s8wj`) uses `%LOCALAPPDATA%/Packages/ManusAI.Manus_vajzd2mq3s8wj/LocalCache/Roaming/Manus/Network/Cookies`. The regular Electron profile at `%APPDATA%/Manus/Network/Cookies` is also checked.

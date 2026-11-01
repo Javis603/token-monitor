@@ -53,7 +53,7 @@
     trae: { api: 'Web' },
     alibaba: { web: 'Web' },
     stepfun: { web: 'Web' },
-    manus: { api: 'API' },
+    manus: { local: 'Local', web: 'Web' },
     thirdparty: { api: 'API' }
   };
 
@@ -408,6 +408,7 @@
       || providerName === 'cursor'
       || (providerName === 'opencode' && source === 'web')
       || (providerName === 'mimo' && source === 'web')
+      || (providerName === 'manus' && source === 'web')
       || (providerName === 'zed' && source === 'web');
   }
 

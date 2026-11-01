@@ -626,6 +626,14 @@ test('undetected settings tags include status and supported collection hints', (
 
 test('detected settings tags show only current source after status', () => {
   assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'manus', status: 'ok', source: 'local', sourceDetail: 'app' }).map((tag) => tag.label),
+    ['Live', 'Local']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'manus', status: 'ok', source: 'web' }).map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
+  assert.deepEqual(
     limitProviderSettingsTags({ provider: 'claude', status: 'ok', source: 'web' })
       .map((tag) => tag.label),
     ['Linked', 'Web']

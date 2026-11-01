@@ -131,13 +131,19 @@ function statusForResponse(status) {
 
 async function fetchManusLimits(options = {}, deps = {}) {
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
-  const base = { provider: 'manus', source: 'api', updatedAt, windows: [] };
+  const supplied = manusSessionValue(deps.env || process.env, options);
+  const base = {
+    provider: 'manus',
+    source: supplied ? 'web' : 'local',
+    sourceDetail: supplied ? 'managed' : 'app',
+    updatedAt,
+    windows: []
+  };
 
   let session;
   try {
     // An explicit session selects that account, including during a save probe.
     // Do not silently validate a different desktop account if it is rejected.
-    const supplied = manusSessionValue(deps.env || process.env, options);
     const token = normalizeManusSessionToken(supplied);
     if (supplied && !token) return normalizeLimitProvider({ ...base, status: 'unauthorized' });
     if (token) {

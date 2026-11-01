@@ -189,7 +189,8 @@ test('Manus fetch posts the Connect RPC with the desktop bearer and returns cred
 
   assert.equal(provider.provider, 'manus');
   assert.equal(provider.status, 'ok');
-  assert.equal(provider.source, 'api');
+  assert.equal(provider.source, 'local');
+  assert.equal(provider.sourceDetail, 'app');
   assert.equal(provider.accountKey, hashKey('manus', 'fixture-user'));
   assert.equal(provider.accountEmail, 'fixture@example.com');
   assert.deepEqual(provider.windows.map((window) => window.kind), ['daily', 'billing']);
@@ -240,6 +241,8 @@ test('Manus manual session accepts only a JWT or its session_id cookie', async (
   });
   assert.equal(provider.status, 'ok');
   assert.equal(desktopReads, 0);
+  assert.equal(provider.source, 'web');
+  assert.equal(provider.sourceDetail, 'managed');
   assert.equal(provider.accountKey, hashKey('manus', 'fixture-user'));
   assert.equal(JSON.stringify(provider).includes(FIXTURE_TOKEN), false);
 });
@@ -252,6 +255,8 @@ test('Manus environment sessions work without a desktop app on every platform', 
       fetch: async () => response(creditsFixture)
     });
     assert.equal(provider.status, 'ok', key);
+    assert.equal(provider.source, 'web', key);
+    assert.equal(provider.sourceDetail, 'managed', key);
   }
 });
 
@@ -312,6 +317,7 @@ test('Manus malformed explicit sessions never switch to the desktop account', as
       fetch: async () => { requests++; return response(creditsFixture); }
     });
     assert.equal(provider.status, 'unauthorized');
+    assert.equal(provider.source, 'web');
     assert.equal(desktopReads, 0);
     assert.equal(requests, 0);
   }
