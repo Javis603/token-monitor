@@ -2619,6 +2619,7 @@ for (const unavailable of [false, true]) {
 }
 
 test('Windows recreates a shaped bubble when both updating and clearing its region fail', t => {
+  const advance = mockDockClock(t);
   const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false });
   t.after(() => fixture.controller.stop());
   const rail = fixture.windowFor('rail'), old = fixture.windowFor('bubble');
@@ -2637,4 +2638,9 @@ test('Windows recreates a shaped bubble when both updating and clearing its regi
   assert.equal(sentPayload(replacement, 'bubble').cell.id, 'cursor');
   assert.equal(FakeBrowserWindow.atPoint({ x: replacement.bounds.x + 20, y: replacement.bounds.y + 20 }), replacement);
   assert.equal(FakeBrowserWindow.atPoint({ x: replacement.bounds.x + 20, y: replacement.bounds.y - 20 }), undefined);
+  const bounds = replacement.getBounds();
+  advance(48);
+  assert.deepEqual(replacement.getBounds(), bounds, 'a motion cancelled during its first frame must not restart a timer');
+  advance(720);
+  assert.deepEqual(replacement.getBounds(), bounds, 'the rectangular fallback stays fixed after the old spring deadline');
 });

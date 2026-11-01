@@ -1200,7 +1200,7 @@ function createEdgeDockController(deps) {
         if (done) cancelBubbleMotion();
       };
       frame();
-      bubbleMotionTimer = setInterval(frame, FADE_STEP_MS);
+      if (bubbleMotion === motion) bubbleMotionTimer = setInterval(frame, FADE_STEP_MS);
     } else {
       paintBubble(target, current.workArea);
     }
