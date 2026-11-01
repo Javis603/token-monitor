@@ -432,7 +432,12 @@ test('runKiroUsageCli retries explicit unknown-option errors', async () => {
 });
 
 test('fetchKiroLimits retries when a wrapper adds a conflicting legacy UI flag', async () => {
-  for (const prefix of ['', 'error: ']) {
+  for (const error of [
+    '--legacy-ui cannot be used with --agent-engine=v2',
+    'error: --legacy-ui cannot be used with --agent-engine=v2',
+    'Conflicting options: --legacy-ui cannot be used with --agent-engine=v2',
+    'error: Conflicting options: --legacy-ui cannot be used with --agent-engine=v2. Use --agent-engine=v1 or remove --legacy-ui.'
+  ]) {
     const calls = [];
     const provider = await fetchKiroLimits({}, {
       env: { TOKEN_MONITOR_KIRO_COMMAND: '/custom/kiro-wrapper' },
@@ -440,7 +445,7 @@ test('fetchKiroLimits retries when a wrapper adds a conflicting legacy UI flag',
         assert.equal(command, '/custom/kiro-wrapper');
         calls.push(args);
         return calls.length === 1
-          ? completedKiroProcess('kiro wrapper\n', `\x1b[31m${prefix}--legacy-ui cannot be used with --agent-engine=v2\x1b[0m\n`, 1)
+          ? completedKiroProcess('kiro wrapper\n', `\x1b[31m${error}\x1b[0m\n`, 1)
           : completedKiroProcess(LEGACY_BASIC);
       }
     });
@@ -458,7 +463,10 @@ test('runKiroUsageCli only unpins after an explicit failed engine rejection', as
     { stderr: UNKNOWN_AGENT_ENGINE_FLAG, exitCode: 0 },
     { stderr: `wrapper diagnostic: ${UNKNOWN_AGENT_ENGINE_FLAG}`, exitCode: 2 },
     { stderr: "error: unexpected argument '--agent-engine-extra' found", exitCode: 2 },
-    { stderr: 'error: failed to initialize auth portal', exitCode: 1 }
+    { stderr: 'error: failed to initialize auth portal', exitCode: 1 },
+    { stderr: 'error: Conflicting options: --legacy-ui cannot be used with --agent-engine=v2.', exitCode: 0 },
+    { stderr: 'error: Conflicting options: --legacy-ui cannot be used with --agent-engine=v20.', exitCode: 1 },
+    { stderr: 'wrapper diagnostic: Conflicting options: --legacy-ui cannot be used with --agent-engine=v2.', exitCode: 1 }
   ]) {
     const calls = [];
     const output = await runKiroUsageCli({

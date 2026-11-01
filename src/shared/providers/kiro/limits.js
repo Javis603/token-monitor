@@ -337,7 +337,7 @@ function shouldRetryWithoutEngine({ stdout, stderr, exitCode }) {
   if (!exitCode) return false;
   const text = stripAnsi(`${stdout}\n${stderr}`);
   return /^error: (?:unexpected argument|unrecognized option|unknown option) ['"]?--agent-engine(?:=v2)?(?:['"\s]|$)/m.test(text)
-    || /^(?:error: )?--legacy-ui cannot be used with --agent-engine=v2(?:\s|$)/m.test(text);
+    || /^(?:error: )?(?:Conflicting options: )?--legacy-ui cannot be used with --agent-engine=v2(?:[.\s]|$)/m.test(text);
 }
 
 async function runKiroUsageCli(deps = {}) {
