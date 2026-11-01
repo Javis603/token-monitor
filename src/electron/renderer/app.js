@@ -18507,13 +18507,15 @@ function setupCustomPricingUI() {
     try {
       const res = await window.tokenMonitor.lookupModelPricing(id);
       if (revision !== lookupRevision) return;
-      if (res?.ok && res.result?.pricing) {
+      if (res?.ok && res.result?.pricing && customPricingFormApi.hasTrustworthyPricingMatch(res.result)) {
         const p = customPricingFormApi.perMillionFromPricing(res.result);
         for (const [el, key] of rateFields) {
           if (!editedFields.has(key)) el.value = p[key] ?? '';
           updateApproximation(el);
         }
         showHint(t('settings.customPricing.currentPrice', { key: res.result.matchedKey || id, source: res.result.source || '' }));
+      } else if (res?.ok && res.result?.pricing) {
+        showHint(t('settings.customPricing.untrustedPrice'));
       } else {
         showHint(t('settings.customPricing.noCurrentPrice'));
       }
