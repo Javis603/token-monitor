@@ -32,8 +32,6 @@ The web probe discovers the current Next.js action id from settings-loader chunk
 
 Electron injects the existing proxy-aware Node exchange transport used by MiMo: Chromium controls `Sec-Fetch-*` headers and does not support the manual redirects needed here. The injected transport preserves the required same-origin headers and inspects authentication redirects without forwarding cookies, while honoring app, environment and system/PAC proxy routes. Other providers retain their existing transport.
 
-The web implementation and response fixtures are adapted from [CodexBar's MuseAI provider](https://github.com/steipete/CodexBar/blob/897bff31731bb4b21b105f6e8bf4c32a8a8bf095/Sources/CodexBarCore/Resources/Plugins/museai.js), retaining its [MIT notice](../../src/shared/providers/muse/LICENSE).
-
 ## Invariants and known gaps
 
 `allowance: null` (including `server_sent_no_usage`, `api_key` and `no_allowance`) is unavailable data, never a full allowance or zero usage. Malformed JSON, unsupported schemas and invalid percentages likewise produce no windows. Only explicit CLI sign-in failures are unauthorized; an absent CLI is not configured.
