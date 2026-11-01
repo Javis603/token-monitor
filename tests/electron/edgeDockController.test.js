@@ -2138,9 +2138,11 @@ test('Windows card switches follow renderer frames and reject stale motion ids',
   emitFrame(card, start.motionId - 1);
   emitFrame(rail, start.motionId);
   assert.deepEqual(paintedCardBounds(card), paintedAtStart, 'stale or foreign renderer frames do nothing');
+  t.mock.timers.tick(8);
+  assert.notDeepEqual(paintedCardBounds(card), paintedAtStart, 'the fallback starts before the first renderer frame');
   emitFrame(card, start.motionId);
   const paintedByRenderer = paintedCardBounds(card);
-  assert.notDeepEqual(paintedByRenderer, paintedAtStart, 'a paint frame advances before the main timer');
+  assert.notDeepEqual(paintedByRenderer, paintedAtStart, 'a renderer frame also advances the spring');
   t.mock.timers.tick(32);
   assert.deepEqual(paintedCardBounds(card), paintedByRenderer, 'the fallback timer does not double-paint while frames arrive');
   advance(80);
@@ -2153,6 +2155,34 @@ test('Windows card switches follow renderer frames and reject stale motion ids',
   t.mock.timers.tick(8);
   emitFrame(card, start.motionId);
   assert.deepEqual(paintedCardBounds(card), settled, 'frames queued after completion cannot restart the spring');
+});
+
+test('Windows card retargets do not restart the frame fallback grace period', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+  };
+
+  open(0, 'claude', 180);
+  advance(160);
+  open(2, 'cursor', 300);
+  const first = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+  t.mock.timers.tick(16);
+  fixture.ipcMain.emit('edgeDock:cardFrame', { sender: card.webContents }, { motionId: first.motionId });
+  t.mock.timers.tick(32);
+
+  open(0, 'claude', 180);
+  const retargeted = paintedCardBounds(card);
+  t.mock.timers.tick(16);
+  assert.deepEqual(paintedCardBounds(card), retargeted, 'the grace period still runs from the last renderer frame');
+  t.mock.timers.tick(16);
+  assert.notDeepEqual(paintedCardBounds(card), retargeted, 'fallback resumes without waiting another full grace period after retargeting');
 });
 
 test('native release finishes a held drag at its final location and acknowledges its gesture', (t) => {

@@ -165,7 +165,7 @@ function createEdgeDockController(deps) {
   let bubblePointerMode = null;
   let bubbleMotion = null;
   let bubbleMotionTimer = null;
-  let lastCardFrameAt = 0;
+  let lastCardFrameAt = null;
   let nextBubbleMotionId = 0;
   let railMotion = null;
   let railMotionTimer = null;
@@ -1151,13 +1151,13 @@ function createEdgeDockController(deps) {
     setVisible('bubble', false, FADE_OUT_MS);
   }
 
-  function cancelBubbleMotion() {
+  function cancelBubbleMotion({ preserveFrameClock = false } = {}) {
     const motion = bubbleMotion;
     clearInterval(bubbleMotionTimer);
     bubbleMotionTimer = null;
     bubbleMotion = null;
     if (motion) send('bubble', 'edgeDock:cardMotion', { motionId: motion.id, active: false });
-    lastCardFrameAt = 0;
+    if (!preserveFrameClock) lastCardFrameAt = null;
   }
 
   function paintBubble(frame, workArea, target = frame) {
@@ -1205,7 +1205,9 @@ function createEdgeDockController(deps) {
     const moving = bubbleVisible && (animate || bubbleMotion) && !prefersReducedMotion() && !bubbleShapeFailed
       && keys.some(key => from[key] !== target[key]);
     const velocity = bubbleMotion?.velocity || {};
-    cancelBubbleMotion();
+    // A retarget keeps the renderer clock so it does not extend the fallback's
+    // stale-frame grace period beyond the last frame that actually arrived.
+    cancelBubbleMotion({ preserveFrameClock: bubbleMotion !== null });
     if (moving) {
       const motion = { id: ++nextBubbleMotionId, keys, from, to: target, frame: from, initialVelocity: velocity, velocity: {},
         startedAt: Date.now(), workArea: current.workArea };
@@ -1214,13 +1216,13 @@ function createEdgeDockController(deps) {
       // ticks. Let the visible renderer drive paint frames; the main timer
       // remains a fallback if frame delivery stops.
       if (platform === 'win32') {
-        lastCardFrameAt = Date.now();
         send('bubble', 'edgeDock:cardMotion', { motionId: motion.id, active: true });
       }
       advanceBubbleMotion(motion);
       if (bubbleMotion === motion) {
         bubbleMotionTimer = setInterval(() => {
-          if (platform === 'win32' && Date.now() - lastCardFrameAt < CARD_FRAME_STALE_MS) return;
+          if (platform === 'win32' && lastCardFrameAt !== null
+            && Date.now() - lastCardFrameAt < CARD_FRAME_STALE_MS) return;
           advanceBubbleMotion(motion);
         }, FADE_STEP_MS);
       }
