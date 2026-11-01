@@ -554,9 +554,9 @@ function updateShape(payload) {
   shapeLayer.dataset.key = key;
   shapeLayer.replaceChildren();
   if (surface === 'bubble') {
-    // Readings have independent destination positions in the fixed canvas.
-    // Only the shared silhouette clips them as it travels and changes height.
-    contentLayer.style.transform = '';
+    // The whole reading travels with the painted frame. The clip is offset
+    // into the same local space, so content cannot vanish between distant cells.
+    contentLayer.style.transform = shape?.contentBounds ? `translateY(${shape.contentBounds.y / (payload.zoom || 1)}px)` : '';
     contentLayer.style.height = '';
     contentLayer.style.overflow = '';
     contentLayer.style.clipPath = shape?.contentBounds ? 'url(#edge-dock-card-clip)' : '';
@@ -567,7 +567,7 @@ function updateShape(payload) {
       clip.setAttribute('clipPathUnits', 'userSpaceOnUse');
       const path = document.createElementNS(SVG_NS, 'path');
       path.setAttribute('d', shape.d);
-      path.setAttribute('transform', `scale(${1 / (payload.zoom || 1)})`);
+      path.setAttribute('transform', `translate(0 ${-shape.contentBounds.y / (payload.zoom || 1)}) scale(${1 / (payload.zoom || 1)})`);
       clip.append(path);
       defs.append(clip);
       shapeLayer.append(defs);
@@ -1891,8 +1891,8 @@ function sessionsCard(cell, card, head) {
 
 // Cards are built in a hidden staging layer and measured there. The visible
 // card is only replaced once the main process has accepted its measured size.
-// While switching, each reading keeps its destination inside one fixed
-// canvas; the travelling silhouette reveals and clips the two layouts.
+// While switching, the content layer follows the painted frame inside the
+// fixed native canvas; text remains unscaled under the moving clip.
 //
 // Both scroll containers, because which one scrolls depends on the card. Provider,
 // grouped Sessions, and period-breakdown cards scroll `.edge-dock-accounts`; the
@@ -1917,7 +1917,7 @@ function clearCardSwitch() {
   motion.ghost.remove();
 }
 
-function captureCardSwitch(previous, sameCard, next) {
+function captureCardSwitch(previous, sameCard) {
   if (surface !== 'bubble' || !previous || prefersReducedMotion() || document.visibilityState === 'hidden') {
     clearCardSwitch();
     return null;
@@ -1936,13 +1936,6 @@ function captureCardSwitch(previous, sameCard, next) {
     clearCardSwitch();
     return null;
   }
-  const from = previous.getBoundingClientRect(), to = next.getBoundingClientRect();
-  if (from.bottom <= to.top || to.bottom <= from.top) {
-    // Distant readings switch directly with their silhouette, without fading
-    // in an otherwise empty destination or retaining an off-screen copy.
-    clearCardSwitch();
-    return null;
-  }
   const ghost = previous.cloneNode(true);
   const opacity = getComputedStyle(previous).opacity;
   const scrollTops = [...previous.querySelectorAll(CARD_SCROLL_SELECTOR)].map(list => list.scrollTop);
@@ -1957,8 +1950,8 @@ function captureCardSwitch(previous, sameCard, next) {
 
 function animateCardSwitch(card, motion) {
   if (!motion) return;
-  // Each reading stays at its own destination while the shared clip moves.
-  // The next one starts immediately, without a separate slide or scale.
+  // Both readings travel together with the painted frame.
+  // Crossfade the content without scaling its text.
   contentLayer.append(motion.ghost);
   [...motion.ghost.querySelectorAll(CARD_SCROLL_SELECTOR)].forEach((list, index) => {
     list.scrollTop = motion.scrollTops[index];
@@ -1983,7 +1976,7 @@ function commitCard(card, cellId) {
     .filter(list => !list.closest('.edge-dock-session-family'));
   const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
   const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
-  const switchMotion = captureCardSwitch(previous, sameCard, card);
+  const switchMotion = captureCardSwitch(previous, sameCard);
   const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
   contentLayer.replaceChildren(card);
   overflowText.refresh();
@@ -2043,8 +2036,7 @@ function fitCardTotal(card, scale = 1) {
 }
 
 function renderBubble(payload) {
-  const target = payload.shape?.contentTarget;
-  const contentTransform = target ? `translateY(${target.y / (payload.zoom || 1)}px)` : '';
+  const contentTransform = '';
   root.dataset.side = payload.side;
   root.style.setProperty('--edge-dock-card-width', `${payload.cardWidth || 280}px`);
   const cell = payload.cell;

@@ -2478,7 +2478,7 @@ for (const side of ['left', 'right']) {
 }
 
 for (const side of ['left', 'right']) {
-  test(`non-overlapping short cards switch directly without a travelling empty silhouette (${side})`, (t) => {
+  test(`distant short cards and rapid reversals animate continuously (${side})`, (t) => {
     const advance = mockDockClock(t);
     const fixture = createFixture({ prefersReducedMotion: () => false, settings: { edgeDockSide: side } });
     t.after(() => fixture.controller.stop());
@@ -2490,42 +2490,24 @@ for (const side of ['left', 'right']) {
       fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
       fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: `short-${cellIndex}`, height: 160 });
     };
-    const assertAtDestination = () => {
-      const payload = sentPayload(card, 'bubble');
-      assert.deepEqual(payload.shape.contentBounds, payload.shape.contentTarget, 'the outline must reveal the destination immediately');
-      const frames = card.webContents.messages.filter(m => m.channel === 'edgeDock:shapeFrame').length;
-      advance(32);
-      assert.equal(card.webContents.messages.filter(m => m.channel === 'edgeDock:shapeFrame').length, frames, 'no delayed spring frame can move the outline away again');
-    };
     open(0);
     advance(160);
-    const first = paintedCardBounds(card), canvas = card.getBounds();
-    open(7);
-    assertAtDestination();
-    assert.ok(paintedCardBounds(card).y >= first.y + first.height, 'the two short cards really are disjoint');
-    open(0);
-    assertAtDestination();
-    open(1);
-    advance(32);
-    assert.notDeepEqual(sentPayload(card, 'bubble').shape.contentBounds, sentPayload(card, 'bubble').shape.contentTarget, 'nearby cards still animate');
-    open(7);
-    assertAtDestination();
-    for (const [start, pending, next] of [[2, 4, 0], [5, 3, 7]]) {
-      for (const elapsed of [0, 16]) {
-        open(start);
-        advance(720);
-        open(pending);
-        const outgoing = sentPayload(card, 'bubble').shape.contentTarget;
-        advance(elapsed);
-        const painted = paintedCardBounds(card);
-        open(next);
-        const target = sentPayload(card, 'bubble').shape.contentTarget;
-        const targetY = canvas.y + target.y;
-        assert.ok(painted.y < targetY + target.height && targetY < painted.y + painted.height, 'the travelling frame overlaps the third card');
-        assert.ok(outgoing.y + outgoing.height <= target.y || target.y + target.height <= outgoing.y, 'the two reading destinations are disjoint');
-        assertAtDestination();
-      }
+    const canvas = card.getBounds();
+    for (const next of [7, 0, 5, 2, 7]) {
+      const previous = paintedCardBounds(card);
+      open(next);
+      assert.deepEqual(paintedCardBounds(card), previous, 'every selection starts at the current painted position');
+      const target = sentPayload(card, 'bubble').shape.contentTarget;
+      advance(48);
+      assert.notEqual(paintedCardBounds(card).y, previous.y, 'distant cards also move instead of jumping');
+      advance(720);
+      assert.equal(paintedCardBounds(card).y, canvas.y + target.y);
     }
+    open(0);advance(32);
+    const moving = paintedCardBounds(card);
+    open(7);
+    assert.deepEqual(paintedCardBounds(card), moving, 'rapid reversal retains position continuity');
+    advance(720);
     assert.deepEqual(card.getBounds(), canvas, 'the native canvas remains fixed');
   });
 }
@@ -2617,10 +2599,13 @@ for (const unavailable of [false, true]) {
     const advance = mockDockClock(t);
     const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false, shapeFails: !unavailable });
     t.after(() => fixture.controller.stop());
-    const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+    const rail = fixture.windowFor('rail');
+    let card = fixture.windowFor('bubble');
     if (unavailable) card.setShape = undefined;
     fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
     fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'claude', height: 180 });
+    card = fixture.windowFor('bubble');
+    card.webContents.emit('did-finish-load');
     assert.equal(card.getBounds().height, 180);
     assert.equal(sentPayload(card, 'bubble').shape.contentBounds.y, 0);
     assert.equal(FakeBrowserWindow.atPoint({ x: card.bounds.x + 20, y: card.bounds.y - 20 }), undefined, 'background above the card remains reachable');
@@ -2632,3 +2617,24 @@ for (const unavailable of [false, true]) {
     assert.deepEqual(card.getBounds(), bounds, 'fallback switches directly without a large animation canvas');
   });
 }
+
+test('Windows recreates a shaped bubble when both updating and clearing its region fail', t => {
+  const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), old = fixture.windowFor('bubble');
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: old.webContents }, { cellId: 'claude', height: 180 });
+  assert.ok(old.region?.length, 'a native region was previously accepted');
+  FakeBrowserWindow.shapeFails = true;
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 2 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: old.webContents }, { cellId: 'cursor', height: 240 });
+  const replacement = fixture.windowFor('bubble');
+  assert.notEqual(replacement, old, 'the failed old region must not remain attached');
+  assert.equal(old.destroyed, true);
+  replacement.webContents.emit('did-finish-load');
+  assert.equal(replacement.region, undefined);
+  assert.equal(replacement.bounds.height, 240);
+  assert.equal(sentPayload(replacement, 'bubble').cell.id, 'cursor');
+  assert.equal(FakeBrowserWindow.atPoint({ x: replacement.bounds.x + 20, y: replacement.bounds.y + 20 }), replacement);
+  assert.equal(FakeBrowserWindow.atPoint({ x: replacement.bounds.x + 20, y: replacement.bounds.y - 20 }), undefined);
+});

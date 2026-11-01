@@ -155,7 +155,7 @@ test('a card commits after its reported height is clamped to the work area', () 
       const cell = { id: `next-${kind}`, kind };
       const payload = { side: 'right', cell, maxCardHeight, zoom: 1.25, shape: { contentTarget: { y: 250, height: expected } } };
       renderBubble(payload);
-      assert.equal(card.style.transform, 'translateY(200px)', 'content uses its destination before the outline arrives');
+      assert.equal(card.style.transform, '', 'the reading follows its shared moving layer');
       assert.deepEqual(reports, [{ cellId: cell.id, height: expected }]);
       assert.equal(visibleId, 'previous-card', 'wait for the main process to place the new card');
       // Mirror the main process acknowledgement, including its height cap.
@@ -3185,7 +3185,7 @@ test('macOS rail forwards pointer reports using the existing bridge without affe
 });
 
 
-test('bubble silhouette clips fixed destination layouts without moving their canvas', () => {
+test('bubble silhouette moves content and clips it in the same local coordinates', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const source = dock.slice(dock.indexOf('function updateShape('), dock.indexOf('// ---- Peek'));
   const style = {}, nodes = [];
@@ -3198,15 +3198,15 @@ test('bubble silhouette clips fixed destination layouts without moving their can
   const update = Function('surface', 'contentLayer', 'shapeLayer', 'document', 'SVG_NS', `${source}; return updateShape;`)(
     'bubble', { style }, shapeLayer, document, 'svg');
   update({ zoom: 1.25, shape: { key: 'frame-a', width: 365, height: 900, d: 'M 0 100 Z', contentBounds: { y: 100, height: 250 } } });
-  assert.equal(style.transform, '');
+  assert.equal(style.transform, 'translateY(80px)');
   assert.equal(style.height, '');
   assert.equal(style.clipPath, 'url(#edge-dock-card-clip)');
   assert.equal(nodes.find(node => node.name === 'clipPath').attributes.clipPathUnits, 'userSpaceOnUse');
-  assert.equal(nodes.find(node => node.name === 'path').attributes.transform, 'scale(0.8)');
+  assert.equal(nodes.find(node => node.name === 'path').attributes.transform, 'translate(0 -80) scale(0.8)');
   assert.equal(nodes.find(node => node.name === 'path').attributes.d, 'M 0 100 Z');
   nodes.length = 0;
   update({ zoom: 1.25, shape: { key: 'frame-b', width: 365, height: 900, d: 'M 0 150 Z', contentBounds: { y: 150, height: 300 } } });
-  assert.equal(style.transform, '', 'the canvas stays fixed as the outline moves');
+  assert.equal(style.transform, 'translateY(120px)', 'the complete reading follows the painted frame');
   assert.equal(style.height, '');
   assert.equal(nodes.find(node => node.name === 'path').attributes.d, 'M 0 150 Z');
 });
@@ -3300,7 +3300,7 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   for (const top of [504, -504, 120, -120]) {
     const pending = api.captureCardSwitch(first, false, next);
     api.animateCardSwitch(next, pending);
-    assert.equal(api.captureCardSwitch(next, false, node('1', 0, top)), null, 'disjoint readings switch without a fade, including touching bounds');
+    assert.equal(api.captureCardSwitch(next, false, node('1', 0, top)), null, 'interrupted fades hand off directly regardless of reading distance');
     assert.equal(ghosts.size, 0, 'a direct switch also clears any interrupted outgoing copy');
     assert.equal(pending.incoming.cancelled, true);
   }

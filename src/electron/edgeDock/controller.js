@@ -898,7 +898,20 @@ function createEdgeDockController(deps) {
         bubbleShapeFailed = true;
         cancelBubbleMotion();
         // Remove any previously accepted region before using a small rectangle.
-        try { win.setShape?.([]); } catch { /* Region support is unavailable. */ }
+        try { win.setShape?.([]); } catch {
+          // A previously accepted native region may still be attached. A fresh
+          // window guarantees a rectangular fallback without that stale region.
+          cancelFade(win);
+          backdrops.get(win)?.dispose();
+          backdrops.delete(win);
+          windows.bubble = null;
+          ready.bubble = false;
+          visibleTargets.bubble = false;
+          lastSent.bubble = '';
+          shapes.bubble = null;
+          win.destroy();
+          windows.bubble = createSurface('bubble', builtMaterial);
+        }
         paintBubble(layout().bubble, layout().workArea);
         return;
       }
@@ -1160,12 +1173,8 @@ function createEdgeDockController(deps) {
     // Retarget from the painted frame, never from the previous destination.
     // Only switches animate; live data/size updates on the same card stay direct.
     const from = bubbleFrame || target;
-    // Both the painted frame and the outgoing reading must overlap the next
-    // destination: the renderer drops a disjoint reading's fade immediately.
-    const outgoing = bubbleMotion?.to || from;
-    const overlaps = [from, outgoing].every(bounds => bounds.y < target.y + target.height && target.y < bounds.y + bounds.height);
     const moving = bubbleVisible && (animate || bubbleMotion) && !prefersReducedMotion() && !bubbleShapeFailed
-      && overlaps && keys.some(key => from[key] !== target[key]);
+      && keys.some(key => from[key] !== target[key]);
     const velocity = bubbleMotion?.velocity || {};
     cancelBubbleMotion();
     if (moving) {
@@ -1174,8 +1183,8 @@ function createEdgeDockController(deps) {
       const frame = () => {
         const elapsed = Date.now() - motion.startedAt;
         const done = elapsed >= CARD_MOVE_MS || prefersReducedMotion();
-        // The silhouette follows one spring while each reading keeps its own
-        // destination layout. Rapid retargets preserve the outline's velocity.
+        // The silhouette and its shared content layer follow one spring.
+        // Rapid retargets preserve the outline's velocity.
         const seconds = elapsed / 1000, omega = 2 * Math.PI / cardSpring.response;
         const decayRate = cardSpring.damping * omega, frequency = omega * Math.sqrt(1 - cardSpring.damping ** 2);
         const decay = Math.exp(-decayRate * seconds), cosine = Math.cos(frequency * seconds), sine = Math.sin(frequency * seconds);
