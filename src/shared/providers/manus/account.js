@@ -29,7 +29,7 @@ module.exports = {
     saveKey: 'settings.manus.saveToken',
     emptyKey: 'settings.manus.statusNotSet',
     failedKey: 'settings.manus.saveFailed',
-    steps: ['settings.manus.step1', 'settings.manus.step2', 'settings.manus.step3'],
+    steps: ['settings.manus.step1', 'settings.manus.step2', 'settings.manus.step3', 'settings.manus.step4'],
     url: 'https://manus.im/'
   },
   urlPolicy: [{ hosts: ['manus.im'], exactPaths: ['/'] }]
