@@ -255,7 +255,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | 阿里雲控制台 cookie（百鍊／Model Studio Token Plan 額度，團隊版與個人版） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan 額度） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI 滾動／每月額度，限 Business/Enterprise；手動 token_v2 Cookie + 明確的工作區 ID | — | ✅ | — |
-| <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | 每月額度、定期補充額度與點數餘額；桌面工作階段（macOS／Windows）或手動網頁工作階段（所有 OS） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | 每日／每月額度與點數餘額；桌面工作階段（macOS／Windows）或手動網頁工作階段（所有 OS） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="第三方 API" /> | 第三方 API | New API / Sub2API 相容帳戶預設方案（包括相容的 One API 分支）、New API 金鑰預設方案與自訂餘額端點 | — | ✅ | — |
 
 <details>
@@ -272,7 +272,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 - Unsloth Studio 從 `studio.db` 追蹤 Studio 對話與本機 API 的推論用量。本機推論的 API 費用為零；可識別的按量計費供應商使用 Tokscale 的價格估算。不包含訓練 Token。詳見 [Unsloth 資料來源說明](docs/providers/unsloth.md)。
 - Devin 從本機 `sessions.db` 追蹤 Devin CLI 會話，並從 `acp-events` ACP 日誌追蹤 Devin Desktop 代理會話；同一 session 兩邊都有資料時以 CLI 資料庫為準。Desktop 的涵蓋範圍取決於連接的 ACP 代理：只有會在本機寫入 `usage_update` 事件的代理才會計入，而 Devin Desktop 預設的 `devin-cloud` 代理在伺服器端計量，因此預設的 Desktop 設定不會回報 Desktop token。session 標題與專案歸屬取自 CLI 資料庫。詳見 [Devin 資料來源說明](docs/providers/devin.md)。
 - Notion AI 使用內部 API，需手動貼上 `token_v2` Cookie 與明確的 Business/Enterprise 工作區 ID。目前僅以測試資料驗證，尚無真實回應樣本，實際登入驗證待批准。不會自動取得 Cookie，也不保證公開 API 相容性。詳見 [Notion 資料來源說明](docs/providers/notion.md)。
-- Manus 支援 macOS／Windows 桌面工作階段自動讀取，所有 OS（含 Linux）也可手動輸入網頁工作階段。每月額度、定期補充額度與點數餘額使用相同的未公開內部介面，不保證相容性。詳見 [Manus 資料來源說明](docs/providers/manus.md)。
+- Manus 支援 macOS／Windows 桌面工作階段自動讀取，所有 OS（含 Linux）也可手動輸入網頁工作階段。每日／每月額度與點數餘額使用相同的未公開內部介面，不保證相容性。詳見 [Manus 資料來源說明](docs/providers/manus.md)。
 - MiniMax Code 讀取 CLI 寫入的本機工作階段記錄，位於 `~/.minimax` 或 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`（亦包括 `~/.mavis` 與 `~/.minimax-<profile>` / `~/.mavis-<profile>`），並加上以 `tokscale headless mcode` 擷取的執行；兩邊都有的同一輪只計一次。
 
 - Command Code transcript 不包含實際 Token 數或每則訊息的模型資料。Token 用量依 transcript 文字估算；模型歸屬與推算成本則可能反映目前設定的模型，而非每次請求當時實際使用的模型。
