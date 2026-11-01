@@ -316,8 +316,8 @@ function spawnKiroUsageCli(args, deps = {}) {
     child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', (error) => finish(reject, error));
-    child.on('close', () => {
-      finish(resolve, { stdout, stderr });
+    child.on('close', (exitCode) => {
+      finish(resolve, { stdout, stderr, exitCode });
     });
     signal?.addEventListener?.('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
@@ -331,19 +331,19 @@ function isKiroV2UsageSummary(text) {
     && !/\(\d+\.?\d*\s+of\s+\d+\s+covered/i.test(stripped);
 }
 
-// kiro-cli builds that predate engine selection reject `--agent-engine` with a
-// clap usage error; they only have the slash-command engine, so the unpinned
-// command is safe there.
 // Check both streams: a wrapper set via TOKEN_MONITOR_KIRO_COMMAND may print to
 // stdout while the clap error lands on stderr.
-function isUnknownAgentEngineFlag({ stdout, stderr }) {
-  return /unexpected argument '--agent-engine/.test(stripAnsi(`${stdout}\n${stderr}`));
+function shouldRetryWithoutEngine({ stdout, stderr, exitCode }) {
+  if (!exitCode) return false;
+  const text = stripAnsi(`${stdout}\n${stderr}`);
+  return /^error: (?:unexpected argument|unrecognized option|unknown option) ['"]?--agent-engine(?:=v2)?(?:['"\s]|$)/m.test(text)
+    || /^(?:error: )?--legacy-ui cannot be used with --agent-engine=v2(?:\s|$)/m.test(text);
 }
 
 async function runKiroUsageCli(deps = {}) {
   const pinned = await spawnKiroUsageCli(['chat', '--no-interactive', '--agent-engine=v2', '/usage'], deps);
   let output = pinned.stdout.trim() ? pinned.stdout : pinned.stderr;
-  if (isUnknownAgentEngineFlag(pinned)) {
+  if (shouldRetryWithoutEngine(pinned)) {
     output = await runKiroUsageCliOnce(['chat', '--no-interactive', '/usage'], deps);
   }
   if (!isKiroV2UsageSummary(output)) return output;

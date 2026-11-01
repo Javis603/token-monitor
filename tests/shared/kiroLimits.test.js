@@ -44,7 +44,7 @@ const UNKNOWN_AGENT_ENGINE_FLAG = [
   'Usage: kiro-cli chat [OPTIONS] [INPUT]'
 ].join('\n');
 
-function completedKiroProcess(output, stderr = '') {
+function completedKiroProcess(output, stderr = '', exitCode = 0) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -52,7 +52,7 @@ function completedKiroProcess(output, stderr = '') {
   process.nextTick(() => {
     child.stdout.emit('data', output);
     if (stderr) child.stderr.emit('data', stderr);
-    child.emit('close', 0);
+    child.emit('close', exitCode);
   });
   return child;
 }
@@ -378,7 +378,9 @@ test('runKiroUsageCli falls back to the unpinned command on a CLI without --agen
   const output = await runKiroUsageCli({
     spawn: (_command, args) => {
       calls.push(args);
-      return completedKiroProcess(calls.length === 1 ? UNKNOWN_AGENT_ENGINE_FLAG : LEGACY_BASIC);
+      return calls.length === 1
+        ? completedKiroProcess(UNKNOWN_AGENT_ENGINE_FLAG, '', 2)
+        : completedKiroProcess(LEGACY_BASIC);
     }
   });
 
@@ -395,7 +397,7 @@ test('runKiroUsageCli falls back when a wrapper prints to stdout and the flag er
     spawn: (_command, args) => {
       calls.push(args);
       return calls.length === 1
-        ? completedKiroProcess('kiro wrapper v1\n', UNKNOWN_AGENT_ENGINE_FLAG)
+        ? completedKiroProcess('kiro wrapper v1\n', UNKNOWN_AGENT_ENGINE_FLAG, 2)
         : completedKiroProcess(LEGACY_BASIC);
     }
   });
@@ -405,6 +407,71 @@ test('runKiroUsageCli falls back when a wrapper prints to stdout and the flag er
     ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
     ['chat', '--no-interactive', '/usage']
   ]);
+});
+
+test('runKiroUsageCli retries explicit unknown-option errors', async () => {
+  for (const error of [
+    "error: unrecognized option '--agent-engine'",
+    'error: unknown option "--agent-engine=v2"'
+  ]) {
+    const calls = [];
+    const output = await runKiroUsageCli({
+      spawn: (_command, args) => {
+        calls.push(args);
+        return calls.length === 1
+          ? completedKiroProcess('', error, 2)
+          : completedKiroProcess(LEGACY_BASIC);
+      }
+    });
+    assert.equal(output, LEGACY_BASIC);
+    assert.deepEqual(calls, [
+      ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
+      ['chat', '--no-interactive', '/usage']
+    ]);
+  }
+});
+
+test('fetchKiroLimits retries when a wrapper adds a conflicting legacy UI flag', async () => {
+  for (const prefix of ['', 'error: ']) {
+    const calls = [];
+    const provider = await fetchKiroLimits({}, {
+      env: { TOKEN_MONITOR_KIRO_COMMAND: '/custom/kiro-wrapper' },
+      spawn: (command, args) => {
+        assert.equal(command, '/custom/kiro-wrapper');
+        calls.push(args);
+        return calls.length === 1
+          ? completedKiroProcess('kiro wrapper\n', `\x1b[31m${prefix}--legacy-ui cannot be used with --agent-engine=v2\x1b[0m\n`, 1)
+          : completedKiroProcess(LEGACY_BASIC);
+      }
+    });
+    assert.equal(provider.status, 'ok');
+    assert.equal(provider.windows[0].used, 12.5);
+    assert.deepEqual(calls, [
+      ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
+      ['chat', '--no-interactive', '/usage']
+    ]);
+  }
+});
+
+test('runKiroUsageCli only unpins after an explicit failed engine rejection', async () => {
+  for (const { stderr, exitCode } of [
+    { stderr: UNKNOWN_AGENT_ENGINE_FLAG, exitCode: 0 },
+    { stderr: `wrapper diagnostic: ${UNKNOWN_AGENT_ENGINE_FLAG}`, exitCode: 2 },
+    { stderr: "error: unexpected argument '--agent-engine-extra' found", exitCode: 2 },
+    { stderr: 'error: failed to initialize auth portal', exitCode: 1 }
+  ]) {
+    const calls = [];
+    const output = await runKiroUsageCli({
+      spawn: (_command, args) => {
+        calls.push(args);
+        return calls.length === 1
+          ? completedKiroProcess(V2_ESTIMATED_USAGE, stderr, exitCode)
+          : completedKiroProcess(V3_MODEL_REPLY);
+      }
+    });
+    assert.equal(output, V2_ESTIMATED_USAGE);
+    assert.deepEqual(calls, [['chat', '--no-interactive', '--agent-engine=v2', '/usage']]);
+  }
 });
 
 test('fetchKiroLimits reads the kiro-cli 2.37 v2 estimated-usage report', async () => {
