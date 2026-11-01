@@ -365,11 +365,14 @@ test('saved-only WorkBuddy subscription card does not appear on the sole live si
 });
 
 test('Notion rolling and monthly allowances render in both display modes and hide independently', () => {
+  // Reset text is omitted once resetsAt is past the grace window, so these
+  // instants stay ahead of the render clock instead of a calendar date.
+  const now = Date.now();
   const provider = normalizeLimitProvider({
     provider: 'notion', status: 'ok', source: 'web',
     windows: [
-      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: '2026-11-01T00:00:00Z' },
-      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: '2026-12-01T00:00:00Z' }
+      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: new Date(now + 6 * 60 * 60 * 1000).toISOString() },
+      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString() }
     ]
   });
   const before = JSON.stringify(provider);
