@@ -64,7 +64,7 @@ function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}
   vm.runInContext([
     sourceBetween('function showPopover(', 'function focusExistingWindow('),
     sourceBetween('function handleWindowToggleShortcut(', 'function trayMenuLocale('),
-    sourceBetween("  win.on('blur', () => {", "  win.on('resized',")
+    sourceBetween("  win.on('blur', () => {", '  const onBoundsChange =')
   ].join('\n'), context);
   const pressOptions = vm.runInContext(`({${sourceBetween(
     '    getWindowVisible: () => Boolean(mainWindow', '    onOpenView: openViewFromTray'

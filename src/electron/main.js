@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
@@ -349,6 +350,7 @@ const { projectLimitStatsForDisplay } = require('./limits/statsPresentation');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');
+const { shouldUseXWayland } = require('./linuxDisplayServer');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
   buildTrayIcon,
@@ -588,6 +590,22 @@ const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServices
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
+// Ozone selects the main-process backend before JS command-line mutations can
+// affect it. Relaunch with a real argv switch; the explicit-switch check in
+// shouldUseXWayland() lets the relaunched process continue to its first window.
+// spawn, not app.relaunch: the child must name the AppImage itself, because
+// process.execPath points into the runtime's transient mount, which is torn
+// down as this process exits; and app.relaunch ignores a custom execPath on
+// this Electron build — verified on 45.1.0 — so it would target that mount.
+if (shouldUseXWayland()) {
+  const relaunched = spawn(process.env.APPIMAGE || process.execPath, [...process.argv.slice(1), '--ozone-platform=x11'], {
+    detached: true,
+    stdio: 'ignore'
+  });
+  relaunched.on('error', (error) => console.log(`[display] XWayland relaunch failed: ${error.message}`));
+  relaunched.unref();
+  app.exit(0);
+}
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.exit(0);
@@ -7658,8 +7676,8 @@ function createWindow(boundsOverride, options = {}) {
     }
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
-  win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
-  win.on('moved', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
+  const onBoundsChange = () => { persistBoundsSoon(); syncTaskbarZOrder(); };
+  for (const eventName of ['resize', 'resized', 'move', 'moved']) win.on(eventName, onBoundsChange);
   win.on('show', syncTaskbarZOrder);
   win.on('restore', syncTaskbarZOrder);
   win.on('hide', stopTaskbarZOrderKeeper);
