@@ -260,6 +260,21 @@ test('Manus environment sessions work without a desktop app on every platform', 
   }
 });
 
+test('Manus malformed free credits never publish a successful balance', async () => {
+  for (const freeCredits of [{ invalid: true }, [], true, 'invalid']) {
+    for (const body of [{ freeCredits }, { ...creditsFixture, freeCredits }]) {
+      assert.throws(() => parseManusCredits(body), /freeCredits is not a number/);
+      const provider = await fetchManusLimits({ manusSessionToken: FIXTURE_TOKEN }, {
+        env: {},
+        fetch: async () => response(body)
+      });
+      assert.equal(provider.status, 'unavailable');
+      assert.deepEqual(provider.windows, []);
+      assert.equal(provider.balance, null);
+    }
+  }
+});
+
 test('Manus monthly credits have a separate meter without an invented renewal date', () => {
   const { windows } = parseManusCredits({ ...creditsFixture, proMonthlyCredits: 1000, periodicCredits: 650 });
   const monthly = windows.find((window) => window.label === 'Monthly');

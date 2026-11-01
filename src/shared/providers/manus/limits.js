@@ -57,6 +57,8 @@ function parseManusCredits(body) {
     throw new Error('Manus credits response carries no credit fields');
   }
   const total = creditCount(body, 'totalCredits');
+  // This field also identifies a credits response, even though it has no meter.
+  creditCount(body, 'freeCredits');
   const refresh = creditCount(body, 'refreshCredits');
   const maxRefresh = creditCount(body, 'maxRefreshCredits');
   const interval = typeof body.refreshInterval === 'string' ? body.refreshInterval.trim().toLowerCase() : '';
