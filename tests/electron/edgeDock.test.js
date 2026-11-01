@@ -3416,3 +3416,23 @@ for (const kind of ['provider', 'stat']) {
     });
   }
 }
+
+test('detail tooltip flipping uses the painted card top in CSS pixels', () => {
+  const source = fs.readFileSync(path.join(rendererDir, 'limits/windowsView.js'), 'utf8');
+  const body = source.slice(source.indexOf('function attachLimitDetailTooltip('), source.indexOf('// Entries are rows'));
+  for (const zoom of [1, 1.25]) {
+    for (const cardY of [0, 400]) {
+      for (const triggerY of [50, 150]) {
+        const events = {}, flips = [];
+        const attach = Function('deps', 'tooltipHost', 'positionCenteredDetailTooltip', `let tooltipAnchorSeq = 0; ${body}; return attachLimitDetailTooltip;`)(
+          { tooltipTop: () => cardY / zoom }, { markOpened() {}, release() {} }, () => {});
+        const wrap = { style: { setProperty() {} }, classList: { add() {} }, isConnected: true,
+          getBoundingClientRect: () => ({ top: (cardY + triggerY) / zoom }), addEventListener: (name, fn) => { events[name] = fn; } };
+        const tooltip = { style: { setProperty() {} }, setAttribute() {}, childElementCount: 1, offsetHeight: 120 / zoom,
+          showPopover() {}, classList: { toggle: (_name, below) => flips.push(below) } };
+        attach(wrap, tooltip); events.pointerenter();
+        assert.deepEqual(flips, [triggerY < 120 + 8 * zoom]);
+      }
+    }
+  }
+});

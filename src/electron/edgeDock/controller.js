@@ -125,6 +125,7 @@ function createEdgeDockController(deps) {
   // measures a new card off-screen and only swaps it in once this matches, so a
   // card never paints into a window still at the previous card's size.
   let bubblePlaced = null;
+  let bubbleShapeFailed = false;
   let bubbleVisible = false;
   let railVisible = false;
   let pointerOnRail = false;
@@ -798,6 +799,7 @@ function createEdgeDockController(deps) {
     bubbleCell = null;
     bubblePlaced = null;
     builtGlass = null;
+    bubbleShapeFailed = false;
     builtMaterial = null;
     for (const surface of SURFACES) {
       shapes[surface] = null;
@@ -885,12 +887,20 @@ function createEdgeDockController(deps) {
     } else if (platform === 'win32') {
       let shaped = false;
       try {
-        if (win.setShape) {
+        if (win.setShape && !(surface === 'bubble' && bubbleShapeFailed)) {
           win.setShape(shapeRectsFromPolygons(toPolygons(closed), width, height));
           shaped = true;
         }
       } catch (error) {
         logger(`[edge-dock] ${surface} shape failed: ${error.message}`);
+      }
+      if (surface === 'bubble' && !shaped && !bubbleShapeFailed) {
+        bubbleShapeFailed = true;
+        cancelBubbleMotion();
+        // Remove any previously accepted region before using a small rectangle.
+        try { win.setShape?.([]); } catch { /* Region support is unavailable. */ }
+        paintBubble(layout().bubble, layout().workArea);
+        return;
       }
       if (surface === 'peek' && shaped !== peekRegionClips) {
         peekRegionClips = shaped;
@@ -1133,9 +1143,10 @@ function createEdgeDockController(deps) {
 
   function paintBubble(frame, workArea, target = frame) {
     bubbleFrame = frame;
-    placeSurface('bubble', { x: frame.x, y: workArea.y, width: frame.width, height: workArea.height,
-      cardY: frame.y - workArea.y, cardHeight: frame.height, tailY: frame.tailY,
-      contentY: target.y - workArea.y, contentHeight: target.height });
+    const canvasY = bubbleShapeFailed ? frame.y : workArea.y;
+    placeSurface('bubble', { x: frame.x, y: canvasY, width: frame.width, height: bubbleShapeFailed ? frame.height : workArea.height,
+      cardY: frame.y - canvasY, cardHeight: frame.height, tailY: frame.tailY,
+      contentY: target.y - canvasY, contentHeight: target.height });
     syncBubblePointer();
   }
 
@@ -1153,7 +1164,7 @@ function createEdgeDockController(deps) {
     // destination: the renderer drops a disjoint reading's fade immediately.
     const outgoing = bubbleMotion?.to || from;
     const overlaps = [from, outgoing].every(bounds => bounds.y < target.y + target.height && target.y < bounds.y + bounds.height);
-    const moving = bubbleVisible && (animate || bubbleMotion) && !prefersReducedMotion()
+    const moving = bubbleVisible && (animate || bubbleMotion) && !prefersReducedMotion() && !bubbleShapeFailed
       && overlaps && keys.some(key => from[key] !== target[key]);
     const velocity = bubbleMotion?.velocity || {};
     cancelBubbleMotion();

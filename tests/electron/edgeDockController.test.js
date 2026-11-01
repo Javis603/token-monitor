@@ -2611,3 +2611,24 @@ test('macOS card canvas forwards background clicks outside the painted card and 
   assert.equal(card.ignoreMouse, false);
   advance(32);
 });
+
+for (const unavailable of [false, true]) {
+  test(`Windows shape failure bounds the bubble and disables motion (missing: ${unavailable})`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false, shapeFails: !unavailable });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+    if (unavailable) card.setShape = undefined;
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'claude', height: 180 });
+    assert.equal(card.getBounds().height, 180);
+    assert.equal(sentPayload(card, 'bubble').shape.contentBounds.y, 0);
+    assert.equal(FakeBrowserWindow.atPoint({ x: card.bounds.x + 20, y: card.bounds.y - 20 }), undefined, 'background above the card remains reachable');
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 2 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'cursor', height: 240 });
+    assert.equal(card.getBounds().height, 240);
+    const bounds = card.getBounds();
+    advance(48);
+    assert.deepEqual(card.getBounds(), bounds, 'fallback switches directly without a large animation canvas');
+  });
+}

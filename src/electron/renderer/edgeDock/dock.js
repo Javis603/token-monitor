@@ -457,6 +457,7 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
     document,
     t,
     settings: appearance,
+    tooltipTop: () => surface === 'bubble' ? (state.payload?.shape?.contentBounds?.y ?? 0) / (state.payload?.zoom || 1) : 0,
     currentLocale: () => state.locale,
     presentation: limitPresentationApi,
     // Which device a row's reading came from — "· imac-m1" beside the provider's

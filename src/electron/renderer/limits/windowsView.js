@@ -462,7 +462,8 @@
       if (!wrap.isConnected) return;
       tooltip.showPopover?.();
       // Measured after opening: a closed popover has no box to measure.
-      tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top < tooltip.offsetHeight + 8);
+      const top = deps.tooltipTop?.() ?? 0;
+      tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top - top < tooltip.offsetHeight + 8);
       positionCenteredDetailTooltip(tooltip);
     };
     const close = () => {
