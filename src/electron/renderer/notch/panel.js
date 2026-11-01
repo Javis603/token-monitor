@@ -816,8 +816,9 @@
         const costReading = reading ? usageCost('', reading) : text('', '');
         cost.replaceChildren(...costReading.children);
         cost.classList.toggle('edge-dock-cost-reading', Boolean(reading));
+        monthTitle.textContent = date ? monthName.format(new Date(`${date}T00:00:00Z`))
+          : new Intl.DateTimeFormat(locale(), { month: 'long' }).format(new Date());
         if (leaving) renderPage('home');
-        pageNode.querySelector('.notch-week-title').textContent = date ? monthName.format(new Date(`${date}T00:00:00Z`)) : currentMonth;
       }
       pageNode.replaceChildren(left, right);
       function fitBig() {
