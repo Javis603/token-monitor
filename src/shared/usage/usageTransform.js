@@ -14,6 +14,7 @@ const { applyProjectRollups } = require('../usage');
 const USAGE_TRANSFORM_SETTING_KEYS = Object.freeze([
   'archivedClientUsage',
   'clients',
+  'claudeDesktopSplitEnabled',
   'projectsEnabled',
   'sessionUsageArchiveEnabled'
 ]);
@@ -90,15 +91,19 @@ function createUsageTransform(options = {}) {
   // argument because capturing into it is a separate decision, see below.
   function project(summary, archive, now) {
     const settings = getSettings() || {};
+    const archiveOptions = {
+      now,
+      claudeDesktopSplitEnabled: settings.claudeDesktopSplitEnabled !== false
+    };
     const withArchivedClients = applyArchivedClientUsage(summary, settings.archivedClientUsage, {
       activeClients: settings.clients,
-      now,
+      ...archiveOptions,
       shareSessions: true
     });
     const visibleSummary = settings.sessionUsageArchiveEnabled === false
       ? withArchivedClients
       : applySessionUsageArchive(withArchivedClients, archive, {
-          now,
+          ...archiveOptions,
           canonical: true,
           canonicalSummary: true,
           mutate: true

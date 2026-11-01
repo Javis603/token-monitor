@@ -247,6 +247,9 @@ function fileSessionMetadata(sessionId, filePath, context, existing = {}) {
 const SESSION_METADATA_RESOLVERS = new Map([
   ['antigravity', { resolve: antigravitySessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['claude', { resolve: claudeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  // Desktop-started sessions are ordinary Claude Code transcripts relabelled
+  // onto the derived row (providers/claude/desktopSessions.js).
+  ['claude-desktop', { resolve: claudeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codebuddy', { resolve: codebuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codex', { resolve: codexSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['cursor', { resolve: cursorSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],

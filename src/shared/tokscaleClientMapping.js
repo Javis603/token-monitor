@@ -11,6 +11,16 @@ const TOKSCALE_CLIENT_GROUPS = Object.freeze({
     // one parser so generations without responseId cannot be counted twice.
     customScanIds: Object.freeze(['antigravity', 'antigravity-cli'])
   }),
+  // `claude-desktop` is derived, not scanned: tokscale reports Claude Desktop's
+  // transcripts under its `claude` client, and the collector moves the rows of
+  // Desktop-started sessions onto this id after the scan (see
+  // claudeDesktopSessions.js). Scanning it therefore means scanning `claude`,
+  // and it takes no custom roots of its own.
+  'claude-desktop': Object.freeze({
+    aliases: Object.freeze([]),
+    scanIds: Object.freeze(['claude']),
+    customScanIds: Object.freeze([])
+  }),
   // Xiaomi MiMo Desktop and the MiMo Code CLI share one `mimocode` SQLite
   // store; tokscale re-stamps a row as `micode-desktop` when its
   // `session.version` starts with `desktop-`. Both surfaces are one Token

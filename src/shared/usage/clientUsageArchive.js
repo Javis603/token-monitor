@@ -377,10 +377,15 @@ function shouldApplyPeriod(periodName, entry, now) {
 // a `pi` snapshot written after it: a user who untracks Pi today stores a
 // genuinely Pi-only entry, and treating that as merged would subtract the live
 // split client from usage which never contained it.
-function mergedSnapshotFor(client, entry) {
+function mergedSnapshotFor(client, entry, options = {}) {
   for (const splitDef of CLIENT_IDENTITY_SPLITS) {
     if (client !== splitDef.merged) continue;
-    if (!isPreSplitEntry(entry)) continue;
+    // A disabled Desktop split treats every `claude` snapshot as merged again,
+    // so live Desktop usage under `claude` is netted out of the archive.
+    if (splitDef.split === 'claude-desktop' && options.claudeDesktopSplitEnabled === false) {
+      return splitDef;
+    }
+    if (!isPreSplitEntry(entry, splitDef)) continue;
     return splitDef;
   }
   return null;
@@ -502,7 +507,7 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
   // the snapshot recognises that overlap only once the split id's rows are in
   // the period — insertion order puts the older merged entry first.
   const orderedEntries = Object.entries(normalizedArchive.clients)
-    .map(([client, entry]) => [client, entry, mergedSnapshotFor(client, entry)])
+    .map(([client, entry]) => [client, entry, mergedSnapshotFor(client, entry, options)])
     .sort((left, right) => Number(Boolean(left[2])) - Number(Boolean(right[2])));
   for (const [client, entry, splitDef] of orderedEntries) {
     // An ordinary entry is skipped once its client is tracked: the live scan now
@@ -538,7 +543,7 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
   return next;
 }
 
-function pruneArchivedClientUsage(archive, activeClients) {
+function pruneArchivedClientUsage(archive, activeClients, options = {}) {
   const normalizedArchive = normalizeArchivedClientUsage(archive);
   const active = clientSet(activeClients);
   for (const client of active) {
@@ -548,7 +553,7 @@ function pruneArchivedClientUsage(archive, activeClients) {
     // not report, and the archive is the only place that usage exists. A merged
     // entry is left in place and nets itself out against the live rows on every
     // apply instead, which is also what keeps a later untrack from resurfacing it.
-    if (mergedSnapshotFor(client, normalizedArchive.clients[client])) continue;
+    if (mergedSnapshotFor(client, normalizedArchive.clients[client], options)) continue;
     delete normalizedArchive.clients[client];
   }
   return normalizedArchive;

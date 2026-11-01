@@ -53,6 +53,7 @@ const supportedToolIds = (text, file) => text
 
 const supportedToolOrder = [
   'Claude Code',
+  'Claude Desktop',
   'Codex',
   'OpenCode',
   'Hermes Agent',
@@ -103,6 +104,7 @@ const supportedToolOrder = [
 
 const supportedToolIdOrder = [
   'claude',
+  'claude-desktop',
   'codex',
   'opencode',
   'hermes-agent',

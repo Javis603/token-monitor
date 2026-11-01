@@ -30,6 +30,29 @@ module.exports = {
       normalize: { fn: 'normalizeClaudeWebOrganizationId', style: 'value' },
       project: 'value',
       clearWithCredential: true
+    },
+    // Claude Desktop local-only mode (see desktopPlanUsage.js): read the
+    // Desktop app's plan-usage samples and never enter the Web, OAuth or CLI
+    // lanes. The env var is a fallback lane, so it also switches the mode on
+    // when the stored setting is off.
+    {
+      key: 'claudeDesktopLocalOnly',
+      kind: 'setting',
+      normalize: (value) => value === true || /^(1|true|yes|on)$/i.test(String(value ?? '').trim()),
+      configNormalize: (value) => value === true || /^(1|true|yes|on)$/i.test(String(value ?? '').trim()),
+      envFallback: ['TOKEN_MONITOR_CLAUDE_DESKTOP_LOCAL_ONLY'],
+      persist: 'spread',
+      initial: null
+    },
+    // Organization whose Desktop samples to read when several accounts have
+    // used this machine. Empty: the organization of the newest sample.
+    {
+      key: 'claudeDesktopOrgId',
+      kind: 'setting',
+      normalize: 'trim',
+      envFallback: ['TOKEN_MONITOR_CLAUDE_DESKTOP_ORG_ID'],
+      persist: 'spread',
+      initial: null
     }
   ],
   status: {

@@ -30,7 +30,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 47+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 48+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
 
 ## 対応ツール
 
@@ -38,6 +38,7 @@ Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 47+ 種類�
 
 <p align="center">
     <img src=".github/assets/tools-icon/claude.png" width="40" alt="Claude Code" title="Claude Code" />
+    <img src=".github/assets/tools-icon/claude-desktop.png" width="40" alt="Claude Desktop" title="Claude Desktop" />
     <img src=".github/assets/tools-icon/codex.png" width="40" alt="Codex" title="Codex" />
     <img src=".github/assets/tools-icon/opencode.png" width="40" alt="OpenCode" title="OpenCode" />
     <img src=".github/assets/tools-icon/hermes-agent.png" width="40" alt="Hermes Agent" title="Hermes Agent" />
@@ -153,7 +154,7 @@ brew install --cask token-monitor
 
 ### 使用量の追跡
 
-- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 38+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
+- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 39+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
 - **リアルタイムトークンレート** — 生成速度を `tok/s`、総消費を `tok/min` で表示する任意のライブ表示
 - **セッション別詳細** — セッションを開くとプロンプトごとのトークン、各応答のトークン分割・使用ツールまで展開（ローカル transcript/DB を必要時のみ読み込み、同期しない）
 - **キャッシュヒット統計** — ツール・モデルをクリックすると入力トークン（キャッシュ hit/miss）、出力トークン、ヒット率の詳細
@@ -209,6 +210,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | Logo | ツール | データパス | トークン使用量 | AI ツール制限 | セッション詳細 |
 |:---:|------|-----------|:---:|:---:|:---:|
 | <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`, `~/.claude/transcripts/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/claude-desktop.png" width="28" alt="Claude Desktop" /> | Claude Desktop | `~/.claude/projects/` のうち Desktop で開始したセッション、`<Claude userData>/local-agent-mode-sessions/`、`claude-code-sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/`（`sessions/`、`archived_sessions/`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/`（`opencode*.db`、`storage/message/`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |

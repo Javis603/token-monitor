@@ -19,36 +19,45 @@ function seedAgentClients(resolved, options = {}) {
   // The seeded result is what has to persist, bound to the CSV it came from —
   // an unchanged declaration keeps the seeded list, while an edited CSV is a
   // new declaration and is seeded (or taken literally) on its own terms.
-  if (stored && typeof stored === 'object'
-      && stored.sourceCsv === resolved
-      && typeof stored.clients === 'string' && stored.clients) {
-    return stored.clients;
-  }
   // A marker without a recorded result cannot prove the seed ever landed, so
   // its `applied` set is only trusted when the source CSV was recorded too.
   const applied = stored && typeof stored === 'object' && typeof stored.sourceCsv === 'string'
     && Array.isArray(stored.applied)
     ? stored.applied
     : [];
-  const seeded = seedSplitClients(resolved, { applied });
+  const splitOptions = {
+    applied,
+    claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false
+  };
+  let clients = resolved;
+  if (stored && typeof stored === 'object'
+      && stored.sourceCsv === resolved
+      && typeof stored.clients === 'string' && stored.clients) {
+    // Same CSV as last launch: keep the seeded result, but still allow a later
+    // enable of the Desktop split to seed `claude-desktop` once if that seed
+    // was skipped while the setting was off.
+    clients = stored.clients;
+  }
+  const seeded = seedSplitClients(clients, splitOptions);
+  clients = seeded.clients;
   // A dry run still resolves the post-split client list so the preview shows
   // what a real launch would collect, but it must not record the migration:
   // persisting here would consume the one-shot seed on a run that collected
   // nothing, and the next real launch would silently drop the split client.
-  if (options.persist !== false) {
+  if (options.persist !== false && (seeded.evaluated.length > 0 || stored?.sourceCsv !== resolved)) {
     const next = [...new Set([
       ...applied.map((value) => String(value || '').trim()).filter(Boolean),
       ...seeded.evaluated
     ])];
     try {
-      writeJsonAtomic(markerPath, { version: 1, applied: next, sourceCsv: resolved, clients: seeded.clients });
+      writeJsonAtomic(markerPath, { version: 1, applied: next, sourceCsv: resolved, clients });
     } catch (error) {
       // A read-only data directory must not stop collection; the worst case is
       // that the next launch re-evaluates and re-adds the split client.
       console.warn('[agent] could not record the client-identity migration: ' + error.message);
     }
   }
-  return seeded.clients;
+  return clients;
 }
 
 module.exports = { seedAgentClients };
