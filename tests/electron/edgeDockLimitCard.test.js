@@ -2820,3 +2820,34 @@ test('Meta Muse renders its weekly allowance and separate additional money balan
   assert.match(rendered.text, /\$60\.00/);
   assert.equal(dockView().limitProviderUsageItems([provider]).length, 2);
 });
+
+test('Muse names its product sources without numbered accounts or repeated row icons', () => {
+  const providers = ['cli', 'web'].map((source) => normalizeLimitProvider({
+    provider: 'muse', source, status: 'ok',
+    windows: [{ kind: 'weekly', usedPercent: 20 }]
+  }));
+  const view = dockView();
+  const group = view.renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF');
+  const rows = group.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), ['Muse Code', 'Muse']);
+  assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-icon')).length, 1);
+  assert.ok(rows.every((row) => row.find('limit-icon') === null));
+  assert.equal(group.find('limit-plan').textContent, '');
+  for (const provider of providers) {
+    assert.ok(view.renderLimitProviderSolo('muse', 'Muse', provider, '#0866FF').find('limit-icon'));
+    assert.equal(provider.accountKey, '');
+  }
+});
+
+test('Muse web weekly quota spans the row above its full-width balance', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { paid } = require('../fixtures/museWeb');
+  const provider = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const rows = dockView().renderProviderWindows(provider, '#0866FF').children;
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.classNames.has('limit-window-wide')));
+  const cli = dockView().renderProviderWindows({ provider: 'muse', source: 'cli', windows: [
+    { kind: 'session', remainingPercent: 75 }, { kind: 'weekly', remainingPercent: 35 }
+  ] }, '#0866FF');
+  assert.ok(cli.children.every((row) => !row.classNames.has('limit-window-wide')));
+});

@@ -1741,6 +1741,7 @@
         if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
         windows.append(balanceNode);
       }
+      repairWindowPairs(windows);
     }
     if (!options.showAllUsageItems) {
       hideUsageItems(windows, usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, provider?.provider));
@@ -1813,6 +1814,9 @@
   // same account. Providers identified by email need no entry — the default below
   // already masks them.
   const LIMIT_ACCOUNT_TITLES = {
+    muse: (provider, index, providers) => provider?.source === 'cli'
+      ? 'Muse Code'
+      : provider?.source === 'web' ? 'Muse' : limitAccountDefaultTitle(provider, index, providers),
     codex: codexAccountTitle,
     opencode: opencodeAccountTitle,
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
@@ -2250,6 +2254,9 @@
     workbuddy: (provider, color, { grouped }) => ({
       options: grouped ? { showIcon: false } : {}
     }),
+    muse: (provider, color, { grouped }) => ({
+      options: grouped ? { showIcon: false } : {}
+    }),
     mimo: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
@@ -2450,6 +2457,8 @@
   // one; leaving it to the caller is what let the dock card render a group with
   // no count at all while the page showed one.
   function limitGroupCountText(providerId, count) {
+    // Muse rows name product sources, not linked accounts.
+    if (providerId === 'muse') return '';
     const key = GROUP_COUNT_KEYS[providerId] || `settings.${providerId}.nAccounts`;
     const text = t(key, { count });
     // A provider with no key of its own would otherwise print the key itself.
