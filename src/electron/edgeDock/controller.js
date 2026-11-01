@@ -1149,9 +1149,10 @@ function createEdgeDockController(deps) {
     // Retarget from the painted frame, never from the previous destination.
     // Only switches animate; live data/size updates on the same card stay direct.
     const from = bubbleFrame || target;
-    // Fixed readings leave an empty clip between disjoint short cards.
-    // Jump to the destination instead of moving a blank silhouette through it.
-    const overlaps = from.y < target.y + target.height && target.y < from.y + from.height;
+    // Both the painted frame and the outgoing reading must overlap the next
+    // destination: the renderer drops a disjoint reading's fade immediately.
+    const outgoing = bubbleMotion?.to || from;
+    const overlaps = [from, outgoing].every(bounds => bounds.y < target.y + target.height && target.y < bounds.y + bounds.height);
     const moving = bubbleVisible && (animate || bubbleMotion) && !prefersReducedMotion()
       && overlaps && keys.some(key => from[key] !== target[key]);
     const velocity = bubbleMotion?.velocity || {};

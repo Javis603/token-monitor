@@ -2510,6 +2510,22 @@ for (const side of ['left', 'right']) {
     assert.notDeepEqual(sentPayload(card, 'bubble').shape.contentBounds, sentPayload(card, 'bubble').shape.contentTarget, 'nearby cards still animate');
     open(7);
     assertAtDestination();
+    for (const [start, pending, next] of [[2, 4, 0], [5, 3, 7]]) {
+      for (const elapsed of [0, 16]) {
+        open(start);
+        advance(720);
+        open(pending);
+        const outgoing = sentPayload(card, 'bubble').shape.contentTarget;
+        advance(elapsed);
+        const painted = paintedCardBounds(card);
+        open(next);
+        const target = sentPayload(card, 'bubble').shape.contentTarget;
+        const targetY = canvas.y + target.y;
+        assert.ok(painted.y < targetY + target.height && targetY < painted.y + painted.height, 'the travelling frame overlaps the third card');
+        assert.ok(outgoing.y + outgoing.height <= target.y || target.y + target.height <= outgoing.y, 'the two reading destinations are disjoint');
+        assertAtDestination();
+      }
+    }
     assert.deepEqual(card.getBounds(), canvas, 'the native canvas remains fixed');
   });
 }
