@@ -38,7 +38,7 @@
     zed: { web: 'Web' },
     commandcode: { web: 'Web' },
     mimo: { web: 'Web' },
-    muse: { cli: 'CLI' },
+    muse: { cli: 'CLI', web: 'Web' },
     zai: { api: 'API' },
     zaiteam: { api: 'API' },
     kiro: { cli: 'CLI' },
@@ -78,7 +78,7 @@
     zed: ['Manual login', 'Web'],
     commandcode: ['Manual login', 'Web'],
     mimo: ['Auto', 'Desktop app', 'Token Plan'],
-    muse: ['Auto', 'CLI'],
+    muse: ['Auto', 'CLI', 'Web', 'Manual'],
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
@@ -409,6 +409,7 @@
       || (providerName === 'opencode' && source === 'web')
       || (providerName === 'mimo' && source === 'web')
       || (providerName === 'manus' && source === 'web')
+      || (providerName === 'muse' && source === 'web')
       || (providerName === 'zed' && source === 'web');
   }
 
@@ -499,7 +500,7 @@
           : providerName === 'grok'
           ? { label: 'Re-login', tone: 'setup' }
           : providerName === 'muse'
-          ? { label: 'Run muse login', tone: 'setup' }
+          ? { label: sourceId(provider) === 'web' ? 'Sign in again' : 'Run muse login', tone: 'setup' }
           : { label: 'Sign in again', tone: 'setup' };
     }
     if (status === 'rateLimited') return { label: 'Limited', tone: 'warn' };
@@ -517,7 +518,7 @@
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi' || providerName === 'cline') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
       if (providerName === 'kiro') return { label: 'Run kiro-cli login', tone: 'setup' };
-      if (providerName === 'muse') return { label: 'Install Muse Code', tone: 'setup' };
+      if (providerName === 'muse') return { label: sourceId(provider) === 'web' ? 'Add credential' : 'Install Muse Code', tone: 'setup' };
       return { label: 'Not set up', tone: 'setup' };
     }
     return status ? { label: 'Error', tone: 'warn' } : null;

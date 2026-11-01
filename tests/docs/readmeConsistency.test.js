@@ -74,7 +74,7 @@ const supportedToolOrder = [
   'Kilo',
   'Command Code',
   'MiMo Code / MiMo Desktop',
-  'Muse Code',
+  'Muse / Muse Code',
   'ZCode / GLM',
   'Kiro',
   'CodeBuddy',

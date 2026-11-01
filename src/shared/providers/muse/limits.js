@@ -117,7 +117,7 @@ function parseMuseUsage(text) {
   return { windows, planLabel, asOfMs };
 }
 
-async function fetchMuseLimits(_options = {}, deps = {}) {
+async function fetchMuseCodeLimits(_options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const base = { provider: 'muse', source: 'cli', updatedAt: new Date(nowMs).toISOString(), windows: [] };
   try {
@@ -137,4 +137,21 @@ async function fetchMuseLimits(_options = {}, deps = {}) {
   }
 }
 
-module.exports = { existingMuseCli, runMuseUsageCli, parseMuseUsage, fetchMuseLimits };
+const { fetchMuseWebLimits, museWebCookie, normalizeMuseWebCookieHeader } = require('./webLimits');
+
+async function fetchMuseLimits(options = {}, deps = {}) {
+  // A save-time check must only validate the submitted web cookie; the CLI
+  // login cannot vouch for it or turn a rejected cookie into a successful save.
+  if (deps.probe) return fetchMuseWebLimits(options, deps);
+  const hasWeb = Boolean(museWebCookie(deps.env || process.env, options));
+  const [cli, web] = await Promise.all([
+    fetchMuseCodeLimits(options, deps),
+    hasWeb ? fetchMuseWebLimits(options, deps) : { provider: 'muse', source: 'web', removed: true }
+  ]);
+  // Explicitly retire an absent lane so a previous good observation is not
+  // retained as unavailable after the CLI disappears or the web cookie clears.
+  const code = cli.status === 'notConfigured' && hasWeb ? { provider: 'muse', source: 'cli', removed: true } : cli;
+  return [code, web];
+}
+
+module.exports = { existingMuseCli, runMuseUsageCli, parseMuseUsage, fetchMuseCodeLimits, fetchMuseLimits, museWebCookie, normalizeMuseWebCookieHeader };

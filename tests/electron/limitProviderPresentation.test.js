@@ -626,6 +626,14 @@ test('undetected settings tags include status and supported collection hints', (
 
 test('detected settings tags show only current source after status', () => {
   assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'muse', status: 'ok', source: 'cli' }).map((tag) => tag.label),
+    ['Live', 'CLI']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'muse', status: 'ok', source: 'web' }).map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
+  assert.deepEqual(
     limitProviderSettingsTags({ provider: 'manus', status: 'ok', source: 'local', sourceDetail: 'app' }).map((tag) => tag.label),
     ['Live', 'Local']
   );
@@ -916,7 +924,7 @@ test('every multi-account Limits group uses its provider-localized account count
   // key itself.
   assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
   assert.match(view, /return text === key \? '' : text;/);
-  assert.match(view, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(view, /count \? limitGroupCountText\(providerId, count\) : ''/);
   assert.match(view, /providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
   for (const provider of ['claude', 'codex', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
@@ -1986,7 +1994,7 @@ test('account validation reads the local device raw limits, not the collapsed ag
   // not expose raw device rows at all.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
   // DeepSeek and MiniMax reach it through the shared account-form lane.
-  assert.match(functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked'), /const provider = localProviderStatus\(providerName\);/);
+  assert.match(functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked'), /localProviderStatus\(providerName\);/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {

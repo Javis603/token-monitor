@@ -111,12 +111,14 @@ function ensureMimoExchangeFetch() {
   return mimoExchangeFetch;
 }
 
+// Muse's web action also needs Node headers and manual redirects. Reuse the
+// exchange transport so its requests inherit the same app/env/system proxy route.
 // Settings-side provider probes take the same transport as the collector's.
 // Most of them are what an account save is gated on, so leaving one on the
 // global fetch refuses to save an account on exactly the machines this
 // transport exists for.
 function electronProviderDeps(deps = {}) {
-  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch() };
+  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch(), museWebFetch: ensureMimoExchangeFetch() };
 }
 const {
   DEFAULT_CLIENTS,
@@ -1034,6 +1036,7 @@ function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
     mimoExchangeFetch: ensureMimoExchangeFetch(),
+    museWebFetch: ensureMimoExchangeFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     workbuddyFetch: async (url, init = {}, expectedSession = null) => {
       const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
