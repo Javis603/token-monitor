@@ -2114,6 +2114,42 @@ test('Windows drag frames follow the native cursor between polls and reject stal
   assert.equal(fixture.placements.length, 1);
 });
 
+test('Windows card switches follow renderer frames and reject stale motion ids', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+  };
+  const emitFrame = (win, motionId) => fixture.ipcMain.emit('edgeDock:cardFrame', { sender: win.webContents }, { motionId });
+
+  open(0, 'claude', 180);
+  advance(160);
+  open(2, 'cursor', 300);
+  const start = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+  assert.equal(start.active, true);
+  assert.equal(typeof start.motionId, 'number');
+  const paintedAtStart = paintedCardBounds(card);
+  t.mock.timers.tick(8);
+  emitFrame(card, start.motionId - 1);
+  emitFrame(rail, start.motionId);
+  assert.deepEqual(paintedCardBounds(card), paintedAtStart, 'stale or foreign renderer frames do nothing');
+  emitFrame(card, start.motionId);
+  assert.notDeepEqual(paintedCardBounds(card), paintedAtStart, 'a paint frame advances before the main timer');
+
+  advance(720);
+  const stop = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+  assert.deepEqual(stop, { motionId: start.motionId, active: false });
+  const settled = paintedCardBounds(card);
+  t.mock.timers.tick(8);
+  emitFrame(card, start.motionId);
+  assert.deepEqual(paintedCardBounds(card), settled, 'frames queued after completion cannot restart the spring');
+});
+
 test('native release finishes a held drag at its final location and acknowledges its gesture', (t) => {
   const advance = mockDockClock(t);
   let down = true;
@@ -2557,12 +2593,17 @@ test('rapid card reversal carries velocity instead of restarting from rest', (t)
   open(0, 'claude', 180);
   advance(160);
   open(2, 'cursor', 300);
-  advance(48);
+  advance(16);
+  assert.equal(paintedCardBounds(card).height, 182, 'the first spring sample uses the initial resting velocity');
+  advance(16);
+  assert.equal(paintedCardBounds(card).height, 188);
+  advance(16);
   const moving = paintedCardBounds(card).height;
+  assert.equal(moving, 195);
   open(0, 'claude', 180);
   assert.equal(paintedCardBounds(card).height, moving, 'retargeting has no position discontinuity');
   advance(16);
-  assert.ok(paintedCardBounds(card).height > moving, 'existing growth decelerates before reversing direction');
+  assert.equal(paintedCardBounds(card).height, 202, 'the retarget uses the sampled velocity once instead of feeding it back');
   advance(720);
   assert.equal(paintedCardBounds(card).height, 180, 'the spring settles at the latest destination');
 });

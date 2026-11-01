@@ -3122,6 +3122,28 @@ for (const platform of ['win32', 'darwin']) {
   });
 }
 
+for (const platform of ['win32', 'darwin']) {
+  test(`${platform} card transitions request renderer frames only on Windows`, () => {
+    const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+    const source = dock.slice(dock.indexOf('let cardMotionId = null;'), dock.indexOf('bridge.onDragEnded'));
+    const frames = [], callbacks = [];
+    let motion;
+    Function('bridge', 'state', 'requestAnimationFrame', `${source};`)(
+      { cardFrame: id => frames.push(id), onCardMotion: fn => { motion = fn; } },
+      { payload: { platform } },
+      fn => callbacks.push(fn)
+    );
+    motion({ motionId: 42, active: true });
+    assert.equal(callbacks.length, platform === 'win32' ? 1 : 0, 'only Windows starts a paint loop');
+    callbacks.shift()?.();
+    assert.deepEqual(frames, platform === 'win32' ? [42] : []);
+    motion({ motionId: 42, active: false });
+    callbacks.shift()?.();
+    assert.deepEqual(frames, platform === 'win32' ? [42] : []);
+    assert.equal(callbacks.length, 0, 'the native completion frame stops the loop');
+  });
+}
+
 for (const eventType of ['lostpointercapture', 'pointercancel']) {
   test(`${eventType} while moving the rail does not end the held native drag`, () => {
     const dock = readRendererFile(path.join('edgeDock', 'dock.js'));

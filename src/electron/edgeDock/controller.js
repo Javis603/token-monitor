@@ -164,6 +164,7 @@ function createEdgeDockController(deps) {
   let bubblePointerMode = null;
   let bubbleMotion = null;
   let bubbleMotionTimer = null;
+  let nextBubbleMotionId = 0;
   let railMotion = null;
   let railMotionTimer = null;
   let railHitPolygons = [];
@@ -1149,9 +1150,11 @@ function createEdgeDockController(deps) {
   }
 
   function cancelBubbleMotion() {
+    const motion = bubbleMotion;
     clearInterval(bubbleMotionTimer);
     bubbleMotionTimer = null;
     bubbleMotion = null;
+    if (motion) send('bubble', 'edgeDock:cardMotion', { motionId: motion.id, active: false });
   }
 
   function paintBubble(frame, workArea, target = frame) {
@@ -1161,6 +1164,29 @@ function createEdgeDockController(deps) {
       cardY: frame.y - canvasY, cardHeight: frame.height, tailY: frame.tailY,
       contentY: target.y - canvasY, contentHeight: target.height });
     syncBubblePointer();
+  }
+
+  function advanceBubbleMotion(motion) {
+    if (bubbleMotion !== motion) return;
+    const elapsed = Date.now() - motion.startedAt;
+    const done = elapsed >= CARD_MOVE_MS || prefersReducedMotion();
+    // The silhouette and its shared content layer follow one spring.
+    // Rapid retargets preserve the outline's velocity.
+    const seconds = elapsed / 1000, omega = 2 * Math.PI / cardSpring.response;
+    const decayRate = cardSpring.damping * omega, frequency = omega * Math.sqrt(1 - cardSpring.damping ** 2);
+    const decay = Math.exp(-decayRate * seconds), cosine = Math.cos(frequency * seconds), sine = Math.sin(frequency * seconds);
+    motion.frame = Object.fromEntries(motion.keys.map(key => {
+      // This is the velocity carried into this motion, not the sample written
+      // below. Re-reading the latter turns the closed-form spring into feedback.
+      const speed = motion.initialVelocity[key] || 0;
+      const displacement = motion.from[key] - motion.to[key];
+      const b = (speed + decayRate * displacement) / frequency;
+      motion.velocity[key] = done ? 0 : decay * ((frequency * b - decayRate * displacement) * cosine
+        - (frequency * displacement + decayRate * b) * sine);
+      return [key, done ? motion.to[key] : Math.round(motion.to[key] + decay * (displacement * cosine + b * sine))];
+    }));
+    paintBubble(motion.frame, motion.workArea, motion.to);
+    if (done) cancelBubbleMotion();
   }
 
   function placeBubble({ animate = false } = {}) {
@@ -1178,29 +1204,15 @@ function createEdgeDockController(deps) {
     const velocity = bubbleMotion?.velocity || {};
     cancelBubbleMotion();
     if (moving) {
-      const motion = { from, to: target, frame: from, velocity: {}, startedAt: Date.now() };
+      const motion = { id: ++nextBubbleMotionId, keys, from, to: target, frame: from, initialVelocity: velocity, velocity: {},
+        startedAt: Date.now(), workArea: current.workArea };
       bubbleMotion = motion;
-      const frame = () => {
-        const elapsed = Date.now() - motion.startedAt;
-        const done = elapsed >= CARD_MOVE_MS || prefersReducedMotion();
-        // The silhouette and its shared content layer follow one spring.
-        // Rapid retargets preserve the outline's velocity.
-        const seconds = elapsed / 1000, omega = 2 * Math.PI / cardSpring.response;
-        const decayRate = cardSpring.damping * omega, frequency = omega * Math.sqrt(1 - cardSpring.damping ** 2);
-        const decay = Math.exp(-decayRate * seconds), cosine = Math.cos(frequency * seconds), sine = Math.sin(frequency * seconds);
-        motion.frame = Object.fromEntries(keys.map(key => {
-          const speed = velocity[key] || 0;
-          const displacement = from[key] - target[key];
-          const b = (speed + decayRate * displacement) / frequency;
-          motion.velocity[key] = done ? 0 : decay * ((frequency * b - decayRate * displacement) * cosine
-            - (frequency * displacement + decayRate * b) * sine);
-          return [key, done ? target[key] : Math.round(target[key] + decay * (displacement * cosine + b * sine))];
-        }));
-        paintBubble(motion.frame, current.workArea, target);
-        if (done) cancelBubbleMotion();
-      };
-      frame();
-      if (bubbleMotion === motion) bubbleMotionTimer = setInterval(frame, FADE_STEP_MS);
+      // Windows rounds a nominal 16ms main-process timeout up to two system
+      // ticks. Let the visible renderer drive paint frames; the main timer
+      // remains a fallback if frame delivery stops.
+      if (platform === 'win32') send('bubble', 'edgeDock:cardMotion', { motionId: motion.id, active: true });
+      advanceBubbleMotion(motion);
+      if (bubbleMotion === motion) bubbleMotionTimer = setInterval(() => advanceBubbleMotion(motion), FADE_STEP_MS);
     } else {
       paintBubble(target, current.workArea);
     }
@@ -1451,6 +1463,11 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:dragFrame', (event, payload) => {
       if (platform !== 'win32' || surfaceFor(event.sender) !== 'rail' || !drag || drag.gestureId !== payload?.gestureId) return;
       tickDrag(screen.getCursorScreenPoint(), layout());
+    });
+    ipcMain.on('edgeDock:cardFrame', (event, payload) => {
+      if (platform !== 'win32' || surfaceFor(event.sender) !== 'bubble'
+        || !bubbleMotion || bubbleMotion.id !== payload?.motionId) return;
+      advanceBubbleMotion(bubbleMotion);
     });
     ipcMain.on('edgeDock:dragEnd', (event) => {
       if (surfaceFor(event.sender) !== 'rail') return;
