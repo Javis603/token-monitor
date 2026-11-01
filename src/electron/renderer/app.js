@@ -18735,9 +18735,6 @@ function setupCursorAccountUI() {
   setCursorManualExpanded(false);
 
   document.getElementById('cursorLoginButton').addEventListener('click', () => {
-    window.tokenMonitor.openExternal('https://cursor.com/dashboard');
-  });
-  document.getElementById('cursorCookiePageButton').addEventListener('click', () => {
     window.tokenMonitor.openExternal('https://cursor.com');
   });
 

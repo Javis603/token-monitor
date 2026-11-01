@@ -343,6 +343,8 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://claude.ai/settings/billing',
     'https://cursor.com/settings',
     'https://www.cursor.com/settings',
+    'https://cursor.com/',
+    'https://www.cursor.com/',
     'https://cursor.com/dashboard',
     'https://www.cursor.com/dashboard',
     'https://opencode.ai/',
@@ -398,12 +400,12 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     } } }
   });
   cursorLogin();
-  assert.deepEqual(cursorUrls, ['https://cursor.com/dashboard']);
+  assert.deepEqual(cursorUrls, ['https://cursor.com']);
 
   const denied = [
     'https://claude.ai/',
     'https://claude.ai/login',
-    'https://cursor.com/',
+    'https://cursor.com/other',
     'https://cursor.com/dashboard-other',
     'https://cursor.com/dashboard/other',
     'https://cursor.com.evil.com/dashboard',

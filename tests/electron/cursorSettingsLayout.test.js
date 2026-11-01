@@ -211,9 +211,9 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.match(details, /<div id="cursorManualPanel" class="opencode-add-form">/);
   assert.match(details, /<div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
   assert.match(details, /data-i18n="settings\.cursor\.addManual">Add account<\/span>/);
-  assert.match(details, /using “Sign in to Cursor”, then sign in/);
-  assert.match(details, /cursor\.com\/dashboard/);
-  assert.match(details, /id="cursorCookiePageButton"[^>]*data-i18n="settings\.cursor\.openCookiePage"/);
+  assert.match(details, /using “Open Cursor website”, then sign in/);
+  assert.match(details, /<code>cursor\.com<\/code>/);
+  assert.doesNotMatch(details, /cursorCookiePageButton/);
   assert.match(details, /data-i18n="settings\.cursor\.cookiePage"[^>]*>[^<]*grok\.com\/dashboard/);
   assert.match(details, /data-i18n="settings\.cursor\.cookieMissing"/);
   assert.doesNotMatch(details, /cursor\.com\/dashboard\/settings/);
@@ -243,8 +243,7 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
     window: { tokenMonitor: { openExternal: (url) => openedUrls.push(url) } }
   });
   handlers.get('cursorLoginButton')();
-  handlers.get('cursorCookiePageButton')();
-  assert.deepEqual(openedUrls, ['https://cursor.com/dashboard', 'https://cursor.com']);
+  assert.deepEqual(openedUrls, ['https://cursor.com']);
   assert.doesNotMatch(setup, /openExternal\('https:\/\/cursor\.com\/dashboard\/settings'\)/);
   assert.match(setup, /cursorAddAccountButton\?\.addEventListener\('click'/);
   assert.match(setup, /cursorManualDetails\?\.classList\.toggle\('hidden', !next\)/);
