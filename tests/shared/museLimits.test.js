@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const { execFile } = require('node:child_process');
 const test = require('node:test');
-const { existingMuseCli, runMuseUsageCli, parseMuseUsage, fetchMuseLimits } = require('../../src/shared/providers/muse/limits');
+const { existingMuseCli, runMuseUsageCli, parseMuseUsage, fetchMuseCodeLimits: fetchMuseLimits } = require('../../src/shared/providers/muse/limits');
 const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
 const { limitProviderForClient, limitProvidersForDetectedClients } = require('../../src/shared/limits/providers');
 
@@ -30,7 +30,7 @@ const deps = { env: { PATH: '/bin' }, platform: 'linux', existsSync: (file) => f
 test('Muse is registered as the limits side of its existing tracked client', async () => {
   assert.equal(limitProviderForClient('muse'), 'muse');
   assert.deepEqual(limitProvidersForDetectedClients({ clients: { muse: { source: { state: 'detected' } } } }), ['muse']);
-  assert.equal((await LIMIT_PROVIDER_FETCHERS.muse({}, deps)).status, 'ok');
+  assert.equal((await LIMIT_PROVIDER_FETCHERS.muse({}, deps))[0].status, 'ok');
 });
 
 test('Muse discovers PATH before the launcher fallback without resolving shell commands', () => {

@@ -110,8 +110,9 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
-  muse: 'settings.limits.connection.muse',
   kiro: 'settings.limits.connection.kiro',
+  manus: 'settings.limits.connection.manus',
+  muse: 'settings.limits.connection.muse',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
 const TRAY_ICON_VARIANTS = [
@@ -4874,6 +4875,7 @@ function renderLimits() {
       state.settings?.showCodexAdditionalLimits !== false,
       state.settings?.limitProviderHiddenItems || {},
       state.settings?.currency || '',
+      state.settings?.compactTokenUnits || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
       state.settings?.codexManagedAccounts || [],
@@ -14005,7 +14007,8 @@ function syncDockControls() {
   els.edgeDockInput.checked = enabled;
   els.edgeDockOptions?.classList.toggle('hidden', !enabled);
   const side = state.settings?.edgeDockSide === 'left' ? 'left' : 'right';
-  for (const input of els.edgeDockSideInputs || []) input.checked = input.value === side;
+  const floating = Number.isFinite(state.settings?.edgeDockFloatingX);
+  for (const input of els.edgeDockSideInputs || []) input.checked = !floating && input.value === side;
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
@@ -16724,10 +16727,13 @@ function clearDisabledLimitProviderPendingChecks(enabledProviders) {
 }
 
 function externalProviderForAccount(providerName) {
-  // The key form follows the API-key row. A Code login is not that credential.
+  // MiniMax's key form follows the API-key row. A Code login is not that credential.
+  // Muse's manual credential panel owns only the web session, not its CLI login.
   const provider = providerName === 'minimax'
     ? localProviderStatuses(providerName).find((entry) => entry.source === 'api') || null
-    : localProviderStatus(providerName);
+    : providerName === 'muse'
+      ? localProviderStatuses('muse').find((row) => row.source === 'web') || null
+      : localProviderStatus(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
@@ -16792,6 +16798,22 @@ function clearExternalProviderCheckPending(providerName) {
 }
 
 function clearExternalProviderPendingStatus(providerName) {
+  if (providerName === 'muse') {
+    // Only this device's Web Cookie changed. Keep its CLI and remote readings.
+    const localDeviceId = state.settings?.deviceId || '';
+    const keepSource = (provider) => provider.provider !== 'muse' || provider.source !== 'web';
+    const localDevice = state.stats?.devices?.find((device) => device.deviceId === localDeviceId);
+    if (Array.isArray(localDevice?.limits?.providers)) {
+      localDevice.limits.providers = localDevice.limits.providers.filter(keepSource);
+    }
+    if (Array.isArray(state.stats?.limits?.providers)) {
+      state.stats.limits.providers = state.stats.limits.providers.filter((provider) => keepSource(provider)
+        || (provider.sourceDeviceId
+          ? provider.sourceDeviceId !== localDeviceId
+          : Array.isArray(state.stats?.devices)));
+    }
+    return;
+  }
   if (!Array.isArray(state.stats?.limits?.providers)) return;
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName
     || (providerName === 'minimax' && provider.source !== 'api'));

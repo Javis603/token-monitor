@@ -199,11 +199,12 @@
     const namedA = keysA.size > 0 || Boolean(emailA);
     const namedB = keysB.size > 0 || Boolean(emailB);
     if (namedA || namedB) return false;
-    // Anonymous Muse rows name a device, not an account: the CLI exposes no
-    // stable account id (limits/core.js scopes them by device for the same
-    // reason). Trimmed, case-sensitive device ids decide; a missing id is one
-    // unknown bucket, equal only to another unknown — never to a known device.
-    if (provider === 'muse') return sourceDeviceKey(a) === sourceDeviceKey(b);
+    // The products have independent quotas. Preserve Muse Code's device rows;
+    // anonymous web readings dedupe across devices like other providers.
+    if (provider === 'muse') {
+      if (String(a.source || '') !== String(b.source || '')) return false;
+      return a.source === 'web' || sourceDeviceKey(a) === sourceDeviceKey(b);
+    }
     return true;
   }
 
@@ -316,11 +317,10 @@
         if (accountKeyFamily(record).size > 0) continue;
         const email = emailOf(record);
         if (!email) {
-          // Anonymous Muse rows are device observations (see sameAccount):
-          // one survivor per trimmed device id, with every missing id in a
-          // single unknown bucket that never absorbs a known device row.
+          // Match sameAccount: web is one cross-device product reading;
+          // existing CLI observations retain their device scope.
           if (provider === 'muse') {
-            const deviceKey = sourceDeviceKey(record);
+            const deviceKey = JSON.stringify([record.source === 'web' ? '' : sourceDeviceKey(record), String(record.source || '')]);
             if (keptMuseDevices.has(deviceKey)) continue;
             keptMuseDevices.add(deviceKey);
             survivors.set(indexes[position], record);

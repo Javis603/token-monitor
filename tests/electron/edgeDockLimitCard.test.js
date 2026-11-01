@@ -35,6 +35,8 @@ const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
 const minimaxTestHome = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'minimax-renderer-home-'));
 test.after(() => fs.rmSync(minimaxTestHome, { recursive: true, force: true }));
+const { parseManusCredits } = require('../../src/shared/providers/manus/limits');
+const manusCreditsFixture = require('../fixtures/manusAvailableCredits.json');
 const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
 
 const root = path.join(__dirname, '../..');
@@ -367,11 +369,14 @@ test('saved-only WorkBuddy subscription card does not appear on the sole live si
 });
 
 test('Notion rolling and monthly allowances render in both display modes and hide independently', () => {
+  // Reset text is omitted once resetsAt is past the grace window, so these
+  // instants stay ahead of the render clock instead of a calendar date.
+  const now = Date.now();
   const provider = normalizeLimitProvider({
     provider: 'notion', status: 'ok', source: 'web',
     windows: [
-      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: '2026-11-01T00:00:00Z' },
-      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: '2026-12-01T00:00:00Z' }
+      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: new Date(now + 6 * 60 * 60 * 1000).toISOString() },
+      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString() }
     ]
   });
   const before = JSON.stringify(provider);
@@ -395,6 +400,55 @@ test('Notion rolling and monthly allowances render in both display modes and hid
   const monthlyOnly = { ...provider, windows: [provider.windows[1]] };
   assert.ok(dockView().renderProviderWindows(monthlyOnly, '#888888').children[0].classNames.has('limit-window-wide'));
   assert.equal(JSON.stringify(provider), before);
+});
+
+test('Manus daily refresh credits and credits balance render in both display modes and hide independently', () => {
+  const nextRefreshTime = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+  const { windows } = parseManusCredits({ ...manusCreditsFixture, nextRefreshTime });
+  const provider = normalizeLimitProvider({ provider: 'manus', status: 'ok', source: 'api', windows, balance: { amount: 1180, currency: 'CREDITS' } });
+  const before = JSON.stringify(provider);
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#429DFA');
+    assert.equal(card.children.length, 2);
+    const [daily, balance] = card.children;
+    assert.equal(daily.children[0].children[0].textContent, 'Daily');
+    assert.ok(daily.classList.contains('limit-window-wide'));
+    assert.match(card.text, showLimitUsed ? /40% used/ : /60% left/);
+    assert.ok(daily.find('limit-reset').text, 'the refresh allowance shows when it resets');
+    assert.equal(balance.dataset.usageItem, 'credits');
+    assert.match(balance.text, /1,?180/);
+    assert.equal(card.text.includes('$'), false, 'Manus credits are not money');
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 2);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { manus: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#429DFA').children.length, 1);
+    }
+  }
+  assert.equal(JSON.stringify(provider), before);
+});
+
+test('Manus refresh and monthly quotas share a row before balance and hide independently', () => {
+  const { windows } = parseManusCredits({ ...manusCreditsFixture, refreshInterval: 'weekly', proMonthlyCredits: 1000, periodicCredits: 650 });
+  const provider = normalizeLimitProvider({ provider: 'manus', status: 'ok', windows });
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#429DFA');
+    assert.equal(card.children.length, 3);
+    assert.equal(card.children[0].children[0].children[0].textContent, 'Refresh');
+    assert.equal(card.children[1].children[0].children[0].textContent, 'Monthly');
+    assert.match(card.children[1].text, showLimitUsed ? /35% used/ : /65% left/);
+    assert.equal(Boolean(card.children[1].find('limit-reset')?.text), false);
+    assert.equal(card.children[0].classList.contains('limit-window-wide'), false);
+    assert.equal(card.children[1].classList.contains('limit-window-wide'), false);
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 3);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { manus: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#429DFA').children.length, 2);
+    }
+  }
 });
 
 test('MiniMax API balances reach the shared Limits and dock renderer in both currencies', async () => {
@@ -2852,4 +2906,140 @@ test('summary allocation and width fitting need only ordered items and measured 
   const hidden = context.fitNotchSummaryItems(widths, { budget: 0, gap: 6, overflowWidth: 8, optional: true });
   assert.deepEqual(Array.from(hidden.visible), []);
   assert.equal(hidden.overflow, false, 'unknown or occupied clearance admits no optional overflow');
+});
+
+test('Meta Muse renders weekly allowance and a single additional token balance row', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { paid } = require('../fixtures/museWeb');
+  const provider = normalizeLimitProvider({ provider: 'muse', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const rendered = dockView({}, { formatCompact: value => require('../../src/shared/compactTokens').formatCompactTokens(value) }).renderProviderWindows(provider, '#0866FF');
+  assert.match(rendered.text, /97%/);
+  assert.doesNotMatch(rendered.text, /\$60\.00/);
+  const additional = rendered.children[1];
+  assert.match(additional.text, /Additional tokens/);
+  assert.equal(additional.find('limit-spend-summary').textContent, '1.5B');
+  assert.equal(additional.find('limit-reset'), null, 'the balance has no second line');
+  assert.doesNotMatch(additional.text, /left/);
+  assert.equal(dockView().limitProviderUsageItems([provider])[1].id, 'credits');
+  const hidden = dockView({ limitProviderHiddenItems: { muse: ['credits'] } }).renderProviderWindows(provider, '#0866FF');
+  assert.equal(hidden.children.length, 1, 'the existing usage item still hides the token balance');
+});
+
+test('Muse additional tokens follow the existing compact-unit setting without changing the reading', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { formatCompactTokens } = require('../../src/shared/compactTokens');
+  const { paid } = require('../fixtures/museWeb');
+  const provider = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const before = JSON.stringify(provider);
+  let units = 'western';
+  const view = dockView({}, { formatCompact: value => formatCompactTokens(value, units, 'zh-TW') });
+  for (const [setting, expected] of [['western', '1.5B'], ['localized', '15億'], ['western', '1.5B']]) {
+    units = setting;
+    const row = view.renderProviderWindows(provider, '#0866FF').children[1];
+    assert.equal(row.find('limit-spend-summary').textContent, expected);
+  }
+  units = 'localized';
+  for (const [websiteText, expected] of [['12K', '1.2萬'], ['2M', '200萬'], ['800', '800']]) {
+    const reading = normalizeLimitProvider({ ...provider, windows: provider.windows.map(window => window.metric === 'credits'
+      ? { ...window, resetDescription: `${websiteText} tokens left` } : window) });
+    assert.equal(view.renderProviderWindows(reading, '#0866FF').children[1].find('limit-spend-summary').textContent, expected);
+  }
+  const unrecognized = normalizeLimitProvider({ ...provider, windows: provider.windows.map(window => window.metric === 'credits'
+    ? { ...window, resetDescription: 'about 1.5B tokens left' } : window) });
+  assert.equal(view.renderProviderWindows(unrecognized, '#0866FF').children[1].find('limit-spend-summary').textContent, 'about 1.5B');
+  assert.equal(JSON.stringify(provider), before, 'unit changes never overwrite the website text or numeric balance');
+});
+
+test('Muse additional balance keeps the money fallback only when the website omits token text', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { paid, free } = require('../fixtures/museWeb');
+  const withSummary = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const before = JSON.stringify(withSummary);
+  const fallback = normalizeLimitProvider({ ...withSummary, windows: withSummary.windows.map(window => ({ ...window, resetDescription: '' })) });
+  const row = dockView().renderProviderWindows(fallback, '#0866FF').children[1];
+  assert.match(row.text, /Additional balance/);
+  assert.match(row.text, /\$60\.00/);
+  assert.doesNotMatch(row.text, /Additional tokens/);
+  dockView().renderProviderWindows(withSummary, '#0866FF');
+  assert.equal(JSON.stringify(withSummary), before, 'presentation does not change the synced reading');
+  const noTopup = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(free) });
+  assert.equal(dockView().renderProviderWindows(noTopup, '#0866FF').children.length, 1);
+});
+
+test('Muse names its product sources without numbered accounts or repeated row icons', () => {
+  const providers = ['cli', 'web'].map((source) => normalizeLimitProvider({
+    provider: 'muse', source, status: 'ok',
+    windows: [{ kind: 'weekly', usedPercent: 20 }]
+  }));
+  const view = dockView();
+  const group = view.renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF');
+  const rows = group.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), ['Muse Code', 'Muse']);
+  assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-icon')).length, 1);
+  assert.ok(rows.every((row) => row.find('limit-icon') === null));
+  assert.equal(group.find('limit-plan').textContent, '');
+  for (const provider of providers) {
+    const solo = view.renderLimitProviderSolo('muse', 'Muse', provider, '#0866FF');
+    assert.ok(solo.find('limit-icon'));
+    assert.equal(solo.find('limit-name-title').textContent, provider.source === 'cli' ? 'Muse Code' : 'Muse');
+    assert.equal(provider.accountKey, '');
+  }
+});
+
+test('Muse duplicate product rows identify their devices with source display off', () => {
+  const providers = ['cli', 'web'].flatMap((source) => ['a', 'b'].map((sourceDeviceId) => ({
+    provider: 'muse', source, sourceDeviceId, status: 'ok', windows: []
+  })));
+  const view = dockView({ showLimitSource: false, provenanceContext: {
+    syncActive: true, localDeviceId: 'a',
+    devices: [{ deviceId: 'a' }, { deviceId: 'b' }]
+  } });
+  const built = view.renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF');
+  const rows = built.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), [
+    'Muse Code · a', 'Muse Code · b', 'Muse · a', 'Muse · b'
+  ]);
+  const mixed = view.renderLimitProviderGroup('muse', 'Muse', [providers[0], providers[2], providers[3]], '#0866FF');
+  assert.equal(mixed.find('limit-account-list').children[0].find('limit-name-title').textContent, 'Muse Code');
+  const fallback = view.limitAccountTitle('muse', { provider: 'muse', accountName: 'Legacy source' }, 0);
+  assert.equal(fallback, 'Legacy source');
+});
+
+test('Muse source-less placeholders keep the catalog provider title', () => {
+  const view = dockView();
+  for (const status of ['notConfigured', 'unavailable', 'noSyncedData']) {
+    const row = view.renderLimitProviderSolo('muse', 'Muse', { provider: 'muse', status, windows: [] }, '#0866FF');
+    assert.equal(row.find('limit-name-title').textContent, 'Muse', status);
+    assert.ok(row.find('limit-icon'));
+  }
+});
+
+test('Muse group subscriptions retain a visible keyboard trigger without counting sources as accounts', () => {
+  const providers = ['cli', 'web'].map((source) => ({ provider: 'muse', source, status: 'ok', windows: [] }));
+  const subscription = {
+    id: 'muse-sub', provider: 'muse', kind: 'subscription', planName: 'Maximum', amountMinor: 2000,
+    currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-08-01', autoRenew: true, topUps: []
+  };
+  const view = dockView({ subscriptions: [subscription], accounts: providers });
+  const built = view.renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF');
+  const trigger = built.find('subscription-plan-wrap');
+  assert.ok(trigger);
+  assert.equal(trigger.tabIndex, 0);
+  assert.equal(trigger.find('subscription-plan-trigger').textContent, 'Subscriptions');
+  assert.match(trigger.find('subscription-tooltip').text, /\$20\.00/);
+  assert.doesNotMatch(built.text, /\d+ accounts/);
+  assert.equal(dockView().renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF').find('limit-plan').textContent, '');
+});
+
+test('Muse web weekly quota spans the row above its full-width balance', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { paid } = require('../fixtures/museWeb');
+  const provider = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const rows = dockView().renderProviderWindows(provider, '#0866FF').children;
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.classNames.has('limit-window-wide')));
+  const cli = dockView().renderProviderWindows({ provider: 'muse', source: 'cli', windows: [
+    { kind: 'session', remainingPercent: 75 }, { kind: 'weekly', remainingPercent: 35 }
+  ] }, '#0866FF');
+  assert.ok(cli.children.every((row) => !row.classNames.has('limit-window-wide')));
 });

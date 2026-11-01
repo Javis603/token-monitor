@@ -2826,6 +2826,7 @@ test('main settings migrateLimitProviders normalizes without expanding old defau
 
 test('Home limits groups multiple MiMo accounts like Codex', () => {
   const app = readRendererFile('app.js');
+  const groupBody = viewBody('renderLimitProviderGroup');
   const frameBody = viewBody('renderLimitProviderGroupFrame', 'appendMimoAccountProducts');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
@@ -2837,7 +2838,8 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
     frameBody,
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
-  assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(frameBody, /count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
 
   // The page's dispatch is by account count with no provider branch left.

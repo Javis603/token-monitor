@@ -38,7 +38,7 @@
     zed: { web: 'Web' },
     commandcode: { web: 'Web' },
     mimo: { web: 'Web' },
-    muse: { cli: 'CLI' },
+    muse: { cli: 'CLI', web: 'Web' },
     zai: { api: 'API' },
     zaiteam: { api: 'API' },
     kiro: { cli: 'CLI' },
@@ -53,6 +53,7 @@
     trae: { api: 'Web' },
     alibaba: { web: 'Web' },
     stepfun: { web: 'Web' },
+    manus: { local: 'Local', web: 'Web' },
     thirdparty: { api: 'API' }
   };
 
@@ -77,7 +78,7 @@
     zed: ['Manual login', 'Web'],
     commandcode: ['Manual login', 'Web'],
     mimo: ['Auto', 'Desktop app', 'Token Plan'],
-    muse: ['Auto', 'CLI'],
+    muse: ['Auto', 'CLI', 'Web', 'Manual'],
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
@@ -94,6 +95,7 @@
     alibaba: ['Token Plan', 'Web'],
     stepfun: ['Coding/Token Plan', 'Web'],
     notion: ['Web', 'Manual'],
+    manus: ['Auto', 'Desktop app', 'Manual'],
     thirdparty: ['Relay', 'API']
   };
 
@@ -406,6 +408,8 @@
       || providerName === 'cursor'
       || (providerName === 'opencode' && source === 'web')
       || (providerName === 'mimo' && source === 'web')
+      || (providerName === 'manus' && source === 'web')
+      || (providerName === 'muse' && source === 'web')
       || (providerName === 'zed' && source === 'web');
   }
 
@@ -492,7 +496,7 @@
           : providerName === 'grok'
           ? { label: 'Re-login', tone: 'setup' }
           : providerName === 'muse'
-          ? { label: 'Run muse login', tone: 'setup' }
+          ? { label: sourceId(provider) === 'web' ? 'Sign in again' : 'Run muse login', tone: 'setup' }
           : { label: 'Sign in again', tone: 'setup' };
     }
     if (status === 'rateLimited') return { label: 'Limited', tone: 'warn' };
@@ -502,7 +506,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi' || providerName === 'ollama') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'alibaba' || providerName === 'ollama' || providerName === 'manus') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       // Cline joins the key-configured family: with neither a key nor a stored
       // sign-in, the one thing this application can be told is a key (the sign-in
@@ -510,7 +514,7 @@
       if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi' || providerName === 'cline') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
       if (providerName === 'kiro') return { label: 'Run kiro-cli login', tone: 'setup' };
-      if (providerName === 'muse') return { label: 'Install Muse Code', tone: 'setup' };
+      if (providerName === 'muse') return { label: sourceId(provider) === 'web' ? 'Add credential' : 'Install Muse Code', tone: 'setup' };
       return { label: 'Not set up', tone: 'setup' };
     }
     return status ? { label: 'Error', tone: 'warn' } : null;

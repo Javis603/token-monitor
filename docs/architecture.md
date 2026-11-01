@@ -138,6 +138,8 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 
 Windows 11 Edge Dock uses a single helper with HostBackdrop clipped to the renderer's curves; HWND-wide Acrylic/Accent cannot preserve the concave outline. Electron owns input. Native underlays stay disabled, nonactivating and directly below their content windows.
 
+Windows rail dragging follows renderer animation frames: a nominal 16 ms main-process timeout can round up to about 31 ms on Windows. Main still owns native cursor coordinates, placement and button-state checks; cursor polling remains a fallback if frame delivery stops.
+
 Share renderer curves at physical display scale and position against `GetWindowRect`, not rounded Electron DIP bounds. Unchanged hover updates must not re-show underlays. Lower the tinted fallback only after native attachment succeeds; a failed generation retries only after all its surfaces are disposed. EOF, parent exit and content-window closure must remove native windows.
 
 Local Windows development requires `npm run build:windows-dock`. Packaging builds the helper with the OS .NET compiler/WinRT metadata and includes it outside ASAR, so Windows artifacts require a Windows build host. User-facing material settings are covered in [configuration](configuration.md#widget-gui).

@@ -1448,3 +1448,38 @@ test('clearing a source preserves sibling lastGood and fences a late provider-wi
     assert.deepEqual(runtime.getSnapshot().providers.map(row => [row.accountKey, row.windows.length]), [['code-A', 1]]);
   } finally { job.resolve([]); runtime.stop(); }
 });
+
+test('Muse anonymous source reset refreshes stay provider-wide without duplicate or retained identities', async () => {
+  for (const sources of [['web'], ['cli', 'web']]) {
+    const clock = fakeClock(Date.parse('2026-11-01T00:00:00Z'));
+    const reset = new Date(clock.now() + 1000).toISOString();
+    const calls = [];
+    let hasWeb = true;
+    const runtime = createLimitsRuntime({ limitProviders: ['muse'], limitsRefreshMs: 60_000 }, runtimeDeps({
+      autoStart: true, now: clock.now, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+      probeProvider: async (_provider, _config, context) => {
+        calls.push(context);
+        return sources.map((source) => source === 'web' && !hasWeb
+          ? { provider: 'muse', source, removed: true }
+          : { provider: 'muse', source, status: 'ok', accountLabel: source === 'web' ? 'Muse (Meta)' : '',
+            updatedAt: new Date(clock.now()).toISOString(), windows: [{ kind: 'weekly', usedPercent: calls.length, resetsAt: reset }] });
+      }
+    }));
+    try {
+      await waitFor(() => runtime.getSnapshot().providers.length === sources.length, 'Muse startup');
+      clock.advance(31_000);
+      await waitFor(() => calls.length >= 2, 'Muse reset dispatch');
+      await waitFor(() => runtime.getSnapshot().providers.some((row) => row.updatedAt === new Date(clock.now()).toISOString()), 'Muse reset commit');
+      assert.equal(runtime.getSnapshot().providers.length, sources.length);
+      assert.deepEqual(calls[1].scope, { provider: 'muse' });
+      assert.equal(calls.length, 2, 'simultaneous anonymous boundaries need one full-provider refresh');
+      await runtime.refresh({ provider: 'muse', accountLabel: 'Muse (Meta)' }, 'manual');
+      assert.equal(runtime.getSnapshot().providers.length, sources.length);
+      hasWeb = false;
+      await runtime.refresh({ provider: 'muse' }, 'credential-save');
+      assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.source), sources.filter((source) => source !== 'web'));
+    } finally {
+      runtime.stop();
+    }
+  }
+});

@@ -632,6 +632,22 @@ test('undetected settings tags include status and supported collection hints', (
 
 test('detected settings tags show only current source after status', () => {
   assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'muse', status: 'ok', source: 'cli' }).map((tag) => tag.label),
+    ['Live', 'CLI']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'muse', status: 'ok', source: 'web' }).map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'manus', status: 'ok', source: 'local', sourceDetail: 'app' }).map((tag) => tag.label),
+    ['Live', 'Local']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'manus', status: 'ok', source: 'web' }).map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
+  assert.deepEqual(
     limitProviderSettingsTags({ provider: 'claude', status: 'ok', source: 'web' })
       .map((tag) => tag.label),
     ['Linked', 'Web']
@@ -912,7 +928,8 @@ test('every multi-account Limits group uses its provider-localized account count
   // key itself.
   assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
   assert.match(view, /return text === key \? '' : text;/);
-  assert.match(view, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(view, /count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(view, /providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
   for (const provider of ['claude', 'codex', 'minimax', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
     assert.match(i18n, new RegExp(`'settings\\.${provider}\\.nAccounts'`));
@@ -1963,6 +1980,12 @@ test('account validation reads the local device raw limits, not the collapsed ag
   assert.match(helper, /localProviders !== null/);
   // Legacy stats without raw device rows retain aggregate fallback.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
+  // The default account form reads the local row. MiniMax follows its API-key
+  // row, and Muse follows its web session.
+  const externalAccount = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
+  assert.match(externalAccount, /localProviderStatus\(providerName\);/);
+  assert.match(externalAccount, /source === 'api'/);
+  assert.match(externalAccount, /source === 'web'/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {
@@ -2633,14 +2656,38 @@ test('settings pushes sync once while repainting the background main view', () =
   assert.equal([...settingsPush.matchAll(/syncSettingsForm/g)].length, 1);
 });
 
-test('main limits rerenders coalesce identical visible provider data', () => {
-  const app = readRendererFile('app.js');
-  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-
-  assert.match(renderLimits, /const renderSignature = JSON\.stringify\(\{/);
-  assert.match(renderLimits, /state\.limitPanelRenderSignature === renderSignature/);
-  assert.match(renderLimits, /els\.limitsPanel\.children\.length === orderedProviders\.length/);
-  assert.match(renderLimits, /state\.limitPanelRenderSignature = renderSignature;/);
+test('main limits cache reuses unchanged data and repaints when token units change', () => {
+  const source = functionBody(readRendererFile('app.js'), 'renderLimits', 'serviceStatusLabel');
+  let paints = 0;
+  const state = { settings: { compactTokenUnits: 'western' }, stats: { limits: { providers: [{ provider: 'muse', source: 'web', status: 'ok' }] } } };
+  const context = vm.createContext({
+    state,
+    Date: class extends Date { static now() { return 1793512800000; } },
+    els: { limitsPanel: { children: [], replaceChildren(...nodes) { this.children = nodes; paints++; } } },
+    currentLocale: () => 'zh-TW',
+    limitDetailTooltipShouldHoldRender: () => false,
+    codexAccountControl: { deferRender: () => false, stateSignature: () => [] },
+    enabledLimitProviderSet: () => new Set(['muse']),
+    providersByLimitProviderId: records => new Map([['muse', records]]),
+    LIMIT_PROVIDERS: [{ id: 'muse', label: 'Muse' }],
+    limitProviderOrderApi,
+    captureLimitResetMotion: () => null,
+    animateCachedLimitBarsFromZero() {},
+    animateLimitResets() {},
+    limitProviderColor: () => '#0866FF',
+    renderLimitProviderSolo: () => ({})
+  });
+  vm.runInContext(source, context);
+  const render = () => vm.runInContext('renderLimits()', context);
+  render();
+  render();
+  assert.equal(paints, 1, 'unchanged readings reuse the existing row');
+  state.settings.compactTokenUnits = 'localized';
+  render();
+  assert.equal(paints, 2, 'a unit change repaints immediately without a new reading');
+  state.settings.compactTokenUnits = 'western';
+  render();
+  assert.equal(paints, 3, 'switching back also repaints');
 });
 
 test('successful providers use a green dot while preserving source and account labels', () => {

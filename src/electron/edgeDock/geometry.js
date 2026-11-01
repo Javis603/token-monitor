@@ -96,6 +96,13 @@ function normalizeEdgeDockOffset(value) {
   return Math.max(0, Math.min(1, number));
 }
 
+// Null keeps the legacy edge placement. A fraction of the available horizontal
+// travel survives resolution, scale and display changes without going offscreen.
+function normalizeEdgeDockFloatingX(value) {
+  if (value === null || value === undefined || value === '' || typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(1, value));
+}
+
 // The dock's size: three presets, or a scale of the user's own kept separately
 // so switching to a preset and back does not lose it.
 const EDGE_DOCK_SIZES = Object.freeze({ small: 0.85, medium: 1, large: 1.25, custom: null });
@@ -243,11 +250,13 @@ function railTop(workArea, length, offset, metrics = EDGE_DOCK_METRICS) {
   return Math.round(minY + travel * normalizeEdgeDockOffset(offset));
 }
 
-function edgeDockRailBounds({ workArea, side, offset, cellCount, cellKinds, metrics = EDGE_DOCK_METRICS }) {
+function edgeDockRailBounds({ workArea, side, offset, floatingX = null, cellCount, cellKinds, metrics = EDGE_DOCK_METRICS }) {
   if (!workArea) return null;
   const cells = edgeDockCellLayout(workArea, cellKindsFrom(cellKinds, cellCount), metrics);
   const length = Math.min(cells.length, Math.max(0, workArea.height - metrics.screenMargin * 2));
-  const x = normalizeEdgeDockSide(side) === 'left'
+  const x = floatingX !== null
+    ? workArea.x + metrics.screenMargin + Math.max(0, workArea.width - metrics.railWidth - metrics.screenMargin * 2) * floatingX
+    : normalizeEdgeDockSide(side) === 'left'
     ? workArea.x + metrics.edgeInset
     : workArea.x + workArea.width - metrics.railWidth - metrics.edgeInset;
   return { x: Math.round(x), y: railTop(workArea, length, offset, metrics), width: metrics.railWidth, height: length, cells };
@@ -362,10 +371,9 @@ function edgeDockBubbleBounds({ railBounds, cellIndex, height, workArea, side, m
   return { x: Math.round(x), y, width, height: bubbleHeight, tailY: Math.round(cellCenter - y) };
 }
 
-// Placement after a drag: vertical position becomes the normalized offset
-// within the work area, and the side follows whichever half the pointer was
-// released in, so a drag across the screen re-docks on the other edge.
-function edgeDockPlacementForDrop({ workArea, pointer, grabOffsetY, cellCount, cellKinds, metrics = EDGE_DOCK_METRICS }) {
+// Snap only near an edge; elsewhere keep both axes free. The horizontal grab
+// point is in DIPs, like grabOffsetY, so dragging never recentres the rail.
+function edgeDockPlacementForDrop({ workArea, pointer, metrics = EDGE_DOCK_METRICS, grabOffsetX = metrics.railWidth / 2, grabOffsetY, cellCount, cellKinds }) {
   if (!workArea || !pointer) return null;
   const side = pointer.x < workArea.x + workArea.width / 2 ? 'left' : 'right';
   const length = Math.min(
@@ -376,7 +384,14 @@ function edgeDockPlacementForDrop({ workArea, pointer, grabOffsetY, cellCount, c
   const travel = Math.max(0, workArea.height - length - metrics.screenMargin * 2);
   const top = pointer.y - (Number(grabOffsetY) || 0);
   const offset = travel > 0 ? (top - minY) / travel : EDGE_DOCK_DEFAULT_OFFSET;
-  return { side, offset: Math.round(normalizeEdgeDockOffset(offset) * 1000) / 1000 };
+  const left = pointer.x - grabOffsetX;
+  const right = workArea.x + workArea.width - metrics.railWidth;
+  const snap = 24;
+  const snapped = left <= workArea.x + snap || left >= right - snap;
+  const horizontalTravel = Math.max(0, workArea.width - metrics.railWidth - metrics.screenMargin * 2);
+  const floatingX = snapped ? null : horizontalTravel > 0
+    ? Math.max(0, Math.min(1, (left - workArea.x - metrics.screenMargin) / horizontalTravel)) : 0;
+  return { side, offset: normalizeEdgeDockOffset(offset), floatingX };
 }
 
 // Pointer intent state machine. `tick` takes one cursor observation and returns
@@ -580,6 +595,7 @@ module.exports = {
   edgeDockTriggerBounds,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockFloatingX,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
