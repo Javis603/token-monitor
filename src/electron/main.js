@@ -7091,6 +7091,13 @@ function configureNativeAppUpdater() {
   appUpdateNativeConfigured = true;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  if (process.platform === 'win32' && appUpdateInstallSupport({
+    isPackaged: app.isPackaged, platform: process.platform, env: process.env
+  }).supported) {
+    // Keep NSIS updates in the running installation even if its registry records
+    // are missing. NsisUpdater forwards this through the installer's /D= option.
+    autoUpdater.installDirectory = path.dirname(process.execPath);
+  }
   // Notes for every release between this version and the latest, not only the
   // latest's, so the update card covers everything the user is about to receive.
   autoUpdater.fullChangelog = true;

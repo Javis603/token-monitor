@@ -23,6 +23,6 @@ module.exports = {
   ],
   normalizeCursorAccountIds,
   urlPolicy: [
-    { hosts: ['cursor.com', 'www.cursor.com'], pathPrefixes: ['/settings'], exactPaths: ['/dashboard'] }
+    { hosts: ['cursor.com', 'www.cursor.com'], pathPrefixes: ['/settings'], exactPaths: ['/', '/dashboard'] }
   ]
 };
