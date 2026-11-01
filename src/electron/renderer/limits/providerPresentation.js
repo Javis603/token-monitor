@@ -38,7 +38,7 @@
     zed: { web: 'Web' },
     commandcode: { web: 'Web' },
     mimo: { web: 'Web' },
-    muse: { cli: 'Muse Code', web: 'Muse (Meta)' },
+    muse: { cli: 'CLI', web: 'Web' },
     zai: { api: 'API' },
     zaiteam: { api: 'API' },
     kiro: { cli: 'CLI' },
@@ -409,6 +409,7 @@
       || (providerName === 'opencode' && source === 'web')
       || (providerName === 'mimo' && source === 'web')
       || (providerName === 'manus' && source === 'web')
+      || (providerName === 'muse' && source === 'web')
       || (providerName === 'zed' && source === 'web');
   }
 

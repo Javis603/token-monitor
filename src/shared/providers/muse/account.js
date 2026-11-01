@@ -23,7 +23,7 @@ module.exports = {
     saveKey: 'settings.muse.saveCookie', emptyKey: 'settings.muse.statusNotSet',
     failedKey: 'settings.muse.saveFailed',
     messages: { invalidFormat: 'settings.muse.invalidFormat', rejected: 'settings.muse.rejected' },
-    manual: [{ note: 'settings.muse.note' }, { steps: ['settings.muse.step1', 'settings.muse.step2', 'settings.muse.step3'] }, { field: 'museWebCookie' }],
+    manual: [{ steps: ['settings.muse.step1', 'settings.muse.step2', 'settings.muse.step3', 'settings.muse.step4'] }, { field: 'museWebCookie' }],
     openUrl: { url: 'https://muse.ai/?settings_tab=general' }
   },
   urlPolicy: [{ hosts: ['muse.ai'] }]
