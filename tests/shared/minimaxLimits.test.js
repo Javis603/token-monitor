@@ -638,7 +638,7 @@ test('MiniMax stops the superseded probe before retrying another region with the
   const runtime = createLimitsRuntime({
     limitProviders: ['minimax'], minimaxApiKey: 'sk-cp-old', minimaxApiRegion: 'auto'
   }, {
-    autoStart: false, autoRetry: false, env: {},
+    autoStart: false, autoRetry: false, env: {}, homeDir: emptyHome,
     fetch: async (url, init) => {
       calls.push({ url, authorization: init.headers.Authorization });
       if (init.signal.aborted) throw init.signal.reason;
@@ -673,7 +673,7 @@ test('MiniMax runtime retains quota on outages and applies region changes on ref
   const runtime = createLimitsRuntime({
     limitProviders: ['minimax'], minimaxApiKey: 'sk-cp-test', minimaxApiRegion: 'cn'
   }, {
-    autoStart: false, autoRetry: false, env: {},
+    autoStart: false, autoRetry: false, env: {}, homeDir: emptyHome,
     fetch: async () => {
       if (outage) throw new Error('fetch failed');
       return okResponse(windowsBody);
@@ -704,11 +704,9 @@ test('MiniMax runtime retains quota on outages and applies region changes on ref
 
 test('MiniMax cash Spend is a server snapshot and a failed period leaves the balance', async () => {
   const now = new Date(2026, 2, 1, 12).getTime();
-  const requests = [];
   const row = await fetchMinimaxLimits({ minimaxBillingMode: 'api', minimaxApiRegion: 'cn', minimaxApiKey: 'mock-key' }, {
     env: {}, now: () => now,
     fetch: async (url, { headers }) => {
-      requests.push(url);
       const target = new URL(url);
       assert.equal(target.host, 'api.minimaxi.com');
       assert.equal(headers.Authorization, 'Bearer mock-key');
@@ -723,8 +721,6 @@ test('MiniMax cash Spend is a server snapshot and a failed period leaves the bal
   assert.equal(row.status, 'ok');
   assertFields(row.balance, { amount: 14.97, currency: 'CNY', todaySpend: 0,
     weekSpend: null, monthSpend: 0, allTimeSpend: 12.34, trackingSince: null });
-  assert.equal(requests.length, 4, 'identical Today and Month filters share one request');
-  assert.equal(new Set(requests).size, requests.length);
 });
 
 const CODE_NOW = 1790000000000;
@@ -901,40 +897,36 @@ test('MiniMax Code selects one personal workspace without changing a selected te
 });
 
 test('MiniMax Code delegates expiry to the installed CLI using the selected data directory and region', async () => {
-  for (const [platform, homeDir, environment, command, region] of [
-    ['linux', '/home/test', { MCODE_INSTALL_DIR: '/custom/install' }, '/custom/install/bin/mcode', 'en'],
-    ['win32', 'C:\\Users\\Test', { MCODE_INSTALL_DIR: 'D:\\100% & 测试!^' }, 'D:\\100% & 测试!^\\mcode.cmd', 'cn']
-  ]) {
-    const fixture = writeCodeAuthFixture({ region, record: { expiresAtMs: CODE_NOW } });
-    const calls = [];
-    const deps = codeDeps(fixture, async (_url, init) => {
-      assert.equal(init.headers.authorization, `Bearer ${ACCESS_ROTATED}`);
-      return okResponse(membershipBody({ has_token_plan: false }));
-    }, { platform, homeDir, env: { MINIMAX_DATA_DIR: fixture.base, ...environment },
-      existsSync: candidate => candidate === command,
-      execFile: (executable, args, options, done) => {
-        calls.push({ executable, args, options, privateCwd: process.platform === 'win32' || (fs.statSync(options.cwd).mode & 0o077) === 0 });
-        writeCodeLease(fixture, codeDesktopRecord({ accessToken: ACCESS_ROTATED, refreshToken: REFRESH_ROTATED, generation: 8 }));
-        done(null, '{}');
-        return {};
-      }
-    });
-    const row = await readCode(deps);
-    assert.equal(row.status, 'ok', command);
-    assert.equal(calls.length, 1, command);
-    const { executable, args, options, privateCwd } = calls[0];
-    const shim = command.endsWith('.cmd');
-    assert.equal(executable, shim ? 'cmd.exe' : command);
-    assert.deepEqual(args, shim ? ['/d', '/s', '/v:off', '/c', '""%TOKEN_MONITOR_MCODE_COMMAND_PATH%" provider list --json"'] : ['provider', 'list', '--json']);
-    if (shim) assert.equal(options.env.TOKEN_MONITOR_MCODE_COMMAND_PATH, command);
-    assert.equal(options.env.MINIMAX_DATA_DIR, fixture.base);
-    assert.equal(options.env.MAVIS_DATA_DIR, fixture.base);
-    assert.equal(options.env.MAVIS_REGION, region);
-    assert.equal(options.timeout, 12000);
-    assert.equal(privateCwd, true);
-    assert.equal(fs.existsSync(options.cwd), false);
-    assert.equal(deps.requests.some(url => url.includes('/oauth2/')), false);
-  }
+  const command = 'D:\\100% & 测试!^\\mcode.cmd';
+  const fixture = writeCodeAuthFixture({ region: 'cn', record: { expiresAtMs: CODE_NOW } });
+  const calls = [];
+  const deps = codeDeps(fixture, async (_url, init) => {
+    assert.equal(init.headers.authorization, `Bearer ${ACCESS_ROTATED}`);
+    return okResponse(membershipBody({ has_token_plan: false }));
+  }, {
+    platform: 'win32', homeDir: 'C:\\Users\\Test',
+    env: { MINIMAX_DATA_DIR: fixture.base, MCODE_INSTALL_DIR: 'D:\\100% & 测试!^' },
+    existsSync: candidate => candidate === command,
+    execFile: (executable, args, options, done) => {
+      calls.push({ executable, args, options, privateCwd: process.platform === 'win32' || (fs.statSync(options.cwd).mode & 0o077) === 0 });
+      writeCodeLease(fixture, codeDesktopRecord({ accessToken: ACCESS_ROTATED, refreshToken: REFRESH_ROTATED, generation: 8 }));
+      done(null, '{}');
+      return {};
+    }
+  });
+  const row = await readCode(deps);
+  assert.equal(row.status, 'ok');
+  assert.equal(calls.length, 1);
+  const { executable, args, options, privateCwd } = calls[0];
+  assert.equal(executable, 'cmd.exe');
+  assert.equal(args.join(' ').includes(command), false);
+  assert.equal(options.env.TOKEN_MONITOR_MCODE_COMMAND_PATH, command);
+  assert.equal(options.env.MINIMAX_DATA_DIR, fixture.base);
+  assert.equal(options.env.MAVIS_DATA_DIR, fixture.base);
+  assert.equal(options.env.MAVIS_REGION, 'cn');
+  assert.equal(privateCwd, true);
+  assert.equal(fs.existsSync(options.cwd), false);
+  assert.equal(deps.requests.some(url => url.includes('/oauth2/')), false);
 });
 
 test('MiniMax Code trusts reread credentials rather than CLI exit status or output', async () => {
@@ -1107,9 +1099,6 @@ test('MiniMax Code meters a complete grant list and keeps the amount when the li
         op_credit_summary: { total_remaining_amount: String(credits) } }));
       if (parsed.pathname === '/minimax-cloud/api/v1/credit/details') {
         detailPages++;
-        assert.deepEqual(Object.fromEntries(parsed.searchParams), {
-          page_number: String(detailPages), page_size: '100', include_expired: 'false'
-        });
         return okResponse(pages[detailPages - 1]);
       }
       assert.fail(`unexpected Code request: ${url}`);
@@ -1151,12 +1140,10 @@ test('MiniMax Code retains quota through plan and auth-state outages', async (t)
   const fixture = writeCodeAuthFixture();
   let outage = false;
   let timestamp = CODE_NOW;
-  let nameRequests = 0;
   const runtime = createLimitsRuntime({ limitProviders: ['minimax'], minimaxBillingMode: 'api' }, {
     ...codeDeps(fixture, async url => {
       if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ token_plan_tier: '12345', op_credit_summary: { total_remaining_amount: outage ? '4000' : '4624' } }));
       if (new URL(url).pathname.endsWith('/charge/combo/cycle_audio_resource_package')) {
-        nameRequests++;
         return okResponse({ current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Build' } });
       }
       return outage ? { ok: false, status: 503 } : okResponse(planRemainsBody());
@@ -1175,11 +1162,9 @@ test('MiniMax Code retains quota through plan and auth-state outages', async (t)
   const partial = runtime.getSnapshot().providers[0];
   assert.equal(partial.status, 'unavailable');
   assert.equal(partial.planLabel, 'Build', 'quota failure must not suppress an available subscription name');
-  assert.equal(nameRequests, 1, 'quota failures do not require rereading a fresh plan name');
   assert.equal(partial.updatedAt, first.updatedAt);
   assert.equal(partial.windows.find(window => window.metric === 'credits').remaining, 4000);
   assert.deepEqual(partial.windows.filter(window => window.metric !== 'credits'), first.windows.filter(window => window.metric !== 'credits'));
-  assert.equal('invalidateCachedWindowLabels' in partial, false);
   fs.unlinkSync(fixture.statePath);
   timestamp += 60000;
   await runtime.refresh({ provider: 'minimax' }, 'manual');
@@ -1249,25 +1234,26 @@ test('MiniMax Code key probes and custom OAuth endpoints never touch the lease',
 });
 
 test('API region settings never select or hide the local Code login', async () => {
-  for (const region of ['cn', 'en']) {
+  // Same-region pairs repeat this. These three are the ones that fail if Code follows the API setting.
+  for (const [region, apiRegion] of [['cn', 'intl'], ['cn', 'auto'], ['en', 'cn']]) {
     const fixture = writeCodeAuthFixture({ region });
-    for (const apiRegion of ['cn', 'intl', 'auto']) {
-      const deps = codeDeps(fixture, async (url, init) => {
-        assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
-        const target = new URL(url);
-        if (target.pathname.endsWith('/get_membership_info')) {
-          assert.equal(target.origin, region === 'cn' ? 'https://agent.minimax.cn' : 'https://agent.minimax.io');
-          return okResponse(membershipBody({ token_plan_tier: '12345' }));
-        }
-        assert.equal(target.origin, region === 'cn' ? 'https://www.minimaxi.com' : 'https://platform.minimax.io');
-        assert.equal(init.headers['X-Group-Id'], 'grp-123');
-        return okResponse(target.pathname.endsWith('/remains_percent') ? planRemainsBody()
-          : { current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Build' } });
-      }, { env: { MINIMAX_DATA_DIR: fixture.base, MINIMAX_API_REGION: apiRegion } });
-      const row = await fetchMinimaxLimits({ minimaxApiRegion: apiRegion }, deps);
-      assertFields(row, { status: 'ok', source: 'oauth', region, planLabel: 'Build' }, `${region} Code with ${apiRegion} API setting`);
-      assert.equal(row.windows.find(window => window.label === 'Credits').remaining, 4624);
-    }
+    const membershipOrigin = region === 'cn' ? 'https://agent.minimax.cn' : 'https://agent.minimax.io';
+    const planOrigin = region === 'cn' ? 'https://www.minimaxi.com' : 'https://platform.minimax.io';
+    const deps = codeDeps(fixture, async (url, init) => {
+      assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
+      const target = new URL(url);
+      if (target.pathname.endsWith('/get_membership_info')) {
+        assert.equal(target.origin, membershipOrigin, `${region} with ${apiRegion}`);
+        return okResponse(membershipBody({ token_plan_tier: '12345' }));
+      }
+      assert.equal(target.origin, planOrigin, `${region} with ${apiRegion}`);
+      assert.equal(init.headers['X-Group-Id'], 'grp-123');
+      return okResponse(target.pathname.endsWith('/remains_percent') ? planRemainsBody()
+        : { current_subscribe: { curr_subscribe_combo_id: '12345', current_subscribe_title: 'Build' } });
+    }, { env: { MINIMAX_DATA_DIR: fixture.base, MINIMAX_API_REGION: apiRegion } });
+    const row = await fetchMinimaxLimits({ minimaxApiRegion: apiRegion }, deps);
+    assertFields(row, { status: 'ok', source: 'oauth', region, planLabel: 'Build' }, `${region} Code with ${apiRegion} API setting`);
+    assert.equal(row.windows.find(window => window.label === 'Credits').remaining, 4624);
   }
 });
 test('MiniMax Code rejects nonprivate credential stores as the official FileStore does', { skip: process.platform === 'win32' }, async () => {

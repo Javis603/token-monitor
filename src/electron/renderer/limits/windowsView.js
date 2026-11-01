@@ -1978,6 +1978,11 @@
     const plan = document.createElement('div');
     plan.className = 'limit-plan';
     plan.textContent = limitPlanText(provider, options);
+    // An explicit empty planText is a caller refusing the cost door. A blank
+    // reading is not: the saved record still needs a visible entry.
+    if (!plan.textContent && options.planText === undefined && subscriptionForProvider(provider)) {
+      plan.textContent = t('settings.subscriptions.title');
+    }
     // A record binds to one account, so the provider-wide rollup belongs on the
     // row that stands for the provider as a whole — the header of a group, or a
     // provider's single row — and not on each member of a group, which would
@@ -2367,8 +2372,7 @@
     if ((providers || []).length !== 2) return false;
     const api = providers.find(row => row.source === 'api');
     const code = providers.find(row => row.source === 'oauth');
-    return Boolean(api?.status === 'ok' && code?.status === 'ok'
-      && api.accountKey && code.accountKey && api.region && api.region === code.region
+    return Boolean(api?.accountKey && code?.accountKey && api.region && api.region === code.region
       && (api.relatedAccountKey === code.accountKey || code.relatedAccountKey === api.accountKey));
   }
 

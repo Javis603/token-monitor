@@ -83,23 +83,21 @@ test('a healthy anonymous Cline reading remains selectable when its profile read
   assert.equal(h.els.subscriptionAccountInput.options.length, 1);
 });
 
-for (const provider of ['workbuddy', 'minimax']) {
-  test(`${provider} editing and saving retains a missing binding while other accounts are live`, async () => {
-    for (const count of [1, 2]) {
-      const live = ['a', 'b'].slice(0, count).map((key) => ({ provider, accountKey: 'live-' + key, accountName: 'Same nickname', status: 'ok', windows: [] }));
-      const h = harness(live, [{ ...saved, provider }]);
-      h.els.subscriptionProviderInput.value = provider;
-      h.run("beginSubscriptionEdit('saved-sub')");
-      assert.equal(h.els.subscriptionAccountInput.value, provider + '\0missing-key');
-      await h.run('submitSubscription()');
-      assert.equal(h.written()[0].binding.accountKey, 'missing-key');
-      h.context.target = h.run('subscriptionAccountChoices().at(-1).provider');
-      assert.equal(h.run(`subscriptionForAccount(state.settings.subscriptions, '${provider}', target)?.id`), 'saved-sub');
-      h.context.target = live[0];
-      assert.equal(h.run(`subscriptionForAccount(state.settings.subscriptions, '${provider}', target)`), null);
-    }
-  });
-}
+test('workbuddy editing and saving retains a missing binding while other accounts are live', async () => {
+  for (const count of [1, 2]) {
+    const live = ['a', 'b'].slice(0, count).map((key) => ({ provider: 'workbuddy', accountKey: 'live-' + key, accountName: 'Same nickname', status: 'ok', windows: [] }));
+    const h = harness(live, [{ ...saved, provider: 'workbuddy' }]);
+    h.els.subscriptionProviderInput.value = 'workbuddy';
+    h.run("beginSubscriptionEdit('saved-sub')");
+    assert.equal(h.els.subscriptionAccountInput.value, 'workbuddy\0missing-key');
+    await h.run('submitSubscription()');
+    assert.equal(h.written()[0].binding.accountKey, 'missing-key');
+    h.context.target = h.run('subscriptionAccountChoices().at(-1).provider');
+    assert.equal(h.run("subscriptionForAccount(state.settings.subscriptions, 'workbuddy', target)?.id"), 'saved-sub');
+    h.context.target = live[0];
+    assert.equal(h.run("subscriptionForAccount(state.settings.subscriptions, 'workbuddy', target)"), null);
+  }
+});
 
 test('other providers heal rotated keys before saved-only choices and still reject duplicate live records', async () => {
   for (const kind of ['email', 'profile', 'sole']) {

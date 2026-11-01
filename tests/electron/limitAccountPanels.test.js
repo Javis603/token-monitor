@@ -76,8 +76,19 @@ function renderPanel(form, callbacks = {}) {
 function appSource(from, to) {
   const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
   const start = app.indexOf(from);
+  assert.ok(start !== -1, `${from} should exist`);
+  if (!to) {
+    let depth = 0;
+    for (let index = start; index < app.length; index += 1) {
+      if (app[index] === '{') depth += 1;
+      else if (app[index] === '}') {
+        depth -= 1;
+        if (depth === 0) return app.slice(start, index + 1);
+      }
+    }
+  }
   const end = app.indexOf(to, start);
-  assert.ok(start !== -1 && end !== -1, `${from} should exist`);
+  assert.ok(end !== -1, `${from} should exist`);
   return app.slice(start, end);
 }
 
@@ -874,7 +885,7 @@ test('other key panels keep repair controls available while a new reading is pen
 });
 
 test('MiniMax API-key rechecks leave the independent Code row in place', () => {
-  const source = appSource('function clearExternalProviderPendingStatus(', '\nfunction nextCopilotSignInFlowId(');
+  const source = appSource('function clearExternalProviderPendingStatus(');
   const state = { stats: { limits: { providers: [
     { provider: 'minimax', source: 'oauth', status: 'ok' },
     { provider: 'minimax', source: 'api', status: 'unauthorized' },

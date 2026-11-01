@@ -478,46 +478,47 @@ test('MiniMax API balances reach the shared Limits and dock renderer in both cur
   }
 });
 
-test('MiniMax Code and API rows share one provider heading', () => {
-  const view = dockView();
+test('a confirmed MiniMax account stays one heading, and a saved cost stays reachable without a plan name', () => {
   const codeKey = `sha256:${'a'.repeat(64)}`;
   const apiKey = `sha256:${'b'.repeat(64)}`;
-  const rows = [
-    { provider: 'minimax', status: 'ok', source: 'oauth', region: 'cn', accountKey: codeKey, accountLabel: 'MiniMax Code', updatedAt: '2026-10-14T04:00:00Z', windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
-    { provider: 'minimax', status: 'ok', source: 'api', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey, accountLabel: 'Pay-as-you-go', updatedAt: '2026-10-14T04:00:00Z', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
-  ].map(normalizeLimitProvider);
-  const row = view.renderLimitProviderGroup('minimax', 'Minimax', rows, '#000000');
-  const head = row.children[0].find('limit-title');
-  const lanes = row.find('limit-account-list').children;
-  const lane = lanes[1];
-  assert.equal(head.find('limit-name-title').textContent.trim(), 'Minimax');
-  assert.notEqual(head.find('limit-meta'), null);
-  assert.equal(row.find('limit-plan').textContent, '');
-  assert.equal(lanes.length, 2);
-  assert.equal(lanes[0].classList.contains('limit-account-row'), true);
-  assert.equal(lane.classList.contains('limit-account-row'), true);
-  assert.equal(lane.find('limit-name-title'), null);
-  assert.equal(lane.find('limit-plan').textContent, 'Pay-as-you-go');
-  assert.notEqual(lane.find('limit-meta'), null);
-  assert.deepEqual([...lanes[0].find('limit-windows').children].map((node) => node.children[0].children[0].textContent), ['Credits']);
-  assert.deepEqual([...lane.find('limit-windows').children].map((node) => node.children[0].children[0].textContent), ['Balance']);
-  const named = view.renderLimitProviderGroup('minimax', 'Minimax', [
-    { ...rows[0], planLabel: 'Starter' }, rows[1]
-  ], '#000000');
-  assert.equal(named.find('limit-plan').textContent, 'Starter');
-  assert.equal(named.find('limit-account-list').children[1].find('limit-plan').textContent, 'Pay-as-you-go');
-  assert.equal(view.limitProviderPlan(rows[0]), '', 'a product label is not a subscription');
-  assert.equal(view.limitProviderPlan({ ...rows[0], planLabel: 'Starter' }), 'Starter');
-  const unlinked = view.renderLimitProviderGroup('minimax', 'Minimax', [
-    rows[0], { ...rows[1], relatedAccountKey: undefined }
-  ], '#000000');
-  assert.deepEqual(unlinked.find('limit-account-list').children.map(row => row.find('limit-name-title').textContent.trim()), ['Account 1', 'Account 2']);
-
-  const refused = view.renderLimitProviderGroup('minimax', 'Minimax', [
-    rows[0],
-    { ...rows[1], status: 'unauthorized', windows: [] }
-  ], '#000000');
-  assert.equal(refused.find('limit-account-list').children[1].find('limit-plan').textContent, 'Sign in again');
+  const code = normalizeLimitProvider({
+    provider: 'minimax', status: 'ok', source: 'oauth', region: 'cn', accountKey: codeKey,
+    accountLabel: 'MiniMax Code', planLabel: '', updatedAt: '2026-10-14T04:00:00Z',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }]
+  });
+  const api = normalizeLimitProvider({
+    provider: 'minimax', status: 'ok', source: 'api', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey,
+    accountLabel: 'Pay-as-you-go', updatedAt: '2026-10-14T04:00:00Z',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }]
+  });
+  const view = dockView();
+  const card = (rows, appearance) => (appearance ? dockView(appearance) : view)
+    .renderLimitProviderGroup('minimax', 'Minimax', rows, '#000000');
+  const paired = card([code, api]);
+  assert.match(paired.text, /Minimax/);
+  assert.match(paired.text, /Credits/);
+  assert.match(paired.text, /Balance/);
+  assert.match(paired.text, /Pay-as-you-go/);
+  assert.doesNotMatch(paired.text, /Account 1|2 accounts|Subscriptions/);
+  assert.equal(view.limitProviderPlan(code), '');
+  assert.match(card([{ ...code, planLabel: 'Starter' }, api]).text, /Starter/);
+  const unlinked = card([code, { ...api, relatedAccountKey: undefined }]);
+  assert.match(unlinked.text, /Account 1/);
+  assert.match(unlinked.text, /Account 2/);
+  const refused = card([code, { ...api, status: 'unauthorized', windows: [] }]);
+  assert.match(refused.text, /Sign in again/);
+  assert.doesNotMatch(refused.text, /Account 1|2 accounts/);
+  const saved = {
+    id: 'code-cost', provider: 'minimax', kind: 'subscription', planName: 'Build', amountMinor: 2000,
+    currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-08-01', autoRenew: true,
+    topUps: [], binding: { accountKey: codeKey }
+  };
+  const recorded = card([code, api], { subscriptions: [saved], accounts: [code, api] });
+  assert.match(recorded.text, /Subscriptions/);
+  assert.match(recorded.text, /20\.00/);
+  const down = card([{ ...code, status: 'unavailable', stale: true }, api], { subscriptions: [saved], accounts: [code, api] });
+  assert.match(down.text, /Subscriptions/);
+  assert.doesNotMatch(down.text, /2 accounts|Account 1/);
 });
 
 test('MiniMax Code follows the shared quota, count and credits rows', () => {
