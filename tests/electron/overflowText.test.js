@@ -371,6 +371,7 @@ for (const phase of ['pending', 'active', 'completed']) {
     assert.ok(start >= 0 && end > start, 'commitCard source boundaries exist');
     const context = {
       document: h.document,
+      captureCardSwitch: () => null, animateCardSwitch() {},
       contentLayer, overflowText: h.api, CARD_SCROLL_SELECTOR: '.scroll',
       cardResetAnimator: { capture: () => null, animate() {} }
     };

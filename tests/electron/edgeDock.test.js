@@ -153,8 +153,9 @@ test('a card commits after its reported height is clamped to the work area', () 
         commitCard: (_card, cellId) => { visibleId = cellId; }
       });
       const cell = { id: `next-${kind}`, kind };
-      const payload = { side: 'right', cell, maxCardHeight };
+      const payload = { side: 'right', cell, maxCardHeight, zoom: 1.25, shape: { contentTarget: { y: 250, height: expected } } };
       renderBubble(payload);
+      assert.equal(card.style.transform, '', 'the reading follows its shared moving layer');
       assert.deepEqual(reports, [{ cellId: cell.id, height: expected }]);
       assert.equal(visibleId, 'previous-card', 'wait for the main process to place the new card');
       // Mirror the main process acknowledgement, including its height cap.
@@ -193,6 +194,7 @@ test('a no-cell payload unmounts committed and staged plugin cards and removes t
   const { renderBubble, observed } = Function('deps', `
     const { root, contentLayer, stagingLayer, pluginHost, pluginContent, bubbleSizeObserver } = deps;
     let observedPluginCard = deps.card;
+    const clearCardSwitch = () => {};
     ${source}
     return { renderBubble, observed: () => observedPluginCard };
   `)({ root, contentLayer, stagingLayer, pluginHost, card: cards[1].card,
@@ -1103,7 +1105,7 @@ test('shared card repaint preserves both account and session scroll positions in
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const source = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
   let previous;
-  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR} = deps; ${source}; return commitCard;`)({
+  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR} = deps; const captureCardSwitch = () => null, animateCardSwitch = () => {}; ${source}; return commitCard;`)({
     contentLayer: { querySelector: () => previous, replaceChildren() {} },
     overflowText: { refresh() {}, preserveReading() {} },
     cardResetAnimator: { capture() {}, animate() {} },
@@ -2866,7 +2868,7 @@ test('provider card repaint preserves both account and session scroll and ignore
   const accounts = list(0), sessions = list(0), nested = list(0, true);
   const next = { dataset: { cellId: 'codex' }, querySelectorAll: () => [accounts, sessions, nested] };
   const commit = Function('contentLayer', 'overflowText', 'document', 'cardResetAnimator', 'CARD_SCROLL_SELECTOR',
-    `${body}\nreturn commitCard;`)(
+    `const captureCardSwitch = () => null, animateCardSwitch = () => {}; ${body}\nreturn commitCard;`)(
     { querySelector: () => previous, replaceChildren() {} },
     { refresh() {}, preserveReading() {} }, {}, { capture() {}, animate() {} }, '.scroll');
   commit(next, 'codex');
@@ -3180,5 +3182,258 @@ test('macOS rail forwards pointer reports using the existing bridge without affe
     handlers.get('mousemove')?.();
     handlers.get('mouseleave')?.();
     assert.equal(reports.length, platform === 'darwin' ? 2 : 0);
+  }
+});
+
+
+test('bubble silhouette moves content and clips it in the same local coordinates', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function updateShape('), dock.indexOf('// ---- Peek'));
+  const style = {}, nodes = [];
+  const shapeLayer = { dataset: {}, setAttribute() {}, replaceChildren() {}, append() {} };
+  const document = { createElementNS(_namespace, name) {
+    const node = { name, attributes: {}, setAttribute(key, value) { this.attributes[key] = value; }, append() {} };
+    nodes.push(node);
+    return node;
+  } };
+  const update = Function('surface', 'contentLayer', 'shapeLayer', 'document', 'SVG_NS', `${source}; return updateShape;`)(
+    'bubble', { style }, shapeLayer, document, 'svg');
+  update({ zoom: 1.25, shape: { key: 'frame-a', width: 365, height: 900, d: 'M 0 100 Z', contentBounds: { y: 100, height: 250 } } });
+  assert.equal(style.transform, 'translateY(80px)');
+  assert.equal(style.height, '');
+  assert.equal(style.clipPath, 'url(#edge-dock-card-clip)');
+  assert.equal(nodes.find(node => node.name === 'clipPath').attributes.clipPathUnits, 'userSpaceOnUse');
+  assert.equal(nodes.find(node => node.name === 'path').attributes.transform, 'translate(0 -80) scale(0.8)');
+  assert.equal(nodes.find(node => node.name === 'path').attributes.d, 'M 0 100 Z');
+  nodes.length = 0;
+  update({ zoom: 1.25, shape: { key: 'frame-b', width: 365, height: 900, d: 'M 0 150 Z', contentBounds: { y: 150, height: 300 } } });
+  assert.equal(style.transform, 'translateY(120px)', 'the complete reading follows the painted frame');
+  assert.equal(style.height, '');
+  assert.equal(nodes.find(node => node.name === 'path').attributes.d, 'M 0 150 Z');
+});
+
+test('shape-only frames preserve the reading destination until its full payload arrives', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const start = dock.indexOf('bridge.onShapeFrame?.(');
+  const source = dock.slice(start, dock.indexOf('// A repaint that no push triggers', start));
+  const first = { y: 120, height: 280 }, next = { y: 250, height: 164 };
+  const state = { payload: { cell: { id: 'claude' }, shape: { contentTarget: first } } };
+  let receive, painted;
+  Function('bridge', 'surface', 'state', 'root', 'updateShape', source)(
+    { onShapeFrame: callback => { receive = callback; } }, 'bubble', state, { dataset: {} }, payload => { painted = payload; });
+  receive({ side: 'left', shape: { key: 'moving', contentBounds: { y: 155, height: 249 }, contentTarget: next } });
+  assert.equal(painted.shape.key, 'moving');
+  assert.equal(state.payload.shape.contentTarget, first, 'an intervening self-repaint must keep the old reading at its own destination');
+  state.payload = { cell: { id: 'codex' }, shape: { contentTarget: next } };
+  receive({ side: 'left', shape: { key: 'later', contentBounds: { y: 187, height: 221 }, contentTarget: first } });
+  assert.equal(state.payload.shape.contentTarget, next);
+});
+
+test('whole-card transitions retain repaint progress and clean up interrupted outgoing content', async () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('let cardSwitchMotion ='), dock.indexOf('function commitCard('));
+  let reduced = false;
+  const document = { visibilityState: 'visible' };
+  const ghosts = new Set();
+  function node(opacity = '1', scroll = 0, top = 0) {
+    const list = { scrollTop: scroll };
+    const value = { style: {}, opacity, attributes: {}, animations: [],
+      querySelectorAll: selector => selector === '.scroll' ? [list] : [],
+      cloneNode: () => node(opacity, 0, top),
+      getBoundingClientRect: () => ({ top, bottom: top + 120 }),
+      setAttribute(name, text) { this.attributes[name] = text; },
+      removeAttribute(name) { delete this.attributes[name]; },
+      remove() { ghosts.delete(this); this.removed = true; },
+      animate(frames, timing) {
+        let resolve, reject;
+        const finished = new Promise((yes, no) => { resolve = yes; reject = no; });
+        // Browsers create the finished promise lazily; observe this eager fake.
+        finished.catch(() => {});
+        const animation = { frames, timing, currentTime: 0, finished,
+          cancel() { this.cancelled = true; reject(new Error('cancelled')); },
+          finish() { resolve(); } };
+        this.animations.push(animation);
+        return animation;
+      }
+    };
+    return value;
+  }
+  const api = Function('surface', 'document', 'prefersReducedMotion', 'getComputedStyle', 'contentLayer', 'CARD_SCROLL_SELECTOR',
+    `${source}; return { captureCardSwitch, animateCardSwitch, clearCardSwitch };`)(
+    'bubble', document, () => reduced, card => ({ opacity: card.opacity }), { append: ghost => ghosts.add(ghost) }, '.scroll');
+  const first = node('1', 37), next = node();
+  const motion = api.captureCardSwitch(first, false, next);
+  api.animateCardSwitch(next, motion);
+  assert.equal(ghosts.size, 1);
+  assert.equal(motion.ghost.inert, true);
+  assert.equal(motion.ghost.attributes['aria-hidden'], 'true');
+  assert.equal(motion.ghost.style.pointerEvents, 'none');
+  assert.equal(motion.ghost.querySelectorAll('.scroll')[0].scrollTop, 37);
+  assert.deepEqual(next.animations[0].frames, [{ opacity: 0 }, { opacity: 1 }]);
+  assert.equal(next.animations[0].timing.duration, 160);
+  assert.equal(next.animations[0].timing.delay, undefined, 'both readings start together');
+  const originalIncoming = motion.incoming, outgoing = motion.outgoing;
+  originalIncoming.currentTime = 80;
+  const repaint = api.captureCardSwitch(next, true, node());
+  api.animateCardSwitch(node(), repaint);
+  assert.equal(repaint, motion);
+  assert.equal(repaint.incoming.currentTime, 80, 'a live repaint does not restart or snap the fade');
+  assert.equal(repaint.outgoing, outgoing, 'the outgoing content keeps its original deadline');
+  assert.equal(originalIncoming.cancelled, true);
+  outgoing.finish();
+  await Promise.resolve();
+  const rapid = api.captureCardSwitch(node('0.4'), false, node());
+  api.animateCardSwitch(node(), rapid);
+  await Promise.resolve();
+  assert.equal(ghosts.size, 1, 'an older completion cannot remove the latest transition');
+  assert.equal(rapid.ghost.removed, undefined);
+  assert.equal(rapid.outgoing.frames[0].opacity, '0.4', 'a rapid switch starts from the painted opacity');
+  rapid.outgoing.finish();
+  await Promise.resolve();
+  assert.equal(ghosts.size, 0);
+  assert.equal(rapid.incoming.cancelled, true, 'finishing releases the animation effect');
+  reduced = true;
+  assert.equal(api.captureCardSwitch(first, false, next), null);
+  reduced = false;
+  document.visibilityState = 'hidden';
+  assert.equal(api.captureCardSwitch(first, false, next), null, 'reopening starts without stale outgoing content');
+  document.visibilityState = 'visible';
+  for (const top of [504, -504, 120, -120]) {
+    const pending = api.captureCardSwitch(first, false, next);
+    api.animateCardSwitch(next, pending);
+    assert.equal(api.captureCardSwitch(next, false, node('1', 0, top)), null, 'interrupted fades hand off directly regardless of reading distance');
+    assert.equal(ghosts.size, 0, 'a direct switch also clears any interrupted outgoing copy');
+    assert.equal(pending.incoming.cancelled, true);
+  }
+  for (const elapsed of [0, 16, 40]) {
+    const incoming = node();
+    const pending = api.captureCardSwitch(first, false, incoming);
+    api.animateCardSwitch(incoming, pending);
+    pending.incoming.currentTime = elapsed;
+    pending.outgoing.currentTime = elapsed;
+    incoming.opacity = elapsed === 0 ? '0' : elapsed === 16 ? '0.0197225' : '0.129162';
+    const latest = node();
+    const interrupted = api.captureCardSwitch(incoming, false, latest);
+    assert.equal(interrupted, null, 'rapid selection displays the latest reading directly, without another fade from zero');
+    api.animateCardSwitch(latest, interrupted);
+    assert.equal(latest.animations.length, 0);
+    assert.equal(ghosts.size, 0, 'interruption leaves no outgoing copy');
+    assert.equal(pending.incoming.cancelled, true);
+    assert.equal(pending.outgoing.cancelled, true);
+    await Promise.resolve();
+  }
+});
+
+for (const kind of ['provider', 'stat']) {
+  for (const acknowledgeImmediately of [false, true]) {
+    test(`switching plugin → ${kind} → plugin during the fade commits the live card (${acknowledgeImmediately ? 'placed' : 'awaiting size'})`, async () => {
+      const { Element } = require('../helpers/notchPanel');
+      class CardElement extends Element {
+        querySelectorAll(selector) {
+          const exclude = selector.match(/^(.*):not\(\[([^=]+)="([^"]+)"\]\)$/);
+          if (exclude) return super.querySelectorAll(exclude[1]).filter(node => node.getAttribute(exclude[2]) !== exclude[3]);
+          return super.querySelectorAll(selector);
+        }
+        cloneNode(deep) {
+          const clone = new CardElement(this.tagName, this.ownerDocument);
+          clone.className = this.className;
+          Object.assign(clone.dataset, this.dataset);
+          Object.assign(clone.attributes, this.attributes);
+          Object.assign(clone.style, this.style);
+          clone.value = this.value;
+          if (deep) clone.append(...this.children.map(child => child.cloneNode(true)));
+          return clone;
+        }
+        getBoundingClientRect() { return { height: this.classList.contains('edge-dock-card-plugin') ? 180 : 240 }; }
+        animate() {
+          let finish, cancel;
+          const finished = new Promise((resolve, reject) => { finish = resolve; cancel = () => reject(new Error('cancelled')); });
+          finished.catch(() => {});
+          const animation = { finished, finish, cancel, currentTime: 0 };
+          (this.animations ||= []).push(animation);
+          return animation;
+        }
+      }
+      const document = { visibilityState: 'visible', createElement: tag => new CardElement(tag, document) };
+      const el = (tag, className, text) => {
+        const node = document.createElement(tag); node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+      const root = el('main', ''), contentLayer = el('div', ''), stagingLayer = el('div', '');
+      root.append(contentLayer, stagingLayer);
+      const reports = [];
+      let mounts = 0;
+      const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+      const source = dock.slice(dock.indexOf('let cardSwitchMotion ='), dock.indexOf('const bubbleSizeObserver ='));
+      const pluginSource = dock.slice(dock.indexOf('function pluginCard('), dock.indexOf('const codexAccountControl ='));
+      const { renderBubble } = Function('deps', `
+        const { document, el, root, contentLayer, stagingLayer, bridge, pluginHost } = deps;
+        const surface = 'bubble', CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list', BREAKDOWN_VISIBLE_ROWS = 6;
+        const prefersReducedMotion = () => false, getComputedStyle = () => ({ opacity: '1' });
+        const overflowText = { refresh() {}, preserveReading() {} };
+        const cardResetAnimator = { capture() {}, animate() {} };
+        const pluginContent = null, bubbleSizeObserver = null;
+        let observedPluginCard = null;
+        const providerCard = cell => el('section', 'edge-dock-card', cell.id), statCard = providerCard;
+        ${pluginSource}
+        ${source}
+        return { renderBubble };
+      `)({ document, el, root, contentLayer, stagingLayer,
+        bridge: { reportBubbleSize: (id, height) => reports.push({ id, height }) },
+        pluginHost: { state: () => ({ title: 'Plugin reading' }), mount: body => { mounts++; body.textContent = 'Live plugin content'; } }
+      });
+      const plugin = { id: 'plugin', kind: 'plugin', ref: 'fixture/view' };
+      const other = { id: kind, kind };
+      const paint = (cell, placed) => renderBubble({ side: 'right', cell, placed });
+      paint(plugin, { cellId: plugin.id, height: 180 });
+      const original = contentLayer.children[0];
+      paint(other, { cellId: other.id, height: 240 });
+      const ghost = contentLayer.children[1];
+      assert.equal(ghost.dataset.cellId, plugin.id);
+      assert.equal(ghost.classList.contains('edge-dock-card-plugin'), true);
+      assert.equal(ghost.getAttribute('aria-hidden'), 'true');
+      assert.equal(ghost.inert, true);
+
+      paint(plugin, acknowledgeImmediately ? { cellId: plugin.id, height: 180 } : { cellId: other.id, height: 240 });
+      if (!acknowledgeImmediately) {
+        assert.equal(contentLayer.children[0].dataset.cellId, other.id, 'keep the placed card until size confirmation');
+        assert.equal(stagingLayer.children[0]?.dataset.cellId, plugin.id, 'build a real plugin card, not retain its fading clone');
+        assert.deepEqual(reports, [{ id: plugin.id, height: 180 }]);
+        paint(plugin, { cellId: plugin.id, height: 180 });
+      }
+      const active = contentLayer.children[0];
+      assert.equal(active.dataset.cellId, plugin.id, 'the selected plugin must replace the provider/stat card');
+      assert.notEqual(active, ghost);
+      assert.notEqual(active, original);
+      assert.equal(active.inert, undefined);
+      assert.ok(active.textContent.includes('Live plugin content'));
+      const mounted = mounts;
+      paint(plugin, { cellId: plugin.id, height: 180 });
+      assert.equal(contentLayer.children[0], active, 'normal live-plugin retention still preserves its mount');
+      assert.equal(mounts, mounted);
+      await Promise.resolve();
+      assert.deepEqual(contentLayer.children, [active], 'rapid selection cancels the outgoing copy without removing the live plugin');
+    });
+  }
+}
+
+test('detail tooltip flipping uses the painted card top in CSS pixels', () => {
+  const source = fs.readFileSync(path.join(rendererDir, 'limits/windowsView.js'), 'utf8');
+  const body = source.slice(source.indexOf('function attachLimitDetailTooltip('), source.indexOf('// Entries are rows'));
+  for (const zoom of [1, 1.25]) {
+    for (const cardY of [0, 400]) {
+      for (const triggerY of [50, 150]) {
+        const events = {}, flips = [];
+        const attach = Function('deps', 'tooltipHost', 'positionCenteredDetailTooltip', `let tooltipAnchorSeq = 0; ${body}; return attachLimitDetailTooltip;`)(
+          { tooltipTop: () => cardY / zoom }, { markOpened() {}, release() {} }, () => {});
+        const wrap = { style: { setProperty() {} }, classList: { add() {} }, isConnected: true,
+          getBoundingClientRect: () => ({ top: (cardY + triggerY) / zoom }), addEventListener: (name, fn) => { events[name] = fn; } };
+        const tooltip = { style: { setProperty() {} }, setAttribute() {}, childElementCount: 1, offsetHeight: 120 / zoom,
+          showPopover() {}, classList: { toggle: (_name, below) => flips.push(below) } };
+        attach(wrap, tooltip); events.pointerenter();
+        assert.deepEqual(flips, [triggerY < 120 + 8 * zoom]);
+      }
+    }
   }
 });
