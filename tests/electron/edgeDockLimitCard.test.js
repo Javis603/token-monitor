@@ -2811,14 +2811,37 @@ test('summary allocation and width fitting need only ordered items and measured 
   assert.equal(hidden.overflow, false, 'unknown or occupied clearance admits no optional overflow');
 });
 
-test('Meta Muse renders its weekly allowance and separate additional money balance', () => {
+test('Meta Muse renders weekly allowance and a single additional token balance row', () => {
   const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
   const { paid } = require('../fixtures/museWeb');
   const provider = normalizeLimitProvider({ provider: 'muse', status: 'ok', ...parseMuseWebSubscription(paid) });
   const rendered = dockView().renderProviderWindows(provider, '#0866FF');
   assert.match(rendered.text, /97%/);
-  assert.match(rendered.text, /\$60\.00/);
-  assert.equal(dockView().limitProviderUsageItems([provider]).length, 2);
+  assert.doesNotMatch(rendered.text, /\$60\.00/);
+  const additional = rendered.children[1];
+  assert.match(additional.text, /Additional tokens/);
+  assert.equal(additional.find('limit-spend-summary').textContent, '1.5B');
+  assert.equal(additional.find('limit-reset'), null, 'the balance has no second line');
+  assert.doesNotMatch(additional.text, /left/);
+  assert.equal(dockView().limitProviderUsageItems([provider])[1].id, 'credits');
+  const hidden = dockView({ limitProviderHiddenItems: { muse: ['credits'] } }).renderProviderWindows(provider, '#0866FF');
+  assert.equal(hidden.children.length, 1, 'the existing usage item still hides the token balance');
+});
+
+test('Muse additional balance keeps the money fallback only when the website omits token text', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { paid, free } = require('../fixtures/museWeb');
+  const withSummary = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const before = JSON.stringify(withSummary);
+  const fallback = normalizeLimitProvider({ ...withSummary, windows: withSummary.windows.map(window => ({ ...window, resetDescription: '' })) });
+  const row = dockView().renderProviderWindows(fallback, '#0866FF').children[1];
+  assert.match(row.text, /Additional balance/);
+  assert.match(row.text, /\$60\.00/);
+  assert.doesNotMatch(row.text, /Additional tokens/);
+  dockView().renderProviderWindows(withSummary, '#0866FF');
+  assert.equal(JSON.stringify(withSummary), before, 'presentation does not change the synced reading');
+  const noTopup = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(free) });
+  assert.equal(dockView().renderProviderWindows(noTopup, '#0866FF').children.length, 1);
 });
 
 test('Muse names its product sources without numbered accounts or repeated row icons', () => {
