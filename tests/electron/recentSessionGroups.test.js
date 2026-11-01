@@ -435,7 +435,7 @@ test('Dock projects once per update for Sessions and multiple provider cards and
   let projections = 0;
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
-    module,
+    module, Date,
     require(id) {
       const api = load(id);
       if (id !== '../sessionRows') return api;
@@ -504,7 +504,7 @@ const NATIVE_MAIN = '01a128e7-84b0-7443-9d1d-af0368c81583';
 const NATIVE_CHILD = '01a1296b-e500-7b51-82c8-169dec45b59c';
 function continuations() {
   const rows = [
-    session('codex', 'rollout-1', { nativeSessionId: NATIVE_MAIN, turnEnded: true, lastUsedAt: '2026-01-01T00:00:00Z' }),
+    session('codex', 'rollout-1', { nativeSessionId: NATIVE_MAIN, turnEnded: true, lastUsedAt: new Date(Date.now() - 86_400_000).toISOString() }),
     session('codex', 'rollout-2', { nativeSessionId: NATIVE_MAIN, title: 'Current main', liveActivity: { state: 'running', source: 'test', observedAt: new Date().toISOString() } }),
     session('codex', 'child-1', { nativeSessionId: NATIVE_CHILD, parentSessionId: 'rollout-1', turnEnded: true }),
     session('codex', 'child-2', { nativeSessionId: NATIVE_CHILD, parentSessionId: 'rollout-2', turnEnded: true }),

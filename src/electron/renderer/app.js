@@ -109,8 +109,9 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
-  muse: 'settings.limits.connection.muse',
   kiro: 'settings.limits.connection.kiro',
+  manus: 'settings.limits.connection.manus',
+  muse: 'settings.limits.connection.muse',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
 const TRAY_ICON_VARIANTS = [
@@ -545,6 +546,10 @@ Object.assign(els, {
   automaticAppUpdatesRow: document.getElementById('automaticAppUpdatesRow'),
   automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
   automaticAppUpdatesNote: document.getElementById('automaticAppUpdatesNote'),
+  proxyUrlInput: document.getElementById('proxyUrlInput'),
+  noProxyInput: document.getElementById('noProxyInput'),
+  networkProxySource: document.getElementById('networkProxySource'),
+  proxyUrlError: document.getElementById('proxyUrlError'),
   appUpdateLatest: document.getElementById('appUpdateLatest'),
   appUpdateCheckButton: document.getElementById('appUpdateCheckButton'),
   appUpdateViewReleaseButton: document.getElementById('appUpdateViewReleaseButton'),
@@ -1793,6 +1798,66 @@ function renderSettingsAppUpdateRow() {
     els.appUpdateMessage.textContent = '';
     els.appUpdateMessage.classList.remove('error');
   }
+}
+
+// Per-field edit state. `dirty` keeps a settings push from overwriting text
+// that has not been stored (an edit in progress or a refused value), and the
+// revision lets a save that finishes after a newer edit leave that edit alone.
+const networkProxyDrafts = {
+  proxyUrl: { revision: 0, dirty: false },
+  noProxy: { revision: 0, dirty: false }
+};
+// The last refused save, kept until that field is edited again so the next
+// settings push does not wipe the reason off screen.
+let networkProxyError = null;
+const PROXY_SETTING_ERROR_CODES = ['proxy_invalid_url', 'proxy_unsupported_scheme', 'proxy_credentials_unsupported', 'proxy_bypass_unsupported', 'proxy_bypass_too_long'];
+
+function networkProxyInput(field) {
+  return field === 'proxyUrl' ? els.proxyUrlInput : els.noProxyInput;
+}
+
+function syncNetworkProxyControls() {
+  if (!els.proxyUrlInput) return;
+  for (const field of Object.keys(networkProxyDrafts)) {
+    const input = networkProxyInput(field);
+    if (input && document.activeElement !== input && !networkProxyDrafts[field].dirty) {
+      input.value = state.settings?.[field] || '';
+    }
+  }
+  if (els.networkProxySource) {
+    const source = state.settings?.networkProxySource || 'system';
+    els.networkProxySource.textContent = t(`settings.proxy.source.${source}`);
+  }
+  if (els.proxyUrlError) {
+    els.proxyUrlError.hidden = !networkProxyError;
+    els.proxyUrlError.textContent = networkProxyError ? t(`settings.proxy.error.${networkProxyError.code}`) : '';
+  }
+}
+
+function markNetworkProxyDraft(field) {
+  networkProxyDrafts[field].revision += 1;
+  networkProxyDrafts[field].dirty = true;
+  if (networkProxyError?.field !== field) return;
+  networkProxyError = null;
+  syncNetworkProxyControls();
+}
+
+async function saveNetworkProxySetting(field) {
+  const draft = networkProxyDrafts[field];
+  const revision = draft.revision;
+  let code = '';
+  try {
+    await saveSettings({ [field]: networkProxyInput(field).value });
+  } catch (error) {
+    const message = String(error?.message || '');
+    code = PROXY_SETTING_ERROR_CODES.find((candidate) => message.includes(candidate)) || 'save_failed';
+  }
+  // A newer edit owns the field now; this outcome no longer describes it.
+  if (draft.revision !== revision) return;
+  // A refused value stays dirty, so it is left in place to be corrected.
+  draft.dirty = Boolean(code);
+  networkProxyError = code ? { field, code } : (networkProxyError?.field === field ? null : networkProxyError);
+  preserveSettingsPanelScroll(syncNetworkProxyControls);
 }
 
 function renderAutomaticAppUpdateControl() {
@@ -4809,6 +4874,7 @@ function renderLimits() {
       state.settings?.showCodexAdditionalLimits !== false,
       state.settings?.limitProviderHiddenItems || {},
       state.settings?.currency || '',
+      state.settings?.compactTokenUnits || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
       state.settings?.codexManagedAccounts || [],
@@ -9619,6 +9685,7 @@ function syncSettingsForm() {
   const modelRankingMetric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
   for (const input of els.modelRankingMetricInputs || []) input.checked = input.value === modelRankingMetric;
   syncCurrencyRateControls();
+  syncNetworkProxyControls();
   syncHubDraftFields();
   els.limitsRefreshInput.value = state.settings.limitsRefreshMode === 'adaptive'
     ? 'adaptive'
@@ -13938,7 +14005,8 @@ function syncDockControls() {
   els.edgeDockInput.checked = enabled;
   els.edgeDockOptions?.classList.toggle('hidden', !enabled);
   const side = state.settings?.edgeDockSide === 'left' ? 'left' : 'right';
-  for (const input of els.edgeDockSideInputs || []) input.checked = input.value === side;
+  const floating = Number.isFinite(state.settings?.edgeDockFloatingX);
+  for (const input of els.edgeDockSideInputs || []) input.checked = !floating && input.value === side;
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
@@ -14195,6 +14263,10 @@ els.windowToggleShortcutValue?.addEventListener('click', startWindowShortcutReco
 els.windowToggleShortcutClearButton?.addEventListener('click', () => setWindowToggleShortcut('').catch(() => {}));
 els.startAtLoginInput?.addEventListener('change', () => saveSettings({ startAtLogin: els.startAtLoginInput.checked }));
 els.automaticAppUpdatesInput?.addEventListener('change', () => saveSettings({ automaticAppUpdates: els.automaticAppUpdatesInput.checked }));
+els.proxyUrlInput?.addEventListener('input', () => markNetworkProxyDraft('proxyUrl'));
+els.proxyUrlInput?.addEventListener('change', () => saveNetworkProxySetting('proxyUrl'));
+els.noProxyInput?.addEventListener('input', () => markNetworkProxyDraft('noProxy'));
+els.noProxyInput?.addEventListener('change', () => saveNetworkProxySetting('noProxy'));
 els.glassInput.addEventListener('change', saveAppearanceFromControls);
 els.blurInput.addEventListener('change', saveAppearanceFromControls);
 els.backgroundImageOpacityInput?.addEventListener('change', saveAppearanceFromControls);
@@ -16660,7 +16732,10 @@ function clearDisabledLimitProviderPendingChecks(enabledProviders) {
 }
 
 function externalProviderForAccount(providerName) {
-  const provider = localProviderStatus(providerName);
+  // Muse's manual credential panel owns only the web session, not its CLI login.
+  const provider = providerName === 'muse'
+    ? localProviderStatuses('muse').find((row) => row.source === 'web') || null
+    : localProviderStatus(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
@@ -16725,6 +16800,22 @@ function clearExternalProviderCheckPending(providerName) {
 }
 
 function clearExternalProviderPendingStatus(providerName) {
+  if (providerName === 'muse') {
+    // Only this device's Web Cookie changed. Keep its CLI and remote readings.
+    const localDeviceId = state.settings?.deviceId || '';
+    const keepSource = (provider) => provider.provider !== 'muse' || provider.source !== 'web';
+    const localDevice = state.stats?.devices?.find((device) => device.deviceId === localDeviceId);
+    if (Array.isArray(localDevice?.limits?.providers)) {
+      localDevice.limits.providers = localDevice.limits.providers.filter(keepSource);
+    }
+    if (Array.isArray(state.stats?.limits?.providers)) {
+      state.stats.limits.providers = state.stats.limits.providers.filter((provider) => keepSource(provider)
+        || (provider.sourceDeviceId
+          ? provider.sourceDeviceId !== localDeviceId
+          : Array.isArray(state.stats?.devices)));
+    }
+    return;
+  }
   if (!Array.isArray(state.stats?.limits?.providers)) return;
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
 }

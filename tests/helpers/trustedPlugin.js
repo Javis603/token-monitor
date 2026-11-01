@@ -39,7 +39,7 @@ async function runtimeFixture(t, { initialSettings = {}, catalogFetch = async ()
   const main = new BrowserWindow(), notch = new BrowserWindow();
   const electron = { BrowserWindow, Notification, utilityProcess: { fork: fakeFork(children, { delayedExit }) },
     ipcMain: { handle: (name, fn) => handlers.set(name, fn), removeHandler: name => handlers.delete(name), on: (name, fn) => events.set(name, fn), removeListener: name => events.delete(name) },
-    session: { fromPartition: () => ({ fetch: catalogFetch }), defaultSession: { protocol: { handle() {}, unhandle() {} } } },
+    session: { fromPartition: () => ({ fetch: (url, init) => url === require('../../src/electron/plugins/officialSources')[0].url ? Promise.resolve(new Response(JSON.stringify({ format: 1, title: 'Official fixture', plugins: [] }))) : catalogFetch(url, init) }), defaultSession: { protocol: { handle() {}, unhandle() {} } } },
     dialog: { showMessageBox: async (_win, options) => { dialogs.push(options); return { response: confirmations.length ? confirmations.shift() : confirmation }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [sourceDirectory] }) } };
   beforeStart(dir);
   const runtime = createPluginRuntime({ electron, businessAdapters, userDataDir: dir, getSettings: () => settings, getAppSettings: () => ({ public: true }), getContext: () => ({ source: 'fixture' }), getLocale: () => 'en',

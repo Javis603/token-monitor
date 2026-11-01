@@ -8,6 +8,7 @@ export const references = [
   { source: "docs/plugins/author-ui-options.md", page: "plugin-ui-reference", title: "UI integration reference" },
   { source: "docs/plugins/distribution-design.md", page: "plugin-distribution-reference", title: "Package and catalog reference" },
   { source: "docs/plugins/author-data-settings.md", page: "plugin-data-reference", title: "Data and settings reference" },
+  { source: "docs/plugins/author-data-resources.md", page: "plugin-resources-reference", title: "Resource fields and measurement coverage" },
   { source: "docs/plugins/publishing.md", page: "plugin-publishing-reference", title: "Publishing guide" },
   { source: "docs/plugins/validation.md", page: "plugin-testing-reference", title: "Author testing and platform acceptance" }
 ];

@@ -12,6 +12,33 @@ const {
 
 const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
 
+test('projection results follow each alias policy without retaining another plan', () => {
+  const model = 'vendor/GPT.X';
+  const stats = { periods: { today: { models: { [model]: 10 } } } };
+  const sessions = { one: { model, models: { [model]: 10 } } };
+  const history = { daily: [{ date: '2026-10-31', perModel: { [model]: { tokens: 10 } } }] };
+  const before = JSON.stringify([stats, sessions, history]);
+  const project = [
+    (aliases, grouping) => projectModelAliasStats(stats, aliases, { grouping }).periods.today.models,
+    (aliases, grouping) => projectModelAliasSessions(stats, sessions, aliases, { grouping }).one.models,
+    (aliases, grouping) => projectModelAliasHistory(history, aliases, { grouping }).daily[0].perModel
+  ];
+  const policies = [
+    [{ [model]: 'first' }, 'off', 'first'],
+    [{ [model]: 'second' }, 'off', 'second'],
+    [{}, 'off', model],
+    [{}, 'prefix', 'GPT.X'],
+    [{}, 'off', model],
+    [{ [model]: 'first' }, 'off', 'first']
+  ];
+  for (const projection of project) {
+    for (const [aliases, grouping, expected] of policies) {
+      assert.deepEqual(Object.keys(projection(aliases, grouping)), [expected]);
+    }
+  }
+  assert.equal(JSON.stringify([stats, sessions, history]), before);
+});
+
 for (const labels of [['__proto__', 'app'], ['app', '__proto__']]) {
   for (const aliasedProject of labels) {
     test(`project aliases retain reserved rollup keys with ${labels.join(', ')} and ${aliasedProject} aliased`, () => {

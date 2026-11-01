@@ -26,13 +26,30 @@ Uninstall can retain plugin data/preferences and display locations independently
 
 ## Catalogs
 
-Discover shows one Featured plugins group: official packages first, then App-designated maintainer catalogs branded Token Monitor Community. Both brands show a shield identifying distribution provenance, not a safety audit. Their package actions use the simplified Install and enable / Update flow with the same exact-revision approval underneath. Other HTTPS catalogs stay in Custom sources and retain the third-party trust warning. In-app GitHub discovery is not yet available; when available, its separate Unofficial plugins · GitHub group shows repository owners without a shield.
+Discover shows one Featured plugins group: official catalogs/packages first, then App-designated maintainer catalogs branded Token Monitor Community. Both brands show a shield identifying distribution provenance, not a safety audit. Their package actions use the simplified Install and enable / Update flow with the same exact-revision approval underneath. Other HTTPS catalogs stay in Custom sources and retain the third-party trust warning. In-app GitHub discovery is not yet available; when available, its separate Unofficial plugins · GitHub group shows repository owners without a shield.
 
-Featured placement and official attribution are host-assigned, not catalog fields authors can request. Custom URLs, author/title metadata and signing keys do not grant featured status. Official package updates currently arrive with an App update; App-designated community catalogs and user-added catalogs provide compatible updates through their existing sources.
+Featured placement and official attribution are host-assigned, not catalog fields authors can request. Custom URLs, author/title metadata and signing keys do not grant featured status. The App designates its official remote catalog separately from the community catalog. Both use the same package validation, compatibility, preview and same-source update checks. Compatible official plugin updates do not require an App update; users still explicitly choose and approve installation. Offline bundled packages, when present, update with the App.
 
 Install from file and folder remains available for private unpublished plugins. Catalog refresh and update preview do not execute code; installation is always explicit. The collapsed Plugins settings summary shows compatible updates from the installation's existing source, even while plugins are disabled. It reads local catalog state at startup and after catalog changes; it does not install updates automatically or introduce remote polling.
 
 Catalogs use bounded downloads, source pins, package hashes and optional Ed25519 signatures. A source is a configured catalog URL, not a GitHub repository crawler. Source changes cannot silently replace another installation's origin. Community labels and author descriptions are publisher claims, never an audit badge. Experimental API compatibility is checked against the downloaded package before installation.
+
+## Official catalog releases
+
+Official plugin source stays in this repository under `plugins/`. The App's designated catalog is `https://raw.githubusercontent.com/Javis603/token-monitor/dist/catalog.json`; the community catalog remains in `token-monitor-plugins`.
+
+The [Publish official plugins workflow](../../.github/workflows/publish-official-plugins.yml) validates packages on pull requests and publishes the catalog and packages to `dist` from `main`.
+
+To prepare local artifacts with dependencies installed, use fresh output directories:
+
+```sh
+node scripts/official-plugin-distribution.cjs build /tmp/token-monitor-official-plugins
+node scripts/official-plugin-distribution.cjs stage /tmp/token-monitor-official-plugins /tmp/token-monitor-plugin-dist
+```
+
+These commands only write local files. Building can target a newer App version than the checkout; installation still enforces the package's compatibility range.
+
+To publish an update, increase the plugin version and add matching localized CHANGELOG entries; these supply the catalog release notes. Keep the package's compatibility range and localized READMEs current. Published package bytes are immutable. The catalog retains the newest 32 versions by SemVer. Releases outside this range are rejected; previously published package files remain in `dist`. Full release history stays in the source CHANGELOG files.
 
 ## Repository details and README
 
@@ -93,7 +110,7 @@ version.sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
 fs.writeFileSync(output, JSON.stringify(catalog, null, 2) + '\n', { flag: 'wx' });
 ```
 
-Required fields are `format`, `title`, `plugins`, each entry's unique `id`, `name`, and nonempty `versions`, and each version's unique SemVer `version`, direct HTTPS `url` and lowercase 64-character `sha256`. Optional entry fields are `description`, `author`, the manifest-compatible `identityIcon`, and the `repository`/`readmePaths` presentation fields described above; optional version fields are `types`, `engines.tokenMonitor` (a SemVer range) and `changelog`. Title/name/description/changelog can be strings or locale-to-string maps. `types` accepts `widget`, `page`, `appearance`; unknown values are ignored. These are display hints, not capabilities. Downloaded manifests determine actual installed types and API compatibility; keep catalog and package engine ranges aligned.
+Required fields are `format`, `title`, `plugins`, each entry's unique `id`, `name`, and nonempty `versions`, and each version's unique SemVer `version`, direct HTTPS `url` and lowercase 64-character `sha256`. Optional entry fields are `description`, `author`, the manifest-compatible `identityIcon`, and the `repository`/`readmePaths` presentation fields described above; optional version fields are `types`, `engines.tokenMonitor` (a SemVer range) and `changelog`. Title/name/description/changelog can be strings or locale-to-string maps. `types` accepts `widget`, `page`, `appearance`, `automation`; unknown values are ignored. These are display hints, not capabilities. Downloaded manifests determine actual installed types and API compatibility; keep catalog and package engine ranges aligned.
 
 Limits: 16 configured sources, 128 entries per index, 32 versions per entry, a 1 MiB downloaded index and 64 MiB package envelope. URLs must be HTTPS without credentials or fragments, at most 2048 normalized characters. Downloads omit cookies, reject redirects and have a 15-second request deadline. Serve actual file bytes, not a repository web page or a redirecting download link.
 

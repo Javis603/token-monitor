@@ -28,7 +28,11 @@ Native visibility and page activity cap each owner's demand without discarding r
 
 Business data reads reuse selected-source snapshots and existing history resolution, never launch provider probes or duplicate collectors, and remain independent of native session rendering. Active ownership, explicit query filters and host privacy preferences apply; there are no per-resource grants or plugin-specific account/device scopes. Ordinary updates preserve admitted immutable cursors; source/privacy changes revoke them. Work and memory limits protect host reads, not unrestricted backend work.
 
+The plugin `liveRate` resource reuses native matched-counter tracking over captured Today snapshots. The business-data service owns subscription lifetimes and supplies active device scopes to the rate reader. See the [live-rate contract](plugins/author-data-resources.md#live-token-rate).
+
 Package transactions release only their target plugin, after content-conflict and unsaved-work confirmations complete and the preview is revalidated. Cancellation before cleanup must preserve existing UI instances, drafts and backends. Recheck affected content selections after asynchronous lifecycle waits so an older confirmation cannot overwrite a newer choice. Content-source changes inspect only the departing replacement refs and targets; they must not release the provider's other mounts. Unrelated mounts, drafts and backends stay live, including during rollback. Preserve existing App data and credential contracts. Renderer-independent safe mode must remain available for recovery; it cannot undo arbitrary plugin filesystem effects. See [management and recovery](plugins/distribution-design.md).
+
+Official and community remote plugin sources are separate host-owned definitions. Remote official provenance comes only from `electron/plugins/officialSources.js`; catalog titles, authors and user-added source metadata cannot grant it. See [official catalog releases](plugins/distribution-design.md#official-catalog-releases) for distribution.
 
 ## Generated and registered state
 
@@ -81,6 +85,8 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 
 `src/shared/usage/usageHost.js` moves collection, transforms and session-archive writes off Electron's main thread. Its summaries are already transformed (`{ transformed: true }`); `DeviceRuntime` must not transform or archive them again.
 
+Archive projection can share canonical live session rows read-only while copying mutable period and session maps. Replay must replace rows rather than mutate them; `DeviceState` detaches the published record. The default archive APIs still return complete JSON copies for callers outside this internal projection path.
+
 - Replacement and archive clearing wait for worker exit, preventing overlapping collectors, descriptor sets and archive writers.
 - After a transformed worker delivery, Electron releases its cold-anchor archive and SQLite connection without deleting persisted rows. In-process fallback must fully reload the archive and revision before capturing.
 - Widget previews read snapshots from their own store without capture, migration or pruning. Archive read/write failures reject normal widget and headless publication; external-agent reads use the same strict rule, and genuinely empty archives remain valid. Failed cold-anchor reads skip publication. Headless `--dry-run` uses best-effort reads, which may fall back to an empty archive, and writes neither the archive nor Hub data. Remove the private scan-completion hint before publication.
@@ -103,7 +109,9 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 
 ### Outbound transport
 
-`src/electron/limits/fetch.js` injects the same transport into collection and credential probes: env-proxy-aware `outboundFetch.js` when configured, otherwise Electron `net.fetch` for OS proxy support. Providers must preserve an injected fetch; custom transports do not inherit these guarantees and must be documented in the provider note.
+`src/electron/limits/fetch.js` injects the same transport into collection and credential probes, with app settings taking precedence over environment proxies, then OS routing. `src/electron/networkProxy.js` owns the app proxy policy: while set, it replaces environment proxy and bypass settings with consistent Node/Chromium routes, preserving native local-host bypasses and supported app bypass entries. Empty settings preserve existing env/OS routing. Providers must preserve the injected transport; custom transports must document their exceptions in the provider note.
+
+Routes are read per request, including MiMo exchange hops. Protected Chromium requests wait for proxy changes and connection cleanup; failed applies block those requests and remain retryable, and waits must support cancellation. Invalid persisted proxy URLs block traffic except for the retained bypasses. This setting does not cover external browser/CLI sign-ins, usage collection, Hub sync or GitHub release checks.
 
 Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies cannot shadow provider-managed cookies, and expect cross-origin `Referer` paths to be cancelled without a suitable `referrerPolicy`.
 
@@ -128,6 +136,8 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 ## Windows Edge Dock material
 
 Windows 11 Edge Dock uses a single helper with HostBackdrop clipped to the renderer's curves; HWND-wide Acrylic/Accent cannot preserve the concave outline. Electron owns input. Native underlays stay disabled, nonactivating and directly below their content windows.
+
+Windows rail dragging follows renderer animation frames: a nominal 16 ms main-process timeout can round up to about 31 ms on Windows. Main still owns native cursor coordinates, placement and button-state checks; cursor polling remains a fallback if frame delivery stops.
 
 Share renderer curves at physical display scale and position against `GetWindowRect`, not rounded Electron DIP bounds. Unchanged hover updates must not re-show underlays. Lower the tinted fallback only after native attachment succeeds; a failed generation retries only after all its surfaces are disposed. EOF, parent exit and content-window closure must remove native windows.
 

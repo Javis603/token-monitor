@@ -11,6 +11,7 @@ on:
       - 'docs/plugins/author-ui-options.md'
       - 'docs/plugins/distribution-design.md'
       - 'docs/plugins/author-data-settings.md'
+      - 'docs/plugins/author-data-resources.md'
       - 'docs/plugins/publishing.md'
       - 'docs/plugins/validation.md'
       # site/scripts/islands.jsx imports this module, so the islands bundle
@@ -27,6 +28,7 @@ on:
       - 'docs/plugins/author-ui-options.md'
       - 'docs/plugins/distribution-design.md'
       - 'docs/plugins/author-data-settings.md'
+      - 'docs/plugins/author-data-resources.md'
       - 'docs/plugins/publishing.md'
       - 'docs/plugins/validation.md'
       # site/scripts/islands.jsx imports this module, so the islands bundle

@@ -92,6 +92,33 @@ test('formal data source changes refresh results; disabled calls reject and host
   await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
   await assert.rejects(f.invoke('plugins:host', 'trusted-fixture', 'data.query', {}), /disabled/);
 });
+for (const boundary of ['disable', 'navigation']) test(`live-rate subscription demand clears on ${boundary}`, async t => {
+  const f = await runtimeFixture(t, { businessAdapters: { now: () => 100000 } });
+  await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  const publish = n => f.runtime.publishStats({ periods: { today: { capabilities: { throughput: true },
+    timedTokens: n, timedOutputTokens: n, timedDurationMs: n * 10 } } });
+  const read = () => f.invoke('plugins:host', 'trusted-fixture', 'data.query', { resource: 'liveRate' });
+  publish(0);
+  await f.invoke('plugins:subscribe', 'trusted-fixture', { resource: 'liveRate' });
+  await tick(); await tick();
+  assert.equal((await read()).rows[0].reason, 'waitingForSample');
+  publish(100); assert.equal((await read()).rows[0].speed, 100);
+  if (boundary === 'disable') {
+    await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+    await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  } else f.main.webContents.emit('did-start-navigation', {}, 'file:///index.html', false, true);
+  assert.equal((await read()).rows[0].reason, 'waitingForSample', 'old rate cannot survive a released owner');
+  assert.equal(f.children.length, 0, 'rate queries never start a backend');
+});
+test('disabling a plugin revokes live-rate subscriptions immediately', async t => {
+  const f = await runtimeFixture(t); await f.install();
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
+  f.runtime.publishStats({ periods: { today: { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 } } });
+  const id = await f.invoke('plugins:subscribe', 'trusted-fixture', { resource: 'liveRate' });
+  await tick(); await tick();
+  await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: false });
+  assert.equal(await f.invoke('plugins:unsubscribe', id), false, 'subscription was already revoked');
+});
 test('descriptor subscription receives first content selection without foreground demand', async t => {
   const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', { id: 'trusted-fixture', enabled: true });
   const first = f.handlers.get('plugins:views')(f.event(f.notch), { surface: 'notch' });
@@ -459,12 +486,13 @@ test('runtime refreshes only the curated index at startup and six hours, notifyi
   } });
   f.invoke('plugins:list');
   for (let i = 0; i < 10; i++) await tick();
-  assert.equal(calls, 1); assert.equal(f.invoke('plugins:catalog').entries[0].origin.kind, 'maintainer');
+  const curatedEntries = () => f.invoke('plugins:catalog').entries.filter(entry => entry.origin.kind === 'maintainer');
+  assert.equal(calls, 1); assert.deepEqual(curatedEntries().map(entry => entry.id), ['remote-plugin']);
   assert.equal(f.runtime.manager.list().plugins.length, 0);
   assert.ok(f.main.webContents.sent.some(event => event.channel === 'plugins:changed'));
   offline = true;
   t.mock.timers.tick(6 * 60 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
-  assert.equal(calls, 2); assert.equal(f.invoke('plugins:catalog').entries.length, 1);
+  assert.equal(calls, 2); assert.deepEqual(curatedEntries().map(entry => entry.id), ['remote-plugin']);
   t.mock.timers.tick(5 * 60 * 1000); for (let i = 0; i < 10; i++) await tick();
   assert.equal(calls, 3);
   await f.runtime.dispose(); t.mock.timers.tick(6 * 60 * 60 * 1000); assert.equal(calls, 3);

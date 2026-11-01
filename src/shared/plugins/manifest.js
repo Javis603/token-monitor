@@ -63,6 +63,8 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
   const name = normalizeLocalized(raw.name, 48);
   if (!name) fail('name is required');
   for (const key of ['main', 'permissions', 'network', 'metrics', 'alerts', 'webUi', 'visible']) if (raw[key] !== undefined) fail(`unsupported manifest field: ${key}`);
+  const category = raw.category ?? null;
+  if (category !== null && category !== 'automation') fail('category must be automation');
   const ui = raw.ui ?? null, backend = raw.backend ?? null;
   for (const [key, value] of [['ui', ui], ['backend', backend]]) if (value !== null && (!filePath(value) || !/\.(?:mjs|cjs|js)$/.test(value))) fail(`${key} must be a package-local JS file`);
   const files = Array.isArray(raw.files) ? raw.files : [];
@@ -123,7 +125,7 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
   const defaults = Object.freeze({ content: Object.freeze(content), background: initial.background === true, skin: initial.skin ?? null });
   if (errors.length) return { ok: false, manifest: null, errors };
   return { ok: true, errors, manifest: Object.freeze({ id: raw.id, version: raw.version, apiMajor: API_MAJOR, source,
-    name, description: normalizeLocalized(raw.description, 240), author: cleanText(raw.author, 80),
+    name, category, description: normalizeLocalized(raw.description, 240), author: cleanText(raw.author, 80),
     homepage: typeof raw.homepage === 'string' && /^https:\/\//.test(raw.homepage) ? raw.homepage.slice(0, 300) : '',
     ui, backend, files: Object.freeze([...files]), css: Object.freeze([...css]), views: Object.freeze(views),
     skins: Object.freeze(skins), trayMenu: Object.freeze(trayMenu), settings, identityIcon, defaults, background: raw.background === true, backgroundDescription }) };

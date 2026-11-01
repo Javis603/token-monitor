@@ -39,6 +39,17 @@ const {
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
+  createSessionProxyApplier,
+  createProxyReadyFetch,
+  networkProxySource,
+  normalizeNoProxy,
+  noProxyError,
+  normalizeProxyUrl,
+  outboundRouteForSettings,
+  proxyUrlError,
+  sessionProxyConfig
+} = require('./networkProxy');
+const {
   expandedBoundsForCollapse,
   normalWindowBounds,
   persistWindowState,
@@ -55,7 +66,7 @@ const {
 // a closed parent pipe turns the next log call into an unhandled 'error'
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
-const electronClaudeWebFetch = createClaudeWebFetch(net);
+const electronClaudeWebFetch = createProxyReadyFetch(createClaudeWebFetch(net), () => sessionProxy.ensureReady());
 const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
   fetch: electronLimitsFetch()
 });
@@ -67,23 +78,47 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
 // exchange on the mimoExchangeFetch below, which keeps undici for the per-hop
 // request it needs but still asks Chromium which proxy to use.
 function electronLimitsFetch() {
-  return createElectronLimitsFetch({ net, env: process.env });
+  return createElectronLimitsFetch({
+    net: { fetch: createProxyReadyFetch(net.fetch.bind(net), () => sessionProxy.ensureReady()) },
+    getRoute: networkProxyRoute
+  });
 }
+
+// Read per request: the app proxy setting can change after a caller captured
+// its fetch, and `settings` is still null while this module loads.
+function networkProxyRoute() {
+  return outboundRouteForSettings(settings || {}, process.env);
+}
+
+// The Chromium half of the app proxy setting, so net.fetch/net.request callers
+// and MiMo's resolveProxy route the same way as the Node-side transport.
+// Untouched until a proxy is configured, so an install without one keeps
+// Electron's own default; clearing it restores that default.
+const sessionProxy = createSessionProxyApplier({
+  getSession: () => session.defaultSession,
+  getConfig: () => sessionProxyConfig(settings || {}),
+  log: (message) => console.log(message)
+});
 
 // Lazy because `session.defaultSession` only exists once the app is ready, and
 // process-wide because the transport caches one proxy agent per proxy URL.
 let mimoExchangeFetch = null;
 function ensureMimoExchangeFetch() {
-  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({ session: session.defaultSession });
+  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({
+    session: { resolveProxy: createProxyReadyFetch((url) => session.defaultSession.resolveProxy(url), () => sessionProxy.ensureReady()) },
+    getRoute: networkProxyRoute
+  });
   return mimoExchangeFetch;
 }
 
+// Muse's web action also needs Node headers and manual redirects. Reuse the
+// exchange transport so its requests inherit the same app/env/system proxy route.
 // Settings-side provider probes take the same transport as the collector's.
 // Most of them are what an account save is gated on, so leaving one on the
 // global fetch refuses to save an account on exactly the machines this
 // transport exists for.
 function electronProviderDeps(deps = {}) {
-  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch() };
+  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch(), museWebFetch: ensureMimoExchangeFetch() };
 }
 const {
   DEFAULT_CLIENTS,
@@ -433,6 +468,7 @@ const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
 const {
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockFloatingX,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
@@ -661,6 +697,7 @@ function defaultSettings() {
     edgeDockSize: 'medium',
     edgeDockCustomScale: 1,
     edgeDockSide: 'right',
+    edgeDockFloatingX: null,
     edgeDockOffset: null,
     edgeDockDisplayId: null,
     edgeDockItems: null,
@@ -765,6 +802,8 @@ function defaultSettings() {
     currencyRates: {},
     startAtLogin: false,
     automaticAppUpdates: false,
+    proxyUrl: '',
+    noProxy: '',
     language: 'auto',
     ...initialAccountSettings(process.env),
     appUpdate: {
@@ -997,6 +1036,7 @@ function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
     mimoExchangeFetch: ensureMimoExchangeFetch(),
+    museWebFetch: ensureMimoExchangeFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     workbuddyFetch: async (url, init = {}, expectedSession = null) => {
       const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
@@ -2808,6 +2848,7 @@ function readSettings() {
     merged.edgeDockRefreshEnabled = parseBoolean(merged.edgeDockRefreshEnabled, false);
     merged.edgeDockRunningIndicatorEnabled = parseBoolean(merged.edgeDockRunningIndicatorEnabled, true);
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
+    merged.edgeDockFloatingX = normalizeEdgeDockFloatingX(merged.edgeDockFloatingX);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
     merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
@@ -5570,7 +5611,8 @@ function settingsForRenderer() {
     limitAccountForms: limitAccountFormsForRenderer(),
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
-    windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
+    windowToggleShortcutStatus: currentWindowToggleShortcutStatus(),
+    networkProxySource: networkProxySource(settings, process.env)
   };
 }
 
@@ -6197,8 +6239,9 @@ function ensureEdgeDockController() {
     },
     // The same setting the widget's rate readout toggles, so both stay in step.
     onToggleRateMode: toggleDockRateMode,
-    onPlacementChange: ({ side, offset, displayId }) => {
+    onPlacementChange: ({ side, offset, displayId, floatingX }) => {
       settings.edgeDockSide = normalizeEdgeDockSide(side);
+      settings.edgeDockFloatingX = normalizeEdgeDockFloatingX(floatingX);
       settings.edgeDockOffset = normalizeEdgeDockOffset(offset);
       settings.edgeDockDisplayId = normalizeEdgeDockDisplayId(displayId);
       saveSettings();
@@ -6345,7 +6388,10 @@ function setTrayContentFromMenu(value) {
 function setEdgeDockFromMenu(patch = {}) {
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
   if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
-  if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
+  if (patch.edgeDockSide !== undefined) {
+    settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
+    settings.edgeDockFloatingX = null;
+  }
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
   pushSettingsToRenderer();
@@ -7849,6 +7895,7 @@ app.whenReady().then(() => {
   ensureSettingsLoaded();
   powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
   powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
@@ -8076,6 +8123,7 @@ app.whenReady().then(() => {
     const previousStartAtLogin = settings.startAtLogin;
     const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
+    const previousProxyKey = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.windowMaximized;
@@ -8112,6 +8160,14 @@ app.whenReady().then(() => {
       const limitError = customScanPathLimitError(patch.customScanPaths);
       if (limitError) throw new Error(limitError);
       normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
+    }
+    if (patch.proxyUrl !== undefined) {
+      const proxyError = proxyUrlError(patch.proxyUrl);
+      if (proxyError) throw new Error(proxyError);
+    }
+    if (patch.noProxy !== undefined) {
+      const bypassError = noProxyError(patch.noProxy);
+      if (bypassError) throw new Error(bypassError);
     }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
@@ -8196,6 +8252,7 @@ app.whenReady().then(() => {
       edgeDockRefreshEnabled: parseBoolean(patch.edgeDockRefreshEnabled ?? settings.edgeDockRefreshEnabled, false),
       edgeDockRunningIndicatorEnabled: parseBoolean(patch.edgeDockRunningIndicatorEnabled ?? settings.edgeDockRunningIndicatorEnabled, true),
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
+      edgeDockFloatingX: patch.edgeDockSide !== undefined ? null : normalizeEdgeDockFloatingX(settings.edgeDockFloatingX),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
       edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
@@ -8290,6 +8347,10 @@ app.whenReady().then(() => {
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
+      // A hand-edited settings.json value the form would refuse is kept as-is
+      // so the transport fails closed on it rather than silently going direct.
+      proxyUrl: patch.proxyUrl !== undefined ? normalizeProxyUrl(patch.proxyUrl) : String(settings.proxyUrl || ''),
+      noProxy: patch.noProxy !== undefined ? normalizeNoProxy(patch.noProxy) : String(settings.noProxy || ''),
       ...finalAccountSettings(patch, settings),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
@@ -8331,6 +8392,15 @@ app.whenReady().then(() => {
       settings.startAtLogin = applyLoginItem(settings.startAtLogin);
       saveSettings({ throwOnError: true });
     }
+    // Every save re-applies, so re-saving the same proxy retries a session
+    // apply that failed earlier. Every provider answer so far came over the
+    // previous route; ask again over the new one instead of waiting out each
+    // provider's interval.
+    const proxySettingChanged = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']) !== previousProxyKey;
+    void sessionProxy.apply().then((sessionChanged) => {
+      if (proxySettingChanged || sessionChanged) return queueLimitInvalidation({ all: true }, 'settings-change');
+      return null;
+    }).catch((error) => console.log(`[limits-runtime] proxy refresh failed: ${error.message}`));
     if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) {
       runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
     }
@@ -9750,6 +9820,7 @@ app.whenReady().then(() => {
         businessAdapters: {
           sourceId: () => `${hubModeGeneration}:${mode}:${settings.hubMode}`,
           extras: stats => ({
+            liveRateContext: { hubMode: settings.hubMode, deviceId: settings.deviceId, clients: settings.clients },
             historyRevision: JSON.stringify([settings.historyEnabled !== false, stats?.deviceHistoryRevision || statsHistoryRevision(stats)]),
             subscriptions: effectiveSubscriptions(),
             subscriptionContext: { date: subscriptionDisplay.todayString(), rates: { ...(effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {})) } },
