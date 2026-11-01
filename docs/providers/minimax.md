@@ -23,7 +23,7 @@ Code points use `CREDITS`, never CNY/USD. Membership's `op_credit_summary.total_
 
 ## Wallet and Spend
 
-API wallet balance comes from `/account/query_balance.available_amount`, including usable vouchers, rather than `cash_balance` alone. Zero and negative balances are valid; a missing or nonnumeric amount is unavailable. Balance and cash Spend measure different things and must not be subtracted to reconstruct transactions.
+API wallet balance comes from `/account/query_balance.available_amount`, including usable vouchers, rather than `cash_balance` alone. It is one `credits` window in CNY for China or USD for International. Zero and negative balances are valid; a missing or nonnumeric amount is unavailable. Balance and cash Spend measure different things and must not be subtracted to reconstruct transactions.
 
 | Spend field | Server source |
 | --- | --- |
@@ -54,7 +54,7 @@ Code's `accountLabel` names the product, never the subscription. The plan cell u
 
 Matched current-subscription names may be retained in memory for one hour per credential namespace, region, account group, login epoch and combo ID. Ordinary token rotation retains the name; missing epochs, failures and unmatched catalog responses establish no cache entry. Only the name is retained: personal workspace, membership, points, grant details, plan quotas and API Spend keep their existing collection cadence.
 
-The official generic label can be `M Plan` or `Token Plan` according to catalog availability; neither names a purchased tier. Settings retain the upstream `Token Plan` / `API billing` choices for the manual key. Display only quota authorized by that supplied key; the choice does not establish which product the account purchased. Without a token plan, membership `plan_name` may name the Code membership; it does not establish a Token Plan subscription. Do not derive the Token Plan tier from `personal_plan_type` (Free/Basic/Pro/Ultra), product enums, quota size, point totals or the `MiniMax Code` product label.
+The generic `Subscription` label does not identify a purchased tier. Settings retain the upstream `Token Plan` / `API billing` choices for the manual key. Display only quota authorized by that supplied key; the choice does not establish which product the account purchased. Without a token plan, membership `plan_name` may name the Code membership; it does not establish a Token Plan subscription. Do not derive the Token Plan tier from `personal_plan_type` (Free/Basic/Pro/Ultra), product enums, quota size, point totals or the `MiniMax Code` product label.
 
 Token Monitor reads the official credential and auth-state files without modifying them. It does not exchange refresh tokens, acquire or remove official locks, publish refresh fences, retry credential writes or clear the official login.
 
@@ -91,3 +91,7 @@ Credentials stay in main and calls use the injected transport. Key billing type 
 Reuse shared account rows, sign-in states, privacy handling, balance formatting, Spend tooltip and hide/show behavior. Settings keep the automatic connection explanation separate from the key form, like other automatic-plus-manual providers. Either healthy lane keeps the provider summary live, while the key form status reads only the local API lane. Both Code points and the API wallet use `metric: 'credits'` with their own units. The `billing` window kind does not make points currency.
 
 Membership alone supplies no points denominator. Optional active credit details may supply a bar only after complete pagination, valid grant/remaining/expiry fields, exclusion of expired grants, and reconciliation against that same membership total within half a hundredth of a point. Otherwise retain the fresh amount without a bar. Expiry is not spend, and independent grant expiries do not imply one reset date. API wallet meters remain shared display-only values, never wire percentages. Team collection and simultaneous managed Code logins are unsupported.
+
+## Verification
+
+Run `node --test tests/shared/minimaxLimits.test.js tests/electron/limitAccountPanels.test.js tests/electron/limitProviderWiring.test.js tests/electron/credentialCommands.test.js` for focused coverage and `npm run verify` for the full suite. Live quota or balance verification requires a key of the selected billing type in the selected region; Code checks require the official local login. Mock responses do not establish current endpoint or billing semantics.
