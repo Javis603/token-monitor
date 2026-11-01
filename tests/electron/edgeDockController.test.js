@@ -2477,6 +2477,43 @@ for (const side of ['left', 'right']) {
   });
 }
 
+for (const side of ['left', 'right']) {
+  test(`non-overlapping short cards switch directly without a travelling empty silhouette (${side})`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({ prefersReducedMotion: () => false, settings: { edgeDockSide: side } });
+    t.after(() => fixture.controller.stop());
+    fixture.controller.setCells(Array.from({ length: 8 }, (_, index) => ({ id: `short-${index}`, kind: 'provider' })));
+    const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+    const open = (cellIndex) => {
+      const layout = sentPayload(rail, 'rail').cellLayout;
+      fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+      fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+      fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: `short-${cellIndex}`, height: 160 });
+    };
+    const assertAtDestination = () => {
+      const payload = sentPayload(card, 'bubble');
+      assert.deepEqual(payload.shape.contentBounds, payload.shape.contentTarget, 'the outline must reveal the destination immediately');
+      const frames = card.webContents.messages.filter(m => m.channel === 'edgeDock:shapeFrame').length;
+      advance(32);
+      assert.equal(card.webContents.messages.filter(m => m.channel === 'edgeDock:shapeFrame').length, frames, 'no delayed spring frame can move the outline away again');
+    };
+    open(0);
+    advance(160);
+    const first = paintedCardBounds(card), canvas = card.getBounds();
+    open(7);
+    assertAtDestination();
+    assert.ok(paintedCardBounds(card).y >= first.y + first.height, 'the two short cards really are disjoint');
+    open(0);
+    assertAtDestination();
+    open(1);
+    advance(32);
+    assert.notDeepEqual(sentPayload(card, 'bubble').shape.contentBounds, sentPayload(card, 'bubble').shape.contentTarget, 'nearby cards still animate');
+    open(7);
+    assertAtDestination();
+    assert.deepEqual(card.getBounds(), canvas, 'the native canvas remains fixed');
+  });
+}
+
 test('detail card motion stops on dismissal and reduced motion switches directly', (t) => {
   const advance = mockDockClock(t);
   let reduced = false;

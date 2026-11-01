@@ -1916,7 +1916,7 @@ function clearCardSwitch() {
   motion.ghost.remove();
 }
 
-function captureCardSwitch(previous, sameCard) {
+function captureCardSwitch(previous, sameCard, next) {
   if (surface !== 'bubble' || !previous || prefersReducedMotion() || document.visibilityState === 'hidden') {
     clearCardSwitch();
     return null;
@@ -1928,6 +1928,13 @@ function captureCardSwitch(previous, sameCard) {
     cardSwitchMotion.elapsed = cardSwitchMotion.incoming.currentTime;
     cardSwitchMotion.incoming.cancel();
     return cardSwitchMotion;
+  }
+  const from = previous.getBoundingClientRect(), to = next.getBoundingClientRect();
+  if (from.bottom <= to.top || to.bottom <= from.top) {
+    // Distant readings switch directly with their silhouette, without fading
+    // in an otherwise empty destination or retaining an off-screen copy.
+    clearCardSwitch();
+    return null;
   }
   const ghost = previous.cloneNode(true);
   const opacity = getComputedStyle(previous).opacity;
@@ -1969,7 +1976,7 @@ function commitCard(card, cellId) {
     .filter(list => !list.closest('.edge-dock-session-family'));
   const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
   const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
-  const switchMotion = captureCardSwitch(previous, sameCard);
+  const switchMotion = captureCardSwitch(previous, sameCard, card);
   const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
   contentLayer.replaceChildren(card);
   overflowText.refresh();
