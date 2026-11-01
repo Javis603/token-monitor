@@ -647,6 +647,17 @@ test('leaving a day after a month boundary shows the new current month', t => {
   assert.equal(f.find('notch-week-title').textContent, 'November');
 });
 
+test('returning Home clears the hovered month after a page change', t => {
+  const f = panelFixture(t), data = payload();
+  data.panel.week.days[0].date = '2026-09-30';
+  f.panel.render(data);
+  f.all('notch-day')[0].fire('pointerenter');
+  f.panel.selectPage('limits');
+  f.panel.selectPage('home');
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+  assert.equal(f.find('notch-big').textContent, '100');
+});
+
 test('scrubbing freezes the historical reading and returning applies the latest push immediately', t => {
   const f = panelFixture(t); f.panel.render(payload());
   f.all('notch-day')[0].fire('pointerenter');

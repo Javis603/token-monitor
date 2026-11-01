@@ -398,6 +398,7 @@
       const previous = pageOrder.indexOf(view.page);
       settleRolls();
       stopTitleReading();
+      if (view.scrub || view.monthDate) pageKeys.delete('home');
       view.scrub = null; view.monthDate = null;
       releasePluginPage(view.page);
       view.page = page;
