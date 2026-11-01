@@ -3280,6 +3280,7 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   assert.equal(repaint.outgoing, outgoing, 'the outgoing content keeps its original deadline');
   assert.equal(originalIncoming.cancelled, true);
   outgoing.finish();
+  await Promise.resolve();
   const rapid = api.captureCardSwitch(node('0.4'), false, node());
   api.animateCardSwitch(node(), rapid);
   await Promise.resolve();
@@ -3302,6 +3303,23 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
     assert.equal(api.captureCardSwitch(next, false, node('1', 0, top)), null, 'disjoint readings switch without a fade, including touching bounds');
     assert.equal(ghosts.size, 0, 'a direct switch also clears any interrupted outgoing copy');
     assert.equal(pending.incoming.cancelled, true);
+  }
+  for (const elapsed of [0, 16, 40]) {
+    const incoming = node();
+    const pending = api.captureCardSwitch(first, false, incoming);
+    api.animateCardSwitch(incoming, pending);
+    pending.incoming.currentTime = elapsed;
+    pending.outgoing.currentTime = elapsed;
+    incoming.opacity = elapsed === 0 ? '0' : elapsed === 16 ? '0.0197225' : '0.129162';
+    const latest = node();
+    const interrupted = api.captureCardSwitch(incoming, false, latest);
+    assert.equal(interrupted, null, 'rapid selection displays the latest reading directly, without another fade from zero');
+    api.animateCardSwitch(latest, interrupted);
+    assert.equal(latest.animations.length, 0);
+    assert.equal(ghosts.size, 0, 'interruption leaves no outgoing copy');
+    assert.equal(pending.incoming.cancelled, true);
+    assert.equal(pending.outgoing.cancelled, true);
+    await Promise.resolve();
   }
 });
 
@@ -3393,9 +3411,8 @@ for (const kind of ['provider', 'stat']) {
       paint(plugin, { cellId: plugin.id, height: 180 });
       assert.equal(contentLayer.children[0], active, 'normal live-plugin retention still preserves its mount');
       assert.equal(mounts, mounted);
-      contentLayer.children[1].animations[0].finish();
       await Promise.resolve();
-      assert.deepEqual(contentLayer.children, [active], 'fade completion removes only the outgoing copy');
+      assert.deepEqual(contentLayer.children, [active], 'rapid selection cancels the outgoing copy without removing the live plugin');
     });
   }
 }

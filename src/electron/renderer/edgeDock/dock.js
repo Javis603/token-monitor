@@ -1929,6 +1929,12 @@ function captureCardSwitch(previous, sameCard, next) {
     cardSwitchMotion.incoming.cancel();
     return cardSwitchMotion;
   }
+  if (cardSwitchMotion) {
+    // A rapid selection takes over immediately. Restarting from the partially
+    // transparent incoming card would discard the still-visible outgoing one.
+    clearCardSwitch();
+    return null;
+  }
   const from = previous.getBoundingClientRect(), to = next.getBoundingClientRect();
   if (from.bottom <= to.top || to.bottom <= from.top) {
     // Distant readings switch directly with their silhouette, without fading
