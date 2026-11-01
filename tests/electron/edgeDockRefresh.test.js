@@ -244,6 +244,7 @@ test('forecast completion and session expiry re-project the manually refreshed d
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(context.dockStats, context.localStats, 'forecast completion must retain the manual snapshot');
   Object.assign(context, {
+    Date,
     edgeDockSessionExpiryTimer: null,
     edgeDockLastCells: [{ metric: 'sessions', runningExpiresAt: Date.now() + 1000 }],
     EDGE_DOCK_EXPIRY_FLOOR_MS: 20,
