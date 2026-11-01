@@ -1335,6 +1335,31 @@ function startDragFrames() {
   requestAnimationFrame(frame);
 }
 
+let cardMotionId = null;
+let cardFrameLoop = false;
+
+function pumpCardFrames() {
+  if (cardMotionId === null) {
+    cardFrameLoop = false;
+    return;
+  }
+  bridge.cardFrame(cardMotionId);
+  if (cardMotionId !== null) requestAnimationFrame(pumpCardFrames);
+}
+
+bridge.onCardMotion?.(({ motionId, active }) => {
+  if (state.payload?.platform !== 'win32') return;
+  if (!active) {
+    if (cardMotionId === motionId) cardMotionId = null;
+    return;
+  }
+  cardMotionId = motionId;
+  if (!cardFrameLoop) {
+    cardFrameLoop = true;
+    requestAnimationFrame(pumpCardFrames);
+  }
+});
+
 bridge.onDragEnded?.(({ gestureId }) => {
   if (gesture?.id !== gestureId) return;
   gesture = null;

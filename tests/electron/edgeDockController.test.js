@@ -2114,6 +2114,77 @@ test('Windows drag frames follow the native cursor between polls and reject stal
   assert.equal(fixture.placements.length, 1);
 });
 
+test('Windows card switches follow renderer frames and reject stale motion ids', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+  };
+  const emitFrame = (win, motionId) => fixture.ipcMain.emit('edgeDock:cardFrame', { sender: win.webContents }, { motionId });
+
+  open(0, 'claude', 180);
+  advance(160);
+  open(2, 'cursor', 300);
+  const start = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+  assert.equal(start.active, true);
+  assert.equal(typeof start.motionId, 'number');
+  const paintedAtStart = paintedCardBounds(card);
+  t.mock.timers.tick(8);
+  emitFrame(card, start.motionId - 1);
+  emitFrame(rail, start.motionId);
+  assert.deepEqual(paintedCardBounds(card), paintedAtStart, 'stale or foreign renderer frames do nothing');
+  t.mock.timers.tick(8);
+  assert.notDeepEqual(paintedCardBounds(card), paintedAtStart, 'the fallback starts before the first renderer frame');
+  emitFrame(card, start.motionId);
+  const paintedByRenderer = paintedCardBounds(card);
+  assert.notDeepEqual(paintedByRenderer, paintedAtStart, 'a renderer frame also advances the spring');
+  t.mock.timers.tick(32);
+  assert.deepEqual(paintedCardBounds(card), paintedByRenderer, 'the fallback timer does not double-paint while frames arrive');
+  advance(80);
+  assert.notDeepEqual(paintedCardBounds(card), paintedByRenderer, 'the timer resumes only after renderer frames stop');
+
+  advance(720);
+  const stop = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+  assert.deepEqual(stop, { motionId: start.motionId, active: false });
+  const settled = paintedCardBounds(card);
+  t.mock.timers.tick(8);
+  emitFrame(card, start.motionId);
+  assert.deepEqual(paintedCardBounds(card), settled, 'frames queued after completion cannot restart the spring');
+});
+
+test('Windows card retargets do not restart the frame fallback grace period', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+  };
+
+  open(0, 'claude', 180);
+  advance(160);
+  open(2, 'cursor', 300);
+  const first = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+  t.mock.timers.tick(16);
+  fixture.ipcMain.emit('edgeDock:cardFrame', { sender: card.webContents }, { motionId: first.motionId });
+  t.mock.timers.tick(32);
+
+  open(0, 'claude', 180);
+  const retargeted = paintedCardBounds(card);
+  t.mock.timers.tick(16);
+  assert.deepEqual(paintedCardBounds(card), retargeted, 'the grace period still runs from the last renderer frame');
+  t.mock.timers.tick(16);
+  assert.notDeepEqual(paintedCardBounds(card), retargeted, 'fallback resumes without waiting another full grace period after retargeting');
+});
+
 test('native release finishes a held drag at its final location and acknowledges its gesture', (t) => {
   const advance = mockDockClock(t);
   let down = true;
@@ -2490,6 +2561,13 @@ for (const side of ['left', 'right']) {
       fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
       fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: `short-${cellIndex}`, height: 160 });
     };
+    const advanceCardFrames = (ms) => {
+      for (let elapsed = 0; elapsed < ms; elapsed += 16) {
+        t.mock.timers.tick(Math.min(16, ms - elapsed));
+        const motion = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+        if (motion?.active) fixture.ipcMain.emit('edgeDock:cardFrame', { sender: card.webContents }, { motionId: motion.motionId });
+      }
+    };
     open(0);
     advance(160);
     const canvas = card.getBounds();
@@ -2498,7 +2576,7 @@ for (const side of ['left', 'right']) {
       open(next);
       assert.deepEqual(paintedCardBounds(card), previous, 'every selection starts at the current painted position');
       const target = sentPayload(card, 'bubble').shape.contentTarget;
-      advance(48);
+      advanceCardFrames(48);
       assert.notEqual(paintedCardBounds(card).y, previous.y, 'distant cards also move instead of jumping');
       advance(720);
       assert.equal(paintedCardBounds(card).y, canvas.y + target.y);
@@ -2554,15 +2632,27 @@ test('rapid card reversal carries velocity instead of restarting from rest', (t)
     fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
     fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
   };
+  const advanceCardFrames = (ms) => {
+    for (let elapsed = 0; elapsed < ms; elapsed += 16) {
+      t.mock.timers.tick(Math.min(16, ms - elapsed));
+      const motion = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+      if (motion?.active) fixture.ipcMain.emit('edgeDock:cardFrame', { sender: card.webContents }, { motionId: motion.motionId });
+    }
+  };
   open(0, 'claude', 180);
   advance(160);
   open(2, 'cursor', 300);
-  advance(48);
+  advanceCardFrames(16);
+  assert.equal(paintedCardBounds(card).height, 182, 'the first spring sample uses the initial resting velocity');
+  advanceCardFrames(16);
+  assert.equal(paintedCardBounds(card).height, 188);
+  advanceCardFrames(16);
   const moving = paintedCardBounds(card).height;
+  assert.equal(moving, 195);
   open(0, 'claude', 180);
   assert.equal(paintedCardBounds(card).height, moving, 'retargeting has no position discontinuity');
-  advance(16);
-  assert.ok(paintedCardBounds(card).height > moving, 'existing growth decelerates before reversing direction');
+  advanceCardFrames(16);
+  assert.equal(paintedCardBounds(card).height, 202, 'the retarget uses the sampled velocity once instead of feeding it back');
   advance(720);
   assert.equal(paintedCardBounds(card).height, 180, 'the spring settles at the latest destination');
 });
