@@ -642,7 +642,7 @@ test('leaving a day after a month boundary shows the new current month', t => {
   const f = panelFixture(t);
   f.panel.render(payload());
   f.all('notch-day')[0].fire('pointerenter');
-  t.mock.timers.setTime(Date.parse('2026-11-01T10:00:00Z'));
+  t.mock.timers.setTime(new Date(2026, 10, 1, 12).getTime());
   f.find('notch-week-bars').fire('pointerleave');
   assert.equal(f.find('notch-week-title').textContent, 'November');
 });
