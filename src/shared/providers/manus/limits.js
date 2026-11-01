@@ -62,22 +62,6 @@ function parseManusCredits(body) {
   const interval = typeof body.refreshInterval === 'string' ? body.refreshInterval.trim().toLowerCase() : '';
 
   const windows = [];
-  const monthlyLimit = creditCount(body, 'proMonthlyCredits');
-  const monthlyRemaining = creditCount(body, 'periodicCredits');
-  if (monthlyLimit > 0) {
-    const remaining = Math.max(0, Math.min(monthlyRemaining, monthlyLimit));
-    const used = monthlyLimit - remaining;
-    windows.push({
-      kind: 'billing',
-      label: 'Monthly credits',
-      used,
-      limit: monthlyLimit,
-      remaining,
-      usedPercent: used / monthlyLimit * 100,
-      remainingPercent: remaining / monthlyLimit * 100,
-      resetsAt: null
-    });
-  }
   // The refreshing allowance is the one that resets, so it gets the meter.
   // Without a positive ceiling there is no allowance to measure.
   if (maxRefresh > 0) {
@@ -95,6 +79,22 @@ function parseManusCredits(body) {
       remainingPercent: 100 - usedPercent,
       resetsAt: toIso(body.nextRefreshTime),
       ...(daily ? { windowMinutes: 24 * 60 } : {})
+    });
+  }
+  const monthlyLimit = creditCount(body, 'proMonthlyCredits');
+  const monthlyRemaining = creditCount(body, 'periodicCredits');
+  if (monthlyLimit > 0) {
+    const remaining = Math.max(0, Math.min(monthlyRemaining, monthlyLimit));
+    const used = monthlyLimit - remaining;
+    windows.push({
+      kind: 'billing',
+      label: 'Monthly credits',
+      used,
+      limit: monthlyLimit,
+      remaining,
+      usedPercent: used / monthlyLimit * 100,
+      remainingPercent: remaining / monthlyLimit * 100,
+      resetsAt: null
     });
   }
   // The spendable total (refreshing plus non-refreshing credits) is a points

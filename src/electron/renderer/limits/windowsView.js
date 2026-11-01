@@ -1666,11 +1666,11 @@
       // points balance without a ceiling. The default branch renders neither a
       // daily window nor a credits balance.
       const balanceWindow = (provider.windows || []).find(isCreditsWindow) || null;
-      const refreshNodes = (provider.windows || [])
+      const quotaNodes = (provider.windows || [])
         .filter((window) => window !== balanceWindow && (window.kind === 'daily' || window.kind === 'billing'))
         .map((window) => limitWindowNode(providerWindowLabel(provider, window), window, color, 0.78));
-      for (const node of refreshNodes) node.classList.add('limit-window-wide');
-      windows.append(...refreshNodes);
+      if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+      windows.append(...quotaNodes);
       const balanceValue = balanceWindow ? creditsBalanceValue(provider, balanceWindow) : '';
       if (balanceValue) {
         const label = balanceWindow.label || 'Credits';

@@ -411,6 +411,7 @@ test('Manus daily refresh credits and credits balance render in both display mod
     assert.equal(card.children.length, 2);
     const [daily, balance] = card.children;
     assert.equal(daily.children[0].children[0].textContent, 'Daily credits');
+    assert.ok(daily.classList.contains('limit-window-wide'));
     assert.match(card.text, showLimitUsed ? /40% used/ : /60% left/);
     assert.ok(daily.find('limit-reset').text, 'the refresh allowance shows when it resets');
     assert.equal(balance.dataset.usageItem, 'credits');
@@ -426,17 +427,19 @@ test('Manus daily refresh credits and credits balance render in both display mod
   assert.equal(JSON.stringify(provider), before);
 });
 
-test('Manus monthly, periodic refresh and balance rows remain independently visible', () => {
+test('Manus refresh and monthly quotas share a row before balance and hide independently', () => {
   const { windows } = parseManusCredits({ ...manusCreditsFixture, refreshInterval: 'weekly', proMonthlyCredits: 1000, periodicCredits: 650 });
   const provider = normalizeLimitProvider({ provider: 'manus', status: 'ok', windows });
   for (const showLimitUsed of [false, true]) {
     const view = dockView({ showLimitUsed });
     const card = view.renderProviderWindows(provider, '#429DFA');
     assert.equal(card.children.length, 3);
-    assert.match(card.children[0].text, /Monthly credits/);
-    assert.match(card.children[0].text, showLimitUsed ? /35% used/ : /65% left/);
-    assert.equal(Boolean(card.children[0].find('limit-reset')?.text), false);
-    assert.match(card.children[1].text, /Refresh credits/);
+    assert.match(card.children[0].text, /Refresh credits/);
+    assert.match(card.children[1].text, /Monthly credits/);
+    assert.match(card.children[1].text, showLimitUsed ? /35% used/ : /65% left/);
+    assert.equal(Boolean(card.children[1].find('limit-reset')?.text), false);
+    assert.equal(card.children[0].classList.contains('limit-window-wide'), false);
+    assert.equal(card.children[1].classList.contains('limit-window-wide'), false);
     const items = view.limitProviderUsageItems([provider]);
     assert.equal(items.length, 3);
     for (const item of items) {
