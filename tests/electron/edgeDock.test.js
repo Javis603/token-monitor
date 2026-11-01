@@ -3295,3 +3295,98 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   document.visibilityState = 'hidden';
   assert.equal(api.captureCardSwitch(first, false), null, 'reopening starts without stale outgoing content');
 });
+
+for (const kind of ['provider', 'stat']) {
+  for (const acknowledgeImmediately of [false, true]) {
+    test(`switching plugin → ${kind} → plugin during the fade commits the live card (${acknowledgeImmediately ? 'placed' : 'awaiting size'})`, async () => {
+      const { Element } = require('../helpers/notchPanel');
+      class CardElement extends Element {
+        querySelectorAll(selector) {
+          const exclude = selector.match(/^(.*):not\(\[([^=]+)="([^"]+)"\]\)$/);
+          if (exclude) return super.querySelectorAll(exclude[1]).filter(node => node.getAttribute(exclude[2]) !== exclude[3]);
+          return super.querySelectorAll(selector);
+        }
+        cloneNode(deep) {
+          const clone = new CardElement(this.tagName, this.ownerDocument);
+          clone.className = this.className;
+          Object.assign(clone.dataset, this.dataset);
+          Object.assign(clone.attributes, this.attributes);
+          Object.assign(clone.style, this.style);
+          clone.value = this.value;
+          if (deep) clone.append(...this.children.map(child => child.cloneNode(true)));
+          return clone;
+        }
+        getBoundingClientRect() { return { height: this.classList.contains('edge-dock-card-plugin') ? 180 : 240 }; }
+        animate() {
+          let finish, cancel;
+          const finished = new Promise((resolve, reject) => { finish = resolve; cancel = () => reject(new Error('cancelled')); });
+          finished.catch(() => {});
+          const animation = { finished, finish, cancel, currentTime: 0 };
+          (this.animations ||= []).push(animation);
+          return animation;
+        }
+      }
+      const document = { visibilityState: 'visible', createElement: tag => new CardElement(tag, document) };
+      const el = (tag, className, text) => {
+        const node = document.createElement(tag); node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+      const root = el('main', ''), contentLayer = el('div', ''), stagingLayer = el('div', '');
+      root.append(contentLayer, stagingLayer);
+      const reports = [];
+      let mounts = 0;
+      const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+      const source = dock.slice(dock.indexOf('let cardSwitchMotion ='), dock.indexOf('const bubbleSizeObserver ='));
+      const pluginSource = dock.slice(dock.indexOf('function pluginCard('), dock.indexOf('const codexAccountControl ='));
+      const { renderBubble } = Function('deps', `
+        const { document, el, root, contentLayer, stagingLayer, bridge, pluginHost } = deps;
+        const surface = 'bubble', CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list', BREAKDOWN_VISIBLE_ROWS = 6;
+        const prefersReducedMotion = () => false, getComputedStyle = () => ({ opacity: '1' });
+        const overflowText = { refresh() {}, preserveReading() {} };
+        const cardResetAnimator = { capture() {}, animate() {} };
+        const pluginContent = null, bubbleSizeObserver = null;
+        let observedPluginCard = null;
+        const providerCard = cell => el('section', 'edge-dock-card', cell.id), statCard = providerCard;
+        ${pluginSource}
+        ${source}
+        return { renderBubble };
+      `)({ document, el, root, contentLayer, stagingLayer,
+        bridge: { reportBubbleSize: (id, height) => reports.push({ id, height }) },
+        pluginHost: { state: () => ({ title: 'Plugin reading' }), mount: body => { mounts++; body.textContent = 'Live plugin content'; } }
+      });
+      const plugin = { id: 'plugin', kind: 'plugin', ref: 'fixture/view' };
+      const other = { id: kind, kind };
+      const paint = (cell, placed) => renderBubble({ side: 'right', cell, placed });
+      paint(plugin, { cellId: plugin.id, height: 180 });
+      const original = contentLayer.children[0];
+      paint(other, { cellId: other.id, height: 240 });
+      const ghost = contentLayer.children[1];
+      assert.equal(ghost.dataset.cellId, plugin.id);
+      assert.equal(ghost.classList.contains('edge-dock-card-plugin'), true);
+      assert.equal(ghost.getAttribute('aria-hidden'), 'true');
+      assert.equal(ghost.inert, true);
+
+      paint(plugin, acknowledgeImmediately ? { cellId: plugin.id, height: 180 } : { cellId: other.id, height: 240 });
+      if (!acknowledgeImmediately) {
+        assert.equal(contentLayer.children[0].dataset.cellId, other.id, 'keep the placed card until size confirmation');
+        assert.equal(stagingLayer.children[0]?.dataset.cellId, plugin.id, 'build a real plugin card, not retain its fading clone');
+        assert.deepEqual(reports, [{ id: plugin.id, height: 180 }]);
+        paint(plugin, { cellId: plugin.id, height: 180 });
+      }
+      const active = contentLayer.children[0];
+      assert.equal(active.dataset.cellId, plugin.id, 'the selected plugin must replace the provider/stat card');
+      assert.notEqual(active, ghost);
+      assert.notEqual(active, original);
+      assert.equal(active.inert, undefined);
+      assert.ok(active.textContent.includes('Live plugin content'));
+      const mounted = mounts;
+      paint(plugin, { cellId: plugin.id, height: 180 });
+      assert.equal(contentLayer.children[0], active, 'normal live-plugin retention still preserves its mount');
+      assert.equal(mounts, mounted);
+      contentLayer.children[1].animations[0].finish();
+      await Promise.resolve();
+      assert.deepEqual(contentLayer.children, [active], 'fade completion removes only the outgoing copy');
+    });
+  }
+}

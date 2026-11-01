@@ -2044,7 +2044,7 @@ function renderBubble(payload) {
     stagingLayer.replaceChildren();
     return;
   }
-  const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin');
+  const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin:not([aria-hidden="true"])');
   if (retained && retained.dataset.pluginRef === cell.ref && retained.dataset.cellId === cell.id) {
     retained.style.transform = contentTransform;
     const view = pluginHost?.state('edgeDock', cell.ref);
