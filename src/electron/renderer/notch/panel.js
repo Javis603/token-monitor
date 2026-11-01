@@ -640,13 +640,8 @@
       body.append(sessionHeading(row, 'notch-now-title'));
       const meta = el('div', 'notch-now-meta');
       if (running) meta.append(wave());
-      const label = el('span');
-      if (!running && live) label.append(text('', `${t('notch.waiting')} · `));
-      label.append(text('', clientLabel(row.client)));
-      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
       const time = running ? duration(row.startedAt, nowMs) : !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
-      if (time) label.append(text('', ` · ${time}`));
-      meta.append(label);
+      meta.append(sessionMetaLabel(row, { lead: !running && live ? t('notch.waiting') : '', time }));
       const extra = (running ? waitingCount : Math.max(0, waitingCount - 1));
       if (extra > 0) meta.append(text('notch-waiting-note', t('notch.moreWaiting', { count: extra })));
       body.append(meta);
@@ -1084,6 +1079,21 @@
       });
     }
 
+    // The heading mark already names the tool. This line does not wrap, so
+    // repeating the name pushes the model, effort and time off the row.
+    function sessionMetaLabel(row, { lead = '', time = '' } = {}) {
+      const label = el('span');
+      const parts = [];
+      if (lead) parts.push(text('', lead));
+      if (sessionRows.sessionModelMetadataLabel(row)) parts.push(sessionModelMetadata(row));
+      if (time) parts.push(text('', time));
+      parts.forEach((part, index) => {
+        if (index) label.append(text('', ' · '));
+        label.append(part);
+      });
+      return label;
+    }
+
     function activeRow(row, stateName, nowMs) {
       const node = el('div', `notch-active is-${stateName}`);
       node.setAttribute('role', 'listitem');
@@ -1093,12 +1103,7 @@
       const meta = el('div', 'notch-active-meta');
       if (stateName === 'running') meta.append(wave());
       else meta.append(text('notch-pill', t('notch.waiting')));
-      const label = el('span');
-      label.append(text('', clientLabel(row.client)));
-      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
-      const time = duration(row.startedAt, nowMs);
-      if (time) label.append(text('', ` · ${time}`));
-      meta.append(label);
+      meta.append(sessionMetaLabel(row, { time: duration(row.startedAt, nowMs) }));
       body.append(meta);
       const value = el('div', 'notch-active-value');
       value.append(sessionTokens(row, 'notch-active-tokens', false));

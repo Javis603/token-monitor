@@ -438,12 +438,16 @@ for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and
   ];
   f.panel.render(data);
   const home = f.find('notch-now-meta');
-  assert.ok(home.textContent.includes(`${client === 'codex' ? 'Codex' : 'Claude Code'} · 2 models · high`));
+  const toolName = client === 'codex' ? 'Codex' : 'Claude Code';
+  assert.ok(home.textContent.includes('2 models · high'));
+  assert.equal(home.textContent.includes(toolName), false, 'the heading icon already names the tool');
   assert.equal(home.querySelector('.session-models').tooltipEntries.length, 2, 'model breakdown retains its tooltip');
   f.panel.selectPage('sessions');
   const page = f.find('notch-page-sessions');
   const active = page.querySelectorAll('.notch-active');
   assert.deepEqual(active.map(node => node.querySelector('.session-reasoning-effort').textContent), ['high', 'xhigh']);
+  assert.equal(active[0].querySelector('.notch-active-meta').textContent.includes(toolName), false);
+  assert.ok(active[0].querySelector('.notch-active-meta').textContent.includes('2 models · high'));
   const recent = page.querySelectorAll('.notch-recent');
   assert.deepEqual(recent.map(node => node.querySelector('.session-reasoning-effort')?.textContent), ['medium', 'high', undefined]);
   assert.equal(recent[0].querySelector('.notch-session-context'), null);
@@ -586,7 +590,8 @@ test('quiet sessions use concise age metadata and explicit empty-state copy', t 
   data.cells[1].sessions = [{ key: 'codex:old', client: 'codex', sessionId: 'old', title: 'Previous task',
     models: { 'model-a': 1 }, totalTokens: 1, lastUsedAt: new Date(Date.now() - 660000).toISOString() }];
   f.panel.render(data);
-  assert.match(f.find('notch-now-meta').textContent, /^Codex · model-a · /);
+  assert.match(f.find('notch-now-meta').textContent, /^model-a · /);
+  assert.doesNotMatch(f.find('notch-now-meta').textContent, /Codex/);
   assert.doesNotMatch(f.find('notch-now-meta').textContent, /Last active/);
   assert.equal(f.find('notch-now-caption'), null);
   assert.match(f.find('notch-now-tokens').attributes['aria-label'], /last session.*1/i);
