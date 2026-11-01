@@ -371,7 +371,7 @@ function minimaxCodeAuthFiles(deps = {}) {
 function minimaxCodeAuthState(session, deps = {}) {
   let state;
   try { state = JSON.parse((deps.readFileSync || fs.readFileSync)(session.statePath, 'utf8')); }
-  catch (error) { throw errorWithStatus(error.code === 'ENOENT' ? 'notConfigured' : 'unavailable', 'MiniMax Code auth state unavailable'); }
+  catch (_) { throw errorWithStatus('unavailable', 'MiniMax Code auth state unavailable'); }
   if (![1, 2].includes(state?.schemaVersion) || state.storeKind !== 'file' || state.clientId !== 'mcode-public' || state.audience !== 'agent-backend'
     || !Array.isArray(state.scopes) || !state.scopes.includes('agent.default')
     || !((state.buildEnv === undefined && state.region === undefined)

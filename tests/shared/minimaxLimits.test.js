@@ -863,7 +863,7 @@ test('MiniMax Code reads the live record and quota without launching the CLI', a
 
 test('MiniMax Code rejects missing, logged-out or inconsistent official auth state before requesting quota', async () => {
   for (const [state, status, record] of [
-    [false, 'notConfigured'],
+    [false, 'unavailable'],
     [{ status: 'anonymous' }, 'unauthorized'],
     [{ status: 'authorizing' }, 'unavailable'],
     [{ generation: 8 }, 'unavailable'],
@@ -1147,7 +1147,7 @@ test('MiniMax Code parses modern plan percentages, unlimited quota and video cou
   }
 });
 
-test('MiniMax Code partial refresh updates credits and retains visibly stale plan windows', async (t) => {
+test('MiniMax Code retains quota through plan and auth-state outages', async (t) => {
   const fixture = writeCodeAuthFixture();
   let outage = false;
   let timestamp = CODE_NOW;
@@ -1180,6 +1180,19 @@ test('MiniMax Code partial refresh updates credits and retains visibly stale pla
   assert.equal(partial.windows.find(window => window.metric === 'credits').remaining, 4000);
   assert.deepEqual(partial.windows.filter(window => window.metric !== 'credits'), first.windows.filter(window => window.metric !== 'credits'));
   assert.equal('invalidateCachedWindowLabels' in partial, false);
+  fs.unlinkSync(fixture.statePath);
+  timestamp += 60000;
+  await runtime.refresh({ provider: 'minimax' }, 'manual');
+  const missingState = runtime.getSnapshot().providers[0];
+  assert.equal(missingState.status, 'unavailable');
+  assert.equal(missingState.accountKey, partial.accountKey);
+  assert.deepEqual(missingState.windows, partial.windows);
+  writeCodeLease(fixture, codeDesktopRecord(), { status: 'anonymous' });
+  timestamp += 60000;
+  await runtime.refresh({ provider: 'minimax' }, 'manual');
+  const loggedOut = runtime.getSnapshot().providers[0];
+  assert.equal(loggedOut.status, 'unauthorized');
+  assert.deepEqual(loggedOut.windows, []);
 });
 
 test('MiniMax Code does not turn a cancelled plan or name request into a successful credits reading', async () => {
