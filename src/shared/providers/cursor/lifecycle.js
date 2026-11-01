@@ -71,4 +71,4 @@ function withCursorLifecycle(operation, { signal } = {}) {
   });
 }
 
-module.exports = { withCursorLifecycle };
+module.exports = { withCursorLifecycle, cursorLifecycleBusy: () => cursorLifecycleActive };

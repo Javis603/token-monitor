@@ -3573,19 +3573,27 @@ test('smart collection coalesces watch events into one targeted interval tick', 
       onUpdate: (_summary, reason) => updates.push(reason)
     });
 
-    await waitForCondition(() => updates.length === 1);
+    // Cursor publishes its offline cache independently of the local startup.
+    // Settle both the initial and post-sync cache reads before measuring the
+    // activity batch; each complete Cursor read scans three periods.
+    await waitForCondition(() => calls.filter(args => args[args.indexOf('--client') + 1] === 'cursor').length === 6);
+    await new Promise(resolve => setImmediate(resolve));
+    await handle.whenIdle();
+    const startupCalls = calls.length;
+    const startupUpdates = updates.length;
     watchHandler('change', path.join(tmp, '.claude', 'projects', 'one.jsonl'));
     watchHandler('change', path.join(tmp, '.claude', 'projects', 'two.jsonl'));
     watchHandler('change', path.join(tmp, '.claude', 'projects', 'three.jsonl'));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(calls.length, 3, 'watch events never scan immediately in smart mode');
+    assert.equal(calls.length, startupCalls, 'watch events never scan immediately in smart mode');
 
-    await waitForCondition(() => updates.length === 2);
-    assert.equal(calls.length, 5, 'one targeted tick acknowledges the event batch');
-    assert.equal(calls[3][calls[3].indexOf('--client') + 1], 'claude,cursor');
-    assert.equal(calls[4][calls[4].indexOf('--client') + 1], 'claude,codex,cursor');
+    await waitForCondition(() => updates.length === startupUpdates + 1);
+    const activityCalls = calls.slice(startupCalls);
+    assert.equal(activityCalls.length, 2, 'one targeted tick acknowledges the event batch');
+    assert.equal(activityCalls[0][activityCalls[0].indexOf('--client') + 1], 'claude');
+    assert.equal(activityCalls[1][activityCalls[1].indexOf('--client') + 1], 'claude,codex');
     await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(calls.length, 5, 'the acknowledged batch does not repeat');
+    assert.equal(calls.length, startupCalls + 2, 'the acknowledged batch does not repeat');
   } finally {
     if (handle) handle.stop();
     cursorAuth.runCursorSync = originalRunCursorSync;
@@ -3734,17 +3742,22 @@ test('smart collection retries a failed activity scan on the next interval', asy
       onError: (error) => errors.push(error.message)
     });
 
-    await waitForCondition(() => updates.length === 1);
+    await waitForCondition(() => calls.filter(args => args[args.indexOf('--client') + 1] === 'cursor').length === 6);
+    await new Promise(resolve => setImmediate(resolve));
+    await handle.whenIdle();
+    const startupCalls = calls.length;
+    const startupUpdates = updates.length;
     failNext = true;
     watchHandler('change', path.join(tmp, '.claude', 'projects', 'session.jsonl'));
     await waitForCondition(() => errors.length === 1);
-    await waitForCondition(() => updates.length === 2);
-    assert.equal(calls.length, 5, 'failed and successful activity attempts each spawn once');
-    assert.equal(calls[3][calls[3].indexOf('--client') + 1], 'claude,cursor');
+    await waitForCondition(() => updates.length === startupUpdates + 1);
+    const activityCalls = calls.slice(startupCalls);
+    assert.equal(activityCalls.length, 2, 'failed and successful activity attempts each spawn once');
+    assert.equal(activityCalls[0][activityCalls[0].indexOf('--client') + 1], 'claude');
     assert.equal(
-      calls[4][calls[4].indexOf('--client') + 1],
-      'claude,codex,cursor',
-      'a failed targeted scan retries all clients instead of acknowledging partial data'
+      activityCalls[1][activityCalls[1].indexOf('--client') + 1],
+      'claude,codex',
+      'a failed targeted scan retries all local clients instead of acknowledging partial data'
     );
   } finally {
     if (handle) handle.stop();
