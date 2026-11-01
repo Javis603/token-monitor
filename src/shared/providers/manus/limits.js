@@ -71,7 +71,7 @@ function parseManusCredits(body) {
     const daily = interval === 'daily';
     windows.push({
       kind: daily ? 'daily' : 'billing',
-      label: daily ? 'Daily credits' : 'Refresh credits',
+      label: daily ? 'Daily' : 'Refresh',
       used,
       limit: maxRefresh,
       remaining,
@@ -88,7 +88,7 @@ function parseManusCredits(body) {
     const used = monthlyLimit - remaining;
     windows.push({
       kind: 'billing',
-      label: 'Monthly credits',
+      label: 'Monthly',
       used,
       limit: monthlyLimit,
       remaining,

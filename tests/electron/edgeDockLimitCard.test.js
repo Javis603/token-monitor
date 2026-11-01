@@ -410,7 +410,7 @@ test('Manus daily refresh credits and credits balance render in both display mod
     const card = view.renderProviderWindows(provider, '#429DFA');
     assert.equal(card.children.length, 2);
     const [daily, balance] = card.children;
-    assert.equal(daily.children[0].children[0].textContent, 'Daily credits');
+    assert.equal(daily.children[0].children[0].textContent, 'Daily');
     assert.ok(daily.classList.contains('limit-window-wide'));
     assert.match(card.text, showLimitUsed ? /40% used/ : /60% left/);
     assert.ok(daily.find('limit-reset').text, 'the refresh allowance shows when it resets');
@@ -434,8 +434,8 @@ test('Manus refresh and monthly quotas share a row before balance and hide indep
     const view = dockView({ showLimitUsed });
     const card = view.renderProviderWindows(provider, '#429DFA');
     assert.equal(card.children.length, 3);
-    assert.match(card.children[0].text, /Refresh credits/);
-    assert.match(card.children[1].text, /Monthly credits/);
+    assert.match(card.children[0].text, /Refresh/);
+    assert.match(card.children[1].text, /Monthly/);
     assert.match(card.children[1].text, showLimitUsed ? /35% used/ : /65% left/);
     assert.equal(Boolean(card.children[1].find('limit-reset')?.text), false);
     assert.equal(card.children[0].classList.contains('limit-window-wide'), false);

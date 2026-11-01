@@ -53,7 +53,7 @@
     trae: { api: 'Web' },
     alibaba: { web: 'Web' },
     stepfun: { web: 'Web' },
-    manus: { api: 'Session' },
+    manus: { api: 'API' },
     thirdparty: { api: 'API' }
   };
 

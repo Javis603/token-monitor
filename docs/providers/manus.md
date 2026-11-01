@@ -27,8 +27,8 @@ The response carries `totalCredits`, `freeCredits`, `periodicCredits`, `proMonth
 
 ## Windows
 
-- When `proMonthlyCredits > 0`, a separate billing "Monthly credits" meter shows the remaining `periodicCredits`, clamped to its ceiling. No renewal date is supplied or inferred.
-- When `maxRefreshCredits > 0`, the refreshing allowance becomes a quota window: `daily` (1440 minutes, "Daily credits") when `refreshInterval` is `daily`, otherwise a `billing` "Refresh credits" window. `remaining` is `refreshCredits` clamped to the ceiling, `used` is the rest, and `resetsAt` is `nextRefreshTime`.
+- When `proMonthlyCredits > 0`, a separate billing "Monthly" meter shows the remaining `periodicCredits`, clamped to its ceiling. No renewal date is supplied or inferred.
+- When `maxRefreshCredits > 0`, the refreshing allowance becomes a quota window: `daily` (1440 minutes, "Daily") when `refreshInterval` is `daily`, otherwise a `billing` "Refresh" window. `remaining` is `refreshCredits` clamped to the ceiling, `used` is the rest, and `resetsAt` is `nextRefreshTime`.
 - The spendable total is a `billing` window with `metric: 'credits'` and currency `CREDITS`, no meter and no reset, also reported as the provider balance. Manus credits are not money and never get a currency symbol.
 
 Connect's JSON mapping omits zero-valued fields, so an absent count is read as zero. A body carrying none of the credit fields, or a non-numeric count, is an unknown shape and reports unavailable rather than zeros.

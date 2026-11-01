@@ -121,7 +121,7 @@ test('Manus credits parse into a daily refresh meter and a credits balance', () 
   assert.equal(windows.length, 2);
   assert.deepEqual(windows[0], {
     kind: 'daily',
-    label: 'Daily credits',
+    label: 'Daily',
     used: 120,
     limit: 300,
     remaining: 180,
@@ -154,7 +154,7 @@ test('Manus credits treat omitted Connect fields as zero but reject unknown shap
 
   const monthly = parseManusCredits({ ...creditsFixture, refreshInterval: 'monthly' });
   assert.equal(monthly.windows[0].kind, 'billing');
-  assert.equal(monthly.windows[0].label, 'Refresh credits');
+  assert.equal(monthly.windows[0].label, 'Refresh');
   assert.equal(monthly.windows[0].windowMinutes, undefined);
 
   const over = parseManusCredits({ ...creditsFixture, refreshCredits: 500 });
@@ -257,7 +257,7 @@ test('Manus environment sessions work without a desktop app on every platform', 
 
 test('Manus monthly credits have a separate meter without an invented renewal date', () => {
   const { windows } = parseManusCredits({ ...creditsFixture, proMonthlyCredits: 1000, periodicCredits: 650 });
-  const monthly = windows.find((window) => window.label === 'Monthly credits');
+  const monthly = windows.find((window) => window.label === 'Monthly');
   assert.equal(monthly.limit, 1000);
   assert.equal(monthly.used, 350);
   assert.equal(monthly.remaining, 650);
