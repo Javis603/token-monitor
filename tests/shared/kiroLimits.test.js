@@ -22,6 +22,28 @@ const LEGACY_BASIC = [
 
 const V2_USAGE_SUMMARY = 'Plan: KIRO POWER | 1 usage breakdowns';
 
+// kiro-cli 2.37.0 `chat --no-interactive --agent-engine=v2 /usage`.
+const V2_ESTIMATED_USAGE = [
+  'Estimated Usage | resets on 2026-12-01 | KIRO STUDENT',
+  'Credits (16.27 of 1000 covered in plan), 1.6%',
+  'Manage your plan at https://app.kiro.dev/account/usage'
+].join('\n');
+
+// kiro-cli 2.37.0 with `chat.agentEngine = v3`: `/usage` reaches the model.
+const V3_MODEL_REPLY = [
+  "I can't show usage or quota details \u2014 that's not something I have access to.",
+  '',
+  "If you're looking for your Kiro usage or billing info, you can check it through the Kiro account settings or the usage view in the IDE panel. Want help with anything else?"
+].join('\n');
+
+const UNKNOWN_AGENT_ENGINE_FLAG = [
+  "error: unexpected argument '--agent-engine' found",
+  '',
+  "  tip: to pass '--agent-engine' as a value, use '-- --agent-engine'",
+  '',
+  'Usage: kiro-cli chat [OPTIONS] [INPUT]'
+].join('\n');
+
 function completedKiroProcess(output) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -317,7 +339,7 @@ test('runKiroUsageCli retries a v2 plan summary through the legacy v1 UI', async
 
   assert.equal(output, LEGACY_BASIC);
   assert.deepEqual(calls, [
-    ['chat', '--no-interactive', '/usage'],
+    ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
     ['chat', '--no-interactive', '--agent-engine=v1', '--legacy-ui', '/usage']
   ]);
 });
@@ -332,5 +354,52 @@ test('runKiroUsageCli keeps a complete default-engine report without retrying', 
   });
 
   assert.equal(output, LEGACY_BASIC);
-  assert.deepEqual(calls, [['chat', '--no-interactive', '/usage']]);
+  assert.deepEqual(calls, [['chat', '--no-interactive', '--agent-engine=v2', '/usage']]);
+});
+
+test('runKiroUsageCli pins the v2 engine so a v3 default never sends /usage to the model', async () => {
+  const calls = [];
+  const output = await runKiroUsageCli({
+    spawn: (_command, args) => {
+      calls.push(args);
+      // Model a CLI whose configured default is v3: only an explicit v2/v1 pin
+      // yields the slash-command report.
+      return completedKiroProcess(args.some((arg) => arg.startsWith('--agent-engine=')) ? V2_ESTIMATED_USAGE : V3_MODEL_REPLY);
+    }
+  });
+
+  assert.equal(output, V2_ESTIMATED_USAGE);
+  assert.deepEqual(calls, [['chat', '--no-interactive', '--agent-engine=v2', '/usage']]);
+});
+
+test('runKiroUsageCli falls back to the unpinned command on a CLI without --agent-engine', async () => {
+  const calls = [];
+  const output = await runKiroUsageCli({
+    spawn: (_command, args) => {
+      calls.push(args);
+      return completedKiroProcess(calls.length === 1 ? UNKNOWN_AGENT_ENGINE_FLAG : LEGACY_BASIC);
+    }
+  });
+
+  assert.equal(output, LEGACY_BASIC);
+  assert.deepEqual(calls, [
+    ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
+    ['chat', '--no-interactive', '/usage']
+  ]);
+});
+
+test('fetchKiroLimits reads the kiro-cli 2.37 v2 estimated-usage report', async () => {
+  const provider = await fetchKiroLimits({}, {
+    runKiroUsageCli: async () => V2_ESTIMATED_USAGE,
+    now: () => Date.parse('2026-11-01T12:00:00Z')
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.accountLabel, 'Student');
+  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows[0].label, 'Credits');
+  assert.equal(provider.windows[0].used, 16.27);
+  assert.equal(provider.windows[0].limit, 1000);
+  assert.ok(Math.abs(provider.windows[0].usedPercent - 1.627) < 1e-9);
+  assert.equal(provider.windows[0].resetsAt, new Date('2026-12-01T00:00:00').toISOString());
 });

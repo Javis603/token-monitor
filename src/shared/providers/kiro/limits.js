@@ -7,9 +7,12 @@
 // setup on startup and writes the report to stdout/stderr as ANSI text. Running
 // `kiro-cli chat --no-interactive /usage` with TERM set captures that output
 // without an interactive session (the same approach Win-CodexBar uses, which is
-// what keeps this portable to Windows — no PTY required). Kiro CLI 2.x's default
-// v2 engine can collapse that command to a plan-only summary, so we retry through
-// its legacy v1 UI only for that exact shape. We strip ANSI and regex-parse the
+// what keeps this portable to Windows — no PTY required). The engine is pinned
+// to v2: with `chat.agentEngine = v3` (set by Kiro's auto agent upgrade) the v3
+// engine forwards `/usage` to the model as a prompt, which returns prose instead
+// of the report and bills a model turn on every refresh. Kiro CLI 2.x's v2 engine
+// can collapse the command to a plan-only summary, so we retry through its legacy
+// v1 UI only for that exact shape. We strip ANSI and regex-parse the
 // report. Parsing mirrors CodexBar's KiroStatusProbe so the supported output
 // formats stay aligned with upstream.
 
@@ -323,8 +326,18 @@ function isKiroV2UsageSummary(text) {
     && !/\(\d+\.?\d*\s+of\s+\d+\s+covered/i.test(stripped);
 }
 
+// kiro-cli builds that predate engine selection reject `--agent-engine` with a
+// clap usage error; they only have the slash-command engine, so the unpinned
+// command is safe there.
+function isUnknownAgentEngineFlag(text) {
+  return /unexpected argument '--agent-engine/.test(stripAnsi(text));
+}
+
 async function runKiroUsageCli(deps = {}) {
-  const output = await runKiroUsageCliOnce(['chat', '--no-interactive', '/usage'], deps);
+  let output = await runKiroUsageCliOnce(['chat', '--no-interactive', '--agent-engine=v2', '/usage'], deps);
+  if (isUnknownAgentEngineFlag(output)) {
+    output = await runKiroUsageCliOnce(['chat', '--no-interactive', '/usage'], deps);
+  }
   if (!isKiroV2UsageSummary(output)) return output;
   return runKiroUsageCliOnce([
     'chat',
