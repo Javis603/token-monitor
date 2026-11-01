@@ -33,6 +33,8 @@ const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../
 const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
+const { parseManusCredits } = require('../../src/shared/providers/manus/limits');
+const manusCreditsFixture = require('../fixtures/manusAvailableCredits.json');
 const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
 
 const root = path.join(__dirname, '../..');
@@ -365,11 +367,14 @@ test('saved-only WorkBuddy subscription card does not appear on the sole live si
 });
 
 test('Notion rolling and monthly allowances render in both display modes and hide independently', () => {
+  // Reset text is omitted once resetsAt is past the grace window, so these
+  // instants stay ahead of the render clock instead of a calendar date.
+  const now = Date.now();
   const provider = normalizeLimitProvider({
     provider: 'notion', status: 'ok', source: 'web',
     windows: [
-      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: '2026-11-01T00:00:00Z' },
-      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: '2026-12-01T00:00:00Z' }
+      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: new Date(now + 6 * 60 * 60 * 1000).toISOString() },
+      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString() }
     ]
   });
   const before = JSON.stringify(provider);
@@ -393,6 +398,55 @@ test('Notion rolling and monthly allowances render in both display modes and hid
   const monthlyOnly = { ...provider, windows: [provider.windows[1]] };
   assert.ok(dockView().renderProviderWindows(monthlyOnly, '#888888').children[0].classNames.has('limit-window-wide'));
   assert.equal(JSON.stringify(provider), before);
+});
+
+test('Manus daily refresh credits and credits balance render in both display modes and hide independently', () => {
+  const nextRefreshTime = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+  const { windows } = parseManusCredits({ ...manusCreditsFixture, nextRefreshTime });
+  const provider = normalizeLimitProvider({ provider: 'manus', status: 'ok', source: 'api', windows, balance: { amount: 1180, currency: 'CREDITS' } });
+  const before = JSON.stringify(provider);
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#429DFA');
+    assert.equal(card.children.length, 2);
+    const [daily, balance] = card.children;
+    assert.equal(daily.children[0].children[0].textContent, 'Daily');
+    assert.ok(daily.classList.contains('limit-window-wide'));
+    assert.match(card.text, showLimitUsed ? /40% used/ : /60% left/);
+    assert.ok(daily.find('limit-reset').text, 'the refresh allowance shows when it resets');
+    assert.equal(balance.dataset.usageItem, 'credits');
+    assert.match(balance.text, /1,?180/);
+    assert.equal(card.text.includes('$'), false, 'Manus credits are not money');
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 2);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { manus: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#429DFA').children.length, 1);
+    }
+  }
+  assert.equal(JSON.stringify(provider), before);
+});
+
+test('Manus refresh and monthly quotas share a row before balance and hide independently', () => {
+  const { windows } = parseManusCredits({ ...manusCreditsFixture, refreshInterval: 'weekly', proMonthlyCredits: 1000, periodicCredits: 650 });
+  const provider = normalizeLimitProvider({ provider: 'manus', status: 'ok', windows });
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#429DFA');
+    assert.equal(card.children.length, 3);
+    assert.equal(card.children[0].children[0].children[0].textContent, 'Refresh');
+    assert.equal(card.children[1].children[0].children[0].textContent, 'Monthly');
+    assert.match(card.children[1].text, showLimitUsed ? /35% used/ : /65% left/);
+    assert.equal(Boolean(card.children[1].find('limit-reset')?.text), false);
+    assert.equal(card.children[0].classList.contains('limit-window-wide'), false);
+    assert.equal(card.children[1].classList.contains('limit-window-wide'), false);
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 3);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { manus: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#429DFA').children.length, 2);
+    }
+  }
 });
 
 test('MiniMax API balances reach the shared Limits and dock renderer in both currencies', async () => {

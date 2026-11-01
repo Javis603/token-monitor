@@ -127,3 +127,21 @@ test('sessions is the default in settings loading, patching and the collapsed-co
   f.syncDockControls();
   assert.equal(f.els.notchSummaryModeInput.value, 'sessions');
 });
+
+test('floating Edge Dock leaves both edge radios available for an explicit docking choice', () => {
+  for (const side of ['left', 'right']) {
+    const f = controls('darwin', false);
+    f.els.edgeDockSideInputs = ['left', 'right'].map(value => ({ value, checked: false }));
+    f.state.settings.edgeDockSide = side;
+    for (const floatingX of [0, 0.5, 1]) {
+      f.state.settings.edgeDockFloatingX = floatingX;
+      f.syncDockControls();
+      assert.ok(f.els.edgeDockSideInputs.every(input => !input.checked), 'either radio can change while floating');
+    }
+    for (const floatingX of [null, undefined]) {
+      f.state.settings.edgeDockFloatingX = floatingX;
+      f.syncDockControls();
+      assert.equal(f.els.edgeDockSideInputs.find(input => input.checked).value, side);
+    }
+  }
+});
