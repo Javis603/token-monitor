@@ -1056,7 +1056,9 @@
       const title = text(className, sessionTitle(row));
       title.dataset.overflowKey = JSON.stringify(['notch', view.page, row.key || `${row.client}:${row.sessionId}`]);
       overflowText.bind(title);
-      heading.append(mark(row.client), title);
+      // The mark is a painted mask. Say the tool beside it, out of the visual
+      // line, the same way the Edge Dock does. The meta row has no room for it.
+      heading.append(mark(row.client), text('sr-only', `${clientLabel(row.client)} `), title);
       return heading;
     }
 

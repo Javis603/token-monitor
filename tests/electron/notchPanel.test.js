@@ -441,12 +441,14 @@ for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and
   const toolName = client === 'codex' ? 'Codex' : 'Claude Code';
   assert.ok(home.textContent.includes('2 models · high'));
   assert.equal(home.textContent.includes(toolName), false, 'the heading icon already names the tool');
+  assert.equal(f.find('notch-now').querySelector('.notch-session-heading').querySelector('.sr-only').textContent, `${toolName} `);
   assert.equal(home.querySelector('.session-models').tooltipEntries.length, 2, 'model breakdown retains its tooltip');
   f.panel.selectPage('sessions');
   const page = f.find('notch-page-sessions');
   const active = page.querySelectorAll('.notch-active');
   assert.deepEqual(active.map(node => node.querySelector('.session-reasoning-effort').textContent), ['high', 'xhigh']);
   assert.equal(active[0].querySelector('.notch-active-meta').textContent.includes(toolName), false);
+  assert.equal(active[0].querySelector('.notch-session-heading').querySelector('.sr-only').textContent, `${toolName} `);
   assert.ok(active[0].querySelector('.notch-active-meta').textContent.includes('2 models · high'));
   const recent = page.querySelectorAll('.notch-recent');
   assert.deepEqual(recent.map(node => node.querySelector('.session-reasoning-effort')?.textContent), ['medium', 'high', undefined]);
