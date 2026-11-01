@@ -474,7 +474,7 @@ test('a self-sync cancelled by usage replacement is neutral and returns its allo
 
     const updates = [];
     replacement = startCollector({ ...options, onUpdate: (summary) => updates.push(summary) });
-    await waitFor(() => updates.length === 1);
+    await waitFor(() => updates.length > 0 && syncCalls === 2 && selfSyncThrottle.syncStatus('cursor').state === 'ok');
 
     assert.equal(syncCalls, 2, 'the cancelled claim does not block the replacement sync');
     assert.equal(selfSyncThrottle.sourceFloorMs('cursor'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);

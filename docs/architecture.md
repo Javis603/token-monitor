@@ -69,6 +69,8 @@ Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, 
 
 The collector owns one `selfSyncThrottle.js` instance shared by provider self-syncs and supplies their binary resolver. It resets with the collector; cancellation during replacement is not a provider failure. `forceSelfSync`, `sourceSelfSync` and `todayOnly` are independent: forcing a sync must not downgrade a full scan. Keep the floor and catch-up deadline centralized. Source details belong in [Cursor](providers/cursor.md#self-sync-and-sessions) and [Antigravity](providers/antigravity.md#source-roots-and-self-sync).
 
+The continuous collector imports Cursor in a separate lifecycle lane and merges a completed offline snapshot into local scans. Its completion reconciles all periods and History; local watch ticks must not wait for the network import or read a cache being replaced. One-shot collection retains its awaited self-sync behavior.
+
 ### WSL
 
 `src/shared/wslUsage.js` scans only running distros, serially, after checking the Windows WSL registry key; never start a stopped distro or invoke the install-prompt stub on a machine without WSL. Merge before deriving client status. WSL refreshes only on full ticks and remains frozen in `wslAnchor` between them, preserving exact native deltas; host watching does not extend into WSL.

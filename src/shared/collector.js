@@ -27,7 +27,6 @@ const {
   applyPeriodDelta,
   emptyPeriod,
   extractUsageBundleFromTokscale,
-  extractUsageFromTokscale,
   mergePeriods,
   normalizeClientName,
   UNATTRIBUTED_USAGE_CLIENT
@@ -36,7 +35,7 @@ const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: pro
 const { createWatcherHost } = require('./watcherHost');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
-const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
+const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories, mergeDailyMaps } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
@@ -47,6 +46,7 @@ const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
+const { createCursorUsageSource } = require('./providers/cursor/usageSource');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const {
   applySessionMetadata,
@@ -540,9 +540,9 @@ function applyKnownCapabilityFilter(clientFilter, identity) {
   return supported ? filterSupportedClients(clientFilter, supported) : clientFilter;
 }
 
-function runCursorAwareTokscale(clientFilter, operation, signal) {
+function runCursorAwareTokscale(clientFilter, operation, signal, lifecycleHeld = false) {
   const includesCursor = String(clientFilter || '').split(',').includes('cursor');
-  return includesCursor ? withCursorLifecycle(operation, { signal }) : operation();
+  return includesCursor && !lifecycleHeld ? withCursorLifecycle(operation, { signal }) : operation();
 }
 
 function runTokscale({
@@ -554,7 +554,9 @@ function runTokscale({
   onTerminationUnconfirmed,
   customScanPaths,
   homeDir,
-  workspaces = true
+  workspaces = true,
+  offline = false,
+  cursorLifecycleHeld = false
 }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
@@ -573,7 +575,7 @@ function runTokscale({
   const groupBy = () => (workspaces && workspaceGroupBySupported(command.identity)
     ? TOKSCALE_WORKSPACE_GROUP_BY
     : TOKSCALE_SESSION_GROUP_BY);
-  const runArgs = (filter, grouping) => ['--json', '--client', filter, '--group-by', grouping, ...flags];
+  const runArgs = (filter, grouping) => [...(offline ? ['--offline'] : []), '--json', '--client', filter, '--group-by', grouping, ...flags];
   const subprocessOptions = {
     operation: 'tokscale scan',
     terminationOptions,
@@ -606,17 +608,17 @@ function runTokscale({
         onTerminationUnconfirmed
       })
     ))
-  ), signal);
+  ), signal, cursorLifecycleHeld || (offline && flags.includes('--home')));
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, offline = false, cursorLifecycleHeld = false }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ contributions: [] });
-  const runArgs = (filter) => ['graph', '--client', filter, '--no-spinner'];
+  const runArgs = (filter) => [...(offline ? ['--offline'] : []), 'graph', '--client', filter, '--no-spinner'];
   const subprocessOptions = {
     operation: 'tokscale graph',
     terminationOptions,
@@ -631,7 +633,7 @@ function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOption
         onTerminationUnconfirmed
       })
     ))
-  ), signal);
+  ), signal, cursorLifecycleHeld);
 }
 
 function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
@@ -813,6 +815,11 @@ async function collectHistoryOnce(options) {
   };
   const clients = normalizeClientsCsv(options.clients);
   if (options.historyEnabled === false) return null;
+  if (options.cursorGraphFailed) {
+    failureCode = 'history-graph-failed';
+    reportStatus(false);
+    return null;
+  }
   let liveHistory = null;
   const rawGraphs = [];
   const runGraph = options.runGraph || runTokscaleGraph;
@@ -833,6 +840,17 @@ async function collectHistoryOnce(options) {
       failureCode = 'history-graph-failed';
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
     }
+  }
+  if (options.cursorGraph && !failureCode) {
+    rawGraphs.push(options.cursorGraph);
+    const graphs = rawGraphs.map(parseGraphResult);
+    // Merge uncapped parsed days, then derive lifetime statistics once. Each
+    // graph's component summary remains scoped to its own client rows. Cursor
+    // events have no activity spans; preserve the native graph's time metrics.
+    liveHistory = normalizeHistory({
+      contributions: mergeDailyMaps(graphs.map(graph => ({ daily: graph.contributions }))),
+      ...(graphs[0]?.timeMetrics ? { timeMetrics: graphs[0].timeMetrics } : {})
+    }, { capDays, todayKey });
   }
   // Keep the supplemental ledger out of generic history retention too: a
   // retained maximum would survive when a native rollout replaces this thread.
@@ -898,6 +916,20 @@ async function collectUsageOnce(options) {
     }
   };
   const projectsEnabled = options.projectsEnabled !== false;
+  const cursorSnapshot = options.cursorSnapshot;
+  const withoutCursor = (value) => normalizeClientsCsv(value).split(',').filter(client => client !== 'cursor').join(',');
+  const cursorReports = new WeakMap();
+  const extractScanBundle = json => {
+    const cursor = cursorReports.get(json);
+    if (!cursor) return extractUsageBundleFromTokscale(json);
+    const native = extractUsageBundleFromTokscale(json.native);
+    const remote = extractUsageBundleFromTokscale(cursor);
+    const byClient = { ...native.byClient };
+    for (const [client, period] of Object.entries(remote.byClient)) {
+      byClient[client] = byClient[client] ? mergePeriods(byClient[client], period) : period;
+    }
+    return { period: mergePeriods(native.period, remote.period), byClient };
+  };
   const runTokscaleScan = options.runTokscale || ((input) => runTokscale({
     ...input,
     workspaces: projectsEnabled,
@@ -907,9 +939,17 @@ async function collectUsageOnce(options) {
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
   const runTokscaleFn = async (input) => {
-    const json = await runTokscaleScan(input);
+    const includesCursor = cursorSnapshot && !input.flags.includes('--home')
+      && normalizeClientsCsv(input.clients).split(',').includes('cursor');
+    const scanInput = includesCursor ? { ...input, clients: withoutCursor(input.clients) }
+      : cursorSnapshot && input.flags.includes('--home') ? { ...input, offline: true } : input;
+    const json = scanInput.clients ? await runTokscaleScan(scanInput) : { entries: [] };
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
-    return json;
+    if (!includesCursor) return json;
+    const period = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
+    const combined = { native: json };
+    cursorReports.set(combined, cursorSnapshot[period]);
+    return combined;
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
@@ -990,7 +1030,8 @@ async function collectUsageOnce(options) {
     try { options.onProgress({ ...periods, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
-    const syncClients = targetRequested ? targetClientsCsv : normalizedClients;
+    const selectedSyncClients = targetRequested ? targetClientsCsv : normalizedClients;
+    const syncClients = cursorSnapshot ? withoutCursor(selectedSyncClients) : selectedSyncClients;
     await maybeSyncCursor(syncClients, options.logger, {
       minIntervalMs: selfSyncThrottle.minIntervalForTick(options, 'cursor'),
       explicit: selfSyncSelected(options.forceSelfSync, 'cursor'),
@@ -1022,7 +1063,7 @@ async function collectUsageOnce(options) {
       if (scanClients) {
         const todayJson = await runTokscaleFn({ clients: scanClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
         throwIfAborted(options.signal);
-        const bundle = extractUsageBundleFromTokscale(todayJson);
+        const bundle = extractScanBundle(todayJson);
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
         const attributedClients = Object.keys(freshPartitions).filter((client) => client !== UNATTRIBUTED_USAGE_CLIENT);
@@ -1047,7 +1088,7 @@ async function collectUsageOnce(options) {
           // anchor partition. Rebuild the complete today snapshot instead.
           const fullTodayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
           throwIfAborted(options.signal);
-          freshPartitions = extractUsageBundleFromTokscale(fullTodayJson).byClient;
+          freshPartitions = extractScanBundle(fullTodayJson).byClient;
           useTargetedPartitions = false;
         } else if (targetRequested) {
           // Empty tokscale output uses the unattributed fallback shape. Keep the
@@ -1073,19 +1114,19 @@ async function collectUsageOnce(options) {
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
-      const todayBundle = extractUsageBundleFromTokscale(todayJson);
+      const todayBundle = extractScanBundle(todayJson);
       today = todayBundle.period;
       todayPartitions = todayBundle.byClient;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
       emitProgress({ today });
       const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
-      month = extractUsageFromTokscale(monthJson);
+      month = extractScanBundle(monthJson).period;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       emitProgress({ today, month });
       const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
-      allTime = extractUsageFromTokscale(allTimeJson);
+      allTime = extractScanBundle(allTimeJson).period;
     }
     // Always decorate: session timestamps drive the recency sort regardless of the
     // Projects opt-out (issue #182). decorateLocalPeriods gates only project identity
@@ -1346,7 +1387,9 @@ async function collectUsageOnce(options) {
   } else if (options.includeHistory) {
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
-      clients: normalizedClients,
+      clients: cursorSnapshot ? withoutCursor(normalizedClients) : normalizedClients,
+      cursorGraph: cursorSnapshot?.graph,
+      cursorGraphFailed: cursorSnapshot?.graphFailed,
       codexLocalGraph: codexLocalView?.graph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
@@ -2686,7 +2729,59 @@ function startCollector(options) {
       sourceSelfSync
     })
   });
+  const restoreCursorSource = kind => sourceSyncQueue.restore(['cursor'], kind);
   const selfSyncedClients = normalizeClientsCsv(clients).split(',').filter((client) => SELF_SYNCED_CLIENTS.has(client));
+  const nonCursorSyncSelection = selection => selection === true
+    ? SELF_SYNC_KINDS.filter(client => client !== 'cursor')
+    : Array.isArray(selection) ? selection.filter(client => client !== 'cursor') : selection;
+  let publishedCursorRevision = trackedClients.has('cursor') ? -1 : 0;
+  const cursorSource = trackedClients.has('cursor') ? createCursorUsageSource({
+    signal: runtimeSignal,
+    context: { day: localTodayKey(collectionDate(options.now)), pricing: pricingRevision },
+    sync: (syncOptions) => maybeSyncCursor('cursor', log, {
+      ...syncOptions,
+      terminationOptions: options.subprocessTerminationOptions,
+      onTerminationUnconfirmed: () => emitDiagnosticEvent({ subsystem: 'collector', code: 'subprocess-termination-unconfirmed', operation: 'cursor-sync' })
+    }),
+    async read(context, signal) {
+      const scan = options.runTokscale || runTokscale;
+      const graph = options.runGraph || runTokscaleGraph;
+      const input = {
+        clients: 'cursor', commandTimeoutMs, signal,
+        customScanPaths: options.customScanPaths, homeDir: options.homeDir,
+        workspaces: options.projectsEnabled !== false,
+        terminationOptions: options.subprocessTerminationOptions,
+        offline: true, cursorLifecycleHeld: true
+      };
+      const next = {};
+      // Keep all three windows and History on one cache/account generation.
+      for (const [period, flags] of [['today', ['--today']], ['month', ['--month']], ['allTime', ['--since', allTimeSince]]]) {
+        next[period] = await scan({ ...input, flags });
+        throwIfAborted(signal);
+        applyTokscaleSessionMetadata(next[period], { resolveProjects: options.projectsEnabled !== false });
+      }
+      next.graph = null;
+      if (historyEnabled) {
+        try {
+          next.graph = await graph({ ...input, commandTimeoutMs: options.historyTimeoutMs || HISTORY_TIMEOUT_MS });
+        } catch (error) {
+          throwIfAborted(signal);
+          next.graphFailed = true;
+          log(`cursor history scan failed: ${error.message}`);
+        }
+      }
+      throwIfAborted(signal);
+      // The next local tick also fences pricing changes during publication.
+      if (localTodayKey(collectionDate(options.now)) !== context.day || pricingFingerprint(options) !== context.pricing) {
+        throw new Error('Cursor snapshot inputs changed during cache scan');
+      }
+      return next;
+    },
+    onChange() {
+      if (!stopped) void runTick('cursor-cache', { forceHistory: true, cursorSnapshotRefresh: true });
+    },
+    onError: error => log(`cursor cache scan failed: ${error.message}`)
+  }) : null;
   let activityRevision = 0;
   let collectedActivityRevision = 0;
   let initialCollectionComplete = false;
@@ -2873,7 +2968,7 @@ function startCollector(options) {
     // is not due yet, so fixed ranges never wait for the next scheduled graph.
     const localDayRolledOver = Boolean(anchor?.dateKey && anchor.dateKey !== todayKey);
     if (localDayRolledOver && historyEnabled) rolloverHistoryPending = true;
-    const includeHistory = shouldIncludeHistory(
+    let includeHistory = shouldIncludeHistory(
       collectedAt.getTime(),
       lastHistoryAt,
       historyIntervalMs,
@@ -2887,18 +2982,33 @@ function startCollector(options) {
     let historyScanSucceeded = !includeHistory;
     const requestedTargetClients = [...new Set(normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean))];
     const targetAnchorReady = canTargetTodayPartitions(anchor, requestedTargetClients);
-    const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
+    let anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
     const refreshWsl = Boolean(tickOptions.refreshWsl);
     const hadPreviousFailure = tickHadFailure;
     lastTickAttemptAt = tickStartedAt;
     lastTickReasonCode = tickReasonCode(reason);
     lastTickScope = tickScopeCode(tickOptions);
     try {
+      // Coalesced ticks and pricing replays also enter here directly. Fence
+      // every scan, not just the initiating runTick, against an older snapshot.
+      const cursorContext = { day: todayKey, pricing: tickPricingRevision };
+      if (cursorSource && !cursorSource.contextMatches(cursorContext)) await cursorSource.ensureContext(cursorContext);
+      const tickCursorSnapshot = cursorSource?.getSnapshot();
+      if (tickCursorSnapshot && tickCursorSnapshot.revision !== publishedCursorRevision) {
+        anchored = false;
+        includeHistory = historyEnabled;
+        historyScanSucceeded = !includeHistory;
+        if (includeHistory) {
+          lastHistoryAt = collectedAt.getTime();
+          lastHistoryAttemptAt = tickStartedAt;
+        }
+      }
       let captured = null;
       let tickLocalView = null;
       let catpawSourceChangeObserved = false;
       const summary = await collectUsageOnce({
         ...options,
+        ...(tickCursorSnapshot ? { cursorSnapshot: tickCursorSnapshot } : {}),
         codexDotsVisible,
         signal: runtimeSignal,
         clients,
@@ -3132,6 +3242,7 @@ function startCollector(options) {
         if (titlesChanged || projectsChanged || sourcesChanged || identitiesUpgraded) persistAnchor(tickPricingRevision, tickSourceRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
+      if (tickCursorSnapshot) publishedCursorRevision = tickCursorSnapshot.revision;
       publishedCodexVisibilityRevision = visibilityRevision;
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
         ? transformedSummary
@@ -3242,6 +3353,40 @@ function startCollector(options) {
       }
       if (stopped || runtimeSignal.aborted) return false;
     }
+    if (cursorSource) {
+      const context = { day: localTodayKey(collectionDate(options.now)), pricing: pricingFingerprint(options) };
+      try {
+        // Context/explicit waits are outside tickInFlight. Other tools keep
+        // collecting while a requested Cursor refresh owns its separate lane.
+        if (!cursorSource.contextMatches(context)) await cursorSource.ensureContext(context);
+        const targets = normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean);
+        const cursorSelected = !tickOptions.todayOnly || targets.length === 0 || targets.includes('cursor')
+          || selfSyncSelected(tickOptions.forceSelfSync, 'cursor') || selfSyncSelected(tickOptions.sourceSelfSync, 'cursor');
+        if (!tickOptions.cursorSnapshotRefresh && cursorSelected) {
+          const cursorAcknowledged = selfSyncSelected(tickOptions.forceSelfSync, 'cursor')
+            ? sourceSyncQueue.acknowledge(['cursor']) : [];
+          tickOptions = { ...tickOptions, acknowledgedSourceSync: mergeSelfSyncSelection(tickOptions.acknowledgedSourceSync, cursorAcknowledged) };
+          const consumed = mergeSelfSyncSelection(tickOptions.sourceSelfSync, tickOptions.acknowledgedSourceSync) || [];
+          const refresh = cursorSource.refresh({
+            context,
+            force: selfSyncSelected(tickOptions.forceSelfSync, 'cursor'),
+            source: selfSyncSelected(tickOptions.sourceSelfSync, 'cursor'),
+            minIntervalMs: () => selfSyncThrottle.minIntervalForTick(tickOptions, 'cursor'),
+            timeoutMs: options.selfSyncTimeoutMs,
+            ...(selfSyncSelected(consumed, 'cursor') ? { onFailure: restoreCursorSource } : {})
+          });
+          if (selfSyncSelected(tickOptions.forceSelfSync, 'cursor') && await refresh === false) return false;
+        }
+      } catch (error) {
+        if (stopped) return false;
+        if (onError) onError(error, reason); else log(`collector Cursor refresh failed: ${error.message}`);
+        return false;
+      }
+      if (stopped) return false;
+      if (cursorSource.getSnapshot().revision !== publishedCursorRevision) {
+        tickOptions = { ...tickOptions, todayOnly: false, targetClients: [], forceHistory: true };
+      }
+    }
     const tickActivityRevision = Number.isFinite(tickOptions.activityRevision)
       ? tickOptions.activityRevision
       : activityRevision;
@@ -3284,7 +3429,8 @@ function startCollector(options) {
     try {
       const initialResult = await performWithInputReplay(reason, {
         ...effectiveTickOptions,
-        acknowledgedSourceSync: sourceSyncQueue.acknowledge(effectiveTickOptions.forceSelfSync)
+        acknowledgedSourceSync: mergeSelfSyncSelection(effectiveTickOptions.acknowledgedSourceSync,
+          sourceSyncQueue.acknowledge(cursorSource ? nonCursorSyncSelection(effectiveTickOptions.forceSelfSync) : effectiveTickOptions.forceSelfSync))
       });
       while (tickPending && !stopped) {
         const forceHistory = pendingForceHistory;
@@ -3306,7 +3452,7 @@ function startCollector(options) {
         pendingTodayOnly = null;
         pendingTargetClients = null;
         pendingActivityRevision = null;
-        const acknowledgedSourceSync = sourceSyncQueue.acknowledge(forceSelfSync);
+        const acknowledgedSourceSync = sourceSyncQueue.acknowledge(cursorSource ? nonCursorSyncSelection(forceSelfSync) : forceSelfSync);
         const result = await performWithInputReplay('coalesced', {
           forceHistory,
           rolloverHistoryRetry,
@@ -3678,6 +3824,7 @@ function startCollector(options) {
     stopped = true;
     runtimeAbortController.abort(new Error('collector stopped'));
     codexLocalSource?.stop();
+    cursorSource?.stop();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     activityScheduler?.stop();
@@ -3694,7 +3841,8 @@ function startCollector(options) {
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
     const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
-    return usageIdle.then(() => activityUpdate).then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
+    return usageIdle.then(() => activityUpdate).then(() => stopped
+      ? Promise.all([codexLocalSource?.whenIdle(), cursorSource?.whenIdle()]) : undefined);
   }
 
   function getDiagnostics() {
@@ -3773,6 +3921,16 @@ function startCollector(options) {
     const normalized = String(clientId || '').trim().toLowerCase();
     if (!normalized || !trackedClients.has(normalized)) {
       throw new TypeError(`Unsupported targeted usage client: ${normalized || '(empty)'}`);
+    }
+    if (normalized === 'cursor' && cursorSource && refreshOptions.forceSync !== true) {
+      return cursorSource.readCache({ day: localTodayKey(collectionDate(options.now)), pricing: pricingFingerprint(options) })
+        .then(() => runTick('client:cursor', { forceHistory: true, cursorSnapshotRefresh: true }))
+        .catch(error => {
+          if (!stopped) {
+            if (onError) onError(error, 'client:cursor'); else log(`Cursor cache refresh failed: ${error.message}`);
+          }
+          return false;
+        });
     }
     return runTick(`client:${normalized}`, {
       todayOnly: true,
