@@ -449,7 +449,7 @@ test('Home keeps both MiniMax readings named and in their own units', () => {
   const apiKey = `sha256:${'b'.repeat(64)}`;
   const providers = [
     { provider: 'minimax', source: 'oauth', status: 'ok', region: 'cn', accountKey: codeKey, accountLabel: 'MiniMax Code',
-      windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS' }] },
     { provider: 'minimax', source: 'api', status: 'ok', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey, accountLabel: 'Pay-as-you-go',
       windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
   ].map(normalizeLimitProvider);

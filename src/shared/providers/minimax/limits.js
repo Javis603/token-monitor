@@ -28,15 +28,6 @@ const MINIMAX_CODE_PLAN_REMAINS_URL_INTL = 'https://platform.minimax.io/backend/
 const MINIMAX_CODE_GROUP_STATE_KEY = 'minimax.code.group';
 const MINIMAX_CODE_PLAN_NAME_STATE_KEY = 'minimax.code.plan-name';
 const MINIMAX_CODE_PLAN_NAME_TTL_MS = 60 * 60_000;
-const MINIMAX_CODE_CREDIT_MAX_PAGES = 10;
-
-function minimaxPhysicalBoundMs(deps = {}) {
-  // Two Code attempts: workspace, membership, grant pages, name and plan.
-  // API runs concurrently; one peer confirmation follows both lanes.
-  const requests = 2 * (4 + MINIMAX_CODE_CREDIT_MAX_PAGES) + 1;
-  return requests * Number(deps.fetchTimeoutMs || 12000) + Number(deps.mcodeCliTimeoutMs || 12000) + 2000;
-}
-
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
 
@@ -465,40 +456,6 @@ async function minimaxCodeRequest(url, init, deps = {}) {
   return body;
 }
 
-// Only complete active grants reconciled with membership establish a denominator.
-async function minimaxCodeCreditMeter(membershipUrl, headers, credits, deps) {
-  const grants = [];
-  let total = null;
-  // More than 1,000 grants leaves the denominator unknown.
-  for (let page = 1; page <= MINIMAX_CODE_CREDIT_MAX_PAGES; page++) {
-    const url = new URL('/minimax-cloud/api/v1/credit/details', membershipUrl);
-    url.search = new URLSearchParams({ page_number: page, page_size: 100, include_expired: false }).toString();
-    const body = await minimaxCodeRequest(url.href, { headers }, deps);
-    if (!Array.isArray(body.details) || !Number.isSafeInteger(body.total_count) || body.total_count < 0 || body.total_count > 1000
-      || (total !== null && total !== body.total_count)) return null;
-    total = body.total_count;
-    grants.push(...body.details);
-    if (grants.length === total) break;
-    if (!body.details.length || grants.length > total) return null;
-  }
-  if (grants.length !== total) return null;
-  let limit = 0;
-  let remaining = 0;
-  const now = (deps.now || Date.now)();
-  for (const grant of grants) {
-    const expires = parseNumberOrNull(grant?.expire_at_ms);
-    if (expires === null) return null;
-    if (expires <= now) continue;
-    const amount = minimaxCodeCredits(grant.granted_amount);
-    const left = minimaxCodeCredits(grant.remaining_amount);
-    if (![1, 2].includes(grant.credit_type) || amount === null || left === null || left > amount) return null;
-    limit += amount;
-    remaining += left;
-  }
-  if (!(limit > 0) || !Number.isFinite(limit) || Math.abs(remaining - credits) > 0.005) return null;
-  return { used: Math.max(0, limit - credits), limit, showMeter: true };
-}
-
 // The membership total includes purchased and gifted points, not API cash.
 // A plan outage must not discard fresh credits.
 async function fetchMinimaxCodeLimits(deps = {}, context = {}) {
@@ -561,18 +518,9 @@ async function fetchMinimaxCodeLimits(deps = {}, context = {}) {
         state?.set(MINIMAX_CODE_GROUP_STATE_KEY, context.codeIdentity);
       }
       const windows = [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: credits,
-        currency: 'CREDITS', showMeter: false }];
+        currency: 'CREDITS' }];
       const platformUrl = region === 'cn' ? MINIMAX_CODE_PLAN_REMAINS_URL_CN : MINIMAX_CODE_PLAN_REMAINS_URL_INTL;
       const platformHeaders = { ...headers, 'X-Group-Id': groupId };
-      if (groupId) {
-        try {
-          const meter = await minimaxCodeCreditMeter(membershipUrl, headers, credits, deps);
-          if (meter) Object.assign(windows[0], meter);
-        } catch (error) {
-          if (deps.signal?.aborted) throw error;
-          // A missing denominator leaves the fresh amount visible without a bar.
-        }
-      }
       if (groupId && hasPlan) {
         if (/^\d+$/u.test(tierName)) {
           // A login epoch separates re-logins without invalidating ordinary token rotation.
@@ -858,7 +806,6 @@ module.exports = {
   MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
   isMinimaxTransportError,
-  minimaxPhysicalBoundMs,
   minimaxToken,
   minimaxBaseUrl,
   minimaxRegion,

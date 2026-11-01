@@ -812,7 +812,6 @@ function codeDeps(fixture, fetchImpl, extra = {}) {
   const requests = [];
   const transport = extra.fetch || (async (url, init) => {
     if (url.endsWith('/matrix/api/v1/user/get_user_extra_info')) return okResponse({ workspaces: [{ workspace_type: 0, workspace_id: 'personal-test' }] });
-    if (new URL(url).pathname === '/minimax-cloud/api/v1/credit/details') return okResponse({ details: [], total_count: 0 });
     return fetchImpl(url, init);
   });
   return {
@@ -851,7 +850,7 @@ test('MiniMax Code reads the live record and quota without launching the CLI', a
   }, { existsSync: () => true, execFile: () => assert.fail('a live token must not launch the CLI') }));
   assertFields(result, { status: 'ok', source: 'oauth', accountLabel: 'MiniMax Code' }, 'live Code reading');
   assertFields(result.windows.find(window => window.label === 'Credits'),
-    { remaining: 4624, currency: 'CREDITS', showMeter: false }, 'Code points');
+    { remaining: 4624, currency: 'CREDITS', usedPercent: null, limit: null }, 'Code points');
   assert.deepEqual(result.windows.map(window => [window.label, window.usedPercent]).sort(),
     [['5h', 30], ['Credits', null], ['Weekly', 10]]);
   assert.ok(result.accountKey);
@@ -1086,7 +1085,7 @@ test('MiniMax Code uses only a matched subscription name and tolerates metadata 
   }
 });
 
-test('MiniMax dispatch budget covers paginated Code quota and one delegated retry', async () => {
+test('MiniMax quota and delegated recovery fit the shared dispatch budget', async () => {
   const { providerPhysicalBoundMs } = require('../../src/shared/limits/collector');
   const fixture = writeCodeAuthFixture();
   let elapsed = 0;
@@ -1108,9 +1107,6 @@ test('MiniMax dispatch budget covers paginated Code quota and one delegated retr
       if (url.includes('/v1/token_plan/remains')) return okResponse({ base_resp: { status_code: 2062 } });
       if (url.endsWith('/user/get_user_extra_info')) return okResponse({ workspaces: [{ workspace_type: 0, workspace_id: 0 }] });
       if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ token_plan_tier: '123' }));
-      if (new URL(url).pathname.endsWith('/credit/details')) {
-        return okResponse({ details: Array(100).fill({}), total_count: 1000 });
-      }
       if (url === MINIMAX_CODE_PLAN_REMAINS_URL_CN) return renewals
         ? okResponse(planRemainsBody()) : { ok: false, status: 401 };
       return okResponse({}); // optional subscription name
@@ -1122,37 +1118,6 @@ test('MiniMax dispatch budget covers paginated Code quota and one delegated retr
   assert.equal(renewals, 1);
   assert.ok(providerPhysicalBoundMs('minimax', {}, deps) > elapsed,
     `the dispatch must allow its ${elapsed}ms sequential request path to finish`);
-});
-
-test('MiniMax Code meters a complete grant list and keeps the amount when the list is incomplete', async () => {
-  const fixture = writeCodeAuthFixture();
-  const grant = (amount, remaining) => ({ credit_type: 2, granted_amount: String(amount),
-    remaining_amount: String(remaining), consumed_amount: String(amount - remaining),
-    granted_at_ms: CODE_NOW - 1000, expire_at_ms: CODE_NOW + 86400000 });
-  const read = async (pages, credits) => {
-    let detailPages = 0;
-    const result = await readCode(codeDeps(fixture, null, { fetch: async (url) => {
-      const parsed = new URL(url);
-      if (url.endsWith('/user/get_user_extra_info')) return okResponse({ workspaces: [{ workspace_type: 0, workspace_id: 0 }] });
-      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ has_token_plan: false,
-        op_credit_summary: { total_remaining_amount: String(credits) } }));
-      if (parsed.pathname === '/minimax-cloud/api/v1/credit/details') {
-        detailPages++;
-        return okResponse(pages[detailPages - 1]);
-      }
-      assert.fail(`unexpected Code request: ${url}`);
-    } }));
-    assert.equal(result.status, 'ok');
-    assert.equal(detailPages, pages.length, 'only the pages needed to establish a denominator are requested');
-
-    return result.windows.find(window => window.label === 'Credits');
-  };
-  assertFields(await read([
-    { details: Array.from({ length: 100 }, () => grant(1, 0.5)), total_count: 101 },
-    { details: [grant(100, 25)], total_count: 101 }
-  ], 75), { remaining: 75, limit: 200, showMeter: true }, 'complete paginated grant list');
-  assertFields(await read([{ details: [grant(100, 50)], total_count: 2 }, { details: [], total_count: 2 }], 50),
-    { remaining: 50, limit: null, showMeter: false }, 'incomplete grant list');
 });
 
 test('MiniMax Code parses modern plan percentages, unlimited quota and video counts', async () => {

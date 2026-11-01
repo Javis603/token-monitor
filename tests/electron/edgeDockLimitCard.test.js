@@ -484,7 +484,7 @@ test('a confirmed MiniMax account stays one heading, and a saved cost stays reac
   const code = normalizeLimitProvider({
     provider: 'minimax', status: 'ok', source: 'oauth', region: 'cn', accountKey: codeKey,
     accountLabel: 'MiniMax Code', planLabel: '', updatedAt: '2026-10-14T04:00:00Z',
-    windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }]
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS' }]
   });
   const api = normalizeLimitProvider({
     provider: 'minimax', status: 'ok', source: 'api', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey,
@@ -529,7 +529,7 @@ test('MiniMax Code follows the shared quota, count and credits rows', () => {
       { kind: 'session', label: '5h', usedPercent: 30 },
       { kind: 'weekly', label: 'Weekly', usedPercent: 10 },
       { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17 },
-      { kind: 'billing', metric: 'credits', label: 'Credits', used: 1000, limit: 5624, remaining: 4624, currency: 'CREDITS' }
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS' }
     ]
   });
   const card = dockView().renderProviderWindows(provider, '#888888');
@@ -537,7 +537,10 @@ test('MiniMax Code follows the shared quota, count and credits rows', () => {
   assert.deepEqual(new Set(rows.keys()), new Set(['5h', 'Weekly', 'Video', 'Credits']));
   assert.equal(rows.get('Video').find('limit-detail').textContent, '17/20');
   const points = rows.get('Credits');
-  assert.ok(Math.abs(Number(points.find('limit-meter-fill').style['--bar-scale']) - 4624 / 5624) < 1e-12);
+  assert.equal(points.find('limit-meter-fill').style['--bar-scale'], '1');
+  assert.equal(provider.windows.at(-1).usedPercent, null, 'the display estimate stays off the wire');
+  const empty = { ...provider, windows: [{ ...provider.windows.at(-1), remaining: 0 }] };
+  assert.equal(dockView().renderProviderWindows(empty, '#888888').find('limit-meter-fill').style['--bar-scale'], '0');
   assert.match(points.text, /4624\.00/);
   assert.equal(points.text.includes('¥'), false);
   assert.equal(points.dataset.usageItem, 'credits');

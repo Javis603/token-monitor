@@ -138,7 +138,7 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
   const configured = Number(deps.providerPhysicalBounds?.[provider]);
   const base = Number.isFinite(configured) && configured > 0
     ? configured
-    : provider === 'minimax' ? minimaxLimits.minimaxPhysicalBoundMs(deps) : DEFAULT_PROVIDER_PHYSICAL_BOUND_MS;
+    : DEFAULT_PROVIDER_PHYSICAL_BOUND_MS;
   let jobs = 1;
   if (provider === 'claude') {
     jobs = claudeLimits.normalizeClaudeManagedAccounts(options.claudeManagedAccounts).filter((account) => account.enabled).length
