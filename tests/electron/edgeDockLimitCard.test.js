@@ -424,52 +424,33 @@ test('MiniMax API balances reach the shared Limits and dock renderer in both cur
   }
 });
 
-test('MiniMax groups Code and API lanes only with a verified peer key', () => {
+test('MiniMax Code and API rows share one provider heading', () => {
   const view = dockView();
   const codeKey = `sha256:${'a'.repeat(64)}`;
   const apiKey = `sha256:${'b'.repeat(64)}`;
   const rows = [
-    { provider: 'minimax', status: 'ok', source: 'oauth', region: 'cn', accountKey: codeKey, accountLabel: 'MiniMax Code', windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
-    { provider: 'minimax', status: 'ok', source: 'api', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey, accountLabel: 'Pay-as-you-go', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
+    { provider: 'minimax', status: 'ok', source: 'oauth', region: 'cn', accountKey: codeKey, accountLabel: 'MiniMax Code', updatedAt: '2026-10-14T04:00:00Z', windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS', showMeter: false }] },
+    { provider: 'minimax', status: 'ok', source: 'api', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey, accountLabel: 'Pay-as-you-go', updatedAt: '2026-10-14T04:00:00Z', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
   ].map(normalizeLimitProvider);
-  const laneFor = (group, account) => group.children.find(row => row.dataset.limitMotionKey === limitResetMotionApi.providerKey(account));
-  const group = view.renderLimitProviderGroup('minimax', 'Minimax', rows, '#000000');
-  const lanes = group.children;
-  assert.equal(lanes.length, 2);
-  assert.ok(lanes.every(lane => lane.find('limit-name-title')?.textContent.trim()));
-  assert.equal(laneFor(group, rows[0]).find('limit-plan').textContent, '');
+  const row = view.renderLimitProviderGroup('minimax', 'Minimax', rows, '#000000');
+  assert.equal(row.find('limit-account-list'), null);
+  assert.equal(row.find('limit-name-title').textContent.trim(), 'Minimax');
+  assert.equal(row.find('limit-plan').textContent, 'Pay-as-you-go');
+  assert.equal(row.find('limit-meta') !== null, true);
+  const labels = [...row.find('limit-windows').children].map((node) => node.children[0].children[0].textContent);
+  assert.deepEqual(labels, ['Credits', 'Balance']);
   assert.equal(view.limitProviderPlan(rows[0]), '', 'a product label is not a subscription');
   assert.equal(view.limitProviderPlan({ ...rows[0], planLabel: 'Starter' }), 'Starter');
-  assert.equal(laneFor(group, rows[1]).find('limit-plan').textContent, 'Pay-as-you-go');
-  const subscribed = view.renderLimitProviderGroup('minimax', 'Minimax', [
-    { ...rows[0], planLabel: 'Build' }, rows[1]
+  const unlinked = view.renderLimitProviderGroup('minimax', 'Minimax', [
+    rows[0], { ...rows[1], relatedAccountKey: undefined }
   ], '#000000');
-  assert.equal(laneFor(subscribed, rows[0]).find('limit-plan').textContent, 'Build');
-  assert.equal(laneFor(subscribed, rows[1]).find('limit-plan').textContent, 'Pay-as-you-go');
-  assert.equal(group.text.includes('Account 1'), false);
-  assert.equal(group.text.includes('Account 2'), false);
-
-  const codeScoped = view.renderLimitProviderGroup('minimax', 'Minimax', [
-    { ...rows[0], relatedAccountKey: rows[1].accountKey },
-    { ...rows[1], relatedAccountKey: undefined }
-  ], '#000000');
-  assert.doesNotMatch(codeScoped.text, /\bAccount [12]\b/);
-  for (const unlinkedRows of [
-    [rows[0], { ...rows[1], relatedAccountKey: undefined }],
-    [rows[0], { ...rows[1], region: 'en' }],
-    [rows[1], { ...rows[1], accountKey: `sha256:${'c'.repeat(64)}` }]
-  ]) {
-    const unlinked = view.renderLimitProviderGroup('minimax', 'Minimax', unlinkedRows, '#000000');
-    const accounts = unlinked.find('limit-account-list').children;
-    assert.equal(accounts.length, 2);
-    assert.equal(new Set(accounts.map(row => row.find('limit-name-title').textContent.trim())).size, 2);
-  }
+  assert.deepEqual(unlinked.find('limit-account-list').children.map(row => row.find('limit-name-title').textContent.trim()), ['Account 1', 'Account 2']);
 
   const refused = view.renderLimitProviderGroup('minimax', 'Minimax', [
     rows[0],
     { ...rows[1], status: 'unauthorized', windows: [] }
   ], '#000000');
-  assert.equal(laneFor(refused, rows[1]).find('limit-plan').textContent, 'Sign in again');
+  assert.equal(refused.find('limit-account-list').children[1].find('limit-plan').textContent, 'Sign in again');
 });
 
 test('MiniMax Code follows the shared quota, count and credits rows', () => {

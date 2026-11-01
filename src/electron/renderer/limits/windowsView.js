@@ -1794,7 +1794,7 @@
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
     volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers),
     mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers),
-    minimax: (provider, index, providers) => minimaxAccountTitle(provider, index, providers)
+    minimax: (provider, index, providers) => minimaxSameAccount(providers) ? '' : limitAccountDefaultTitle(provider, index, providers)
   };
 
   // Fallback names for `provider.source`, used when the provider has no override
@@ -2318,19 +2318,13 @@
       && label !== 'Zen';
   }
 
-  // Verified peer keys group sources without merging their billing identities.
-  function minimaxParallelLanes(providers) {
+  function minimaxSameAccount(providers) {
     if ((providers || []).length !== 2) return false;
     const api = providers.find(row => row.source === 'api');
     const code = providers.find(row => row.source === 'oauth');
-    return Boolean(api?.accountKey && code?.accountKey && api.region && api.region === code.region
+    return Boolean(api?.status === 'ok' && code?.status === 'ok'
+      && api.accountKey && code.accountKey && api.region && api.region === code.region
       && (api.relatedAccountKey === code.accountKey || code.relatedAccountKey === api.accountKey));
-  }
-
-  function minimaxAccountTitle(provider, index, providers) {
-    if (!minimaxParallelLanes(providers)) return limitAccountDefaultTitle(provider, index, providers);
-    const statusOnly = Boolean(provider?.status) && provider.status !== 'ok' && !provider.stale;
-    return statusOnly ? String(provider?.accountLabel || '').trim() : '';
   }
 
   function limitAccountDefaultTitle(provider, index, providerEntries = [provider]) {
@@ -2498,11 +2492,17 @@
   // passing a different set.
   function renderLimitProviderGroup(providerId, label, providers, color) {
     if (providerId === 'mimo') return renderMimoProviderGroup(label, providers, color);
-    if (providerId === 'minimax' && minimaxParallelLanes(providers)) {
-      const rows = document.createElement('div');
-      rows.className = 'limit-row-group';
-      rows.append(...providers.map(provider => renderLimitProviderSolo(providerId, label, provider, color)));
-      return rows;
+    if (providerId === 'minimax' && minimaxSameAccount(providers)) {
+      const api = providers.find((row) => row.source === 'api') || providers[1];
+      const newest = [...providers].sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0))[0];
+      return renderLimitProviderSolo(providerId, label, {
+        ...newest,
+        source: api.source,
+        accountLabel: api.accountLabel,
+        planLabel: api.planLabel,
+        balance: api.balance,
+        windows: providers.flatMap((row) => row.windows || [])
+      }, color);
     }
     const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
     const { markId, sharedFamily, forecastOnGroup } = policy(providers);

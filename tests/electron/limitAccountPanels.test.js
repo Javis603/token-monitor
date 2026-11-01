@@ -826,7 +826,7 @@ test('MiniMax key status reads only the API row and defaults to not configured w
   state.minimaxPendingCheckSince = Date.parse('2026-10-26T00:00:01.000Z');
   state.stats.limits.providers = state.stats.limits.providers.filter((row) => row.source !== 'api');
   render();
-  assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), false, 'a recheck must not reopen the paste form');
+  assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), true, 'a missing API reading reopens the paste form');
   state.minimaxPendingCheckSince = 0;
   state.stats.limits.providers.push({ provider: 'minimax', status: 'unauthorized', source: 'api', updatedAt: '2026-10-26T00:00:02.000Z' });
   render();
@@ -848,7 +848,7 @@ test('MiniMax key status reads only the API row and defaults to not configured w
   assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), false);
   gapState.stats.limits.providers = [{ provider: 'minimax', status: 'ok', source: 'oauth' }];
   renderGap();
-  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), false);
+  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), true);
   settled.add('minimax');
   renderGap();
   assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), true, 'a completed check without a reading must leave key repair available');

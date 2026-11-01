@@ -437,10 +437,14 @@ for (const { name, settings, expected } of [
   });
 }
 
-test('Home keeps both verified MiniMax readings named and in their own units', () => {
+test('Home keeps both MiniMax readings named and in their own units', () => {
   const presentation = require('../../src/electron/renderer/limits/providerPresentation');
   const settings = { homeLimitAccountCount: 12 };
-  const view = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({ presentation, settings: () => settings });
+  const view = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({
+    presentation,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => settings
+  });
   const codeKey = `sha256:${'a'.repeat(64)}`;
   const apiKey = `sha256:${'b'.repeat(64)}`;
   const providers = [
@@ -464,8 +468,7 @@ test('Home keeps both verified MiniMax readings named and in their own units', (
       homeOverviewApi: { homeLimitAccountsForProviders }
     });
     assert.equal(rows.length, 2);
-    assert.ok(rows.every(row => row.name.trim()));
-    assert.ok(rows.every(row => !/\bAccount [12]\b/.test(row.name)));
+    assert.deepEqual(rows.map(row => row.name), ['Minimax', 'Minimax']);
     assert.deepEqual(new Set(Array.from(rows, row => `${row.windows[0].remaining}:${row.windows[0].currency}`)),
       new Set(['4624:CREDITS', '14.97:CNY']));
   }

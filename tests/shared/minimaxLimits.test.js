@@ -713,11 +713,11 @@ test('MiniMax cash Spend is a server snapshot and a failed period leaves the bal
       assert.equal(target.host, 'api.minimaxi.com');
       assert.equal(headers.Authorization, 'Bearer mock-key');
       if (target.pathname === '/account/query_balance') return okResponse({ available_amount: '14.97', base_resp: { status_code: 0 } });
-      if (target.pathname === '/account/query_recharge') return okResponse({ cash_total_usage: '12.34', base_resp: { status_code: 0 } });
       assert.equal(target.pathname, '/account/amount');
       assert.equal(target.searchParams.get('aggregate'), 'true');
+      if (!target.searchParams.get('start_date')) return okResponse({ consume_cash_sum: '12.34', base_resp: { status_code: 0 } });
       if (target.searchParams.get('start_date') === '2026-02-23') return okResponse({ base_resp: { status_code: 1032 } });
-      return okResponse({ consume_cash_after_voucher_sum: '0.0000', base_resp: { status_code: 0 } });
+      return okResponse({ consume_cash_sum: '0.0000', base_resp: { status_code: 0 } });
     }
   });
   assert.equal(row.status, 'ok');

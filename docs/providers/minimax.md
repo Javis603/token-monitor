@@ -27,12 +27,12 @@ API wallet balance comes from `/account/query_balance.available_amount`, includi
 
 | Spend field | Server source |
 | --- | --- |
-| Today | `/account/amount`, dated `aggregate=true`, `consume_cash_after_voucher_sum` |
+| Today | `/account/amount`, dated `aggregate=true`, `consume_cash_sum` |
 | Week | The same aggregate over seven calendar dates including today |
 | Month | The same aggregate from the first calendar date of the month |
-| All time | `/account/query_recharge.cash_total_usage`, with the console's `page_num=1&page_size=10` |
+| All time | `/account/amount`, undated `aggregate=true`, `consume_cash_sum` |
 
-Periods use the console's calendar-date filters. Bills refresh daily and can lag the current wallet. All time means MiniMax's reported cumulative cash usage; the endpoint does not establish complete lifetime bill retention or real-time settlement. Cash Spend excludes voucher-funded consumption. Do not replace a valid post-voucher zero with `consume_cash_sum`, add voucher `used_amount`, substitute recharge totals, or sum rounded rows from a partial page. Voucher summary counters are not consumption totals for the selected issuance dates.
+Periods use the console's calendar-date filters. Bills refresh daily and can lag the current wallet. Every Spend figure is `consume_cash_sum`, the pre-voucher total. All time is that field with no dates. It is not `cash_total_usage` from the recharge query and not a sum of page rows. Voucher summary counters are not consumption totals for the selected issuance dates.
 
 These are replacement snapshots, not increments. There is no MiniMax local Spend ledger, balance-delta fallback or tracking baseline. Optional Spend reads use the same selected key, resolved region and injected transport as the valid balance. A failed, denied or malformed optional result leaves that figure unknown without invalidating the balance, changing region or selecting another credential. Save-time probes skip Spend enrichment.
 
@@ -72,11 +72,11 @@ Once a delegated command starts, quota cancellation does not interrupt its offic
 
 Code identity hashes the server's regional group. Manual API-key identity retains its existing key hash. Matching readings select one observation through shared aggregation; amounts are never added across devices. There is no automatic alias or stored-key migration. One current Code login and one API key can coexist locally; multiple managed Code logins are unsupported. Product labels do not replace subscription names in the plan cell.
 
-Only a verified pair suppresses numbered account titles and the account count. Its two observations retain separate standard provider headings, each with its own plan and update time; the relationship never promotes one lane’s plan to the other. For CN pay-as-you-go keys, query `/v1/token_plan/remains?GroupId=<Code personal group>` with the API key: a well-formed success or `2062` (authorized group without a subscription) confirms the display relationship. A `2062` response may have null quota rows; successful code `0` requires the quota array. `1004`, other errors and missing response structure leave it unknown without affecting either reading. Confirmation is reused for the exact key hash, regional Code identity and region; credential probes never perform this lookup. A later resource failure retains the confirmed relationship and region without making that resource healthy. Raw groups stay in main's runtime state. Optional `relatedAccountKey` carries only the verified peer's hash through authenticated stats/sync, is stripped from public stats, and never acts as an identity alias or subscription binding. Either lane may carry the evidence after an account-scoped refresh. New associations are not established in subscription-key mode or other regions; unverified pairs retain ordinary account titles. Normal OAuth rotation and billing-type changes do not change an already verified key/group relationship or require another confirmation.
+A GroupId confirmation that the API key belongs to the Code login is one account, so the limits card uses the shared single-account row: one heading, the Updated line in that heading, and both readings as windows. Without that confirmation the rows stay a several-account group. Amounts are not added. The peer hash is display-only and is stripped from public stats.
 
 An identified successful Code reading may retire the prior local OAuth identity through shared removal markers. A failed or unidentified read cannot prove logout or create a replacement account. Scoped work for a retired account must not adopt a newly logged-in account. Use the shared runtime's cancellation/revision checks; removal markers never enter the wire payload.
 
-Subscriptions and top-ups bind to an exact saved account key. A matching label/email or the sole remaining account does not prove the same wallet. Keep saved-only accounts available to the shared settings picker while their live reading is unavailable. Any future cross-source identity change must preserve existing bindings rather than simply replacing hashes.
+Subscriptions and top-ups use the shared account matcher: an exact saved account key wins, then the account email, then the sole remaining account. Keep saved-only accounts available to the shared settings picker while their live reading is unavailable.
 
 Provider subscription metadata is separate from saved cost records in `settings.subscriptions`. A detected plan name may prefill the editable cost form, but never creates an expense record, supplies its price or establishes its renewal schedule. Those records still require the user's form submission.
 

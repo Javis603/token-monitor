@@ -12158,7 +12158,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   }
   renderExternalProviderStatus(id);
   await refreshStats();
-  if (id !== 'minimax') setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
+  setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
   renderExternalProviderStatus(id);
   return result;
 }
@@ -16724,8 +16724,7 @@ function clearDisabledLimitProviderPendingChecks(enabledProviders) {
 }
 
 function externalProviderForAccount(providerName) {
-  // MiniMax's settings pill belongs to the API-key lane. Code/OAuth is an
-  // independent source and must never make a key look linked or invalid.
+  // The key form follows the API-key row. A Code login is not that credential.
   const provider = providerName === 'minimax'
     ? localProviderStatuses(providerName).find((entry) => entry.source === 'api') || null
     : localProviderStatus(providerName);
@@ -17128,12 +17127,8 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  // MiniMax keeps its key form stable while its independent API reading is pending.
-  const readingPending = providerName === 'minimax' && (pending || (enabled && !settled && configured && !provider));
-  if (!readingPending) {
-    manualPanel.classList.toggle('hidden', linked);
-    openBtn.classList.toggle('hidden', linked);
-  }
+  manualPanel.classList.toggle('hidden', linked);
+  openBtn.classList.toggle('hidden', linked);
   if (providerName === 'claude') {
     const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
     manualPanel.classList.toggle('hidden', !showForm);

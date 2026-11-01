@@ -219,20 +219,18 @@ async function minimaxCashSpend(balanceUrl, headers, fetchJson, deps, now) {
   const month = new Date(now);
   month.setDate(1);
   const day = date => date.toLocaleDateString('en-CA');
-  // Post-voucher server totals exclude gifts. Neither recharge amounts nor
-  // balance deltas establish cash spending in a calendar period.
+  // Every period is the bill's pre-voucher cash total. Recharge totals are not spend.
   const specs = [['todaySpend', today], ['weekSpend', week], ['monthSpend', month]].map(([key, start]) =>
     [key, { page: 1, limit: 10, aggregate: true, start_date: day(start), end_date: day(today) }]);
-  specs.push(['allTimeSpend', { page_num: 1, page_size: 10 }]);
+  specs.push(['allTimeSpend', { page: 1, limit: 10, aggregate: true }]);
   const requests = new Map();
   const results = await Promise.allSettled(specs.map(async ([key, params]) => {
-    const cumulative = key === 'allTimeSpend';
-    const url = new URL(cumulative ? '/account/query_recharge' : '/account/amount', balanceUrl);
+    const url = new URL('/account/amount', balanceUrl);
     url.search = new URLSearchParams(params);
     if (!requests.has(url.href)) requests.set(url.href, fetchJson(url.href, headers, deps));
     const body = await requests.get(url.href);
     if (parseNumberOrNull(body?.base_resp?.status_code) !== 0) return null;
-    const amount = parseNumberOrNull(cumulative ? body.cash_total_usage : body.consume_cash_after_voucher_sum);
+    const amount = parseNumberOrNull(body.consume_cash_sum);
     return amount === null ? null : [key, amount];
   }));
   // Cancelled and rejected periods are unknown figures. They must not fail the balance already parsed.

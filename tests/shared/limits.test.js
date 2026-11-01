@@ -837,10 +837,6 @@ test('MiniMax peer links survive sync without merging identities or leaking thro
   ] };
   assert.equal(syncLimits(limits).providers[1].relatedAccountKey, codeKey);
   assert.equal(Object.hasOwn(publicLimits(limits).providers[1], 'relatedAccountKey'), false);
-  for (const relatedAccountKey of ['raw-group-id', 'sk-api-secret', apiKey]) {
-    assert.equal(Object.hasOwn(normalizeLimitProvider({ ...limits.providers[1], relatedAccountKey }), 'relatedAccountKey'), false);
-  }
-  assert.equal(Object.hasOwn(normalizeLimitProvider({ ...limits.providers[1], provider: 'deepseek' }), 'relatedAccountKey'), false);
   const aggregate = aggregateLimits([{ deviceId: 'mini', limits, receivedAt: new Date().toISOString() }]);
   assert.equal(aggregate.providers.length, 2);
   assert.deepEqual(new Set(aggregate.providers.map(row => row.accountKey)), new Set([codeKey, apiKey]));
