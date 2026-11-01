@@ -2665,14 +2665,38 @@ test('settings pushes sync once while repainting the background main view', () =
   assert.equal([...settingsPush.matchAll(/syncSettingsForm/g)].length, 1);
 });
 
-test('main limits rerenders coalesce identical visible provider data', () => {
-  const app = readRendererFile('app.js');
-  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-
-  assert.match(renderLimits, /const renderSignature = JSON\.stringify\(\{/);
-  assert.match(renderLimits, /state\.limitPanelRenderSignature === renderSignature/);
-  assert.match(renderLimits, /els\.limitsPanel\.children\.length === orderedProviders\.length/);
-  assert.match(renderLimits, /state\.limitPanelRenderSignature = renderSignature;/);
+test('main limits cache reuses unchanged data and repaints when token units change', () => {
+  const source = functionBody(readRendererFile('app.js'), 'renderLimits', 'serviceStatusLabel');
+  let paints = 0;
+  const state = { settings: { compactTokenUnits: 'western' }, stats: { limits: { providers: [{ provider: 'muse', source: 'web', status: 'ok' }] } } };
+  const context = vm.createContext({
+    state,
+    Date: class extends Date { static now() { return 1793512800000; } },
+    els: { limitsPanel: { children: [], replaceChildren(...nodes) { this.children = nodes; paints++; } } },
+    currentLocale: () => 'zh-TW',
+    limitDetailTooltipShouldHoldRender: () => false,
+    codexAccountControl: { deferRender: () => false, stateSignature: () => [] },
+    enabledLimitProviderSet: () => new Set(['muse']),
+    providersByLimitProviderId: records => new Map([['muse', records]]),
+    LIMIT_PROVIDERS: [{ id: 'muse', label: 'Muse' }],
+    limitProviderOrderApi,
+    captureLimitResetMotion: () => null,
+    animateCachedLimitBarsFromZero() {},
+    animateLimitResets() {},
+    limitProviderColor: () => '#0866FF',
+    renderLimitProviderSolo: () => ({})
+  });
+  vm.runInContext(source, context);
+  const render = () => vm.runInContext('renderLimits()', context);
+  render();
+  render();
+  assert.equal(paints, 1, 'unchanged readings reuse the existing row');
+  state.settings.compactTokenUnits = 'localized';
+  render();
+  assert.equal(paints, 2, 'a unit change repaints immediately without a new reading');
+  state.settings.compactTokenUnits = 'western';
+  render();
+  assert.equal(paints, 3, 'switching back also repaints');
 });
 
 test('successful providers use a green dot while preserving source and account labels', () => {

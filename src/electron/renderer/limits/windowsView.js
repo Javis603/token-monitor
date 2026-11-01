@@ -1728,6 +1728,22 @@
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
       if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
+        // Muse supplies the token balance as display text; keep it ahead of the
+        // monetary fallback without changing the underlying credits reading.
+        if (provider.provider === 'muse' && creditsWindow.resetDescription?.endsWith(' tokens left')) {
+          const label = 'Additional tokens';
+          const tokenText = creditsWindow.resetDescription.replace(/ tokens left$/u, '');
+          const amount = /^(\d+(?:\.\d+)?)([KMB])?$/iu.exec(tokenText);
+          // Convert the displayed abbreviation only for unit formatting; this
+          // rounded website value never becomes a measured token count.
+          const tokenCount = amount && Number(amount[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[amount[2]?.toUpperCase()] || 1);
+          windows.append(tagUsageItem(limitNoteRowNode({
+            label,
+            summary: amount ? formatCompact(tokenCount) : tokenText,
+            ariaParts: [creditsWindow.resetDescription]
+          }), usageItems.limitUsageItemId(creditsWindow), label));
+          continue;
+        }
         const amount = creditsAmount(provider, creditsWindow);
         if (amount === null) continue;
         const balanceNode = limitWindowNode(
