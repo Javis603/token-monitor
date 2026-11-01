@@ -1814,9 +1814,7 @@
   // same account. Providers identified by email need no entry — the default below
   // already masks them.
   const LIMIT_ACCOUNT_TITLES = {
-    muse: (provider, index, providers) => provider?.source === 'cli'
-      ? 'Muse Code'
-      : provider?.source === 'web' ? 'Muse' : limitAccountDefaultTitle(provider, index, providers),
+    muse: museSourceTitle,
     codex: codexAccountTitle,
     opencode: opencodeAccountTitle,
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
@@ -2255,7 +2253,7 @@
       options: grouped ? { showIcon: false } : {}
     }),
     muse: (provider, color, { grouped }) => ({
-      options: grouped ? { showIcon: false } : {}
+      options: grouped ? { showIcon: false } : { title: limitAccountTitle('muse', provider, 0) }
     }),
     mimo: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
@@ -2379,6 +2377,14 @@
     }) || `Account ${index + 1}`;
   }
 
+  function museSourceTitle(provider, index, providers = [provider]) {
+    const title = provider?.source === 'cli' ? 'Muse Code' : provider?.source === 'web' ? 'Muse' : '';
+    if (!title) return limitAccountDefaultTitle(provider, index, providers);
+    if (providers.filter((row) => row.source === provider.source).length < 2) return title;
+    const device = presentationApi.limitProviderProvenance(provider, provenanceContext()).selectedDeviceLabel;
+    return [title, device].filter(Boolean).join(' · ');
+  }
+
   function codexAccountTitle(provider, index, providers = [provider]) {
     const label = accountIdentity.codexAccountDisplayLabel(provider, providers, {
       maskEmail: limitAccountEmailsMasked(),
@@ -2478,7 +2484,9 @@
       groupAccounts: providers
     };
     row.append(renderLimitProviderHead(providerId, label, groupProvider, color, {
-      planText: count ? limitGroupCountText(providerId, count) : '',
+      planText: providerId === 'muse' && subscriptionsForProviderGroup(providerId, providers).length
+        ? t('settings.subscriptions.title')
+        : count ? limitGroupCountText(providerId, count) : '',
       hideMeta: true,
       ...(markId ? { markId } : {})
     }));

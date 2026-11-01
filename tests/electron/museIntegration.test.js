@@ -152,3 +152,44 @@ test('Muse generic web account statuses are translated in every locale', () => {
     }
   }
 });
+
+test('Muse Cookie save and clear preserve CLI quotas when the following stats refresh fails', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const bodies = [
+    ['async function saveAccountCredential(', '\n// The busy guard'],
+    ['async function clearAccountCredential(', '\nasync function commitAccountCredential('],
+    ['function markExternalProviderCheckPending(', '\nfunction clearExternalProviderCheckPending('],
+    ['function clearExternalProviderCheckPending(', '\nfunction clearExternalProviderPendingStatus('],
+    ['function clearExternalProviderPendingStatus(', '\nfunction nextCopilotSignInFlowId(']
+  ].map(([start, end]) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)))).join('\n');
+  for (const action of ['save', 'clear']) {
+    const cli = { provider: 'muse', source: 'cli', sourceDeviceId: 'local', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 35 }] };
+    const remoteCli = { ...cli, sourceDeviceId: 'remote' };
+    const web = { provider: 'muse', source: 'web', status: 'ok' };
+    const other = { provider: 'manus', status: 'ok' };
+    const state = { stats: { limits: { providers: [cli, web, remoteCli, other] } } };
+    const context = {
+      state, LIMIT_PROVIDERS: [{ id: 'muse', label: 'Muse' }], externalLimitAccountConfig: {},
+      limitAccountForm: () => ({ status: { pendingKey: 'museWebPendingCheckSince' } }),
+      externalProviderCheckSettled: new Set(), cancelExternalProviderCheckSettle() {}, scheduleExternalProviderCheckSettle() {},
+      setAccountPanelMessage() {}, renderExternalProviderStatus() {},
+      commitAccountCredential: (request) => request(),
+      refreshStats: async () => { throw new Error('stats unavailable'); },
+      window: { tokenMonitor: { limits: {
+        saveCredential: async () => ({ saved: true, verdict: 'valid', checkedSince: 123 }),
+        clearCredential: async () => ({})
+      } } }
+    };
+    vm.createContext(context);
+    vm.runInContext(bodies, context);
+    await assert.rejects(action === 'save'
+      ? context.saveAccountCredential('muse', {})
+      : context.clearAccountCredential('muse'), /stats unavailable/);
+    assert.deepEqual(state.stats.limits.providers, [cli, remoteCli, other], action);
+    assert.equal(state.stats.limits.providers[0], cli, 'the existing CLI quota observation survives');
+    context.clearExternalProviderPendingStatus('manus');
+    assert.deepEqual(state.stats.limits.providers, [cli, remoteCli], 'other providers retain their existing cleanup');
+  }
+});

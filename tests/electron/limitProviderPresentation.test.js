@@ -924,7 +924,7 @@ test('every multi-account Limits group uses its provider-localized account count
   // key itself.
   assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
   assert.match(view, /return text === key \? '' : text;/);
-  assert.match(view, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(view, /count \? limitGroupCountText\(providerId, count\) : ''/);
   assert.match(view, /providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
   for (const provider of ['claude', 'codex', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {

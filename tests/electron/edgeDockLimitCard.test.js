@@ -2834,9 +2834,47 @@ test('Muse names its product sources without numbered accounts or repeated row i
   assert.ok(rows.every((row) => row.find('limit-icon') === null));
   assert.equal(group.find('limit-plan').textContent, '');
   for (const provider of providers) {
-    assert.ok(view.renderLimitProviderSolo('muse', 'Muse', provider, '#0866FF').find('limit-icon'));
+    const solo = view.renderLimitProviderSolo('muse', 'Muse', provider, '#0866FF');
+    assert.ok(solo.find('limit-icon'));
+    assert.equal(solo.find('limit-name-title').textContent, provider.source === 'cli' ? 'Muse Code' : 'Muse');
     assert.equal(provider.accountKey, '');
   }
+});
+
+test('Muse duplicate product rows identify their devices with source display off', () => {
+  const providers = ['cli', 'web'].flatMap((source) => ['a', 'b'].map((sourceDeviceId) => ({
+    provider: 'muse', source, sourceDeviceId, status: 'ok', windows: []
+  })));
+  const view = dockView({ showLimitSource: false, provenanceContext: {
+    syncActive: true, localDeviceId: 'a',
+    devices: [{ deviceId: 'a' }, { deviceId: 'b' }]
+  } });
+  const built = view.renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF');
+  const rows = built.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), [
+    'Muse Code · a', 'Muse Code · b', 'Muse · a', 'Muse · b'
+  ]);
+  const mixed = view.renderLimitProviderGroup('muse', 'Muse', [providers[0], providers[2], providers[3]], '#0866FF');
+  assert.equal(mixed.find('limit-account-list').children[0].find('limit-name-title').textContent, 'Muse Code');
+  const fallback = view.limitAccountTitle('muse', { provider: 'muse', accountName: 'Legacy source' }, 0);
+  assert.equal(fallback, 'Legacy source');
+});
+
+test('Muse group subscriptions retain a visible keyboard trigger without counting sources as accounts', () => {
+  const providers = ['cli', 'web'].map((source) => ({ provider: 'muse', source, status: 'ok', windows: [] }));
+  const subscription = {
+    id: 'muse-sub', provider: 'muse', kind: 'subscription', planName: 'Maximum', amountMinor: 2000,
+    currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-08-01', autoRenew: true, topUps: []
+  };
+  const view = dockView({ subscriptions: [subscription], accounts: providers });
+  const built = view.renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF');
+  const trigger = built.find('subscription-plan-wrap');
+  assert.ok(trigger);
+  assert.equal(trigger.tabIndex, 0);
+  assert.equal(trigger.find('subscription-plan-trigger').textContent, 'Subscriptions');
+  assert.match(trigger.find('subscription-tooltip').text, /\$20\.00/);
+  assert.doesNotMatch(built.text, /\d+ accounts/);
+  assert.equal(dockView().renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF').find('limit-plan').textContent, '');
 });
 
 test('Muse web weekly quota spans the row above its full-width balance', () => {

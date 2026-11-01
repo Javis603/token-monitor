@@ -2842,7 +2842,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
     frameBody,
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
-  assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(frameBody, /count \? limitGroupCountText\(providerId, count\) : ''/);
   assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
 

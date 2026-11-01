@@ -111,6 +111,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   grok: 'settings.limits.connection.grok',
   kiro: 'settings.limits.connection.kiro',
   manus: 'settings.limits.connection.manus',
+  muse: 'settings.limits.connection.muse',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
 const TRAY_ICON_VARIANTS = [
@@ -16799,7 +16800,9 @@ function clearExternalProviderCheckPending(providerName) {
 
 function clearExternalProviderPendingStatus(providerName) {
   if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
+  // Muse's Cookie panel changes only Web; its CLI allowance is independent.
+  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName
+    || (providerName === 'muse' && provider.source !== 'web'));
 }
 
 function nextCopilotSignInFlowId() {
