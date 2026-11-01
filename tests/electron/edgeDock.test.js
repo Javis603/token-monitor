@@ -1955,7 +1955,8 @@ test('period cards expose an accessible tools and models switch', () => {
   assert.match(bubble, /stagingLayer\.replaceChildren\(card\);\s+fitCardTotal\(card\);\s+clampBreakdownList\(card\);/);
 });
 
-test('provider cards list the newest sessions of their own clients this month', () => {
+test('provider cards list the newest sessions of their own clients this month', (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-09-17T12:00:00Z'));
   const session = (client, id, lastUsedAt, extra = {}) => ({ client, sessionId: id, lastUsedAt, totalTokens: 10, models: { 'gpt-5': 10 }, ...extra });
   const stats = {
     periods: {
