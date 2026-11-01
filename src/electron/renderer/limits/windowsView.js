@@ -1272,6 +1272,7 @@
       for (const billing of billingWindows) {
         const node = limitWindowNode(providerWindowLabel(provider, billing), billing, color, 0.68);
         node.classList.add('limit-window-wide');
+        if (!billing.resetsAt && !billing.resetDescription) node.classList.add('limit-window-no-reset');
         windows.append(node);
       }
     } else if (provider.provider === 'zed') {
