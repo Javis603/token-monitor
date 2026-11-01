@@ -211,7 +211,7 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.match(details, /<div id="cursorManualPanel" class="opencode-add-form">/);
   assert.match(details, /<div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
   assert.match(details, /data-i18n="settings\.cursor\.addManual">Add account<\/span>/);
-  assert.match(details, /using “Open Cursor website”, then sign in/);
+  assert.match(details, /using “Open Cursor dashboard”, then sign in/);
   assert.match(details, /<code>cursor\.com<\/code>/);
   assert.doesNotMatch(details, /cursorCookiePageButton/);
   assert.match(details, /data-i18n="settings\.cursor\.cookiePage"[^>]*>[^<]*grok\.com\/dashboard/);
