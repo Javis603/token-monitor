@@ -49,7 +49,7 @@
     { id: 'zed', label: 'Zed' },
     { id: 'commandcode', label: 'Command Code' },
     { id: 'mimo', label: 'Xiaomi MiMo' },
-    { id: 'muse', label: 'Muse Code' },
+    { id: 'muse', label: 'Muse' },
     { id: 'zai', label: 'GLM', settingsLabel: 'Z.ai / GLM' },
     { id: 'zaiteam', label: 'GLM Team' },
     { id: 'kiro', label: 'Kiro' },
