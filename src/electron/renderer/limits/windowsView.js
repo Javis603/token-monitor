@@ -2493,16 +2493,33 @@
   function renderLimitProviderGroup(providerId, label, providers, color) {
     if (providerId === 'mimo') return renderMimoProviderGroup(label, providers, color);
     if (providerId === 'minimax' && minimaxSameAccount(providers)) {
-      const api = providers.find((row) => row.source === 'api') || providers[1];
-      const newest = [...providers].sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0))[0];
-      return renderLimitProviderSolo(providerId, label, {
-        ...newest,
-        source: api.source,
-        accountLabel: api.accountLabel,
-        planLabel: api.planLabel,
-        balance: api.balance,
-        windows: providers.flatMap((row) => row.windows || [])
-      }, color);
+      // The first lane wears the provider heading, so its Updated line stays in
+      // that heading. Both lanes are account rows, so the shared separator sits
+      // between them.
+      const [lead, ...rest] = providers;
+      const row = renderLimitProviderRow(providerId, label, lead, color);
+      if (rest.some((provider) => provider.stale)) row.classList.add('stale');
+      if (rest.length) {
+        const list = document.createElement('div');
+        list.className = 'limit-account-list';
+        const windows = [...row.children].find((node) => node.classList.contains('limit-windows'));
+        if (windows) {
+          const leadLane = document.createElement('div');
+          leadLane.className = 'limit-row limit-account-row';
+          windows.remove();
+          leadLane.append(windows);
+          list.append(leadLane);
+        }
+        for (const provider of rest) {
+          const policy = limitAccountRowPolicy(providerId, provider, color, { grouped: true, sharedFamily: null });
+          list.append(renderLimitProviderRow(providerId, '', provider, policy.color, {
+            accountRow: true,
+            ...policy.options
+          }));
+        }
+        row.append(list);
+      }
+      return row;
     }
     const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
     const { markId, sharedFamily, forecastOnGroup } = policy(providers);

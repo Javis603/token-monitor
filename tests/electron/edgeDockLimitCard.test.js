@@ -433,12 +433,25 @@ test('MiniMax Code and API rows share one provider heading', () => {
     { provider: 'minimax', status: 'ok', source: 'api', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey, accountLabel: 'Pay-as-you-go', updatedAt: '2026-10-14T04:00:00Z', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
   ].map(normalizeLimitProvider);
   const row = view.renderLimitProviderGroup('minimax', 'Minimax', rows, '#000000');
-  assert.equal(row.find('limit-account-list'), null);
-  assert.equal(row.find('limit-name-title').textContent.trim(), 'Minimax');
-  assert.equal(row.find('limit-plan').textContent, 'Pay-as-you-go');
-  assert.equal(row.find('limit-meta') !== null, true);
-  const labels = [...row.find('limit-windows').children].map((node) => node.children[0].children[0].textContent);
-  assert.deepEqual(labels, ['Credits', 'Balance']);
+  const head = row.children[0].find('limit-title');
+  const lanes = row.find('limit-account-list').children;
+  const lane = lanes[1];
+  assert.equal(head.find('limit-name-title').textContent.trim(), 'Minimax');
+  assert.notEqual(head.find('limit-meta'), null);
+  assert.equal(row.find('limit-plan').textContent, '');
+  assert.equal(lanes.length, 2);
+  assert.equal(lanes[0].classList.contains('limit-account-row'), true);
+  assert.equal(lane.classList.contains('limit-account-row'), true);
+  assert.equal(lane.find('limit-name-title'), null);
+  assert.equal(lane.find('limit-plan').textContent, 'Pay-as-you-go');
+  assert.notEqual(lane.find('limit-meta'), null);
+  assert.deepEqual([...lanes[0].find('limit-windows').children].map((node) => node.children[0].children[0].textContent), ['Credits']);
+  assert.deepEqual([...lane.find('limit-windows').children].map((node) => node.children[0].children[0].textContent), ['Balance']);
+  const named = view.renderLimitProviderGroup('minimax', 'Minimax', [
+    { ...rows[0], planLabel: 'Starter' }, rows[1]
+  ], '#000000');
+  assert.equal(named.find('limit-plan').textContent, 'Starter');
+  assert.equal(named.find('limit-account-list').children[1].find('limit-plan').textContent, 'Pay-as-you-go');
   assert.equal(view.limitProviderPlan(rows[0]), '', 'a product label is not a subscription');
   assert.equal(view.limitProviderPlan({ ...rows[0], planLabel: 'Starter' }), 'Starter');
   const unlinked = view.renderLimitProviderGroup('minimax', 'Minimax', [
