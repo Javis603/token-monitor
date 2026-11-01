@@ -187,6 +187,8 @@ test('native Codex activity requires a verified metadata header before admitting
 test('resumed historical Codex question appears in Today before new usage without duplicating other periods', async t => {
   const f = fixture(t); fs.unlinkSync(f.runtimeFile); f.write([started, question]);
   const clock = new Date(2026, 9, 9, 0, 1).getTime();
+  let displayClock = clock;
+  t.mock.method(Date, 'now', () => displayClock);
   fs.utimesSync(f.file, new Date(clock), new Date(clock));
   const summary = f.summary(); summary.today = usage.emptyPeriod();
   for (const name of ['month', 'allTime']) Object.assign(summary[name].sessions[f.key], {
@@ -206,8 +208,7 @@ test('resumed historical Codex question appears in Today before new usage withou
     assert.equal(next[name].sessions[f.key].totalTokens, 100);
     assert.equal(summary[name].sessions[f.key].liveActivity, undefined);
   }
-  let displayClock = clock;
-  t.mock.method(Date, 'now', () => displayClock);
+
   const display = { periods: next, nativeSessions: next.nativeSessions };
   const homeRows = presentation.recentSessionRows(display, 5, { includeRunningBeyondCap: true });
   const dockCells = presentation.buildEdgeDockCells(display, { items: [
@@ -333,6 +334,7 @@ test('same-day archived Codex question survives discovery and Sessions dedup wit
 });
 
 test('completed resumed transcripts publish one idle observation without renewing its timestamp', async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const f = fixture(t); fs.unlinkSync(f.runtimeFile); f.write([entry('event_msg', { type: 'task_complete' })]);
   let summary = f.summary(); summary.today = usage.emptyPeriod();
   const observations = [];
@@ -348,6 +350,7 @@ test('completed resumed transcripts publish one idle observation without renewin
 });
 
 test('historical multi-UUID rollout candidates require the actual header identity', async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   for (const order of ['native-first', 'native-last']) {
     const f = fixture(t);
     f.catalog.close();
@@ -379,6 +382,7 @@ test('historical multi-UUID rollout candidates require the actual header identit
 });
 
 test('T3 terminal observations keep completion time, expire and yield to a resumed native Codex question', async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const f = fixture(t); f.write([started]);
   fs.utimesSync(f.file, new Date(now - 2000), new Date(now - 2000));
   const completedAt = new Date(now - 1000).toISOString();
@@ -569,6 +573,7 @@ test('native file and catalog changes invalidate cached discovery before its rec
 });
 
 test('live Codex observations normalize, merge by their clock and expire independently of transcript time', async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const f = fixture(t); f.write([started]);
   const before = f.summary();
   const observed = await activity.readSessionActivity(before, f.options);
@@ -695,6 +700,7 @@ test('collector discovers a native question before token_count and preserves exa
 });
 
 test('T3 polling updates waiting, response and terminal states without rescanning token usage', { timeout: 10_000 }, async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: now + 60_000 });
   const f = fixture(t); f.write([started]);
   const updates = [];
   let scans = 0;
@@ -752,6 +758,7 @@ test('local display deduplicates no-token activity once usage arrives and omits 
 });
 
 test('a late T3 message answer clears newer waiting through projection and patches without renewing idle', async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const f = fixture(t); f.write([started]);
   f.db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'completed', completed_at = ?")
     .run(new Date(now).toISOString());
@@ -813,6 +820,7 @@ test('activity identity uses session_meta, not incidental UUIDs in rollout filen
 });
 
 test('a catalog-confirmed historical activity candidate is verified by its header even when its basename hint differs', async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const f = fixture(t); f.write([started]);
   const old = now - 86400_000;
   const differentFile = path.join(path.dirname(f.file), 'rollout-2026-10-08T12-00-00-external-label.jsonl');
@@ -848,6 +856,7 @@ test('activity discovery accepts a custom root when the default native root is a
 });
 
 test('a historical rollout absent from the catalog is located on demand and clears its lease', async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const f = fixture(t); f.write([started]);
   const dir = path.join(f.home, '.codex', 'sessions', '2025', '10', '01');
   fs.mkdirSync(dir, { recursive: true });
