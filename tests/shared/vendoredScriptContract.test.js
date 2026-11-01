@@ -35,10 +35,11 @@ test('runtime and packaging scripts explicitly ensure vendored tokscale', () => 
 });
 
 test('ordinary install-adjacent scripts do not pull the vendored binary', () => {
-  for (const name of ['hub', 'test', 'lint', 'verify', 'build:mac-widget', 'dist:win:prepackaged']) {
+  for (const name of ['hub', 'test', 'lint', 'verify', 'postinstall', 'build:mac-widget', 'dist:win:prepackaged']) {
     assert.doesNotMatch(packageJson.scripts[name], /ensure:tokscale/, name);
   }
-  assert.equal(packageJson.scripts.postinstall, undefined);
+  // Apply local dependency patches at install time, without fetching tokscale.
+  assert.equal(packageJson.scripts.postinstall, 'patch-package --error-on-fail');
   assert.equal(packageJson.scripts.prepack, undefined);
 });
 
