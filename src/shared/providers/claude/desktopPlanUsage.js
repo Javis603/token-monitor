@@ -12,7 +12,8 @@
 //                                  "u": { "fh": 42, "sd": 67, ... } } ] }
 //
 // `fh` is the five-hour session window and `sd` the seven-day all-models
-// window, both as percentages. Other `u` keys exist but their meaning is not
+// window, both as percentages. The seven-day window resets every Tuesday at
+// 10:00 Asia/Taipei. Other `u` keys exist but their meaning is not
 // established, so they are surfaced to diagnostics only and never mapped onto a
 // window. Because the format is private the reader is deliberately tolerant: a
 // half-written file is salvaged sample by sample, an unknown version is read
@@ -32,7 +33,14 @@ const MAX_FILE_BYTES = 16 * 1024 * 1024;
 const SESSION_WINDOW_MINUTES = 5 * 60;
 const WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 const SESSION_WINDOW_MS = SESSION_WINDOW_MINUTES * 60 * 1000;
-const WEEKLY_WINDOW_MS = WEEKLY_WINDOW_MINUTES * 60 * 1000;
+// This account's seven-day window resets on a fixed clock, not from the
+// moment a prompt was sent. Asia/Taipei is UTC+8 with no daylight-saving shift,
+// so Tuesday 10:00 here is always Tuesday 02:00 UTC.
+const WEEKLY_RESET_TIME_ZONE = 'Asia/Taipei';
+const WEEKLY_RESET_WEEKDAY = 2;
+const WEEKLY_RESET_HOUR = 10;
+const WEEKLY_RESET_MINUTE = 0;
+const WEEKDAY_BY_SHORT_NAME = Object.freeze({ Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 });
 // Desktop samples every ~5 minutes while running; a larger gap means it was
 // closed, so a run of samples across that gap cannot date a window start.
 const MAX_CONTIGUOUS_GAP_MS = 20 * 60 * 1000;
@@ -242,25 +250,73 @@ function orgMatches(sampleOrg, filter) {
     || (SHORT_ID_RE.test(sampleOrg) && filter.startsWith(sampleOrg));
 }
 
-function lastResetIndex(samples, key) {
-  for (let i = samples.length - 1; i > 0; i -= 1) {
-    const previous = samples[i - 1].usage[key];
-    const current = samples[i].usage[key];
-    if (previous === undefined || current === undefined) continue;
-    if (previous - current >= RESET_DROP_POINTS) return i;
-  }
-  return -1;
+function zonedParts(ms, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(new Date(ms));
+  const value = (type) => parts.find((part) => part.type === type)?.value;
+  let hour = Number(value('hour'));
+  if (hour === 24) hour = 0;
+  const weekday = WEEKDAY_BY_SHORT_NAME[value('weekday')];
+  if (weekday === undefined) return null;
+  return {
+    year: Number(value('year')),
+    month: Number(value('month')),
+    day: Number(value('day')),
+    hour,
+    minute: Number(value('minute')),
+    second: Number(value('second')),
+    weekday
+  };
 }
 
-// The weekly window resets on a fixed schedule, so one observed fall dates
-// every later boundary to within one sampling interval (the later sample of
-// the pair is used, which can only make the countdown slightly late).
-function estimateWeeklyReset(samples, latest) {
-  const index = lastResetIndex(samples, 'sd');
-  if (index < 0) return null;
-  let resetsAt = samples[index].t + WEEKLY_WINDOW_MS;
-  while (resetsAt <= latest.t) resetsAt += WEEKLY_WINDOW_MS;
+function addCalendarDays(parts, days) {
+  const utc = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+  return { year: utc.getUTCFullYear(), month: utc.getUTCMonth() + 1, day: utc.getUTCDate() };
+}
+
+function zonedTimeToUtcMs(year, month, day, hour, minute, timeZone) {
+  let utc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  for (let i = 0; i < 4; i += 1) {
+    const parts = zonedParts(utc, timeZone);
+    if (!parts) return null;
+    const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    const delta = Date.UTC(year, month - 1, day, hour, minute, 0, 0) - asUtc;
+    if (delta === 0) return utc;
+    utc += delta;
+  }
+  return null;
+}
+
+// Next Tuesday 10:00 Asia/Taipei strictly after `afterMs`. Desktop often writes
+// the first post-reset sample long after the boundary; dating the cycle from
+// that sample pushes the next reset out by the gap.
+function nextWeeklyResetMs(afterMs, timeZone = WEEKLY_RESET_TIME_ZONE) {
+  if (!Number.isFinite(afterMs)) return null;
+  const parts = zonedParts(afterMs, timeZone);
+  if (!parts) return null;
+  const deltaDays = (WEEKLY_RESET_WEEKDAY - parts.weekday + 7) % 7;
+  let day = addCalendarDays(parts, deltaDays);
+  let resetsAt = zonedTimeToUtcMs(day.year, day.month, day.day, WEEKLY_RESET_HOUR, WEEKLY_RESET_MINUTE, timeZone);
+  if (resetsAt === null) return null;
+  if (resetsAt <= afterMs) {
+    day = addCalendarDays(day, 7);
+    resetsAt = zonedTimeToUtcMs(day.year, day.month, day.day, WEEKLY_RESET_HOUR, WEEKLY_RESET_MINUTE, timeZone);
+  }
   return resetsAt;
+}
+
+function estimateWeeklyReset(_samples, latest, timeZone = WEEKLY_RESET_TIME_ZONE) {
+  if (!latest || !Number.isFinite(latest.t)) return null;
+  return nextWeeklyResetMs(latest.t, timeZone);
 }
 
 // The five-hour window opens with the first request after a reset. Only a run

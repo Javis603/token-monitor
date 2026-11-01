@@ -153,14 +153,25 @@ test('a half-written file keeps every complete sample', () => {
   assert.deepEqual(parsed.samples.map(({ usage }) => usage.fh), [10, 11]);
 });
 
-test('weekly reset is the last observed drop plus seven days, rolled past the latest sample', () => {
+test('weekly reset is the next Tuesday 10:00 Asia/Taipei, not the last observed drop', () => {
+  // NOW is Monday 2026-10-19 20:00 Taipei. A drop days earlier must not move the boundary.
   const samples = [
     { t: NOW - 9 * 24 * HOUR, usage: { sd: 80 } },
     { t: NOW - 8 * 24 * HOUR, usage: { sd: 2 } },
     { t: NOW, usage: { sd: 30 } }
   ];
-  assert.equal(estimateWeeklyReset(samples, samples[2]), NOW - 8 * 24 * HOUR + 14 * 24 * HOUR);
-  assert.equal(estimateWeeklyReset([{ t: NOW, usage: { sd: 3 } }], { t: NOW, usage: { sd: 3 } }), null);
+  assert.equal(estimateWeeklyReset(samples, samples[2]), Date.parse('2026-10-20T02:00:00.000Z'));
+  assert.equal(estimateWeeklyReset([{ t: NOW, usage: { sd: 3 } }], { t: NOW, usage: { sd: 3 } }), Date.parse('2026-10-20T02:00:00.000Z'));
+
+  // Tuesday 03:30 Taipei is still inside the open window; 10:00 that morning is the reset.
+  const beforeReset = Date.parse('2026-10-13T03:30:00.000+08:00');
+  assert.equal(estimateWeeklyReset([], { t: beforeReset, usage: { sd: 78 } }), Date.parse('2026-10-13T02:00:00.000Z'));
+  // A sample written days after the boundary still belongs to the following Tuesday.
+  const lateSample = Date.parse('2026-10-30T05:10:00.000+08:00');
+  assert.equal(estimateWeeklyReset([], { t: lateSample, usage: { sd: 0 } }), Date.parse('2026-11-03T02:00:00.000Z'));
+  const boundary = Date.parse('2026-10-20T02:00:00.000Z');
+  assert.equal(estimateWeeklyReset([], { t: boundary, usage: { sd: 0 } }), Date.parse('2026-10-27T02:00:00.000Z'));
+  assert.equal(estimateWeeklyReset([], { t: boundary - 1, usage: { sd: 1 } }), boundary);
 });
 
 test('session reset needs a contiguous run that starts after a zero or a drop', () => {
@@ -232,7 +243,7 @@ test('collect builds a normalized local provider keyed like the OAuth/Web lanes'
   assert.equal(Date.parse(session.resetsAt), NOW - 20 * MIN + 5 * HOUR);
   assert.equal(weekly.usedPercent, 5);
   assert.equal(weekly.windowMinutes, 10080);
-  assert.equal(Date.parse(weekly.resetsAt), NOW - 20 * MIN + 7 * 24 * HOUR);
+  assert.equal(Date.parse(weekly.resetsAt), Date.parse('2026-10-20T02:00:00.000Z'));
 });
 
 test('collect reports notConfigured without a file and unavailable with an unusable one', () => {
