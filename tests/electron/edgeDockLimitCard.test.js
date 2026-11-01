@@ -434,8 +434,8 @@ test('Manus refresh and monthly quotas share a row before balance and hide indep
     const view = dockView({ showLimitUsed });
     const card = view.renderProviderWindows(provider, '#429DFA');
     assert.equal(card.children.length, 3);
-    assert.match(card.children[0].text, /Refresh/);
-    assert.match(card.children[1].text, /Monthly/);
+    assert.equal(card.children[0].children[0].children[0].textContent, 'Refresh');
+    assert.equal(card.children[1].children[0].children[0].textContent, 'Monthly');
     assert.match(card.children[1].text, showLimitUsed ? /35% used/ : /65% left/);
     assert.equal(Boolean(card.children[1].find('limit-reset')?.text), false);
     assert.equal(card.children[0].classList.contains('limit-window-wide'), false);
