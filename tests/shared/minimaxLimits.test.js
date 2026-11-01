@@ -839,7 +839,8 @@ test('MiniMax Code distinguishes missing login from a malformed store', async ()
 
 test('MiniMax Code reads the live record and quota without launching the CLI', async () => {
   const fixture = writeCodeAuthFixture({ siblings: {
-    ['com.minimax.mcode.oauth.prod.cn\0previous-store']: codeDesktopRecord({ accessToken: 'stale-token' })
+    ['com.minimax.mcode.oauth.prod.cn\0previous-store']: codeDesktopRecord({ accessToken: 'stale-token' }),
+    unrelated: { schemaVersion: 999, audience: 'other-service' }
   } });
   const result = await readCode(codeDeps(fixture, async (url, init) => {
     assert.equal(init.headers.authorization, `Bearer ${ACCESS_ONFILE}`);
@@ -1083,6 +1084,44 @@ test('MiniMax Code uses only a matched subscription name and tolerates metadata 
     assert.equal(row.planLabel, label);
     assert.equal(row.windows.length, 3);
   }
+});
+
+test('MiniMax dispatch budget covers paginated Code quota and one delegated retry', async () => {
+  const { providerPhysicalBoundMs } = require('../../src/shared/limits/collector');
+  const fixture = writeCodeAuthFixture();
+  let elapsed = 0;
+  let renewals = 0;
+  const deps = codeDeps(fixture, null, {
+    existsSync: () => true,
+    execFile: (_command, _args, options, done) => {
+      elapsed += options.timeout - 1;
+      renewals++;
+      writeCodeLease(fixture, codeDesktopRecord({ accessToken: ACCESS_ROTATED, generation: 8 }));
+      done(null, '{}');
+      return {};
+    },
+    fetch: async (url) => {
+      if (url.includes('/account/query_balance')) return okResponse({ available_amount: 7 });
+      if (url.includes('/account/amount')) return okResponse({ consume_cash_sum: 2 });
+      // Charge each completed request almost its full timeout without a slow test.
+      elapsed += 11999;
+      if (url.includes('/v1/token_plan/remains')) return okResponse({ base_resp: { status_code: 2062 } });
+      if (url.endsWith('/user/get_user_extra_info')) return okResponse({ workspaces: [{ workspace_type: 0, workspace_id: 0 }] });
+      if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ token_plan_tier: '123' }));
+      if (new URL(url).pathname.endsWith('/credit/details')) {
+        return okResponse({ details: Array(100).fill({}), total_count: 1000 });
+      }
+      if (url === MINIMAX_CODE_PLAN_REMAINS_URL_CN) return renewals
+        ? okResponse(planRemainsBody()) : { ok: false, status: 401 };
+      return okResponse({}); // optional subscription name
+    }
+  });
+  const rows = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-test', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' }, deps);
+  assert.equal(rows.find(row => row.source === 'oauth').status, 'ok');
+  assert.equal(rows.find(row => row.source === 'api').windows[0].remaining, 7);
+  assert.equal(renewals, 1);
+  assert.ok(providerPhysicalBoundMs('minimax', {}, deps) > elapsed,
+    `the dispatch must allow its ${elapsed}ms sequential request path to finish`);
 });
 
 test('MiniMax Code meters a complete grant list and keeps the amount when the list is incomplete', async () => {

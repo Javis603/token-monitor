@@ -28,6 +28,14 @@ const MINIMAX_CODE_PLAN_REMAINS_URL_INTL = 'https://platform.minimax.io/backend/
 const MINIMAX_CODE_GROUP_STATE_KEY = 'minimax.code.group';
 const MINIMAX_CODE_PLAN_NAME_STATE_KEY = 'minimax.code.plan-name';
 const MINIMAX_CODE_PLAN_NAME_TTL_MS = 60 * 60_000;
+const MINIMAX_CODE_CREDIT_MAX_PAGES = 10;
+
+function minimaxPhysicalBoundMs(deps = {}) {
+  // Two Code attempts: workspace, membership, grant pages, name and plan.
+  // API runs concurrently; one peer confirmation follows both lanes.
+  const requests = 2 * (4 + MINIMAX_CODE_CREDIT_MAX_PAGES) + 1;
+  return requests * Number(deps.fetchTimeoutMs || 12000) + Number(deps.mcodeCliTimeoutMs || 12000) + 2000;
+}
 
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
@@ -321,13 +329,15 @@ function isMinimaxCodeRecord(record) {
     && ['subject', 'accountId', 'loginEpoch'].every(key => record[key] === undefined || typeof record[key] === 'string');
 }
 
-function readMinimaxCodeAuth(authPath, deps = {}) {
+function readMinimaxCodeAuth(authPath, recordKey, deps = {}) {
   if (process.platform !== 'win32' && [path.dirname(authPath), authPath].some(file => (fs.statSync(file).mode & 0o077) !== 0)) {
     throw errorWithStatus('unavailable', 'MiniMax Code credential store is not private');
   }
   const auth = JSON.parse((deps.readFileSync || fs.readFileSync)(authPath, 'utf8'));
   if (auth?.schemaVersion !== 1 || !auth.records || typeof auth.records !== 'object' || Array.isArray(auth.records)
-    || !Object.values(auth.records).every(isMinimaxCodeRecord)) throw errorWithStatus('unavailable', 'MiniMax Code credential contract changed');
+    || (Object.hasOwn(auth.records, recordKey) && !isMinimaxCodeRecord(auth.records[recordKey]))) {
+    throw errorWithStatus('unavailable', 'MiniMax Code credential contract changed');
+  }
   return auth;
 }
 
@@ -351,13 +361,13 @@ function minimaxCodeAuthFiles(deps = {}) {
     for (const regionDir of ['cn', 'en']) {
       const directory = path.join(base, 'auth', 'prod', regionDir, 'mcode-public');
       const authPath = path.join(directory, 'auth.json');
+      const recordKey = minimaxCodeRecordKey(base, regionDir);
       let auth;
-      try { auth = readMinimaxCodeAuth(authPath, deps); }
+      try { auth = readMinimaxCodeAuth(authPath, recordKey, deps); }
       catch (error) {
         if (error.code !== 'ENOENT') unreadable = true;
         continue;
       }
-      const recordKey = minimaxCodeRecordKey(base, regionDir);
       if (!auth.records[recordKey]) continue;
       return { dataDir: path.resolve(base), authPath, statePath: path.join(directory, 'auth-state.json'), regionDir, recordKey, record: auth.records[recordKey] };
     }
@@ -402,7 +412,7 @@ function minimaxCodeCommand(deps) {
 }
 
 function readMinimaxCodeSession(session, deps) {
-  const record = readMinimaxCodeAuth(session.authPath, deps).records[session.recordKey];
+  const record = readMinimaxCodeAuth(session.authPath, session.recordKey, deps).records[session.recordKey];
   if (!record) throw errorWithStatus('notConfigured', 'MiniMax Code login missing');
   const current = { ...session, record };
   const state = minimaxCodeAuthState(current, deps);
@@ -460,7 +470,7 @@ async function minimaxCodeCreditMeter(membershipUrl, headers, credits, deps) {
   const grants = [];
   let total = null;
   // More than 1,000 grants leaves the denominator unknown.
-  for (let page = 1; page <= 10; page++) {
+  for (let page = 1; page <= MINIMAX_CODE_CREDIT_MAX_PAGES; page++) {
     const url = new URL('/minimax-cloud/api/v1/credit/details', membershipUrl);
     url.search = new URLSearchParams({ page_number: page, page_size: 100, include_expired: false }).toString();
     const body = await minimaxCodeRequest(url.href, { headers }, deps);
@@ -848,6 +858,7 @@ module.exports = {
   MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
   isMinimaxTransportError,
+  minimaxPhysicalBoundMs,
   minimaxToken,
   minimaxBaseUrl,
   minimaxRegion,

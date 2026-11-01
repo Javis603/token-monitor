@@ -983,10 +983,9 @@ function betterProvider(current, candidate) {
   return timestampMs(candidate.updatedAt) >= timestampMs(current.updatedAt) ? candidate : current;
 }
 
-// Muse's two products refresh independently; a fresh CLI observation cannot
-// retire the Web product's last-good quota, or vice versa.
+// Independent products cannot retire a sibling source's last-good quota.
 function providerFreshnessKey(provider) {
-  return provider.provider === 'muse' ? `muse:${provider.source}` : provider.provider;
+  return ['muse', 'minimax'].includes(provider.provider) ? `${provider.provider}:${provider.source}` : provider.provider;
 }
 
 function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {

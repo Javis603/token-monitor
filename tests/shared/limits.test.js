@@ -2074,3 +2074,24 @@ test('Muse CLI and Web retain stale last-good independently when the other sourc
     }
   }
 });
+
+test('MiniMax sources retain stale quota across devices independently of a fresh sibling', () => {
+  const now = Date.parse('2026-11-01T10:30:00Z');
+  for (const staleSource of ['api', 'oauth']) {
+    for (const freshStatus of ['ok', 'notConfigured']) {
+      const devices = ['api', 'oauth'].map(source => ({ deviceId: source, limits: { refreshMs: 60_000, providers: [{
+        provider: 'minimax', source, status: source === staleSource ? 'unavailable' : freshStatus,
+        accountKey: source !== staleSource && freshStatus === 'notConfigured' ? '' : hashKey('minimax', source),
+        updatedAt: new Date(now - (source === staleSource ? 600_000 : 0)).toISOString(),
+        windows: source !== staleSource && freshStatus === 'notConfigured' ? [] : [{ kind: 'weekly', usedPercent: 35 }]
+      }] } }));
+      for (const aggregate of [aggregateLimits, require('../../worker/src/shared/limits/core').aggregateLimits]) {
+        const retained = aggregate(devices, 0, now).providers.find(row => row.source === staleSource);
+        assert.ok(retained, `${staleSource} quota survives a fresh ${freshStatus} sibling`);
+        assert.equal(retained.stale, true);
+        assert.equal(retained.status, 'unavailable');
+        assert.equal(retained.windows[0].usedPercent, 35);
+      }
+    }
+  }
+});
