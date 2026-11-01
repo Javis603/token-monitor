@@ -2066,3 +2066,22 @@ test('aggregateLimits never labels a merged OpenCode row Web while a local windo
   assert.equal(provider.windows.length, 2);
   assert.equal(provider.source, 'local');
 });
+
+test('Muse CLI and Web retain stale last-good independently when the other source refreshes', () => {
+  const now = Date.parse('2026-11-01T10:30:00Z');
+  for (const failedSource of ['cli', 'web']) {
+    const devices = [{ deviceId: 'a', limits: { refreshMs: 60_000, providers: ['cli', 'web'].map(source => ({
+      provider: 'muse', source, status: source === failedSource ? 'unavailable' : 'ok',
+      updatedAt: new Date(now - (source === failedSource ? 600_000 : 0)).toISOString(),
+      windows: [{ kind: 'weekly', usedPercent: source === failedSource ? 35 : 70 }]
+    })) } }];
+    for (const aggregate of [aggregateLimits, require('../../worker/src/shared/limits/core').aggregateLimits]) {
+      const rows = aggregate(devices, 0, now).providers;
+      assert.equal(rows.length, 2, `${failedSource} last-good survives its fresh sibling`);
+      const retained = rows.find(row => row.source === failedSource);
+      assert.equal(retained.stale, true);
+      assert.equal(retained.status, 'unavailable');
+      assert.equal(retained.windows[0].usedPercent, 35);
+    }
+  }
+});

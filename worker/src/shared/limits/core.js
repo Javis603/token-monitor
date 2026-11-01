@@ -979,6 +979,12 @@ function betterProvider(current, candidate) {
   return timestampMs(candidate.updatedAt) >= timestampMs(current.updatedAt) ? candidate : current;
 }
 
+// Muse's two products refresh independently; a fresh CLI observation cannot
+// retire the Web product's last-good quota, or vice versa.
+function providerFreshnessKey(provider) {
+  return provider.provider === 'muse' ? `muse:${provider.source}` : provider.provider;
+}
+
 function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
   const byKey = new Map();
@@ -996,10 +1002,11 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
         sourceDeviceId: String(device?.deviceId || ''),
         stale: isProviderStale(provider, summary, device, staleAfterMs, nowMs)
       };
-      if (isConfiguredProvider(provider)) providersWithConfiguredAccounts.add(provider.provider);
+      const freshnessKey = providerFreshnessKey(provider);
+      if (isConfiguredProvider(provider)) providersWithConfiguredAccounts.add(freshnessKey);
       if (!candidate.stale) {
-        providersWithFreshObservations.add(provider.provider);
-        if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(provider.provider);
+        providersWithFreshObservations.add(freshnessKey);
+        if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(freshnessKey);
       }
       const key = providerAggregateKey(candidate);
       if (candidate.provider === 'opencode' && isConfiguredProvider(candidate)) {
@@ -1033,14 +1040,15 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     if (hasKnownWorkbuddyAccount && isWorkbuddyPlaceholder(candidate)) continue;
     const knownWorkbuddyAccount = candidate.provider === 'workbuddy' && candidate.accountKey
       && !isWorkbuddyPlaceholder(candidate);
-    const hasFreshObservation = providersWithFreshObservations.has(candidate.provider);
+    const freshnessKey = providerFreshnessKey(candidate);
+    const hasFreshObservation = providersWithFreshObservations.has(freshnessKey);
     // Fresh siblings cannot establish freshness for a different account. The
     // first pass already chooses the best observation of each exact identity.
     if (!knownWorkbuddyAccount && candidate.stale && hasFreshObservation) continue;
     const configuredProviders = hasFreshObservation
       ? providersWithFreshConfiguredAccounts
       : providersWithConfiguredAccounts;
-    if (!knownWorkbuddyAccount && !isConfiguredProvider(candidate) && configuredProviders.has(candidate.provider)) continue;
+    if (!knownWorkbuddyAccount && !isConfiguredProvider(candidate) && configuredProviders.has(freshnessKey)) continue;
     const collapseKey = providerCollapseKey(candidate);
     byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate));
   }

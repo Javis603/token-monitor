@@ -134,7 +134,8 @@ function normalizedScope(scope) {
   if (!scope || typeof scope !== 'object') return { provider: '' };
   const provider = providerId(scope.provider);
   // Muse rows identify local sources, not accounts. Display labels cannot
-  // address one source, so all its refresh/clear scopes stay provider-wide.
+  // address one source, so refresh scopes stay provider-wide. clear() can
+  // explicitly invalidate the web source when its Cookie changes.
   return provider === 'muse' ? { provider } : { ...cloneValue(scope), provider };
 }
 
@@ -823,7 +824,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       if (!isAccountScope(normalized)) {
         cancelLane(lane, reason);
         resetRetryPolicy(lane);
-        lane.identities.clear();
+        if (provider === 'muse' && scope.source === 'web') lane.identities.delete('muse:source:web');
+        else lane.identities.clear();
         lane.accountRevisions.clear();
         continue;
       }

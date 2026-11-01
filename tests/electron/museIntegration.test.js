@@ -206,3 +206,64 @@ test('Muse Cookie save and clear retire only local Web rows when the following s
     assert.deepEqual(state.stats.limits.providers, [cli, remoteWeb], 'legacy local snapshots without device rows still retire Web');
   }
 });
+
+test('Muse Cookie settings invalidation preserves CLI last-good through a failed CLI refresh', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const { settingsLimitInvalidationPlan, runLimitInvalidation } = require('../../src/electron/deviceRuntimeCoordinator');
+  for (const action of ['save', 'clear']) {
+    await t.test(action, async () => {
+      let settings = { limitProviders: 'muse', museWebCookie: 'session=old' };
+      let failing = false;
+      const scopes = [];
+      const snapshots = [];
+      const runtime = createLimitsRuntime(settings, {
+        autoStart: false, autoRetry: false,
+        onUpdate: (summary) => snapshots.push(summary),
+        probeProvider: async (_provider, _config, context) => {
+          scopes.push(context.scope);
+          return [
+            { provider: 'muse', source: 'cli', status: failing ? 'unavailable' : 'ok',
+              windows: failing ? [] : [{ kind: 'weekly', usedPercent: 35 }] },
+            settings.museWebCookie
+              ? { provider: 'muse', source: 'web', status: failing ? 'unavailable' : 'ok',
+                windows: failing ? [] : [{ kind: 'weekly', usedPercent: 20 }] }
+              : { provider: 'muse', source: 'web', removed: true }
+          ];
+        }
+      });
+      try {
+        await runtime.refresh({ provider: 'muse' }, 'manual');
+        failing = true;
+        snapshots.length = 0;
+        const api = createCredentialCommands({
+          getSettings: () => settings, env: {},
+          probeDeps: () => ({ probe: true, museWebFetch: fixtureFetch() }),
+          applySettingsPatch: async (patch, context) => {
+            const previous = settings;
+            settings = { ...settings, ...patch };
+            const change = classifySettingsChange(previous, settings);
+            runtime.reconfigure(settings);
+            for (const entry of settingsLimitInvalidationPlan(change, context?.ensureLimitProvider)) {
+              await runLimitInvalidation({ clearLimits: runtime.clear, refreshLimits: runtime.refresh }, entry.scope, entry.reason, entry.options);
+            }
+            return accountFieldProjection(settings, {});
+          }
+        });
+        if (action === 'save') await api.saveCredential('muse', { museWebCookie: 'session=new' });
+        else await api.clearCredential('muse');
+        assert.ok(snapshots.length > 0);
+        for (const snapshot of snapshots) {
+          assert.equal(snapshot.providers.find(row => row.source === 'cli')?.windows[0]?.usedPercent, 35,
+            'clear-before-refresh never drops the CLI last-good reading');
+        }
+        const rows = runtime.getSnapshot().providers;
+        assert.equal(rows.find(row => row.source === 'cli').status, 'unavailable');
+        assert.equal(rows.find(row => row.source === 'cli').windows[0].usedPercent, 35);
+        assert.equal(rows.find(row => row.source === 'web')?.windows.length || 0, 0, 'old cookie quotas are invalidated');
+        assert.deepEqual(scopes, [{ provider: 'muse' }, { provider: 'muse' }], 'refresh remains provider-wide');
+        runtime.clear({ provider: 'muse' }, 'removed');
+        assert.equal(runtime.getSnapshot().providers.length, 0, 'explicit provider removal still clears both sources');
+      } finally { runtime.stop(); }
+    });
+  }
+});
