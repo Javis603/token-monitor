@@ -4874,6 +4874,7 @@ function renderLimits() {
       state.settings?.showCodexAdditionalLimits !== false,
       state.settings?.limitProviderHiddenItems || {},
       state.settings?.currency || '',
+      state.settings?.compactTokenUnits || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
       state.settings?.codexManagedAccounts || [],
