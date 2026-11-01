@@ -2777,8 +2777,11 @@ function startCollector(options) {
       }
       return next;
     },
-    onChange() {
-      if (!stopped) void runTick('cursor-cache', { forceHistory: true, cursorSnapshotRefresh: true });
+    onChange({ changed }) {
+      if (!stopped) void runTick('cursor-cache', {
+        ...(changed ? { forceHistory: true } : { todayOnly: true, targetClients: ['cursor'] }),
+        cursorSnapshotRefresh: true
+      });
     },
     onError: error => log(`cursor cache scan failed: ${error.message}`)
   }) : null;

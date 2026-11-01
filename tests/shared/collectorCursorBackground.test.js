@@ -26,13 +26,14 @@ async function until(predicate) {
   }
 }
 
-function fixture(t, { historyEnabled = true, cursorGraphFailure = false, localGate = null } = {}) {
+function fixture(t, { historyEnabled = true, cursorGraphFailure = false, syncFailure = false, localGate = null } = {}) {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-background-'));
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];
   const collector = require(collectorPath);
   let localTokens = 10;
   let cursorTokens = { today: 12, month: 40, allTime: 80 };
+  let cursorHistoryTokens = null;
   let cursorReadFailure = false;
   const calls = [];
   const graphCalls = [];
@@ -45,6 +46,7 @@ function fixture(t, { historyEnabled = true, cursorGraphFailure = false, localGa
     const gate = deferred();
     gates.push(gate);
     await gate.promise;
+    if (syncFailure) throw new Error('simulated Cursor sync failure');
     return { synced: true };
   }, options));
   const day = '2026-11-01';
@@ -70,7 +72,7 @@ function fixture(t, { historyEnabled = true, cursorGraphFailure = false, localGa
       }
       const period = input.flags.includes('--today') ? 'today' : input.flags.includes('--month') ? 'month' : 'allTime';
       const client = cursor ? 'cursor' : 'codex';
-      return { entries: [{ client, sessionId: `${client}-session`, model: `${client}-model`, input: cursor ? cursorTokens[period] : localTokens, output: 0, cost: 0 }] };
+      return { processingTimeMs: calls.length, entries: [{ client, sessionId: `${client}-session`, model: `${client}-model`, input: cursor ? cursorTokens[period] : localTokens, output: 0, cost: 0 }] };
     },
     runGraph: async input => {
       graphCalls.push(input);
@@ -78,7 +80,7 @@ function fixture(t, { historyEnabled = true, cursorGraphFailure = false, localGa
       if (cursor) assert.equal(input.offline, true);
       else assert.equal(input.clients, 'codex');
       if (cursor && cursorGraphFailure) throw new Error('simulated graph failure');
-      return { contributions: [{ date: day, clients: [{ client: cursor ? 'cursor' : 'codex', modelId: 'test-model', tokens: { input: cursor ? cursorTokens.today : localTokens }, cost: 0 }] }] };
+      return { meta: { generatedAt: new Date(graphCalls.length).toISOString(), version: 1 }, contributions: [{ date: day, clients: [{ client: cursor ? 'cursor' : 'codex', modelId: 'test-model', tokens: { input: cursor ? cursorHistoryTokens ?? cursorTokens.today : localTokens }, cost: 0 }] }] };
     }
   };
   const runtime = collector.startCollector(options);
@@ -92,6 +94,7 @@ function fixture(t, { historyEnabled = true, cursorGraphFailure = false, localGa
   return { runtime, updates, errors, syncs, gates, calls, graphCalls,
     setLocal: value => { localTokens = value; },
     setCursor: value => { cursorTokens = value; },
+    setCursorHistory: value => { cursorHistoryTokens = value; },
     failCursorReads: () => { cursorReadFailure = true; } };
 }
 
@@ -131,6 +134,55 @@ test('long Cursor import leaves Codex watch ticks live, then reconciles all peri
   assert.equal(latest.history.daily.filter(x => x.tokens > 0).length, 1);
   assert.deepEqual(f.errors, []);
 });
+
+for (const syncFailure of [false, true]) {
+  test(`unchanged Cursor completion publishes ${syncFailure ? 'failed' : 'successful'} health without rescanning local usage`, async t => {
+    const f = fixture(t, { syncFailure });
+    const collection = () => f.updates.at(-1)?.clientHealth?.clients.cursor.collection;
+    await until(() => f.syncs.length === 1 && collection()?.state === 'pending');
+    await f.runtime.whenIdle();
+    const before = f.updates.at(-1);
+    const reports = f.calls.filter(call => call.clients === 'codex').length;
+    const graphs = f.graphCalls.filter(call => call.clients === 'codex').length;
+    f.gates[0].resolve();
+    await until(() => collection()?.state === (syncFailure ? 'failed' : 'ok'));
+    await f.runtime.whenIdle();
+    assert.equal(f.calls.filter(call => call.clients === 'cursor').length, 6, 'the import still reads every cached period');
+    assert.equal(f.calls.filter(call => call.clients === 'codex').length, reports);
+    assert.equal(f.graphCalls.filter(call => call.clients === 'codex').length, graphs);
+    for (const period of ['today', 'month', 'allTime']) {
+      assert.equal(f.updates.at(-1)[period].totalTokens, before[period].totalTokens, period);
+      assert.deepEqual(f.updates.at(-1)[period].clients, before[period].clients, period);
+    }
+    assert.ok(collection().lastAttemptAt);
+    if (syncFailure) assert.ok(collection().syncFailureStage);
+    else assert.ok(collection().lastSuccessAt);
+    assert.equal(f.updates.at(-1).history, undefined, 'unchanged completion does not replace retained History');
+    assert.deepEqual(f.errors, []);
+  });
+}
+
+for (const change of ['month', 'allTime', 'history']) {
+  test(`a Cursor ${change}-only correction still reconciles all periods and History`, async t => {
+    const f = fixture(t);
+    await until(() => f.syncs.length === 1 && f.updates.some(x => x.today.clients.cursor === 12));
+    await f.runtime.whenIdle();
+    const reports = f.calls.filter(call => call.clients === 'codex').length;
+    const graphs = f.graphCalls.filter(call => call.clients === 'codex').length;
+    if (change === 'history') f.setCursorHistory(25);
+    else f.setCursor({ today: 12, month: 40, allTime: 80, [change]: 100 });
+    f.gates[0].resolve();
+    await until(() => change === 'history'
+      ? f.updates.at(-1)?.history?.summary.totalTokens === 35
+      : f.updates.at(-1)?.[change].clients.cursor === 100);
+    await f.runtime.whenIdle();
+    const scans = f.calls.filter(call => call.clients === 'codex').slice(reports);
+    assert.deepEqual(scans.map(call => call.flags), [['--today'], ['--month'], ['--since', '2024-01-01']]);
+    assert.equal(f.graphCalls.filter(call => call.clients === 'codex').length, graphs + 1);
+    assert.equal(f.updates.at(-1).today.clients.cursor, 12);
+    assert.deepEqual(f.errors, []);
+  });
+}
 
 test('manual Cursor force waits outside the local tick and never overlaps syncs', async t => {
   const f = fixture(t, { historyEnabled: false });

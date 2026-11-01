@@ -323,3 +323,121 @@ test('an idle cadence request cannot replace a queued source event and its short
   assert.deepEqual(floors, [10000]);
   assert.equal(restored, 1);
 });
+
+for (const method of ['ensureContext', 'readCache']) {
+  test(`${method} rejects a superseded context instead of accepting another context's snapshot`, async t => {
+    const gate = deferred();
+    const nextContext = { ...context, day: '2026-11-02' };
+    const latestContext = { ...nextContext, pricing: 'prices-v2' };
+    const publications = [];
+    const source = createCursorUsageSource({ context, signal: new AbortController().signal,
+      sync: async () => assert.fail('context reads must remain offline'),
+      read: async current => {
+        if (current === nextContext) await gate.promise;
+        return snapshot(current === context ? 10 : 20);
+      },
+      onChange: () => publications.push(source.getSnapshot().context)
+    });
+    t.after(async () => {
+      source.stop();
+      gate.resolve();
+      await source.whenIdle();
+    });
+    await source.refresh({ readOnly: true });
+    const superseded = source[method](nextContext).then(
+      () => ({ state: 'ready' }),
+      error => ({ state: 'rejected', error })
+    );
+    await flush();
+    const latest = source.ensureContext(latestContext);
+    gate.resolve();
+    await latest;
+    const outcome = await superseded;
+    assert.equal(outcome.state, 'rejected');
+    assert.match(outcome.error.message, /superseded/);
+    assert.equal(source.getSnapshot().context, latestContext);
+    assert.deepEqual(publications, [context, latestContext]);
+    await source.ensureContext(latestContext);
+    await source.whenIdle();
+  });
+}
+
+for (const reason of ['stopped', 'aborted']) {
+  test(`ensureContext rejects after the source is ${reason}, including matching contexts`, async () => {
+    const controller = new AbortController();
+    let reads = 0;
+    const source = createCursorUsageSource({ context, signal: controller.signal,
+      sync: async () => false,
+      read: async () => { reads++; return snapshot(); }
+    });
+    await source.refresh({ readOnly: true });
+    if (reason === 'stopped') source.stop();
+    else controller.abort(new Error('parent aborted'));
+    for (const requested of [{ ...context, day: '2026-11-02' }, context]) {
+      let outcome = 'pending';
+      const ready = source.ensureContext(requested).then(
+        () => { outcome = 'ready'; },
+        () => { outcome = 'rejected'; }
+      );
+      await flush();
+      assert.equal(outcome, 'rejected');
+      await ready;
+    }
+    assert.equal(reads, 1, 'no cache work can start after shutdown');
+  });
+}
+
+test('identical complete snapshots retain their revision while completing refresh and cache waiters', async () => {
+  const changes = [];
+  let reads = 0;
+  const source = createCursorUsageSource({ context, signal: new AbortController().signal,
+    sync: async () => true,
+    read: async () => {
+      reads++;
+      const value = snapshot(10);
+      for (const period of ['today', 'month', 'allTime']) value[period].processingTimeMs = reads;
+      value.graph.meta = { generatedAt: new Date(reads).toISOString(), version: 1, dateRange: { start: context.day, end: context.day } };
+      return value;
+    },
+    onChange: change => changes.push(change?.changed)
+  });
+  assert.equal(await source.refresh(), true);
+  const initial = source.getSnapshot();
+  assert.equal(initial.revision, 1, 'the identical post-sync read is not a new data revision');
+  await source.readCache({ ...context });
+  await source.whenIdle();
+  assert.equal(await source.refresh({ force: true }), true);
+  assert.equal(source.getSnapshot(), initial);
+  assert.equal(initial.today.processingTimeMs, 1, 'comparison does not mutate the raw reports');
+  assert.equal(initial.graph.meta.generatedAt, new Date(1).toISOString());
+  assert.deepEqual(changes, [true, false, false, false], 'completion still publishes current sync health');
+});
+
+test('periods, History, graph status and context each invalidate a Cursor snapshot', async () => {
+  let value = snapshot(10);
+  let requested = context;
+  const changes = [];
+  const source = createCursorUsageSource({ context, signal: new AbortController().signal,
+    sync: async () => false,
+    read: async () => structuredClone(value),
+    onChange: change => changes.push(change?.changed)
+  });
+  await source.refresh({ readOnly: true });
+  for (const field of ['today', 'month', 'allTime', 'warnings', 'graph', 'graphVersion', 'graphDateRange', 'graphFailed', 'graphRecovered', 'day', 'pricing']) {
+    const previous = source.getSnapshot();
+    if (['today', 'month', 'allTime'].includes(field)) value[field].totalTokens++;
+    else if (field === 'warnings') value.today.warnings = ['unpriced model'];
+    else if (field === 'graph') value.graph.contributions.push({ date: '2025-01-01', clients: [] });
+    else if (field === 'graphVersion') value.graph.meta = { version: 2 };
+    else if (field === 'graphDateRange') value.graph.meta.dateRange = { start: '2025-01-01', end: context.day };
+    else if (field === 'graphFailed') value.graphFailed = true;
+    else if (field === 'graphRecovered') delete value.graphFailed;
+    else if (field === 'day') requested = { ...requested, day: '2026-11-02' };
+    else requested = { ...requested, pricing: 'prices-v2' };
+    await source.readCache(requested);
+    await source.whenIdle();
+    assert.equal(source.getSnapshot().revision, previous.revision + 1, field);
+    assert.equal(changes.at(-1), true, field);
+  }
+  assert.equal(changes.length, 12);
+});

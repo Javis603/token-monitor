@@ -1,5 +1,6 @@
 'use strict';
 
+const { isDeepStrictEqual } = require('node:util');
 const { abortReason, throwIfAborted } = require('../../abortSignal');
 const { CURSOR_EXPLICIT_SYNC_TIMEOUT_MS } = require('./auth');
 const { withCursorLifecycle } = require('./lifecycle');
@@ -7,6 +8,22 @@ const { withCursorLifecycle } = require('./lifecycle');
 function emptySnapshot(context) {
   return { context, revision: 0, today: { entries: [] }, month: { entries: [] },
     allTime: { entries: [] }, graph: null };
+}
+
+// Tokscale's scan diagnostics change on every read, including an empty cache.
+// Ignore only those fields for comparison; keep the complete raw snapshot.
+function reportContent(report) {
+  if (!report || typeof report !== 'object' || Array.isArray(report)) return report;
+  const content = { ...report };
+  delete content.processingTimeMs;
+  return content;
+}
+
+function graphContent(graph) {
+  if (!graph?.meta || typeof graph.meta !== 'object' || Array.isArray(graph.meta)) return graph;
+  const meta = { ...graph.meta };
+  delete meta.generatedAt;
+  return { ...graph, meta };
 }
 
 // Long cloud imports own the Cursor lane, not the collector's local scan lane.
@@ -33,13 +50,21 @@ function createCursorUsageSource({ sync, read, onChange, onError, signal, contex
     const next = await withCursorLifecycle(() => read(current, currentSignal), { signal: currentSignal });
     throwIfAborted(currentSignal);
     if (changedContext(current)) return;
-    snapshot = { ...next, context: current, revision: snapshot.revision + 1 };
+    const changed = snapshot.revision === 0 || !isDeepStrictEqual(snapshot.context, current)
+      || ['today', 'month', 'allTime'].some(key => !isDeepStrictEqual(reportContent(snapshot[key]), reportContent(next[key])))
+      || !isDeepStrictEqual(graphContent(snapshot.graph), graphContent(next.graph))
+      || snapshot.graphFailed !== next.graphFailed;
+    if (changed) snapshot = { ...next, context: current, revision: snapshot.revision + 1 };
     initialized = true;
     readPending = false;
     const waiters = contextWaiters;
     contextWaiters = [];
-    for (const waiter of waiters) waiter.resolve();
-    onChange?.();
+    for (const waiter of waiters) {
+      if (waiter.context.day === current.day && waiter.context.pricing === current.pricing) waiter.resolve();
+      else waiter.reject(new Error('Cursor snapshot context superseded'));
+    }
+    // Even unchanged usage must publish the completed sync's health state.
+    onChange?.({ changed });
   }
 
   function refresh(options = {}) {
@@ -147,13 +172,14 @@ function createCursorUsageSource({ sync, read, onChange, onError, signal, contex
     readCache(next) {
       if (stopped || signal.aborted) return Promise.reject(abortReason(signal));
       readPending = true;
-      const ready = new Promise((resolve, reject) => contextWaiters.push({ resolve, reject }));
+      const ready = new Promise((resolve, reject) => contextWaiters.push({ context: next, resolve, reject }));
       void refresh({ context: next, readOnly: true });
       return ready;
     },
     ensureContext(next) {
+      if (stopped || signal.aborted) return Promise.reject(abortReason(signal));
       if (next.day === snapshot.context.day && next.pricing === snapshot.context.pricing) return Promise.resolve();
-      const ready = new Promise((resolve, reject) => contextWaiters.push({ resolve, reject }));
+      const ready = new Promise((resolve, reject) => contextWaiters.push({ context: next, resolve, reject }));
       void refresh({ context: next, readOnly: true });
       return ready;
     },
