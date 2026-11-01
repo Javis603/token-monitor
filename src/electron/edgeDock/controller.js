@@ -46,6 +46,7 @@ const FADE_STEP_MS = 16;
 const WAKE_TOPMOST_RETRY_MS = 500;
 const RAIL_MORPH_MS = 160;
 const CARD_MOVE_MS = 650;
+const CARD_FRAME_STALE_MS = 64;
 
 function edgeDockSupported(platform = process.platform) {
   return platform === 'darwin' || platform === 'win32';
@@ -164,6 +165,7 @@ function createEdgeDockController(deps) {
   let bubblePointerMode = null;
   let bubbleMotion = null;
   let bubbleMotionTimer = null;
+  let lastCardFrameAt = 0;
   let nextBubbleMotionId = 0;
   let railMotion = null;
   let railMotionTimer = null;
@@ -1155,6 +1157,7 @@ function createEdgeDockController(deps) {
     bubbleMotionTimer = null;
     bubbleMotion = null;
     if (motion) send('bubble', 'edgeDock:cardMotion', { motionId: motion.id, active: false });
+    lastCardFrameAt = 0;
   }
 
   function paintBubble(frame, workArea, target = frame) {
@@ -1210,9 +1213,17 @@ function createEdgeDockController(deps) {
       // Windows rounds a nominal 16ms main-process timeout up to two system
       // ticks. Let the visible renderer drive paint frames; the main timer
       // remains a fallback if frame delivery stops.
-      if (platform === 'win32') send('bubble', 'edgeDock:cardMotion', { motionId: motion.id, active: true });
+      if (platform === 'win32') {
+        lastCardFrameAt = Date.now();
+        send('bubble', 'edgeDock:cardMotion', { motionId: motion.id, active: true });
+      }
       advanceBubbleMotion(motion);
-      if (bubbleMotion === motion) bubbleMotionTimer = setInterval(() => advanceBubbleMotion(motion), FADE_STEP_MS);
+      if (bubbleMotion === motion) {
+        bubbleMotionTimer = setInterval(() => {
+          if (platform === 'win32' && Date.now() - lastCardFrameAt < CARD_FRAME_STALE_MS) return;
+          advanceBubbleMotion(motion);
+        }, FADE_STEP_MS);
+      }
     } else {
       paintBubble(target, current.workArea);
     }
@@ -1467,6 +1478,7 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:cardFrame', (event, payload) => {
       if (platform !== 'win32' || surfaceFor(event.sender) !== 'bubble'
         || !bubbleMotion || bubbleMotion.id !== payload?.motionId) return;
+      lastCardFrameAt = Date.now();
       advanceBubbleMotion(bubbleMotion);
     });
     ipcMain.on('edgeDock:dragEnd', (event) => {
