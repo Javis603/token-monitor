@@ -3141,6 +3141,17 @@ for (const platform of ['win32', 'darwin']) {
     callbacks.shift()?.();
     assert.deepEqual(frames, platform === 'win32' ? [42] : []);
     assert.equal(callbacks.length, 0, 'the native completion frame stops the loop');
+
+    motion({ motionId: 42, active: true });
+    motion({ motionId: 42, active: false });
+    motion({ motionId: 43, active: true });
+    assert.equal(callbacks.length, platform === 'win32' ? 1 : 0, 'retargeting keeps the pending paint loop');
+    callbacks.shift()?.();
+    assert.deepEqual(frames, platform === 'win32' ? [42, 43] : []);
+    assert.equal(callbacks.length, platform === 'win32' ? 1 : 0, 'the pending callback uses the new motion');
+    motion({ motionId: 43, active: false });
+    callbacks.shift()?.();
+    assert.equal(callbacks.length, 0, 'the retargeted native completion frame stops the loop');
   });
 }
 
