@@ -12158,6 +12158,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   }
   renderExternalProviderStatus(id);
   await refreshStats();
+  if (id !== 'minimax') setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
   renderExternalProviderStatus(id);
   return result;
 }
@@ -17127,9 +17128,8 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  // Leave the form unchanged during a check, and while a configured key still
-  // has no row and that check has not settled.
-  const readingPending = pending || (enabled && !settled && configured && !provider);
+  // MiniMax keeps its key form stable while its independent API reading is pending.
+  const readingPending = providerName === 'minimax' && (pending || (enabled && !settled && configured && !provider));
   if (!readingPending) {
     manualPanel.classList.toggle('hidden', linked);
     openBtn.classList.toggle('hidden', linked);

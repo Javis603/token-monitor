@@ -81,20 +81,20 @@ function appSource(from, to) {
   return app.slice(start, end);
 }
 
-function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, providerSource = 'api', providerRows, keyConfigured = false, enabledProviders = new Set(['minimax']) } = {}) {
-  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+function accountAppStatus({ providerName = 'minimax', billingMode = 'token-plan', providerStatus, providerSource = 'api', providerRows, keyConfigured = false, enabledProviders = new Set([providerName]) } = {}) {
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === providerName);
   const { group, document } = renderPanel(form);
-  group.byId('minimaxSettingsDetails').classList.remove('hidden');
+  group.byId(`${providerName}SettingsDetails`).classList.remove('hidden');
   const state = {
     settings: {
       limitAccountForms: [form],
       minimaxBillingMode: billingMode,
-      minimaxApiKeyConfigured: keyConfigured,
-      minimaxApiKeySource: keyConfigured ? 'settings' : ''
+      [form.status.configuredKey]: keyConfigured,
+      [form.status.sourceKey]: keyConfigured ? 'settings' : ''
     },
-    stats: { limits: { providers: providerRows || (providerStatus ? [{ provider: 'minimax', status: providerStatus, source: providerSource }] : []) } },
+    stats: { limits: { providers: providerRows || (providerStatus ? [{ provider: providerName, status: providerStatus, source: providerSource }] : []) } },
     accountPanelMessages: {},
-    minimaxPendingCheckSince: 0
+    [form.status.pendingKey]: 0
   };
   const context = {
     state,
@@ -122,9 +122,9 @@ function minimaxAppStatus({ billingMode = 'token-plan', providerStatus, provider
       + appSource('function renderExternalProviderStatus(', '\n// The override inputs'),
     context
   );
-  context.renderExternalProviderStatus('minimax');
+  context.renderExternalProviderStatus(providerName);
   return { group, state, enabledProviders, settled: context.externalProviderCheckSettled,
-    render: () => context.renderExternalProviderStatus('minimax'), linked: context.externalProviderAccountLinked('minimax') };
+    render: () => context.renderExternalProviderStatus(providerName), linked: context.externalProviderAccountLinked(providerName) };
 }
 
 function isVisible(root, target) {
@@ -669,6 +669,7 @@ test('a confirmed credential is cleared from the draft and re-checked', async ()
   assert.deepEqual(save.calls.find(([name]) => name === 'applyPersistedSettings'), ['applyPersistedSettings', { next: true }]);
   assert.ok(save.calls.some(([name]) => name === 'markPending'));
   assert.ok(save.calls.some(([name]) => name === 'refreshStats'));
+  assert.deepEqual(save.calls.find(([name]) => name === 'expanded'), ['expanded', 'deepseek', true]);
   assert.equal(save.message(), null);
 });
 
@@ -789,11 +790,11 @@ test('MiniMax billing choice waits for saving before key submission and follows 
 
 test('MiniMax key status reads only the API row and defaults to not configured without a key', () => {
   // OAuth/Code rows can coexist but do not configure, validate, or link the API key.
-  const withApiRow = (api) => minimaxAppStatus({
+  const withApiRow = (api) => accountAppStatus({
     providerRows: [{ provider: 'minimax', status: 'ok', source: 'oauth' }, { provider: 'minimax', source: 'api', ...api }],
     keyConfigured: true
   });
-  const { group: noKey, linked: oauthLinked } = minimaxAppStatus({
+  const { group: noKey, linked: oauthLinked } = accountAppStatus({
     providerRows: [{ provider: 'minimax', status: 'ok', source: 'oauth' }]
   });
   assert.equal(oauthLinked, false);
@@ -840,7 +841,7 @@ test('MiniMax key status reads only the API row and defaults to not configured w
   assert.equal(fresh.byId('minimaxSettingsDetails').classList.contains('hidden'), true, 'fresh confirmed quota folds the form');
   assert.equal(fresh.byId('minimaxSettingsToggle').attributes['aria-expanded'], 'false');
 
-  const { group: gap, state: gapState, enabledProviders, settled, render: renderGap } = minimaxAppStatus({
+  const { group: gap, state: gapState, enabledProviders, settled, render: renderGap } = accountAppStatus({
     providerRows: [{ provider: 'minimax', status: 'ok', source: 'api' }],
     keyConfigured: true
   });
@@ -859,6 +860,17 @@ test('MiniMax key status reads only the API row and defaults to not configured w
   renderGap();
   assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), true, 'disabling collection must not leave the paste form hidden as if a check were pending');
   assert.equal(isVisible(gap, gap.byId('minimaxOpenBrowser')), true);
+});
+
+test('other key panels keep repair controls available while a new reading is pending', () => {
+  for (const providerName of ['deepseek', 'devin']) {
+    const { group, state, render } = accountAppStatus({ providerName, providerStatus: 'ok', keyConfigured: true });
+    assert.equal(isVisible(group, group.byId(`${providerName}ManualPanel`)), false);
+    state.stats.limits.providers = [];
+    render();
+    assert.equal(isVisible(group, group.byId(`${providerName}ManualPanel`)), true, providerName);
+    assert.equal(isVisible(group, group.byId(`${providerName}OpenBrowser`)), true, providerName);
+  }
 });
 
 test('MiniMax API-key rechecks leave the independent Code row in place', () => {
