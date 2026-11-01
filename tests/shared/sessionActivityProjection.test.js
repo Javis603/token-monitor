@@ -9,6 +9,9 @@ const { createDeviceRuntime } = require('../../src/shared/usage/deviceRuntime');
 const { composeLocalOnlySummary, projectLocalActivity, completeLocalSyncStats } = require('../../src/electron/syncDisplayStats');
 const { createRendererSnapshots, createStatsPresentationCache } = require('../../src/electron/statsPublisher');
 const now = Date.parse('2026-10-09T00:01:00Z');
+// Overlay readers also consult Date.now when rejecting future observations.
+test.beforeEach(t => t.mock.method(Date, 'now', () => now + 60_000));
+
 const observation = (state, time = now) => ({ state, observedAt: new Date(time).toISOString() });
 function fixture(count = 5000) {
   const sessions = Object.fromEntries(Array.from({ length: count }, (_, i) => [`claude:id-${i}`, {
