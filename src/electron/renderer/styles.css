@@ -4242,13 +4242,15 @@ html.is-windows .settings-panel select option {
 
 /* Keep these related controls closer than the shell's 8px section gap. */
 .session-tool-filter:not(.hidden) + .session-pager-host { margin-block-start: -6px; }
-.session-tool-filter-button {
+.session-tool-filter-button,
+.session-tool-filter-button.limit-detail-tooltip-wrap {
   position: relative;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   min-width: 26px;
+  width: auto;
   height: 28px;
   padding: 0 4px;
   border: 0;
@@ -4257,6 +4259,7 @@ html.is-windows .settings-panel select option {
   color: var(--muted);
   font: inherit;
   font-size: 0.625rem;
+  white-space: nowrap;
   cursor: pointer;
 }
 .session-tool-filter-button:first-child { margin-inline-start: auto; }
