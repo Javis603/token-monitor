@@ -1081,9 +1081,8 @@
       const parts = [];
       if (lead) parts.push(text('', lead));
       if (sessionRows.sessionModelMetadataLabel(row)) parts.push(sessionModelMetadata(row));
-      const cache = sessionRows.sessionCacheHitPercent(row);
-      if (cache !== null) {
-        const percent = `${cache > 0 && cache < 1 ? '<1' : Math.round(Math.min(100, cache))}%`;
+      const percent = row.tokenDataUnavailable ? '' : sessionRows.cacheHitLabel(row);
+      if (percent) {
         const reading = text('notch-session-cache-hit', `${running ? 'Cache ' : ''}${percent}`);
         parts.push(reading);
       }

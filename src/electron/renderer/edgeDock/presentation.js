@@ -200,6 +200,8 @@
       if (Number.isFinite(lastUsedMs)) native.set(key, { key, session: accounted
         ? { ...session, totalTokens: accounted.session.totalTokens, costUsd: accounted.session.costUsd,
           unpricedTokens: accounted.session.unpricedTokens, models: accounted.session.models,
+          inputTokens: accounted.session.inputTokens, cacheReadTokens: accounted.session.cacheReadTokens,
+          cacheWriteTokens: accounted.session.cacheWriteTokens, cacheReported: accounted.session.cacheReported,
           nativeSessionId: session.nativeSessionId || accounted.session.nativeSessionId,
           t3ThreadId: session.t3ThreadId || accounted.session.t3ThreadId,
           parentSessionId: session.parentSessionId || accounted.session.parentSessionId,

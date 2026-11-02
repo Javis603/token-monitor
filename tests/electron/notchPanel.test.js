@@ -497,6 +497,9 @@ test('Notch replaces session age with weighted cache hit usage from projected se
   f.panel.selectPage('home');
   render();
   assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · 0% · just now');
+  sessions['codex:parent'].tokenDataUnavailable = true;
+  render();
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · just now');
 });
 
 test('cache expiry refreshes within the same minute without a new stats push', t => {
