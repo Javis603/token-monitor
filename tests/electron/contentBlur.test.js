@@ -34,7 +34,7 @@ function fixture() {
   const unlisten = event => listeners.delete(event);
   document.addEventListener = listen; document.removeEventListener = unlisten;
   const window = {
-    getComputedStyle: surface => ({ overlay: surface.overlay || 'none' }),
+    getComputedStyle: surface => ({ overlay: surface.overlay || 'none', opacity: surface.opacity ?? '1' }),
     requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
     cancelAnimationFrame: id => frames.delete(id), addEventListener: listen, removeEventListener: unlisten,
     MutationObserver: class {
@@ -180,9 +180,13 @@ test('closing surfaces keep their moving blur mask until the browser removes the
   f.animations.push({ playState: 'running', effect: { target: menu } });
   f.toggle(menu, false);
   assert.equal(f.filterFor(f.root), filter, 'do not clear blur at beforetoggle');
+  menu.opacity = 0.4;
   menu.box.top += 3; f.tick();
   assert.equal(f.filterFor(f.root), filter, 'the fading surface still needs blur');
   assert.equal(filter.children.find(node => node.tagName === 'FEFLOOD').getAttribute('y'), '203');
+  assert.equal(filter.children.find(node => node.tagName === 'FEFLOOD').getAttribute('flood-opacity'), '0.4', 'blur fades with the surface instead of staying at full strength');
+  menu.opacity = 0.1; f.tick();
+  assert.equal(filter.children.find(node => node.tagName === 'FEFLOOD').getAttribute('flood-opacity'), '0.1');
   menu.overlay = 'none'; f.animations.length = 0; f.tick();
   assert.equal(f.definitions.children.length, 0);
   assert.equal(f.frames.size, 0, 'tracking stops when the exit animation finishes');
