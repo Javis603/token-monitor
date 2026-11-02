@@ -49,10 +49,19 @@ function readEntry(file, previous) {
   }
 }
 
+// Windows MSIX builds keep this store outside the app roots, under
+// `%LOCALAPPDATA%\Claude-Data\claude_<publisher id>\` (seen on 4.4212.0.0).
+function sessionRoots(homeDir) {
+  const msixData = path.join(homeDir, 'AppData', 'Local', 'Claude-Data');
+  return [
+    ...CLAUDE_DESKTOP_APP_ROOTS.map((appRoot) => path.join(homeDir, ...appRoot.split('/'))),
+    ...childDirs(msixData).filter((dir) => path.basename(dir).startsWith('claude_'))
+  ].map((dir) => path.join(dir, 'claude-code-sessions'));
+}
+
 function readDesktopSessionTitles(homeDir, sessionIds) {
   const titles = new Map();
-  for (const appRoot of CLAUDE_DESKTOP_APP_ROOTS) {
-    const root = path.join(homeDir, ...appRoot.split('/'), 'claude-code-sessions');
+  for (const root of sessionRoots(homeDir)) {
     const previous = rootCache.get(root) || new Map();
     const next = new Map();
     for (const orgDir of childDirs(root).flatMap(childDirs)) {

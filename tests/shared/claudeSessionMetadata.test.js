@@ -973,3 +973,18 @@ test('a removed Desktop title also leaves anchored month and all-time rows on wa
   assert.deepEqual(titles(await watch()), ['', '', '']);
   assert.deepEqual(titles(await watch()), ['', '', '']);
 });
+
+test('Desktop titles are also read from the Windows MSIX data root', (t) => {
+  const { readDesktopSessionTitles } = require('../../src/shared/providers/claude/desktopSessionTitles');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-claude-desktop-msix-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const store = path.join(home, 'AppData', 'Local', 'Claude-Data', 'claude_pzs8sxrjxfjjc', 'claude-code-sessions', 'account', 'org');
+  fs.mkdirSync(store, { recursive: true });
+  fs.writeFileSync(path.join(store, 'local_a.json'), JSON.stringify({ cliSessionId: 'msix', title: 'MSIX title' }));
+  // Only the publisher-scoped `claude_*` directories hold Desktop state.
+  const other = path.join(home, 'AppData', 'Local', 'Claude-Data', 'other', 'claude-code-sessions', 'account', 'org');
+  fs.mkdirSync(other, { recursive: true });
+  fs.writeFileSync(path.join(other, 'local_b.json'), JSON.stringify({ cliSessionId: 'other', title: 'Unrelated' }));
+
+  assert.deepEqual(readDesktopSessionTitles(home, new Set(['msix', 'other'])), new Map([['msix', 'MSIX title']]));
+});
