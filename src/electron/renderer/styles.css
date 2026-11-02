@@ -4192,6 +4192,84 @@ html.is-windows .settings-panel select option {
   align-items: center;
   justify-content: center;
 }
+.session-tool-filter {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+.session-tool-filter-items {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 3px 2px;
+}
+.session-tool-filter-items::-webkit-scrollbar { display: none; }
+.session-tool-scroll {
+  display: grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  visibility: hidden;
+}
+.session-tool-filter.has-overflow .session-tool-scroll { visibility: visible; }
+.session-tool-scroll .session-page-icon {
+  width: 5px;
+  height: 5px;
+  background: transparent;
+  -webkit-mask: none;
+  mask: none;
+  border-left: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg);
+}
+.session-tool-scroll-next .session-page-icon { transform: rotate(225deg); }
+.session-tool-scroll:hover:not(:disabled) { color: var(--text); }
+.session-tool-scroll:disabled { opacity: 0; cursor: default; }
+.session-tool-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Keep these related controls closer than the shell's 8px section gap. */
+.session-tool-filter:not(.hidden) + .session-pager-host { margin-block-start: -6px; }
+.session-tool-filter-button,
+.session-tool-filter-button.limit-detail-tooltip-wrap {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  width: auto;
+  height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.625rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.session-tool-filter-button:first-child { margin-inline-start: auto; }
+.session-tool-filter-button:last-child { margin-inline-end: auto; }
+.session-tool-filter-button:hover { color: var(--text); }
+.session-tool-filter-button[aria-pressed="true"] {
+  color: var(--accent);
+}
+.session-tool-filter-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.shell.session-mode .session-tool-filter-button .row-icon { width: 13px; height: 13px; margin: 0; }
 .session-pager {
   display: grid;
   width: min(208px, 100%);

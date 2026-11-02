@@ -112,7 +112,7 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
     removeAttribute(name) { delete this[name]; }
   };
   const document = {
-    querySelector: selector => selector.split(', ').some(part => part === '.home-session-row .is-hover-reading')
+    querySelector: selector => selector.split(', ').some(part => part === '.home-panel:not(.hidden) .home-session-row .is-hover-reading')
       && classes.has('is-hover-reading') ? title : null,
     querySelectorAll: () => [title],
     createElement: () => ({
