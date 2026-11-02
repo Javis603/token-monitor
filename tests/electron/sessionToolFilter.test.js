@@ -29,14 +29,14 @@ function setup() {
   strip.clientWidth = 200;
   strip.scrollWidth = 300;
   document.createElement = element;
-  const state = { sessionToolFilter: '', sessionPage: 4 };
+  const state = { sessionToolFilter: '', sessionPage: 4, settings: {showToolIcons:true} };
   const els = { sessionToolFilter: host, sessionToolFilterItems: strip,
     sessionToolPrevious: element(), sessionToolNext: element(), breakdown: { scrollTop: 42 } };
   let renders = 0;
   const filter = Function('state', 'els', 'document', 'KNOWN_CLIENTS', 'clientLabels', 'clientsWithIcon',
-    'currentLocale', 't', 'render', 'updateSessionToolScrollButtons', 'limitWindowsView', `${app.slice(start, end)}; return renderSessionToolFilter;`)(
+    'currentLocale', 't', 'render', 'updateSessionToolScrollButtons', 'limitWindowsView', 'sessionToolClients', 'toolIconsEnabled', `${app.slice(start, end)}; return renderSessionToolFilter;`)(
     state, els, document, [{ id: 'claude' }, { id: 'codex' }], { claude: 'Claude Code', codex: 'Codex' },
-    new Set(['claude', 'codex']), () => 'en', key => key, () => renders++, () => {}, { setDetailTooltip() {} });
+    new Set(['claude', 'codex']), () => 'en', key => key, () => renders++, () => {}, { setDetailTooltip() {} }, appFunction('sessionToolClients', [], []), value => value === true);
   return { state, els, document, host, strip, filter, renders: () => renders };
 }
 
@@ -127,7 +127,7 @@ test('arrow clicks request native scrolling and respect reduced motion', () => {
   for (const reduced of [false, true]) {
     const requests = [];
     const els = { sessionToolFilterItems: { clientWidth: 200, scrollBy: options => requests.push(options) } };
-    const scroll = appFunction('scrollSessionTools', ['els', 'reducedMotionMedia'], [els, { matches: reduced }]);
+    const scroll = appFunction('scrollSessionTools', ['els', 'prefersReducedMotion', 'reducedMotionMedia'], [els, () => reduced, {matches:false}]);
     scroll(1);
     scroll(-1);
     assert.deepEqual(requests, [
@@ -136,4 +136,37 @@ test('arrow clicks request native scrolling and respect reduced motion', () => {
     ]);
   }
   assert.doesNotMatch(app, /scrollSessionToolsWithWheel/);
+});
+
+
+test('cross-tool groups remain reachable from every member tool', () => {
+  const ui = setup();
+  const group = {key:'mixed', kind:'summary', client:'codex', groupRows:[{client:'codex'},{client:'claude'}]};
+  assert.equal(ui.filter([group]).length, 1);
+  assert.equal(ui.host.hidden, false, 'two tools within one group still offer a filter');
+  assert.deepEqual(ui.strip.children.map(button => button.dataset.client), ['', 'claude', 'codex']);
+  ui.strip.children[1].click();
+  assert.deepEqual(ui.filter([group]), [group]);
+});
+
+test('turning off tool icons renders tool labels and invalidates existing buttons', () => {
+  const ui = setup();
+  ui.filter(rows);
+  assert.equal(ui.strip.children[1].children.length, 1);
+  ui.state.settings.showToolIcons = false;
+  ui.filter(rows);
+  assert.equal(ui.strip.children[1].children.length, 0);
+  assert.equal(ui.strip.children[1].textContent, 'Claude Code');
+});
+
+test('both direct detail render paths hide the list filter immediately', () => {
+  for (const name of ['renderSessionDetail', 'renderSessionGroupDetail']) {
+    const start = app.indexOf(`function ${name}(`);
+    const end = app.indexOf('  const head =', start);
+    const hidden = new Set();
+    const node = {classList:{add(name) {hidden.add(name);},remove(){}}};
+    const els = {sessionToolFilter:node,breakdown:{classList:{add(){}}},sessionDetail:node,sessionDetailHead:node};
+    Function('els', `${app.slice(start, end)}\n}; return ${name};`)(els)();
+    assert.equal(hidden.has('hidden'), true, name);
+  }
 });

@@ -3044,16 +3044,20 @@ function updateSessionToolScrollButtons() {
 function scrollSessionTools(direction) {
   els.sessionToolFilterItems.scrollBy({
     left: direction * els.sessionToolFilterItems.clientWidth * 0.75,
-    behavior: reducedMotionMedia?.matches ? 'instant' : 'smooth'
+    behavior: prefersReducedMotion() ? 'instant' : 'smooth'
   });
+}
+
+function sessionToolClients(row) {
+  if (row.kind !== 'session' && row.kind !== 'summary') return [];
+  return [row.client, ...(row.groupRows || []).map(member => member.client)].filter(Boolean);
 }
 
 // Filter only the session list; shared projections also feed Home and details.
 function renderSessionToolFilter(rows) {
   const host = els.sessionToolFilter;
   const strip = els.sessionToolFilterItems;
-  const clients = [...new Set(rows.filter(row => row.kind === 'session' || row.kind === 'summary')
-    .map(row => row.client).filter(Boolean))];
+  const clients = [...new Set(rows.flatMap(sessionToolClients))];
   clients.sort((a, b) => KNOWN_CLIENTS.findIndex(client => client.id === a) - KNOWN_CLIENTS.findIndex(client => client.id === b) || a.localeCompare(b));
   if (state.sessionToolFilter && (clients.length < 2 || !clients.includes(state.sessionToolFilter))) {
     state.sessionToolFilter = '';
@@ -3063,7 +3067,8 @@ function renderSessionToolFilter(rows) {
   host.setAttribute('aria-label', t('sessions.filterTools'));
   els.sessionToolPrevious.setAttribute('aria-label', t('sessions.toolsPrevious'));
   els.sessionToolNext.setAttribute('aria-label', t('sessions.toolsNext'));
-  const signature = JSON.stringify([currentLocale(), clients, state.sessionToolFilter]);
+  const showIcons = toolIconsEnabled(state.settings?.showToolIcons);
+  const signature = JSON.stringify([currentLocale(), clients, state.sessionToolFilter, showIcons]);
   if (host.dataset.signature !== signature) {
     host.dataset.signature = signature;
     const focused = strip.contains(document.activeElement) ? document.activeElement.dataset.client : null;
@@ -3076,7 +3081,7 @@ function renderSessionToolFilter(rows) {
       limitWindowsView.setDetailTooltip(button, [{ full: label }]);
       button.setAttribute('aria-label', label);
       button.setAttribute('aria-pressed', String(state.sessionToolFilter === client));
-      if (client && clientsWithIcon.has(client)) {
+      if (showIcons && client && clientsWithIcon.has(client)) {
         const icon = document.createElement('span');
         icon.className = `row-icon row-icon-${client}`;
         icon.setAttribute('aria-hidden', 'true');
@@ -3097,7 +3102,7 @@ function renderSessionToolFilter(rows) {
     if (focused !== null) buttons.find(button => button.dataset.client === focused)?.focus({ preventScroll: true });
   }
   updateSessionToolScrollButtons();
-  return state.sessionToolFilter ? rows.filter(row => row.client === state.sessionToolFilter) : rows;
+  return state.sessionToolFilter ? rows.filter(row => sessionToolClients(row).includes(state.sessionToolFilter)) : rows;
 }
 
 function renderRows(rows, { incompleteHint = '' } = {}) {
@@ -5323,6 +5328,7 @@ function sessionDetailBack() {
 }
 
 function renderSessionDetail({ detail, loading, error, preserveScroll = false } = {}) {
+  els.sessionToolFilter.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
@@ -5542,6 +5548,7 @@ function sessionGroupRunNode(row, max, parent) {
 }
 
 function renderSessionGroupDetail(request) {
+  els.sessionToolFilter.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
