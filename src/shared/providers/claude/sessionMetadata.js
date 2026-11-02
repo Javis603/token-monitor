@@ -664,7 +664,9 @@ function resolveSessionMetadata(sessionIds, context) {
   // Read only when some transcript carries no title record of its own.
   let desktopTitles;
   const desktopTitle = (sessionId) => {
-    desktopTitles ||= readDesktopSessionTitles(home, sessionIds);
+    // Like CLAUDE_CONFIG_DIR, a scoped home never inherits the host's LocalAppData.
+    const localAppData = deps.scopedHome ? '' : String((deps.env || process.env).LOCALAPPDATA || '').trim();
+    desktopTitles ||= readDesktopSessionTitles(home, sessionIds, localAppData);
     return cleanTitle(desktopTitles.get(sessionId));
   };
   const applyFile = (sessionId, filePath) => {

@@ -988,3 +988,25 @@ test('Desktop titles are also read from the Windows MSIX data root', (t) => {
 
   assert.deepEqual(readDesktopSessionTitles(home, new Set(['msix', 'other'])), new Map([['msix', 'MSIX title']]));
 });
+
+test('the MSIX data root follows LOCALAPPDATA except for a scoped home', (t) => {
+  const { resolveSessionMetadata } = require('../../src/shared/providers/claude/sessionMetadata');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-claude-desktop-localappdata-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const projects = path.join(home, '.claude', 'projects', 'p');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(path.join(projects, 'msix.jsonl'), `${JSON.stringify({ type: 'user', message: { content: 'hi' } })}\n`);
+  // A relocated LocalAppData that is not `<home>/AppData/Local`.
+  const localAppData = path.join(home, 'relocated-local');
+  const store = path.join(localAppData, 'Claude-Data', 'claude_pzs8sxrjxfjjc', 'claude-code-sessions', 'account', 'org');
+  fs.mkdirSync(store, { recursive: true });
+  fs.writeFileSync(path.join(store, 'local_a.json'), JSON.stringify({ cliSessionId: 'msix', title: 'MSIX title' }));
+  const title = (scopedHome) => resolveSessionMetadata(new Set(['msix']), {
+    home, metadata: new Map(),
+    deps: { scopedHome, env: { LOCALAPPDATA: localAppData }, claudeMetadataDeps: { cache: new Map() } },
+    fileSessionMetadata: (_id, _file, meta) => ({ ...meta })
+  }).get('msix').title;
+
+  assert.equal(title(false), 'MSIX title');
+  assert.equal(title(true), undefined);
+});
