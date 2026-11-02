@@ -36,9 +36,9 @@ function setup() {
     sessionToolPrevious: element(), sessionToolNext: element(), breakdown: { scrollTop: 42 } };
   let renders = 0;
   const filter = Function('state', 'els', 'document', 'KNOWN_CLIENTS', 'clientLabels', 'clientsWithIcon',
-    'currentLocale', 't', 'render', 'updateSessionToolScrollButtons', 'limitWindowsView', 'sessionToolClients', 'toolIconsEnabled', `${app.slice(start, end)}; return renderSessionToolFilter;`)(
+    'currentLocale', 't', 'render', 'updateSessionToolScrollButtons', 'limitWindowsView', 'sessionToolClients', `${app.slice(start, end)}; return renderSessionToolFilter;`)(
     state, els, document, [{ id: 'claude' }, { id: 'codex' }], { claude: 'Claude Code', codex: 'Codex' },
-    new Set(['claude', 'codex']), () => 'en', key => key, () => renders++, () => {}, { setDetailTooltip(button) { button.append({className:'limit-detail-tooltip'}); } }, appFunction('sessionToolClients', [], []), value => value === true);
+    new Set(['claude', 'codex']), () => 'en', key => key, () => renders++, () => {}, { setDetailTooltip(button) { button.append({className:'limit-detail-tooltip'}); } }, appFunction('sessionToolClients', [], []));
   return { state, els, document, host, strip, filter, renders: () => renders };
 }
 
@@ -151,15 +151,16 @@ test('cross-tool groups remain reachable from every member tool', () => {
   assert.deepEqual(ui.filter([group]), [group]);
 });
 
-test('turning off tool icons renders tool labels and invalidates existing buttons', () => {
+test('filter controls retain their icons when decorative tool icons are disabled', () => {
   const ui = setup();
   ui.filter(rows);
-  assert.equal(ui.strip.children[1].children.filter(node=>node.className.includes('row-icon')).length, 1);
+  const button = ui.strip.children[1];
   ui.state.settings.showToolIcons = false;
   ui.filter(rows);
-  assert.equal(ui.strip.children[1].children.filter(node=>node.className.includes('row-icon')).length, 0);
+  assert.strictEqual(ui.strip.children[1], button, 'content decoration does not rebuild filter controls');
+  assert.equal(button.children.filter(node=>node.className.includes('row-icon')).length, 1);
+  assert.equal(button.attributes['aria-label'], 'Claude Code');
   assert.equal(ui.strip.children.every(button=>button.children.some(node=>node.className==='limit-detail-tooltip')), true);
-  assert.equal(ui.strip.children[1].textContent, 'Claude Code');
 });
 
 test('both direct detail render paths hide the list filter immediately', () => {

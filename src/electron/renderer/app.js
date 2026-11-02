@@ -3067,8 +3067,7 @@ function renderSessionToolFilter(rows) {
   host.setAttribute('aria-label', t('sessions.filterTools'));
   els.sessionToolPrevious.setAttribute('aria-label', t('sessions.toolsPrevious'));
   els.sessionToolNext.setAttribute('aria-label', t('sessions.toolsNext'));
-  const showIcons = toolIconsEnabled(state.settings?.showToolIcons);
-  const signature = JSON.stringify([currentLocale(), clients, state.sessionToolFilter, showIcons]);
+  const signature = JSON.stringify([currentLocale(), clients, state.sessionToolFilter]);
   if (host.dataset.signature !== signature) {
     host.dataset.signature = signature;
     const focused = strip.contains(document.activeElement) ? document.activeElement.dataset.client : null;
@@ -3080,7 +3079,7 @@ function renderSessionToolFilter(rows) {
       const label = client ? clientLabels[client] || client : t('sessions.allTools');
       button.setAttribute('aria-label', label);
       button.setAttribute('aria-pressed', String(state.sessionToolFilter === client));
-      if (showIcons && client && clientsWithIcon.has(client)) {
+      if (client && clientsWithIcon.has(client)) {
         const icon = document.createElement('span');
         icon.className = `row-icon row-icon-${client}`;
         icon.setAttribute('aria-hidden', 'true');
