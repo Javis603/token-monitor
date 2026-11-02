@@ -1215,17 +1215,31 @@ test('an archived session is never running and a half-read context is not shown'
 
 test('session rows keep a completed session cache when the recent context expires in every period', () => {
   const at = Date.parse('2026-09-30T09:00:00Z');
-  const session = { client: 'codex', sessionId: 'cache-session', totalTokens: 100, lastUsedAt: new Date(at).toISOString(), turnEnded: true,
-    contextTokens: 60, contextWindow: 100, promptCache: { observedAt: new Date(at).toISOString(), ttlSeconds: 1800 } };
+  const session = { client: 'claude', sessionId: 'cache-session', totalTokens: 100, lastUsedAt: new Date(at).toISOString(), turnEnded: true,
+    contextTokens: 60, contextWindow: 100, promptCache: { observedAt: new Date(at).toISOString(), ttlSeconds: 3600 } };
   for (const period of ['today', 'month', 'allTime']) {
     const before = sessionRowsForPeriod({ sessions: { cache: session } }, { now: new Date(at + 600_000) })[0];
     assert.equal(before.context.percentUsed, 60, period);
     const after = sessionRowsForPeriod({ sessions: { cache: session } }, { now: new Date(at + 600_001) })[0];
     assert.equal(after.context, undefined, period);
-    assert.equal(after.promptCache.minutes, 20, period);
+    assert.equal(after.promptCache.minutes, 50, period);
     assert.equal(after.contextSnapshot.contextTokens, 60, period);
     assert.equal(after.contextSnapshot.contextWindow, 100, period);
-    assert.equal(sessionRowsForPeriod({ sessions: { cache: session } }, { now: new Date(at + 1800_000) })[0].promptCache, null, period);
+    assert.equal(sessionRowsForPeriod({ sessions: { cache: session } }, { now: new Date(at + 3600_000) })[0].promptCache, null, period);
+  }
+});
+
+test('session rows suppress legacy Codex cache countdowns in every period', () => {
+  const at = Date.parse('2026-09-30T09:00:00Z');
+  const session = { client: 'codex', sessionId: 'legacy', totalTokens: 100, lastUsedAt: new Date(at).toISOString(),
+    contextTokens: 60, contextWindow: 100, promptCache: { observedAt: new Date(at).toISOString(), ttlSeconds: 1800 } };
+  for (const period of ['today', 'month', 'allTime']) {
+    const stats = { periods: { [period]: { sessions: { legacy: session } } } };
+    for (const elapsed of [0, 600_001]) {
+      const row = sessionRowsForPeriod(stats.periods[period], { now: new Date(at + elapsed) })[0];
+      assert.equal(row.promptCache, null, period);
+      assert.equal(row.contextSnapshot.contextTokens, 60, period);
+    }
   }
 });
 
@@ -1264,7 +1278,6 @@ test('the shared metrics slot restores its meter and tone after cache or empty s
   assert.equal(gauge.title, undefined);
   assert.deepEqual(gauge.entries, []);
 });
-
 
 test('Grok Bot groups all bot conversations by latest activity and conserves totals', () => {
   const now = new Date(2026, 4, 30, 12, 30);
@@ -1345,7 +1358,6 @@ test('Grok group rows expose usage without an unsupported transcript action', ()
   assert.equal(node.interactive, false);
   assert.deepEqual(node.events, {});
 });
-
 
 test('group sections keep main continuations above children without changing usage or counting runs as agents', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');

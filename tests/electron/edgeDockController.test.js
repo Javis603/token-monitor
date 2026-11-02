@@ -129,6 +129,13 @@ function sentPayload(win, surface) {
   )).at(-1)?.payload;
 }
 
+function paintedCardBounds(win) {
+  const shape = win.webContents.messages.filter(message => message.payload?.shape?.contentBounds).at(-1)?.payload.shape;
+  const frame = shape?.contentBounds;
+  const bounds = win.getBounds();
+  return frame ? { ...bounds, y: bounds.y + frame.y, height: frame.height } : bounds;
+}
+
 // Drive the controller's polling, intent grace and animation frames on one clock.
 function mockDockClock(t) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
@@ -170,6 +177,7 @@ function createFixture(options = {}) {
     powerMonitor,
     screen,
     platform: options.platform || 'win32',
+    osRelease: options.osRelease ?? '24.6.0',
     rendererDir: '/renderer',
     preloadPath: '/preload.js',
     getSettings: () => settings,
@@ -179,7 +187,9 @@ function createFixture(options = {}) {
     windowsBackdrop: options.windowsBackdrop,
     canRefreshLimits: options.canRefreshLimits,
     onRefreshLimits: options.onRefreshLimits,
+    onWebSurfaceChanged: options.onWebSurfaceChanged,
     prefersReducedMotion: options.prefersReducedMotion || (() => true),
+    cardSpring: options.cardSpring,
     isFullScreen: options.isFullScreen,
     primaryButtonDown: options.primaryButtonDown,
     installNonActivatingInput: options.installNonActivatingInput,
@@ -194,6 +204,7 @@ function createFixture(options = {}) {
     onPlacementChange: (placement) => {
       placements.push(placement);
       settings.edgeDockSide = placement.side;
+      settings.edgeDockFloatingX = placement.floatingX;
       settings.edgeDockOffset = placement.offset;
       settings.edgeDockDisplayId = placement.displayId;
     }
@@ -204,7 +215,7 @@ function createFixture(options = {}) {
     { id: 'cursor', kind: 'provider', label: 'Cursor' }
   ]);
   controller.sync();
-  for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
+  if (options.load !== false) for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
   const paintPeek = () => {
     const win = windowFor('peek');
@@ -284,7 +295,7 @@ for (const event of ['resume', 'unlock-screen']) {
         const bubble = fixture.windowFor('bubble');
         fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
         fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
-        fixture.screen.point = { x: bubble.bounds.x + 30, y: bubble.bounds.y + 30 };
+        fixture.screen.point = { x: paintedCardBounds(bubble).x + 30, y: paintedCardBounds(bubble).y + 30 };
       } else {
         fixture.paintPeek();
         fixture.screen.point = { x: 600, y: 400 };
@@ -390,7 +401,7 @@ for (const platform of ['win32', 'darwin']) {
     const open = () => {
       fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
       fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
-      fixture.screen.point = { x: bubble.bounds.x + 30, y: bubble.bounds.y + 30 };
+      fixture.screen.point = { x: paintedCardBounds(bubble).x + 30, y: paintedCardBounds(bubble).y + 30 };
     };
     open();
     fixture.powerMonitor.emit('resume');
@@ -493,7 +504,7 @@ for (const platform of ['win32', 'darwin']) {
     t.mock.timers.tick(1000);
     assert.deepEqual([rail, bubble].map((win) => win.zOrderCalls.length), after, 'steady hover does not keep raising windows');
 
-    fixture.screen.point = { x: bubble.bounds.x + 30, y: bubble.bounds.y + 30 };
+    fixture.screen.point = { x: paintedCardBounds(bubble).x + 30, y: paintedCardBounds(bubble).y + 30 };
     t.mock.timers.tick(100);
     ordinary.moveTop();
     bubble.moveTop();
@@ -610,7 +621,7 @@ test('an open card follows its cell id across removal and reorder', (t) => {
     workArea: fixture.screen.displays[0].workArea,
     side: 'right'
   });
-  assert.equal(bubble.bounds.y, reordered.y);
+  assert.equal(paintedCardBounds(bubble).y, reordered.y);
 
   fixture.settings.edgeDockSide = 'left';
   fixture.controller.sync();
@@ -621,8 +632,8 @@ test('an open card follows its cell id across removal and reorder', (t) => {
     workArea: fixture.screen.displays[0].workArea,
     side: 'left'
   });
-  assert.equal(bubble.bounds.x, moved.x);
-  assert.ok(bubble.bounds.x > rail.bounds.x);
+  assert.equal(paintedCardBounds(bubble).x, moved.x);
+  assert.ok(paintedCardBounds(bubble).x > rail.bounds.x);
 
   fixture.controller.setCells([{ id: 'cursor', kind: 'provider', label: 'Cursor' }]);
   assert.equal(sentPayload(rail, 'rail').focusCellId, null);
@@ -650,7 +661,7 @@ test('updated content keeps an open card visible while its replacement is measur
 
   fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 220 });
   assert.deepEqual(sentPayload(bubble, 'bubble').placed, { cellId: 'codex', height: 220 });
-  assert.equal(bubble.bounds.height, 220);
+  assert.equal(paintedCardBounds(bubble).height, 220);
   assert.equal(bubble.opacity, 1);
 });
 
@@ -668,7 +679,8 @@ test('dragging onto another display moves the dock there and persists its id', a
   await new Promise((resolve) => setTimeout(resolve, 35));
   fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
 
-  assert.equal(rail.bounds.x, 1800 - 64);
+  assert.equal(rail.bounds.x, 1700 - 32);
+  assert.notEqual(fixture.placements.at(-1).floatingX, null);
   assert.equal(fixture.placements.at(-1).displayId, '2');
   assert.equal(fixture.placements.at(-1).side, 'right');
 });
@@ -695,7 +707,7 @@ test('the dock size scales its windows and zooms their pages to match', (t) => {
   fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
   fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
   const { tailY: _tailY, ...expected } = edgeDockBubbleBounds({ railBounds: rail.bounds, cellIndex: 1, height: 225, workArea, side: 'right', metrics: large });
-  assert.deepEqual(bubble.bounds, expected);
+  assert.deepEqual(paintedCardBounds(bubble), expected);
   assert.equal(sentPayload(bubble, 'bubble').placed.height, 180, 'the page keeps its own measurement');
   assert.equal(sentPayload(bubble, 'bubble').maxCardHeight, Math.floor((workArea.height - EDGE_DOCK_METRICS.screenMargin * 2) / 1.25));
 
@@ -759,7 +771,7 @@ test('an open card stays within the work area when the dock grows', (t) => {
   fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
   fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 800 });
   fixture.controller.previewScale(1.5);
-  assert.ok(bubble.bounds.height <= workArea.height - EDGE_DOCK_METRICS.screenMargin * 2, `card ${bubble.bounds.height}px tall`);
+  assert.ok(paintedCardBounds(bubble).height <= workArea.height - EDGE_DOCK_METRICS.screenMargin * 2, `card ${paintedCardBounds(bubble).height}px tall`);
 });
 
 test('a custom size previews while its slider is dragged and the saved size replaces it', (t) => {
@@ -1437,7 +1449,7 @@ test('display metric changes hide and remeasure an open card against the new wor
   assert.equal(sentPayload(bubble, 'bubble').placed, null);
 
   fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 400 });
-  assert.equal(bubble.bounds.height, 300 - EDGE_DOCK_METRICS.screenMargin * 2);
+  assert.equal(paintedCardBounds(bubble).height, 300 - EDGE_DOCK_METRICS.screenMargin * 2);
   assert.equal(bubble.opacity, 1);
 });
 
@@ -1465,7 +1477,10 @@ test('refresh reuses the peek and retains one Liquid Glass view across role chan
   assert.equal(peek.ignoreMouse, false);
   assert.equal(sentPayload(peek, 'peek').liquidGlass, true);
   assert.equal(peek.bounds.width, EDGE_DOCK_METRICS.refreshSize);
-  assert.deepEqual(rail.bounds, originalRail);
+  // The hidden rail started parked off-screen; the reveal docks it at the edge
+  // with its size and height unchanged.
+  assert.deepEqual({ ...rail.bounds, x: 0 }, { ...originalRail, x: 0 });
+  assert.equal(rail.bounds.x + rail.bounds.width, 1200);
   assert.equal(FakeBrowserWindow.instances.length, 3);
   assert.equal((await handler({ sender: rail.webContents })).ok, false);
   const first = handler({ sender: peek.webContents });
@@ -1879,3 +1894,843 @@ for (const mode of ['autoHide', 'alwaysExceptFullScreen']) {
     assert.deepEqual(await request, { ok: true });
   });
 }
+
+
+test('web surface callbacks skip unready and unchanged renders but preserve lifecycle changes', (t) => {
+  let changes = 0;
+  const fixture = createFixture({ load: false, onWebSurfaceChanged: () => { changes += 1; } });
+  t.after(() => fixture.controller.stop());
+  changes = 0;
+  fixture.controller.setAppearance({ dark: true });
+  assert.equal(changes, 0, 'unready renders do not reconcile web surfaces');
+  for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
+  assert.ok(changes > 0, 'loading reconciles surfaces');
+  changes = 0;
+  fixture.controller.setAppearance({ dark: true });
+  assert.equal(changes, 0, 'identical payload does not reconcile');
+  fixture.controller.setAppearance({ dark: false });
+  assert.ok(changes > 0, 'changed payload reconciles');
+  changes = 0;
+  fixture.settings.edgeDockMode = 'hover';
+  fixture.controller.sync();
+  assert.ok(changes > 0, 'hiding reconciles even without a changed payload');
+  changes = 0;
+  fixture.controller.stop();
+  assert.ok(changes > 0, 'teardown reconciles detached hosts');
+});
+
+function onAnyDisplay(win, displays) {
+  const { x, y, width, height } = win.bounds;
+  return displays.some(({ bounds: d }) => x < d.x + d.width && x + width > d.x && y < d.y + d.height && y + height > d.y);
+}
+
+test('a hidden macOS rail is parked off every display so a Space switch cannot flash it', (t) => {
+  const fixture = createFixture({
+    platform: 'darwin',
+    settings: { edgeDockMode: 'autoHide' },
+    displays: [
+      { id: 1, scaleFactor: 1, bounds: { x: 0, y: 0, width: 1200, height: 900 }, workArea: { x: 0, y: 0, width: 1200, height: 860 } },
+      { id: 2, scaleFactor: 2, bounds: { x: 1200, y: -200, width: 1600, height: 1000 }, workArea: { x: 1200, y: -200, width: 1600, height: 960 } }
+    ]
+  });
+  t.after(() => fixture.controller.stop());
+  const displays = fixture.screen.getAllDisplays();
+  const rail = fixture.windowFor('rail');
+  assert.equal(rail.opacity, 0);
+  assert.equal(onAnyDisplay(rail, displays), false, 'parked from the first load');
+
+  fixture.screen.emit('display-metrics-changed');
+  assert.equal(onAnyDisplay(rail, displays), false, 'a layout pass while hidden keeps it parked');
+
+  // The rail is back in place before it becomes visible at all.
+  const boundsAtFirstOpacity = [];
+  const setOpacity = rail.setOpacity.bind(rail);
+  rail.setOpacity = (value) => {
+    if (value > 0 && boundsAtFirstOpacity.length === 0) boundsAtFirstOpacity.push({ ...rail.bounds });
+    setOpacity(value);
+  };
+  fixture.settings.edgeDockMode = 'always';
+  fixture.controller.sync();
+  assert.equal(rail.opacity, 1);
+  assert.equal(boundsAtFirstOpacity.length, 1);
+  assert.equal(onAnyDisplay({ bounds: boundsAtFirstOpacity[0] }, displays), true);
+  assert.equal(rail.bounds.x + rail.bounds.width, 1200, 'docked to the right edge of its display');
+
+  fixture.settings.edgeDockMode = 'autoHide';
+  fixture.controller.sync();
+  assert.equal(rail.opacity, 0);
+  assert.equal(onAnyDisplay(rail, displays), false, 'parked again once it retracts');
+});
+
+for (const [version, osRelease] of [['12', '21.6.0'], ['13', '22.6.0'], ['14', '23.6.0'], ['15.6.1', '24.6.0'], ['26', '25.0.0'], ['27', '26.0.0']]) {
+  test(`macOS ${version} only parks hidden surfaces when older than macOS 26`, (t) => {
+    const fixture = createFixture({ platform: 'darwin', osRelease, settings: { edgeDockMode: 'autoHide' } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const bubble = fixture.windowFor('bubble');
+    const shouldPark = Number.parseInt(version, 10) < 26;
+    const assertHidden = () => {
+      for (const win of [rail, bubble]) {
+        assert.equal(win.opacity, 0);
+        assert.equal(onAnyDisplay(win, fixture.screen.getAllDisplays()), !shouldPark, `${win.surface} placement`);
+      }
+    };
+    assertHidden();
+
+    fixture.settings.edgeDockMode = 'always';
+    fixture.controller.sync();
+    assert.equal(rail.opacity, 1);
+    assert.equal(onAnyDisplay(rail, fixture.screen.getAllDisplays()), true);
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+    assert.equal(bubble.opacity, 1);
+    assert.equal(onAnyDisplay(bubble, fixture.screen.getAllDisplays()), true);
+    fixture.ipcMain.emit('edgeDock:dismiss', { sender: bubble.webContents });
+    fixture.settings.edgeDockMode = 'autoHide';
+    fixture.controller.sync();
+    assertHidden();
+
+    fixture.screen.displays.push({ id: 2, scaleFactor: 2, bounds: { x: 1200, y: 0, width: 3000, height: 900 }, workArea: { x: 1200, y: 0, width: 3000, height: 860 } });
+    fixture.screen.emit('display-added');
+    assertHidden();
+    fixture.settings.edgeDockSide = 'left';
+    fixture.screen.emit('display-metrics-changed');
+    assertHidden();
+  });
+}
+
+test('a hidden Windows rail stays in place', (t) => {
+  const fixture = createFixture({ platform: 'win32', settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  assert.equal(rail.opacity, 0);
+  assert.equal(onAnyDisplay(rail, fixture.screen.getAllDisplays()), true);
+});
+
+test('a display added past the parked surfaces moves them beyond it', (t) => {
+  const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  assert.equal(bubble.opacity, 0);
+  fixture.screen.displays.push({ id: 2, scaleFactor: 1, bounds: { x: 1200, y: 0, width: 3000, height: 900 }, workArea: { x: 1200, y: 0, width: 3000, height: 860 } });
+  fixture.screen.emit('display-added');
+  const displays = fixture.screen.getAllDisplays();
+  assert.equal(onAnyDisplay(rail, displays), false);
+  assert.equal(onAnyDisplay(bubble, displays), false, 'the hidden card has no cell to place, yet it moves too');
+});
+
+test('a free drop persists both axes, remains visible in auto-hide, and can snap back', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  fixture.ipcMain.emit('edgeDock:click', { sender: fixture.windowFor('peek').webContents });
+  const rail = fixture.windowFor('rail');
+  fixture.screen.point = { x: 600, y: 300 };
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30 });
+  // Release before the next poll: the final cursor location is still saved.
+  fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
+  assert.equal(rail.bounds.x, 580);
+  assert.equal(rail.bounds.y, 270);
+  assert.ok(fixture.settings.edgeDockFloatingX > 0);
+  const floatingShape = sentPayload(rail, 'rail').shape.d;
+  fixture.screen.point = { x: 0, y: 0 };
+  advance(1000);
+  assert.equal(rail.opacity, 1);
+  assert.equal(sentPayload(rail, 'rail').always, true);
+  fixture.controller.stop();
+  fixture.controller.sync();
+  for (const win of FakeBrowserWindow.instances.filter(win => !win.destroyed)) win.webContents.emit('did-finish-load');
+  const restored = fixture.windowFor('rail');
+  assert.equal(restored.bounds.x, 580);
+  assert.equal(restored.bounds.y, 270);
+  fixture.screen.point = { x: 1190, y: 400 };
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: restored.webContents }, { grabOffsetX: 20, grabOffsetY: 30 });
+  fixture.ipcMain.emit('edgeDock:dragEnd', { sender: restored.webContents });
+  assert.equal(fixture.settings.edgeDockFloatingX, null);
+  assert.equal(restored.bounds.x, 1136);
+  assert.notEqual(sentPayload(restored, 'rail').shape.d, floatingShape);
+  assert.equal(sentPayload(restored, 'rail').always, false);
+  fixture.screen.point = { x: 600, y: 0 };
+  advance(1000);
+  assert.equal(restored.opacity, 0);
+});
+
+test('floating cards choose the available side and fit a scaled narrow display', (t) => {
+  const fixture = createFixture({ settings: { edgeDockFloatingX: 0.5, edgeDockCustomScale: 1.5, edgeDockSize: 'custom' },
+    displays: [{ id: 1, bounds: { x: -800, y: 0, width: 800, height: 1200 }, workArea: { x: -800, y: 0, width: 800, height: 1160 } }] });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  const open = () => {
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+    assert.ok(paintedCardBounds(bubble).x >= -800);
+    assert.ok(paintedCardBounds(bubble).x + paintedCardBounds(bubble).width <= 0);
+  };
+  open();
+  assert.ok(sentPayload(bubble, 'bubble').cardWidth < 280);
+  fixture.settings.edgeDockFloatingX = 0.1;
+  fixture.controller.sync();
+  open();
+  assert.equal(sentPayload(bubble, 'bubble').side, 'left');
+  assert.ok(paintedCardBounds(bubble).x > rail.bounds.x);
+  fixture.settings.edgeDockFloatingX = 0.9;
+  fixture.controller.sync();
+  open();
+  assert.equal(sentPayload(bubble, 'bubble').side, 'right');
+  assert.ok(paintedCardBounds(bubble).x < rail.bounds.x);
+});
+
+test('Windows drag frames follow the native cursor between polls and reject stale or foreign frames', (t) => {
+  const advance = mockDockClock(t);
+  let down = true;
+  const fixture = createFixture({ primaryButtonDown: () => down });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const emitFrame = (win, gestureId) => fixture.ipcMain.emit('edgeDock:dragFrame', { sender: win.webContents }, { gestureId });
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30, gestureId: 7 });
+  const saved = rail.getBounds();
+  advance(4);
+  fixture.screen.point = { x: 700, y: 300 };
+  emitFrame(rail, 6);
+  emitFrame(fixture.windowFor('peek'), 7);
+  assert.deepEqual(rail.getBounds(), saved);
+  emitFrame(rail, 7);
+  assert.equal(rail.bounds.x, 680, 'a frame moves the rail before the 16ms poll');
+  advance(4);
+  fixture.screen.point = { x: 500, y: 400 };
+  emitFrame(rail, 7);
+  assert.equal(rail.bounds.x, 480, 'high refresh displays are not limited to the poll rate');
+  advance(100);
+  down = false;
+  fixture.screen.point = { x: 20, y: 500 };
+  emitFrame(rail, 7);
+  assert.equal(rail.bounds.x, 0);
+  assert.equal(fixture.placements.length, 1, 'native release saves the final position');
+  fixture.screen.point = { x: 900, y: 300 };
+  emitFrame(rail, 7);
+  assert.equal(rail.bounds.x, 0, 'queued frames cannot move a completed gesture');
+  assert.equal(fixture.placements.length, 1);
+});
+
+test('Windows card switches follow renderer frames and reject stale motion ids', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+  };
+  const emitFrame = (win, motionId) => fixture.ipcMain.emit('edgeDock:cardFrame', { sender: win.webContents }, { motionId });
+
+  open(0, 'claude', 180);
+  advance(160);
+  open(2, 'cursor', 300);
+  const start = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+  assert.equal(start.active, true);
+  assert.equal(typeof start.motionId, 'number');
+  const paintedAtStart = paintedCardBounds(card);
+  t.mock.timers.tick(8);
+  emitFrame(card, start.motionId - 1);
+  emitFrame(rail, start.motionId);
+  assert.deepEqual(paintedCardBounds(card), paintedAtStart, 'stale or foreign renderer frames do nothing');
+  t.mock.timers.tick(8);
+  assert.notDeepEqual(paintedCardBounds(card), paintedAtStart, 'the fallback starts before the first renderer frame');
+  emitFrame(card, start.motionId);
+  const paintedByRenderer = paintedCardBounds(card);
+  assert.notDeepEqual(paintedByRenderer, paintedAtStart, 'a renderer frame also advances the spring');
+  t.mock.timers.tick(32);
+  assert.deepEqual(paintedCardBounds(card), paintedByRenderer, 'the fallback timer does not double-paint while frames arrive');
+  advance(80);
+  assert.notDeepEqual(paintedCardBounds(card), paintedByRenderer, 'the timer resumes only after renderer frames stop');
+
+  advance(720);
+  const stop = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+  assert.deepEqual(stop, { motionId: start.motionId, active: false });
+  const settled = paintedCardBounds(card);
+  t.mock.timers.tick(8);
+  emitFrame(card, start.motionId);
+  assert.deepEqual(paintedCardBounds(card), settled, 'frames queued after completion cannot restart the spring');
+});
+
+test('Windows card retargets do not restart the frame fallback grace period', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+  };
+
+  open(0, 'claude', 180);
+  advance(160);
+  open(2, 'cursor', 300);
+  const first = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+  t.mock.timers.tick(16);
+  fixture.ipcMain.emit('edgeDock:cardFrame', { sender: card.webContents }, { motionId: first.motionId });
+  t.mock.timers.tick(32);
+
+  open(0, 'claude', 180);
+  const retargeted = paintedCardBounds(card);
+  t.mock.timers.tick(16);
+  assert.deepEqual(paintedCardBounds(card), retargeted, 'the grace period still runs from the last renderer frame');
+  t.mock.timers.tick(16);
+  assert.notDeepEqual(paintedCardBounds(card), retargeted, 'fallback resumes without waiting another full grace period after retargeting');
+});
+
+test('native release finishes a held drag at its final location and acknowledges its gesture', (t) => {
+  const advance = mockDockClock(t);
+  let down = true;
+  const fixture = createFixture({ primaryButtonDown: () => down });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  fixture.screen.point = { x: 700, y: 300 };
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30, gestureId: 7 });
+  advance(100);
+  assert.equal(rail.bounds.x, 680);
+  assert.equal(fixture.placements.length, 0);
+  fixture.screen.point = { x: 500, y: 400 };
+  advance(32);
+  assert.equal(rail.bounds.x, 480);
+  fixture.screen.point = { x: 20, y: 500 };
+  down = false;
+  advance(32);
+  assert.equal(rail.bounds.x, 0);
+  assert.equal(fixture.placements.at(-1).floatingX, null);
+  assert.equal(rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:dragEnded').at(-1).payload.gestureId, 7);
+});
+
+test('detaching morphs the shared silhouette over several frames without rebuilding rail content', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  advance(200);
+  const rail = fixture.windowFor('rail');
+  const attached = sentPayload(rail, 'rail').shape.d;
+  const before = rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:render').length;
+  fixture.screen.point = { x: 600, y: 300 };
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30 });
+  advance(32);
+  const frames = () => rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:shapeFrame');
+  assert.ok(frames().length > 0);
+  const intermediate = frames().at(-1).payload.shape.d;
+  assert.notEqual(intermediate, attached);
+  advance(200);
+  const final = sentPayload(rail, 'rail').shape.d;
+  assert.notEqual(final, intermediate);
+  assert.ok(frames().length >= 5);
+  const renders = rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:render').length - before;
+  assert.ok(renders <= 3, `${renders} content renders for the whole morph`);
+  fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
+  fixture.screen.point = { x: 1190, y: 300 };
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30 });
+  advance(32);
+  assert.ok(rail.bounds.x > 580 && rail.bounds.x < 1136, 'snap moves through intermediate positions');
+  advance(200);
+  assert.equal(rail.bounds.x, 1136);
+  assert.equal(sentPayload(rail, 'rail').shape.d, attached);
+});
+
+test('stopping a morph cancels its native window updates', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ prefersReducedMotion: () => false });
+  const rail = fixture.windowFor('rail');
+  fixture.screen.point = { x: 600, y: 300 };
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetY: 30 });
+  advance(32);
+  fixture.controller.stop();
+  const messages = rail.webContents.messages.length;
+  advance(300);
+  assert.equal(rail.webContents.messages.length, messages);
+});
+
+for (const initialButtonState of [null, true]) {
+  test(`capture loss with unreadable native state cancels an outside-work-area drag (${initialButtonState})`, (t) => {
+    const advance = mockDockClock(t);
+    let down = initialButtonState;
+    const fixture = createFixture({ primaryButtonDown: () => down });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const savedBounds = { ...rail.bounds };
+    fixture.screen.point = { x: 600, y: 300 };
+    fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30, gestureId: 9 });
+    advance(100);
+    assert.equal(rail.bounds.x, 580);
+    // A menu-bar release produces no further renderer pointerup/pointermove.
+    fixture.screen.point = { x: 600, y: -20 };
+    advance(32);
+    assert.ok(fixture.screen.point.y < rail.bounds.y, 'work-area clamping leaves the cursor outside the rail');
+    fixture.ipcMain.emit('edgeDock:dragCaptureLost', { sender: rail.webContents }, { gestureId: 8 });
+    advance(32);
+    assert.equal(rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:dragEnded').length, 0, 'stale capture loss cannot cancel a newer drag');
+    fixture.ipcMain.emit('edgeDock:dragCaptureLost', { sender: rail.webContents }, { gestureId: 9 });
+    if (down === true) {
+      advance(32);
+      assert.equal(rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:dragEnded').length, 0, 'known held button continues despite capture loss');
+      down = null;
+    }
+    advance(32);
+    assert.deepEqual(rail.bounds, savedBounds, 'cancel restores the last saved placement');
+    assert.equal(fixture.placements.length, 0, 'unknown release must not commit a new placement');
+    assert.deepEqual(rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:dragEnded').at(-1)?.payload, { gestureId: 9, cancelled: true });
+    fixture.screen.point = { x: 300, y: 600 };
+    advance(1000);
+    assert.deepEqual(rail.bounds, savedBounds, 'the rail no longer follows the cursor without renderer events');
+  });
+}
+
+test('cancelling mid-morph restores the renderer shape even when it matches the cached pre-drag payload', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ prefersReducedMotion: () => false, primaryButtonDown: () => null });
+  t.after(() => fixture.controller.stop());
+  advance(200);
+  const rail = fixture.windowFor('rail');
+  const attached = sentPayload(rail, 'rail').shape.d;
+  const paintedShape = () => rail.webContents.messages.filter(entry => ['edgeDock:render', 'edgeDock:shapeFrame'].includes(entry.channel)).at(-1).payload.shape.d;
+  fixture.screen.point = { x: 600, y: 300 };
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 20, grabOffsetY: 30, gestureId: 10 });
+  advance(64);
+  assert.notEqual(paintedShape(), attached, 'the renderer received an intermediate frame');
+  fixture.ipcMain.emit('edgeDock:dragCaptureLost', { sender: rail.webContents }, { gestureId: 10 });
+  assert.equal(paintedShape(), attached, 'cancellation must deliver the restored shape, not retain the last frame');
+  advance(300);
+  assert.equal(paintedShape(), attached, 'a stopped morph cannot repaint an intermediate shape later');
+});
+
+for (const railX of [350, 800]) {
+  test(`floating refresh preserves the bottom-centred design beside an open last-cell card (x=${railX})`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({
+      canRefreshLimits: () => true,
+      settings: { edgeDockFloatingX: (railX - 8) / 1120 },
+      displays: [{ id: 1, bounds: { x: 0, y: 0, width: 1200, height: 800 }, workArea: { x: 0, y: 0, width: 1200, height: 800 } }]
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const bubble = fixture.windowFor('bubble');
+    const refresh = fixture.windowFor('peek');
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 211 };
+    advance(100);
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 2 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'cursor', height: 180 });
+    fixture.paintPeek();
+    assert.equal(refresh.ignoreMouse, false, 'refresh is actually shown');
+    assert.equal(bubble.opacity, 1, 'the last-cell card is actually shown');
+    assert.equal(refresh.bounds.x + refresh.bounds.width / 2, rail.bounds.x + rail.bounds.width / 2);
+    assert.equal(refresh.bounds.y, rail.bounds.y + rail.bounds.height - Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) + EDGE_DOCK_METRICS.refreshGap);
+    assert.ok(refresh.bounds.x + refresh.bounds.width <= paintedCardBounds(bubble).x || paintedCardBounds(bubble).x + paintedCardBounds(bubble).width <= refresh.bounds.x, 'bottom refresh and the side-opening card cannot overlap');
+  });
+}
+
+for (const buttonState of [true, false, null]) {
+  test(`renderer pointercancel defers placement to native button state (${buttonState})`, (t) => {
+    const advance = mockDockClock(t);
+    let down = true;
+    const fixture = createFixture({ primaryButtonDown: () => down });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const saved = { ...rail.bounds };
+    const handlers = new Map();
+    const node = { addEventListener: (name, fn) => handlers.set(name, fn), setPointerCapture() {}, classList: { add() {}, remove() {} } };
+    const dock = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+    const source = dock.slice(dock.indexOf('let gesture = null;'), dock.indexOf('function indexFromTarget('));
+    const emit = (channel, payload) => fixture.ipcMain.emit(channel, { sender: rail.webContents }, payload);
+    let acknowledge;
+    Function('bridge', 'railNode', 'indexFromTarget', 'DRAG_THRESHOLD_PX', 'state', `${source}; bindRailGestures(railNode);`)(
+      {
+        dragStart: (grabOffsetY, grabOffsetX, gestureId) => emit('edgeDock:dragStart', { grabOffsetY, grabOffsetX, gestureId }),
+        dragEnd: () => emit('edgeDock:dragEnd'),
+        dragCaptureLost: (gestureId) => emit('edgeDock:dragCaptureLost', { gestureId }),
+        onDragEnded: (fn) => { acknowledge = fn; }
+      }, node, () => 0, 5, { payload: { platform: 'darwin' } });
+    const event = { button: 0, buttons: 1, pointerId: 1, screenX: rail.bounds.x + 20, screenY: rail.bounds.y + 30, clientX: 20, clientY: 30 };
+    handlers.get('pointerdown')(event);
+    fixture.screen.point = { x: 600, y: 300 };
+    handlers.get('pointermove')({ ...event, screenX: 600, screenY: 300 });
+    advance(100);
+    assert.notDeepEqual(rail.bounds, saved);
+    down = buttonState;
+    handlers.get('pointercancel')({ ...event, type: 'pointercancel' });
+    handlers.get('lostpointercapture')({ ...event, type: 'lostpointercapture' });
+    assert.equal(fixture.placements.length, 0, 'cancellation itself cannot commit a placement');
+    if (down === true) {
+      advance(100);
+      assert.equal(fixture.placements.length, 0, 'a held native button continues tracking');
+      fixture.screen.point = { x: 700, y: 400 };
+      down = false;
+    }
+    advance(100);
+    const ended = rail.webContents.messages.filter(entry => entry.channel === 'edgeDock:dragEnded').at(-1)?.payload;
+    assert.ok(ended, 'main acknowledges completion without further renderer input');
+    acknowledge(ended);
+    if (buttonState === null) {
+      assert.deepEqual(rail.bounds, saved, 'unreadable native state restores persisted placement');
+      assert.equal(fixture.placements.length, 0);
+      assert.equal(ended.cancelled, true);
+    } else {
+      assert.equal(fixture.placements.length, 1, 'only confirmed native release saves once');
+      assert.equal(rail.bounds.x, buttonState === true ? 680 : 580);
+    }
+    handlers.get('pointerup')({ ...event, type: 'pointerup' });
+    assert.equal(fixture.placements.length, buttonState === null ? 0 : 1, 'acknowledged gesture cannot save again');
+  });
+}
+
+for (const direction of ['detach', 'redock']) {
+  test(`refresh waits for ${direction} morph completion before returning below the rail`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({
+      canRefreshLimits: () => true,
+      prefersReducedMotion: () => false,
+      primaryButtonDown: () => true,
+      settings: { edgeDockFloatingX: direction === 'redock' ? 0.5 : null }
+    });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const refresh = fixture.windowFor('peek');
+    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 60 };
+    advance(120);
+    fixture.paintPeek();
+    advance(160);
+    assert.equal(refresh.ignoreMouse, false);
+    assert.equal(refresh.opacity, 1, 'start with a fully painted refresh so its fade-out is exercised');
+    fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 32, grabOffsetY: 60, gestureId: 11 });
+    fixture.screen.point = { x: direction === 'redock' ? 1190 : 600, y: 300 };
+    advance(32);
+    fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
+    advance(32);
+    fixture.paintPeek();
+    assert.equal(refresh.ignoreMouse, true, 'refresh cannot appear at the destination while the rail is still moving');
+    assert.equal(refresh.opacity, 0, 'refresh is fully hidden during the morph');
+    advance(220);
+    fixture.paintPeek();
+    advance(160);
+    assert.equal(refresh.ignoreMouse, false, 'hovered refresh returns after the morph');
+    assert.equal(refresh.opacity, 1);
+    assert.equal(refresh.bounds.x + refresh.bounds.width / 2, rail.bounds.x + rail.bounds.width / 2);
+    assert.equal(refresh.bounds.y, rail.bounds.y + rail.bounds.height - Math.round(EDGE_DOCK_METRICS.shoulder * 0.7) + EDGE_DOCK_METRICS.refreshGap);
+  });
+}
+
+for (const scale of [0.85, 1, 1.25]) {
+  test(`macOS floating rail only captures its painted capsule at scale ${scale}`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({ platform: 'darwin', settings: { edgeDockFloatingX: 0.5, edgeDockSize: 'custom', edgeDockCustomScale: scale } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    const m = scaledEdgeDockMetrics(scale);
+    const at = (x, y, sender = rail.webContents) => {
+      fixture.screen.point = { x: rail.bounds.x + x, y: rail.bounds.y + y };
+      fixture.ipcMain.emit('edgeDock:pointer', { sender });
+    };
+    assert.equal(rail.ignoreMouse, true, 'a visible floating window initially leaves background input alone');
+    assert.equal(rail.forwardMouse, true, 'forward moves so entering the capsule can capture without waiting for a poll');
+    const transparent = [
+      [rail.bounds.width / 2, m.shoulder / 2],
+      [rail.bounds.width / 2, rail.bounds.height - m.shoulder / 2],
+      [2, m.shoulder + 2], [rail.bounds.width - 2, m.shoulder + 2],
+      [2, rail.bounds.height - m.shoulder - 2], [rail.bounds.width - 2, rail.bounds.height - m.shoulder - 2]
+    ];
+    for (const [x, y] of transparent) {
+      at(rail.bounds.width / 2, rail.bounds.height / 2);
+      assert.equal(rail.ignoreMouse, false, 'the visible body takes input');
+      at(x, y);
+      assert.equal(rail.ignoreMouse, true, `transparent point ${x},${y} passes clicks and wheel through`);
+      assert.equal(rail.forwardMouse, true);
+    }
+    at(rail.bounds.width / 2, rail.bounds.height / 2, fixture.windowFor('bubble').webContents);
+    assert.equal(rail.ignoreMouse, true, 'another surface cannot capture the rail');
+    advance(100);
+    assert.equal(rail.ignoreMouse, false, 'the existing cursor poll also recovers capture');
+    fixture.controller.sync();
+    assert.equal(rail.ignoreMouse, false, 'ordinary settings/render sync preserves painted input');
+    at(rail.bounds.width / 2, m.shoulder / 2);
+    fixture.controller.sync();
+    assert.equal(rail.ignoreMouse, true, 'ordinary settings/render sync cannot recapture transparent input');
+  });
+}
+
+test('macOS floating capture stays active through a drag and resumes silhouette hit testing after cancellation', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'darwin', primaryButtonDown: () => null, settings: { edgeDockFloatingX: 0.5 } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 60 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: rail.webContents });
+  assert.equal(rail.ignoreMouse, false);
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 32, grabOffsetY: 60, gestureId: 31 });
+  fixture.screen.point = { x: 650, y: -20 };
+  advance(32);
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: rail.webContents });
+  assert.equal(rail.ignoreMouse, false, 'drag capture survives a pointer outside the painted rail');
+  fixture.ipcMain.emit('edgeDock:dragCaptureLost', { sender: rail.webContents }, { gestureId: 31 });
+  assert.equal(fixture.placements.length, 0);
+  assert.equal(rail.ignoreMouse, true, 'cancelled drag restores click-through at the saved capsule');
+  fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 60 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: rail.webContents });
+  assert.equal(rail.ignoreMouse, false, 'the restored capsule can be clicked again');
+});
+
+test('macOS floating rail retains a held press before the renderer crosses its drag threshold', (t) => {
+  let down = false;
+  const fixture = createFixture({ platform: 'darwin', primaryButtonDown: () => down, settings: { edgeDockFloatingX: 0.5 } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const report = (x) => {
+    fixture.screen.point = { x: rail.bounds.x + x, y: rail.bounds.y + 60 };
+    fixture.ipcMain.emit('edgeDock:pointer', { sender: rail.webContents });
+  };
+  report(2);
+  assert.equal(rail.ignoreMouse, false);
+  down = true;
+  report(-2);
+  assert.equal(rail.ignoreMouse, false, 'a 4px move outside the outline must not lose the press before dragStart');
+  down = false;
+  report(-2);
+  assert.equal(rail.ignoreMouse, true, 'release outside returns control to the background');
+});
+
+
+for (const side of ['left', 'right']) {
+  test(`detail card switches animate native geometry without delaying content (${side})`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({ platform: 'darwin', nativeGlass: true, prefersReducedMotion: () => false, settings: { edgeDockSide: side } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+    const open = (cellIndex, cellId, height) => {
+      const layout = sentPayload(rail, 'rail').cellLayout;
+      fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+      fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+      fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+    };
+    open(0, 'claude', 180);
+    advance(160);
+    const from = paintedCardBounds(card), canvas = card.getBounds();
+    const opacity = card.opacity;
+    open(2, 'cursor', 300);
+    assert.deepEqual(paintedCardBounds(card), from, 'switch starts at the painted position, not the destination');
+    assert.equal(sentPayload(card, 'bubble').cell.id, 'cursor', 'new content is acknowledged immediately');
+    assert.deepEqual(sentPayload(card, 'bubble').placed, { cellId: 'cursor', height: 300 });
+    const renders = card.webContents.messages.filter(m => m.channel === 'edgeDock:render').length;
+    advance(48);
+    const middle = paintedCardBounds(card);
+    const contentTarget = card.webContents.messages.at(-1).payload.shape.contentTarget;
+    assert.equal(contentTarget.height, 300, 'the content keeps its natural destination height while the outline resizes');
+    assert.notEqual(contentTarget.y, middle.y - canvas.y, 'content is not pinned to the moving top edge');
+    advance(16);
+    assert.deepEqual(card.webContents.messages.at(-1).payload.shape.contentTarget, contentTarget, 'outline frames do not move the destination layout');
+    const retargetFrom = paintedCardBounds(card);
+    assert.ok(middle.height > from.height && middle.height < 300);
+    assert.notEqual(middle.y, from.y);
+    assert.deepEqual(card.getBounds(), canvas, 'the native canvas does not move or resize while its card moves');
+    assert.equal(card.opacity, opacity, 'no fade-out or hidden interval');
+    assert.equal(card.webContents.messages.filter(m => m.channel === 'edgeDock:render').length, renders, 'animation does not rebuild content');
+    assert.ok(card.webContents.messages.some(m => m.channel === 'edgeDock:shapeFrame'));
+    const masks = fixture.maskWindows.length;
+    open(1, 'codex', 220);
+    assert.deepEqual(paintedCardBounds(card), retargetFrom, 'rapid switch retargets from the current frame');
+    advance(720);
+    const final = paintedCardBounds(card);
+    assert.equal(final.height, 220);
+    assert.equal(sentPayload(card, 'bubble').cell.id, 'codex');
+    assert.ok(fixture.maskWindows.length > masks, 'native material follows the animated silhouette');
+    const frames = card.webContents.messages.filter(m => m.channel === 'edgeDock:shapeFrame').length;
+    fixture.screen.point = { x: final.x + 20, y: final.y + 20 };
+    advance(160);
+    assert.equal(card.webContents.messages.filter(m => m.channel === 'edgeDock:shapeFrame').length, frames, 'animation stops at its destination');
+  });
+}
+
+for (const side of ['left', 'right']) {
+  test(`distant short cards and rapid reversals animate continuously (${side})`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({ prefersReducedMotion: () => false, settings: { edgeDockSide: side } });
+    t.after(() => fixture.controller.stop());
+    fixture.controller.setCells(Array.from({ length: 8 }, (_, index) => ({ id: `short-${index}`, kind: 'provider' })));
+    const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+    const open = (cellIndex) => {
+      const layout = sentPayload(rail, 'rail').cellLayout;
+      fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+      fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+      fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: `short-${cellIndex}`, height: 160 });
+    };
+    const advanceCardFrames = (ms) => {
+      for (let elapsed = 0; elapsed < ms; elapsed += 16) {
+        t.mock.timers.tick(Math.min(16, ms - elapsed));
+        const motion = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+        if (motion?.active) fixture.ipcMain.emit('edgeDock:cardFrame', { sender: card.webContents }, { motionId: motion.motionId });
+      }
+    };
+    open(0);
+    advance(160);
+    const canvas = card.getBounds();
+    for (const next of [7, 0, 5, 2, 7]) {
+      const previous = paintedCardBounds(card);
+      open(next);
+      assert.deepEqual(paintedCardBounds(card), previous, 'every selection starts at the current painted position');
+      const target = sentPayload(card, 'bubble').shape.contentTarget;
+      advanceCardFrames(48);
+      assert.notEqual(paintedCardBounds(card).y, previous.y, 'distant cards also move instead of jumping');
+      advance(720);
+      assert.equal(paintedCardBounds(card).y, canvas.y + target.y);
+    }
+    open(0);advance(32);
+    const moving = paintedCardBounds(card);
+    open(7);
+    assert.deepEqual(paintedCardBounds(card), moving, 'rapid reversal retains position continuity');
+    advance(720);
+    assert.deepEqual(card.getBounds(), canvas, 'the native canvas remains fixed');
+  });
+}
+
+test('detail card motion stops on dismissal and reduced motion switches directly', (t) => {
+  const advance = mockDockClock(t);
+  let reduced = false;
+  const fixture = createFixture({ prefersReducedMotion: () => reduced });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+  };
+  open(0, 'claude', 180);
+  advance(160);
+  open(2, 'cursor', 300);
+  advance(32);
+  fixture.screen.point = { x: 600, y: 800 };
+  fixture.ipcMain.emit('edgeDock:dismiss', { sender: card.webContents });
+  const dismissed = paintedCardBounds(card);
+  advance(160);
+  assert.deepEqual(paintedCardBounds(card), dismissed, 'dismissal cancels native movement');
+  reduced = true;
+  open(0, 'claude', 180);
+  advance(160);
+  const frames = card.webContents.messages.filter(m => m.channel === 'edgeDock:shapeFrame').length;
+  open(2, 'cursor', 300);
+  assert.equal(paintedCardBounds(card).height, 300);
+  advance(160);
+  assert.equal(card.webContents.messages.filter(m => m.channel === 'edgeDock:shapeFrame').length, frames);
+});
+
+test('rapid card reversal carries velocity instead of restarting from rest', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2, y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+  };
+  const advanceCardFrames = (ms) => {
+    for (let elapsed = 0; elapsed < ms; elapsed += 16) {
+      t.mock.timers.tick(Math.min(16, ms - elapsed));
+      const motion = card.webContents.messages.filter(message => message.channel === 'edgeDock:cardMotion').at(-1)?.payload;
+      if (motion?.active) fixture.ipcMain.emit('edgeDock:cardFrame', { sender: card.webContents }, { motionId: motion.motionId });
+    }
+  };
+  open(0, 'claude', 180);
+  advance(160);
+  open(2, 'cursor', 300);
+  advanceCardFrames(16);
+  assert.equal(paintedCardBounds(card).height, 182, 'the first spring sample uses the initial resting velocity');
+  advanceCardFrames(16);
+  assert.equal(paintedCardBounds(card).height, 188);
+  advanceCardFrames(16);
+  const moving = paintedCardBounds(card).height;
+  assert.equal(moving, 195);
+  open(0, 'claude', 180);
+  assert.equal(paintedCardBounds(card).height, moving, 'retargeting has no position discontinuity');
+  advanceCardFrames(16);
+  assert.equal(paintedCardBounds(card).height, 202, 'the retarget uses the sampled velocity once instead of feeding it back');
+  advance(720);
+  assert.equal(paintedCardBounds(card).height, 180, 'the spring settles at the latest destination');
+});
+
+
+test('macOS card canvas forwards background clicks outside the painted card and retains held input', (t) => {
+  const advance = mockDockClock(t);
+  let held = false;
+  const fixture = createFixture({ platform: 'darwin', prefersReducedMotion: () => false, primaryButtonDown: () => held });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'claude', height: 180 });
+  const frame = paintedCardBounds(card);
+  fixture.screen.point = { x: frame.x + 30, y: frame.y + 30 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: card.webContents });
+  assert.equal(card.ignoreMouse, false, 'the painted card accepts input');
+  held = true;
+  fixture.screen.point = { x: frame.x + 30, y: card.bounds.y + 2 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: card.webContents });
+  assert.equal(card.ignoreMouse, false, 'selection and scrollbar drags retain capture while held');
+  held = false;
+  advance(96);
+  assert.equal(card.ignoreMouse, true, 'poll restores click-through after release without another pointer move');
+  assert.equal(card.forwardMouse, true, 'forwarded moves can restore capture promptly');
+  fixture.screen.point = { x: frame.x + 30, y: frame.y + 30 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: card.webContents });
+  assert.equal(card.ignoreMouse, false);
+  advance(32);
+});
+
+for (const unavailable of [false, true]) {
+  test(`Windows shape failure bounds the bubble and disables motion (missing: ${unavailable})`, (t) => {
+    const advance = mockDockClock(t);
+    const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false, shapeFails: !unavailable });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+    let card = fixture.windowFor('bubble');
+    if (unavailable) card.setShape = undefined;
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'claude', height: 180 });
+    card = fixture.windowFor('bubble');
+    card.webContents.emit('did-finish-load');
+    assert.equal(card.getBounds().height, 180);
+    assert.equal(sentPayload(card, 'bubble').shape.contentBounds.y, 0);
+    assert.equal(FakeBrowserWindow.atPoint({ x: card.bounds.x + 20, y: card.bounds.y - 20 }), undefined, 'background above the card remains reachable');
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 2 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId: 'cursor', height: 240 });
+    assert.equal(card.getBounds().height, 240);
+    const bounds = card.getBounds();
+    advance(48);
+    assert.deepEqual(card.getBounds(), bounds, 'fallback switches directly without a large animation canvas');
+  });
+}
+
+test('Windows recreates a shaped bubble when both updating and clearing its region fail', t => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'win32', prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), old = fixture.windowFor('bubble');
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 0 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: old.webContents }, { cellId: 'claude', height: 180 });
+  assert.ok(old.region?.length, 'a native region was previously accepted');
+  FakeBrowserWindow.shapeFails = true;
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 2 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: old.webContents }, { cellId: 'cursor', height: 240 });
+  const replacement = fixture.windowFor('bubble');
+  assert.notEqual(replacement, old, 'the failed old region must not remain attached');
+  assert.equal(old.destroyed, true);
+  replacement.webContents.emit('did-finish-load');
+  assert.equal(replacement.region, undefined);
+  assert.equal(replacement.bounds.height, 240);
+  assert.equal(sentPayload(replacement, 'bubble').cell.id, 'cursor');
+  assert.equal(FakeBrowserWindow.atPoint({ x: replacement.bounds.x + 20, y: replacement.bounds.y + 20 }), replacement);
+  assert.equal(FakeBrowserWindow.atPoint({ x: replacement.bounds.x + 20, y: replacement.bounds.y - 20 }), undefined);
+  const bounds = replacement.getBounds();
+  advance(48);
+  assert.deepEqual(replacement.getBounds(), bounds, 'a motion cancelled during its first frame must not restart a timer');
+  advance(720);
+  assert.deepEqual(replacement.getBounds(), bounds, 'the rectangular fallback stays fixed after the old spring deadline');
+});

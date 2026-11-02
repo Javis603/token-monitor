@@ -2,6 +2,8 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const os = require('node:os');
+const { MacUpdater } = require('electron-updater');
 
 const {
   MAC_APP_MIN_DARWIN_VERSION,
@@ -12,10 +14,21 @@ const {
 } = require('../../src/shared/macSystemRequirements');
 
 test('keeps host, updater and Widget minimum versions explicit and aligned', () => {
-  assert.equal(MAC_APP_MIN_VERSION, '12.0');
-  assert.equal(MAC_APP_MIN_DARWIN_VERSION, '21.0.0');
+  assert.equal(MAC_APP_MIN_VERSION, '13.0');
+  assert.equal(MAC_APP_MIN_DARWIN_VERSION, '22.0.0');
   assert.equal(MAC_WIDGET_MIN_VERSION, '14.0');
   assert.equal(MAC_WIDGET_MIN_DARWIN_VERSION, '23.0.0');
+  assert.equal(require('../../package.json').build.mac.minimumSystemVersion, MAC_APP_MIN_VERSION);
+});
+
+test('the published update floor rejects Monterey and accepts Ventura', (t) => {
+  const release = t.mock.method(os, 'release');
+  const updater = { _logger: { info() {}, warn() {} } };
+  const metadata = { minimumSystemVersion: MAC_APP_MIN_DARWIN_VERSION };
+  for (const [version, expected] of [['21.6.0', false], ['22.0.0', true], ['22.6.0', true], ['23.0.0', true]]) {
+    release.mock.mockImplementation(() => version);
+    assert.equal(MacUpdater.prototype.checkIfUpdateSupported.call(updater, metadata), expected, version);
+  }
 });
 
 test('enables the native Widget only on macOS 14 and later', () => {

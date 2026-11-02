@@ -1255,6 +1255,33 @@ test('aggregateLimits keeps Muse rows device-scoped because the CLI exposes no a
   );
 });
 
+test('Muse web selects one cross-device reading using shared ranking while CLI stays device-scoped', () => {
+  const now = Date.parse('2026-11-01T10:03:00.000Z');
+  const row = (source, usedPercent, updatedAt, status = 'ok') => ({
+    provider: 'muse', source, status, updatedAt,
+    windows: [{ kind: 'weekly', usedPercent }]
+  });
+  const devices = [
+    { deviceId: 'a', limits: { providers: [
+      row('cli', 40, '2026-11-01T10:00:00.000Z'),
+      row('web', 20, '2026-11-01T10:02:00.000Z')
+    ] } },
+    { deviceId: 'b', limits: { providers: [
+      row('cli', 70, '2026-11-01T10:02:00.000Z'),
+      row('web', 10, '2026-11-01T10:00:00.000Z')
+    ] } },
+    { deviceId: 'failed', limits: { providers: [row('web', 90, '2026-11-01T10:03:00.000Z', 'unauthorized')] } },
+    { deviceId: 'stale', stale: true, limits: { providers: [row('web', 99, '2026-11-01T10:04:00.000Z')] } }
+  ];
+  for (const input of [devices, [...devices].reverse()]) {
+    const aggregate = aggregateLimits(input, 0, now);
+    const cli = aggregate.providers.filter(p => p.source === 'cli');
+    assert.deepEqual(cli.map(p => p.sourceDeviceId).sort(), ['a', 'b']);
+    assert.deepEqual(aggregate.providers.filter(p => p.source === 'web').map(p => [p.sourceDeviceId, p.windows[0].usedPercent]), [['a', 20]]);
+    assert.deepEqual(require('../../worker/src/shared/limits/core').aggregateLimits(input, 0, now).providers, aggregate.providers);
+  }
+});
+
 test('aggregateLimits does not merge anonymous Antigravity RPC with managed OAuth', () => {
   const sharedFallbackKey = 'sha256:antigravity-shared-fallback';
   const aggregate = aggregateLimits([
@@ -2039,4 +2066,23 @@ test('aggregateLimits never labels a merged OpenCode row Web while a local windo
   const provider = aggregate.providers.find((entry) => entry.provider === 'opencode');
   assert.equal(provider.windows.length, 2);
   assert.equal(provider.source, 'local');
+});
+
+test('Muse CLI and Web retain stale last-good independently when the other source refreshes', () => {
+  const now = Date.parse('2026-11-01T10:30:00Z');
+  for (const failedSource of ['cli', 'web']) {
+    const devices = [{ deviceId: 'a', limits: { refreshMs: 60_000, providers: ['cli', 'web'].map(source => ({
+      provider: 'muse', source, status: source === failedSource ? 'unavailable' : 'ok',
+      updatedAt: new Date(now - (source === failedSource ? 600_000 : 0)).toISOString(),
+      windows: [{ kind: 'weekly', usedPercent: source === failedSource ? 35 : 70 }]
+    })) } }];
+    for (const aggregate of [aggregateLimits, require('../../worker/src/shared/limits/core').aggregateLimits]) {
+      const rows = aggregate(devices, 0, now).providers;
+      assert.equal(rows.length, 2, `${failedSource} last-good survives its fresh sibling`);
+      const retained = rows.find(row => row.source === failedSource);
+      assert.equal(retained.stale, true);
+      assert.equal(retained.status, 'unavailable');
+      assert.equal(retained.windows[0].usedPercent, 35);
+    }
+  }
 });

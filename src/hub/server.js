@@ -29,6 +29,7 @@ const {
   sseFrameForClient,
   hubStatsContentKey,
   wantsFreshnessEvents,
+  wantsDeltaEvents,
   wantsMinimalResponse
 } = require('../shared/hubProtocol');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
@@ -144,20 +145,31 @@ function createHub({
   const statsListeners = new Set();
   let broadcastTimer = null;
   let lastSseContentKey = '';
+  let lastSseStats = null;
+  let streamRevision = 0;
 
   function writeSseFrame(client, frame) {
     if (!frame) return false;
+    if (client.blocked) {
+      client.needsSnapshot = true;
+      return false;
+    }
     try {
-      client.res.write(frame);
+      if (client.res.write(frame) === false) {
+        client.blocked = true;
+        client.res.once('drain', client.onDrain);
+      }
       return true;
     } catch (_) {
-      sseClients.delete(client);
+      client.cleanup();
       return false;
     }
   }
 
   function fanoutSseFrames(frames) {
-    for (const client of sseClients) writeSseFrame(client, sseFrameForClient(frames, client));
+    for (const client of sseClients) {
+      if (writeSseFrame(client, sseFrameForClient(frames, client)) && client.deltaEvents) client.streamRevision = frames.revision;
+    }
   }
 
   function notifyStatsListeners(reason, stats = getStats(), at = new Date().toISOString()) {
@@ -180,13 +192,18 @@ function createHub({
         stats,
         at,
         lastContentKey: lastSseContentKey,
+        previousStats: lastSseStats,
+        revision: ++streamRevision,
         ...sseClientKinds(sseClients),
         allowFreshness: false
       });
       lastSseContentKey = frames.contentKey;
+      lastSseStats = stats;
       fanoutSseFrames(frames);
     }
-    notifyStatsListeners(reason, stats, at);
+    // Embedded widgets add local presentation metadata to their snapshot. Do
+    // not expose the immutable SSE delta baseline to those observers.
+    notifyStatsListeners(reason, sseClients.size > 0 && statsListeners.size > 0 ? getStats() : stats, at);
   }
 
   function flushQueuedStatsBroadcast() {
@@ -199,9 +216,12 @@ function createHub({
       stats,
       at,
       lastContentKey: lastSseContentKey,
+      previousStats: lastSseStats,
+      revision: ++streamRevision,
       ...sseClientKinds(sseClients)
     });
     lastSseContentKey = frames.contentKey;
+    lastSseStats = stats;
     fanoutSseFrames(frames);
   }
 
@@ -425,22 +445,44 @@ function createHub({
         'connection': 'keep-alive',
         'x-accel-buffering': 'no'
       });
-      res.write(encodeSseEvent('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
-      const client = { res, freshnessEvents: wantsFreshnessEvents(req) };
-      if (sseClients.size === 0) lastSseContentKey = hubStatsContentKey(stats);
-      sseClients.add(client);
-      const heartbeat = setInterval(() => { try { res.write(': hb\n\n'); } catch (_) {} }, 30000);
-      const cleanup = () => {
+      const client = { res, freshnessEvents: wantsFreshnessEvents(req), deltaEvents: wantsDeltaEvents(req), streamRevision: null, blocked: false, needsSnapshot: false };
+      let heartbeat = null;
+      client.cleanup = () => {
         clearInterval(heartbeat);
+        res.off('drain', client.onDrain);
         sseClients.delete(client);
         if (sseClients.size === 0) {
           lastSseContentKey = '';
+          lastSseStats = null;
           if (broadcastTimer) clearTimeout(broadcastTimer);
           broadcastTimer = null;
         }
       };
-      res.on('close', cleanup);
-      res.on('error', cleanup);
+      client.onDrain = () => {
+        client.blocked = false;
+        if (!client.needsSnapshot) return;
+        client.needsSnapshot = false;
+        // A skipped frame invalidates both freshness and delta baselines.
+        client.streamRevision = null;
+        try {
+          writeSseFrame(client, encodeSseEvent('stats', {
+            type: 'stats', reason: 'snapshot', stats: getStats(), at: new Date().toISOString()
+          }));
+        } catch (_) { client.cleanup(); }
+      };
+      res.on('close', client.cleanup);
+      res.on('error', client.cleanup);
+      if (sseClients.size === 0) {
+        lastSseContentKey = hubStatsContentKey(stats);
+        lastSseStats = stats;
+        if (client.deltaEvents) client.streamRevision = streamRevision;
+      }
+      sseClients.add(client);
+      heartbeat = setInterval(() => {
+        if (!client.blocked) writeSseFrame(client, ': hb\n\n');
+      }, 30000);
+      writeSseFrame(client, encodeSseEvent('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
+        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {}) }));
       return;
     }
 
@@ -530,8 +572,10 @@ function createHub({
       persistTimer = null;
       if (broadcastTimer) clearTimeout(broadcastTimer);
       broadcastTimer = null;
-      for (const client of sseClients) { try { client.res.end(); } catch (_) {} }
-      sseClients.clear();
+      for (const client of sseClients) {
+        client.cleanup();
+        try { client.res.end(); } catch (_) {}
+      }
       // Save acknowledged uploads even if another request never finishes.
       // A transient failure still gets a second attempt after draining.
       try { if (persistPending) persist(); } catch (error) {

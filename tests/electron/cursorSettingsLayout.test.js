@@ -211,8 +211,11 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.match(details, /<div id="cursorManualPanel" class="opencode-add-form">/);
   assert.match(details, /<div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
   assert.match(details, /data-i18n="settings\.cursor\.addManual">Add account<\/span>/);
-  assert.match(details, /using the button above, then sign in/);
-  assert.match(details, /cursor\.com\/dashboard/);
+  assert.match(details, /using “Open Cursor dashboard”, then sign in/);
+  assert.match(details, /<code>cursor\.com<\/code>/);
+  assert.doesNotMatch(details, /cursorCookiePageButton/);
+  assert.match(details, /data-i18n="settings\.cursor\.cookiePage"[^>]*>[^<]*grok\.com\/dashboard/);
+  assert.match(details, /data-i18n="settings\.cursor\.cookieMissing"/);
   assert.doesNotMatch(details, /cursor\.com\/dashboard\/settings/);
   assert.doesNotMatch(details, /Tokscale|Add an account manually/);
   assert.doesNotMatch(details, /<details|<summary|cursorDetectButton|cursorManualLabel|accountLabel/);
@@ -231,7 +234,16 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.doesNotMatch(body, /cursor-account-row|radio|selectedAccountId|selectAccount/);
 
   const setup = readRendererFile('app.js');
-  assert.match(setup, /openExternal\('https:\/\/cursor\.com\/dashboard'\)/);
+  const navigationStart = setup.indexOf("  document.getElementById('cursorLoginButton').addEventListener");
+  const navigationEnd = setup.indexOf('  const cursorManualSubmit =', navigationStart);
+  const handlers = new Map();
+  const openedUrls = [];
+  vm.runInNewContext(setup.slice(navigationStart, navigationEnd), {
+    document: { getElementById: (id) => ({ addEventListener: (_event, handler) => handlers.set(id, handler) }) },
+    window: { tokenMonitor: { openExternal: (url) => openedUrls.push(url) } }
+  });
+  handlers.get('cursorLoginButton')();
+  assert.deepEqual(openedUrls, ['https://cursor.com']);
   assert.doesNotMatch(setup, /openExternal\('https:\/\/cursor\.com\/dashboard\/settings'\)/);
   assert.match(setup, /cursorAddAccountButton\?\.addEventListener\('click'/);
   assert.match(setup, /cursorManualDetails\?\.classList\.toggle\('hidden', !next\)/);
@@ -552,7 +564,8 @@ test('Codex account email masking is an opt-in display-only setting', () => {
     main.indexOf("ipcMain.handle('settings:openConfig'")
   );
   assert.match(updateHandler, /maskLimitAccountEmails:\s*parseBoolean\(patch\.maskLimitAccountEmails \?\? settings\.maskLimitAccountEmails, false\)/);
-  assert.doesNotMatch(updateHandler, /accountEmail|accountKey|syncLimits|publicLimits/);
+  const settingsUpdate = updateHandler.slice(0, updateHandler.indexOf("ipcMain.handle('claude:accounts'"));
+  assert.doesNotMatch(settingsUpdate, /accountEmail|accountKey|syncLimits|publicLimits/);
 
   const settingsBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(settingsBody, /els\.maskLimitAccountEmailsInput\.checked = Boolean\(state\.settings\.maskLimitAccountEmails\);/);
@@ -976,16 +989,19 @@ test('Z.ai, Qoder, Trae and Ollama panels are generated from their declared form
   assert.deepEqual(forms.qoder.openUrl.urls, { global: 'https://qoder.com/account/usage', cn: 'https://qoder.com.cn/account/usage' });
   assert.doesNotMatch(JSON.stringify(forms.qoder), /settings\.qoder\.note/);
 
-  // Trae: the optional device ID comes after the token, then its note.
-  assert.deepEqual(forms.trae.manual.slice(1), [
-    { field: 'traeAccessToken' }, { field: 'traeDeviceId' }, { note: 'settings.trae.deviceIdNote' }
+  // Trae defaults to the browser Cookie lane; legacy token/device inputs stay available.
+  assert.deepEqual(forms.trae.credentialChoice.fields, ['traeCookie', 'traeAccessToken']);
+  assert.equal(forms.trae.fields[0].input, 'textarea');
+  assert.equal(forms.trae.fields[1].placeholder, 'Cloud-IDE-Token');
+  assert.equal(forms.trae.fields[2].required, false);
+  assert.deepEqual(forms.trae.manual[0].steps, ['settings.trae.step1', 'settings.trae.cookieStep2', 'settings.trae.cookieStep3', 'settings.trae.step4']);
+  assert.deepEqual(forms.trae.manual.slice(-3), [
+    { field: 'traeAccessToken', whenCredential: 'traeAccessToken' },
+    { field: 'traeDeviceId', whenCredential: 'traeAccessToken' },
+    { note: 'settings.trae.deviceIdNote', whenCredential: 'traeAccessToken' }
   ]);
-  assert.equal(forms.trae.fields[0].placeholder, 'Cloud-IDE-Token');
-  assert.equal(forms.trae.fields[1].required, false);
-  assert.deepEqual(forms.trae.manual[0].steps[2], ['settings.trae.step3Before', { code: 'Cloud-IDE-Token' }, 'settings.trae.step3After']);
   assert.equal(forms.trae.messages.required, 'settings.trae.missingAuthorization');
-  assert.doesNotMatch(JSON.stringify(forms.trae), /settings\.trae\.note/);
-  assert.match(readRendererFile('i18n.js'), /'settings\.trae\.deviceIdNote': '[^']*ide_user_ent_usage[^']*X-Device-Id/);
+
 
   // Ollama chooses one draft lane; API key is the fresh-install default.
   assert.deepEqual(forms.ollama.credentialChoice.fields, ['ollamaApiKey', 'ollamaCookie']);
@@ -1150,7 +1166,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     }
   }
   assert.equal(MESSAGES.en['settings.claude.title'], 'Claude Account');
-  assert.match(MESSAGES.en['settings.claude.note'], /detected automatically when Web login is not configured/);
+  assert.match(MESSAGES.en['settings.claude.note'], /collected alongside the automatically detected Claude Code OAuth or CLI account/);
   assert.match(MESSAGES.en['settings.claude.step2'], /Application\/Storage[\s\S]*Cookies[\s\S]*https:\/\/claude\.ai/);
   assert.match(MESSAGES.en['settings.claude.step3'], /Copy the sessionKey value/);
   assert.equal(MESSAGES.en['settings.claude.cookiePlaceholder'], 'sessionKey=...');
@@ -2796,6 +2812,7 @@ test('main collectors share one live GUI limit credential resolver in every widg
     'persistClaudeWebCookieRenewal',
     'credentialProbeDeps'
   );
+  assert.match(renewalPersistence, /claudeAccountService\(\)\.renew/);
   assert.match(renewalPersistence, /settings\.claudeWebCookie === renewed\) return true/);
   assert.match(renewalPersistence, /saveSettings\(\{ throwOnError: true \}\)/);
   assert.doesNotMatch(renewalPersistence, /queueLimitInvalidation|classifySettingsChange/);
@@ -2837,7 +2854,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
     frameBody,
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
-  assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(frameBody, /count \? limitGroupCountText\(providerId, count\) : ''/);
   assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
 

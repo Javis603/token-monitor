@@ -18,7 +18,7 @@ function response(status, body = {}) {
 
 // The real DeepSeek fetcher behind a fake transport, so each verdict is taken
 // from the provider's own classification of an HTTP answer.
-function commands({ answer = () => response(200, BALANCE), settings = {}, env = {} } = {}) {
+function commands({ answer = () => response(200, BALANCE), settings = {}, env = {}, persist } = {}) {
   const patches = [];
   const writes = [];
   let current = { ...settings };
@@ -26,6 +26,7 @@ function commands({ answer = () => response(200, BALANCE), settings = {}, env = 
     getSettings: () => current,
     applySettingsPatch: (patch) => {
       patches.push(patch);
+      if (persist) return persist(patch);
       current = { ...current, ...patch };
       return { projected: true };
     },
@@ -109,6 +110,75 @@ test('an empty draft or an unknown provider never reaches a probe', async () => 
   }
   assert.equal(probes, 0);
   assert.deepEqual(patches, []);
+});
+
+test('credential IPC drafts cannot write another provider, settings controls or prototype keys', async () => {
+  const requests = [];
+  const { api, patches, writes } = commands({
+    settings: { limitProviders: 'deepseek' },
+    answer: (url, init) => { requests.push({ url, init }); return response(200, BALANCE); }
+  });
+  const values = JSON.parse('{"deepseekApiKey":"  sk-draft  ","kimiApiKey":"other-secret","hubHostSecret":"hub-secret","limitProviders":"claude","limitsEnabled":false,"__proto__":{"polluted":true},"constructor":"forged"}');
+  const result = await api.saveCredential('deepseek', values);
+
+  assert.equal(result.saved, true);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].init.headers.Authorization, 'Bearer sk-draft');
+  assert.deepEqual(patches, [{ deepseekApiKey: 'sk-draft', limitProviders: 'deepseek', limitsEnabled: true }]);
+  assert.deepEqual(result.settings, { projected: true });
+  assert.doesNotMatch(JSON.stringify(result), /sk-draft|other-secret|hub-secret/);
+  assert.deepEqual(writes, []);
+
+  assert.equal((await api.saveCredential('deepseek', Object.create({ deepseekApiKey: 'inherited-key' }))).status, 'required');
+  for (const id of ['__proto__', 'constructor', 'not-a-provider']) {
+    assert.deepEqual(await api.clearCredential(id), { cleared: false });
+    assert.deepEqual(await api.listOrganizationChoices(id), { status: 'notConfigured', choices: [] });
+  }
+  assert.equal(requests.length, 1);
+  assert.equal(patches.length, 1);
+  assert.equal({}.polluted, undefined);
+});
+
+test('credential saves and clears wait for persistence and propagate storage failures', async (t) => {
+  for (const operation of ['save', 'clear']) {
+    for (const fails of [false, true]) {
+      await t.test(`${operation}: ${fails ? 'failed write' : 'durable completion'}`, async () => {
+        const entered = Promise.withResolvers();
+        const write = Promise.withResolvers();
+        const failure = Object.assign(new Error('credential store unavailable'), { code: 'EACCES' });
+        const { api, patches, writes } = commands({
+          persist: () => { entered.resolve(); return write.promise; }
+        });
+        let settled = false;
+        const result = operation === 'save'
+          ? api.saveCredential('deepseek', { deepseekApiKey: 'sk-draft' })
+          : api.clearCredential('deepseek');
+        void result.then(() => { settled = true; }, () => { settled = true; });
+        await entered.promise;
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(settled, false, 'IPC must not report success while the durable write is pending');
+
+        if (fails) {
+          write.reject(failure);
+          await assert.rejects(result, (error) => error === failure);
+        } else {
+          write.resolve({ projected: true });
+          const reply = await result;
+          assert.equal(operation === 'save' ? reply.saved : reply.cleared, true);
+          assert.deepEqual(reply.settings, { projected: true });
+        }
+        assert.equal(patches.length, 1);
+        assert.deepEqual(writes, []);
+      });
+    }
+  }
+});
+
+test('a synchronous credential persistence error is not downgraded to a probe verdict', async () => {
+  const failure = Object.assign(new Error('credential disk full'), { code: 'ENOSPC' });
+  const { api, patches } = commands({ persist: () => { throw failure; } });
+  await assert.rejects(api.saveCredential('deepseek', { deepseekApiKey: 'sk-draft' }), (error) => error === failure);
+  assert.equal(patches.length, 1);
 });
 
 test('a probe overtaken by a later write for the same provider does not land', async () => {
@@ -512,4 +582,24 @@ test('MiniMax saves a pay-as-you-go key against balance instead of Token Plan qu
   assert.deepEqual(urls, ['https://api.minimaxi.com/account/query_balance']);
   assert.equal(patches[0].minimaxApiKey, 'sk-api-test');
   assert.equal(Object.hasOwn(patches[0], 'minimaxBillingMode'), false);
+});
+
+test('Trae Cookie save probes the two-hop web route, replaces the legacy token, and rejects an expired session', async () => {
+  const calls = [];
+  const { api, patches } = commands({ settings: { traeAccessToken: 'old-token' }, answer: (url, init) => {
+    calls.push({ url, init });
+    return url.endsWith('/GetUserToken')
+      ? response(200, { Result: { Token: 'exchanged-jwt' } })
+      : response(200, { is_credits_billing: true, usage_summary: { total_amount: 100, consumed_amount: 20 } });
+  } });
+  const result = await api.saveCredential('trae', { traeCookie: 'Cookie: sessionid=fixture' });
+  assert.equal(result.verdict, 'valid');
+  assert.equal(result.saved, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].init.headers.Cookie, 'sessionid=fixture');
+  assert.equal(patches[0].traeAccessToken, '');
+  assert.equal(patches[0].traeCookie, 'sessionid=fixture');
+  const expired = commands({ answer: () => response(401), settings: { traeAccessToken: 'old-token' } });
+  assert.equal((await expired.api.saveCredential('trae', { traeCookie: 'sessionid=expired' })).saved, false);
+  assert.deepEqual(expired.patches, []);
 });

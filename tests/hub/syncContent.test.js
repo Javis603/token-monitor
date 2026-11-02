@@ -279,7 +279,7 @@ for (const runtime of ['Node', 'Worker']) {
             const frame = buffer.slice(0, boundary);
             buffer = buffer.slice(boundary + 2);
             const data = frame.match(/^data: (.+)$/m)?.[1];
-            if (data) { const value = JSON.parse(data); if (value.reason === reason) return value; }
+            if (data) { const value = JSON.parse(data); if (reason === null || value.reason === reason) return value; }
           }
           const chunk = await reader.read();
           assert.equal(chunk.done, false, `SSE ended before ${reason}: ${String(abort.signal.reason || '')}`);
@@ -288,8 +288,12 @@ for (const runtime of ['Node', 'Worker']) {
       } finally { clearTimeout(deadline); }
     }
     assert.equal((await event('snapshot')).stats.periods.today.sessions['codex:a'].title, 'private title');
+    // Revalidating an already enabled policy stores nothing, so it must not resend full stats.
+    await client.send('/api/sync/titles/a', 'PUT', { enabled: true });
     await client.send('/api/sync/settings/customPricing', 'PUT', { baseRevision: 0, value: [] });
-    assert.equal((await event('sync-settings')).stats.syncSettingsRevisions.customPricing, 1);
+    const settings = await event(null);
+    assert.equal(settings.reason, 'sync-settings');
+    assert.equal(settings.stats.syncSettingsRevisions.customPricing, 1);
     await client.send('/api/sync/titles/a', 'PUT', { enabled: false });
     const purged = await event('sync-titles');
     assert.doesNotMatch(JSON.stringify(purged), /private title/);

@@ -74,7 +74,7 @@ const supportedToolOrder = [
   'Kilo',
   'Command Code',
   'MiMo Code / MiMo Desktop',
-  'Muse Code',
+  'Muse / Muse Code',
   'ZCode / GLM',
   'Kiro',
   'CodeBuddy',
@@ -98,6 +98,7 @@ const supportedToolOrder = [
   'Alibaba Cloud',
   'StepFun',
   'Notion AI',
+  'Manus',
   'Third-party APIs'
 ];
 
@@ -148,6 +149,7 @@ const supportedToolIdOrder = [
   'alibaba',
   'stepfun',
   'notion',
+  'manus',
   'thirdparty'
 ];
 

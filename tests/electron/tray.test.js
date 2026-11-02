@@ -525,7 +525,7 @@ test('tray context menu complements the primary click with useful commands', () 
   });
 
   assert.deepEqual(template.map((item) => item.label || item.type), [
-    'Refresh Now', 'Open View', 'separator', 'Tray Display', 'Window Presentation', 'separator', 'Version 0.27.0', 'Settings…', 'Quit Token Monitor'
+    'Refresh Now', 'Open View', 'separator', 'Tray Display', 'Window Presentation', 'separator', 'Version 0.27.0', 'Settings…', 'Restart without plugins', 'Quit Token Monitor'
   ]);
   assert.equal(template.some((item) => item.label === 'Show / Hide'), false);
   assert.equal(template[3].submenu.find((item) => item.label === 'Today Tokens + Cost').checked, true);
@@ -538,7 +538,7 @@ test('tray context menu complements the primary click with useful commands', () 
   template[4].submenu.find((item) => item.label === 'Desktop Pinned').click();
   assert.equal(template[6].enabled, false);
   template[7].click();
-  template[8].click();
+  template[9].click();
   assert.deepEqual(calls, [
     ['refresh'], ['view', 'project'], ['content', 'icon'], ['presentation', 'desktop'], ['settings'], ['quit']
   ]);
@@ -593,7 +593,7 @@ test('tray context menu uses the selected locale for every visible level', () =>
   });
 
   assert.deepEqual(template.map((item) => item.label || item.type), [
-    '立即重新整理', '開啟頁面', 'separator', '托盤顯示', '視窗呈現方式', 'separator', '版本 0.27.0', '設定…', '結束 Token Monitor'
+    '立即重新整理', '開啟頁面', 'separator', '托盤顯示', '視窗呈現方式', 'separator', '版本 0.27.0', '設定…', '不載入外掛並重新啟動', '結束 Token Monitor'
   ]);
   assert.equal(template[1].submenu[0].label, '主頁');
   assert.equal(template[3].submenu[0].label, '今日 Tokens');
@@ -1418,4 +1418,11 @@ test('every tray helper main.js destructures is actually exported', () => {
   assert.ok(names.length > 0);
   const missing = names.filter((name) => typeof trayModule[name] === 'undefined');
   assert.deepEqual(missing, []);
+});
+test('plugin menu callbacks keep native Settings, recovery and Quit entries available', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({ state: { pluginMenu: [{ pluginId: 'fixture', id: 'ping', pluginName: 'Fixture', label: 'Ping' }] }, onPluginMenu: (...args) => calls.push(args) });
+  template.find(item => item.label === 'Fixture: Ping').click();
+  assert.deepEqual(calls, [['fixture', 'ping']]);
+  for (const label of ['Settings…', 'Restart without plugins', 'Quit Token Monitor']) assert.ok(template.some(item => item.label === label));
 });

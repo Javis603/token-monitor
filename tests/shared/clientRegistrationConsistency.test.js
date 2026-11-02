@@ -84,6 +84,8 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.config/Kiro/User/globalStorage/kiro.kiroagent',
     '.config/kiro/User/globalStorage/kiro.kiroagent', '.codebuddy/projects',
     '.workbuddy', '.workbuddy-ai', '.proma/agent-sessions',
+    '.proma/sdk-config/sessions', '.proma/sdk-config/projects', '.proma-dev/agent-sessions',
+    '.proma-dev/sdk-config/sessions', '.proma-dev/sdk-config/projects',
     '.lmstudio/server-logs', '.unsloth/studio/studio.db',
     '.local/share/devin/cli/sessions.db', 'AppData/Roaming/devin/cli/sessions.db',
     '.config/Devin/User/acp-events', '.config/devin/User/acp-events',

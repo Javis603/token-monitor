@@ -1,6 +1,8 @@
 name = "token-monitor-hub"
 main = "src/index.js"
 compatibility_date = "2025-05-01"
+# Preserve operator-managed variables across deployments.
+keep_vars = true
 
 [[durable_objects.bindings]]
 name = "HUB"
@@ -12,8 +14,8 @@ new_sqlite_classes = ["HubDO"]
 
 [vars]
 STALE_AFTER_MS = "600000"
-# Server permission only; each sending device must also opt in and negotiate its generation.
-TOKEN_MONITOR_SYNC_SESSION_TITLES = "false"
+# Title permission is managed in the Cloudflare dashboard. Missing means false.
+# Set TOKEN_MONITOR_SYNC_SESSION_TITLES to "true" there to permit opted-in devices.
 
 # Set the shared secret with:
 #   wrangler secret put TOKEN_MONITOR_SECRET

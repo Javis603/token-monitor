@@ -599,11 +599,11 @@ function providerAggregateKey(provider) {
   ) {
     return `${provider.provider}:${identity}:device:${provider.sourceDeviceId || ''}`;
   }
-  // Muse exposes no stable account id, so every row is a device-local
-  // observation. Scoping by device keeps two different Muse accounts on
-  // synced devices from silently coalescing into one quota row.
+  // Keep the existing Muse Code device observations. The web product follows
+  // the shared cross-device winner selection used by other anonymous providers.
   if (provider.provider === 'muse') {
-    return `${provider.provider}:${identity}:device:${provider.sourceDeviceId || ''}`;
+    const sourceKey = `${provider.provider}:${identity}:source:${provider.source || ''}`;
+    return provider.source === 'web' ? sourceKey : `${sourceKey}:device:${provider.sourceDeviceId || ''}`;
   }
   // One Alibaba Cloud account can hold a Team and a Personal subscription at the
   // same time, with quotas counted separately. Both rows therefore carry the
@@ -630,9 +630,9 @@ function providerCollapseKey(provider) {
   // proves the identity. Anonymous RPC fallback keys are local observations,
   // so keep the device scope established by providerAggregateKey().
   if (provider.provider === 'antigravity') return providerAggregateKey(provider);
-  // Muse rows carry no portable identity (see providerAggregateKey), so the
-  // collapse pass must keep the device scope instead of merging by name.
-  if (provider.provider === 'muse') return providerAggregateKey(provider);
+  if (provider.provider === 'muse') {
+    return provider.source === 'web' ? `${provider.provider}:source:web` : providerAggregateKey(provider);
+  }
   if (
     (provider.provider === 'claude'
       || provider.provider === 'codex'
@@ -648,6 +648,9 @@ function providerCollapseKey(provider) {
       // Notion allowances are per user AND workspace. Its verified composite
       // key is portable; neither a provider-only nor an email collapse is safe.
       || provider.provider === 'notion'
+      // Manus keys hash the account's user id from its session, so the same
+      // account hashes identically on every device.
+      || provider.provider === 'manus'
       // Volcengine's accountKey comes from the AK/SK and region, so it is the
       // same on every platform. Two keys mean the Coding/Agent plan split, not
       // one account hashed twice.
@@ -973,6 +976,12 @@ function betterProvider(current, candidate) {
   return timestampMs(candidate.updatedAt) >= timestampMs(current.updatedAt) ? candidate : current;
 }
 
+// Muse's two products refresh independently; a fresh CLI observation cannot
+// retire the Web product's last-good quota, or vice versa.
+function providerFreshnessKey(provider) {
+  return provider.provider === 'muse' ? `muse:${provider.source}` : provider.provider;
+}
+
 function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
   const byKey = new Map();
@@ -990,10 +999,11 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
         sourceDeviceId: String(device?.deviceId || ''),
         stale: isProviderStale(provider, summary, device, staleAfterMs, nowMs)
       };
-      if (isConfiguredProvider(provider)) providersWithConfiguredAccounts.add(provider.provider);
+      const freshnessKey = providerFreshnessKey(provider);
+      if (isConfiguredProvider(provider)) providersWithConfiguredAccounts.add(freshnessKey);
       if (!candidate.stale) {
-        providersWithFreshObservations.add(provider.provider);
-        if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(provider.provider);
+        providersWithFreshObservations.add(freshnessKey);
+        if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(freshnessKey);
       }
       const key = providerAggregateKey(candidate);
       if (candidate.provider === 'opencode' && isConfiguredProvider(candidate)) {
@@ -1027,14 +1037,15 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     if (hasKnownWorkbuddyAccount && isWorkbuddyPlaceholder(candidate)) continue;
     const knownWorkbuddyAccount = candidate.provider === 'workbuddy' && candidate.accountKey
       && !isWorkbuddyPlaceholder(candidate);
-    const hasFreshObservation = providersWithFreshObservations.has(candidate.provider);
+    const freshnessKey = providerFreshnessKey(candidate);
+    const hasFreshObservation = providersWithFreshObservations.has(freshnessKey);
     // Fresh siblings cannot establish freshness for a different account. The
     // first pass already chooses the best observation of each exact identity.
     if (!knownWorkbuddyAccount && candidate.stale && hasFreshObservation) continue;
     const configuredProviders = hasFreshObservation
       ? providersWithFreshConfiguredAccounts
       : providersWithConfiguredAccounts;
-    if (!knownWorkbuddyAccount && !isConfiguredProvider(candidate) && configuredProviders.has(candidate.provider)) continue;
+    if (!knownWorkbuddyAccount && !isConfiguredProvider(candidate) && configuredProviders.has(freshnessKey)) continue;
     const collapseKey = providerCollapseKey(candidate);
     byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate));
   }

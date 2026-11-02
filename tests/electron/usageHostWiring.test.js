@@ -274,21 +274,25 @@ test('a settings change reaches the running worker as soon as it is saved', () =
 });
 
 test('saving settings waits until a worker-hosted transform has applied them', () => {
-  const start = main.indexOf("ipcMain.handle('settings:update', async (_event, patch) => {");
+  const start = main.indexOf("ipcMain.handle('settings:update', async (event, patch) => {");
   assert.ok(start >= 0, 'settings:update handler not found or not async');
   const body = main.slice(start, main.indexOf('\n  });', start));
   assert.ok(body.indexOf('applySettingsPatch(patch,') < body.indexOf('await latestUsageHost?.transformSettingsApplied?.()'));
 });
 
 test('Dots visibility refresh only delays its own settings save, including after failure', async () => {
-  const start = main.indexOf("ipcMain.handle('settings:update', async (_event, patch) => {");
+  const start = main.indexOf("ipcMain.handle('settings:update', async (event, patch) => {");
   const registration = main.slice(start, main.indexOf('\n  });', start) + '\n  });'.length);
   let update;
   let failRefresh;
   let saved;
   const refresh = new Promise((_resolve, reject) => { failRefresh = reject; });
   const contentRuntime = { status: () => ({ identity: 'test' }), publishPatch: async () => {} };
-  vm.runInNewContext(registration, {
+  const guardStart = main.indexOf('function assertPluginSkinRequest(');
+  const guardEnd = main.indexOf('\nfunction settingsForRenderer(', guardStart);
+  assert.ok(guardStart >= 0 && guardEnd > guardStart);
+  vm.runInNewContext(main.slice(guardStart, guardEnd) + registration, {
+    pluginRuntime: null,
     ipcMain: { handle: (_name, handler) => { update = handler; } },
     getSyncContentRuntime: () => contentRuntime,
     latestUsageHost: { transformSettingsApplied: async () => {} },
@@ -313,14 +317,18 @@ test('Dots visibility refresh only delays its own settings save, including after
 });
 
 test('a delayed Dots visibility reply keeps the settings saved by a later write', async () => {
-  const start = main.indexOf("ipcMain.handle('settings:update', async (_event, patch) => {");
+  const start = main.indexOf("ipcMain.handle('settings:update', async (event, patch) => {");
   const registration = main.slice(start, main.indexOf('\n  });', start) + '\n  });'.length);
   let update;
   let release;
   const refresh = new Promise((resolve) => { release = resolve; });
   const contentRuntime = { status: () => ({ identity: 'test' }), publishPatch: async () => {} };
   let saved = { codexDotsVisible: true, currency: 'USD', clients: 'codex' };
-  vm.runInNewContext(registration, {
+  const guardStart = main.indexOf('function assertPluginSkinRequest(');
+  const guardEnd = main.indexOf('\nfunction settingsForRenderer(', guardStart);
+  assert.ok(guardStart >= 0 && guardEnd > guardStart);
+  vm.runInNewContext(main.slice(guardStart, guardEnd) + registration, {
+    pluginRuntime: null,
     ipcMain: { handle: (_name, handler) => { update = handler; } },
     getSyncContentRuntime: () => contentRuntime,
     latestUsageHost: { transformSettingsApplied: async () => {} },

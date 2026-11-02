@@ -320,6 +320,31 @@ class CredentialStore {
     return this.writeDocument(document);
   }
 
+  readClaudeWebCredential(id, document = this.readDocument()) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return '';
+    const value = valueAt(document.credentials, ['providers', 'claude', 'accounts', accountId, 'cookie']);
+    return typeof value === 'string' ? value : '';
+  }
+
+  writeClaudeWebCredential(id, cookie) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId || !credentialValuePresent(cookie)) return false;
+    const document = this.readDocument();
+    setValueAt(document.credentials, ['providers', 'claude', 'accounts', accountId, 'cookie'], cookie);
+    this.writeDocument(document);
+    return this.readClaudeWebCredential(accountId) === cookie;
+  }
+
+  removeClaudeWebCredential(id) {
+    const accountId = safeDynamicKey(id);
+    if (!accountId) return false;
+    const document = this.readDocument();
+    deleteValueAt(document.credentials, ['providers', 'claude', 'accounts', accountId]);
+    this.writeDocument(document);
+    return !this.readClaudeWebCredential(accountId);
+  }
+
   readMimoCredential(id, document = this.readDocument()) {
     const accountId = safeDynamicKey(id);
     if (!accountId) return '';

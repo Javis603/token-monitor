@@ -191,7 +191,7 @@ test('malformed or incomplete packaged config fails open without registration', 
   }
 });
 
-test('launches the packaged native helper in host-registration mode with bounded options', async () => {
+test('recovers the packaged host and its stale extension on the first launch with bounded options', async () => {
   const setup = fixture();
   const calls = [];
   try {
@@ -202,7 +202,7 @@ test('launches the packaged native helper in host-registration mode with bounded
       calls[0].file,
       path.join(setup.resourcesPath, 'TokenMonitorWidgetReloader')
     );
-    assert.deepEqual(calls[0].args, ['--mode', 'register-host']);
+    assert.deepEqual(calls[0].args, ['--mode', 'recover-host']);
     assert.equal(calls[0].args.includes(setup.appPath), false);
     assert.equal(calls[0].args.includes(setup.appexPath), false);
     assert.equal(calls[0].options.shell, false);
@@ -232,7 +232,7 @@ test('writes a private marker after success and a fresh process skips a recent m
       'registrationIdentity',
       'schemaVersion'
     ]);
-    assert.equal(marker.schemaVersion, 2);
+    assert.equal(marker.schemaVersion, 3);
     assert.equal(marker.completedAt, '2026-08-10T00:00:00.000Z');
     assert.match(marker.registrationIdentity, /^[a-f0-9]{64}$/);
     if (process.platform !== 'win32') {
@@ -284,6 +284,7 @@ test('an identical build reinstalled at the same path invalidates the retained m
     });
     assert.deepEqual(await run(reinstalled, setup), { status: 'completed' });
     assert.equal(calls.length, 2);
+    assert.deepEqual(calls[1].args, ['--mode', 'recover-host']);
   } finally {
     setup.cleanup();
   }
@@ -373,6 +374,33 @@ test('revalidates a matching registration identity after the bounded interval', 
     });
     assert.deepEqual(await run(later, setup), { status: 'completed' });
     assert.equal(calls.length, 2);
+    assert.deepEqual(calls[1].args, ['--mode', 'register-host']);
+  } finally {
+    setup.cleanup();
+  }
+});
+
+test('upgrades a registration-only marker with one extension recovery', async () => {
+  const setup = fixture();
+  const calls = [];
+  try {
+    const first = createMacWidgetLaunchServicesRecovery({ execFile: successfulExec() });
+    await run(first, setup);
+    const markerPath = path.join(setup.userDataPath, MARKER_FILE_NAME);
+    const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+    fs.writeFileSync(markerPath, JSON.stringify({ ...marker, schemaVersion: 2 }));
+
+    const migrated = createMacWidgetLaunchServicesRecovery({ execFile: successfulExec(calls) });
+    assert.deepEqual(await run(migrated, setup), { status: 'completed' });
+    assert.deepEqual(calls.map(({ args }) => args), [['--mode', 'recover-host']]);
+    assert.equal(JSON.parse(fs.readFileSync(markerPath, 'utf8')).schemaVersion, 3);
+
+    const restarted = createMacWidgetLaunchServicesRecovery({ execFile: successfulExec(calls) });
+    assert.deepEqual(await run(restarted, setup), {
+      status: 'skipped',
+      reason: 'already-completed'
+    });
+    assert.equal(calls.length, 1);
   } finally {
     setup.cleanup();
   }
@@ -390,6 +418,7 @@ test('changed build provenance, Widget kind, or host location gets a new registr
     );
     const changedBuild = createMacWidgetLaunchServicesRecovery({ execFile: successfulExec(calls) });
     assert.deepEqual(await run(changedBuild, setup), { status: 'completed' });
+    assert.deepEqual(calls[1].args, ['--mode', 'recover-host']);
 
     fs.writeFileSync(
       path.join(setup.resourcesPath, 'token-monitor-widget.json'),
@@ -465,6 +494,7 @@ test('bounds packaged config and marker reads before parsing', async () => {
 test('child launch failures and timeouts are contained and remain retryable', async () => {
   for (const childError of [
     Object.assign(new Error('sensitive launch error'), { code: 'ENOENT' }),
+    Object.assign(new Error('native process lookup failed'), { code: 1 }),
     Object.assign(new Error('sensitive timeout error'), { killed: true, signal: 'SIGKILL' })
   ]) {
     const setup = fixture();
@@ -490,6 +520,10 @@ test('child launch failures and timeouts are contained and remain retryable', as
       const retry = createMacWidgetLaunchServicesRecovery({ execFile: successfulExec(calls) });
       assert.deepEqual(await run(retry, setup), { status: 'completed' });
       assert.equal(calls.length, 2);
+      assert.deepEqual(calls.map(({ args }) => args), [
+        ['--mode', 'recover-host'],
+        ['--mode', 'recover-host']
+      ]);
     } finally {
       setup.cleanup();
     }

@@ -60,6 +60,7 @@ const {
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { sessionActivityProvidersFor, refreshSessionActivity } = require('./sessionActivityRegistry');
 const { isSessionActivityClient } = require('./sessionActivityProviders');
+const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const { readT3Activities } = require('./t3SessionActivity');
 const { createProcessStartBatch } = require('./processStarts');
 const { catpawDatabaseName, catpawSourcesFingerprint } = require('./providers/catpaw/paths');
@@ -736,6 +737,13 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       // An omitted observation is a metadata miss, not evidence of a cold cache.
       if (Object.prototype.hasOwnProperty.call(session, 'promptCache')) {
         target.promptCache = session.promptCache;
+      }
+      if (isSessionReasoningEffortClient(session.client)) {
+        const freshAt = Date.parse(session.lastUsedAt) || 0;
+        const retainedAt = Date.parse(target.lastUsedAt) || 0;
+        if (freshAt >= retainedAt && Object.prototype.hasOwnProperty.call(session, 'reasoningEffort')) {
+          target.reasoningEffort = normalizeReasoningEffort(session.reasoningEffort);
+        } else if (freshAt > retainedAt) target.reasoningEffort = null;
       }
       // The turn boundary is copied in all three states, matching what the
       // fresh scan said: `true` finished, `false` open, absent unknown. Copying

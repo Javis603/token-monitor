@@ -23,6 +23,14 @@ function numberValue(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+// Session archives retain explicit input separately from cache/output. Only
+// classify the bounded amount actually saved; legacy missing input stays unknown.
+function archivedSessionInput(session) {
+  const value = key => Math.max(0, Math.round(numberValue(session?.[key])));
+  return Math.min(value('inputTokens'), Math.max(0,
+    value('totalTokens') - value('cacheReadTokens') - value('cacheWriteTokens') - value('outputTokens')));
+}
+
 function toDate(value) {
   const date = value instanceof Date ? value : new Date(value || Date.now());
   return Number.isNaN(date.getTime()) ? new Date() : date;
@@ -52,6 +60,28 @@ function cloneJson(value) {
   return JSON.parse(JSON.stringify(value || {}));
 }
 
+// Collector summaries contain canonical JSON session rows. Archive replay only
+// reads or replaces live rows, so its intermediate projection can share them;
+// DeviceState detaches the published record afterwards. Keep every mutable map
+// and other field on the ordinary JSON-copy path.
+function cloneSummaryWithSharedSessions(summary) {
+  const shallow = { ...summary };
+  const nested = summary?.periods && typeof summary.periods === 'object';
+  const source = nested ? summary.periods : summary;
+  const target = nested ? (shallow.periods = { ...source }) : shallow;
+  const sessions = new Map();
+  for (const name of ['today', 'month', 'allTime']) {
+    const period = source?.[name];
+    if (!period || !Object.hasOwn(period, 'sessions')) continue;
+    sessions.set(name, period.sessions);
+    target[name] = { ...period, sessions: null };
+  }
+  const next = cloneJson(shallow);
+  const periods = nested ? next.periods : next;
+  for (const [name, rows] of sessions) periods[name].sessions = { ...rows };
+  return next;
+}
+
 function periodFor(record, periodName) {
   return normalizePeriod(record?.periods?.[periodName] || record?.[periodName]);
 }
@@ -76,7 +106,9 @@ function hasSummaryPeriod(summary, periodName) {
 }
 
 module.exports = {
+  archivedSessionInput,
   cloneJson,
+  cloneSummaryWithSharedSessions,
   hasSummaryPeriod,
   localDay,
   localMonth,

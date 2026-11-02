@@ -9,6 +9,8 @@
 // body — so a credential lands exactly like any other settings write, including
 // the runtime reconfigure and limit invalidation that write already plans, and
 // the renderer gets back the same settings projection settings:update returns.
+// A managed account service may inject commitCredential to reuse validation
+// while owning its metadata/secret transaction and scoped runtime notification.
 
 const { parseLimitProviders } = require('../../shared/limits/collector');
 const { LIMIT_PROVIDER_REGISTRY, limitProviderEntry } = require('../../shared/limits/registry');
@@ -78,7 +80,7 @@ function providerSelectionIncluding(selection, providerId) {
   return LIMIT_PROVIDER_REGISTRY.map(({ id }) => id).filter((id) => selected.has(id)).join(',');
 }
 
-function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, env = process.env }) {
+function createCredentialCommands({ getSettings, applySettingsPatch, commitCredential, probeDeps, env = process.env }) {
   const revisions = new Map();
   // Discovery can rotate a session before the user chooses an organization.
   // Keep that credential in main so the renderer never receives the secret.
@@ -202,7 +204,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     }
     const remember = accountForm(entry).rememberProbe;
     if (remember && verdict === 'valid') entry.limits[remember.fn](candidate[remember.field], provider);
-    const applied = applySettingsPatch({
+    const applied = commitCredential ? commitCredential({ providerId: entry.id, candidate, provider, values, checkedSince }) : applySettingsPatch({
       ...candidate,
       limitProviders: providerSelectionIncluding(getSettings().limitProviders, entry.id),
       limitsEnabled: true

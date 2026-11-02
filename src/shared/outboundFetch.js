@@ -10,7 +10,9 @@
  *   - honors NO_PROXY and lowercase-over-uppercase env precedence
  *   - falls back to globalThis.fetch only when no proxy is configured
  *
- * No app settings / hard-coded proxy addresses — env only (CLI/systemd/shell).
+ * Env only (CLI/systemd/shell); the widget's app proxy setting reaches this
+ * module as a synthesized env (src/electron/networkProxy.js), never as a
+ * separate code path.
  */
 
 const { EnvHttpProxyAgent, fetch: undiciFetch } = require('undici');

@@ -9,12 +9,15 @@ Sources:
   - actions/download.svg: download
   - actions/rotate-cw.svg: rotate-cw
   - actions/external-link.svg: external-link
+  - actions/ellipsis.svg: ellipsis
+  - actions/shield-check.svg: shield-check
   - actions/check.svg: check (stroke widened to 3 for legibility as a small badge)
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left
   - settings/collection.svg: database
   - settings/sync.svg: cloud-sync
   - settings/appearance.svg: palette
+  - settings/plugins.svg: puzzle
   - views/home.svg: house
   - views/session.svg: messages-square
   - views/trends.svg: chart-no-axes-combined

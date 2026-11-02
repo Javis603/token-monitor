@@ -200,6 +200,7 @@ async function readSessionActivity(summary, options = {}) {
       ...metadata.get(id),
       ...(!generatedTitleIds.get(id) ? t3Metadata.get(id) : {}),
       turnEnded: state.turnEnded, waitingForInput: state.waitingForInput,
+      ...(Object.prototype.hasOwnProperty.call(state, 'reasoningEffort') ? { reasoningEffort: state.reasoningEffort } : {}),
       ...(reading ? { liveActivity: reading } : {})
     };
     if (!['running', 'waiting'].includes(sessionActivityState(session, options.now))) continue;

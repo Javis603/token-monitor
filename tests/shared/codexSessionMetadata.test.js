@@ -27,11 +27,11 @@ function makeDb(rows, schema = 'full') {
     const insert = db.prepare('INSERT INTO threads (id, title) VALUES (?, ?)');
     for (const row of rows) insert.run(row.id, row.title || '');
   } else {
-    db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, preview TEXT, first_user_message TEXT, title TEXT, model TEXT, thread_source TEXT, source TEXT)');
-    const insert = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    db.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, preview TEXT, first_user_message TEXT, title TEXT, model TEXT, thread_source TEXT, source TEXT, reasoning_effort TEXT)');
+    const insert = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const row of rows) insert.run(
       row.id, row.name || '', row.preview || '', row.firstUserMessage || '', row.title || '',
-      row.model || '', row.threadSource || '', row.source || ''
+      row.model || '', row.threadSource || '', row.source || '', row.effort || ''
     );
   }
   db.close();
@@ -283,6 +283,27 @@ test('discovers the newest state database first and honors CODEX_HOME', () => {
     path.join(root, 'state_2.sqlite'),
     path.join(root, 'sqlite', 'state_4.sqlite')
   ]);
+});
+
+maybe('title queries also return persisted effort for historical and untitled sessions', () => {
+  const file = makeDb([
+    { id: 'old', name: 'Older conversation', effort: 'high' },
+    { id: 'untitled', effort: 'xhigh' },
+    { id: 'invalid', name: 'Invalid setting', effort: '<script>' }
+  ]);
+  const rows = metadata.readSessionMeta(['old', 'untitled', 'invalid'], { dbPaths: [file], sqlite });
+  assert.deepEqual(rows.get('old'), { title: 'Older conversation', reasoningEffort: 'high' });
+  assert.deepEqual(rows.get('untitled'), { reasoningEffort: 'xhigh' });
+  assert.deepEqual(rows.get('invalid'), { title: 'Invalid setting' });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-effort-history-'));
+  tmpDirs.push(home);
+  const periods = { allTime: { sessions: { 'codex:old': {
+    client: 'codex', sessionId: 'old', totalTokens: 1, lastUsedAt: '2020-01-01T00:00:00Z'
+  } } } };
+  require('../../src/shared/sessionMetadata').applySessionMetadata(periods, home, {
+    env: {}, codexDeps: { dbPaths: [file], sqlite }, readT3Meta: () => new Map(), resolveProjects: false
+  });
+  assert.equal(periods.allTime.sessions['codex:old'].reasoningEffort, 'high');
 });
 
 test('the default T3 discovery covers every installed and dev state layout', () => {

@@ -258,6 +258,21 @@ test('does not overwrite a corrupt credential store', (t) => {
   assert.equal(fs.readFileSync(filePath, 'utf8'), '{broken');
 });
 
+test('unsupported credential versions remain intact when a save is attempted', async (t) => {
+  for (const version of [0, 2]) {
+    await t.test(`version ${version}`, (t) => {
+      const dataDir = tempDataDir(t);
+      const store = new CredentialStore(dataDir);
+      const original = `${JSON.stringify({ version, credentials: { providers: { kimi: { apiKey: 'existing' } } }, migrations: {} })}\n`;
+      fs.writeFileSync(store.filePath, original);
+
+      assert.throws(() => store.replaceSettingsCredentials({ kimiApiKey: 'replacement' }), /Unsupported credential store version/);
+      assert.equal(fs.readFileSync(store.filePath, 'utf8'), original);
+      assert.deepEqual(fs.readdirSync(dataDir), ['credentials.json']);
+    });
+  }
+});
+
 test('refuses to follow a credential-store symlink', { skip: process.platform === 'win32' }, (t) => {
   const dataDir = tempDataDir(t);
   const target = path.join(dataDir, 'target.json');
@@ -266,6 +281,48 @@ test('refuses to follow a credential-store symlink', { skip: process.platform ==
   fs.symlinkSync(target, filePath);
   const store = new CredentialStore(dataDir);
   assert.throws(() => store.readDocument(), /regular file/);
+});
+
+test('credential fsync failures preserve the previous document and never write preferences', async (t) => {
+  for (const boundary of ['file', 'directory']) {
+    await t.test(boundary, { skip: boundary === 'directory' && process.platform === 'win32' }, (t) => {
+      const dataDir = tempDataDir(t);
+      const settingsPath = path.join(dataDir, 'settings.json');
+      const store = new CredentialStore(dataDir);
+      const previousSettings = { language: 'en', kimiApiKey: 'old-key' };
+      store.replaceSettingsCredentials(previousSettings);
+      const previousDocument = store.readDocument();
+      previousDocument.credentials.hub = { syncTitleCleanup: { pending: { secret: 'cleanup-secret' } } };
+      store.writeDocument(previousDocument);
+      writePrivateJsonAtomic(settingsPath, stripCredentialSettings(previousSettings));
+
+      const failure = Object.assign(new Error(`${boundary} fsync failed`), { code: 'EIO' });
+      const fsApi = Object.create(fs);
+      let injected = false;
+      fsApi.fsyncSync = (descriptor) => {
+        if (!injected && fs.fstatSync(descriptor).isDirectory() === (boundary === 'directory')) {
+          injected = true;
+          throw failure;
+        }
+        return fs.fsyncSync(descriptor);
+      };
+      let settingsWrites = 0;
+      assert.throws(() => persistSettingsAndCredentials({
+        store: new CredentialStore(dataDir, { fs: fsApi }),
+        settingsPath,
+        settings: { language: 'zh-TW', kimiApiKey: 'new-key' },
+        previousSettings,
+        writeSettings() { settingsWrites += 1; }
+      }), (error) => error === failure);
+
+      assert.equal(injected, true);
+      assert.equal(failure.atomicWriteCommitted, boundary === 'directory' ? true : undefined);
+      assert.equal(settingsWrites, 0);
+      assert.deepEqual(new CredentialStore(dataDir).readDocument(), previousDocument);
+      assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { language: 'en' });
+      assert.equal(fs.readdirSync(dataDir).some((name) => name.endsWith('.tmp')), false);
+    });
+  }
 });
 
 test('rolls back a credential clear when the settings write fails after commit', (t) => {
@@ -296,6 +353,64 @@ test('rolls back a credential clear when the settings write fails after commit',
   }), /settings write failed after rename/);
   assert.equal(store.settingsCredentials().kimiApiKey, 'old-key');
   assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { language: 'en' });
+});
+
+test('reports rollback failures without losing the original save error or skipping the other rollback', async (t) => {
+  for (const scenario of [
+    { name: 'credential rollback fails', failCredentials: true, failSettings: false },
+    { name: 'settings rollback fails', failCredentials: false, failSettings: true },
+    { name: 'both rollbacks fail', failCredentials: true, failSettings: true }
+  ]) {
+    await t.test(scenario.name, (t) => {
+      const dataDir = tempDataDir(t);
+      const settingsPath = path.join(dataDir, 'settings.json');
+      const store = new CredentialStore(dataDir);
+      const previousSettings = { language: 'en', kimiApiKey: 'old-key' };
+      store.replaceSettingsCredentials(previousSettings);
+      writePrivateJsonAtomic(settingsPath, stripCredentialSettings(previousSettings));
+
+      const saveError = Object.assign(new Error('settings write failed after rename'), {
+        code: 'EIO', atomicWriteCommitted: true
+      });
+      const credentialRollbackError = new Error('credential rollback failed');
+      const settingsRollbackError = new Error('settings rollback failed');
+      const writeDocument = store.writeDocument.bind(store);
+      let credentialWrites = 0;
+      t.mock.method(store, 'writeDocument', (document) => {
+        credentialWrites += 1;
+        if (credentialWrites === 2 && scenario.failCredentials) throw credentialRollbackError;
+        return writeDocument(document);
+      });
+      let settingsWrites = 0;
+      const writeSettings = (target, value) => {
+        settingsWrites += 1;
+        if (settingsWrites === 2 && scenario.failSettings) throw settingsRollbackError;
+        writePrivateJsonAtomic(target, value);
+        if (settingsWrites === 1) throw saveError;
+      };
+
+      assert.throws(() => persistSettingsAndCredentials({
+        store,
+        settingsPath,
+        settings: { language: 'zh-TW', kimiApiKey: 'new-key' },
+        previousSettings,
+        writeSettings
+      }), (error) => {
+        assert.notEqual(error, saveError);
+        assert.equal(error.cause, saveError);
+        assert.ok(error.message.includes(saveError.message));
+        assert.equal(error.message.includes(credentialRollbackError.message), scenario.failCredentials);
+        assert.equal(error.message.includes(settingsRollbackError.message), scenario.failSettings);
+        return true;
+      });
+      assert.equal(credentialWrites, 2);
+      assert.equal(settingsWrites, 2);
+      assert.equal(store.settingsCredentials().kimiApiKey, scenario.failCredentials ? 'new-key' : 'old-key');
+      assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), {
+        language: scenario.failSettings ? 'zh-TW' : 'en'
+      });
+    });
+  }
 });
 
 test('stores, migrates, and removes MiMo account cookies in the unified store', (t) => {

@@ -14,7 +14,7 @@
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/v/release/Javis603/token-monitor?include_prereleases&style=flat-square&label=release&color=22c55e" alt="Latest release" /></a>
     <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/downloads/Javis603/token-monitor/total?style=flat-square&color=22c55e" alt="Total downloads" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 or later" />
-    <img src="https://img.shields.io/badge/macOS-12%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 12 or later" />
+    <img src="https://img.shields.io/badge/macOS-13%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 13 or later" />
     <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
     <a href="https://discord.gg/HmdNVVvw5P"><img src="https://img.shields.io/discord/1344259784219689031?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="License: MIT" /></a>
@@ -30,7 +30,7 @@
 
 ## What is Token Monitor?
 
-A desktop app that shows live token usage and AI Tool Limits across 47+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
+A desktop app that shows live token usage and AI Tool Limits across 48+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
 
 ## Supported Tools
 
@@ -59,7 +59,7 @@ Token usage, AI Tool Limits and session details from the AI coding tools and pro
     <img src=".github/assets/tools-icon/kilo.png" width="40" alt="Kilo" title="Kilo" />
     <img src=".github/assets/tools-icon/commandcode.png" width="40" alt="Command Code" title="Command Code" />
     <img src=".github/assets/tools-icon/mimo.png" width="40" alt="MiMo" title="MiMo" />
-    <img src=".github/assets/tools-icon/muse.png" width="40" alt="Muse Code" title="Muse Code" />
+    <img src=".github/assets/tools-icon/muse.png" width="40" alt="Muse / Muse Code" title="Muse / Muse Code" />
     <img src=".github/assets/tools-icon/zcode.png" width="40" alt="ZCode" title="ZCode" />
     <img src=".github/assets/tools-icon/kiro.png" width="40" alt="Kiro" title="Kiro" />
     <img src=".github/assets/tools-icon/codebuddy.png" width="40" alt="CodeBuddy" title="CodeBuddy" />
@@ -83,6 +83,7 @@ Token usage, AI Tool Limits and session details from the AI coding tools and pro
     <img src=".github/assets/tools-icon/alibaba.png" width="40" alt="Alibaba Cloud" title="Alibaba Cloud" />
     <img src=".github/assets/tools-icon/stepfun.png" width="40" alt="StepFun" title="StepFun" />
     <img src=".github/assets/tools-icon/notion.png" width="40" alt="Notion AI" title="Notion AI" />
+    <img src=".github/assets/tools-icon/manus.png" width="40" alt="Manus" title="Manus" />
     <img src=".github/assets/tools-icon/thirdparty.gif" width="40" alt="Third-party APIs" title="Third-party APIs" />
 </p>
 
@@ -137,6 +138,18 @@ Token usage, AI Tool Limits and session details from the AI coding tools and pro
 
 Most usage monitors are useful on the machine they run on. Token Monitor is built for multi-device work: each device watches its own local logs, sends summary updates to your hub, and every connected widget sees token changes almost immediately.
 
+## Quick Install
+
+On macOS, install through the official [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor):
+
+```bash
+brew install --cask token-monitor
+```
+
+Or download the app for macOS, Windows, or Linux from [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
+
+Launch the app to start tracking this device locally, with no hub setup required. See [Installation](#installation) for full details.
+
 ## Features
 
 ### Tracking usage
@@ -151,7 +164,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Limits, trends & export
 
-- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 30+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
+- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 31+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
 - **Codex reset forecast** — an optional third-party forecast below Codex limits, showing the expected reset time, the reset type (Regular or Banked), and when the window last reset
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
@@ -184,6 +197,12 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Recordable global shortcut** — show or hide the window from anywhere
 - **Discord Rich Presence** — broadcast today's tokens, cost, and top client (opt-in)
 
+### Plugins (experimental)
+
+Extend desktop pages with custom content, add plugin pages and settings, and place content in Notch, Edge Dock, the menu bar/system tray or floating bubbles. Authors can build their own interfaces and optional local Node backends for data sources and computation.
+
+Manage plugins in Settings → Plugins. See the [user guide](https://javis-ai.com/token-monitor/docs/plugins.html?lang=en), [community plugins](https://github.com/Javis603/token-monitor-plugins), [development guide](docs/plugins/author-quickstart.md) and [Plugin API](docs/plugins/README.md). The plugin API is experimental and may change; plugins may need updates. Enable only code you trust: plugins are not sandboxed, and Node backends run with your OS user’s permissions.
+
 ## Supported Tools in Detail
 
 Token Monitor supports token usage, account-limit checks, and session details separately:
@@ -212,12 +231,12 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`; VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse / Muse Code | `~/.local/share/muse/sessions/`; muse.ai Cookie | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage & `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
-| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db` (CN only) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
@@ -236,6 +255,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | Alibaba Cloud console cookie (Bailian / Model Studio Token Plan quota, Team & Personal) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token (Coding Plan / Token Plan quota) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Notion AI rolling/monthly allowance for Business/Enterprise; manual token_v2 cookie + explicit workspace ID | — | ✅ | — |
+| <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Manus credits (monthly + daily/periodic refresh + balance); desktop session (macOS/Windows) or manual web session (all OSes) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="Third-party APIs" /> | Third-party APIs | New API / Sub2API-compatible account presets (including compatible One API forks), a New API API-key preset, and a Custom balance endpoint | — | ✅ | — |
 
 <details>
@@ -252,6 +272,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 - Unsloth Studio tracks inference usage from `studio.db`: Studio chats and its local API. Local inference has zero API cost; recognized metered providers use Tokscale's price estimates. Training tokens are not included. See [Unsloth source notes](docs/providers/unsloth.md).
 - Devin tracks Devin CLI sessions from the local `sessions.db` and Devin Desktop agent sessions from `acp-events` ACP logs; where both cover the same session the CLI database is authoritative. Desktop coverage depends on the connected ACP agent: only agents that write `usage_update` events locally are counted, and Devin Desktop's default `devin-cloud` agent meters its usage server-side, so a default Desktop setup reports no Desktop tokens. Session titles and project attribution come from the CLI database. See [Devin source notes](docs/providers/devin.md).
 - Notion AI uses internal APIs with a manually pasted `token_v2` cookie and an explicit Business/Enterprise workspace ID. Only fixtures have been validated; a real response sample is unavailable and live authentication awaits approval. There is no automatic cookie retrieval or public API guarantee. See [Notion source notes](docs/providers/notion.md).
+- Manus reads a signed-in desktop session on macOS/Windows, or a manually supplied web session on any OS (including Linux). Monthly credits, refresh allowance and balance use the same undocumented internal endpoint, with no compatibility guarantee. See [Manus source notes](docs/providers/manus.md).
 - MiniMax Code reads the local session history the CLI writes, under `~/.minimax` or `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR` (also `~/.mavis` and `~/.minimax-<profile>` / `~/.mavis-<profile>`), plus runs captured with `tokscale headless mcode`; a turn found in both counts once.
 
 - Command Code transcripts do not contain actual token counts or per-message model metadata. Token usage is estimated from transcript text, while model attribution and derived cost may reflect the currently configured model rather than the model historically used for each request.
@@ -260,6 +281,27 @@ Token Monitor supports token usage, account-limit checks, and session details se
 - Custom maps numeric JSON fields from one GET balance endpoint; OpenAI or Anthropic compatibility alone is not enough.
 - Qoder CN is off by default; enable it in Settings → tools. Current sessions are JSONL under `~/.qoder-cn/projects` (`TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, then `QODERCN_CONFIG_DIR/projects`); older builds used a SQLite database, overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`. An unreadable source keeps its last complete read. Legacy database sessions record only a project name, so they appear without a project. Plan-billed JSONL rows that report credits but no token counts are omitted from token totals; those credits stay in AI Tool Limits, and BYOK rows with measured tokens are counted. See [Qoder source notes](docs/providers/qodercn.md).
 </details>
+
+### Additional Feature Support
+
+| Feature | Supported tools/sources | Notes |
+|---------|-------------------------|------------|
+| Session titles | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| Per-prompt/reply usage and tool calls | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Details are read locally and are not synced. |
+| Context usage/remaining space | Claude Code, Codex, DeepSeek Harness | Claude Code's context limit is estimated from the model. |
+| Cache usage/session cache hit rate | Sources exposing cache fields, including Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | Hit rate is shown when cache usage data is available. |
+| Estimated cache time remaining | Claude Code | 5 minutes or 1 hour, based on the recorded cache tier. |
+| Output speed/token consumption rate | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Output speed in `tok/s`, total token consumption in `tok/min`; timing can include waiting. |
+| Reasoning effort setting | Claude Code, Codex | Only settings explicitly recorded in the session are shown. |
+| Reasoning token counts | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| Turn start/completion detection | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | Uses turn signals recorded by the tool. For other tools or without valid signals, running is estimated for about 10 minutes after the last activity. |
+| Native running/waiting-for-input status | Claude Code, Codex | — |
+| Parent/subagent grouping | Codex, Antigravity, Oh My Pi, ZCode; T3 Code sessions with verifiable parent links | Claude Code grouping is available through T3 Code. |
+| Continuation-record grouping for the same conversation | Codex; T3 Code sessions with verified thread links | — |
+| Switch local accounts | Codex | Switches between accounts added in Token Monitor. |
+| Quota reset times/countdowns | Sources exposing reset times, e.g. Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| Available quota reset credits/grants | Claude Code, Codex | Shows remaining resets and expiry dates; display only. |
+| Quota reset forecast | Codex | Optional third-party forecasts from codex-resets.com. |
 
 ## Installation
 
@@ -361,6 +403,8 @@ npm run pack         # unpacked app dir (no installer), for quick local testing
 Output lands in `dist/`. Windows and Linux use the matching `dist:*` script above on the target OS. Packaging the macOS release build requires a local Developer ID Application signing identity; use `npm start` for local development or unsupported platforms.
 
 Runtime and packaging scripts explicitly ensure the pinned tokscale binary on every target with a vendored build. Other source platforms keep the npm binary and filter clients it does not support; `npm install`, lint, and tests do not download it.
+
+For lint and tests, run `npm run verify`. Run `npm run test:coverage` for JavaScript coverage reports; see [testing and coverage](docs/testing.md) for scope, report files and interpretation limits.
 
 ## How it works
 

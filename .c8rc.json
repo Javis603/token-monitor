@@ -1,0 +1,9 @@
+{
+  "all": true,
+  "src": ["src", "worker/src"],
+  "include": ["src/**/*.js", "worker/src/**/*.js"],
+  "exclude": ["worker/src/shared/**"],
+  "extension": [".js"],
+  "reporter": ["text", "html", "lcovonly", "json-summary", "json"],
+  "reports-dir": "coverage"
+}

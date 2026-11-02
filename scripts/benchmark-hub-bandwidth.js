@@ -68,6 +68,13 @@ function payload(totalOffset = 0, updatedAt = NOW) {
         updatedAt: NOW,
         windows: [{ kind: 'weekly', usedPercent: 54, remainingPercent: 46, resetsAt: '2026-09-12T20:51:00.000Z' }]
       }]
+    },
+    // Real producers restamp observedAt on every scan; without it here the
+    // benchmark cannot notice a per-ingest stamp leaking into the content key.
+    clientHealth: {
+      version: 1,
+      clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
+      observedAt: updatedAt
     }
   };
 }
@@ -96,6 +103,13 @@ function wireScenario(protocol, usage, history, gzipSize, runtime) {
   const response = { ok: true, deviceId: baseRecord.deviceId, stats: baseStats };
   const fullEvent = sse('stats', { type: 'stats', reason: 'ingest', stats: baseStats, at: NOW });
   const snapshot = sse('snapshot', { type: 'stats', reason: 'snapshot', stats: baseStats, at: NOW });
+  const restampedAt = '2026-09-09T18:00:30.000Z';
+  const restamped = usage.mergeDeviceRecord(baseRecord, { ...payload(0, restampedAt), receivedAt: restampedAt });
+  assert.equal(
+    protocol.hubStatsContentKey(statsFor(usage, history, restamped)),
+    protocol.hubStatsContentKey(baseStats),
+    `${runtime}: a timestamp-only ingest changed the content key, so it would broadcast full stats`
+  );
   const freshness = sse('freshness', protocol.freshnessEvent(baseStats, 'ingest', NOW));
   const burstEvents = [];
   for (let index = 1; index <= 10; index += 1) {

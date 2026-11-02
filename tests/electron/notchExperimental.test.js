@@ -19,7 +19,7 @@ function controls(platform, enabled) {
   const patches = [];
   const context = { els, state, edgeDockAvailable: () => platform !== 'linux',
     t: key => key,
-    syncDockSizeControls() {}, syncEdgeDockMacBackdropInput() {}, syncNotchStyleInput() {}, syncNotchCapabilities() {}, syncNotchHoverControls() {},
+    renderNotchPageChoices() {}, syncDockSizeControls() {}, syncEdgeDockMacBackdropInput() {}, syncNotchStyleInput() {}, syncNotchCapabilities() {}, syncNotchHoverControls() {},
     saveSettings: patch => patches.push(JSON.parse(JSON.stringify(patch))), refreshTrayComposers() {}, notchItemsComposer: null, edgeDockComposer: null };
   const source = app.slice(app.indexOf('function syncDockControls()'), app.indexOf('function createDockItemsComposer('));
   vm.runInNewContext(source, context);
@@ -126,4 +126,22 @@ test('sessions is the default in settings loading, patching and the collapsed-co
   f.els.notchSummaryModeInput = { value: '' };
   f.syncDockControls();
   assert.equal(f.els.notchSummaryModeInput.value, 'sessions');
+});
+
+test('floating Edge Dock leaves both edge radios available for an explicit docking choice', () => {
+  for (const side of ['left', 'right']) {
+    const f = controls('darwin', false);
+    f.els.edgeDockSideInputs = ['left', 'right'].map(value => ({ value, checked: false }));
+    f.state.settings.edgeDockSide = side;
+    for (const floatingX of [0, 0.5, 1]) {
+      f.state.settings.edgeDockFloatingX = floatingX;
+      f.syncDockControls();
+      assert.ok(f.els.edgeDockSideInputs.every(input => !input.checked), 'either radio can change while floating');
+    }
+    for (const floatingX of [null, undefined]) {
+      f.state.settings.edgeDockFloatingX = floatingX;
+      f.syncDockControls();
+      assert.equal(f.els.edgeDockSideInputs.find(input => input.checked).value, side);
+    }
+  }
 });

@@ -501,3 +501,57 @@ test('anchored watch updates carry cache observations and cold clears into broad
     }
   }
 });
+
+for (const client of ['codex', 'claude']) test(`anchored watch updates replace and clear ${client} effort in all displayed periods`, async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const { emptyPeriod } = require('../../src/shared/usage');
+  const observedAt = new Date().toISOString();
+  const makePeriod = () => ({ ...emptyPeriod(), totalTokens: 50, clients: { [client]: 50 }, sessions: {
+    [`${client}:s1`]: { client, sessionId: 's1', totalTokens: 50, lastUsedAt: observedAt, reasoningEffort: 'high' }
+  } });
+  for (const reasoningEffort of ['low', null]) {
+    const anchor = { dateKey: localTodayKey(), today: makePeriod(), month: makePeriod(), allTime: makePeriod() };
+    const summary = await collectUsageOnce({
+      ...baseOptions, clients: client, todayOnlyAnchor: anchor,
+      runTokscale: async () => ({ entries: [{ client, sessionId: 's1', model: 'fixture', input: 60 }] }),
+      sessionMetadataDeps: { sessionMetadataResolvers: new Map([[client, () => new Map([['s1', { lastUsedAt: observedAt, reasoningEffort }]])]]) }
+    });
+    for (const name of ['today', 'month', 'allTime']) {
+      assert.equal(summary[name].sessions[`${client}:s1`].reasoningEffort, reasoningEffort, name);
+    }
+  }
+});
+
+for (const client of ['codex', 'claude']) test(`${client} anchored effort misses preserve only the same observation through archive capture`, async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const { emptyPeriod } = require('../../src/shared/usage');
+  const { updateSessionUsageArchive, normalizeSessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
+  const observedAt = new Date().toISOString();
+  const newer = new Date(Date.parse(observedAt) + 1000).toISOString();
+  const older = new Date(Date.parse(observedAt) - 1000).toISOString();
+  const makePeriod = () => ({ ...emptyPeriod(), totalTokens: 50, clients: { [client]: 50 }, sessions: {
+    [`${client}:s1`]: { client, sessionId: 's1', totalTokens: 50, lastUsedAt: observedAt, reasoningEffort: 'high' }
+  } });
+  const cases = [
+    [observedAt, {}, 'high'], [observedAt, { reasoningEffort: null }, null],
+    [observedAt, { reasoningEffort: 'low' }, 'low'], [newer, {}, null],
+    [older, {}, 'high'], [older, { reasoningEffort: 'low' }, 'high']
+  ];
+  for (const rawTimestamp of [false, true]) for (const [lastUsedAt, fields, expected] of cases) {
+    const anchor = { dateKey: localTodayKey(), today: makePeriod(), month: makePeriod(), allTime: makePeriod() };
+    const saved = updateSessionUsageArchive(null, anchor, new Date(observedAt)).archive;
+    const summary = await collectUsageOnce({
+      ...baseOptions, clients: client, todayOnlyAnchor: anchor,
+      runTokscale: async () => ({ entries: [{ client, sessionId: 's1', model: 'fixture', input: 50,
+        ...(rawTimestamp ? { lastUsedAt } : {}) }] }),
+      sessionMetadataDeps: { sessionMetadataResolvers: new Map([[client, () => new Map([['s1', { lastUsedAt, ...fields }]])]]) }
+    });
+    updateSessionUsageArchive(saved, summary, new Date(newer));
+    const archive = normalizeSessionUsageArchive(saved);
+    for (const name of ['month', 'allTime']) {
+      assert.equal(summary[name].sessions[`${client}:s1`].reasoningEffort, expected, `${name}: ${lastUsedAt} ${JSON.stringify(fields)} raw=${rawTimestamp}`);
+      assert.equal(archive.sessions[`${client}:s1`].periods[name].reasoningEffort, expected);
+      assert.equal(summary[name].totalTokens, 50);
+    }
+  }
+});
