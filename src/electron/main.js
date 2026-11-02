@@ -594,7 +594,7 @@ if (!gotLock) app.exit(0);
 
 const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
 const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
-const PERIOD_MONTH_MODES = new Set(['month', 'week', 'last7', 'last30']);
+const PERIOD_MONTH_MODES = new Set(['month', 'week', 'last7', 'last30', 'cycle']);
 
 function normalizePeriodMonthMode(value) {
   return PERIOD_MONTH_MODES.has(value) ? value : 'month';
@@ -602,6 +602,11 @@ function normalizePeriodMonthMode(value) {
 
 function normalizeProjectBreakdownMode(value) {
   return value === 'model' ? 'model' : 'tool';
+}
+
+function normalizeBillingCycleStartDay(value) {
+  const day = Math.trunc(Number(value));
+  return Number.isFinite(day) && day >= 1 && day <= 31 ? day : 1;
 }
 
 function normalizeHomeLimitAccountCount(value) {
@@ -657,6 +662,7 @@ function defaultSettings() {
     sessionContextMetric: 'used',
     sessionTitlesEnabled: true,
     periodMonthMode: 'month',
+    billingCycleStartDay: 1,
     themeColors: {},
     vendorColors: {},
     textSize: 'standard',
@@ -2749,6 +2755,7 @@ function readSettings() {
     merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
+    merged.billingCycleStartDay = normalizeBillingCycleStartDay(merged.billingCycleStartDay);
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
@@ -8309,6 +8316,7 @@ app.whenReady().then(() => {
       limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
+      billingCycleStartDay: normalizeBillingCycleStartDay(patch.billingCycleStartDay ?? settings.billingCycleStartDay),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
       sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
