@@ -250,7 +250,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // Electron shell over the same bundled droid kernel and keeps no session data
   // of its own, so this one root covers both.
   add('droid', ...simpleHostSourceRoots('droid', home));
-  // Cursor honours only TOKSCALE_CONFIG_DIR; Antigravity follows the OS config root.
+  // Both caches honour TOKSCALE_CONFIG_DIR. Cursor defaults to ~/.config/tokscale
+  // on every platform; Antigravity uses the platform-aware tokscaleConfigDir().
   const tokscaleConfigRoot = tokscaleConfigDir({ env, platform, homeDir: home });
   add('cursor', ['tokscale-cursor-cache', cursorCacheDir({ env, platform, homeDir: home })]);
   add('antigravity',

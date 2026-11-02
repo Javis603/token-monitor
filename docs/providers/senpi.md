@@ -24,7 +24,7 @@ Tokscale always scans `~/.omo/agent/sessions`. It also scans `~/.senpi/agent/ses
 ~/.senpi/agent/sessions/<encoded-cwd>/<timestamp>_<sessionId>.jsonl
 ~/.omo/senpi-task/children/<task>/sessions/
 ~/.omo/agent/projects/<project>-<hash>/senpi-task/children/
-~/.omo/memory/agents/<agent>/runtime/transcripts/
+~/.omo/memory/
 ```
 
 `SENPI_CODING_AGENT_DIR` replaces only the `~/.senpi/agent` root. `SENPI_CODING_AGENT_SESSION_DIR` adds one extra sessions directory. OmO itself has no environment variable for a relocated tree; tokscale reads that from `scanner.extraScanPaths.senpi` in its settings.json. On Windows, the scanner, source checks and native Session Detail use an absolute native `HOME` before the profile directory; scoped WSL lookups ignore host environment overrides.
@@ -41,7 +41,7 @@ Only transcript roots, configuration files and their necessary ancestor chain ar
 
 Senpi documents `usage.reasoning` as a subset of `usage.output`. Tokscale parses the field and does not add it to the total. Do not put `senpi` in `TOKSCALE_DISJOINT_REASONING_CLIENTS`: that set is for clients whose JSON `reasoning` bucket is additive.
 
-Session Detail uses the shared Pi-format parser. `reasoningTokens` stays informational. A main session resolves by the `_<sessionId>.jsonl` suffix under the scan roots. A task child whose file is named for the task rather than the session id is still counted by tokscale, but Detail does not open it.
+Session Detail uses the shared Pi-format parser. `reasoningTokens` stays informational. Sessions resolve by `<sessionId>.jsonl` or the `_<sessionId>.jsonl` suffix under the scan roots. Task children named for the task and memory transcripts named `transcript.jsonl` are still counted by tokscale, but Detail does not open them when their filenames do not match the session id. Detail does not look up files by the session id in their JSON header.
 
 ## Verification
 
