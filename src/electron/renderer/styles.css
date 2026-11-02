@@ -807,6 +807,10 @@ span.settings-note.settings-item-desc {
 }
 .settings-panel .inline-option:has(input:checked) { background: rgba(var(--overlay-rgb), 0.12); color: var(--text); }
 .settings-panel .inline-option:has(input:focus-visible) { outline: 1px solid rgba(var(--accent-rgb), 0.72); }
+.collection-cadence-quick-options {
+  gap: 6px;
+  padding-left: 2px;
+}
 .settings-group-header { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 0.6875rem; }
 .settings-group-header:not(.cursor-settings-toggle) {
   font-size: 0.5625rem;

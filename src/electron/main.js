@@ -548,7 +548,7 @@ const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'cos
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
-const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
+const COLLECTION_INTERVAL_OPTIONS = [15 * 1000, 5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
 // Smart mode's cadence is fixed and resolved directly in collectorIntervalMs(),
 // so it stays out of COLLECTION_INTERVAL_OPTIONS: that list validates the
 // persisted collectionIntervalMs, and admitting 10m there would let a

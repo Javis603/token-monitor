@@ -610,17 +610,28 @@
             <div class="settings-subgroup settings-collection-cadence">
               <label class="settings-item">
                 <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.collection.cadence">Collection frequency</span>
+                  <span id="collectionCadenceLabel" class="settings-item-title" data-i18n="settings.collection.cadence">Collection frequency</span>
                 </span>
                 <select id="collectionCadenceInput">
                   <option value="live" data-i18n="settings.collection.mode.live">Live watch</option>
                   <option value="smart" data-i18n="settings.collection.mode.smart">Smart (10 minutes)</option>
+                  <option value="15000" data-i18n="settings.collection.interval.15s">Every 15 seconds</option>
                   <option value="300000" data-i18n="settings.collection.interval.5m">Every 5 minutes</option>
                   <option value="900000" data-i18n="settings.collection.interval.15m">Every 15 minutes</option>
                   <option value="1800000" data-i18n="settings.collection.interval.30m">Every 30 minutes</option>
                 </select>
                 <span id="collectionCadenceNote" class="settings-note settings-item-desc" data-i18n="settings.collection.modeDesc" hidden>Smart mode collects after agent activity, with an hourly reconciliation; fixed intervals turn off file watching.</span>
               </label>
+              <div class="inline-options collection-cadence-quick-options" role="group" aria-labelledby="collectionCadenceLabel">
+                <label class="inline-option">
+                  <input type="radio" name="collectionCadenceQuickInterval" value="15000" />
+                  <span data-i18n="settings.collection.interval.15s">Every 15 seconds</span>
+                </label>
+                <label class="inline-option">
+                  <input type="radio" name="collectionCadenceQuickInterval" value="300000" />
+                  <span data-i18n="settings.collection.interval.5m">Every 5 minutes</span>
+                </label>
+              </div>
             </div>
             <div class="settings-subgroup session-archive-settings">
               <div class="settings-group-header"><span data-i18n="settings.collection.sessionArchiveTitle">Session history</span></div>
