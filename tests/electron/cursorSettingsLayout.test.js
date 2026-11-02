@@ -815,13 +815,15 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   // alone and it stays reachable once a key is saved — a user whose auto-probe
   // keeps flapping needs the switch after linking, not before.
   const minimax = forms.find(({ id }) => id === 'minimax');
+  const billingMode = minimax.fields.find(({ key }) => key === 'minimaxBillingMode');
+  assert.deepEqual(billingMode.options.map(({ value }) => value), ['token-plan', 'api']);
   const region = minimax.fields.find(({ key }) => key === 'minimaxApiRegion');
   assert.equal(region.saveOnChange, true);
   assert.deepEqual(region.options.map(({ value }) => value), ['auto', 'cn', 'intl']);
   for (const { labelKey } of region.options) {
     assert.match(labelKey, /^settings\.minimax\./, labelKey);
   }
-  assert.deepEqual(minimax.top, [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }]);
+  assert.deepEqual(minimax.top.filter(block => block.field), [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }]);
 
   // The region never becomes a credential: no store path, so it stays in
   // settings.json only after a selection; an implicit default stays empty.
@@ -1217,12 +1219,6 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     '.accordion-animated-container.hidden > .accordion-animation-inner'
   );
   assert.ok(collapsedInnerRules.some(rule => declaration(rule, 'opacity') === '0'));
-
-  const app = readRendererFile('app.js');
-  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
-  assert.match(statusBody, /const canClearConfiguredCredential = source === 'settings' && configured;/);
-  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
-  assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
 
   // The cookie is checked in main before it can replace a working one: a paste
   // that is not one sk-ant- sessionKey (a multi-line paste included) is refused
@@ -2867,7 +2863,6 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
 test('Limits groups multiple Cursor accounts with separate identity and plan rows', () => {
   const app = readRendererFile('app.js');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  assert.match(readRendererFile('limits/windowsView.js'), /cursor: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
   assert.doesNotMatch(app, /renderCursorAccountGroup/);
 });

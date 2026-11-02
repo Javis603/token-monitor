@@ -879,10 +879,12 @@
       const sub = el('div', 'notch-limit-sub');
       if (records.length > 1) {
         const shown = limitAccountTitle(entry.provider, record, records.indexOf(record), records);
-        const accountName = text('notch-limit-account', shown || t('settings.codex.nAccounts', { count: records.length }), shown);
-        accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
-        overflowText.bind(accountName);
-        sub.append(accountName);
+        if (shown) {
+          const accountName = text('notch-limit-account', shown, shown);
+          accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
+          overflowText.bind(accountName);
+          sub.append(accountName);
+        }
         if (account?.active) {
           const live = text('notch-limit-active', '✓', t('limits.codex.activeAccountHint'));
           live.setAttribute('aria-label', t('limits.codex.activeAccountHint'));

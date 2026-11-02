@@ -33,6 +33,8 @@ const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../
 const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
+const minimaxTestHome = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'minimax-renderer-home-'));
+test.after(() => fs.rmSync(minimaxTestHome, { recursive: true, force: true }));
 const { parseManusCredits } = require('../../src/shared/providers/manus/limits');
 const manusCreditsFixture = require('../fixtures/manusAvailableCredits.json');
 const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
@@ -453,7 +455,7 @@ test('MiniMax API balances reach the shared Limits and dock renderer in both cur
   for (const [region, currency, symbol] of [['cn', 'CNY', '¥'], ['intl', 'USD', '$']]) {
     for (const amount of [98.25, 0, -1.5]) {
       const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: region }, {
-        env: {}, fetchJson: async () => ({ available_amount: String(amount), base_resp: { status_code: 0 } })
+        env: {}, homeDir: minimaxTestHome, fetchJson: async () => ({ available_amount: String(amount), base_resp: { status_code: 0 } })
       });
       assert.equal(provider.status, 'ok');
       assert.equal(provider.windows[0].currency, currency);
@@ -476,6 +478,84 @@ test('MiniMax API balances reach the shared Limits and dock renderer in both cur
   }
 });
 
+test('a confirmed MiniMax account stays one heading, and a saved cost stays reachable without a plan name', () => {
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const apiKey = `sha256:${'b'.repeat(64)}`;
+  const code = normalizeLimitProvider({
+    provider: 'minimax', status: 'ok', source: 'oauth', region: 'cn', accountKey: codeKey,
+    accountLabel: 'MiniMax Code', planLabel: '', updatedAt: '2026-10-14T04:00:00Z',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS' }]
+  });
+  const api = normalizeLimitProvider({
+    provider: 'minimax', status: 'ok', source: 'api', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey,
+    accountLabel: 'Pay-as-you-go', updatedAt: '2026-10-14T04:00:00Z',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }]
+  });
+  const view = dockView();
+  const card = (rows, appearance) => (appearance ? dockView(appearance) : view)
+    .renderLimitProviderGroup('minimax', 'Minimax', rows, '#000000');
+  const paired = card([code, api]);
+  assert.match(paired.text, /Minimax/);
+  assert.match(paired.text, /Credits/);
+  assert.match(paired.text, /Balance/);
+  assert.doesNotMatch(paired.text, /Pay-as-you-go|Token Plan/);
+  assert.doesNotMatch(paired.text, /Account 1|2 accounts|Subscriptions/);
+  assert.equal(view.limitProviderPlan(code), '');
+  assert.equal(view.limitProviderPlan(api), '');
+  assert.equal(view.limitProviderPlan({ ...api, accountLabel: 'Token Plan' }), '');
+  assert.match(card([{ ...code, planLabel: 'Starter' }, api]).text, /Starter/);
+  const unlinked = card([code, { ...api, relatedAccountKey: undefined }]);
+  assert.match(unlinked.text, /Account 1/);
+  assert.match(unlinked.text, /Account 2/);
+  const refused = card([code, { ...api, status: 'unauthorized', windows: [] }]);
+  assert.match(refused.text, /Sign in again/);
+  assert.doesNotMatch(refused.text, /Account 1|2 accounts/);
+  const saved = {
+    id: 'code-cost', provider: 'minimax', kind: 'subscription', planName: 'Build', amountMinor: 2000,
+    currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-08-01', autoRenew: true,
+    topUps: [], binding: { accountKey: codeKey }
+  };
+  const recorded = card([code, api], { subscriptions: [saved], accounts: [code, api] });
+  assert.match(recorded.text, /Subscriptions/);
+  assert.match(recorded.text, /20\.00/);
+  const down = card([{ ...code, status: 'unavailable', stale: true }, api], { subscriptions: [saved], accounts: [code, api] });
+  assert.match(down.text, /Subscriptions/);
+  assert.doesNotMatch(down.text, /2 accounts|Account 1/);
+});
+
+test('MiniMax Code follows the shared quota, count and credits rows', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'minimax',
+    status: 'ok',
+    windows: [
+      { kind: 'session', label: '5h', usedPercent: 30 },
+      { kind: 'weekly', label: 'Weekly', usedPercent: 10 },
+      { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17 },
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS' }
+    ]
+  });
+  const card = dockView().renderProviderWindows(provider, '#888888');
+  const rows = new Map(card.children.map(row => [row.children[0].children[0].textContent, row]));
+  assert.deepEqual(new Set(rows.keys()), new Set(['5h', 'Weekly', 'Video', 'Credits']));
+  assert.equal(rows.get('Video').find('limit-detail').textContent, '17/20');
+  const points = rows.get('Credits');
+  assert.equal(points.find('limit-meter-fill').style['--bar-scale'], '1');
+  assert.equal(provider.windows.at(-1).usedPercent, null, 'the display estimate stays off the wire');
+  const empty = { ...provider, windows: [{ ...provider.windows.at(-1), remaining: 0 }] };
+  assert.equal(dockView().renderProviderWindows(empty, '#888888').find('limit-meter-fill').style['--bar-scale'], '0');
+  assert.match(points.text, /4624\.00/);
+  assert.equal(points.text.includes('¥'), false);
+  assert.equal(points.dataset.usageItem, 'credits');
+  const items = dockView().limitProviderUsageItems([provider]);
+  assert.equal(items.filter((item) => item.id === 'credits').length, 1);
+  assert.equal(items.length, 4);
+  const hidden = dockView({ limitProviderHiddenItems: { minimax: ['credits'] } });
+  assert.deepEqual(
+    new Set(hidden.renderProviderWindows(provider, '#888888').children.map(row => row.children[0].children[0].textContent)),
+    new Set(['5h', 'Weekly', 'Video'])
+  );
+});
+
 test('MiniMax Balance is listed and can be hidden without disappearing from its checklist', () => {
   const provider = normalizeLimitProvider({
     provider: 'minimax', status: 'ok',
@@ -490,7 +570,7 @@ test('MiniMax Balance is listed and can be hidden without disappearing from its 
 
 test('MiniMax Token Plan retains its quota pair and missing API balances do not invent a row', async () => {
   const plan = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-fixture', minimaxApiRegion: 'cn' }, {
-    env: {}, fetchJson: async () => ({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 75, current_weekly_remaining_percent: 50 }] } })
+    env: {}, homeDir: minimaxTestHome, fetchJson: async () => ({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 75, current_weekly_remaining_percent: 50 }] } })
   });
   const card = dockView().renderProviderWindows(plan, '#888888');
   assert.equal(plan.status, 'ok');
@@ -498,7 +578,7 @@ test('MiniMax Token Plan retains its quota pair and missing API balances do not 
   assert.equal(card.text.includes('Balance'), false);
   for (const available_amount of [undefined, 'invalid']) {
     const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' }, {
-      env: {}, fetchJson: async () => ({ available_amount, base_resp: { status_code: 0 } })
+      env: {}, homeDir: minimaxTestHome, fetchJson: async () => ({ available_amount, base_resp: { status_code: 0 } })
     });
     assert.equal(provider.status, 'unavailable');
     assert.equal(dockView().renderProviderWindows(provider, '#888888').children.length, 0);
@@ -663,18 +743,32 @@ test('every preference the shared view reads reaches the dock through the appear
   assert.match(controller, /const base = \{ surface, side, platform, osRelease: os\.release\(\), appearance,/);
 });
 
-test('a DeepSeek card shows the spend row the projection used to drop', () => {
-  const card = dockView().renderProviderWindows({
-    provider: 'deepseek',
-    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
-    balance: { amount: 4.2, currency: 'USD', todaySpend: 0.12, weekSpend: 0.5, monthSpend: 1.4 }
-  }, '#4D6BFE');
-
-  assert.ok(card.find('limit-spend'), 'the card should carry the spend row');
-  assert.match(card.text, /Today/);
-  assert.match(card.text, /Month/);
-  assert.match(card.text, /\$4\.20/);
-  assert.match(card.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), /Month: \$1\.40/);
+test('cash-balance cards share the Spend tooltip and its hide/show identity', () => {
+  for (const id of ['deepseek', 'minimax']) {
+    for (const spend of [
+      { todaySpend: 0, weekSpend: 2, monthSpend: 1.4, allTimeSpend: 8.9 },
+      { todaySpend: 0.12, weekSpend: 0.5, monthSpend: 1.4 }
+    ]) {
+      const provider = {
+        provider: id,
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
+        balance: { amount: 4.2, currency: 'USD', ...spend }
+      };
+      const view = dockView();
+      const card = view.renderProviderWindows(provider, '#4D6BFE');
+      assert.ok(card.find('limit-spend'), 'the card should carry the shared spend row');
+      assert.ok(card.text.includes(`Spend Today $${spend.todaySpend.toFixed(2)} · Month $1.40`));
+      assert.match(card.text, /Week/);
+      assert.equal(card.text.includes('All time'), spend.allTimeSpend !== undefined);
+      if (spend.allTimeSpend !== undefined) assert.match(card.text, /\$8\.90/);
+      assert.match(card.text, /\$4\.20/);
+      assert.match(card.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), /Month: \$1\.40/);
+      assert.ok(view.limitProviderUsageItems([provider]).some(item => item.id === 'spend'));
+      const hidden = dockView({ limitProviderHiddenItems: { [id]: ['spend'] } }).renderProviderWindows(provider, '#4D6BFE');
+      assert.equal(hidden.find('limit-spend'), null);
+      assert.match(hidden.text, /\$4\.20/);
+    }
+  }
 });
 
 test('a TypeSafe card shows the next credit expiry without calling it a reset', () => {
@@ -1433,29 +1527,31 @@ test('a single-account row carries the page head: mark, title, meta and plan', (
   assert.equal(row.find('limit-plan').textContent, 'Plus');
 });
 
-test('a grouped provider heads with the account count the page shows', () => {
-  const account = (email) => ({
-    provider: 'codex',
-    status: 'ok',
-    accountEmail: email,
-    updatedAt: new Date().toISOString(),
-    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+for (const id of ['codex', 'minimax']) {
+  test(`${id} group heads with the account count the page shows`, () => {
+    const account = (email) => ({
+      provider: id,
+      status: 'ok',
+      accountEmail: email,
+      updatedAt: new Date().toISOString(),
+      windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+    });
+    const group = dockView().renderLimitProviderGroup(
+      id,
+      id,
+      ['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com'].map(account),
+      '#10A37F'
+    );
+
+    assert.equal(group.find('limit-plan').textContent, '4 accounts');
+    assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-account-row')).length, 4);
+
+    // A provider with no count phrase of its own prints nothing rather than the
+    // untranslated key.
+    const untranslated = dockView().renderLimitProviderGroup('deepseek', 'DeepSeek', [account('a@x'), account('b@x')], '#4D6BFE');
+    assert.equal(untranslated.find('limit-plan').textContent, '');
   });
-  const group = dockView().renderLimitProviderGroup(
-    'codex',
-    'Codex',
-    ['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com'].map(account),
-    '#10A37F'
-  );
-
-  assert.equal(group.find('limit-plan').textContent, '4 accounts');
-  assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-account-row')).length, 4);
-
-  // A provider with no count phrase of its own prints nothing rather than the
-  // untranslated key.
-  const untranslated = dockView().renderLimitProviderGroup('deepseek', 'DeepSeek', [account('a@x'), account('b@x')], '#4D6BFE');
-  assert.equal(untranslated.find('limit-plan').textContent, '');
-});
+}
 
 // The switch control reads "Use {account} as this device's Codex account", and
 // the name in that sentence was read off the object switchTarget() resolved —
@@ -1527,6 +1623,8 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
     provider,
     status: 'ok',
     accountKey: key,
+    accountName: `Name ${key}`,
+    accountLabel: 'Test plan',
     updatedAt: new Date().toISOString(),
     windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
   });
@@ -1535,16 +1633,21 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   for (const [id, label, color] of [
     ['workbuddy', 'WorkBuddy', '#10B981'],
     ['claude', 'Claude', '#D97757'],
+    ['minimax', 'Minimax', '#F43F5E'],
+    ['cursor', 'Cursor', '#FFFFFF'],
+    ['mimo', 'Xiaomi MiMo', '#000000'],
     ['openrouter', 'OpenRouter', '#6566F1'],
     ['antigravity', 'Antigravity', '#4285F4']
   ]) {
     const solo = view.renderLimitProviderSolo(id, label, account(id, 'k1'), color);
     assert.ok(solo.find('limit-icon'), `${id}: a solo row wears the provider mark`);
+    assert.equal(solo.find('limit-name-title').textContent, label);
 
     const group = view.renderLimitProviderGroup(id, label, [account(id, 'k1'), account(id, 'k2')], color);
     assert.ok(group.find('limit-icon'), `${id}: the group header wears it instead`);
     const list = group.find('limit-account-list');
     assert.equal(list.children.length, 2);
+    assert.deepEqual(list.children.map((row) => row.find('limit-name-title').textContent), ['Name k1', 'Name k2']);
     for (const row of list.children) {
       assert.equal(row.find('limit-icon'), null, `${id}: an account row is named by its own title`);
     }

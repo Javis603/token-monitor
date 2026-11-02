@@ -4774,6 +4774,7 @@ html.is-windows .settings-panel select option {
   grid-column: 1 / -1;
 }
 .limit-row-group {
+  display: grid;
   gap: 8px;
 }
 .codex-reset-forecast {

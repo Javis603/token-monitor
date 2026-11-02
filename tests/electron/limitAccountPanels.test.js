@@ -73,6 +73,82 @@ function renderPanel(form, callbacks = {}) {
   return { group, document };
 }
 
+function appSource(from, to) {
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const start = app.indexOf(from);
+  assert.ok(start !== -1, `${from} should exist`);
+  if (!to) {
+    let depth = 0;
+    for (let index = start; index < app.length; index += 1) {
+      if (app[index] === '{') depth += 1;
+      else if (app[index] === '}') {
+        depth -= 1;
+        if (depth === 0) return app.slice(start, index + 1);
+      }
+    }
+  }
+  const end = app.indexOf(to, start);
+  assert.ok(end !== -1, `${from} should exist`);
+  return app.slice(start, end);
+}
+
+function accountAppStatus({ providerName = 'minimax', billingMode = 'token-plan', providerStatus, providerSource = 'api', providerRows, keyConfigured = false, enabledProviders = new Set([providerName]) } = {}) {
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === providerName);
+  const { group, document } = renderPanel(form);
+  group.byId(`${providerName}SettingsDetails`).classList.remove('hidden');
+  const state = {
+    settings: {
+      limitAccountForms: [form],
+      minimaxBillingMode: billingMode,
+      [form.status.configuredKey]: keyConfigured,
+      [form.status.sourceKey]: keyConfigured ? 'settings' : ''
+    },
+    stats: { limits: { providers: providerRows || (providerStatus ? [{ provider: providerName, status: providerStatus, source: providerSource }] : []) } },
+    accountPanelMessages: {},
+    [form.status.pendingKey]: 0
+  };
+  const context = {
+    state,
+    document,
+    externalLimitAccountConfig: {},
+    externalProviderCheckSettled: new Set(),
+    cancelExternalProviderCheckSettle: () => {},
+    localProviderStatus: (name) => state.stats.limits.providers.find((provider) => provider.provider === name) || null,
+    localProviderStatuses: (name) => state.stats.limits.providers.filter((provider) => provider.provider === name),
+    limitAccountForm: (name) => state.settings.limitAccountForms.find((entry) => entry.id === name),
+    limitProviderEnabled: name => enabledProviders.has(name),
+    limitAccountPanelsApi: require('../../src/electron/renderer/limits/accountPanels'),
+    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
+    setCursorStatusText: (element, text) => { element.textContent = text; element.setAttribute('aria-label', text); },
+    renderSettingsSummaries: () => {},
+    accountShellApi: require('../../src/electron/renderer/limits/accountShell'),
+    limitProviderAccountGroup: () => group,
+    syncLimitProviderAccountExpansion: () => {},
+    t: (key, params) => translated(key, params)
+  };
+  vm.runInNewContext(
+    appSource('function externalProviderForAccount(', '\nfunction setAccountPanelMessage(')
+      + appSource('function apiKeyAccountStatusText(', '\nfunction setExternalAccountExpanded(')
+      + appSource('function setExternalAccountExpanded(', '\nfunction volcenginePlatformUrl(')
+      + appSource('function renderExternalProviderStatus(', '\n// The override inputs'),
+    context
+  );
+  context.renderExternalProviderStatus(providerName);
+  return { group, state, enabledProviders, settled: context.externalProviderCheckSettled,
+    render: () => context.renderExternalProviderStatus(providerName), linked: context.externalProviderAccountLinked(providerName) };
+}
+
+function isVisible(root, target) {
+  if (!target) return false;
+  const visit = (node, hidden) => {
+    if (!(node instanceof Element)) return false;
+    const nextHidden = hidden || node.classList.contains('hidden');
+    if (node === target) return !nextHidden;
+    return node.children.some((child) => visit(child, nextHidden));
+  };
+  return visit(root, false);
+}
+
 const translated = (key, params) => i18n.translate('en', key, params);
 
 test('Ollama defaults to API key and switches instructions, setup URL and draft together', async () => {
@@ -600,9 +676,11 @@ test('a rejected or incomplete draft keeps the draft and the current status', as
 test('a confirmed credential is cleared from the draft and re-checked', async () => {
   const save = accountFormSave({ result: { saved: true, verdict: 'valid', status: 'ok', settings: { next: true } } });
   assert.equal(await save.run({ deepseekApiKey: 'sk-test' }), true);
-  assert.deepEqual(save.calls.map(([name]) => name), [
-    'render', 'saveCredential', 'applyPersistedSettings', 'markPending', 'render', 'refreshStats', 'expanded', 'render'
-  ]);
+  assert.deepEqual(save.calls.find(([name]) => name === 'saveCredential'), ['saveCredential', 'deepseek', { deepseekApiKey: 'sk-test' }]);
+  assert.deepEqual(save.calls.find(([name]) => name === 'applyPersistedSettings'), ['applyPersistedSettings', { next: true }]);
+  assert.ok(save.calls.some(([name]) => name === 'markPending'));
+  assert.ok(save.calls.some(([name]) => name === 'refreshStats'));
+  assert.deepEqual(save.calls.find(([name]) => name === 'expanded'), ['expanded', 'deepseek', true]);
   assert.equal(save.message(), null);
 });
 
@@ -646,12 +724,27 @@ test('every shared account message exists in each locale with its placeholders',
   }
 });
 
-test('MiniMax key hints cover both billing types in every locale', () => {
+test('MiniMax hints cover both key types and keep cash Spend scope outside the draft', () => {
   for (const locale of Object.keys(i18n.MESSAGES)) {
     const hint = i18n.translate(locale, 'settings.minimax.apiKeyPlaceholder');
     assert.match(hint, /sk-cp-/, locale);
     assert.match(hint, /sk-api-/, locale);
+    assert.notEqual(i18n.translate(locale, 'settings.minimax.spendNote'), 'settings.minimax.spendNote', locale);
   }
+  const { syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'minimax');
+  const { group, document } = renderPanel(form);
+  const note = [...group.walk()].find(node => node.dataset.i18n === 'settings.minimax.spendNote');
+  assert.ok(note);
+  const draft = group.byId('minimaxManualPanel');
+  draft.classList.add('hidden');
+  assert.equal([...draft.walk()].includes(note), false, 'a linked key hides the draft, not the Spend scope');
+  syncCredentialFields(form, { document, settings: { minimaxBillingMode: 'api', minimaxApiKeyConfigured: true } });
+  assert.equal(note.classList.contains('hidden'), false);
+  group.byId('minimaxBillingModeInput').change('token-plan');
+  assert.equal(note.classList.contains('hidden'), true, 'subscription keys do not report cash Spend');
+  group.byId('minimaxBillingModeInput').change('api');
+  assert.equal(note.classList.contains('hidden'), false);
 });
 
 test('MiniMax explicit regions drive Open before a probe and override stale status', async () => {
@@ -690,6 +783,8 @@ test('MiniMax billing choice waits for saving before key submission and follows 
   const mode = panel.group.byId('minimaxBillingModeInput');
   assert.equal(mode.value, 'token-plan');
   mode.change('api');
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxBillingMode: 'token-plan', minimaxApiRegion: 'intl' } });
+  assert.equal(mode.value, 'api', 'a status push must not restore the old billing choice while its save is pending');
   assert.equal(resolveOpenUrl(form, { document: panel.document, provider: null }), 'https://platform.minimax.io/user-center/payment/balance');
   panel.group.byId('minimaxApiKeyInput').value = 'sk-api-test';
   const pending = panel.group.byId('minimaxCredentialSubmit').click();
@@ -698,8 +793,109 @@ test('MiniMax billing choice waits for saving before key submission and follows 
   finish();
   await pending;
   assert.deepEqual(drafts, [{ minimaxApiKey: 'sk-api-test' }]);
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxBillingMode: 'token-plan' } });
+  assert.equal(mode.value, 'token-plan', 'settled choices must follow subsequent settings again');
   syncCredentialFields(form, { document: panel.document, settings: { minimaxBillingMode: 'api', minimaxApiRegion: 'auto' } });
   assert.equal(resolveOpenUrl(form, { document: panel.document, provider: { region: 'cn' } }), 'https://platform.minimaxi.com/user-center/payment/balance');
+});
+
+test('MiniMax key status reads only the API row and defaults to not configured without a key', () => {
+  // OAuth/Code rows can coexist but do not configure, validate, or link the API key.
+  const withApiRow = (api) => accountAppStatus({
+    providerRows: [{ provider: 'minimax', status: 'ok', source: 'oauth' }, { provider: 'minimax', source: 'api', ...api }],
+    keyConfigured: true
+  });
+  const { group: noKey, linked: oauthLinked } = accountAppStatus({
+    providerRows: [{ provider: 'minimax', status: 'ok', source: 'oauth' }]
+  });
+  assert.equal(oauthLinked, false);
+  assert.equal(noKey.byId('minimaxAccountStatus').textContent, translated('settings.minimax.statusNotSet'));
+  assert.equal(isVisible(noKey, noKey.byId('minimaxManualPanel')), true);
+  assert.equal(isVisible(noKey, noKey.byId('minimaxOpenBrowser')), true);
+  assert.equal(isVisible(noKey, noKey.byId('minimaxLogoutButton')), false);
+  assert.equal(isVisible(noKey, noKey.byId('minimaxRefreshButton')), false);
+
+  const { group: keyLinked, linked } = withApiRow({ status: 'ok' });
+  assert.equal(linked, true);
+  assert.equal(keyLinked.byId('minimaxAccountStatus').textContent, translated('settings.minimax.statusSet'));
+  assert.equal(isVisible(keyLinked, keyLinked.byId('minimaxManualPanel')), false);
+  assert.equal(isVisible(keyLinked, keyLinked.byId('minimaxOpenBrowser')), false);
+  assert.equal(isVisible(keyLinked, keyLinked.byId('minimaxLogoutButton')), true);
+
+  const { group: rejected, linked: rejectedLinked } = withApiRow({ status: 'unauthorized' });
+  assert.equal(rejectedLinked, false);
+  assert.equal(rejected.byId('minimaxAccountStatus').textContent, translated('settings.minimax.statusInvalid'));
+  assert.equal(isVisible(rejected, rejected.byId('minimaxManualPanel')), true);
+  assert.equal(isVisible(rejected, rejected.byId('minimaxLogoutButton')), true);
+
+  const { group: stalled } = withApiRow({ status: 'unavailable' });
+  assert.equal(isVisible(stalled, stalled.byId('minimaxManualPanel')), true);
+  assert.equal(isVisible(stalled, stalled.byId('minimaxOpenBrowser')), true);
+
+  const { group: recheck, state, render } = withApiRow({ status: 'ok', updatedAt: '2026-10-26T00:00:00.000Z' });
+  assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), false);
+  state.minimaxPendingCheckSince = Date.parse('2026-10-26T00:00:01.000Z');
+  state.stats.limits.providers = state.stats.limits.providers.filter((row) => row.source !== 'api');
+  render();
+  assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), true, 'a missing API reading reopens the paste form');
+  state.minimaxPendingCheckSince = 0;
+  state.stats.limits.providers.push({ provider: 'minimax', status: 'unauthorized', source: 'api', updatedAt: '2026-10-26T00:00:02.000Z' });
+  render();
+  assert.equal(isVisible(recheck, recheck.byId('minimaxManualPanel')), true);
+
+  const { group: fresh, state: freshState, render: renderFresh } = withApiRow({ status: 'ok', updatedAt: '2026-10-26T00:00:00.000Z' });
+  freshState.minimaxPendingCheckSince = Date.parse('2026-10-26T00:00:01.000Z');
+  renderFresh();
+  assert.equal(fresh.byId('minimaxSettingsDetails').classList.contains('hidden'), false, 'old quota cannot fold a pending credential form');
+  freshState.stats.limits.providers.find(row => row.source === 'api').updatedAt = '2026-10-26T00:00:02.000Z';
+  renderFresh();
+  assert.equal(fresh.byId('minimaxSettingsDetails').classList.contains('hidden'), true, 'fresh confirmed quota folds the form');
+  assert.equal(fresh.byId('minimaxSettingsToggle').attributes['aria-expanded'], 'false');
+
+  const { group: gap, state: gapState, enabledProviders, settled, render: renderGap } = accountAppStatus({
+    providerRows: [{ provider: 'minimax', status: 'ok', source: 'api' }],
+    keyConfigured: true
+  });
+  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), false);
+  gapState.stats.limits.providers = [{ provider: 'minimax', status: 'ok', source: 'oauth' }];
+  renderGap();
+  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), true);
+  settled.add('minimax');
+  renderGap();
+  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), true, 'a completed check without a reading must leave key repair available');
+  settled.clear();
+  gapState.stats.limits.providers.push({ provider: 'minimax', status: 'ok', source: 'api' });
+  renderGap();
+  gapState.stats.limits.providers = [];
+  enabledProviders.delete('minimax');
+  renderGap();
+  assert.equal(isVisible(gap, gap.byId('minimaxManualPanel')), true, 'disabling collection must not leave the paste form hidden as if a check were pending');
+  assert.equal(isVisible(gap, gap.byId('minimaxOpenBrowser')), true);
+});
+
+test('other key panels keep repair controls available while a new reading is pending', () => {
+  for (const providerName of ['deepseek', 'devin']) {
+    const { group, state, render } = accountAppStatus({ providerName, providerStatus: 'ok', keyConfigured: true });
+    assert.equal(isVisible(group, group.byId(`${providerName}ManualPanel`)), false);
+    state.stats.limits.providers = [];
+    render();
+    assert.equal(isVisible(group, group.byId(`${providerName}ManualPanel`)), true, providerName);
+    assert.equal(isVisible(group, group.byId(`${providerName}OpenBrowser`)), true, providerName);
+  }
+});
+
+test('MiniMax API-key rechecks leave the independent Code row in place', () => {
+  const source = appSource('function clearExternalProviderPendingStatus(');
+  const state = { stats: { limits: { providers: [
+    { provider: 'minimax', source: 'oauth', status: 'ok' },
+    { provider: 'minimax', source: 'api', status: 'unauthorized' },
+    { provider: 'deepseek', source: 'api', status: 'ok' }
+  ] } } };
+  vm.runInNewContext(`${source}\nclearExternalProviderPendingStatus('minimax');`, { state });
+  assert.deepEqual(state.stats.limits.providers, [
+    { provider: 'minimax', source: 'oauth', status: 'ok' },
+    { provider: 'deepseek', source: 'api', status: 'ok' }
+  ]);
 });
 
 test('MiniMax key submission waits for a region save without submitting an implicit region', async () => {

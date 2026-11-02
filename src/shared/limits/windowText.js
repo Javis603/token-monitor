@@ -1,22 +1,7 @@
 'use strict';
 
-// What one quota window's headline value and sub-line say, shared by the Limits
-// view and the edge dock.
-//
-// This is the second half of what those two surfaces used to decide separately.
-// `limits/windowLabels.js` answers what a window is called; this answers what
-// it reads. Both are display-layer: nothing here is written onto the wire,
-// because the same window is worded differently by the surface that has room
-// for a denominator and the one that does not.
-//
-// Layout is not here — it is in `renderer/limits/windowsView.js`, the row
-// builder both surfaces call. This module answers only what a window reads, which is the
-// question a Node-side caller (the tray, the macOS widget snapshot) can ask
-// without a DOM.
-//
-// `value` is an override: `null` means "render the percentage the meter shows",
-// which is the common case. `detail` is the absolute figure that sits under the
-// bar beside the reset time, and is '' when the window has no second line.
+// Display text stays off the wire and must be usable without a DOM.
+// `value: null` preserves the meter percentage; `detail: ''` omits secondary text.
 (function exposeLimitWindowText(root, factory) {
   const node = typeof module === 'object' && module.exports;
   const api = factory(
@@ -179,6 +164,12 @@
     // Kimi's single shared membership meter ships its Kimi-vs-Code composition
     // as `detail` and is the only other provider that shows one.
     if (id === 'kimi') return billing ? result(null, window.detail || '') : EMPTY;
+
+    // MiniMax Video uses interval counts; its kind does not establish a weekly pool.
+    if (id === 'minimax') {
+      if (kind === 'weekly' && window.label === 'Video') return result(null, rawCount(window, showUsed));
+      return EMPTY;
+    }
 
     // Everything else has no second line. `detail` is deliberately NOT surfaced
     // by default: several providers carry one for a different purpose — Zed and

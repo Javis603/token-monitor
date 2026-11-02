@@ -1,6 +1,6 @@
 'use strict';
 
-// Minimax limits account wiring. Leaf module: no requires.
+// Account declarations must remain require-free for renderer-safe projection.
 module.exports = {
   id: 'minimax',
   fetch: 'fetchMinimaxLimits',
@@ -8,6 +8,7 @@ module.exports = {
     {
       key: 'minimaxApiKey',
       kind: 'credential',
+      invalidationSource: 'api',
       storePath: ['providers', 'minimax', 'apiKey'],
       resolve: 'minimaxToken',
       resolveStyle: 'explicit'
@@ -15,11 +16,11 @@ module.exports = {
     {
       key: 'minimaxApiRegion',
       kind: 'setting',
+      invalidationSource: 'api',
       normalize: { fn: 'normalizeMinimaxRegionSetting', style: 'value' },
       envFallback: ['TOKEN_MONITOR_MINIMAX_API_REGION', 'MINIMAX_API_REGION', 'MINIMAX_API_HOST'],
       configDefault: 'auto',
-      // Resolve an implicit choice at use time. Saving another setting must not
-      // turn the default or env value into a permanent region override.
+      // An unrelated save must not turn an implicit region into a stored pin.
       initial: '',
       persist: 'renormalize',
       persistFallback: '',
@@ -28,6 +29,7 @@ module.exports = {
     {
       key: 'minimaxBillingMode',
       kind: 'setting',
+      invalidationSource: 'api',
       normalize: { fn: 'normalizeMinimaxBillingMode', style: 'value' },
       configDefault: 'token-plan',
       initial: 'token-plan',
@@ -75,8 +77,10 @@ module.exports = {
       },
       { key: 'minimaxApiKey', input: 'password', placeholderKey: 'settings.minimax.apiKeyPlaceholder', required: true }
     ],
-    // Both selections stay reachable after linking, without exposing the key.
-    top: [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }],
+    top: [
+      { field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' },
+      { note: 'settings.minimax.spendNote', when: { field: 'minimaxBillingMode', values: ['api'] } }
+    ],
     manual: [{ note: 'settings.minimax.note' }, { field: 'minimaxApiKey' }],
     // Explicit choices follow the select even before the first probe. Auto
     // follows the last successful probe, with the historical CN fallback.

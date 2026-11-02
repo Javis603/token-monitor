@@ -86,7 +86,7 @@
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
-    minimax: ['Token Plan', 'Pay-as-you-go', 'API key'],
+    minimax: ['Auto', 'Token Plan', 'Pay-as-you-go', 'API key'],
     typesafe: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
@@ -466,21 +466,17 @@
     if (status === 'ok') return { label: isLinkedStatus(provider) ? 'Linked' : 'Live', tone: 'ok' };
     if (status === 'disabled') return { label: 'Disabled', tone: 'muted' };
     if (status === 'noSyncedData') return { label: 'No synced data', tone: 'sync' };
+    // Local OAuth recovery requires signing in, not replacing an API key.
+    if (providerName === 'minimax' && sourceId(provider) === 'oauth' && ['unauthorized', 'notConfigured'].includes(status)) {
+      return status === 'unauthorized'
+        ? { label: 'Sign in again', tone: 'setup' }
+        : { label: 'Sign in', tone: 'setup' };
+    }
     if (status === 'unauthorized') {
       if (providerName === 'kimi') return { label: 'Update credential', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
-      // Cline owns its credential lifecycle — it refreshes the stored token
-      // whenever the app or the CLI runs, and only it persists a rotated one — so
-      // this provider reads that sign-in read-only. The two lanes it accepts refuse
-      // in different places: a rejected key is replaced in Token Monitor's own
-      // settings field, while a stale sign-in only opening Cline fixes. The shared
-      // vocabulary carries one `unauthorized` for both, so the label reads the lane
-      // off the row: providers/cline/limits.js reports `api` for a configured key
-      // and `oauth` for the discovered sign-in. Its status branches on source
-      // because both causes are reachable with neither of them rarer than the
-      // other — the file lane is the discovery
-      // default and its access token expires hourly. Grok and kiro name the vendor's
-      // own action here for the same reason, without needing the split.
+      // Cline owns its discovered login; only the configured-key lane can be
+      // repaired by replacing an API key in Token Monitor.
       if (providerName === 'cline') {
         return sourceId(provider) === 'api'
           ? { label: 'Update API key', tone: 'setup' }
@@ -685,11 +681,11 @@
 
   function limitProviderSettingsRecord(providers, id) {
     const rows = (providers || []).filter((row) => row.provider === id);
-    if (id !== 'mimo') return rows.at(-1);
-    // Either healthy product keeps the provider connected. Otherwise prefer the
-    // Console status, since Settings manages that credential rather than membership.
+    if (id !== 'mimo' && id !== 'minimax') return rows.at(-1);
+    // Either healthy product keeps the provider connected. Otherwise use the
+    // credential Settings manages: MiMo's non-membership row, MiniMax's API-key row.
     return rows.findLast((row) => row.status === 'ok')
-      || rows.find((row) => !isMimoMembershipProduct(row))
+      || rows.find((row) => id === 'mimo' ? !isMimoMembershipProduct(row) : row.source === 'api')
       || rows.at(-1);
   }
 

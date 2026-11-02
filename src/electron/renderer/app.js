@@ -106,6 +106,7 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
+  minimax: 'settings.minimax.codeNote',
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
@@ -6519,6 +6520,7 @@ function homeLimitRows() {
         : providerEntries.length;
       if (accountCount > 1) {
         const accountTitle = limitAccountTitle(id, provider, index, providerEntries);
+        if (!accountTitle) return providerTitle;
         return showProviderTitle ? `${providerTitle} · ${accountTitle}` : accountTitle;
       }
       if (id === 'mimo') {
@@ -16169,15 +16171,8 @@ async function refreshCodexAccounts() {
   renderCodexAccounts();
 }
 
-// Account cards reflect THIS machine's configured credential, so read the
-// local device's RAW limits from state.stats.devices — NOT the collapsed
-// state.stats.limits.providers. In sync mode, aggregateLimits() collapses a
-// local `unauthorized` row out in favor of a remote `ok` (providerCollapseKey
-// for deepseek/minimax/grok is just the provider name; pickBetterProvider keeps
-// the higher statusRank). Searching the aggregate would miss the local row and
-// fall back to the remote `ok`, falsely reporting an invalid local key as
-// Linked. Only legacy/non-aggregated stats without a `devices` array may fall
-// back to the aggregate; once raw device rows are present they are authoritative.
+// A remote account's health cannot validate this device's credential.
+// Raw device rows are authoritative; only legacy stats without them use aggregation.
 function localDeviceLimitsProviders() {
   return accountIdentityApi.localDeviceLimitsProviders(
     state.stats,
@@ -16732,10 +16727,13 @@ function clearDisabledLimitProviderPendingChecks(enabledProviders) {
 }
 
 function externalProviderForAccount(providerName) {
+  // MiniMax's key form follows the API-key row. A Code login is not that credential.
   // Muse's manual credential panel owns only the web session, not its CLI login.
-  const provider = providerName === 'muse'
-    ? localProviderStatuses('muse').find((row) => row.source === 'web') || null
-    : localProviderStatus(providerName);
+  const provider = providerName === 'minimax'
+    ? localProviderStatuses(providerName).find((entry) => entry.source === 'api') || null
+    : providerName === 'muse'
+      ? localProviderStatuses('muse').find((row) => row.source === 'web') || null
+      : localProviderStatus(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
@@ -16817,7 +16815,8 @@ function clearExternalProviderPendingStatus(providerName) {
     return;
   }
   if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
+  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName
+    || (providerName === 'minimax' && provider.source !== 'api'));
 }
 
 function nextCopilotSignInFlowId() {

@@ -270,12 +270,24 @@ test('matchProviderAccount claims the sole account when every candidate misses',
   assert.equal(needsRebinding(sub, providers), false);
 });
 
-test('WorkBuddy stable context bindings never heal onto a sibling with matching display metadata', () => {
-  const sub = subscription({ provider: 'workbuddy', binding: { accountKey: 'saved-c', profileName: 'Same name', accountEmail: 'same@example.com' } });
-  const sibling = { provider: 'workbuddy', accountKey: 'live-a', accountName: 'Same name', accountEmail: 'same@example.com' };
+test('WorkBuddy keyed bindings never heal onto a sibling with matching display metadata', () => {
+  const provider = 'workbuddy';
+  const sub = subscription({ provider, binding: { accountKey: 'saved-c', profileName: 'Same name', accountEmail: 'same@example.com' } });
+  const sibling = { provider, accountKey: 'live-a', accountName: 'Same name', accountEmail: 'same@example.com' };
   assert.equal(matchProviderAccount(sub, [sibling]), null);
+  assert.equal(needsRebinding(sub, []), false);
   const unavailable = { ...sibling, accountKey: 'saved-c', status: 'notConfigured' };
   assert.equal(matchProviderAccount(sub, [sibling, unavailable]), unavailable);
+  assert.equal(needsRebinding(sub, [sibling, unavailable]), false);
+});
+
+test('MiniMax bindings use the shared email and sole-account ladder', () => {
+  const api = { provider: 'minimax', source: 'api', accountKey: 'api-key', accountName: 'Same name', accountEmail: 'same@example.com' };
+  assert.equal(matchProviderAccount(subscription({ provider: 'minimax', binding: {} }), [api]).accountKey, api.accountKey);
+  assert.equal(matchProviderAccount(subscription({
+    provider: 'minimax',
+    binding: { accountKey: 'saved-c', profileName: api.accountName, accountEmail: api.accountEmail }
+  }), [api]).accountKey, api.accountKey);
 });
 
 test('needsRebinding only fires on a genuine ambiguity', () => {

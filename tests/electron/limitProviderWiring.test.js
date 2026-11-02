@@ -575,13 +575,13 @@ test('MiniMax implicit region remains env-driven after unrelated saves and reloa
   const next = { ...previous, ...finalAccountSettings({ minimaxApiRegion: 'cn' }, previous) };
   assert.equal(next.minimaxApiKey, 'test-key');
   const change = classifySettingsChange(previous, next);
-  assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
+  assert.deepEqual(change.limitScopes, [{ provider: 'minimax', source: 'api' }]);
   assert.equal(change.usageStructural, false);
   const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
-  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }]);
 });
 
-test('MiniMax billing choice survives reload and clears only its provider quota', () => {
+test('MiniMax key billing choice survives reload and invalidates only its API source', () => {
   const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
   assert.equal(initialAccountSettings({}).minimaxBillingMode, 'token-plan');
   assert.equal(limitsConfigFromSettings({}, { env: {} }).minimaxBillingMode, 'token-plan');
@@ -595,10 +595,10 @@ test('MiniMax billing choice survives reload and clears only its provider quota'
   assert.equal(limitsConfigFromSettings(next, { env: {} }).minimaxBillingMode, 'api');
   assert.equal(accountFieldProjection(next).minimaxBillingMode, 'api');
   const change = classifySettingsChange(previous, next);
-  assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
+  assert.deepEqual(change.limitScopes, [{ provider: 'minimax', source: 'api' }]);
   assert.equal(change.usageStructural, false);
   const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
-  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }]);
 });
 
 test('Trae credential source follows the usable credential after a malformed stored value', () => {

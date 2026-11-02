@@ -824,9 +824,21 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       if (!isAccountScope(normalized)) {
         cancelLane(lane, reason);
         resetRetryPolicy(lane);
-        if (provider === 'muse' && scope.source === 'web') lane.identities.delete('muse:source:web');
-        else lane.identities.clear();
-        lane.accountRevisions.clear();
+        if (provider === 'muse' && scope.source === 'web') {
+          lane.identities.delete('muse:source:web');
+          lane.accountRevisions.clear();
+        } else if (normalized.source) {
+          for (const [identityKey, state] of lane.identities) {
+            const row = state.lastGood || state.lastAttempt?.row;
+            if (row?.source === normalized.source) {
+              lane.identities.delete(identityKey);
+              lane.accountRevisions.delete(identityKey);
+            }
+          }
+        } else {
+          lane.identities.clear();
+          lane.accountRevisions.clear();
+        }
         continue;
       }
       const identityKeys = matchingIdentityKeys(lane, normalized);

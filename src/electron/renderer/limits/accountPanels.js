@@ -56,7 +56,8 @@ function syncCredentialFields(form, { document, settings }) {
   for (const field of form.fields) {
     const control = document.getElementById(controlId(field));
     if (!control) continue;
-    if (field.input === 'select') {
+    // Concurrent settings pushes must not overwrite an unsaved choice.
+    if (field.input === 'select' && !control.dataset.settingPending) {
       if (form.multipleAccounts && field.key === 'claudeWebOrganizationId') continue;
       const stored = settings?.[field.key];
       control.value = [...(control.options || field.options)].some((option) => option.value === stored) ? stored : field.options[0].value;
@@ -150,11 +151,15 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
         refreshFieldDependents(form, { document });
         if (field.submitWithCredential === false) {
           const value = input.value;
+          input.dataset.settingPending = 'true';
           const previous = independentSettingSaves.get(field.key);
           const pending = (previous || Promise.resolve()).catch(() => {}).then(() => onFieldChange?.(form, field, value));
           independentSettingSaves.set(field.key, pending);
           const settled = () => {
-            if (independentSettingSaves.get(field.key) === pending) independentSettingSaves.delete(field.key);
+            if (independentSettingSaves.get(field.key) === pending) {
+              independentSettingSaves.delete(field.key);
+              delete input.dataset.settingPending;
+            }
           };
           pending.then(settled, (error) => {
             settled();

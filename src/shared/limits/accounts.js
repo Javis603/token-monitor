@@ -64,6 +64,8 @@
 //                               // from credential redaction for storePath keys)
 //     rendererOmit: true,       // deleted from the renderer settings object
 //     watch: false,             // exclude from LIMIT_PROVIDER_SETTING_KEYS
+//     invalidationSource: 'api',// clear only this reading source on edits;
+//                               // absent means the whole provider is affected
 //     initial: value | (env, limits) => value | null
 //                               // fresh-install default. Absent ⇒ '' for
 //                               // credential/setting, {} for profiles, [] for
