@@ -72,6 +72,7 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
     '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
     '.local/share/amp/threads', '.config/tokscale/amp-cache/threads', '.pi/agent/sessions', '.omp/agent/sessions',
+    '.omo/agent/projects', '.omo/memory', '.config/Code/User/globalStorage/emptyWindowChatSessions',
     '.omo/agent/sessions', '.senpi/agent/sessions', '.omo/senpi-task',
     '.local/share/zed/threads/threads.db', '.local/share/kilo/kilo.db',
     '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',

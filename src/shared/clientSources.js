@@ -20,6 +20,7 @@ const {
   devinCliDbDirs,
   devinDesktopAcpDirs
 } = require('./providers/devin/paths');
+const { cursorCacheDir } = require('./providers/cursor/usageEvents');
 const { senpiWatchSources } = require('./providers/senpi/paths');
 
 // Windows only: libuv asserts that the filename ReadDirectoryChangesW hands
@@ -249,18 +250,10 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // Electron shell over the same bundled droid kernel and keeps no session data
   // of its own, so this one root covers both.
   add('droid', ...simpleHostSourceRoots('droid', home));
-  // Tokscale resolves these two caches differently and the split is deliberate
-  // upstream, so mirror it rather than picking whichever looks tidier:
-  //   cursor.rs      — `home_dir().join(".config/tokscale/cursor-cache")`, a
-  //                    home-relative literal that never consults
-  //                    `get_config_dir()`. On Windows that is
-  //                    `%USERPROFILE%\.config\tokscale\`, not `%APPDATA%\tokscale\`,
-  //                    and TOKSCALE_CONFIG_DIR does not move it.
-  //   antigravity.rs — `paths::get_config_dir().join("antigravity-cache")`,
-  //                    routed that way on purpose so an isolated profile covers
-  //                    the sync cache too.
+  // Both caches honour TOKSCALE_CONFIG_DIR. Cursor defaults to ~/.config/tokscale
+  // on every platform; Antigravity uses the platform-aware tokscaleConfigDir().
   const tokscaleConfigRoot = tokscaleConfigDir({ env, platform, homeDir: home });
-  add('cursor', ['tokscale-cursor-cache', path.join(tokscaleHome, '.config', 'tokscale', 'cursor-cache')]);
+  add('cursor', ['tokscale-cursor-cache', cursorCacheDir({ env, platform, homeDir: home })]);
   add('antigravity',
     ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')],
     ['antigravity-extension-data', path.join(home, '.gemini', 'antigravity', 'conversations')]);
@@ -299,7 +292,10 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['copilot-otel', copilotOtelRoot],
     ['copilot-data', path.join(home, '.copilot'), path.join(home, '.copilot', 'data.db')],
     ['copilot-session-store', path.join(home, '.copilot'), path.join(home, '.copilot', 'session-store.db')],
-    ...[...new Set(copilotWorkspaceRoots)].map((dir) => ['vscode-workspace-storage', dir])
+    ...[...new Set(copilotWorkspaceRoots)].map((dir) => ['vscode-workspace-storage', dir]),
+    ...[...new Set(copilotWorkspaceRoots)].map((dir) => [
+      'vscode-empty-window-sessions', path.join(path.dirname(dir), 'globalStorage', 'emptyWindowChatSessions')
+    ])
   ];
   // The parent is the watch root because the exporter file may not exist yet;
   // the exact file is the source. watchAttributionRootsForClients() keeps that

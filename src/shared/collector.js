@@ -1792,7 +1792,13 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     const targets = sources.targets.map(target => ({ ...target, path: canonicalRoot(target.path) }));
     bound('senpi', candidates.senpi, (_parts, file) => !targets.some(target =>
       file === target.path || target.path.startsWith(file + path.sep)
-      || (target.recursive && file.startsWith(target.path + path.sep))));
+      || (target.recursive && file.startsWith(target.path + path.sep))
+      || (target.projectChildren && file.startsWith(target.path + path.sep)
+        && (() => {
+          const parts = path.relative(target.path, file).split(path.sep);
+          return parts.length === 1 || (parts[1] === 'senpi-task'
+            && (parts.length === 2 || parts[2] === 'children'));
+        })())));
   }
 
   // Hermes: SQLite totals and per-call logs provide usage and date evidence. Each explicit
@@ -1851,6 +1857,8 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     if (parts.length === 2 && parts[1] === 'workspace.json') return false;
     return true;
   });
+  bound('copilot', withBasename('copilot', 'emptyWindowChatSessions'),
+    (parts) => parts.length !== 1 || !parts[0].endsWith('.jsonl'));
   // Tokscale ingests exactly the file COPILOT_OTEL_FILE_EXPORTER_PATH names
   // (`path.is_file()`, no glob), but that file need not exist yet, so its parent
   // is what gets watched. The parent is an arbitrary user-chosen directory and
