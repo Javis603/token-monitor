@@ -339,13 +339,6 @@
       if (hours < 24) return t('edgeDock.agoHours', { count: hours });
       return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
     }
-    function duration(fromValue, nowMs = Date.now()) {
-      const ms = Date.parse(fromValue || '');
-      if (!Number.isFinite(ms)) return '';
-      const minutes = Math.max(0, Math.round((nowMs - ms) / 60000));
-      if (minutes < 60) return t('notch.durationMinutes', { minutes });
-      return t('notch.durationHours', { hours: Math.floor(minutes / 60), minutes: String(minutes % 60).padStart(2, '0') });
-    }
     function clientLabel(id) {
       return CLIENT_LABELS[id] || providerLabel(id);
     }
@@ -640,8 +633,8 @@
       body.append(sessionHeading(row, 'notch-now-title'));
       const meta = el('div', 'notch-now-meta');
       if (running) meta.append(wave());
-      const time = running ? duration(row.startedAt, nowMs) : !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
-      meta.append(sessionMetaLabel(row, { lead: !running && live ? t('notch.waiting') : '', time }));
+      const time = !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
+      meta.append(sessionMetaLabel(row, { running, lead: !running && live ? t('notch.waiting') : '', time }));
       const extra = (running ? waitingCount : Math.max(0, waitingCount - 1));
       if (extra > 0) meta.append(text('notch-waiting-note', t('notch.moreWaiting', { count: extra })));
       body.append(meta);
@@ -1082,12 +1075,18 @@
     }
 
     // The heading mark already names the tool. This line does not wrap, so
-    // repeating the name pushes the model, effort and time off the row.
-    function sessionMetaLabel(row, { lead = '', time = '' } = {}) {
+    // repeating the name pushes the model, effort and cache reading off the row.
+    function sessionMetaLabel(row, { running = false, lead = '', time = '' } = {}) {
       const label = el('span');
       const parts = [];
       if (lead) parts.push(text('', lead));
       if (sessionRows.sessionModelMetadataLabel(row)) parts.push(sessionModelMetadata(row));
+      const cache = sessionRows.sessionCacheHitPercent(row);
+      if (cache !== null) {
+        const percent = `${cache > 0 && cache < 1 ? '<1' : Math.round(Math.min(100, cache))}%`;
+        const reading = text('notch-session-cache-hit', `${running ? 'Cache ' : ''}${percent}`);
+        parts.push(reading);
+      }
       if (time) parts.push(text('', time));
       parts.forEach((part, index) => {
         if (index) label.append(text('', ' · '));
@@ -1105,7 +1104,7 @@
       const meta = el('div', 'notch-active-meta');
       if (stateName === 'running') meta.append(wave());
       else meta.append(text('notch-pill', t('notch.waiting')));
-      meta.append(sessionMetaLabel(row, { time: duration(row.startedAt, nowMs) }));
+      meta.append(sessionMetaLabel(row, { running: stateName === 'running' }));
       body.append(meta);
       const value = el('div', 'notch-active-value');
       value.append(sessionTokens(row, 'notch-active-tokens', false));
