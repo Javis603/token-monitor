@@ -34,6 +34,7 @@ function fixture() {
   const unlisten = event => listeners.delete(event);
   document.addEventListener = listen; document.removeEventListener = unlisten;
   const window = {
+    getComputedStyle: surface => ({ overlay: surface.overlay || 'none' }),
     requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
     cancelAnimationFrame: id => frames.delete(id), addEventListener: listen, removeEventListener: unlisten,
     MutationObserver: class {
@@ -86,7 +87,7 @@ test('shared content blur tracks geometry, reuses stable filters, and stops when
   f.changed(); f.tick(); assert.ok(filter.children.includes(flood), 'unchanged geometry does not rebuild the filter');
   menu.box.top = 250; f.changed(menu); f.tick();
   assert.equal(filter.children.find(node => node.tagName === 'FEFLOOD').getAttribute('y'), '250');
-  f.toggle(menu, false);
+  f.toggle(menu, false); f.tick();
   assert.equal(f.frames.size, 0);
   assert.equal(f.definitions.children.length, 0);
   assert.equal(f.root.classList.contains('content-blur-source'), false);
@@ -109,7 +110,7 @@ test('simultaneous surfaces share a union mask and nested popovers filter the lo
   f.toggle(menu, false); f.tick();
   assert.equal(f.definitions.children.length, 1);
   assert.equal(dialog.classList.contains('content-blur-source'), false);
-  f.toggle(dialog, false); assert.equal(f.frames.size, 0);
+  f.toggle(dialog, false); f.tick(); assert.equal(f.frames.size, 0);
   f.controller.dispose();
 });
 
@@ -142,7 +143,7 @@ test('geometry events coalesce and observers only run while surfaces need blur',
   menu.box.width = 150; f.tick();
   assert.equal(f.filterFor(f.root).children.find(node => node.tagName === 'FEFLOOD').getAttribute('width'), '150');
   assert.equal(f.frames.size, 0);
-  f.toggle(menu, false);
+  f.toggle(menu, false); f.tick();
   assert.ok(f.resizes.every(observer => observer.targets.length === 0));
   assert.ok(f.mutations.every(observer => !observer.targets.includes(f.document.body)));
   f.listeners.get('scroll')();
@@ -168,5 +169,34 @@ test('opening and layout animations track every frame, then stop without trackin
   assert.equal(f.frames.size, 1, 'finite layout animations may move CSS anchors');
   animation.playState = 'finished'; f.tick();
   assert.equal(f.frames.size, 0);
+  f.controller.dispose();
+});
+
+test('closing surfaces keep their moving blur mask until the browser removes them from the top layer', () => {
+  const f = fixture(), menu = f.surface('app-update-popover');
+  f.toggle(menu, true); f.tick();
+  const filter = f.filterFor(f.root);
+  menu.overlay = 'auto';
+  f.animations.push({ playState: 'running', effect: { target: menu } });
+  f.toggle(menu, false);
+  assert.equal(f.filterFor(f.root), filter, 'do not clear blur at beforetoggle');
+  menu.box.top += 3; f.tick();
+  assert.equal(f.filterFor(f.root), filter, 'the fading surface still needs blur');
+  assert.equal(filter.children.find(node => node.tagName === 'FEFLOOD').getAttribute('y'), '203');
+  menu.overlay = 'none'; f.animations.length = 0; f.tick();
+  assert.equal(f.definitions.children.length, 0);
+  assert.equal(f.frames.size, 0, 'tracking stops when the exit animation finishes');
+  f.controller.dispose();
+});
+
+test('reopening a closing surface puts it above surfaces opened during its exit', () => {
+  const f = fixture(), dialog = f.surface('sync-content-dialog'), menu = f.surface();
+  f.toggle(dialog, true); f.tick();
+  dialog.overlay = 'auto'; f.toggle(dialog, false);
+  f.toggle(menu, true); f.tick();
+  assert.equal(dialog.classList.contains('content-blur-source'), true);
+  f.toggle(dialog, true); f.tick();
+  assert.equal(dialog.classList.contains('content-blur-source'), false, 'reopened top surface stays sharp');
+  assert.equal(menu.classList.contains('content-blur-source'), true);
   f.controller.dispose();
 });

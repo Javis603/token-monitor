@@ -30,7 +30,10 @@
       for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
       return element;
     };
-    const isOpen = surface => surface.isConnected && surface.matches(':popover-open, :modal');
+    // Logical closing happens before display/overlay exit transitions finish.
+    // Let the browser's top-layer lifetime decide when its mask can disappear.
+    const isVisible = surface => surface.isConnected && (surface.matches(':popover-open, :modal')
+      || window.getComputedStyle(surface).overlay === 'auto');
     const enabled = () => !document.hidden
       && !document.documentElement.classList.contains('native-reduced-transparency')
       && !document.documentElement.classList.contains('native-material-opaque');
@@ -116,7 +119,7 @@
 
     function update() {
       frame = null;
-      for (let index = active.length - 1; index >= 0; index--) if (!isOpen(active[index])) active.splice(index, 1);
+      for (let index = active.length - 1; index >= 0; index--) if (!isVisible(active[index])) active.splice(index, 1);
       if (!active.length || !enabled()) {
         stopObserving();
         for (const source of sources.keys()) release(source);
@@ -155,17 +158,10 @@
       if (!surface.matches?.(SURFACES)) return;
       if (event.newState === 'open') {
         surface.classList.add('content-blur-surface');
-        if (!active.includes(surface)) active.push(surface);
-      } else {
+        // Reopening during an exit puts the surface back on top.
         const index = active.indexOf(surface);
         if (index >= 0) active.splice(index, 1);
-        if (!active.length) {
-          if (frame !== null) window.cancelAnimationFrame(frame);
-          frame = null;
-          stopObserving();
-          for (const source of sources.keys()) release(source);
-          return;
-        }
+        active.push(surface);
       }
       schedule();
     }

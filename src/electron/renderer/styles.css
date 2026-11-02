@@ -6083,8 +6083,7 @@ html.is-windows .limit-live-badge {
    it. Top-layer children stay outside their ancestor's content filter. */
 .content-blur-source { filter: var(--content-blur-filter) !important; }
 .content-blur-surface {
-  --popup-surface-alpha: 0.46;
-  background: linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)), rgba(var(--glass-rgb), var(--popup-surface-alpha)) !important;
+  background: linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)), rgba(var(--glass-rgb), var(--popup-surface-alpha, 0.46)) !important;
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
@@ -6457,6 +6456,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .app-update-popover-close:hover { background: rgba(var(--overlay-rgb), 0.07); color: var(--text); }
 .app-update-popover {
   inset: auto;
+  --popup-surface-alpha: 0.9;
   margin: 0;
   /* Keep the layout through the discrete display/overlay exit transition. */
   flex-direction: column;
@@ -7262,6 +7262,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .custom-pricing-help-button:focus-visible,
 .custom-pricing-help button:focus-visible { outline: 1px solid rgba(115, 189, 245, 0.72); outline-offset: 3px; }
 .custom-pricing-help {
+  --popup-surface-alpha: 1;
   position: fixed;
   inset: auto;
   position-area: top span-left;
