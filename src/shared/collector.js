@@ -515,6 +515,55 @@ function waitForSharedCapabilityProbe(probe, signal) {
 // too (and warned once) so we don't re-probe on every subsequent failure —
 // the original tokscale error surfaces instead, same as before this filter
 // existed.
+
+// A probe that cannot answer must not end the scan. `--help` parsing is the
+// only way to learn the *whole* supported set, but the rejection itself already
+// names the one id clap refused, and that single fact is enough to make
+// progress: drop it and ask again. Each round removes one id, so the loop is
+// bounded by the requested set and always terminates.
+//
+// This is not a guess. The alternative — rethrowing because the capability list
+// is unknown — turns one unusable client into a total collection outage: a
+// saved client list that predates a tokscale release which dropped an id made
+// every tick exit 2, and the dashboard silently froze at the last good value
+// while the app looked healthy. A probe that times out under load (the probe
+// spawns the binary, and `--help` is not free on a machine with large stores)
+// is exactly when this path matters most.
+function rejectedClientId(error) {
+  const match = String(error?.tokscaleStderr || '').match(/invalid value '([^']*)' for '--client/i);
+  return match ? match[1].trim() : '';
+}
+
+function withoutClient(clientFilter, clientId) {
+  return String(clientFilter)
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id && id !== clientId)
+    .join(',');
+}
+
+// The retry has to chain its own rejections: the call site hands us a bare
+// `retry`, and only the first scan carries the catch that leads back here. So a
+// second rejected id would otherwise escape as a failure instead of removing
+// one more id. Depth is bounded twice over — every round strictly shrinks the
+// requested set, and the cap stops a pathological binary from spawning forever.
+const MAX_REJECTED_CLIENT_RETRIES = 8;
+
+function retryWithoutRejectedClient(error, requested, emptyResult, retry, depth = 0) {
+  const rejected = rejectedClientId(error);
+  if (!rejected) return Promise.reject(error);
+  const remaining = withoutClient(requested, rejected);
+  // The named id was not ours to drop (a stale rejection, or the binary
+  // complaining about something else entirely): surface the error rather than
+  // retrying the identical request forever.
+  if (remaining === requested) return Promise.reject(error);
+  if (!remaining) return emptyResult;
+  if (depth >= MAX_REJECTED_CLIENT_RETRIES) return Promise.reject(error);
+  return Promise.resolve(retry(remaining)).catch((next) => (
+    retryWithoutRejectedClient(next, remaining, emptyResult, retry, depth + 1)
+  ));
+}
+
 function retryWithKnownCapabilities(error, requested, command, emptyResult, retry, signal, options = {}) {
   if (signal?.aborted) return Promise.reject(abortReason(signal));
   if (!isUnknownTokscaleClientError(error)) return Promise.reject(error);
@@ -527,7 +576,7 @@ function retryWithKnownCapabilities(error, requested, command, emptyResult, retr
   );
   return waitForSharedCapabilityProbe(sharedProbe, signal).then((supported) => {
     throwIfAborted(signal);
-    if (!supported) return Promise.reject(error);
+    if (!supported) return retryWithoutRejectedClient(error, requested, emptyResult, retry);
     const filtered = filterSupportedClients(requested, supported);
     if (filtered === requested) return Promise.reject(error);
     if (!filtered) return emptyResult;
