@@ -6852,6 +6852,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .home-limit-provider-row {
   grid-template-columns: minmax(0, 1fr) repeat(2, 22px);
 }
+.home-limit-provider-row.has-subgroup,
+.home-limit-provider-row:has(.view-subgroup-toggle) {
+  grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
+}
 .status-provider-header { margin-bottom: 2px; }
 .status-provider-row {
   display: flex;
@@ -6909,7 +6913,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .home-limit-provider-list.drag-active > .home-limit-provider-row:not(.dragging),
 .status-provider-list.drag-active > .status-provider-row:not(.dragging) { opacity: 0.78; }
 #viewDisplayList.is-reordering > .accordion-animated-container,
-.home-settings-list.is-reordering > .accordion-animated-container { transition: none; }
+.home-settings-list.is-reordering > .accordion-animated-container,
+.home-limit-provider-list.is-reordering > .accordion-animated-container { transition: none; }
 .service-status-empty {
   padding: 12px 0;
   color: var(--muted);

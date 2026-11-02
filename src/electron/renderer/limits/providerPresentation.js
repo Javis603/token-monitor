@@ -261,7 +261,7 @@
       || [window?.remainingPercent, window?.usedPercent].some(Number.isFinite);
   }
 
-  function limitProviderCompactWindows(providerOrId, windows = []) {
+  function limitProviderCompactWindows(providerOrId, windows = [], options = {}) {
     const provider = providerId(providerOrId);
     if (provider === 'codex') return (windows || []).filter(isCanonicalCodexWindow);
     if (provider === 'zed') {
@@ -283,6 +283,38 @@
       groupLabel: antigravityQuotaWindow(window)?.groupLabel || ''
     }));
     if (entries.length === 0 || entries.some((entry) => !entry.groupLabel)) return visibleWindows;
+
+    const useCanonicalPeriods = options.canonicalPeriods === true
+      || options.settings?.antigravityCanonicalPeriods === true
+      || options.antigravityCanonicalPeriods === true;
+
+    if (useCanonicalPeriods) {
+      const tightest = (list) => list.slice().sort((a, b) => {
+        const aRemaining = compactWindowRemaining(a.window);
+        const bRemaining = compactWindowRemaining(b.window);
+        if (aRemaining !== bRemaining) return aRemaining - bRemaining;
+        return a.index - b.index;
+      })[0] || null;
+
+      const sessions = entries.filter((entry) => normalizeId(entry.window?.kind) === 'session');
+      const weeklies = entries.filter((entry) => normalizeId(entry.window?.kind) === 'weekly');
+      const chosenSession = tightest(sessions);
+      const chosenWeekly = tightest(weeklies);
+
+      let result;
+      if (chosenSession && chosenWeekly) {
+        result = [chosenSession.window, chosenWeekly.window];
+      } else {
+        const remainingEntries = chosenSession ? sessions : chosenWeekly ? weeklies : entries;
+        result = remainingEntries
+          .slice()
+          .sort((a, b) => compactWindowRemaining(a.window) - compactWindowRemaining(b.window) || a.index - b.index)
+          .slice(0, 2)
+          .map((entry) => entry.window);
+      }
+      Object.defineProperty(result, 'canonicalPeriods', { value: true, configurable: true, writable: true });
+      return result;
+    }
     const groups = new Map();
     for (const entry of entries) {
       if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
@@ -303,6 +335,7 @@
         .map((entry) => entry.window);
     }
     const selected = [...groups.values()].map((groupEntries, groupIndex) => {
+
       const session = tightest(groupEntries.filter((entry) => normalizeId(entry.window?.kind) === 'session'));
       const weekly = tightest(groupEntries.filter((entry) => normalizeId(entry.window?.kind) === 'weekly'));
       const sessionRemaining = compactWindowRemaining(session?.window);
@@ -324,11 +357,16 @@
       .map((entry) => entry.window);
   }
 
-  function limitProviderCompactWindowLabel(providerOrId, window, visibleWindows = []) {
+  function limitProviderCompactWindowLabel(providerOrId, window, visibleWindows = [], options = {}) {
     if (providerId(providerOrId) === 'zai' && normalizeId(window?.kind) === 'daily') {
       return String(window?.label || '').trim();
     }
     if (providerId(providerOrId) !== 'antigravity') return '';
+    const useCanonicalPeriods = options.canonicalPeriods === true
+      || options.settings?.antigravityCanonicalPeriods === true
+      || options.antigravityCanonicalPeriods === true
+      || visibleWindows?.canonicalPeriods === true;
+    if (useCanonicalPeriods) return '';
     const labels = (visibleWindows || []).map((candidate) => antigravityQuotaWindow(candidate)?.groupLabel || '');
     const quota = antigravityQuotaWindow(window);
     if (!labels.length || !quota || labels.some((label) => !label)) return '';
@@ -337,10 +375,20 @@
     return groups.size === labels.length ? quota.groupLabel : '';
   }
 
-  function limitProviderCompactWindowPeriodLabel(providerOrId, window, visibleWindows = []) {
+  function limitProviderCompactWindowPeriodLabel(providerOrId, window, visibleWindows = [], options = {}) {
+    const useCanonicalPeriods = options.canonicalPeriods === true
+      || options.settings?.antigravityCanonicalPeriods === true
+      || options.antigravityCanonicalPeriods === true
+      || visibleWindows?.canonicalPeriods === true;
+    if (useCanonicalPeriods) {
+      if (providerId(providerOrId) === 'antigravity') {
+        const groupLabel = antigravityQuotaWindow(window)?.groupLabel || '';
+        if (groupLabel && groupLabel !== 'Gemini') return groupLabel;
+      }
+      return '';
+    }
     const quota = antigravityQuotaWindow(window);
-    // Single-group labels already include the period, even without reset data.
-    return quota && limitProviderCompactWindowLabel(providerOrId, window, visibleWindows) === quota.groupLabel
+    return quota && limitProviderCompactWindowLabel(providerOrId, window, visibleWindows, options) === quota.groupLabel
       ? quota.windowLabel
       : '';
   }

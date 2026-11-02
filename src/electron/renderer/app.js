@@ -6481,7 +6481,8 @@ function homeLimitRows() {
       ...provider,
       windows: limitProviderPresentationApi.limitProviderCompactWindows(
         provider,
-        (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window))
+        (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window)),
+        { settings: state.settings }
       )
     })),
     providerOptions,
@@ -9952,7 +9953,9 @@ function applyPreferenceOrder(kind, order) {
       ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
       : kind === 'homeModule'
         ? HOME_MODULE_SUBGROUPS[id]?.[1]
-        : '';
+        : kind === 'homeLimitProvider'
+          ? HOME_LIMIT_PROVIDER_SUBGROUPS[id]?.[1]
+          : '';
     const companion = companionId ? document.getElementById(companionId) : null;
     if (companion) list.appendChild(companion);
   }
@@ -9997,6 +10000,10 @@ const HOME_MODULE_SUBGROUPS = {
   device: ['homeDeviceSettingsExpanded', 'homeDeviceSettingsContainer']
 };
 
+const HOME_LIMIT_PROVIDER_SUBGROUPS = {
+  antigravity: ['homeAntigravitySettingsExpanded', 'homeAntigravitySettingsContainer']
+};
+
 function expandedPreferenceSubgroups(definitions) {
   return Object.entries(definitions)
     .filter(([, [stateKey]]) => Boolean(state[stateKey]))
@@ -10006,7 +10013,11 @@ function expandedPreferenceSubgroups(definitions) {
 
 function setPreferenceSubgroupsExpanded(definitions, rowSelector, value) {
   const expanded = new Set(String(value || '').split(',').filter(Boolean));
-  const dataKey = rowSelector === '.view-preference-row' ? 'view' : 'homeModule';
+  const dataKey = rowSelector === '.view-preference-row'
+    ? 'view'
+    : rowSelector === '.home-limit-provider-row'
+      ? 'homeLimitProvider'
+      : 'homeModule';
   for (const [id, [stateKey, containerId]] of Object.entries(definitions)) {
     const open = expanded.has(id);
     state[stateKey] = open;
@@ -10031,6 +10042,10 @@ function setViewPreferenceExpanded(value) {
 
 function setHomeModulePreferenceExpanded(value) {
   setPreferenceSubgroupsExpanded(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', value);
+}
+
+function setHomeLimitProviderPreferenceExpanded(value) {
+  setPreferenceSubgroupsExpanded(HOME_LIMIT_PROVIDER_SUBGROUPS, '.home-limit-provider-row', value);
 }
 
 // Main-screen rows retain their six-dot handle as the only drag surface while
@@ -10092,7 +10107,9 @@ const homeLimitProviderRowDrag = createMainPreferenceRowDrag({
   kind: 'homeLimitProvider',
   rowSelector: '.home-limit-provider-row[data-home-limit-provider]',
   idKey: 'homeLimitProvider',
-  settingKey: 'homeLimitProviderOrder'
+  settingKey: 'homeLimitProviderOrder',
+  getExpanded: () => expandedPreferenceSubgroups(HOME_LIMIT_PROVIDER_SUBGROUPS),
+  setExpanded: setHomeLimitProviderPreferenceExpanded
 });
 
 const statusProviderRowDrag = createMainPreferenceRowDrag({
@@ -10305,6 +10322,34 @@ function renderViewPreferences() {
   }
 }
 
+function renderHomeLimitAntigravitySettings() {
+  const wrap = document.createElement('div');
+  wrap.id = 'homeAntigravitySettingsList';
+  wrap.className = 'settings-nested-list home-antigravity-settings-list';
+  const label = document.createElement('label');
+  label.className = 'checkbox-label settings-item';
+  const copy = document.createElement('span');
+  copy.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('settings.limits.antigravityCanonicalPeriods');
+  copy.append(title);
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.id = 'antigravityCanonicalPeriodsHomeInput';
+  input.checked = state.settings?.antigravityCanonicalPeriods === true;
+  input.addEventListener('change', async () => {
+    await saveSettings({ antigravityCanonicalPeriods: input.checked });
+    renderHomeIfVisible();
+  });
+  const desc = document.createElement('span');
+  desc.className = 'settings-note settings-item-desc';
+  desc.textContent = t('settings.limits.antigravityCanonicalPeriodsDesc');
+  label.append(copy, input, desc);
+  wrap.append(label);
+  return wrap;
+}
+
 function renderHomeLimitProviderList() {
   const wrap = document.createElement('div');
   wrap.id = 'homeLimitProviderList';
@@ -10428,6 +10473,23 @@ function renderHomeLimitProviderList() {
     name.className = 'tool-preference-name';
     name.textContent = settingsLabel || label;
     labelGroup.append(name);
+    const actions = document.createElement('div');
+    actions.className = 'tool-preference-actions';
+    if (id === 'antigravity') {
+      row.classList.add('has-subgroup');
+      const configure = document.createElement('button');
+      configure.type = 'button';
+      const expanded = Boolean(state.homeAntigravitySettingsExpanded);
+      configure.className = `view-subgroup-toggle${expanded ? ' is-expanded' : ''}`;
+      configure.setAttribute('aria-label', t('settings.home.configureLimitProvider', { name: settingsLabel || label }));
+      configure.setAttribute('aria-expanded', String(expanded));
+      const toggleIcon = document.createElement('span');
+      toggleIcon.className = 'view-subgroup-icon';
+      toggleIcon.setAttribute('aria-hidden', 'true');
+      configure.append(toggleIcon);
+      configure.addEventListener('click', () => togglePreferenceSubgroup(HOME_LIMIT_PROVIDER_SUBGROUPS, '.home-limit-provider-row', id));
+      actions.append(configure);
+    }
     const visibility = document.createElement('button');
     visibility.type = 'button';
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
@@ -10436,12 +10498,20 @@ function renderHomeLimitProviderList() {
     visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onHomeLimitProviderVisibilityToggle(id));
     const handle = createPreferenceOrderHandle({ kind: 'homeLimitProvider', id, label: settingsLabel || label, count: providers.length });
-    const actions = document.createElement('div');
-    actions.className = 'tool-preference-actions';
     actions.append(visibility, handle);
     row.append(labelGroup, actions);
     row.addEventListener('pointerdown', (event) => homeLimitProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
+    if (id === 'antigravity') {
+      const listContainer = document.createElement('div');
+      listContainer.id = 'homeAntigravitySettingsContainer';
+      listContainer.className = `accordion-animated-container${state.homeAntigravitySettingsExpanded ? '' : ' hidden'}`;
+      const inner = document.createElement('div');
+      inner.className = 'accordion-animation-inner';
+      inner.appendChild(renderHomeLimitAntigravitySettings());
+      listContainer.appendChild(inner);
+      wrap.append(listContainer);
+    }
   }
   return wrap;
 }
@@ -12394,6 +12464,12 @@ const LIMIT_PROVIDER_SETTINGS = {
     key: 'opencodeLocalLimitsEnabled',
     titleKey: 'settings.limits.opencodeLocalLimits',
     descKey: 'settings.limits.opencodeLocalLimitsDesc',
+    defaultValue: false
+  }],
+  antigravity: [{
+    key: 'antigravityCanonicalPeriods',
+    titleKey: 'settings.limits.antigravityCanonicalPeriods',
+    descKey: 'settings.limits.antigravityCanonicalPeriodsDesc',
     defaultValue: false
   }]
 };
