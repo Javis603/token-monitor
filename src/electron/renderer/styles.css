@@ -4420,6 +4420,7 @@ html.is-windows .settings-panel select option {
 .device-kind-workstation { --device-kind-mask: url("icons/devices/workstation.svg"); }
 .device-kind-server { --device-kind-mask: url("icons/devices/server.svg"); }
 .device-kind-cloud { --device-kind-mask: url("icons/devices/cloud.svg"); }
+.device-kind-linux { --device-kind-mask: url("../../../assets/icons/os-linux.svg"); }
 .sync-device-icon-control { flex: 0 0 auto; margin-left: auto; }
 .settings-panel .sync-device-icon-control .select-control-trigger {
   width: 36px;

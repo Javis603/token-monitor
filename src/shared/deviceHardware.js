@@ -2,6 +2,7 @@
 
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 
 // SMBIOS chassis types, shared by Windows CIM and Linux DMI.
 // https://learn.microsoft.com/windows/win32/cimwin32prov/win32-systemenclosure
@@ -13,7 +14,7 @@ function chassisKind(values) {
   return 'computer';
 }
 
-function detectDeviceKind({ platform = process.platform, run = execFileSync, read = fs.readFileSync } = {}) {
+function detectDeviceKind({ platform = process.platform, run = execFileSync, read = fs.readFileSync, release = os.release } = {}) {
   const options = { encoding: 'utf8', timeout: 2500, maxBuffer: 256 * 1024,
     windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] };
   try {
@@ -30,10 +31,12 @@ function detectDeviceKind({ platform = process.platform, run = execFileSync, rea
         'Get-CimInstance Win32_SystemEnclosure | ForEach-Object { $_.ChassisTypes }'], options);
       return chassisKind(String(output).trim().split(/\s+/));
     } else if (platform === 'linux') {
-      return chassisKind([String(read('/sys/class/dmi/id/chassis_type', 'utf8')).trim()]);
+      if (/microsoft|wsl/i.test(release())) return 'linux';
+      const kind = chassisKind([String(read('/sys/class/dmi/id/chassis_type', 'utf8')).trim()]);
+      return kind === 'computer' ? 'linux' : kind;
     }
-  } catch { /* Unsupported or inaccessible hardware metadata uses the generic icon. */ }
-  return 'computer';
+  } catch { /* Keep the known Linux environment or use the generic hardware hint. */ }
+  return platform === 'linux' ? 'linux' : 'computer';
 }
 
 let cached;

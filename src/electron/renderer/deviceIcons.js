@@ -8,6 +8,7 @@
   if (root) root.TokenMonitorDeviceIcons = api;
 })(typeof window !== 'undefined' ? window : null, function createDeviceIconsApi({ DEVICE_KINDS, normalizeDeviceKind }, selectControl) {
   const controls = new WeakMap();
+  const choices = DEVICE_KINDS.filter(kind => kind !== 'computer');
   const icons = Object.fromEntries(DEVICE_KINDS.map(kind => [kind, document => deviceIconNode(document, kind)]));
   function normalizeDeviceIconOverrides(input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
@@ -24,12 +25,14 @@
   }
   function deviceIconKind(settings, device) {
     const override = deviceIconOverride(settings, device?.deviceId);
-    return normalizeDeviceKind(override === 'auto' ? device?.deviceKind : override);
+    const kind = normalizeDeviceKind(override === 'auto' ? device?.deviceKind : override);
+    return kind === 'computer' ? 'desktop' : kind;
   }
   function deviceIconPatch(settings, deviceId, kind, detectedKind) {
     const scope = settings.deviceIconScope || 'local';
     let values = { ...settings.deviceIconOverrides?.[scope] };
-    if (kind === 'auto' || kind === detectedKind) delete values[deviceId];
+    const detected = normalizeDeviceKind(detectedKind);
+    if (kind === 'auto' || kind === (detected === 'computer' ? 'desktop' : detected)) delete values[deviceId];
     else values = { ...values, [deviceId]: normalizeDeviceKind(kind) };
     return { deviceIconOverrides: { ...settings.deviceIconOverrides, [scope]: values } };
   }
@@ -41,7 +44,7 @@
   }
   function populateDeviceIconSelect(select, translate, detectedKind) {
     select.dataset.detectedKind = normalizeDeviceKind(detectedKind);
-    select.replaceChildren(...DEVICE_KINDS.map(kind => {
+    select.replaceChildren(...choices.map(kind => {
       const option = select.ownerDocument.createElement('option');
       option.value = kind;
       option.textContent = translate(`devices.kind.${kind}`);
@@ -54,7 +57,9 @@
         align: 'end',
         getOptionMeta: option => ({
           icon: icons[option.value],
-          annotation: option.value === select.dataset.detectedKind && option.value !== 'computer' ? translate('devices.icon.detected') : ''
+          annotation: select.dataset.detectedKind === 'computer'
+            ? option.value === 'desktop' ? translate('devices.icon.default') : ''
+            : option.value === select.dataset.detectedKind ? translate('devices.icon.detected') : ''
         })
       });
       if (control) controls.set(select, control);

@@ -18,8 +18,17 @@ test('manual icon wins over detection, choosing the detected kind restores it, a
   settings = { ...settings, ...deviceIconPatch(settings, device.deviceId, 'laptop', 'laptop') };
   assert.equal(deviceIconKind(settings, device), 'laptop');
   assert.deepEqual(settings.deviceIconOverrides['hub-a'], {});
-  assert.equal(deviceIconKind(settings, { deviceId: 'legacy' }), 'computer');
+  assert.equal(deviceIconKind(settings, { deviceId: 'legacy' }), 'desktop');
   assert.equal(deviceIconKind(settings, { deviceId: 'toString', deviceKind: 'laptop' }), 'laptop');
+});
+
+test('unknown hardware uses a desktop default while Linux/WSL remains a distinct choice', () => {
+  const settings = { deviceIconScope: 'hub', deviceIconOverrides: {} };
+  assert.equal(deviceIconKind(settings, { deviceId: 'unknown', deviceKind: 'computer' }), 'desktop');
+  assert.equal(deviceIconKind(settings, { deviceId: 'wsl', deviceKind: 'linux' }), 'linux');
+  const changed = { ...settings, ...deviceIconPatch(settings, 'unknown', 'server', 'computer') };
+  const restored = { ...changed, ...deviceIconPatch(changed, 'unknown', 'desktop', 'computer') };
+  assert.equal(Object.hasOwn(restored.deviceIconOverrides.hub, 'unknown'), false);
 });
 
 test('persisted overrides accept only icon choices and keep device identity keys as data', () => {
