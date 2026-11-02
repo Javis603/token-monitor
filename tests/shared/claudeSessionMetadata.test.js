@@ -916,7 +916,12 @@ test('Claude resolver falls back to the Desktop sidebar title when the transcrip
     fileSessionMetadata: (_id, _file, meta) => ({ ...meta })
   };
   const ids = new Set(['remote', 'local']);
-  const titles = () => Object.fromEntries([...resolveSessionMetadata(ids, context)].map(([id, meta]) => [id, meta.title]));
+  // Feed results back as the collector's metadata cache does, so a stale title would carry over.
+  const titles = () => {
+    const result = resolveSessionMetadata(ids, context);
+    for (const [id, meta] of result) context.metadata.set(`claude:${id}`, meta);
+    return Object.fromEntries([...result].map(([id, meta]) => [id, meta.title]));
+  };
 
   assert.deepEqual(titles(), { remote: 'Desktop title', local: 'Transcript title' });
 

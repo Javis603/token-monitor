@@ -678,8 +678,10 @@ function resolveSessionMetadata(sessionIds, context) {
       filePath,
       nativeMetadata
     );
-    // A transcript supersedes any cached title-only catalog result.
+    // A transcript supersedes any cached title-only catalog result. The title
+    // is re-derived below, so a Desktop fallback that has since gone away clears.
     delete meta.titleOnly;
+    delete meta.title;
     const title = readSessionTitle(filePath, deps.claudeMetadataDeps) || desktopTitle(sessionId);
     // The turn boundary rides the same scan and its cache, so asking for it
     // costs no second pass. Reported for every session rather than only a recent
