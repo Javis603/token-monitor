@@ -31,8 +31,10 @@ test('Windows CIM and Linux DMI classify known chassis types; unsupported probes
 
 test('WSL uses the Linux/WSL kind before host chassis classification', () => {
   for (const kernel of ['5.15.167.4-microsoft-standard-WSL2', '4.4.0-19041-Microsoft']) {
+    let readCalls = 0;
     assert.equal(detectDeviceKind({ platform: 'linux', release: () => kernel,
-      read() { throw new Error('WSL must not use the physical host chassis'); } }), 'linux');
+      read() { readCalls += 1; return '9\n'; } }), 'linux');
+    assert.equal(readCalls, 0);
   }
   const record = { deviceId: 'wsl', deviceKind: 'linux', today: { totalTokens: 10 } };
   assert.equal(syncPayload(record).deviceKind, 'linux');
