@@ -29,6 +29,7 @@
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="week"><span class="view-switcher-menu-label" data-i18n="periodRange.week">This week</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last7"><span class="view-switcher-menu-label" data-i18n="periodRange.last7">Last 7 days</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last30"><span class="view-switcher-menu-label" data-i18n="periodRange.last30">Last 30 days</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="custom"><span class="view-switcher-menu-label" data-i18n="periodRange.custom">Custom range</span></button>
           </div>
           <div class="actions-hotspot" aria-label="Window controls"></div>
           <div class="window-actions">
@@ -192,6 +193,7 @@
                   <option value="week" data-i18n="periodRange.week">This week</option>
                   <option value="last7" data-i18n="periodRange.last7">Last 7 days</option>
                   <option value="last30" data-i18n="periodRange.last30">Last 30 days</option>
+                  <option value="custom" data-i18n="periodRange.custom">Custom range</option>
                 </select>
                 <span class="settings-note settings-item-desc" data-i18n="periodRange.settingsNote">Choose the default usage range shown on Home. On Home, click the selected period at the top again to open the menu and switch quickly.</span>
               </label>
@@ -1666,6 +1668,12 @@
           <span class="back-home-icon" aria-hidden="true"></span>
           <span data-i18n="views.backHome">Back to Home</span>
         </button>
+      </div>
+
+      <div id="customPeriodBar" class="custom-period-bar hidden" role="region" aria-label="Custom date range">
+        <input type="date" id="customPeriodStartDate" class="custom-period-input" aria-label="Start date" data-i18n-aria-label="periodRange.startDate">
+        <span class="custom-period-sep" aria-hidden="true">–</span>
+        <input type="date" id="customPeriodEndDate" class="custom-period-input" aria-label="End date" data-i18n-aria-label="periodRange.endDate">
       </div>
 
       <section id="fixedPeriodMessage" class="fixed-period-message hidden" role="status" aria-live="polite"></section>

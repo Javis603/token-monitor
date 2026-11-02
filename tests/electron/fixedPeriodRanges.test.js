@@ -744,3 +744,172 @@ test('latest request coordinator catches up revisions and upgrades a background 
   assert.deepEqual(settled, [{ render: true }]);
   assert.equal(coordinator.active(), false);
 });
+
+test('MONTH_MODES includes custom and slotForSelection maps custom to month slot', () => {
+  assert.ok(ranges.MONTH_MODES.includes('custom'));
+  assert.equal(ranges.slotForSelection('custom'), 'month');
+  assert.equal(ranges.isDerived('custom'), true);
+  assert.equal(ranges.normalizeMonthMode('custom'), 'custom');
+});
+
+test('custom date range produces exact range and auto-normalizes reversed dates and invalid fallbacks', () => {
+  const normal = ranges.rangeForSelection('custom', {
+    todayKey: '2026-10-28',
+    customRange: { start: '2026-10-01', end: '2026-10-28' }
+  });
+  assert.deepEqual(normal, { start: '2026-10-01', end: '2026-10-28' });
+
+  // Reversed dates: start > end
+  const reversed = ranges.rangeForSelection('custom', {
+    todayKey: '2026-10-28',
+    customRange: { start: '2026-10-28', end: '2026-10-05' }
+  });
+  assert.deepEqual(reversed, { start: '2026-10-05', end: '2026-10-28' });
+
+  // Single-day custom range
+  const single = ranges.rangeForSelection('custom', {
+    todayKey: '2026-10-28',
+    customRange: { start: '2026-10-15', end: '2026-10-15' }
+  });
+  assert.deepEqual(single, { start: '2026-10-15', end: '2026-10-15' });
+
+  // Invalid or missing date strings fall back safely to todayKey
+  const fallback = ranges.rangeForSelection('custom', {
+    todayKey: '2026-10-28',
+    customRange: { start: 'invalid-date', end: '' }
+  });
+  assert.deepEqual(fallback, { start: '2026-10-28', end: '2026-10-28' });
+
+  // Leap year and month transitions
+  const leapYear = ranges.rangeForSelection('custom', {
+    todayKey: '2028-03-01',
+    customRange: { start: '2028-02-28', end: '2028-03-02' }
+  });
+  assert.deepEqual(leapYear, { start: '2028-02-28', end: '2028-03-02' });
+});
+
+test('displayLabel formats custom range with en-dash MM/DD–MM/DD or CUSTOM fallback', () => {
+  assert.equal(ranges.displayLabel('custom'), 'CUSTOM');
+  assert.equal(ranges.displayLabel('custom', { range: null }), 'CUSTOM');
+  assert.equal(ranges.displayLabel('custom', { range: { start: '', end: '' } }), 'CUSTOM');
+  assert.equal(ranges.displayLabel('custom', {
+    range: { start: '2026-10-01', end: '2026-10-28' }
+  }), '10/01\u201310/28');
+  assert.equal(ranges.displayLabel('custom', {
+    range: { start: '2028-02-29', end: '2028-03-01' }
+  }), '02/29\u201303/01');
+});
+
+test('dailyForRange and fixedPeriodSnapshot aggregate custom ranges with live today reconciliation', () => {
+  const history = [
+    day('2026-10-10', 100, 'codex', 'gpt'),
+    day('2026-10-11', 200, 'codex', 'gpt'),
+    day('2026-10-12', 300, 'claude', 'opus')
+  ];
+  const rows = ranges.dailyForRange(history, { start: '2026-10-10', end: '2026-10-12' });
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].tokens, 100);
+  assert.equal(rows[1].tokens, 200);
+  assert.equal(rows[2].tokens, 300);
+
+  const snapshot = ranges.fixedPeriodSnapshot('custom', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-10-12',
+    customRange: { start: '2026-10-10', end: '2026-10-12' },
+    daily: [day('2026-10-10', 100), day('2026-10-11', 200), day('2026-10-12', 150)],
+    todayPeriod: {
+      totalTokens: 350,
+      costUsd: 3.5,
+      clients: { claude: 350 },
+      clientCosts: { claude: 3.5 },
+      models: { opus: 350 },
+      modelCosts: { opus: 3.5 }
+    }
+  });
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.range.start, '2026-10-10');
+  assert.equal(snapshot.range.end, '2026-10-12');
+  assert.equal(snapshot.period.totalTokens, 650);
+  assert.equal(snapshot.period.costUsd, 6.5);
+});
+
+test('dailyForRange terminates at 9999-12-31 and caps extreme multi-millennium spans', () => {
+  const nearMax = ranges.dailyForRange(
+    [day('9999-12-31', 42)],
+    { start: '9999-12-30', end: '9999-12-31' }
+  );
+  assert.deepEqual(nearMax.map((row) => ({ date: row.date, tokens: row.tokens })), [
+    { date: '9999-12-30', tokens: 0 },
+    { date: '9999-12-31', tokens: 42 }
+  ]);
+
+  const extreme = ranges.dailyForRange(
+    [day('9999-12-31', 10)],
+    { start: '0001-01-01', end: '9999-12-31' }
+  );
+  assert.equal(extreme.length, 3660);
+  assert.equal(extreme[extreme.length - 1].date, '9999-12-31');
+  assert.equal(extreme[extreme.length - 1].tokens, 10);
+});
+
+test('a custom range longer than the presentation cap still totals every stored day', () => {
+  // 2016-01-01 → 2026-10-10 spans more than the 3660-day presentation cap, so
+  // the oldest day falls outside the shown series but still belongs to the range.
+  const oldest = { ...day('2016-01-05', 200, 'codex', 'gpt'), activeTimeMs: 60000 };
+  const newest = { ...day('2026-10-10', 100, 'claude', 'opus'), activeTimeMs: 30000 };
+  const snapshot = ranges.fixedPeriodSnapshot('custom', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-10-10',
+    customRange: { start: '2016-01-01', end: '2026-10-10' },
+    daily: [oldest, newest]
+  });
+
+  assert.equal(snapshot.status, 'ready');
+  assert.equal(snapshot.range.start, '2016-01-01');
+  assert.equal(snapshot.range.end, '2026-10-10');
+  assert.equal(snapshot.daily.length, 3660, 'the shown series stays capped');
+  assert.equal(snapshot.daily.some((row) => row.date === '2016-01-05'), false);
+  assert.equal(snapshot.period.totalTokens, 300);
+  assert.equal(snapshot.period.costUsd, 3);
+  assert.deepEqual(snapshot.period.clients, { codex: 200, claude: 100 });
+  assert.deepEqual(snapshot.period.models, { gpt: 200, opus: 100 });
+  // The summary counts the whole range, not just the days the series shows.
+  assert.equal(snapshot.summary.activeDays, 2);
+  assert.equal(snapshot.summary.activeTimeMs, 90000);
+  assert.equal(snapshot.summary.peakDayTokens, 200);
+  assert.equal(snapshot.summary.currentStreak, 1, 'the streak still walks the filled tail');
+});
+
+test('device aggregation totals every stored day of a long custom range', () => {
+  const source = deviceSource({
+    deviceId: 'mac',
+    date: '2026-10-10',
+    endsAt: '2026-10-11T00:00:00.000Z',
+    history: [
+      { ...day('2016-01-05', 200, 'codex', 'gpt'), activeTimeMs: 60000 },
+      { ...day('2026-10-10', 100, 'claude', 'opus'), activeTimeMs: 30000 }
+    ]
+  });
+
+  const result = ranges.fixedPeriodSnapshotFromDevices('custom', [source], {
+    historyEnabled: true,
+    historyAvailable: true,
+    todayKey: '2026-10-10',
+    now: Date.parse('2026-10-10T12:00:00.000Z'),
+    customRange: { start: '2016-01-01', end: '2026-10-10' }
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.equal(result.range.start, '2016-01-01');
+  assert.equal(result.range.end, '2026-10-10');
+  assert.equal(result.daily.length, 3660, 'the shown series stays capped');
+  assert.equal(result.period.totalTokens, 300);
+  assert.equal(result.period.costUsd, 3);
+  assert.deepEqual(result.period.clients, { codex: 200, claude: 100 });
+  assert.equal(result.summary.activeDays, 2);
+  assert.equal(result.summary.activeTimeMs, 90000);
+  assert.equal(result.summary.peakDayTokens, 200);
+  assert.equal(result.devices[0].period.totalTokens, 300);
+});
