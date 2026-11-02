@@ -1978,8 +1978,6 @@
     const plan = document.createElement('div');
     plan.className = 'limit-plan';
     plan.textContent = limitPlanText(provider, options);
-    // An explicit empty planText is a caller refusing the cost door. A blank
-    // reading is not: the saved record still needs a visible entry.
     if (!plan.textContent && options.planText === undefined && subscriptionForProvider(provider)) {
       plan.textContent = t('settings.subscriptions.title');
     }
