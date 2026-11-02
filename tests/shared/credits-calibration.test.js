@@ -34,8 +34,8 @@ test('fitCreditsPerToken degrades R² with noise and refuses degenerate input', 
 
 test('buildConversionProfiles gates on samples and R² per model', () => {
   const sessions = [
-    ...linearPairs(60, 0.0000012).map((p) => ({ model: 'hy4-preview', usedTokens: p.tokens, credits: p.credits })),
-    ...linearPairs(10, 0.0000008).map((p) => ({ model: 'ds-v4.1-flash', usedTokens: p.tokens, credits: p.credits }))
+    ...linearPairs(60, 0.0000012).map((p) => ({ model: 'hy4-preview', tokens: p.tokens, credits: p.credits })),
+    ...linearPairs(10, 0.0000008).map((p) => ({ model: 'ds-v4.1-flash', tokens: p.tokens, credits: p.credits }))
   ];
   const { profiles, pending } = buildConversionProfiles(sessions);
   assert.equal(profiles.length, 1);
@@ -47,12 +47,35 @@ test('buildConversionProfiles gates on samples and R² per model', () => {
   assert.equal(pending[0].reason, 'insufficient_samples');
 });
 
+test('the sample gate is reachable for a single user (12 sessions)', () => {
+  const enough = linearPairs(12, 0.000001).map((p) => ({ model: 'm', tokens: p.tokens, credits: p.credits }));
+  const short = linearPairs(11, 0.000001).map((p) => ({ model: 'm', tokens: p.tokens, credits: p.credits }));
+  assert.equal(buildConversionProfiles(enough).profiles.length, 1);
+  const { profiles, pending } = buildConversionProfiles(short);
+  assert.equal(profiles.length, 0);
+  assert.equal(pending[0].reason, 'insufficient_samples');
+});
+
+test('billed tokens are the x-axis, not the context-window counter', () => {
+  // Same credits, same shape, but the only token field present is `usedTokens`:
+  // fitting on the context counter is what kept every model pending before.
+  const contextOnly = linearPairs(20, 0.000001).map((p) => ({
+    model: 'm',
+    usedTokens: p.tokens,
+    credits: p.credits
+  }));
+  const { profiles, pending, untrackedSessions } = buildConversionProfiles(contextOnly);
+  assert.equal(profiles.length, 0);
+  assert.equal(pending.length, 0);
+  assert.equal(untrackedSessions, 20);
+});
+
 test('buildConversionProfiles drops sessions missing either track and maps unknown models', () => {
   const sessions = [
-    ...linearPairs(55, 0.000001).map((p) => ({ model: null, usedTokens: p.tokens, credits: p.credits })),
-    { model: 'x', usedTokens: 0, credits: 5 },
-    { model: 'x', usedTokens: 5, credits: 0 },
-    { model: 'x', usedTokens: null, credits: null }
+    ...linearPairs(55, 0.000001).map((p) => ({ model: null, tokens: p.tokens, credits: p.credits })),
+    { model: 'x', tokens: 0, credits: 5 },
+    { model: 'x', tokens: 5, credits: 0 },
+    { model: 'x', tokens: null, credits: null }
   ];
   const { profiles, pending } = buildConversionProfiles(sessions);
   assert.equal(profiles.length, 1);
@@ -64,7 +87,7 @@ test('buildConversionProfiles drops sessions missing either track and maps unkno
 test('gates are configurable and a noisy fit stays pending', () => {
   const noisy = linearPairs(60, 0.000001).map((p, i) => ({ ...p, credits: p.credits + (i % 3) * 0.8 }));
   const { profiles, pending } = buildConversionProfiles(
-    noisy.map((p) => ({ model: 'm', usedTokens: p.tokens, credits: p.credits }))
+    noisy.map((p) => ({ model: 'm', tokens: p.tokens, credits: p.credits }))
   );
   if (profiles.length === 1) {
     assert.ok(profiles[0].r2 < 0.9, 'noisy fit that passed must have blocked r2 recorded');

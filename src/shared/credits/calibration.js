@@ -1,13 +1,22 @@
 'use strict';
 
 // Credits↔tokens regression calibration (design spec §3.4/§7). WorkBuddy's
-// local DB carries both tracks per session — `credit_json` spend and the
-// `used` token counter — so an ordinary least-squares fit per model yields
-// the actual conversion coefficient without trusting any published pricing.
-// Gates (default samples ≥ 50 and R² ≥ 0.9) keep an under-sampled or noisy
-// fit out of the conversion profiles; those show up as `pending` instead.
+// local DB carries the credit track (`credit_json` per request) and the session
+// transcripts carry the billed-token track, so an ordinary least-squares fit per
+// model yields the actual conversion coefficient without trusting any published
+// pricing. Gates (default 12 sessions and R² ≥ 0.9) keep an under-sampled or
+// noisy fit out of the conversion profiles; those show up as `pending` instead.
+//
+// The x-axis must be billed tokens, never `session_usage.used`: `used` is the
+// context-window fill. Measured against this machine's data, fitting on `used`
+// drops balanced-model to R² 0.675 while the transcript axis reaches 0.979 —
+// i.e. the wrong axis alone is enough to fail the R² gate forever.
+//
+// 12 rather than 50: a single user's ledger grows by a few sessions per model
+// per month (16 at the time of writing), so a 50-sample gate is unreachable in
+// practice and the conversion page would stay empty forever.
 
-const MIN_SAMPLES = 50;
+const MIN_SAMPLES = 12;
 const MIN_R2 = 0.9;
 const CREDITS_PER_MTOK_SCALE = 1e6;
 
@@ -53,15 +62,19 @@ function passesGates(fit, { minSamples = MIN_SAMPLES, minR2 = MIN_R2 } = {}) {
     && Number.isFinite(fit.r2) && fit.r2 >= minR2;
 }
 
-// sessions come from collectCredits(): { sessionId, model, usedTokens, credits }.
-// A session joins the fit only when both tracks are positive — a zero on
-// either side is a truncation artifact, not a free request.
+// sessions come from collectCredits(): { sessionId, model, tokens, credits }.
+// A session joins the fit only when both tracks are positive — a zero or null on
+// either side is missing data, not a free request.
 function buildConversionProfiles(sessions, { tool = 'workbuddy', gates } = {}) {
   const byModel = new Map();
+  let untracked = 0;
   for (const session of sessions || []) {
-    const tokens = finitePositive(session?.usedTokens);
+    const tokens = finitePositive(session?.tokens);
     const credits = finitePositive(session?.credits);
-    if (tokens === null || credits === null) continue;
+    if (tokens === null || credits === null) {
+      if (finitePositive(session?.credits) !== null) untracked += 1;
+      continue;
+    }
     const model = String(session?.model || 'unknown');
     if (!byModel.has(model)) byModel.set(model, []);
     byModel.get(model).push({ tokens, credits });
@@ -94,7 +107,7 @@ function buildConversionProfiles(sessions, { tool = 'workbuddy', gates } = {}) {
   }
   profiles.sort((a, b) => b.samples - a.samples);
   pending.sort((a, b) => b.samples - a.samples);
-  return { profiles, pending };
+  return { profiles, pending, untrackedSessions: untracked };
 }
 
 module.exports = {

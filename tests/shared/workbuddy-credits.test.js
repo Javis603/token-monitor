@@ -6,9 +6,21 @@ const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 
-const { collectCredits, candidateDbPaths } = require('../../src/shared/providers/workbuddy/credits');
+const { collectCredits, candidateDbPaths, sessionTokens } = require('../../src/shared/providers/workbuddy/credits');
 
-function createFixtureHome({ malformed = false } = {}) {
+function writeTranscript(home, sessionId, records, workspace = 'demo-project') {
+  const dir = path.join(home, '.workbuddy', 'projects', workspace);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${sessionId}.jsonl`);
+  fs.writeFileSync(file, records.map((r) => JSON.stringify(r)).join('\n'));
+  return file;
+}
+
+function usageRecord(usage, extra = {}) {
+  return { type: 'function_call', id: `id-${Math.random()}`, message: { usage }, ...extra };
+}
+
+function createFixtureHome({ malformed = false, transcripts = false } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-wb-credits-'));
   const dir = path.join(home, '.workbuddy');
   fs.mkdirSync(dir, { recursive: true });
@@ -31,6 +43,12 @@ function createFixtureHome({ malformed = false } = {}) {
   db.prepare('INSERT INTO session_usage VALUES (?, ?, ?, ?, ?)')
     .run('s2', 641687, 1000000, 1792328555975, malformed ? '{oops' : '{"b1":3.7}');
   db.close();
+  if (transcripts) {
+    writeTranscript(home, 's1', [
+      usageRecord({ input_tokens: 1000, cache_read_input_tokens: 5000, output_tokens: 100, total_tokens: 1100 }),
+      usageRecord({ input_tokens: 2000, cache_read_input_tokens: 8000, output_tokens: 200, total_tokens: 2200 })
+    ]);
+  }
   return home;
 }
 
@@ -84,6 +102,59 @@ test('collectCredits reports unavailable when the database is missing', () => {
     const result = collectCredits({ home });
     assert.equal(result.available, false);
     assert.match(result.reason, /not found/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('collectCredits pairs each session with its billed tokens from the transcript', () => {
+  const home = createFixtureHome({ transcripts: true });
+  try {
+    const result = collectCredits({ home });
+    const s1 = result.sessions.find((s) => s.sessionId === 's1');
+    const s2 = result.sessions.find((s) => s.sessionId === 's2');
+    // input + cache_read + output — the same three components the panel shows,
+    // and deliberately more than `total_tokens` (which omits the cached read).
+    assert.equal(s1.tokens, 1000 + 5000 + 100 + 2000 + 8000 + 200);
+    assert.equal(s1.transcriptRequests, 2);
+    assert.equal(s1.cacheReadTokens, 13000);
+    assert.equal(s1.outputTokens, 300);
+    assert.equal(s1.usedTokens, 398901);
+    // A session with no transcript is missing data, not a free session.
+    assert.equal(s2.tokens, null);
+    assert.equal(result.tokenTrackedSessions, 1);
+    assert.equal(result.warnings.length, 0);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('collectCredits warns when the ledger has no token track to calibrate against', () => {
+  const home = createFixtureHome();
+  try {
+    const result = collectCredits({ home });
+    assert.equal(result.tokenTrackedSessions, 0);
+    assert.ok(result.warnings.some((w) => /calibration unavailable/.test(w)));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('sessionTokens re-reads only when the transcript changes', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-wb-transcript-'));
+  try {
+    const file = writeTranscript(home, 's9', [
+      usageRecord({ input_tokens: 100, cache_read_input_tokens: 0, output_tokens: 10 })
+    ]);
+    assert.equal(sessionTokens(home, 's9').tokens, 110);
+    // Same file, unchanged: served from cache.
+    assert.equal(sessionTokens(home, 's9').tokens, 110);
+    fs.writeFileSync(file, [
+      usageRecord({ input_tokens: 100, cache_read_input_tokens: 0, output_tokens: 10 }),
+      usageRecord({ input_tokens: 50, cache_read_input_tokens: 0, output_tokens: 5 })
+    ].map((r) => JSON.stringify(r)).join('\n'));
+    assert.equal(sessionTokens(home, 's9').tokens, 165);
+    assert.equal(sessionTokens(home, 'missing'), null);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
