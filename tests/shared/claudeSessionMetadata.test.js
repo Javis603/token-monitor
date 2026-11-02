@@ -1001,12 +1001,14 @@ test('the MSIX data root follows LOCALAPPDATA except for a scoped home', (t) => 
   const store = path.join(localAppData, 'Claude-Data', 'claude_pzs8sxrjxfjjc', 'claude-code-sessions', 'account', 'org');
   fs.mkdirSync(store, { recursive: true });
   fs.writeFileSync(path.join(store, 'local_a.json'), JSON.stringify({ cliSessionId: 'msix', title: 'MSIX title' }));
-  const title = (scopedHome) => resolveSessionMetadata(new Set(['msix']), {
+  const title = (scopedHome, env = { LOCALAPPDATA: localAppData }) => resolveSessionMetadata(new Set(['msix']), {
     home, metadata: new Map(),
-    deps: { scopedHome, env: { LOCALAPPDATA: localAppData }, claudeMetadataDeps: { cache: new Map() } },
+    deps: { scopedHome, env, claudeMetadataDeps: { cache: new Map() } },
     fileSessionMetadata: (_id, _file, meta) => ({ ...meta })
   }).get('msix').title;
 
   assert.equal(title(false), 'MSIX title');
+  // A worker's env copy is case-sensitive, so another casing must still match.
+  assert.equal(title(false, { LocalAppData: localAppData }), 'MSIX title');
   assert.equal(title(true), undefined);
 });

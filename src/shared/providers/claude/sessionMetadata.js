@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 const { claudeSessionRoots } = require('./paths');
 const { readDesktopSessionTitles } = require('./desktopSessionTitles');
+const { envValue } = require('../../limits/providerHelpers');
 const { findSessionFiles } = require('../../sessionFiles');
 const { readT3SessionMeta } = require('../../t3SessionMetadata');
 const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
@@ -665,7 +666,8 @@ function resolveSessionMetadata(sessionIds, context) {
   let desktopTitles;
   const desktopTitle = (sessionId) => {
     // Like CLAUDE_CONFIG_DIR, a scoped home never inherits the host's LocalAppData.
-    const localAppData = deps.scopedHome ? '' : String((deps.env || process.env).LOCALAPPDATA || '').trim();
+    // A worker's copied env is case-sensitive even on Windows.
+    const localAppData = deps.scopedHome ? '' : String(envValue(deps.env || process.env, 'LOCALAPPDATA') || '').trim();
     desktopTitles ||= readDesktopSessionTitles(home, sessionIds, localAppData);
     return cleanTitle(desktopTitles.get(sessionId));
   };
