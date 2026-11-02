@@ -110,11 +110,12 @@
         mask?.append(node('feMergeNode', { in: `patch${index}` }));
         return node('feFlood', { ...rect, 'flood-color': 'white', result: mask ? `patch${index}` : 'region' });
       });
-      const merge = node('feMerge');
-      merge.append(node('feMergeNode', { in: 'outside' }), node('feMergeNode', { in: 'inside' }));
       record.filter.replaceChildren(blur, ...floods, ...(mask ? [mask] : []),
         node('feComposite', { in: 'SourceGraphic', in2: 'region', operator: 'out', result: 'outside' }),
-        node('feComposite', { in: 'blurred', in2: 'region', operator: 'in', result: 'inside' }), merge);
+        node('feComposite', { in: 'blurred', in2: 'region', operator: 'in', result: 'inside' }),
+        // Add complementary premultiplied contributions so a partial mask
+        // crossfades sharp/blurred content without reducing its opacity.
+        node('feComposite', { in: 'outside', in2: 'inside', operator: 'arithmetic', k2: 1, k3: 1 }));
     }
 
     function update() {
@@ -126,20 +127,22 @@
         return;
       }
       observeLayout();
-      const boxes = active.map(surface => surface.getBoundingClientRect());
+      const boxes = active.map(surface => ({ box: surface.getBoundingClientRect(),
+        opacity: Number(window.getComputedStyle(surface).opacity) }));
       const wanted = new Set();
       for (const [index, source] of [root, ...active].entries()) {
         const bounds = source.getBoundingClientRect();
         const scaleX = bounds.width / source.offsetWidth;
         const scaleY = bounds.height / source.offsetHeight;
         const rectangles = [];
-        if (bounds.width && bounds.height) for (const box of boxes.slice(index)) {
+        if (bounds.width && bounds.height) for (const { box, opacity } of boxes.slice(index)) {
           const left = Math.max(bounds.left, box.left), top = Math.max(bounds.top, box.top);
           const right = Math.min(bounds.right, box.right), bottom = Math.min(bounds.bottom, box.bottom);
           if (right <= left || bottom <= top) continue;
           // Coordinates belong to the source before its opening transform.
           rectangles.push(Object.fromEntries(Object.entries({ x: (left - bounds.left) / scaleX,
-            y: (top - bounds.top) / scaleY, width: (right - left) / scaleX, height: (bottom - top) / scaleY })
+            y: (top - bounds.top) / scaleY, width: (right - left) / scaleX, height: (bottom - top) / scaleY,
+            'flood-opacity': opacity })
             .map(([key, value]) => [key, Math.round(value * 100) / 100])));
         }
         filterSource(source, rectangles);
