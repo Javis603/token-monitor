@@ -931,3 +931,45 @@ test('Claude resolver falls back to the Desktop sidebar title when the transcrip
   fs.rmSync(path.join(store, 'local_a.json'));
   assert.deepEqual(titles(), { remote: undefined, local: 'Transcript title' });
 });
+
+test('a removed Desktop title also leaves anchored month and all-time rows on watch ticks', async (t) => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-claude-desktop-anchor-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const projects = path.join(home, '.claude', 'projects', 'p');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(path.join(projects, 'native.jsonl'), `${JSON.stringify({ type: 'user', message: { content: 'hi' } })}\n`);
+  const store = path.join(home, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', 'account', 'org');
+  fs.mkdirSync(store, { recursive: true });
+  const desktop = (title) => fs.writeFileSync(path.join(store, 'local_a.json'), JSON.stringify({ cliSessionId: 'native', title }));
+  desktop('Desktop title');
+  let captured;
+  const options = {
+    clients: 'claude', homeDir: home, projectsEnabled: false, historyEnabled: false,
+    wslScanEnabled: false, osInfo: {},
+    sessionMetadataDeps: { scopedHome: true, claudeMetadataDeps: { cache: new Map() } },
+    runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 'native', model: 'claude-opus', input: 10, output: 0, cost: 0 }] }),
+    onAnchorComputed: (value) => { captured = value; }
+  };
+  const initial = await collectUsageOnce(options);
+  const anchor = {
+    dateKey: localTodayKey(), today: initial.today, month: initial.month, allTime: initial.allTime,
+    todayPartitions: captured.todayPartitions, t3Titles: captured.t3Titles, catalogTitleSources: captured.catalogTitleSources
+  };
+  const watch = async () => {
+    const summary = await collectUsageOnce({ ...options, todayOnlyAnchor: anchor });
+    anchor.todayPartitions = captured.todayPartitions;
+    anchor.todayT3Titles = captured.t3Titles;
+    anchor.catalogTitleSources = captured.catalogTitleSources;
+    return summary;
+  };
+  const titles = (summary) => ['today', 'month', 'allTime'].map((period) => summary[period].sessions['claude:native'].title || '');
+
+  assert.deepEqual(titles(initial), ['Desktop title', 'Desktop title', 'Desktop title']);
+  // The ledger entry must not be replayed as a T3 override over a Desktop rename.
+  desktop('Renamed in Desktop');
+  assert.deepEqual(titles(await watch()), ['Renamed in Desktop', 'Renamed in Desktop', 'Renamed in Desktop']);
+  fs.rmSync(path.join(store, 'local_a.json'));
+  assert.deepEqual(titles(await watch()), ['', '', '']);
+  assert.deepEqual(titles(await watch()), ['', '', '']);
+});

@@ -22,6 +22,8 @@ const MAX_METADATA_LINE_BYTES = 64 * 1024;
 const LONG_LINE_HEAD_BYTES = 64 * 1024;
 const LONG_LINE_TAIL_BYTES = 8 * 1024;
 const titleCache = new Map();
+// Provenance of a Desktop fallback title in the shared catalog-title ledger.
+const DESKTOP_TITLE_SOURCE = 'claude-desktop';
 const MODEL_VERSION_END = '(?:$|[-@:\\[])';
 const CLAUDE_NATIVE_ONE_MILLION_MODEL = new RegExp(
   `^claude-(?:opus-(?:5${MODEL_VERSION_END}|4-(?:7|8)${MODEL_VERSION_END})`
@@ -678,11 +680,24 @@ function resolveSessionMetadata(sessionIds, context) {
       filePath,
       nativeMetadata
     );
-    // A transcript supersedes any cached title-only catalog result. The title
-    // is re-derived below, so a Desktop fallback that has since gone away clears.
+    // A transcript supersedes any cached title-only catalog result. Titles are
+    // re-derived below, so a Desktop fallback that has since gone away clears.
     delete meta.titleOnly;
     delete meta.title;
-    const title = readSessionTitle(filePath, deps.claudeMetadataDeps) || desktopTitle(sessionId);
+    delete meta.catalogTitle;
+    delete meta.catalogTitleSource;
+    const transcriptTitle = readSessionTitle(filePath, deps.claudeMetadataDeps);
+    const fallbackTitle = transcriptTitle ? '' : desktopTitle(sessionId);
+    const title = transcriptTitle || fallbackTitle;
+    // A Desktop title rides the catalog-title ledger. Once it is gone with
+    // nothing in its place, record the removal so anchored month/all-time rows
+    // drop that title instead of keeping it until the next full scan.
+    const key = `claude:${sessionId}`;
+    if (!title && !t3Metadata.has(sessionId) && deps.t3Titles?.[key]
+      && deps.catalogTitleSources?.[key] === DESKTOP_TITLE_SOURCE) {
+      invalidatedSessionIds.add(sessionId);
+      deps.invalidatedTitleKeys?.add(key);
+    }
     // The turn boundary rides the same scan and its cache, so asking for it
     // costs no second pass. Reported for every session rather than only a recent
     // one: it is what stops a session reading as running, and gating it on the
@@ -704,6 +719,7 @@ function resolveSessionMetadata(sessionIds, context) {
       ...(index?.promptCacheState?.observation === undefined ? {}
         : { promptCache: index.promptCacheState.observation }),
       ...(title ? { title } : {}),
+      ...(fallbackTitle ? { catalogTitle: fallbackTitle, catalogTitleSource: DESKTOP_TITLE_SOURCE } : {}),
       ...(turnEnded === undefined ? {} : { turnEnded }),
       ...(sessionContext || {})
     });
@@ -718,8 +734,11 @@ function resolveSessionMetadata(sessionIds, context) {
   for (const sessionId of sessionIds) {
     const cached = metadata.get(`claude:${sessionId}`);
     // A failed lookup may reuse an explicit override, never an unlabelled title.
+    // A Desktop fallback shares the ledger but is no T3 override.
     const t3Title = t3Metadata.get(sessionId)?.title || cached?.t3Title
-      || (!invalidatedSessionIds.has(sessionId) && deps.t3Titles?.[`claude:${sessionId}`]);
+      || (!invalidatedSessionIds.has(sessionId)
+        && deps.catalogTitleSources?.[`claude:${sessionId}`] !== DESKTOP_TITLE_SOURCE
+        && deps.t3Titles?.[`claude:${sessionId}`]);
     if (!t3Title) continue;
     const transcriptMeta = result.get(sessionId);
     result.set(sessionId, {
