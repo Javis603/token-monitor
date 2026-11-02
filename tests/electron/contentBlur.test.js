@@ -6,8 +6,9 @@ const { create } = require('../../src/electron/renderer/contentBlur');
 
 function fixture() {
   const frames = new Map(), listeners = new Map();
-  let nextFrame = 0, appearanceChanged;
-  const document = { hidden: false };
+  let nextFrame = 0;
+  const mutations = [], resizes = [], animations = [];
+  const document = { hidden: false, getAnimations: () => animations };
   class Node extends Element {
     constructor(tag) {
       super(tag, document);
@@ -35,7 +36,16 @@ function fixture() {
   const window = {
     requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
     cancelAnimationFrame: id => frames.delete(id), addEventListener: listen, removeEventListener: unlisten,
-    MutationObserver: class { constructor(callback) { appearanceChanged = callback; } observe() {} disconnect() {} }
+    MutationObserver: class {
+      constructor(callback) { this.callback = callback; this.targets = []; mutations.push(this); }
+      observe(target) { this.targets.push(target); }
+      disconnect() { this.targets.length = 0; }
+    },
+    ResizeObserver: class {
+      constructor(callback) { this.callback = callback; this.targets = []; resizes.push(this); }
+      observe(target) { this.targets.push(target); }
+      disconnect() { this.targets.length = 0; }
+    }
   };
   const root = new Node('main'); document.body.append(root);
   const controller = create({ document, window, root });
@@ -56,7 +66,11 @@ function fixture() {
     return definitions.children.find(node => node.getAttribute('id') === id);
   };
   return { root, document, frames, listeners, controller, definitions, surface, toggle, tick, filterFor,
-    appearanceChanged: () => appearanceChanged() };
+    animations, mutations, resizes,
+    changed: (target = root) => mutations.filter(observer => observer.targets.includes(document.body))
+      .forEach(observer => observer.callback([{ target }])),
+    appearanceChanged: () => mutations.filter(observer => observer.targets.includes(document.documentElement))
+      .forEach(observer => observer.callback()) };
 }
 
 test('shared content blur tracks geometry, reuses stable filters, and stops when closed', () => {
@@ -68,8 +82,9 @@ test('shared content blur tracks geometry, reuses stable filters, and stops when
   assert.equal(menu.classList.contains('content-blur-source'), false, 'top menu stays sharp');
   assert.deepEqual(['x', 'y', 'width', 'height'].map(key => blur.getAttribute(key)), ['2', '182', '156', '216']);
   const flood = filter.children.find(node => node.tagName === 'FEFLOOD');
-  f.tick(); assert.ok(filter.children.includes(flood), 'unchanged geometry does not rebuild the filter');
-  menu.box.top = 250; f.tick();
+  assert.equal(f.frames.size, 0, 'an idle open menu does not poll geometry');
+  f.changed(); f.tick(); assert.ok(filter.children.includes(flood), 'unchanged geometry does not rebuild the filter');
+  menu.box.top = 250; f.changed(menu); f.tick();
   assert.equal(filter.children.find(node => node.tagName === 'FEFLOOD').getAttribute('y'), '250');
   f.toggle(menu, false);
   assert.equal(f.frames.size, 0);
@@ -110,8 +125,48 @@ test('detached/cancelled surfaces, accessibility, visibility and disposal releas
   f.document.hidden = true; f.listeners.get('visibilitychange')(); f.tick();
   assert.equal(f.frames.size, 0); assert.equal(f.definitions.children.length, 0);
   f.document.hidden = false; f.listeners.get('visibilitychange')(); f.tick();
-  menu.remove(); f.tick(); assert.equal(f.frames.size, 0);
+  menu.remove(); f.changed(); f.tick(); assert.equal(f.frames.size, 0);
   f.controller.dispose();
   assert.equal(f.listeners.size, 0);
   assert.equal(f.definitions.parent, null);
+});
+
+test('geometry events coalesce and observers only run while surfaces need blur', () => {
+  const f = fixture(), menu = f.surface();
+  f.toggle(menu, true); f.tick();
+  f.changed(f.definitions);
+  assert.equal(f.frames.size, 0, 'filter writes do not trigger their own update');
+  for (const event of ['scroll', 'resize', 'input', 'change', 'load']) f.listeners.get(event)();
+  f.resizes[0].callback();
+  assert.equal(f.frames.size, 1);
+  menu.box.width = 150; f.tick();
+  assert.equal(f.filterFor(f.root).children.find(node => node.tagName === 'FEFLOOD').getAttribute('width'), '150');
+  assert.equal(f.frames.size, 0);
+  f.toggle(menu, false);
+  assert.ok(f.resizes.every(observer => observer.targets.length === 0));
+  assert.ok(f.mutations.every(observer => !observer.targets.includes(f.document.body)));
+  f.listeners.get('scroll')();
+  assert.equal(f.frames.size, 0, 'closed surfaces do not wake on layout events');
+  f.controller.dispose();
+});
+
+test('opening and layout animations track every frame, then stop without tracking unrelated spinners', () => {
+  const f = fixture(), menu = f.surface();
+  const animation = { playState: 'running', effect: { target: menu, getComputedTiming: () => ({ endTime: 190 }) } };
+  f.animations.push(animation);
+  f.toggle(menu, true); f.tick();
+  menu.box.top = 220; f.tick();
+  assert.equal(f.filterFor(f.root).children.find(node => node.tagName === 'FEFLOOD').getAttribute('y'), '220');
+  animation.playState = 'finished'; f.tick();
+  assert.equal(f.frames.size, 0);
+  const spinner = f.surface('spinner'); f.root.append(spinner);
+  f.animations.push({ playState: 'running', effect: { target: spinner, getComputedTiming: () => ({ endTime: Infinity }) } });
+  f.listeners.get('animationstart')(); f.tick();
+  assert.equal(f.frames.size, 0, 'an unrelated infinite spinner cannot keep the loop alive');
+  animation.effect.target = spinner; animation.playState = 'running';
+  f.listeners.get('transitionrun')(); f.tick();
+  assert.equal(f.frames.size, 1, 'finite layout animations may move CSS anchors');
+  animation.playState = 'finished'; f.tick();
+  assert.equal(f.frames.size, 0);
+  f.controller.dispose();
 });

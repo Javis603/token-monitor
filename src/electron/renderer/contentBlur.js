@@ -24,6 +24,7 @@
     const sources = new Map();
     let frame = null;
     let disposed = false;
+    let observed = [];
     const node = (name, attributes = {}) => {
       const element = document.createElementNS(NS, name);
       for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
@@ -33,6 +34,44 @@
     const enabled = () => !document.hidden
       && !document.documentElement.classList.contains('native-reduced-transparency')
       && !document.documentElement.classList.contains('native-material-opaque');
+    const layoutEvents = ['scroll', 'input', 'change', 'load', 'transitionrun', 'transitionend',
+      'transitioncancel', 'animationstart', 'animationend', 'animationcancel'];
+    const resizeObserver = new window.ResizeObserver(layoutChanged);
+    const layoutObserver = new window.MutationObserver(records => {
+      // Updating our SVG graph must not wake the controller again.
+      if (records.some(record => !definitions.contains(record.target))) layoutChanged();
+    });
+
+    function stopObserving() {
+      resizeObserver.disconnect();
+      layoutObserver.disconnect();
+      observed = [];
+    }
+
+    function observeLayout() {
+      if (observed.length === active.length && observed.every((surface, index) => surface === active[index])) return;
+      stopObserving();
+      observed = [...active];
+      for (const source of [root, ...active]) resizeObserver.observe(source);
+      layoutObserver.observe(document.body, { subtree: true, childList: true, characterData: true,
+        attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'] });
+    }
+
+    function layoutChanged() {
+      if (active.length && enabled()) schedule();
+    }
+
+    function isAnimating() {
+      return document.getAnimations().some(animation => {
+        if (animation.playState !== 'running' && !animation.pending) return false;
+        const target = animation.effect?.target;
+        if (!target) return false;
+        // Finite page animations can move CSS anchors. Unrelated infinite
+        // spinners must not keep an otherwise stationary menu polling forever.
+        return active.some(surface => target.contains(surface))
+          || (root.contains(target) && animation.effect.getComputedTiming().endTime !== Infinity);
+      });
+    }
 
     function release(source) {
       const record = sources.get(source);
@@ -79,9 +118,11 @@
       frame = null;
       for (let index = active.length - 1; index >= 0; index--) if (!isOpen(active[index])) active.splice(index, 1);
       if (!active.length || !enabled()) {
+        stopObserving();
         for (const source of sources.keys()) release(source);
         return;
       }
+      observeLayout();
       const boxes = active.map(surface => surface.getBoundingClientRect());
       const wanted = new Set();
       for (const [index, source] of [root, ...active].entries()) {
@@ -102,7 +143,7 @@
         if (rectangles.length) wanted.add(source);
       }
       for (const source of sources.keys()) if (!wanted.has(source)) release(source);
-      schedule();
+      if (isAnimating()) schedule();
     }
 
     function schedule() {
@@ -121,6 +162,7 @@
         if (!active.length) {
           if (frame !== null) window.cancelAnimationFrame(frame);
           frame = null;
+          stopObserving();
           for (const source of sources.keys()) release(source);
           return;
         }
@@ -130,6 +172,8 @@
 
     document.addEventListener('beforetoggle', toggle, true);
     document.addEventListener('visibilitychange', schedule);
+    for (const event of layoutEvents) document.addEventListener(event, layoutChanged, true);
+    window.addEventListener('resize', layoutChanged);
     const appearanceObserver = new window.MutationObserver(schedule);
     appearanceObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     function dispose() {
@@ -138,9 +182,12 @@
       frame = null;
       for (const source of sources.keys()) release(source);
       active.length = 0;
+      stopObserving();
       appearanceObserver.disconnect();
       document.removeEventListener('beforetoggle', toggle, true);
       document.removeEventListener('visibilitychange', schedule);
+      for (const event of layoutEvents) document.removeEventListener(event, layoutChanged, true);
+      window.removeEventListener('resize', layoutChanged);
       window.removeEventListener('pagehide', dispose);
       definitions.remove();
     }
