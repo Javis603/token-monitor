@@ -498,9 +498,11 @@ test('a confirmed MiniMax account stays one heading, and a saved cost stays reac
   assert.match(paired.text, /Minimax/);
   assert.match(paired.text, /Credits/);
   assert.match(paired.text, /Balance/);
-  assert.match(paired.text, /Pay-as-you-go/);
+  assert.doesNotMatch(paired.text, /Pay-as-you-go|Token Plan/);
   assert.doesNotMatch(paired.text, /Account 1|2 accounts|Subscriptions/);
   assert.equal(view.limitProviderPlan(code), '');
+  assert.equal(view.limitProviderPlan(api), '');
+  assert.equal(view.limitProviderPlan({ ...api, accountLabel: 'Token Plan' }), '');
   assert.match(card([{ ...code, planLabel: 'Starter' }, api]).text, /Starter/);
   const unlinked = card([code, { ...api, relatedAccountKey: undefined }]);
   assert.match(unlinked.text, /Account 1/);

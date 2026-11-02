@@ -1883,7 +1883,7 @@
   function limitProviderPlan(provider) {
     if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitProviderFailureLabel(provider);
     const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
-    if (mimoProduct || (provider?.provider === 'minimax' && provider?.source === 'oauth')) {
+    if (mimoProduct || provider?.provider === 'minimax') {
       const plan = String(provider?.planLabel || '').trim();
       // Product names in accountLabel are not subscription names. An unknown
       // plan stays empty; older rows must not turn the product into a plan.
