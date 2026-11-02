@@ -35,6 +35,8 @@ test('device kind survives wire reduction, normalization, aggregation and legacy
   assert.equal(normalizeDeviceRecord(input).deviceKind, 'laptop');
   assert.equal(aggregateDevices([input], 0).devices[0].deviceKind, 'laptop');
   assert.equal(mergeDeviceRecord(input, { deviceId: 'macbook', limitsOnly: true }).deviceKind, 'laptop');
+  assert.equal(mergeDeviceRecord(input, { deviceId: 'macbook', today: { totalTokens: 20 } }).deviceKind, 'laptop');
+  assert.equal(mergeDeviceRecord(input, { deviceId: 'macbook', deviceKind: 'computer' }).deviceKind, 'computer');
   assert.equal(normalizeDeviceRecord({ ...input, deviceKind: '../../invalid' }).deviceKind, 'computer');
   assert.equal(Object.hasOwn(normalizeDeviceRecord({ deviceId: 'old' }), 'deviceKind'), false);
 });

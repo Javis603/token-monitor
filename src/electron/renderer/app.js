@@ -9351,6 +9351,16 @@ function syncDeviceRow(row) {
   return item;
 }
 
+let deviceIconSave = Promise.resolve();
+function saveDeviceIcon(deviceId, kind, detectedKind) {
+  const scope = state.settings.deviceIconScope || 'local';
+  const save = deviceIconSave.then(() => saveSettings(deviceIconsApi.deviceIconPatch(
+    { ...state.settings, deviceIconScope: scope }, deviceId, kind, detectedKind
+  )));
+  deviceIconSave = save.catch(() => {});
+  return save;
+}
+
 function updateSyncDeviceRow(item, row) {
   const iconKind = deviceIconsApi.deviceIconKind(state.settings, { ...row, deviceId: row.key });
   const signature = JSON.stringify([
@@ -9392,7 +9402,7 @@ function updateSyncDeviceRow(item, row) {
     iconSelect.addEventListener('change', async () => {
       iconSelect.disabled = true;
       deviceIconsApi.syncDeviceIconSelect(iconSelect);
-      try { await saveSettings(deviceIconsApi.deviceIconPatch(state.settings, row.key, iconSelect.value, iconSelect.dataset.detectedKind)); }
+      try { await saveDeviceIcon(row.key, iconSelect.value, iconSelect.dataset.detectedKind); }
       finally {
         iconSelect.disabled = false;
         iconSelect.value = deviceIconsApi.deviceIconKind(state.settings, { deviceId: row.key, deviceKind: iconSelect.dataset.detectedKind });
@@ -13866,7 +13876,7 @@ els.deviceIconInput?.addEventListener('change', async event => {
   const select = event.currentTarget;
   select.disabled = true;
   deviceIconsApi.syncDeviceIconSelect(select);
-  try { await saveSettings(deviceIconsApi.deviceIconPatch(state.settings, state.settings.deviceId, select.value, select.dataset.detectedKind)); }
+  try { await saveDeviceIcon(state.settings.deviceId, select.value, select.dataset.detectedKind); }
   finally { select.disabled = false; syncHubDraftFields(); }
 });
 els.collectionCadenceInput?.addEventListener('change', async () => {

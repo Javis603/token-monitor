@@ -33,6 +33,10 @@ Sources:
 - Tabler Icons: https://github.com/tabler/tabler-icons
   - settings/window.svg: app-window
 
+Project-drawn device glyphs:
+- devices/mini.svg
+- devices/workstation.svg
+
 Lucide Icons license:
 
 ISC License
