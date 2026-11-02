@@ -14,6 +14,8 @@ function setup() {
   function element() {
     return {
       dataset: {}, attributes: {}, children: [], hidden: true,
+      get textContent() { return this._text || ''; },
+      set textContent(value) { this._text = value; this.children = []; },
       classList: { toggle(name, enabled) { if (name === 'hidden') host.hidden = enabled; } },
       setAttribute(name, value) { this.attributes[name] = value; },
       append(child) { this.children.push(child); },
@@ -36,7 +38,7 @@ function setup() {
   const filter = Function('state', 'els', 'document', 'KNOWN_CLIENTS', 'clientLabels', 'clientsWithIcon',
     'currentLocale', 't', 'render', 'updateSessionToolScrollButtons', 'limitWindowsView', 'sessionToolClients', 'toolIconsEnabled', `${app.slice(start, end)}; return renderSessionToolFilter;`)(
     state, els, document, [{ id: 'claude' }, { id: 'codex' }], { claude: 'Claude Code', codex: 'Codex' },
-    new Set(['claude', 'codex']), () => 'en', key => key, () => renders++, () => {}, { setDetailTooltip() {} }, appFunction('sessionToolClients', [], []), value => value === true);
+    new Set(['claude', 'codex']), () => 'en', key => key, () => renders++, () => {}, { setDetailTooltip(button) { button.append({className:'limit-detail-tooltip'}); } }, appFunction('sessionToolClients', [], []), value => value === true);
   return { state, els, document, host, strip, filter, renders: () => renders };
 }
 
@@ -152,10 +154,11 @@ test('cross-tool groups remain reachable from every member tool', () => {
 test('turning off tool icons renders tool labels and invalidates existing buttons', () => {
   const ui = setup();
   ui.filter(rows);
-  assert.equal(ui.strip.children[1].children.length, 1);
+  assert.equal(ui.strip.children[1].children.filter(node=>node.className.includes('row-icon')).length, 1);
   ui.state.settings.showToolIcons = false;
   ui.filter(rows);
-  assert.equal(ui.strip.children[1].children.length, 0);
+  assert.equal(ui.strip.children[1].children.filter(node=>node.className.includes('row-icon')).length, 0);
+  assert.equal(ui.strip.children.every(button=>button.children.some(node=>node.className==='limit-detail-tooltip')), true);
   assert.equal(ui.strip.children[1].textContent, 'Claude Code');
 });
 
@@ -169,4 +172,11 @@ test('both direct detail render paths hide the list filter immediately', () => {
     Function('els', `${app.slice(start, end)}\n}; return ${name};`)(els)();
     assert.equal(hidden.has('hidden'), true, name);
   }
+});
+
+
+test('All keeps its attached tooltip when its label is rendered', () => {
+  const ui = setup();
+  ui.filter(rows);
+  assert.equal(ui.strip.children[0].children.some(node=>node.className==='limit-detail-tooltip'), true);
 });

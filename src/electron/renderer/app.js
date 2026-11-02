@@ -3078,7 +3078,6 @@ function renderSessionToolFilter(rows) {
       button.className = 'session-tool-filter-button';
       button.dataset.client = client;
       const label = client ? clientLabels[client] || client : t('sessions.allTools');
-      limitWindowsView.setDetailTooltip(button, [{ full: label }]);
       button.setAttribute('aria-label', label);
       button.setAttribute('aria-pressed', String(state.sessionToolFilter === client));
       if (showIcons && client && clientsWithIcon.has(client)) {
@@ -3089,6 +3088,7 @@ function renderSessionToolFilter(rows) {
       } else {
         button.textContent = label;
       }
+      limitWindowsView.setDetailTooltip(button, [{ full: label }]);
       button.addEventListener('click', () => {
         state.sessionToolFilter = state.sessionToolFilter === client ? '' : client;
         state.sessionPage = 0;
@@ -4574,7 +4574,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.is-hover-reading, .detail-heading.is-hover-reading, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-panel:not(.hidden) .home-session-row .is-hover-reading, .home-panel:not(.hidden) .home-session-meta .limit-detail-tooltip-wrap:hover, .home-panel:not(.hidden) .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.is-hover-reading, .detail-heading.is-hover-reading, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
