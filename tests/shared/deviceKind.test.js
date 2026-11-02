@@ -19,7 +19,7 @@ test('Mac hardware names distinguish portable, desktop, mini and workstation wit
 });
 
 test('Windows CIM and Linux DMI classify known chassis types; unsupported probes stay generic', () => {
-  for (const [type, kind] of [[9, 'laptop'], [31, 'laptop'], [3, 'desktop'], [23, 'server'], [1, 'computer']]) {
+  for (const [type, kind] of [[9, 'laptop'], [31, 'laptop'], [3, 'desktop'], [23, 'server'], [28, 'server'], [29, 'server'], [17, 'computer'], [1, 'computer']]) {
     assert.equal(detectDeviceKind({ platform: 'win32', run: () => `${type}\r\n` }), kind);
     assert.equal(detectDeviceKind({ platform: 'linux', read: () => `${type}\n` }), kind);
   }

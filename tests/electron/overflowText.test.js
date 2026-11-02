@@ -666,7 +666,8 @@ test('actual shared row rendering keeps group availability and binds Auto Review
   };
   const bindings = [];
   const context = {
-    state: { breakdown: 'session', settings: { showToolIcons: true, deviceId: 'imac' } }, rowWidth: () => 50, iconKindFor: () => ({ kind: 'dot' }),
+    state: { breakdown: 'session', settings: { showToolIcons: true, deviceId: 'imac' } }, rowWidth: () => 50,
+    toolIconsEnabled: value => value !== false, clientsWithIcon: new Set(['codex', 'claude']),
     deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
     setHoverMarqueeText: h.api.setText, overflowText: h.api, formatNumber: String, formatCost: String,
     rowNumberAnimations: new Map(),
@@ -680,8 +681,9 @@ test('actual shared row rendering keeps group availability and binds Auto Review
     rowTemplate: makeRow, openSessionDetail() {}
   };
   const update = app.slice(app.indexOf('function updateRow('), app.indexOf('function applyHomeListMark('));
+  const iconKind = app.slice(app.indexOf('function iconKindFor('), app.indexOf('const LIMIT_PROVIDER_ACCOUNT_NODES ='));
   const member = app.slice(app.indexOf('function sessionGroupRunNode('), app.indexOf('function renderSessionGroupDetail('));
-  vm.runInNewContext(`${update}\n${member}\nglobalThis.update = updateRow; globalThis.member = sessionGroupRunNode;`, context);
+  vm.runInNewContext(`${iconKind}\n${update}\n${member}\nglobalThis.update = updateRow; globalThis.member = sessionGroupRunNode;`, context);
   const now = new Date();
   const accounting = { client: 'codex', sessionId: 'old', t3ThreadId: 'main', totalTokens: 500, costUsd: 2,
     models: { a: 500 }, lastUsedAt: new Date(2026, 9, 11, 8, 0).toISOString() };
@@ -735,6 +737,9 @@ test('actual shared row rendering keeps group availability and binds Auto Review
     assert.equal(sourcedRow.querySelector('.row-device').textContent, '');
     assert.equal(sourcedRow.querySelector('.row-subtitle').textContent, 'a · high');
   }
+  context.update(sourcedRow, { ...sourced, client: 'custom-tool', clientLabel: 'Custom Tool', subtitle: 'Custom Tool · a', reasoningEffort: null });
+  assert.equal(sourcedRow.querySelector('.row-mark').className, 'row-mark dot');
+  assert.equal(sourcedRow.querySelector('.row-subtitle').textContent, 'Custom Tool · a');
   context.state.settings.showToolIcons = false;
   context.update(sourcedRow, sourced);
   assert.equal(sourcedRow.querySelector('.row-subtitle').textContent, 'Codex · a · high');

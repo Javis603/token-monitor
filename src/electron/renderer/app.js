@@ -2816,7 +2816,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   }
   const subtitleText = sessionRowsApi.sessionSubtitleForDisplay(
     { client, clientLabel }, splitSubtitle ? subtitleIdentity || '' : subtitle,
-    { keepClient: state.settings?.showToolIcons !== true }
+    { keepClient: iconKind.kind !== 'icon' }
   );
   if (splitSubtitle) {
     subtitleEl.querySelector('.session-subagent-count').textContent = `${subtitleText ? ' · ' : ''}${subagentCountLabel}`;

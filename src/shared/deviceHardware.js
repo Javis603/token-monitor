@@ -8,7 +8,7 @@ const fs = require('node:fs');
 function chassisKind(values) {
   const types = values.map(Number);
   if (types.some(type => [8, 9, 10, 14, 30, 31, 32].includes(type))) return 'laptop';
-  if (types.some(type => [17, 23, 28, 29].includes(type))) return 'server';
+  if (types.some(type => [23, 28, 29].includes(type))) return 'server';
   if (types.some(type => [3, 4, 5, 6, 7, 13, 15, 16, 24].includes(type))) return 'desktop';
   return 'computer';
 }
