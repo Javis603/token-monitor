@@ -7593,8 +7593,8 @@ function renderAppContent() {
     if (!surface) statsRenderScheduler.request();
     return;
   }
-  if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
   ensureBreakdownVisible();
+  if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
   if (pluginPage) {

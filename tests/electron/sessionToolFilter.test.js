@@ -180,3 +180,17 @@ test('All keeps its attached tooltip when its label is rendered', () => {
   ui.filter(rows);
   assert.equal(ui.strip.children[0].children.some(node=>node.className==='limit-detail-tooltip'), true);
 });
+
+test('hiding Sessions hides its toolbar after resolving the replacement view', () => {
+  const start = app.indexOf('function renderAppContent()');
+  const end = app.indexOf('  const pluginPage =', start);
+  const state = {breakdown:'session',openSession:null};
+  let hidden = false;
+  const render = Function('state', 'els', 'visibleStatsSurface', 'statsRenderScheduler', 'ensureBreakdownVisible',
+    `${app.slice(start,end)}\n}; return renderAppContent;`)(state,
+    {sessionToolFilter:{classList:{add(name){hidden=name==='hidden';}}}},
+    ()=>'main', {request(){}}, ()=>{state.breakdown='tool';});
+  render();
+  assert.equal(state.breakdown,'tool');
+  assert.equal(hidden,true);
+});
