@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 const { claudeSessionRoots } = require('./paths');
+const { readDesktopSessionTitles } = require('./desktopSessionTitles');
 const { findSessionFiles } = require('../../sessionFiles');
 const { readT3SessionMeta } = require('../../t3SessionMetadata');
 const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
@@ -657,6 +658,12 @@ function resolveSessionMetadata(sessionIds, context) {
     delete invalidated.t3Title;
     metadata.set(key, invalidated);
   }
+  // Read only when some transcript carries no title record of its own.
+  let desktopTitles;
+  const desktopTitle = (sessionId) => {
+    desktopTitles ||= readDesktopSessionTitles(home, sessionIds);
+    return cleanTitle(desktopTitles.get(sessionId));
+  };
   const applyFile = (sessionId, filePath) => {
     const cached = metadata.get(`claude:${sessionId}`);
     let nativeMetadata = cached;
@@ -673,7 +680,7 @@ function resolveSessionMetadata(sessionIds, context) {
     );
     // A transcript supersedes any cached title-only catalog result.
     delete meta.titleOnly;
-    const title = readSessionTitle(filePath, deps.claudeMetadataDeps);
+    const title = readSessionTitle(filePath, deps.claudeMetadataDeps) || desktopTitle(sessionId);
     // The turn boundary rides the same scan and its cache, so asking for it
     // costs no second pass. Reported for every session rather than only a recent
     // one: it is what stops a session reading as running, and gating it on the

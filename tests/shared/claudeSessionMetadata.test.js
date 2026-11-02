@@ -892,3 +892,37 @@ test('Claude session metadata indexes title records appended before a large writ
 
   assert.equal(readSessionTitle(file, { cache }), 'Renamed title');
 });
+
+test('Claude resolver falls back to the Desktop sidebar title when the transcript has none', (t) => {
+  const { resolveSessionMetadata } = require('../../src/shared/providers/claude/sessionMetadata');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-claude-desktop-title-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const projects = path.join(home, '.claude', 'projects', 'p');
+  fs.mkdirSync(projects, { recursive: true });
+  // A Remote Control spawn has no title record; a local session carries Desktop's title itself.
+  fs.writeFileSync(path.join(projects, 'remote.jsonl'), `${JSON.stringify({ type: 'user', message: { content: 'hi' } })}\n`);
+  fs.writeFileSync(path.join(projects, 'local.jsonl'), `${JSON.stringify({ type: 'custom-title', customTitle: 'Transcript title' })}\n`);
+  const store = path.join(home, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', 'account', 'org');
+  fs.mkdirSync(store, { recursive: true });
+  const desktop = (name, session) => fs.writeFileSync(path.join(store, name), JSON.stringify(session));
+  desktop('local_a.json', { cliSessionId: 'remote', title: '  Desktop   title ', remoteControlSpawn: { rcChild: false } });
+  desktop('local_b.json', { cliSessionId: 'local', title: 'Stale Desktop title' });
+  desktop('local_c.json', { cliSessionId: 'unrequested', title: 'Other session' });
+  fs.writeFileSync(path.join(store, 'local_torn.json'), '{"cliSessionId":"remote","title":');
+  const context = {
+    home,
+    deps: { scopedHome: true, claudeMetadataDeps: { cache: new Map() } },
+    metadata: new Map(),
+    fileSessionMetadata: (_id, _file, meta) => ({ ...meta })
+  };
+  const ids = new Set(['remote', 'local']);
+  const titles = () => Object.fromEntries([...resolveSessionMetadata(ids, context)].map(([id, meta]) => [id, meta.title]));
+
+  assert.deepEqual(titles(), { remote: 'Desktop title', local: 'Transcript title' });
+
+  // A rename in Desktop reaches an unchanged transcript; a removed session drops its title.
+  desktop('local_a.json', { cliSessionId: 'remote', title: 'Renamed in Desktop' });
+  assert.deepEqual(titles(), { remote: 'Renamed in Desktop', local: 'Transcript title' });
+  fs.rmSync(path.join(store, 'local_a.json'));
+  assert.deepEqual(titles(), { remote: undefined, local: 'Transcript title' });
+});
