@@ -3087,7 +3087,6 @@ function renderSessionToolFilter(rows) {
       } else {
         button.textContent = label;
       }
-      limitWindowsView.setDetailTooltip(button, [{ full: label }]);
       button.addEventListener('click', () => {
         state.sessionToolFilter = state.sessionToolFilter === client ? '' : client;
         state.sessionPage = 0;

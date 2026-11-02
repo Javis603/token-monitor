@@ -4242,8 +4242,7 @@ html.is-windows .settings-panel select option {
 
 /* Keep these related controls closer than the shell's 8px section gap. */
 .session-tool-filter:not(.hidden) + .session-pager-host { margin-block-start: -6px; }
-.session-tool-filter-button,
-.session-tool-filter-button.limit-detail-tooltip-wrap {
+.session-tool-filter-button {
   position: relative;
   display: flex;
   flex: 0 0 auto;

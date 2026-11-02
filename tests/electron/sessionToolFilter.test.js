@@ -36,9 +36,9 @@ function setup() {
     sessionToolPrevious: element(), sessionToolNext: element(), breakdown: { scrollTop: 42 } };
   let renders = 0;
   const filter = Function('state', 'els', 'document', 'KNOWN_CLIENTS', 'clientLabels', 'clientsWithIcon',
-    'currentLocale', 't', 'render', 'updateSessionToolScrollButtons', 'limitWindowsView', 'sessionToolClients', `${app.slice(start, end)}; return renderSessionToolFilter;`)(
+    'currentLocale', 't', 'render', 'updateSessionToolScrollButtons', 'sessionToolClients', `${app.slice(start, end)}; return renderSessionToolFilter;`)(
     state, els, document, [{ id: 'claude' }, { id: 'codex' }], { claude: 'Claude Code', codex: 'Codex' },
-    new Set(['claude', 'codex']), () => 'en', key => key, () => renders++, () => {}, { setDetailTooltip(button) { button.append({className:'limit-detail-tooltip'}); } }, appFunction('sessionToolClients', [], []));
+    new Set(['claude', 'codex']), () => 'en', key => key, () => renders++, () => {}, appFunction('sessionToolClients', [], []));
   return { state, els, document, host, strip, filter, renders: () => renders };
 }
 
@@ -160,7 +160,7 @@ test('filter controls retain their icons when decorative tool icons are disabled
   assert.strictEqual(ui.strip.children[1], button, 'content decoration does not rebuild filter controls');
   assert.equal(button.children.filter(node=>node.className.includes('row-icon')).length, 1);
   assert.equal(button.attributes['aria-label'], 'Claude Code');
-  assert.equal(ui.strip.children.every(button=>button.children.some(node=>node.className==='limit-detail-tooltip')), true);
+  assert.equal(button.children.length, 1, 'only the tool icon is rendered');
 });
 
 test('both direct detail render paths hide the list filter immediately', () => {
@@ -176,10 +176,14 @@ test('both direct detail render paths hide the list filter immediately', () => {
 });
 
 
-test('All keeps its attached tooltip when its label is rendered', () => {
+test('filter buttons keep accessible names without tooltips', () => {
   const ui = setup();
   ui.filter(rows);
-  assert.equal(ui.strip.children[0].children.some(node=>node.className==='limit-detail-tooltip'), true);
+  assert.equal(ui.strip.children[0].textContent, 'sessions.allTools');
+  assert.deepEqual(ui.strip.children.map(button => button.attributes['aria-label']),
+    ['sessions.allTools', 'Claude Code', 'Codex']);
+  assert.equal(ui.strip.children[0].children.length, 0);
+  assert.equal(ui.strip.children.every(button => !button.children.some(node => node.className === 'limit-detail-tooltip')), true);
 });
 
 test('hiding Sessions hides its toolbar after resolving the replacement view', () => {
