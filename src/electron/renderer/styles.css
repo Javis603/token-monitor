@@ -3183,7 +3183,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   border-radius: 7px;
   background:
     linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
-    rgba(var(--glass-rgb), 0.76);
+    rgba(var(--glass-rgb), var(--popup-surface-alpha, 0.76));
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
   -webkit-backdrop-filter: blur(28px) saturate(115%);
   backdrop-filter: blur(28px) saturate(115%);
@@ -6078,6 +6078,44 @@ html.is-windows .limit-live-badge {
     visibility 0s linear 0s;
   will-change: opacity, transform, filter;
 }
+.content-blur-definitions { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+/* One content filter per source, regardless of how many higher surfaces cover
+   it. Top-layer children stay outside their ancestor's content filter. */
+.content-blur-source { filter: var(--content-blur-filter) !important; }
+.content-blur-surface {
+  --popup-surface-alpha: 0.46;
+  background: linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)), rgba(var(--glass-rgb), var(--popup-surface-alpha)) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.native-reduced-transparency .content-blur-source,
+html.native-material-opaque .content-blur-source { filter: none !important; }
+html.native-reduced-transparency .content-blur-surface,
+html.native-material-opaque .content-blur-surface { --popup-surface-alpha: 1; }
+#viewSwitcher { anchor-name: --view-switcher; }
+#viewSwitcherMenu {
+  /* The top layer stays sharp when the underlying shell content is filtered. */
+  position: fixed;
+  position-anchor: --view-switcher;
+  inset: auto;
+  left: anchor(left);
+  bottom: calc(anchor(top) + 6px);
+  width: anchor-size(width);
+  margin: 0;
+  color: var(--text);
+  /* Keep content filtering out of the backdrop surface. The menu fades and
+     moves; its labels stay sharp and only the page behind it is blurred. */
+  will-change: transform;
+  filter: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition-property: opacity, transform, filter, visibility, display, overlay;
+  transition-behavior: normal, normal, normal, normal, allow-discrete, allow-discrete;
+}
+#viewSwitcherMenu:not(:popover-open) { display: none !important; }
+@starting-style {
+  #viewSwitcherMenu:popover-open { opacity: 0; transform: translateY(6px) scale(0.985); }
+}
 .view-switcher-menu.hidden {
   /* Animates out rather than disappearing, so it must keep its box. Higher
      specificity than the blanket `.hidden`, and matching weight to beat it. */
@@ -6155,10 +6193,8 @@ html.native-liquid-glass .update-pill-progress-bar {
 }
 html.native-liquid-glass .view-switcher-current { border-radius: 999px 0 0 999px; padding-left: 11px; }
 html.native-liquid-glass .view-switcher-disclosure { width: 28px; flex-basis: 28px; padding-right: 3px; border-radius: 0 999px 999px 0; }
-/* The menu is the one layer that floats over content, and the page is drawn
-   above the native glass, so nothing but its own fill can hide the rows it
-   covers. It stays a dense frosted plate; only its shape and edge follow the
-   glass controls. */
+/* Floating surfaces blur the page drawn above the native window material;
+   their tint is separate from that material. */
 html.native-liquid-glass .plugin-menu,
 html.native-liquid-glass .select-control-popup,
 html.native-liquid-glass .view-switcher-menu { padding: 5px; }
@@ -6173,7 +6209,7 @@ html.native-liquid-glass .app-update-popover {
   border-radius: 14px;
   background:
     linear-gradient(180deg, rgba(var(--overlay-rgb), 0.07), rgba(var(--overlay-rgb), 0.02)),
-    rgba(var(--glass-rgb), 0.86);
+    rgba(var(--glass-rgb), var(--popup-surface-alpha, 0.86));
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24), var(--liquid-glass-specular);
 }
 html.native-liquid-glass .plugin-menu button,
@@ -6188,6 +6224,24 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   width: 132px;
   pointer-events: auto;
   transform-origin: right top;
+}
+#monthPeriodTab { anchor-name: --month-period-tab; }
+#monthPeriodMenu {
+  position: fixed;
+  position-anchor: --month-period-tab;
+  inset: auto;
+  top: calc(anchor(bottom) + 6px);
+  right: anchor(right);
+  margin: 0;
+  color: var(--text);
+  filter: none;
+  will-change: transform;
+  transition-property: opacity, transform, filter, visibility, display, overlay;
+  transition-behavior: normal, normal, normal, normal, allow-discrete, allow-discrete;
+}
+#monthPeriodMenu:not(:popover-open) { display: none !important; }
+@starting-style {
+  #monthPeriodMenu:popover-open { opacity: 0; transform: translateY(-6px) scale(0.985); }
 }
 .period-menu.view-switcher-menu [data-fixed-period] {
   -webkit-app-region: no-drag;
