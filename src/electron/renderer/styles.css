@@ -4421,8 +4421,13 @@ html.is-windows .settings-panel select option {
 .device-kind-server { --device-kind-mask: url("icons/devices/server.svg"); }
 .device-kind-cloud { --device-kind-mask: url("icons/devices/cloud.svg"); }
 .device-kind-linux { --device-kind-mask: url("../../../assets/icons/os-linux.svg"); }
-.sync-device-icon-control { flex: 0 0 auto; margin-left: auto; }
+/* Center the 24px click target on the text without increasing the row height. */
+.sync-device-icon-control { position: relative; flex: 0 0 36px; align-self: stretch; margin-left: auto; }
 .settings-panel .sync-device-icon-control .select-control-trigger {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
   width: 36px;
   min-height: 24px;
   gap: 3px;
