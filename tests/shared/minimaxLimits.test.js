@@ -220,6 +220,7 @@ test('MiniMax API billing uses one balance endpoint in the selected region', asy
       assert.deepEqual(calls.filter(target => target === url), [url]);
       assert.equal(result.status, 'ok');
       assert.equal(result.accountLabel, 'Pay-as-you-go');
+      assert.equal(result.planLabel, '');
       assert.equal(result.windows.length, 1);
       assert.equal(result.windows[0].metric, 'credits');
       assert.equal(result.windows[0].currency, currency);
@@ -349,6 +350,7 @@ test('fetchMinimaxLimits reads quota with the env or preferred settings key with
     assert.equal(result.status, 'ok');
     assert.equal(result.source, 'api');
     assert.equal(result.accountLabel, 'Token Plan');
+    assert.equal(result.planLabel, '');
     assert.match(result.accountKey, /^sha256:/);
     assert.equal(result.region, 'en');
     assert.deepEqual(result.windows.map(window => window.kind), ['session', 'weekly']);

@@ -621,7 +621,7 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
   const account = {
     provider: 'minimax', accountKey, source: 'api', updatedAt,
     accountLabel: apiBilling ? 'Pay-as-you-go' : 'Token Plan',
-    planLabel: apiBilling ? '' : 'Subscription'
+    planLabel: ''
   };
   const fetchJson = deps.fetchJson
     || ((u, headers) => minimaxJsonFetch(deps.fetch || fetch, u, { headers }, deps));
