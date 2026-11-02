@@ -714,6 +714,7 @@ function defaultSettings() {
     lastViewState: { period: 'today', breakdown: 'home' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
+    deviceIconOverrides: {},
     icloudWriterId: '',
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
@@ -2860,6 +2861,7 @@ function readSettings() {
     merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
+    merged.deviceIconOverrides = require('./renderer/deviceIcons').normalizeDeviceIconOverrides(merged.deviceIconOverrides);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
     merged.pluginInitialSetup = require('./plugins/initialSetup').normalizeInitialSetup(merged.pluginInitialSetup);
     merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
@@ -3223,6 +3225,7 @@ function syncProvenanceActive() {
 }
 
 const presentationCache = createStatsPresentationCache();
+const { projectSessionDeviceSessions, projectSessionDeviceStats } = require('./sessionDeviceSources');
 
 // Every input besides `stats` belongs in the cache key, or a settings change
 // would keep serving the projection it replaced.
@@ -3235,11 +3238,14 @@ function electronPresentationStats(stats) {
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
   const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
-  return presentationCache.get(stats, key, () => projectModelAliasStats(
-    projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
-    aliases,
-    { grouping }
-  ));
+  return presentationCache.get(stats, key, () => {
+    const sourced = projectSessionDeviceStats(stats, settings?.deviceId);
+    return projectModelAliasStats(
+      projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(sourced) : sourced, limitOptions),
+      aliases,
+      { grouping }
+    );
+  });
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
@@ -3264,7 +3270,11 @@ function rendererAllTimeSessions(stats) {
     const sessions = hubSnapshot
       ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
       : complete.periods?.allTime?.sessions || {};
-    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
+    const devices = hubSnapshot?.localDevice
+      ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
+      : complete.devices;
+    const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
+    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
   });
 }
 
@@ -5588,6 +5598,7 @@ function settingsForRenderer() {
     ...rendererSettings,
     syncContentStatus: getSyncContentRuntime().status(),
     locale: trayMenuLocale(),
+    deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
     // last-known cache behind it.
@@ -8177,6 +8188,7 @@ app.whenReady().then(() => {
       if (bypassError) throw new Error(bypassError);
     }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
+    if (patch.deviceIconOverrides !== undefined) normalizedPatch.deviceIconOverrides = require('./renderer/deviceIcons').normalizeDeviceIconOverrides(patch.deviceIconOverrides);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);

@@ -6,6 +6,7 @@ const PERIODS = ['today', 'month', 'allTime'];
 const { normalizeLiveActivity, normalizeReasoningEffort, isSessionReasoningEffortClient, canReplaceLiveActivity, sessionWithActivity } = require('./sessionLive');
 const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
+const { normalizeDeviceKind } = require('./deviceKind');
 const {
   coerceHistory, dayKeyAddDays, hasDisjointReasoning, localDayKey, mergeHistories,
   normalizeTokscaleClientName, normalizeTokscaleModelNameForClient
@@ -1402,6 +1403,7 @@ function normalizeDeviceRecord(record) {
     limits: normalizeLimitsSummary(record.limits)
   };
   if (hasOwn(record, 'osName')) normalized.osName = normalizeDeviceOsName(record.osName);
+  if (hasOwn(record, 'deviceKind')) normalized.deviceKind = normalizeDeviceKind(record.deviceKind);
   if (hasOwn(record, 'osVersion')) normalized.osVersion = normalizeDeviceOsVersion(record.osVersion);
   if (hasOwn(record, 'trackedClients')) normalized.trackedClients = normalizeTrackedClients(record.trackedClients);
   if (hasOwn(record, 'clientStatus')) normalized.clientStatus = normalizeClientStatus(record.clientStatus);
@@ -1628,6 +1630,9 @@ function mergeDeviceRecord(existing, incoming) {
   if (!hasExisting) return normalizedIncoming;
 
   const normalizedExisting = normalizeDeviceRecord(existing);
+  if (!hasOwn(normalizedIncoming, 'deviceKind') && hasOwn(normalizedExisting, 'deviceKind')) {
+    normalizedIncoming.deviceKind = normalizedExisting.deviceKind;
+  }
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
     // The three attribution fields describe the usage this branch is carrying
@@ -1913,6 +1918,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
     aggregate.devices.push({
       deviceId: normalized.deviceId,
       hostname: normalized.hostname,
+      ...(hasOwn(normalized, 'deviceKind') ? { deviceKind: normalized.deviceKind } : {}),
       platform: normalized.platform,
       ...(hasOwn(normalized, 'osName') ? { osName: normalized.osName } : {}),
       ...(hasOwn(normalized, 'osVersion') ? { osVersion: normalized.osVersion } : {}),

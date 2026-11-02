@@ -24,6 +24,9 @@ Sources:
   - views/model.svg: atom
   - views/tool.svg: bot
   - views/status.svg: activity
+  - devices/laptop.svg: laptop
+  - devices/server.svg: server
+  - devices/cloud.svg: cloud
 - Basil Icons by Craftwork: https://www.figma.com/community/file/931906394678748246
   - actions/zap.svg: lightning-alt-outline
     (modified with a subtle outline for small-size legibility)

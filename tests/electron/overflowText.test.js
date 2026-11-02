@@ -20,6 +20,7 @@ function harness(distance = 7, options = {}) {
       get textContent() { return this.children.map(child => child.textContent).join(''); },
       set textContent(text) { this.children = [{ textContent: text }]; },
       append(...children) { this.children = children; },
+      prepend(...children) { this.children.unshift(...children); },
       replaceChildren(...children) { this.children = children; },
       getBoundingClientRect: () => ({ width: 200 + distance, left: 0, right: 200, top: 0, bottom: 20 }),
       classList: {
@@ -644,6 +645,7 @@ test('actual shared row rendering keeps group availability and binds Auto Review
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const makeNode = () => {
     const node = h.node();
+    node.append = (...children) => node.children.push(...children);
     node.querySelector = selector => {
       const name = selector.slice(1);
       const find = children => {
@@ -664,7 +666,8 @@ test('actual shared row rendering keeps group availability and binds Auto Review
   };
   const bindings = [];
   const context = {
-    state: { breakdown: 'session' }, rowWidth: () => 50, iconKindFor: () => ({ kind: 'dot' }),
+    state: { breakdown: 'session', settings: { showToolIcons: true, deviceId: 'imac' } }, rowWidth: () => 50, iconKindFor: () => ({ kind: 'dot' }),
+    deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
     setHoverMarqueeText: h.api.setText, overflowText: h.api, formatNumber: String, formatCost: String,
     rowNumberAnimations: new Map(),
     updateRowContext() {}, updateRowLive() {}, applyBarScale() {}, cancelRowNumberAnimation() {},
@@ -710,4 +713,33 @@ test('actual shared row rendering keeps group availability and binds Auto Review
     assert.equal(rendered.querySelector('.row-title').textContent, '2 models · 08:00');
     assert.equal(rendered.classList.contains('session-group-run'), true, 'existing tooltip repaint guard includes the target');
   }
+  const sourced = { name: 'Review', kind: 'session', client: 'codex', clientLabel: 'Codex',
+    subtitle: 'Codex · a · high', modelLabel: 'a', reasoningEffort: 'high', value: 500, cost: 2,
+    sourceDevice: { deviceId: 'macbook', name: 'MacBook', deviceKind: 'laptop' } };
+  const sourcedRow = makeRow();
+  for (const value of [500, 600]) {
+    context.update(sourcedRow, { ...sourced, value });
+    assert.equal(sourcedRow.querySelector('.row-subtitle').textContent, 'a · high');
+    assert.equal(sourcedRow.querySelector('.row-subtitle').querySelector('.device-kind-icon'), null);
+    assert.equal(sourcedRow.querySelector('.row-device').textContent, 'MacBook');
+    assert.equal(sourcedRow.querySelector('.row-device').classList.contains('hidden'), false);
+    assert.equal(sourcedRow.querySelector('.row-device').querySelector('.device-kind-icon').className,
+      'device-kind-icon device-kind-laptop');
+  }
+  for (const sourceDevice of [
+    { deviceId: 'imac', name: 'MacBook', deviceKind: 'desktop' }, undefined,
+    { name: 'Unknown device' }
+  ]) {
+    context.update(sourcedRow, { ...sourced, sourceDevice });
+    assert.equal(sourcedRow.querySelector('.row-device').classList.contains('hidden'), true);
+    assert.equal(sourcedRow.querySelector('.row-device').textContent, '');
+    assert.equal(sourcedRow.querySelector('.row-subtitle').textContent, 'a · high');
+  }
+  context.state.settings.showToolIcons = false;
+  context.update(sourcedRow, sourced);
+  assert.equal(sourcedRow.querySelector('.row-subtitle').textContent, 'Codex · a · high');
+  assert.equal(sourcedRow.querySelector('.row-device').textContent, 'MacBook');
+  delete context.state.settings.deviceId;
+  context.update(sourcedRow, sourced);
+  assert.equal(sourcedRow.querySelector('.row-device').classList.contains('hidden'), true);
 });

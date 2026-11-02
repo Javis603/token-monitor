@@ -1895,7 +1895,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   border-radius: 0;
 }
 .sync-device-row + .sync-device-row { box-shadow: inset 0 1px 0 rgba(var(--line-rgb), 0.06); }
-.sync-device-mark { justify-self: center; margin-top: 2px; width: 12px; height: 12px; color: var(--text); opacity: 0.82; }
+.sync-device-mark { grid-column: 1; grid-row: 1; justify-self: center; align-self: center; width: 12px; height: 12px; color: var(--text); opacity: 0.82; }
 .sync-device-mark-generic {
   width: 7px;
   height: 7px;
@@ -1930,6 +1930,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .sync-device-side {
   grid-column: 3;
   grid-row: 1;
+  align-self: center;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -3204,6 +3205,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .select-control-option-text { display: grid; min-width: 0; gap: 3px; }
 .select-control-option-label { overflow-wrap: anywhere; }
 .select-control-description { color: var(--muted); font-size: 0.59375rem; line-height: 1.45; overflow-wrap: anywhere; }
+.select-control-annotation { margin-left: auto; align-self: center; color: var(--muted); font-size: 0.59375rem; white-space: nowrap; }
 .select-control-option[data-highlighted="true"] { background: rgba(var(--overlay-rgb), 0.07); }
 .select-control-option[data-selected="true"] { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
 .select-control-option[aria-disabled="true"] { opacity: 0.5; cursor: default; }
@@ -4376,12 +4378,12 @@ html.is-windows .settings-panel select option {
   min-width: 0;
   gap: 2px;
 }
-.row-title, .row-subtitle, .row-activity, .row-detail {
+.row-title, .row-subtitle, .row-activity, .row-device, .row-detail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.row-subtitle, .row-activity, .row-detail {
+.row-subtitle, .row-activity, .row-device, .row-detail {
   color: var(--muted);
   font-size: 0.625rem;
 }
@@ -4400,6 +4402,44 @@ html.is-windows .settings-panel select option {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.device-kind-icon,
+.device-kind-icon.limit-detail-tooltip-wrap {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  vertical-align: -2px;
+  background-color: currentColor;
+  -webkit-mask: var(--device-kind-mask) center / contain no-repeat;
+  mask: var(--device-kind-mask) center / contain no-repeat;
+}
+.row-device .device-kind-icon { margin-right: 4px; }
+.device-kind-computer, .device-kind-desktop { --device-kind-mask: url("icons/views/device.svg"); }
+.device-kind-laptop { --device-kind-mask: url("icons/devices/laptop.svg"); }
+.device-kind-mini { --device-kind-mask: url("icons/devices/mini.svg"); }
+.device-kind-workstation { --device-kind-mask: url("icons/devices/workstation.svg"); }
+.device-kind-server { --device-kind-mask: url("icons/devices/server.svg"); }
+.device-kind-cloud { --device-kind-mask: url("icons/devices/cloud.svg"); }
+.sync-device-icon-control { flex: 0 0 auto; margin-left: auto; }
+.settings-panel .sync-device-icon-control .select-control-trigger {
+  width: 36px;
+  min-height: 24px;
+  gap: 3px;
+  padding: 4px;
+  font-size: 0.59375rem;
+  border-color: transparent;
+  background: transparent;
+}
+.sync-device-icon-control .select-control-value {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.sync-device-icon-control .select-control-arrow { margin: -3px 0 0; }
+.device-icon-local-control { flex: 0 1 auto; max-width: 65%; }
+.settings-panel .device-icon-local-control .select-control-trigger { min-height: 28px; padding: 5px 8px; font-size: 0.625rem; }
 .session-subagent-count {
   flex: 0 0 auto;
   white-space: pre;
@@ -4579,7 +4619,8 @@ html.is-windows .settings-panel select option {
   gap: 1px;
 }
 .shell.session-mode .row-subtitle,
-.shell.session-mode .row-activity {
+.shell.session-mode .row-activity,
+.shell.session-mode .row-device {
   font-size: 0.625rem;
   line-height: 1.2;
 }
@@ -4591,18 +4632,21 @@ html.is-windows .settings-panel select option {
 .shell.session-mode .row-title,
 .shell.session-mode .row-subtitle,
 .shell.session-mode .row-activity,
+.shell.session-mode .row-device,
 .shell.session-mode .row-detail {
   scrollbar-width: none;
 }
 .shell.session-mode .row-title::-webkit-scrollbar,
 .shell.session-mode .row-subtitle::-webkit-scrollbar,
 .shell.session-mode .row-activity::-webkit-scrollbar,
+.shell.session-mode .row-device::-webkit-scrollbar,
 .shell.session-mode .row-detail::-webkit-scrollbar {
   display: none;
 }
 .shell.session-mode .row-title.is-hover-scrolling,
 .shell.session-mode .row-subtitle.is-hover-scrolling,
 .shell.session-mode .row-activity.is-hover-scrolling,
+.shell.session-mode .row-device.is-hover-scrolling,
 .shell.session-mode .row-detail.is-hover-scrolling {
   text-overflow: clip;
 }

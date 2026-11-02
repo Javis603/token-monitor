@@ -197,6 +197,7 @@ const {
   toolIconsEnabled
 } = breakdownRenderPolicyApi;
 const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
+const deviceIconsApi = window.TokenMonitorDeviceIcons;
 const toolDetailsApi = window.TokenMonitorToolDetails;
 const usageAttributionRowsApi = window.TokenMonitorUsageAttributionRows;
 const projectRowsApi = window.TokenMonitorProjectRows;
@@ -483,6 +484,8 @@ Object.assign(els, {
   syncConnectionCancel: document.getElementById('syncConnectionCancel'),
   syncConnectionSaveError: document.getElementById('syncConnectionSaveError'),
   syncDeviceSettings: document.getElementById('syncDeviceSettings'),
+  deviceIconInput: document.getElementById('deviceIconInput'),
+  deviceIconLocalRow: document.getElementById('deviceIconLocalRow'),
   syncUploadIntervalRow: document.getElementById('syncUploadIntervalRow'),
   hubHostFields: document.getElementById('hubHostFields'),
   hubPortInput: document.getElementById('hubPortInput'),
@@ -647,6 +650,9 @@ const syncModeSelect = window.TokenMonitorSelectControl?.enhance(els.hubModeOpti
   getOptionMeta: option => ({ description: t(SYNC_MODE_DESCRIPTIONS[option.value]), icon: syncModeIcons[option.value] })
 });
 window.addEventListener('unload', () => syncModeSelect?.destroy(), { once: true });
+window.addEventListener('unload', () => {
+  for (const select of document.querySelectorAll('.device-icon-select, #deviceIconInput')) deviceIconsApi.destroyDeviceIconSelect(select);
+}, { once: true });
 
 function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
@@ -2359,7 +2365,7 @@ function rowTemplate(rowData) {
   // `.row-live` is absolutely positioned over the mark's corner and `.row-context`
   // is the third metrics line; both stay empty and hidden on every row that is
   // not a live session, so the shared template keeps building one shape.
-  row.innerHTML = `<div class="row-head"><div class="row-name"><span class="row-mark"></span><span class="row-live" aria-hidden="true">${rowLiveMarkup}</span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div><div class="row-context hidden"><span class="row-context-meter"><span class="row-context-fill"></span></span><span class="row-context-value"></span></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>`;
+  row.innerHTML = `<div class="row-head"><div class="row-name"><span class="row-mark"></span><span class="row-live" aria-hidden="true">${rowLiveMarkup}</span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-device hidden"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div><div class="row-context hidden"><span class="row-context-meter"><span class="row-context-fill"></span></span><span class="row-context-value"></span></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>`;
   row.querySelector('.row-title').textContent = name;
   row.querySelector('.row-subtitle').textContent = subtitle || '';
   row.querySelector('.row-activity').textContent = activity || '';
@@ -2367,6 +2373,7 @@ function rowTemplate(rowData) {
   bindHoverMarquee(row.querySelector('.row-title'));
   bindHoverMarquee(row.querySelector('.row-subtitle'));
   bindHoverMarquee(row.querySelector('.row-activity'));
+  bindHoverMarquee(row.querySelector('.row-device'));
   bindHoverMarquee(row.querySelector('.row-detail'));
   return row;
 }
@@ -2752,7 +2759,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2806,10 +2813,15 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
       content.replaceChildren(subtitleTextEl, count);
       bindHoverMarquee(subtitleTextEl);
     }
-    subtitleEl.querySelector('.session-subagent-count').textContent = `${subtitleIdentity ? ' · ' : ''}${subagentCountLabel}`;
+  }
+  const subtitleText = sessionRowsApi.sessionSubtitleForDisplay(
+    { client, clientLabel }, splitSubtitle ? subtitleIdentity || '' : subtitle,
+    { keepClient: state.settings?.showToolIcons !== true }
+  );
+  if (splitSubtitle) {
+    subtitleEl.querySelector('.session-subagent-count').textContent = `${subtitleText ? ' · ' : ''}${subagentCountLabel}`;
     overflowText.update(subtitleEl);
   }
-  const subtitleText = splitSubtitle ? subtitleIdentity || '' : subtitle;
   // A multi-model session abbreviates to "N models"; that label opens the same
   // tooltip the context gauge carries, one row per model with its tokens and
   // share of the session. A titled row prints the label inside the
@@ -2843,12 +2855,29 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   if (!subtitleShowsModel && !titleModelLabel && hasMetadata && metadataLabel && String(name || '').endsWith(metadataLabel)) {
     replaceMetadata(titleEl, name, name.length - metadataLabel.length);
   }
-  subtitleEl.classList.toggle('hidden', !subtitle);
+  subtitleEl.classList.toggle('hidden', !subtitleText && !subagentCountLabel);
   // The activity line carries time, calls, cache hit and tok/s; a narrow window
   // fades and scrolls it on hover the way the title does rather than wrapping.
   const activityEl = row.querySelector('.row-activity');
   setHoverMarqueeText(activityEl, activity);
   activityEl.classList.toggle('hidden', !activity);
+  // Local sessions keep their usual density; only a confirmed remote source
+  // adds a separate line below the session's activity.
+  const deviceEl = row.querySelector('.row-device');
+  const remoteDevice = state.settings?.deviceId && sourceDevice?.deviceId
+    && sourceDevice.deviceId !== state.settings.deviceId && sourceDevice.name ? sourceDevice : null;
+  setHoverMarqueeText(deviceEl, remoteDevice?.name || '');
+  deviceEl.classList.toggle('hidden', !remoteDevice);
+  if (remoteDevice) {
+    const deviceKind = deviceIconsApi.deviceIconKind(state.settings, remoteDevice);
+    const content = deviceEl.querySelector('.overflow-text-content') || deviceEl;
+    const existingIcon = content.querySelector('.device-kind-icon');
+    const icon = existingIcon || deviceIconsApi.deviceIconNode(document, deviceKind);
+    icon.className = `device-kind-icon device-kind-${deviceKind}`;
+    limitWindowsView.setDetailTooltip(icon, [{ full: `${remoteDevice.name} · ${t(`devices.kind.${deviceKind}`)}` }]);
+    if (!existingIcon) content.prepend(icon);
+    overflowText.update(deviceEl);
+  }
   // A titled session already has name, client/model and activity lines. Move
   // its ID into Details, but keep the ID when only two lines remain so untitled
   // sessions can still be distinguished (including when titles are disabled).
@@ -3138,6 +3167,8 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     currencyRatesEffective: state.settings?.currencyRatesEffective || null,
     locale: currentLocale(),
     showToolIcons: toolIconsEnabled(state.settings?.showToolIcons),
+    deviceIconOverrides: state.settings?.deviceIconOverrides,
+    deviceIconScope: state.settings?.deviceIconScope,
     // The context gauge carries its own Remaining/Used preference, so flipping
     // either it or the limits meters has to invalidate these rows.
     showLimitUsed: state.settings?.showLimitUsed === true,
@@ -3338,6 +3369,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 }
 
 function sessionPresentationOptions() {
+  const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
     clientLabels,
     clientColors,
@@ -3350,6 +3382,8 @@ function sessionPresentationOptions() {
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
+    localSourceDevice: localDevice ? { deviceId: localDevice.deviceId,
+      name: deviceBreakdownApi.deviceLabel(localDevice), platform: localDevice.platform || '', deviceKind: localDevice.deviceKind || 'computer' } : undefined,
     subagents: {
       countLabel: (count) => t('sessions.subagentCount', { count }),
       unattributedLabel: t('dashboard.tooltip.unclassified')
@@ -9147,6 +9181,8 @@ function renderSyncPanel() {
   const hubMode = state.settings?.hubMode || 'local';
   const shared = SHARED_SYNC_MODES.has(hubMode)
     && (hubMode !== 'icloud' || state.appInfo?.platform === 'darwin');
+  if (els.deviceIconLocalRow) els.deviceIconLocalRow.hidden = shared && state.mode === 'sync'
+    && state.stats?.devices?.some(device => device.deviceId === state.settings?.deviceId);
   els.syncDevicePanel.hidden = !shared;
   if (!shared) {
     syncPanelRows = [];
@@ -9240,6 +9276,7 @@ function renderSyncPanelDevices(rows) {
     state.settings?.hubHostPort, state.settings?.hubHostSecret
   ]);
   if (scope !== syncPanelListScope) {
+    for (const select of list.querySelectorAll('.device-icon-select')) deviceIconsApi.destroyDeviceIconSelect(select);
     for (const remove of list.querySelectorAll('.device-delete-button')) resetDeviceDeleteConfirmation(remove);
     list.replaceChildren();
     syncPanelListScope = scope;
@@ -9248,6 +9285,8 @@ function renderSyncPanelDevices(rows) {
   const wanted = new Set(rows.map(row => row.key));
   for (const [key, item] of existing) {
     if (wanted.has(key)) continue;
+    const select = item.querySelector('.device-icon-select');
+    if (select) deviceIconsApi.destroyDeviceIconSelect(select);
     const remove = item.querySelector('.device-delete-button');
     if (remove) resetDeviceDeleteConfirmation(remove);
     item.remove();
@@ -9313,7 +9352,9 @@ function syncDeviceRow(row) {
 }
 
 function updateSyncDeviceRow(item, row) {
+  const iconKind = deviceIconsApi.deviceIconKind(state.settings, { ...row, deviceId: row.key });
   const signature = JSON.stringify([
+    iconKind, row.deviceKind, deviceIconsApi.deviceIconOverride(state.settings, row.key), state.settings?.deviceIconScope,
     currentLocale(), row.name, row.hostname, row.platform, row.osName, row.osVersion,
     row.agentVersion, row.agentRuntime, row.isLocal, row.stale, row.canRemove,
     devicesBeingDeleted.has(row.key), Boolean(window.tokenMonitor.deleteDevice)
@@ -9342,6 +9383,29 @@ function updateSyncDeviceRow(item, row) {
     [deviceRuntimeLabel(row.agentRuntime), row.agentVersion ? `v${row.agentVersion}` : ''].filter(Boolean).join(' ')
   ].filter(Boolean).join(' · ');
   const side = item.querySelector('.sync-device-side');
+  let iconSelect = item.querySelector('.device-icon-select');
+  if (!iconSelect) {
+    const control = document.createElement('span');
+    control.className = 'sync-device-icon-control';
+    iconSelect = document.createElement('select');
+    iconSelect.className = 'device-icon-select';
+    iconSelect.addEventListener('change', async () => {
+      iconSelect.disabled = true;
+      deviceIconsApi.syncDeviceIconSelect(iconSelect);
+      try { await saveSettings(deviceIconsApi.deviceIconPatch(state.settings, row.key, iconSelect.value, iconSelect.dataset.detectedKind)); }
+      finally {
+        iconSelect.disabled = false;
+        iconSelect.value = deviceIconsApi.deviceIconKind(state.settings, { deviceId: row.key, deviceKind: iconSelect.dataset.detectedKind });
+        deviceIconsApi.syncDeviceIconSelect(iconSelect);
+      }
+    });
+    control.append(iconSelect);
+    title.append(control);
+  }
+  iconSelect.setAttribute('aria-label', `${t('devices.icon.label')} · ${row.name}`);
+  deviceIconsApi.populateDeviceIconSelect(iconSelect, t, row.deviceKind);
+  iconSelect.value = iconKind;
+  deviceIconsApi.syncDeviceIconSelect(iconSelect);
   let remove = side.querySelector('.device-delete-button');
   if (row.canRemove && row.stale && !row.isLocal && window.tokenMonitor.deleteDevice) {
     if (!remove) {
@@ -9658,6 +9722,13 @@ function syncHubDraftFields() {
   }
   syncHubConnectionUi();
   syncHubSaveButton();
+  const iconSelect = els.deviceIconInput;
+  if (iconSelect && !iconSelect.disabled) {
+    const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
+    deviceIconsApi.populateDeviceIconSelect(iconSelect, t, localDevice?.deviceKind);
+    iconSelect.value = deviceIconsApi.deviceIconKind(state.settings, { deviceId: state.settings?.deviceId, deviceKind: localDevice?.deviceKind });
+    deviceIconsApi.syncDeviceIconSelect(iconSelect);
+  }
 }
 
 // Keep this aligned with main's normalizeHubPort: dirty state must describe
@@ -13790,6 +13861,13 @@ for (const [field, inputId] of HUB_DRAFT_FIELDS) {
 }
 els.syncUploadIntervalInput?.addEventListener('change', async () => {
   await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });
+});
+els.deviceIconInput?.addEventListener('change', async event => {
+  const select = event.currentTarget;
+  select.disabled = true;
+  deviceIconsApi.syncDeviceIconSelect(select);
+  try { await saveSettings(deviceIconsApi.deviceIconPatch(state.settings, state.settings.deviceId, select.value, select.dataset.detectedKind)); }
+  finally { select.disabled = false; syncHubDraftFields(); }
 });
 els.collectionCadenceInput?.addEventListener('change', async () => {
   const value = els.collectionCadenceInput.value;

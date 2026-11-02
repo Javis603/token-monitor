@@ -1594,6 +1594,7 @@
                 </div>
                 <div id="syncConnectionSaveError" class="hub-status error" role="alert" hidden></div>
               </div>
+              <div id="deviceIconLocalRow" class="settings-item"><label for="deviceIconInput" class="settings-item-text" data-i18n="devices.icon.thisDevice">This device’s icon</label><span class="device-icon-local-control"><select id="deviceIconInput"></select></span></div>
               <label id="syncUploadIntervalRow" class="sync-upload-interval-row settings-item" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
                 <select id="syncUploadIntervalInput">
                   <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
@@ -1808,9 +1809,11 @@
     <script src="statsRenderScheduler.js"></script>
     <script src="allTimeSessions.js"></script>
     <script src="hubBuildPresentation.js"></script>
+    <script src="../../shared/deviceKind.js"></script>
+    <script src="selectControl.js"></script>
+    <script src="deviceIcons.js"></script>
     <script src="deviceBreakdown.js"></script>
     <script src="syncDevicePanel.js"></script>
-    <script src="selectControl.js"></script>
     <script src="usageAttributionRows.js"></script>
     <script src="toolDetails.js"></script>
     <script src="../../shared/projectKey.js"></script>
