@@ -22,14 +22,37 @@ const LEGACY_BASIC = [
 
 const V2_USAGE_SUMMARY = 'Plan: KIRO POWER | 1 usage breakdowns';
 
-function completedKiroProcess(output) {
+// kiro-cli 2.37.0 `chat --no-interactive --agent-engine=v2 /usage`.
+const V2_ESTIMATED_USAGE = [
+  'Estimated Usage | resets on 2026-12-01 | KIRO STUDENT',
+  'Credits (16.27 of 1000 covered in plan), 1.6%',
+  'Manage your plan at https://app.kiro.dev/account/usage'
+].join('\n');
+
+// kiro-cli 2.37.0 with `chat.agentEngine = v3`: `/usage` reaches the model.
+const V3_MODEL_REPLY = [
+  "I can't show usage or quota details \u2014 that's not something I have access to.",
+  '',
+  "If you're looking for your Kiro usage or billing info, you can check it through the Kiro account settings or the usage view in the IDE panel. Want help with anything else?"
+].join('\n');
+
+const UNKNOWN_AGENT_ENGINE_FLAG = [
+  "error: unexpected argument '--agent-engine' found",
+  '',
+  "  tip: to pass '--agent-engine' as a value, use '-- --agent-engine'",
+  '',
+  'Usage: kiro-cli chat [OPTIONS] [INPUT]'
+].join('\n');
+
+function completedKiroProcess(output, stderr = '', exitCode = 0) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.kill = () => {};
   process.nextTick(() => {
     child.stdout.emit('data', output);
-    child.emit('close', 0);
+    if (stderr) child.stderr.emit('data', stderr);
+    child.emit('close', exitCode);
   });
   return child;
 }
@@ -317,7 +340,7 @@ test('runKiroUsageCli retries a v2 plan summary through the legacy v1 UI', async
 
   assert.equal(output, LEGACY_BASIC);
   assert.deepEqual(calls, [
-    ['chat', '--no-interactive', '/usage'],
+    ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
     ['chat', '--no-interactive', '--agent-engine=v1', '--legacy-ui', '/usage']
   ]);
 });
@@ -332,5 +355,145 @@ test('runKiroUsageCli keeps a complete default-engine report without retrying', 
   });
 
   assert.equal(output, LEGACY_BASIC);
-  assert.deepEqual(calls, [['chat', '--no-interactive', '/usage']]);
+  assert.deepEqual(calls, [['chat', '--no-interactive', '--agent-engine=v2', '/usage']]);
+});
+
+test('runKiroUsageCli pins the v2 engine so a v3 default never sends /usage to the model', async () => {
+  const calls = [];
+  const output = await runKiroUsageCli({
+    spawn: (_command, args) => {
+      calls.push(args);
+      // Model a CLI whose configured default is v3: only an explicit v2/v1 pin
+      // yields the slash-command report.
+      return completedKiroProcess(args.some((arg) => arg.startsWith('--agent-engine=')) ? V2_ESTIMATED_USAGE : V3_MODEL_REPLY);
+    }
+  });
+
+  assert.equal(output, V2_ESTIMATED_USAGE);
+  assert.deepEqual(calls, [['chat', '--no-interactive', '--agent-engine=v2', '/usage']]);
+});
+
+test('runKiroUsageCli falls back to the unpinned command on a CLI without --agent-engine', async () => {
+  const calls = [];
+  const output = await runKiroUsageCli({
+    spawn: (_command, args) => {
+      calls.push(args);
+      return calls.length === 1
+        ? completedKiroProcess(UNKNOWN_AGENT_ENGINE_FLAG, '', 2)
+        : completedKiroProcess(LEGACY_BASIC);
+    }
+  });
+
+  assert.equal(output, LEGACY_BASIC);
+  assert.deepEqual(calls, [
+    ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
+    ['chat', '--no-interactive', '/usage']
+  ]);
+});
+
+test('runKiroUsageCli falls back when a wrapper prints to stdout and the flag error goes to stderr', async () => {
+  const calls = [];
+  const output = await runKiroUsageCli({
+    spawn: (_command, args) => {
+      calls.push(args);
+      return calls.length === 1
+        ? completedKiroProcess('kiro wrapper v1\n', UNKNOWN_AGENT_ENGINE_FLAG, 2)
+        : completedKiroProcess(LEGACY_BASIC);
+    }
+  });
+
+  assert.equal(output, LEGACY_BASIC);
+  assert.deepEqual(calls, [
+    ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
+    ['chat', '--no-interactive', '/usage']
+  ]);
+});
+
+test('runKiroUsageCli retries explicit unknown-option errors', async () => {
+  for (const error of [
+    "error: unrecognized option '--agent-engine'",
+    'error: unknown option "--agent-engine=v2"'
+  ]) {
+    const calls = [];
+    const output = await runKiroUsageCli({
+      spawn: (_command, args) => {
+        calls.push(args);
+        return calls.length === 1
+          ? completedKiroProcess('', error, 2)
+          : completedKiroProcess(LEGACY_BASIC);
+      }
+    });
+    assert.equal(output, LEGACY_BASIC);
+    assert.deepEqual(calls, [
+      ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
+      ['chat', '--no-interactive', '/usage']
+    ]);
+  }
+});
+
+test('fetchKiroLimits retries when a wrapper adds a conflicting legacy UI flag', async () => {
+  for (const error of [
+    '--legacy-ui cannot be used with --agent-engine=v2',
+    'error: --legacy-ui cannot be used with --agent-engine=v2',
+    'Conflicting options: --legacy-ui cannot be used with --agent-engine=v2',
+    'error: Conflicting options: --legacy-ui cannot be used with --agent-engine=v2. Use --agent-engine=v1 or remove --legacy-ui.'
+  ]) {
+    const calls = [];
+    const provider = await fetchKiroLimits({}, {
+      env: { TOKEN_MONITOR_KIRO_COMMAND: '/custom/kiro-wrapper' },
+      spawn: (command, args) => {
+        assert.equal(command, '/custom/kiro-wrapper');
+        calls.push(args);
+        return calls.length === 1
+          ? completedKiroProcess('kiro wrapper\n', `\x1b[31m${error}\x1b[0m\n`, 1)
+          : completedKiroProcess(LEGACY_BASIC);
+      }
+    });
+    assert.equal(provider.status, 'ok');
+    assert.equal(provider.windows[0].used, 12.5);
+    assert.deepEqual(calls, [
+      ['chat', '--no-interactive', '--agent-engine=v2', '/usage'],
+      ['chat', '--no-interactive', '/usage']
+    ]);
+  }
+});
+
+test('runKiroUsageCli only unpins after an explicit failed engine rejection', async () => {
+  for (const { stderr, exitCode } of [
+    { stderr: UNKNOWN_AGENT_ENGINE_FLAG, exitCode: 0 },
+    { stderr: `wrapper diagnostic: ${UNKNOWN_AGENT_ENGINE_FLAG}`, exitCode: 2 },
+    { stderr: "error: unexpected argument '--agent-engine-extra' found", exitCode: 2 },
+    { stderr: 'error: failed to initialize auth portal', exitCode: 1 },
+    { stderr: 'error: Conflicting options: --legacy-ui cannot be used with --agent-engine=v2.', exitCode: 0 },
+    { stderr: 'error: Conflicting options: --legacy-ui cannot be used with --agent-engine=v20.', exitCode: 1 },
+    { stderr: 'wrapper diagnostic: Conflicting options: --legacy-ui cannot be used with --agent-engine=v2.', exitCode: 1 }
+  ]) {
+    const calls = [];
+    const output = await runKiroUsageCli({
+      spawn: (_command, args) => {
+        calls.push(args);
+        return calls.length === 1
+          ? completedKiroProcess(V2_ESTIMATED_USAGE, stderr, exitCode)
+          : completedKiroProcess(V3_MODEL_REPLY);
+      }
+    });
+    assert.equal(output, V2_ESTIMATED_USAGE);
+    assert.deepEqual(calls, [['chat', '--no-interactive', '--agent-engine=v2', '/usage']]);
+  }
+});
+
+test('fetchKiroLimits reads the kiro-cli 2.37 v2 estimated-usage report', async () => {
+  const provider = await fetchKiroLimits({}, {
+    runKiroUsageCli: async () => V2_ESTIMATED_USAGE,
+    now: () => Date.parse('2026-11-01T12:00:00Z')
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.accountLabel, 'Student');
+  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows[0].label, 'Credits');
+  assert.equal(provider.windows[0].used, 16.27);
+  assert.equal(provider.windows[0].limit, 1000);
+  assert.ok(Math.abs(provider.windows[0].usedPercent - 1.627) < 1e-9);
+  assert.equal(provider.windows[0].resetsAt, new Date('2026-12-01T00:00:00').toISOString());
 });
