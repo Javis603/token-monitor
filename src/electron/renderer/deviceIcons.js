@@ -8,7 +8,7 @@
   if (root) root.TokenMonitorDeviceIcons = api;
 })(typeof window !== 'undefined' ? window : null, function createDeviceIconsApi({ DEVICE_KINDS, normalizeDeviceKind }, selectControl) {
   const controls = new WeakMap();
-  const choices = DEVICE_KINDS.filter(kind => kind !== 'computer');
+  const choices = ['desktop', 'laptop', 'mini', 'workstation', 'linux', 'server', 'cloud'];
   const icons = Object.fromEntries(DEVICE_KINDS.map(kind => [kind, document => deviceIconNode(document, kind)]));
   function normalizeDeviceIconOverrides(input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
