@@ -22,8 +22,9 @@ const MAX_METADATA_LINE_BYTES = 64 * 1024;
 const LONG_LINE_HEAD_BYTES = 64 * 1024;
 const LONG_LINE_TAIL_BYTES = 8 * 1024;
 const titleCache = new Map();
-// Provenance of a Desktop fallback title in the shared catalog-title ledger.
+// Provenance of the winning title in the shared catalog-title ledger.
 const DESKTOP_TITLE_SOURCE = 'claude-desktop';
+const T3_TITLE_SOURCE = 't3';
 const MODEL_VERSION_END = '(?:$|[-@:\\[])';
 const CLAUDE_NATIVE_ONE_MILLION_MODEL = new RegExp(
   `^claude-(?:opus-(?:5${MODEL_VERSION_END}|4-(?:7|8)${MODEL_VERSION_END})`
@@ -745,6 +746,10 @@ function resolveSessionMetadata(sessionIds, context) {
       ...(transcriptMeta || cached || {}),
       title: t3Title,
       t3Title,
+      // Replace Desktop provenance, so a later T3 read miss still reuses it.
+      ...(transcriptMeta?.catalogTitleSource === DESKTOP_TITLE_SOURCE
+        || deps.catalogTitleSources?.[`claude:${sessionId}`] === DESKTOP_TITLE_SOURCE
+        ? { catalogTitleSource: T3_TITLE_SOURCE } : {}),
       ...(transcriptMeta?.title ? { titleFallback: transcriptMeta.title } : {}),
       ...(!transcriptMeta ? { titleOnly: true } : {})
     });
