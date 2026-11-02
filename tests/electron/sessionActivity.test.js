@@ -70,7 +70,8 @@ test('a late TOTAL load reapplies title policy after restoring a previously visi
   assert.equal(state.stats.periods.allTime.sessions.old.totalTokens, 500);
 });
 
-test('renderer activity survives late detail loads on the same accounting snapshot and respects title policy and source changes', () => {
+test('renderer activity survives late detail loads on the same accounting snapshot and respects title policy and source changes', (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-10-09T00:01:00Z'));
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const start = source.indexOf('let localSessionActivity = null;');
   const end = source.indexOf('\nfunction setRendererSettings(', start);

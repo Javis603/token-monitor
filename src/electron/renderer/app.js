@@ -4874,6 +4874,7 @@ function renderLimits() {
       state.settings?.showCodexAdditionalLimits !== false,
       state.settings?.limitProviderHiddenItems || {},
       state.settings?.currency || '',
+      state.settings?.compactTokenUnits || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
       state.settings?.codexManagedAccounts || [],
@@ -18734,7 +18735,7 @@ function setupCursorAccountUI() {
   setCursorManualExpanded(false);
 
   document.getElementById('cursorLoginButton').addEventListener('click', () => {
-    window.tokenMonitor.openExternal('https://cursor.com/dashboard');
+    window.tokenMonitor.openExternal('https://cursor.com');
   });
 
   const cursorManualSubmit = document.getElementById('cursorManualSubmit');

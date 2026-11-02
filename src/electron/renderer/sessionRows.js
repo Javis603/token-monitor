@@ -907,6 +907,7 @@
     handleBreakdownRowKeydown,
     sessionBreakdownIncomplete,
     sessionCacheHitPercent,
+    cacheHitLabel,
     sessionIdLabel,
     sessionDetailIdLabel,
     sessionTitleForDisplay,

@@ -1925,7 +1925,7 @@ test('Claude OAuth usage maps cedar_ember reset grants into resetCredits', () =>
         }
       ]
     }
-  }));
+  }), { now: Date.parse('2030-01-02T00:00:00Z') });
 
   const resetCredits = provider.resetCredits;
   assert.equal(resetCredits.availableCount, 3);
@@ -1968,7 +1968,7 @@ test('Claude OAuth usage drops spent and lapsed reset grants', () => {
         }
       ]
     }
-  }));
+  }), { now: Date.parse('2030-01-02T00:00:00Z') });
 
   assert.equal(provider.resetCredits, null);
 });

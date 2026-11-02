@@ -462,7 +462,8 @@
       if (!wrap.isConnected) return;
       tooltip.showPopover?.();
       // Measured after opening: a closed popover has no box to measure.
-      tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top < tooltip.offsetHeight + 8);
+      const top = deps.tooltipTop?.() ?? 0;
+      tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top - top < tooltip.offsetHeight + 8);
       positionCenteredDetailTooltip(tooltip);
     };
     const close = () => {
@@ -1272,6 +1273,7 @@
       for (const billing of billingWindows) {
         const node = limitWindowNode(providerWindowLabel(provider, billing), billing, color, 0.68);
         node.classList.add('limit-window-wide');
+        if (!billing.resetsAt && !billing.resetDescription) node.classList.add('limit-window-no-reset');
         windows.append(node);
       }
     } else if (provider.provider === 'zed') {
@@ -1728,6 +1730,22 @@
       if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
       if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
+        // Muse supplies the token balance as display text; keep it ahead of the
+        // monetary fallback without changing the underlying credits reading.
+        if (provider.provider === 'muse' && creditsWindow.resetDescription?.endsWith(' tokens left')) {
+          const label = 'Additional tokens';
+          const tokenText = creditsWindow.resetDescription.replace(/ tokens left$/u, '');
+          const amount = /^(\d+(?:\.\d+)?)([KMB])?$/iu.exec(tokenText);
+          // Convert the displayed abbreviation only for unit formatting; this
+          // rounded website value never becomes a measured token count.
+          const tokenCount = amount && Number(amount[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[amount[2]?.toUpperCase()] || 1);
+          windows.append(tagUsageItem(limitNoteRowNode({
+            label,
+            summary: amount ? formatCompact(tokenCount) : tokenText,
+            ariaParts: [creditsWindow.resetDescription]
+          }), usageItems.limitUsageItemId(creditsWindow), label));
+          continue;
+        }
         const amount = creditsAmount(provider, creditsWindow);
         if (amount === null) continue;
         const balanceNode = limitWindowNode(
