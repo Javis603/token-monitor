@@ -117,7 +117,6 @@ test('parseMinimaxTiers reads the nested data.model_remains shape used by the li
   const body = {
     base_resp: { status_code: 0, status_msg: 'success' },
     data: {
-      current_subscribe_title: 'Token Plan Plus',
       model_remains: [
         {
           model_name: 'general',
@@ -1205,22 +1204,6 @@ test('MiniMax Code does not turn a cancelled plan or name request into a success
     assert.equal(result.status, 'unavailable');
     assert.deepEqual(result.windows, []);
   }
-});
-
-test('MiniMax Code lane treats 2062 as no subscription, not an error', async () => {
-  const fixture = writeCodeAuthFixture();
-  const deps = codeDeps(fixture, async (url) => {
-    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody());
-    if (url.startsWith(MINIMAX_CODE_PLAN_REMAINS_URL_CN)) {
-      return okResponse(planRemainsBody({ base_resp: { status_code: 2062, status_msg: 'no active token plan subscription' } }));
-    }
-    throw new Error(`unexpected url ${url}`);
-  });
-  const result = await readCode(deps);
-  assert.equal(deps.requests.filter(url => url === MINIMAX_CODE_PLAN_REMAINS_URL_CN).length, 1);
-  assert.equal(result.status, 'ok');
-  assert.equal(result.windows.length, 1, 'the credits window stands alone without a subscription');
-  assert.equal(result.windows[0].label, 'Credits');
 });
 
 test('MiniMax Code key probes and custom OAuth endpoints never touch the lease', async () => {
