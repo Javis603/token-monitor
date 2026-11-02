@@ -626,6 +626,6 @@ module.exports = {
   hasDisjointReasoning, num, normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
   normalizeTokscaleModelComponentSummary, sumOutputTokens, sumTokens,
   parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
-  computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
+  computeStreaks, monthlyRollup, normalizeHistory, mergeHistories, mergeDailyMaps,
   coerceHistory, historyPreview, historyRevision, deviceHistoryRevision
 };

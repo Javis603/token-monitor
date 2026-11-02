@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { tokscaleHomeDir } = require('../../tokscaleConfig');
+const { cursorLifecycleBusy } = require('./lifecycle');
 
 // Tokscale's Cursor JSON cache holds every usage event with its millisecond
 // timestamp, its tokens and the conversation it belongs to, which is exactly
@@ -78,6 +79,10 @@ function createCursorUsageEventIndex(options = {}) {
   let cached = null;
 
   return function readCursorUsageEvents() {
+    // Sync/logout may replace the cache, including a non-atomic Windows copy.
+    // Archive repair is synchronous: retain the last complete index instead
+    // of observing a partial rewrite and permanently linking a legacy row.
+    if (cursorLifecycleBusy()) return cached;
     const files = cacheFiles(options.cacheDir || cursorCacheDir(options), fsImpl);
     const signature = files.map((file) => file.signature).join('\n');
     if (cached?.signature === signature) return cached;
