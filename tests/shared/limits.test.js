@@ -2075,22 +2075,25 @@ test('Muse CLI and Web retain stale last-good independently when the other sourc
   }
 });
 
-test('MiniMax sources retain stale quota across devices independently of a fresh sibling', () => {
+test('MiniMax sync retains stale accounts independently of refreshed sources and siblings', () => {
   const now = Date.parse('2026-11-01T10:30:00Z');
-  for (const staleSource of ['api', 'oauth']) {
+  for (const [staleSource, freshSource] of [['api', 'oauth'], ['oauth', 'api'], ['api', 'api'], ['oauth', 'oauth']]) {
     for (const freshStatus of ['ok', 'notConfigured']) {
-      const devices = ['api', 'oauth'].map(source => ({ deviceId: source, limits: { refreshMs: 60_000, providers: [{
-        provider: 'minimax', source, status: source === staleSource ? 'unavailable' : freshStatus,
-        accountKey: source !== staleSource && freshStatus === 'notConfigured' ? '' : hashKey('minimax', source),
-        updatedAt: new Date(now - (source === staleSource ? 600_000 : 0)).toISOString(),
-        windows: source !== staleSource && freshStatus === 'notConfigured' ? [] : [{ kind: 'weekly', usedPercent: 35 }]
+      // Each device still has just one configured credential per source.
+      const devices = [staleSource, freshSource].map((source, index) => ({ deviceId: String(index), limits: { refreshMs: 60_000, providers: [{
+        provider: 'minimax', source, status: index === 0 ? 'unavailable' : freshStatus,
+        accountKey: index === 1 && freshStatus === 'notConfigured' ? '' : hashKey('minimax', String(index)),
+        updatedAt: new Date(now - (index === 0 ? 600_000 : 0)).toISOString(),
+        windows: index === 1 && freshStatus === 'notConfigured' ? [] : [{ kind: 'weekly', usedPercent: 35 }]
       }] } }));
       for (const aggregate of [aggregateLimits, require('../../worker/src/shared/limits/core').aggregateLimits]) {
-        const retained = aggregate(devices, 0, now).providers.find(row => row.source === staleSource);
+        const rows = aggregate(devices, 0, now).providers;
+        const retained = rows.find(row => row.sourceDeviceId === '0');
         assert.ok(retained, `${staleSource} quota survives a fresh ${freshStatus} sibling`);
         assert.equal(retained.stale, true);
         assert.equal(retained.status, 'unavailable');
         assert.equal(retained.windows[0].usedPercent, 35);
+        assert.equal(rows.length, staleSource === freshSource && freshStatus === 'notConfigured' ? 1 : 2);
       }
     }
   }

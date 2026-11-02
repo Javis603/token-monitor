@@ -70,7 +70,7 @@ Once a delegated command starts, quota cancellation does not interrupt its offic
 
 ## Account identity and aggregation
 
-Code identity hashes the server's regional group. Manual API-key identity retains its existing key hash. Matching readings select one observation through shared aggregation; amounts are never added across devices. There is no automatic alias or stored-key migration. One current Code login and one API key can coexist locally; multiple managed Code logins are unsupported. Product labels do not replace subscription names in the plan cell.
+Code identity hashes the server's regional group. Manual API-key identity retains its existing key hash. Matching readings select one observation through shared aggregation; amounts are never added across devices. Different keys or groups reported by other devices keep their own last-good readings. There is no automatic alias or stored-key migration. One current Code login and one API key can coexist locally; multiple managed Code logins are unsupported. Product labels do not replace subscription names in the plan cell.
 
 A GroupId confirmation that the API key belongs to the Code login is one account. The limits card shows one provider heading and that account's product lanes. The first lane's Updated line sits in the heading. Both lanes are account rows, so the shared account separator sits between them. Each later lane keeps its own Updated line, plan cell and readings. A lane with no subscription name leaves that cell empty. A saved cost record for that lane uses the shared subscriptions title as its entry. Without that confirmation the rows stay a several-account group. Amounts are not added. The peer hash is display-only and is stripped from public stats.
 

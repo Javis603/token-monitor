@@ -627,9 +627,8 @@ function isConfiguredProvider(provider) {
 }
 
 function providerCollapseKey(provider) {
-  // Known WorkBuddy identities survive missing credentials and refresh-token
-  // rotation. Keep every account separate even while its login is unavailable.
-  if (provider.provider === 'workbuddy' && provider.accountKey) return providerAggregateKey(provider);
+  // Stable identities survive missing credentials and refresh-token rotation.
+  if (['workbuddy', 'minimax'].includes(provider.provider) && provider.accountKey) return providerAggregateKey(provider);
   // Antigravity account keys are portable only when a normalized Google email
   // proves the identity. Anonymous RPC fallback keys are local observations,
   // so keep the device scope established by providerAggregateKey().
@@ -639,9 +638,6 @@ function providerCollapseKey(provider) {
   }
   if (
     (provider.provider === 'claude'
-      // Code carries a regional group identity; API keys carry a credential
-      // identity. Neither proves that a differently keyed row is the same account.
-      || provider.provider === 'minimax'
       || provider.provider === 'codex'
       || provider.provider === 'opencode'
       || provider.provider === 'openrouter'
@@ -1036,22 +1032,26 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   // Map.set() would arbitrarily overwrite the fresh one with the stale one.
   const hasKnownWorkbuddyAccount = Array.from(byKey.values()).some((candidate) =>
     candidate.provider === 'workbuddy' && candidate.accountKey && !isWorkbuddyPlaceholder(candidate));
+  const knownMinimaxSources = new Set(Array.from(byKey.values())
+    .filter((candidate) => candidate.provider === 'minimax' && candidate.accountKey)
+    .map((candidate) => candidate.source));
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
     // A local-app sentinel is an onboarding hint, not an extra account. Real
     // identities keep their own failure hints even when none has credentials.
     if (hasKnownWorkbuddyAccount && isWorkbuddyPlaceholder(candidate)) continue;
-    const knownWorkbuddyAccount = candidate.provider === 'workbuddy' && candidate.accountKey
-      && !isWorkbuddyPlaceholder(candidate);
+    if (candidate.provider === 'minimax' && !candidate.accountKey && knownMinimaxSources.has(candidate.source)) continue;
+    const knownAccount = candidate.accountKey && (candidate.provider === 'minimax'
+      || (candidate.provider === 'workbuddy' && !isWorkbuddyPlaceholder(candidate)));
     const freshnessKey = providerFreshnessKey(candidate);
     const hasFreshObservation = providersWithFreshObservations.has(freshnessKey);
     // Fresh siblings cannot establish freshness for a different account. The
     // first pass already chooses the best observation of each exact identity.
-    if (!knownWorkbuddyAccount && candidate.stale && hasFreshObservation) continue;
+    if (!knownAccount && candidate.stale && hasFreshObservation) continue;
     const configuredProviders = hasFreshObservation
       ? providersWithFreshConfiguredAccounts
       : providersWithConfiguredAccounts;
-    if (!knownWorkbuddyAccount && !isConfiguredProvider(candidate) && configuredProviders.has(freshnessKey)) continue;
+    if (!knownAccount && !isConfiguredProvider(candidate) && configuredProviders.has(freshnessKey)) continue;
     const collapseKey = providerCollapseKey(candidate);
     byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate));
   }
