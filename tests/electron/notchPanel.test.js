@@ -461,6 +461,65 @@ for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and
   }
 });
 
+test('Notch replaces session age with weighted cache hit usage from projected sessions', t => {
+  const f = panelFixture(t), data = payload();
+  const now = Date.now();
+  const row = (id, extra = {}) => ({ client: 'codex', sessionId: id, title: id,
+    totalTokens: 100, models: { 'gpt-test': 100 }, reasoningEffort: 'high',
+    startedAt: new Date(now - 109 * 3600000).toISOString(), lastUsedAt: new Date(now).toISOString(),
+    ...extra });
+  const sessions = {
+    'codex:parent': row('parent', { inputTokens: 80, cacheReadTokens: 20 }),
+    'codex:child': row('child', { parentSessionId: 'parent', inputTokens: 100, cacheReadTokens: 800, cacheWriteTokens: 100 })
+  };
+  const render = () => {
+    const snapshot = Object.fromEntries(Object.entries(sessions).map(([key, value]) => [key, { ...value }]));
+    data.cells = buildEdgeDockCells({ periods: { month: { sessions: snapshot } } }, { items: [{ type: 'stat', metric: 'sessions' }] });
+    f.panel.render(data);
+  };
+  render();
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · Cache 75%');
+  f.panel.selectPage('sessions');
+  assert.equal(f.find('notch-active-meta').textContent, 'gpt-test · high · Cache 75%');
+  delete sessions['codex:child'];
+  for (const field of ['inputTokens', 'cacheReadTokens']) delete sessions['codex:parent'][field];
+  render();
+  assert.equal(f.find('notch-active-meta').textContent, 'gpt-test · high');
+  sessions['codex:parent'].inputTokens = 100;
+  sessions['codex:parent'].cacheReported = true;
+  render();
+  assert.equal(f.find('notch-active-meta').textContent, 'gpt-test · high · Cache 0%');
+  sessions['codex:parent'].liveActivity = { state: 'waiting', observedAt: new Date(now).toISOString() };
+  render();
+  assert.equal(f.find('notch-active-meta').querySelector('.notch-session-cache-hit').textContent, '0%');
+  sessions['codex:parent'].turnEnded = true;
+  delete sessions['codex:parent'].liveActivity;
+  f.panel.selectPage('home');
+  render();
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · 0% · just now');
+  sessions['codex:parent'].tokenDataUnavailable = true;
+  render();
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · just now');
+});
+
+for (const client of ['codex', 'claude']) test(`resumed ${client} native activity displays the accounting cache rate`, t => {
+  const f = panelFixture(t), data = payload(), now = Date.now();
+  const key = `${client}:resumed`;
+  const session = { client, sessionId: 'resumed', title: 'resumed',
+    lastUsedAt: new Date(now).toISOString(), totalTokens: 100,
+    models: { 'test-model': 100 }, inputTokens: 20, cacheReadTokens: 80 };
+  data.cells = buildEdgeDockCells({
+    periods: { month: { sessions: { [key]: { ...session, archived: true } } } },
+    nativeSessions: { today: { [key]: { client, sessionId: 'resumed',
+      lastUsedAt: session.lastUsedAt, tokenDataUnavailable: true,
+      totalTokens: 0, costUsd: 0, models: {} } } }
+  }, { items: [{ type: 'stat', metric: 'sessions' }] });
+  f.panel.render(data);
+  assert.equal(f.find('notch-now-meta').textContent, 'test-model · Cache 80%');
+  f.panel.selectPage('sessions');
+  assert.equal(f.find('notch-active-meta').textContent, 'test-model · Cache 80%');
+});
+
 test('cache expiry refreshes within the same minute without a new stats push', t => {
   const f = panelFixture(t), data = payload(), now = Date.now();
   data.cells[1].sessions = [{ key: 'claude:cache', client: 'claude', sessionId: 'cache', title: 'cached session', totalTokens: 10,

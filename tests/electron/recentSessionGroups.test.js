@@ -369,13 +369,18 @@ test('Dock family expansion keeps real member rows and requests the existing nat
 });
 
 test('native activity overlay retains archived accounting tokens, costs and models when a family resumes', () => {
-  const parent = session('codex', 'parent', { archived: true, totalTokens: 900, costUsd: 9, models: { prior: 900 } });
+  const parent = session('codex', 'parent', { archived: true, totalTokens: 900, costUsd: 9, models: { prior: 900 },
+    inputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 5, cacheReported: true });
   const stats = { periods: { month: { sessions: { 'codex:parent': parent,
     'claude:child': session('claude', 'child', { parentClient: 'codex', parentSessionId: 'parent' }) } } },
     nativeSessions: { today: { 'codex:parent': session('codex', 'parent', { totalTokens: 0, costUsd: 0, models: {} }) } } };
   const [group] = presentation.recentSessionRows(stats);
   assert.equal(group.totalTokens, 1000);
   assert.equal(group.costUsd, 10);
+  assert.equal(group.inputTokens, 20);
+  assert.equal(group.cacheReadTokens, 80);
+  assert.equal(group.cacheWriteTokens, 5);
+  assert.equal(group.cacheReported, true);
   assert.deepEqual(group.models, { prior: 900, shared: 100 });
   assert.equal(presentation.runningSessionSummary([group]).count, 1);
 });
