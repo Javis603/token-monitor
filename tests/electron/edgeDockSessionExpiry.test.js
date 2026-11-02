@@ -60,6 +60,7 @@ test('the edge dock arms a re-projection for the moment its running reading expi
   // longer has one, so a guard keyed on a count would never fire.
   assert.match(main, /function edgeDockNextSessionExpiry\(cells\) \{/);
   assert.match(main, /cell\.runningExpiresAt/);
+  assert.match(main, /cell\?\.metric !== 'sessions' && cell\?\.metric !== 'cacheHit'/);
   assert.match(main, /function scheduleSessionExpiry\(\) \{/);
   assert.match(main, /if \(!expiresAt\) return;/);
   assert.match(main, /EDGE_DOCK_EXPIRY_FLOOR_MS/);

@@ -6151,7 +6151,7 @@ function pushNotchCells(visibleStats) {
   scheduleSessionExpiry();
 }
 
-// The soonest moment any sessions cell stops reading as running, or 0 when none
+// The soonest moment any sessions cell or cache-hit cell stops reading as running, or 0 when none
 // of them does. A quiet cell never becomes running on its own, so 0 means there
 // is nothing to wake for and the timer must not be armed.
 function edgeDockNextSessionExpiry(cells) {
@@ -6161,7 +6161,7 @@ function edgeDockNextSessionExpiry(cells) {
   // and the re-projection that follows a real expiry drops the row's expiry to 0.
   const now = Date.now();
   for (const cell of Array.isArray(cells) ? cells : []) {
-    if (cell?.metric !== 'sessions') continue;
+    if (cell?.metric !== 'sessions' && cell?.metric !== 'cacheHit') continue;
     const expiresAt = Number(cell.runningExpiresAt) || 0;
     if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
   }

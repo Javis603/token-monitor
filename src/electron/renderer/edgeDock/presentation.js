@@ -641,6 +641,58 @@
         || a.model.localeCompare(b.model));
   }
 
+  // The same input split the Tool detail prints. Cache writes stay on the miss
+  // side, so a request that only creates a cache is not scored as a hit.
+  function cacheHitSummary(value, options = {}) {
+    const total = Math.max(0, finite(value?.totalTokens) || 0);
+    const unclassified = Math.min(total, Math.max(0, finite(value?.unclassifiedTokens) || 0));
+    const classified = total - unclassified;
+    const hit = Math.min(classified, Math.max(0, finite(value?.cacheReadTokens) || 0));
+    const writes = Math.max(0, finite(value?.cacheWriteTokens) || 0);
+    const output = Math.min(classified - hit, Math.max(0, finite(value?.outputTokens) || 0));
+    // Normalized sessions carry measured input but no unclassified remainder.
+    // Use their counters so an unobserved remainder cannot inflate misses.
+    const miss = options.measuredInput
+      ? Math.max(0, Math.min(classified - hit, (finite(value?.inputTokens) || 0) + writes))
+      : Math.max(0, classified - hit - output);
+    const measured = hit + miss;
+    // Total-only records carry no cache counters, so zero is unknown rather than
+    // a measured 0% hit rate. Periods expose component capability; sessions use
+    // the same explicit evidence contract as the Sessions list.
+    const cacheReported = value?.cacheReported === true
+      || value?.tokenComponentsAvailable === true
+      || value?.capabilities?.tokenComponents === true
+      || hit > 0 || writes > 0;
+    return { hit, miss, rate: cacheReported && measured > 0 ? hit / measured * 100 : null };
+  }
+
+  function cacheHitSessionRow(session) {
+    const summary = cacheHitSummary(session, { measuredInput: true });
+    if (summary.rate === null) return null;
+    const client = normalizedId(session.client);
+    const key = `${client}:${session.sessionId || ''}`;
+    const title = sessionRowsApi.sessionTitleForDisplay(session);
+    return {
+      key,
+      title: title || session.projectLabel || String(session.sessionId || '').slice(0, 14) || '-',
+      client,
+      ...summary,
+      lastUsed: Date.parse(session.lastUsedAt || session.startedAt || '') || 0,
+      // Activity is re-derived by the dock on its own clock. These are the
+      // fields the shared predicate and expiry timer read.
+      lastUsedAt: session.lastUsedAt || null,
+      turnEnded: session.turnEnded,
+      liveActivity: session.liveActivity || null,
+      waitingForInput: client === 'codex' && session.waitingForInput === true,
+      archived: session.archived === true,
+      deleted: session.deleted === true,
+      sourceDeleted: session.sourceDeleted === true,
+      grokBotSession: sessionLive.isGrokBotSession(
+        client === session.client ? session : { ...session, client }, key
+      )
+    };
+  }
+
   function statCell(stats, metric, options = {}) {
     if (metric === 'liveRate') {
       const sample = options.liveRate || null;
@@ -690,6 +742,34 @@
         // or 0 when nothing is running (a quiet row never becomes running on its
         // own, so nothing has to wake for it).
         runningExpiresAt: expiryAt,
+        sessions
+      };
+    }
+    if (metric === 'cacheHit') {
+      const period = stats?.periods?.today || null;
+      const summary = cacheHitSummary(period);
+      const now = Date.now();
+      const rows = Object.values(period?.sessions || {})
+        .filter(session => session?.sessionKind !== 'background-review')
+        .map(session => cacheHitSessionRow(session))
+        .filter(Boolean);
+      const running = rows.filter(row => sessionActivityState(row, now) === 'running');
+      const ranked = running.length > 0 ? running : rows;
+      const sessions = ranked
+        .sort(running.length > 0
+          ? (a, b) => b.hit - a.hit
+          : (a, b) => b.lastUsed - a.lastUsed)
+        .slice(0, SESSIONS_RECENT_COUNT);
+      return {
+        id: `stat:${metric}`,
+        kind: 'stat',
+        metric,
+        period: 'today',
+        available: summary.rate !== null,
+        ...summary,
+        // The list is capped for the card; the status count is not.
+        runningCount: running.length,
+        runningExpiresAt: nextRunningExpiryAt(rows, now),
         sessions
       };
     }

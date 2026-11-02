@@ -851,6 +851,24 @@ function formatRate(rate) {
   return formatTokens(value);
 }
 
+function formatCacheHitRate(rate) {
+  if (!Number.isFinite(rate)) return '—';
+  const value = Math.max(0, rate);
+  const percent = (number) => number.toLocaleString(state.locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }) + '%';
+  if (value > 0 && value < 0.1) return '<' + percent(0.1);
+  return percent(value);
+}
+
+function cacheHitDetail(cell) {
+  return t('edgeDock.cacheHit.detail', {
+    hit: formatTokens(cell.hit),
+    miss: formatTokens(cell.miss)
+  });
+}
+
 function statLabel(metric) {
   if (metric === 'liveRate') return t('edgeDock.stat.liveRate');
   if (metric === presentation.SESSIONS_METRIC) return t('edgeDock.sessions');
@@ -959,6 +977,10 @@ function statCellNode(cell) {
       const marks = runningMarksNode(cell);
       if (marks) node.append(marks);
     }
+  } else if (cell.metric === 'cacheHit') {
+    node.classList.toggle('is-idle', cell.available !== true);
+    const value = el('span', 'edge-dock-stat-value', formatCacheHitRate(cell.rate));
+    node.append(value);
   } else if (!cell.available) {
     node.classList.add('is-idle');
     node.append(el('span', 'edge-dock-stat-value', '—'));
@@ -985,11 +1007,13 @@ function statCellNode(cell) {
   const workingTools = cell.metric === presentation.SESSIONS_METRIC
     ? runningSessionSummary(cell.sessions).clients.map((client) => clientLabel(client))
     : [];
-  const spoken = cell.metric === presentation.SESSIONS_METRIC
+  const spokenParts = cell.metric === presentation.SESSIONS_METRIC
     // The count already reads as a number in `readout`; the tools are appended only
     // when there are any, so a quiet cell does not end with an empty clause.
-    ? [statLabel(cell.metric), readout, workingTools.join(', ')].filter(Boolean).join(' ').trim()
-    : `${statLabel(cell.metric)} ${readout}`.trim();
+    ? [statLabel(cell.metric), readout, workingTools.join(', ')]
+    : [statLabel(cell.metric), readout];
+  if (cell.metric === 'cacheHit' && cell.available) spokenParts.push(cacheHitDetail(cell));
+  const spoken = spokenParts.filter(Boolean).join(' ').trim();
   node.setAttribute('aria-label', spoken);
   return node;
 }
@@ -1762,6 +1786,40 @@ function statCard(cell) {
     return card;
   }
   if (cell.metric === presentation.SESSIONS_METRIC) return sessionsCard(cell, card, head);
+  if (cell.metric === 'cacheHit') {
+    if (!cell.available) {
+      card.append(el('div', 'edge-dock-note', t('edgeDock.periodUnavailable')));
+      return card;
+    }
+    const running = Math.max(0, Number(cell.runningCount) || 0);
+    if (running > 0) {
+      head.classList.add('is-inline');
+      head.append(el('span', 'edge-dock-card-status', t('edgeDock.runningCount', { count: running })));
+    }
+    const headline = el('div', 'edge-dock-stat-headline');
+    headline.append(el('strong', '', formatCacheHitRate(cell.rate)));
+    card.append(headline);
+    card.append(el('div', 'edge-dock-note', cacheHitDetail(cell)));
+    if ((cell.sessions || []).length) {
+      const list = el('div', 'edge-dock-session-list');
+      for (const s of cell.sessions) {
+        const row = el('div', 'edge-dock-session');
+        row.classList.toggle('is-running', presentation.sessionActivityState(s) === 'running');
+        const nameNode = el('span', 'edge-dock-session-name');
+        if (s.client) {
+          nameNode.append(markNode(s.client));
+          nameNode.append(el('span', 'sr-only', `${clientLabel(s.client)} `));
+        }
+        nameNode.append(el('span', 'edge-dock-session-title', s.title));
+        const meta = el('span', 'edge-dock-session-meta');
+        meta.append(el('span', 'edge-dock-session-description', cacheHitDetail(s)));
+        row.append(nameNode, el('span', 'edge-dock-session-tokens', formatCacheHitRate(s.rate)), meta);
+        list.append(row);
+      }
+      card.append(list);
+    }
+    return card;
+  }
   if (!cell.available) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.periodUnavailable')));
     return card;
