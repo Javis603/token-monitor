@@ -469,7 +469,7 @@ test('Notch replaces session age with weighted cache hit usage from projected se
     startedAt: new Date(now - 109 * 3600000).toISOString(), lastUsedAt: new Date(now).toISOString(),
     ...extra });
   const sessions = {
-    'codex:parent': row('parent', { inputTokens: 20, cacheReadTokens: 80 }),
+    'codex:parent': row('parent', { inputTokens: 80, cacheReadTokens: 20 }),
     'codex:child': row('child', { parentSessionId: 'parent', inputTokens: 100, cacheReadTokens: 800, cacheWriteTokens: 100 })
   };
   const render = () => {
@@ -478,9 +478,9 @@ test('Notch replaces session age with weighted cache hit usage from projected se
     f.panel.render(data);
   };
   render();
-  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · Cache 80%');
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · Cache 75%');
   f.panel.selectPage('sessions');
-  assert.equal(f.find('notch-active-meta').textContent, 'gpt-test · high · Cache 80%');
+  assert.equal(f.find('notch-active-meta').textContent, 'gpt-test · high · Cache 75%');
   delete sessions['codex:child'];
   for (const field of ['inputTokens', 'cacheReadTokens']) delete sessions['codex:parent'][field];
   render();
