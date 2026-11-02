@@ -1070,8 +1070,8 @@ test('MiniMax Code uses only a matched subscription name and tolerates metadata 
   const fixture = writeCodeAuthFixture();
   for (const [metadata, label] of [
     [{ current_subscribe: { curr_subscribe_combo_id: '12345' }, current_combo_card: { combo_id: 12345, title: 'Build' } }, 'Build'],
-    [{ current_combo_card: { combo_id: 12345, title: 'Unowned plan' } }, 'Subscription'],
-    [null, 'Subscription']
+    [{ current_combo_card: { combo_id: 12345, title: 'Unowned plan' } }, ''],
+    [null, '']
   ]) {
     const row = await readCode(codeDeps(fixture, async url => {
       if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ token_plan_tier: '12345' }));

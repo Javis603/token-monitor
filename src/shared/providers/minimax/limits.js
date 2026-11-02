@@ -505,7 +505,7 @@ async function fetchMinimaxCodeLimits(deps = {}, context = {}) {
       const tier = workspace.token_plan_tier || membership.token_plan_tier;
       const hasPlan = Boolean(workspace.has_token_plan || membership.has_token_plan || tier);
       const tierName = cleanSecret(tier);
-      planLabel = hasPlan ? (tierName && !/^\d+$/u.test(tierName) ? tierName : 'Subscription') : cleanSecret(membership.plan_name);
+      planLabel = hasPlan ? (tierName && !/^\d+$/u.test(tierName) ? tierName : '') : cleanSecret(membership.plan_name);
       const groupId = cleanSecret(workspace.op_group_id) || cleanSecret(membership?.op_group_id);
       accountKey = groupId ? hashKey('minimax', `code:${region}:${groupId}`) : '';
       const credits = minimaxCodeCredits(membership?.op_credit_summary?.total_remaining_amount)
