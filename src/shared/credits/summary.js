@@ -9,6 +9,7 @@ const MAX_RECENT_EVENTS = 200;
 const MAX_MODEL_ENTRIES = 50;
 const MAX_CALIBRATION_ENTRIES = 20;
 const MAX_REASON_LENGTH = 200;
+const CONFIDENCE_LEVELS = new Set(['exact', 'vendor', 'estimated']);
 
 function clampNumber(value) {
   // Number(null)/Number('') are 0 and Number(true) is 1 — reject these up front
@@ -39,6 +40,11 @@ function normalizeTotals(raw) {
   const credits = clampNumber(raw.credits);
   if (credits === null) return null;
   const totals = { credits, requests: Math.max(0, Math.trunc(Number(raw.requests) || 0)) };
+  // Today's spend is computed once at attach time over the *full* event list.
+  // Deriving it from the 200-event window instead loses the start of a busy day
+  // once the ledger outgrows the window — silently, with no error anywhere.
+  const todayCredits = clampNumber(raw.todayCredits);
+  if (todayCredits !== null && todayCredits >= 0) totals.todayCredits = todayCredits;
   if (raw.byModel && typeof raw.byModel === 'object') {
     const byModel = {};
     for (const [model, value] of Object.entries(raw.byModel).slice(0, MAX_MODEL_ENTRIES)) {
@@ -99,6 +105,9 @@ function normalizeCreditsSummary(raw) {
     updatedAt: raw.updatedAt ? String(raw.updatedAt).slice(0, 40) : '',
     totals
   };
+  // Confidence travels with the data instead of being re-derived by each
+  // surface: `exact` (local file), `vendor` (quoted by the tool), `estimated`.
+  if (CONFIDENCE_LEVELS.has(raw.confidence)) summary.confidence = raw.confidence;
   if (Array.isArray(raw.recentEvents)) {
     const events = [];
     for (const candidate of raw.recentEvents.slice(-MAX_RECENT_EVENTS)) {
@@ -122,12 +131,30 @@ function buildCreditsSummary(collectResult, { now = new Date(), tool = 'workbudd
       reason: collectResult?.reason || 'unavailable'
     };
   }
+  const events = collectResult.events || [];
+  const dayStart = new Date(now);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayStartMs = dayStart.getTime();
+  let todayCredits = 0;
+  for (const event of events) {
+    const at = Number(event?.updatedAt);
+    const amount = Number(event?.credits);
+    if (!Number.isFinite(at) || at < dayStartMs) continue;
+    if (!Number.isFinite(amount) || amount >= 0) continue;
+    todayCredits += -amount;
+  }
   return {
     available: true,
     tool,
+    // Every figure in this block comes from a local file read, never from a
+    // vendor quote — the badge says so and the data says so.
+    confidence: 'exact',
     updatedAt: now.toISOString(),
-    totals: collectResult.totals,
-    recentEvents: (collectResult.events || []).slice(-MAX_RECENT_EVENTS),
+    totals: {
+      ...collectResult.totals,
+      todayCredits: Math.round(todayCredits * 1e6) / 1e6
+    },
+    recentEvents: events.slice(-MAX_RECENT_EVENTS),
     warnings: (collectResult.warnings || []).length
   };
 }

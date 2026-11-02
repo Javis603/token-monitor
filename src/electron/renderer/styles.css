@@ -3767,6 +3767,12 @@ html.is-windows .settings-panel select option {
   grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto) minmax(31px, auto);
   column-gap: 8px;
 }
+/* TokenLedger: the WorkBuddy row carries the credit badge, so the module needs a
+   fifth column whenever a ledger is present. Rows without a badge leave that
+   cell empty on purpose — one template keeps the share column aligned. */
+.home-module-tool.has-credits .home-tool-row {
+  grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto) minmax(31px, auto) auto;
+}
 .home-device-row {
   grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto) auto;
   column-gap: 8px;

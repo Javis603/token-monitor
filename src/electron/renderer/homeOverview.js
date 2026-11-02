@@ -211,11 +211,16 @@
     }));
   }
 
-  // TokenLedger: today's credit spend for the device's WorkBuddy ledger, from
-  // the bounded recentEvents window. Null when the device reports no ledger —
-  // most machines — so callers render nothing instead of a zero.
+  // TokenLedger: today's credit spend for the device's WorkBuddy ledger. Null
+  // when the device reports no ledger — most machines — so callers render
+  // nothing instead of a zero.
   function creditsSpentToday(credits, now = Date.now()) {
-    if (!credits || credits.available !== true || !Array.isArray(credits.recentEvents)) return null;
+    if (!credits || credits.available !== true) return null;
+    // The attach-time total wins: it was summed over the whole ledger, so a day
+    // with more requests than the 200-event window cannot lose its early spend.
+    const explicit = Number(credits?.totals?.todayCredits);
+    if (Number.isFinite(explicit) && explicit > 0) return explicit;
+    if (!Array.isArray(credits.recentEvents)) return null;
     const startOfDay = new Date(now);
     startOfDay.setHours(0, 0, 0, 0);
     const startMs = startOfDay.getTime();

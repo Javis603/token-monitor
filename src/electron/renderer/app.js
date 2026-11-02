@@ -6697,8 +6697,67 @@ function homeToolSourceRows(period) {
   }));
 }
 
+// TokenLedger: the credit ledger belongs on the WorkBuddy tool row. It used to
+// hang off the device row, but the device module is hidden by default
+// (hiddenHomeModules), so the badge was effectively unreachable.
+function creditsTooltipText(calibration) {
+  const lines = [t('home.creditsSource')];
+  if (calibration) {
+    const { profiles, pending } = homeOverviewApi.creditsCalibrationLines(calibration);
+    lines.push(t('home.creditsCalibration', { profiles: profiles.length, pending: pending.length }));
+    for (const entry of profiles) {
+      lines.push(t('home.creditsFittedModel', {
+        model: entry.model,
+        value: formatCredits(entry.creditsPerMTok),
+        r2: entry.r2,
+        samples: entry.samples
+      }));
+    }
+    for (const entry of pending) {
+      lines.push(t('home.creditsPendingModel', { model: entry.model, samples: entry.samples }));
+    }
+  }
+  return lines.join('\n');
+}
+
+function localCreditsView() {
+  const localId = String(state.settings?.deviceId || '').trim();
+  const devices = fixedPeriodDevices();
+  const device = devices.find((entry) => String(entry?.deviceId || '').trim() === localId)
+    || devices.find((entry) => entry?.credits?.available === true);
+  const credits = device?.credits;
+  if (!credits || credits.available !== true) return null;
+  return {
+    today: homeOverviewApi.creditsSpentToday(credits),
+    total: Number(credits?.totals?.credits) || 0,
+    calibration: credits.calibration || null
+  };
+}
+
+// One markup path for both surfaces so the tooltip, the confidence line and the
+// "today vs total" fallback can never drift apart.
+function creditsBadgeElement(view) {
+  const credits = document.createElement('span');
+  credits.className = 'home-device-credits';
+  // A day with no WorkBuddy spend still proves the ledger is connected; only the
+  // label switches to the running total.
+  credits.textContent = view.today != null
+    ? t('home.creditsToday', { value: formatCredits(view.today) })
+    : t('home.creditsTotal', { value: formatCredits(view.total) });
+  const tooltip = creditsTooltipText(view.calibration);
+  credits.title = tooltip;
+  // Keyboard/screen-reader parity with the hover tooltip.
+  credits.setAttribute('role', 'note');
+  credits.setAttribute('aria-label', tooltip);
+  return credits;
+}
+
 function renderHomeToolModule(period) {
   const { module, body } = homeModuleShell('tool', t('home.tools'), 'tool');
+  const creditsView = localCreditsView();
+  // The badge adds a fifth column; keep it on every row so the share column
+  // stays aligned whether or not a row has a ledger.
+  if (creditsView) module.classList.add('has-credits');
   const rows = homeOverviewApi.homeToolRows(homeToolSourceRows(period), period?.totalTokens, homeModulePreferencesApi.homeModuleCount(state.settings, 'tool'));
   if (rows.length === 0) {
     const empty = document.createElement('div');
@@ -6722,6 +6781,8 @@ function renderHomeToolModule(period) {
     share.className = 'home-list-aux';
     share.textContent = formatPercent(row.share * 100);
     item.append(mark, name, value, share);
+    // Only the tool that owns a credit ledger gets the badge.
+    if (creditsView && String(row.key).toLowerCase() === 'workbuddy') item.append(creditsBadgeElement(creditsView));
     body.append(item);
   }
   return module;
@@ -6892,31 +6953,7 @@ function renderHomeDeviceModule() {
     body.append(empty);
     return module;
   }
-  // TokenLedger: the credits badge is exact local-ledger data; its tooltip
-  // states the confidence and how far the per-model calibration has come.
-  function creditsTooltip(calibration) {
-    const lines = [t('home.creditsSource')];
-    if (calibration) {
-      const { profiles, pending } = homeOverviewApi.creditsCalibrationLines(calibration);
-      lines.push(t('home.creditsCalibration', { profiles: profiles.length, pending: pending.length }));
-      for (const entry of profiles) {
-        lines.push(t('home.creditsFittedModel', {
-          model: entry.model,
-          value: formatCredits(entry.creditsPerMTok),
-          r2: entry.r2,
-          samples: entry.samples
-        }));
-      }
-      for (const entry of pending) {
-        lines.push(t('home.creditsPendingModel', { model: entry.model, samples: entry.samples }));
-      }
-    }
-    return lines.join('\n');
-  }
   for (const row of rows) {
-    if (row === rows[0]) {
-      console.log('[diag-render] deviceRow', row.key, 'creditsAvailable=', row.creditsAvailable, 'creditsToday=', row.creditsToday, 'creditsTotal=', row.creditsTotal);
-    }
     const item = document.createElement('div');
     item.className = 'home-list-row home-device-row';
     if (row.isStale) {
@@ -6942,19 +6979,11 @@ function renderHomeDeviceModule() {
     value.textContent = formatCompact(row.value);
     item.append(mark, label, value);
     if (row.creditsAvailable) {
-      const credits = document.createElement('span');
-      credits.className = 'home-device-credits';
-      // A day with no WorkBuddy spend still proves the ledger is connected;
-      // only the label switches to the running total.
-      credits.textContent = row.creditsToday != null
-        ? t('home.creditsToday', { value: formatCredits(row.creditsToday) })
-        : t('home.creditsTotal', { value: formatCredits(row.creditsTotal) });
-      const tooltip = creditsTooltip(row.creditsCalibration);
-      credits.title = tooltip;
-      // Keyboard/screen-reader parity with the hover tooltip.
-      credits.setAttribute('role', 'note');
-      credits.setAttribute('aria-label', tooltip);
-      item.append(credits);
+      item.append(creditsBadgeElement({
+        today: row.creditsToday,
+        total: row.creditsTotal,
+        calibration: row.creditsCalibration
+      }));
     }
     body.append(item);
   }

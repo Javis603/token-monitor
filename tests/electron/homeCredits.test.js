@@ -286,11 +286,19 @@ test('the attacher produces a fitted calibration end to end', () => {
     db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, cwd TEXT, model TEXT, created_at INTEGER, updated_at INTEGER);');
     const ins = db.prepare('INSERT INTO sessions (id, model) VALUES (?, ?)');
     const usage = db.prepare('INSERT INTO session_usage VALUES (?, ?, ?, ?, ?)');
-    // 55 exact-linear sessions on one model: 1.25 credits per Mtok.
+    // 55 exact-linear sessions on one model: 1.25 credits per Mtok. The token
+    // track comes from the transcripts — `used` is the context counter and must
+    // stay out of the fit, so it is seeded with a deliberately unrelated value.
+    const transcriptDir = path.join(dir, 'projects', 'demo');
+    fs.mkdirSync(transcriptDir, { recursive: true });
     for (let i = 0; i < 55; i++) {
       const tokens = 100_000 + i * 20_000;
       ins.run('s' + i, 'hy4-preview');
-      usage.run('s' + i, tokens, 1_000_000, NOON, JSON.stringify({ r: tokens * 0.00000125 }));
+      usage.run('s' + i, 1_000_000 - i, 1_000_000, NOON, JSON.stringify({ r: tokens * 0.00000125 }));
+      fs.writeFileSync(
+        path.join(transcriptDir, `s${i}.jsonl`),
+        JSON.stringify({ type: 'message', message: { usage: { input_tokens: tokens, output_tokens: 0 } } })
+      );
     }
     db.close();
     const attach = createCreditsAttacher({ home, now: new Date(NOON) });

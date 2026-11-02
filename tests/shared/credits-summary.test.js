@@ -38,6 +38,55 @@ test('buildCreditsSummary propagates unavailable collect results', () => {
   assert.deepEqual(summary, { available: false, reason: 'workbuddy.db not found' });
 });
 
+test("today's credits are summed over the whole ledger, not the 200-event window", () => {
+  const now = new Date('2026-10-25T12:00:00');
+  const dayStart = new Date('2026-10-25T00:00:00').getTime();
+  const events = Array.from({ length: 260 }, (_, i) => ({
+    dedupKey: `s:${i}`, credits: -1, updatedAt: dayStart + 1000 + i
+  }));
+  const summary = buildCreditsSummary(
+    { available: true, totals: { credits: 260, requests: 260 }, events, warnings: [] },
+    { now }
+  );
+  // The window still bounds what travels on the wire, but the day total is
+  // computed before truncation — otherwise the first 60 requests vanish silently.
+  assert.equal(summary.recentEvents.length, 200);
+  assert.equal(summary.totals.todayCredits, 260);
+  assert.equal(summary.confidence, 'exact');
+});
+
+test('buildCreditsSummary counts only today and only outflows', () => {
+  const now = new Date('2026-10-25T12:00:00');
+  const events = [
+    { dedupKey: 'a', credits: -3.7, updatedAt: new Date('2026-10-25T01:00:00').getTime() },
+    { dedupKey: 'b', credits: -1.3, updatedAt: new Date('2026-10-25T11:00:00').getTime() },
+    { dedupKey: 'yesterday', credits: -40, updatedAt: new Date('2026-10-24T23:00:00').getTime() },
+    { dedupKey: 'inflow', credits: 5, updatedAt: new Date('2026-10-25T10:00:00').getTime() }
+  ];
+  const summary = buildCreditsSummary(
+    { available: true, totals: { credits: 40, requests: 4 }, events, warnings: [] },
+    { now }
+  );
+  assert.equal(summary.totals.todayCredits, 5);
+});
+
+test('normalizeCreditsSummary keeps todayCredits and a known confidence level', () => {
+  const summary = normalizeCreditsSummary({
+    available: true,
+    confidence: 'exact',
+    totals: { credits: 12, requests: 2, todayCredits: 4.5 },
+    recentEvents: []
+  });
+  assert.equal(summary.confidence, 'exact');
+  assert.equal(summary.totals.todayCredits, 4.5);
+  // Unknown levels drop instead of reaching a badge that would claim them.
+  assert.equal(normalizeCreditsSummary({
+    available: true,
+    confidence: 'certain-ish',
+    totals: { credits: 1, requests: 1 }
+  }).confidence, undefined);
+});
+
 test('normalizeCreditsSummary caps events, models and string lengths', () => {
   const normalized = normalizeCreditsSummary({
     available: true,

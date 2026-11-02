@@ -77,6 +77,27 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
 // claudeWebFetch above, the CLI fallbacks on a spawned binary, and MiMo's
 // exchange on the mimoExchangeFetch below, which keeps undici for the per-hop
 // request it needs but still asks Chromium which proxy to use.
+// Dev-only stats tracing. Off unless TL_DIAG=1, and never in a packaged build:
+// the previous version printed on every stats push (every 15s) and carried
+// project-specific model names, which is neither shippable nor safe to paste
+// into an issue. Callers keep their own try/catch — diagnostics must never
+// break the push they observe.
+function statsDiagEnabled() {
+  return !app.isPackaged && process.env.TL_DIAG === '1';
+}
+
+function logStatsDiag(label, stats) {
+  if (!statsDiagEnabled()) return;
+  try {
+    const providers = (stats?.limits?.providers || []).map((p) => `${p.provider}:${p.status}`).join(' ');
+    const credits = (stats?.devices || []).map((d) => `${d.deviceId}:credits=${d.credits ? d.credits.available : 'absent'}`).join(' ');
+    const allTime = stats?.periods?.allTime || stats?.allTime || {};
+    const models = Object.keys(allTime.models || {}).length;
+    const days = (stats?.historyPreview || []).length;
+    console.log(`[diag] ${label} limits=[${providers}] ${credits} allTimeTokens=${allTime.totalTokens || 0} models=${models} historyDays=${days}`);
+  } catch (_) { /* diagnostics must never break the push */ }
+}
+
 function electronLimitsFetch() {
   return createElectronLimitsFetch({
     net: { fetch: createProxyReadyFetch(net.fetch.bind(net), () => sessionProxy.ensureReady()) },
@@ -4488,14 +4509,9 @@ async function startIcloudCollector() {
       const identity = currentHubStatsIdentity('icloud');
       setLatestHubStatsCache(stats, 'icloud', generation, identity);
       updateDiscordRpcDisplay(stats);
-      // TokenLedger dev diagnostics: one line per stats push, stdout only.
-      if (!app.isPackaged) {
-        try {
-          const prov = (stats?.limits?.providers || []).map((p) => `${p.provider}:${p.status}`).join(' ');
-          const cred = (stats?.devices || []).map((d) => `${d.deviceId}:credits=${d.credits ? d.credits.available : 'absent'}`).join(' ');
-          console.log(`[diag] statsPush limits=[${prov}] ${cred}`);
-        } catch (_) { /* diagnostics must never break the push */ }
-      }
+      // TokenLedger dev diagnostics: one line per stats push, stdout only, and
+      // only with TL_DIAG=1.
+      logStatsDiag('statsPush(local)', stats);
       sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats, at: new Date().toISOString() } }, { widgetProducerOwner });
     },
     onStatus: (status) => {
@@ -4762,14 +4778,9 @@ function startHostStats() {
     if (!hubModeRequestIsCurrent(generation, 'host', cacheIdentity)) return;
     setLatestHubStatsCache(stats, 'host', generation, cacheIdentity);
     updateDiscordRpcDisplay(stats);
-    // TokenLedger dev diagnostics: one line per stats push, stdout only.
-    if (!app.isPackaged) {
-      try {
-        const prov = (stats?.limits?.providers || []).map((p) => `${p.provider}:${p.status}`).join(' ');
-        const cred = (stats?.devices || []).map((d) => `${d.deviceId}:credits=${d.credits ? d.credits.available : 'absent'}`).join(' ');
-        console.log(`[diag] statsPush limits=[${prov}] ${cred}`);
-      } catch (_) { /* diagnostics must never break the push */ }
-    }
+    // TokenLedger dev diagnostics: one line per stats push, stdout only, and
+    // only with TL_DIAG=1.
+    logStatsDiag(`statsPush(${reason})`, stats);
     sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } }, { widgetProducerOwner });
   };
   embeddedHubUnsub = embeddedHub.hub.onStats((stats, reason) => emit(stats, reason || 'hub'));
@@ -5070,16 +5081,7 @@ function sendPush(payload, options = {}) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     // TokenLedger dev diagnostics: the single sink every stats push crosses.
-    if (!app.isPackaged) {
-      try {
-        const s = latestStats;
-        const prov = (s?.limits?.providers || []).map((p) => `${p.provider}:${p.status}`).join(' ');
-        const cred = (s?.devices || []).map((d) => `${d.deviceId}:credits=${d.credits ? d.credits.available : 'absent'}`).join(' ');
-        const at = s?.periods?.allTime || s?.allTime || {};
-        const cl = at.clients || {};
-        console.log(`[diag] sendPush reason=${payload?.data?.reason} limits=[${prov}] ${cred} allTime=${Math.round((at.totalTokens || 0) / 1e8 * 100) / 100}亿 clients: claude=${Math.round((cl.claude || 0) / 1e8 * 100) / 100}亿 codex=${Math.round((cl.codex || 0) / 1e8 * 100) / 100}亿 zcode=${Math.round((cl.zcode || 0) / 1e8 * 100) / 100}亿 5.6sol=${Math.round((at.models?.['gpt-5.6-sol'] || 0) / 1e8 * 100) / 100}亿 opus48=${Math.round((at.models?.['claude-opus-4-8'] || 0) / 1e8 * 100) / 100}亿 out=${Math.round((at.outputTokens || 0) / 1e6)}M cacheR=${Math.round((at.cacheReadTokens || 0) / 1e8 * 10) / 10}b cost=$${(at.costUsd || 0).toFixed(2)} hist=${JSON.stringify((s?.historyPreview || []).slice(-3).map(d => (d.date || d.day) + ":" + Math.round((d.tokens || 0) / 1e6) + "M"))}`);
-      } catch (_) { /* diagnostics must never break the push */ }
-    }
+    logStatsDiag(`sendPush(${payload?.data?.reason})`, latestStats);
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
     if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) {
