@@ -12,6 +12,10 @@ const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kim
 const { catpawDataSources, nativeWindowsFolders } = require('./providers/catpaw/paths');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
+const {
+  GCMP_SOURCE_CHECK_ID,
+  gcmpUsagesRoots
+} = require('./providers/gcmp/usage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
@@ -410,6 +414,12 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['agent-sessions', path.join('sdk-config', 'sessions'), path.join('sdk-config', 'projects')]
       .map((dir) => ['proma-sessions', path.join(tokscaleHome, base, dir)])
   )));
+  // AI Chat Models (vicanent.gcmp) — per-hour usage JSONL under each VS Code
+  // variant's globalStorage. Watch the usages dir directly; its parent holds
+  // only state this extension rewrites itself (inter-instance events), and the
+  // per-hour tree is what a tick actually reads.
+  add('gcmp', ...gcmpUsagesRoots({ homeDir: home, platform, env })
+    .map((dir) => [GCMP_SOURCE_CHECK_ID, dir]));
   if (enabled.has('catpaw')) {
     const catpaw = catpawDataSources({ ...options, platform, env });
     add('catpaw',

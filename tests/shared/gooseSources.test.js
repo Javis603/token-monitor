@@ -19,7 +19,7 @@ installSourceEnvGuard(test);
 
 test('Goose is upstream parsed, default tracked, partition safe and refuses custom paths', () => {
   assert.deepEqual(CLIENT_CATALOG.find(({ id }) => id === 'goose'), {
-    id: 'goose', label: 'Goose', defaultTracked: true, forkOnly: false
+    id: 'goose', label: 'Goose', defaultTracked: true, forkOnly: false, locallyParsed: false
   });
   assert.equal(normalizeClientName('Goose'), 'goose');
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('goose'), false);
