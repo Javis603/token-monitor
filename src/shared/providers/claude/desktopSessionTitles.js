@@ -43,9 +43,10 @@ function readEntry(file, previous) {
       cliSessionId: typeof session?.cliSessionId === 'string' ? session.cliSessionId : '',
       title: typeof session?.title === 'string' ? session.title : ''
     };
-  } catch (_) {
-    // The app rewrites these files in place; a torn read keeps the last good entry.
-    return previous;
+  } catch (error) {
+    // A file deleted since it was listed is gone; any other failure is a torn
+    // read of a file the app rewrites in place, which keeps the last good entry.
+    return error?.code === 'ENOENT' ? undefined : previous;
   }
 }
 

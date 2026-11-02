@@ -1012,3 +1012,27 @@ test('the MSIX data root follows LOCALAPPDATA except for a scoped home', (t) => 
   assert.equal(title(false, { LocalAppData: localAppData }), 'MSIX title');
   assert.equal(title(true), undefined);
 });
+
+test('a Desktop session file deleted after listing drops its title; other read errors keep it', (t) => {
+  const { readDesktopSessionTitles } = require('../../src/shared/providers/claude/desktopSessionTitles');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-claude-desktop-race-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const store = path.join(home, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', 'account', 'org');
+  fs.mkdirSync(store, { recursive: true });
+  const file = path.join(store, 'local_a.json');
+  fs.writeFileSync(file, JSON.stringify({ cliSessionId: 'session', title: 'Old title' }));
+  const ids = new Set(['session']);
+  assert.equal(readDesktopSessionTitles(home, ids).get('session'), 'Old title');
+
+  // The file is still listed, but reading it fails between the two steps.
+  const statSync = fs.statSync;
+  const failWith = (code) => t.mock.method(fs, 'statSync', (target, ...rest) => {
+    if (target === file) throw Object.assign(new Error(code), { code });
+    return statSync(target, ...rest);
+  });
+  failWith('EIO');
+  assert.equal(readDesktopSessionTitles(home, ids).get('session'), 'Old title');
+  fs.statSync.mock.restore();
+  failWith('ENOENT');
+  assert.equal(readDesktopSessionTitles(home, ids).get('session'), undefined);
+});
