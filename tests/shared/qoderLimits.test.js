@@ -36,7 +36,7 @@ test('parseQoderPlanLabel maps official plan tiers to display labels', () => {
   assert.equal(parseQoderPlanLabel({ data: { current_plan: { plan_tier: 'ORGANIZATION_PLAN_TIER_ENTERPRISE' } } }), 'Enterprise');
 });
 
-test('parseQoderUsage merges personal and shared big-model credit quotas', () => {
+test('parseQoderUsage emits personal and team credits as separate windows', () => {
   const usage = parseQoderUsage({
     totalQuota: {
       quotaSummary: {
@@ -55,15 +55,19 @@ test('parseQoderUsage merges personal and shared big-model credit quotas', () =>
       }
     },
     nextResetAt: '2026-08-01T00:00:00Z'
-  });
+  }, null, { planResetsAt: '2026-09-01T00:00:00.000Z' });
 
-  assert.equal(usage.usedCredits, 35);
-  assert.equal(usage.totalCredits, 150);
-  assert.equal(usage.remainingCredits, 115);
-  assert.equal(usage.usagePercentage, 35 / 150 * 100);
-  assert.equal(usage.resetsAt, '2026-08-01T00:00:00.000Z');
-  assert.equal(usage.window.kind, 'billing');
-  assert.equal(usage.window.label, 'Credits');
+  assert.deepEqual(
+    usage.windows.map(({ label, used, limit, remaining, resetsAt }) => ({
+      label, used, limit, remaining, resetsAt
+    })),
+    [
+      { label: 'Credits', used: 25, limit: 100, remaining: 75, resetsAt: '2026-08-01T00:00:00.000Z' },
+      { label: 'Team credits', used: 10, limit: 50, remaining: 40, resetsAt: '2026-09-01T00:00:00.000Z' }
+    ]
+  );
+  assert.equal(usage.windows[0].remainingPercent, 75);
+  assert.equal(usage.windows[1].remainingPercent, 80);
 });
 
 test('parseQoderUsage accepts data-wrapped usage payloads', () => {
@@ -81,10 +85,20 @@ test('parseQoderUsage accepts data-wrapped usage payloads', () => {
     }
   });
 
-  assert.equal(usage.usedCredits, 42);
-  assert.equal(usage.totalCredits, 100);
-  assert.equal(usage.remainingCredits, 58);
-  assert.equal(usage.resetsAt, '2026-06-01T00:00:00.000Z');
+  assert.deepEqual(
+    usage.windows.map(({ label, used, limit, remaining, resetsAt }) => ({
+      label, used, limit, remaining, resetsAt
+    })),
+    [{ label: 'Credits', used: 42, limit: 100, remaining: 58, resetsAt: '2026-06-01T00:00:00.000Z' }]
+  );
+});
+
+test('parseQoderUsage omits allowances with no limit', () => {
+  const usage = parseQoderUsage({
+    totalQuota: { quotaSummary: { usedValue: 0, limitValue: 0, remainingValue: 0, unit: 'credits' } },
+    sharedQuota: { quotaSummary: { usedValue: 0, limitValue: 0, remainingValue: 0, unit: 'credits' } }
+  });
+  assert.deepEqual(usage.windows, []);
 });
 
 test('fetchQoderLimits returns notConfigured without a cookie', async () => {
@@ -101,16 +115,7 @@ const quota = (used, limit, remaining) => ({
 
 for (const scenario of [
   {
-    name: 'includes the member shared cap instead of the whole organization pool',
-    personal: { total_quota: quota(0, 0, 0), nextResetAt: '2026-09-22T16:00:00Z' },
-    shared: {
-      shared_quota: quota(4478, 20000, 15522),
-      organization_pool: { used_value: 7252788, limit_value: 300000000, remaining_value: 292747212 }
-    },
-    expected: { used: 4478, limit: 20000, remaining: 15522, resetsAt: null }
-  },
-  {
-    name: 'combines personal and separately fetched shared credits without double counting',
+    name: 'keeps personal and team credits as separate windows',
     personal: {
       data: {
         total_quota: quota(25, 100, 75),
@@ -118,27 +123,47 @@ for (const scenario of [
         next_reset_at: '2026-11-22T16:00:00Z'
       }
     },
-    shared: { data: { shared_quota: quota(10, 50, 40) } },
-    expected: { used: 35, limit: 150, remaining: 115, resetsAt: '2026-11-22T16:00:00.000Z' }
+    shared: { data: { shared_quota: quota(10, 50, 40), next_reset_at: '2026-12-01T00:00:00Z' } },
+    expectedWindows: [
+      { label: 'Credits', used: 25, limit: 100, remaining: 75, resetsAt: '2026-11-22T16:00:00.000Z' },
+      { label: 'Team credits', used: 10, limit: 50, remaining: 40, resetsAt: '2026-12-01T00:00:00.000Z' }
+    ]
+  },
+  {
+    name: 'includes the member shared cap instead of the whole organization pool',
+    personal: { total_quota: quota(0, 0, 0), nextResetAt: '2026-09-22T16:00:00Z' },
+    shared: {
+      shared_quota: quota(4478, 20000, 15522),
+      organization_pool: { used_value: 7252788, limit_value: 300000000, remaining_value: 292747212 }
+    },
+    expectedWindows: [
+      { label: 'Team credits', used: 4478, limit: 20000, remaining: 15522, resetsAt: null }
+    ]
   },
   {
     name: 'preserves personal credits when no organization quota exists',
     personal: { total_quota: quota(20, 100, 80), nextResetAt: '2026-11-01T00:00:00Z' },
     sharedStatus: 404,
-    expected: { used: 20, limit: 100, remaining: 80, resetsAt: '2026-11-01T00:00:00.000Z' }
+    expectedWindows: [
+      { label: 'Credits', used: 20, limit: 100, remaining: 80, resetsAt: '2026-11-01T00:00:00.000Z' }
+    ]
   },
   {
     name: 'treats a forbidden shared quota as a personal account',
     personal: { total_quota: quota(20, 100, 80), nextResetAt: '2026-11-01T00:00:00Z' },
     sharedStatus: 403,
-    expected: { used: 20, limit: 100, remaining: 80, resetsAt: '2026-11-01T00:00:00.000Z' }
+    expectedWindows: [
+      { label: 'Credits', used: 20, limit: 100, remaining: 80, resetsAt: '2026-11-01T00:00:00.000Z' }
+    ]
   },
   {
-    name: 'uses the plan renewal date when the shared quota carries no reset',
+    name: 'uses the plan renewal date when team credits carry no reset',
     personal: { total_quota: quota(0, 0, 0), nextResetAt: '2026-09-22T16:00:00Z' },
     shared: { shared_quota: quota(4478, 20000, 15522) },
     planResetAt: 1795363200000,
-    expected: { used: 4478, limit: 20000, remaining: 15522, resetsAt: '2026-11-22T16:00:00.000Z' }
+    expectedWindows: [
+      { label: 'Team credits', used: 4478, limit: 20000, remaining: 15522, resetsAt: '2026-11-22T16:00:00.000Z' }
+    ]
   },
   {
     name: 'does not report full remaining credits when the shared quota service fails',
@@ -156,7 +181,15 @@ for (const scenario of [
     name: 'keeps personal credits when the shared quota rejects the session',
     personal: { total_quota: quota(20, 100, 80), nextResetAt: '2026-11-01T00:00:00Z' },
     sharedStatus: 401,
-    expected: { used: 20, limit: 100, remaining: 80, resetsAt: '2026-11-01T00:00:00.000Z' }
+    expectedWindows: [
+      { label: 'Credits', used: 20, limit: 100, remaining: 80, resetsAt: '2026-11-01T00:00:00.000Z' }
+    ]
+  },
+  {
+    name: 'omits allowances with no limit',
+    personal: { total_quota: quota(0, 0, 0) },
+    shared: { shared_quota: quota(0, 0, 0) },
+    expectedWindows: []
   },
 ]) {
   test(`fetchQoderLimits ${scenario.name}`, async () => {
@@ -188,13 +221,15 @@ for (const scenario of [
       assert.deepEqual(provider.windows, []);
       return;
     }
-    const window = provider.windows[0];
-    const { used, limit, remaining, resetsAt } = scenario.expected;
     assert.deepEqual(
-      { used: window.used, limit: window.limit, remaining: window.remaining, resetsAt: window.resetsAt },
-      { used, limit, remaining, resetsAt }
+      provider.windows.map(({ label, used, limit, remaining, resetsAt }) => ({
+        label, used, limit, remaining, resetsAt
+      })),
+      scenario.expectedWindows
     );
-    assert.equal(window.remainingPercent, Number((100 - used / limit * 100).toFixed(3)));
+    for (const window of provider.windows) {
+      assert.equal(window.remainingPercent, Number((100 - window.used / window.limit * 100).toFixed(3)));
+    }
   });
 }
 

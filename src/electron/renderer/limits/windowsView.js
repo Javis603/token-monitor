@@ -1526,8 +1526,7 @@
       }
     } else if (provider.provider === 'qoder') {
       windows.classList.add('limit-windows-qoder');
-      const credits = windowForKind(provider, 'billing');
-      if (credits) {
+      for (const credits of windowsForKind(provider, 'billing')) {
         const node = limitWindowNode(
           credits?.label || 'Credits',
           credits,
