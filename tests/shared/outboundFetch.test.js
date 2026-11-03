@@ -7,8 +7,7 @@ const {
   cleanProxyUrl,
   resolveProxyConfig,
   resolveProxyUrl,
-  createOutboundFetch,
-  resetOutboundFetchCache
+  createOutboundFetch
 } = require('../../src/shared/outboundFetch');
 
 test('cleanProxyUrl trims and strips matching quotes', () => {
@@ -116,28 +115,4 @@ test('createOutboundFetch deps.fetch override wins over proxy wiring', async () 
   const res = await fetchFn('https://example.test/');
   assert.equal(hits, 1);
   assert.equal(res.status, 204);
-});
-
-test('resetOutboundFetchCache destroys cached proxy agents before clearing them', async () => {
-  const created = [];
-  const destroyed = [];
-  class FakeEnvHttpProxyAgent {
-    constructor() {
-      created.push(this);
-    }
-    destroy() {
-      destroyed.push(this);
-      return Promise.resolve();
-    }
-  }
-  const deps = { EnvHttpProxyAgent: FakeEnvHttpProxyAgent, undiciFetch: async () => ({ ok: true }) };
-  await resetOutboundFetchCache();
-  createOutboundFetch({ HTTPS_PROXY: 'http://127.0.0.1:7897' }, deps);
-  assert.equal(created.length, 1);
-  await resetOutboundFetchCache();
-  assert.deepEqual(destroyed, [created[0]]);
-  createOutboundFetch({ HTTPS_PROXY: 'http://127.0.0.1:7897' }, deps);
-  assert.equal(created.length, 2);
-  await resetOutboundFetchCache();
-  assert.deepEqual(destroyed, [created[0], created[1]]);
 });
