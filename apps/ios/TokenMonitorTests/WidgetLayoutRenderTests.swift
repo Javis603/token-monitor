@@ -324,6 +324,37 @@ extension WidgetLayoutRenderTests {
         }
     }
 
+
+    @Test func notchWaveFramesAndMotionFallbacks() throws {
+        let now = Date.now
+        let samples = [0.0, 0.2, 0.5, 0.8]
+        for (index, phase) in samples.enumerated() {
+            let view = ActivityWaveShape(phase: phase)
+                .fill(ActivityPalette.quotaTint("codex"))
+                .frame(width: 100, height: 73.6).padding(20).background(.black)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 3
+            write(try #require(renderer.uiImage), name: "notch-wave-frame-\(index)")
+        }
+        for (name, stale) in [
+            ("stale", true),
+            ("live-update", false)
+        ] {
+            let view = ActivityWaveform(updatedAt: now, isStale: stale, tint: ActivityPalette.quotaTint("codex"))
+                .environment(\.activityPreviewAnimated, true)
+                .padding(20).background(.black)
+            // Disable preview timing for the update path so its identity
+            // transition also has to produce a visible, non-empty wave.
+                .environment(\.activityPreviewAnimated, name != "live-update")
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 3
+            let image = try #require(renderer.uiImage)
+            write(image, name: "notch-wave-\(name)")
+            let bytes = try #require(image.cgImage?.dataProvider?.data) as Data
+            #expect(bytes.contains { $0 > 0 && $0 < 255 })
+        }
+    }
+
     @Test func staleQuotaRemainsVisibleInUsageAndOverviewTemplates() throws {
         typealias State = TokenMonitorActivityAttributes.ContentState
         let now = Date.now

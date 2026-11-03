@@ -4,6 +4,22 @@ import Testing
 
 @MainActor
 struct WidgetPresentationTests {
+    @Test func waveformMatchesDesktopCSSAtThreePhases() {
+        // Independently calculated from notch.css heights/delays and CSS
+        // cubic-bezier(.42, 0, .58, 1), using a JS binary-search oracle.
+        let reference: [(Double, [Double])] = [
+            (0, [6.59168619, 6.01925487, 8.47502510, 9.29886935, 3.71954774]),
+            (0.25, [3.35600433, 11.19721545, 10.17513729, 7.48095398, 6.66761841]),
+            (0.5, [4.67831381, 14.91074513, 6.01497490, 14.85113065, 5.94045226])
+        ]
+        for (phase, heights) in reference {
+            for index in heights.indices {
+                #expect(abs(ActivityWaveGeometry.barHeight(index, phase: phase) - heights[index]) < 0.001)
+                #expect(abs(ActivityWaveGeometry.barHeight(index, phase: phase + 1) - heights[index]) < 0.001)
+            }
+        }
+    }
+
     @Test func automaticActivityFollowsWorkThenQuotaThenUsageWithoutChangingSavedSlots() throws {
         typealias State = TokenMonitorActivityAttributes.ContentState
         let now = Date.now

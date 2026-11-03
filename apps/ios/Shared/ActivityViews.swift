@@ -576,10 +576,12 @@ struct ActivityFreshness: View {
 /// extra status sentence that can truncate beside a quota or currency value.
 struct ActivityRunningLabel: View {
     let agents: ActivityState.Agents
+    let updatedAt: Date
+    let isStale: Bool
 
     var body: some View {
         if agents.running > 0 || (agents.waiting ?? 0) > 0 {
-            ActivityWorkStatus(agents: agents)
+            ActivityWorkStatus(agents: agents, updatedAt: updatedAt, isStale: isStale)
         }
     }
 }
@@ -659,7 +661,8 @@ struct ActivityCompactItemView: View {
         case .agentIcons:
             ActivityAgentIcons(agents: context.state.agents)
         case .activity:
-            ActivityWorkStatus(agents: context.state.agents, isStale: context.isStale)
+            ActivityWorkStatus(agents: context.state.agents, updatedAt: context.state.updatedAt,
+                               isStale: context.sourceIsStale(nil))
         case .none:
             EmptyView()
         }
@@ -677,52 +680,14 @@ struct ActivityAgentIcons: View {
                 ActivityMark(providerID: client, size: 19)
                     .padding(1)
                     .background(.black, in: Circle())
-                    .offset(x: CGFloat(index) * 13)
+                    .offset(x: CGFloat(index) * 12)
                     .zIndex(Double(clients.count - index))
             }
             if clients.isEmpty { ActivityMark(providerID: nil, size: 19) }
         }
-        .frame(width: CGFloat(max(0, clients.count - 1)) * 13 + 21, height: 21)
+        .frame(width: CGFloat(max(0, clients.count - 1)) * 12 + 21, height: 21)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: clients.map { WidgetPresentation.displayName(for: $0) }.joined(separator: ", ")))
-    }
-}
-
-/// macOS's single-session waveform and separate running/waiting readings.
-struct ActivityWorkStatus: View {
-    let agents: ActivityState.Agents
-    var isStale = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var tint: Color { ActivityPalette.quotaTint(agents.clients.first) }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            if agents.running == 1 && (agents.waiting ?? 0) == 0 {
-                Image(systemName: "waveform")
-                    .font(.system(size: 19, weight: .medium))
-                    .symbolEffect(.variableColor.iterative, isActive: !reduceMotion && !isStale)
-                    .foregroundStyle(tint)
-            } else {
-                if agents.running > 0 {
-                    Text(verbatim: agents.running.formatted())
-                        .font(.system(size: 16, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(tint)
-                }
-                if let waiting = agents.waiting, waiting > 0 {
-                    HStack(spacing: 3) {
-                        Image(systemName: "ellipsis.message")
-                            .font(.system(size: 10, weight: .medium))
-                        Text(verbatim: waiting.formatted())
-                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    }
-                    .foregroundStyle(.orange)
-                }
-            }
-        }
-        .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("\(agents.running) running, \(agents.waiting ?? 0) waiting"))
     }
 }
 
@@ -836,7 +801,8 @@ struct ActivityExpandedTrailing: View {
                 }
             case .usage:
                 if context.state.agents.running > 0 {
-                    ActivityRunningLabel(agents: context.state.agents)
+                    ActivityRunningLabel(agents: context.state.agents, updatedAt: context.state.updatedAt,
+                                         isStale: context.sourceIsStale(nil))
                 } else {
                     ActivityFreshness(context: context)
                 }
@@ -1005,7 +971,8 @@ struct ActivityLockScreenView: View {
                 HStack(spacing: 8) {
                     Text(verbatim: context.costText(usage))
                         .foregroundStyle(.secondary)
-                    ActivityRunningLabel(agents: context.state.agents)
+                    ActivityRunningLabel(agents: context.state.agents, updatedAt: context.state.updatedAt,
+                                         isStale: context.sourceIsStale(nil))
                 }
                 .font(.footnote.monospacedDigit())
                 .lineLimit(1)

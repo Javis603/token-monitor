@@ -55,7 +55,11 @@
 		12000000000000000000001B /* TokenMonitorActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001B /* TokenMonitorActivityWidget.swift */; };
 		12000000000000000000001C /* TokenMonitorWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001C /* TokenMonitorWidgets.swift */; };
 		120000000000000000000051 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000042 /* ActivityViews.swift */; };
+		D41749749CA1FEE19A0034CF /* ActivityWorkStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87CC6FD2187D1225E08B7337 /* ActivityWorkStatus.swift */; };
+		30B7B3516BBEB0C1C0C8456C /* ActivityWaveform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31245DC3568F9249D0D23A4F /* ActivityWaveform.swift */; };
 		120000000000000000000052 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000042 /* ActivityViews.swift */; };
+		7572320D603F9C1FA366DCD3 /* ActivityWorkStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87CC6FD2187D1225E08B7337 /* ActivityWorkStatus.swift */; };
+		907F3BF6A4789D745D73ABC8 /* ActivityWaveform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31245DC3568F9249D0D23A4F /* ActivityWaveform.swift */; };
 		120000000000000000000053 /* LiveActivityCustomizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000043 /* LiveActivityCustomizerView.swift */; };
 		120000000000000000000054 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000016 /* WidgetPresentation.swift */; };
 		12000000000000000000001D /* SharedSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* SharedSnapshotStore.swift */; };
@@ -261,6 +265,8 @@
 		110000000000000000000008 /* TokenMonitorActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorActivityAttributes.swift; sourceTree = "<group>"; };
 		110000000000000000000009 /* TokenMonitorSharedPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorSharedPayload.swift; sourceTree = "<group>"; };
 		110000000000000000000042 /* ActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityViews.swift; sourceTree = "<group>"; };
+		87CC6FD2187D1225E08B7337 /* ActivityWorkStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityWorkStatus.swift; sourceTree = "<group>"; };
+		31245DC3568F9249D0D23A4F /* ActivityWaveform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityWaveform.swift; sourceTree = "<group>"; };
 		110000000000000000000043 /* LiveActivityCustomizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityCustomizerView.swift; sourceTree = "<group>"; };
 		11000000000000000000000A /* BreakdownItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownItem.swift; sourceTree = "<group>"; };
 		11000000000000000000000B /* ActivityHeatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityHeatmap.swift; sourceTree = "<group>"; };
@@ -501,6 +507,8 @@
 				110000000000000000000007 /* SharedSnapshotStore.swift */,
 				110000000000000000000008 /* TokenMonitorActivityAttributes.swift */,
 				110000000000000000000042 /* ActivityViews.swift */,
+				87CC6FD2187D1225E08B7337 /* ActivityWorkStatus.swift */,
+				31245DC3568F9249D0D23A4F /* ActivityWaveform.swift */,
 				110000000000000000000009 /* TokenMonitorSharedPayload.swift */,
 			);
 			path = Shared;
@@ -906,6 +914,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				120000000000000000000052 /* ActivityViews.swift in Sources */,
+				7572320D603F9C1FA366DCD3 /* ActivityWorkStatus.swift in Sources */,
+				907F3BF6A4789D745D73ABC8 /* ActivityWaveform.swift in Sources */,
 				120000000000000000000014 /* ProviderEntity.swift in Sources */,
 				12000000000000000000001D /* SharedSnapshotStore.swift in Sources */,
 				12000000000000000000001B /* TokenMonitorActivityWidget.swift in Sources */,
@@ -1047,6 +1057,8 @@
 				01942276D4783199323D77C2 /* SurfaceCard.swift in Sources */,
 				120000000000000000000006 /* SystemSurfaceCoordinator.swift in Sources */,
 				120000000000000000000051 /* ActivityViews.swift in Sources */,
+				D41749749CA1FEE19A0034CF /* ActivityWorkStatus.swift in Sources */,
+				30B7B3516BBEB0C1C0C8456C /* ActivityWaveform.swift in Sources */,
 				120000000000000000000008 /* TokenMonitorActivityAttributes.swift in Sources */,
 				06013428F8C212F797CD3D88 /* TokenMonitorApp.swift in Sources */,
 				120000000000000000000002 /* TokenMonitorSharedPayload+Hub.swift in Sources */,

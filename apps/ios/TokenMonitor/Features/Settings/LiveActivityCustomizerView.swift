@@ -81,6 +81,7 @@ struct LiveActivityCustomizerView: View {
         ScrollView {
             VStack(spacing: DesignTokens.sectionSpacing) {
                 stage
+                    .environment(\.activityPreviewAnimated, true)
                 controls
                 presentationMode
                 if preferences.liveLayout.mode == .custom {
@@ -151,6 +152,11 @@ struct LiveActivityCustomizerView: View {
             snapshot: previewSnapshot(),
             preferences: preferences.sharedPreferences
         )
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--sample-live-single") {
+            state.agents = .init(running: 1, clients: ["codex"])
+        }
+        #endif
         if store.stats == nil, state.agents.running == 0 {
             state.agents = .init(running: 2, clients: ["claude", "codex"])
         }
