@@ -9,6 +9,7 @@ const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'rendere
 const items = require(path.join(rendererDir, 'edgeDock', 'items'));
 const presentation = require(path.join(rendererDir, 'edgeDock', 'presentation'));
 const fixedPeriodRanges = require(path.join(rendererDir, 'fixedPeriodRanges'));
+const { applyActivityPatch } = require('../../src/shared/sessionActivityProjection');
 const { LANGUAGE_OPTIONS, MESSAGES, translate } = require(path.join(rendererDir, 'i18n'));
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -204,6 +205,51 @@ test('cacheHit uses measured session input while the period keeps its own split'
   assert.equal(cell.sessions[0].miss, 200);
   assert.ok(Math.abs(cell.sessions[0].rate - 75) < 1e-9);
 });
+
+for (const client of ['codex', 'claude']) for (const activity of ['running', 'waiting', 'idle']) {
+  test(`cacheHit joins ${client} ${activity} patches before selection and expiry`, (t) => {
+    const now = Date.now();
+    t.mock.method(Date, 'now', () => now);
+    const key = `${client}:patched`;
+    const row = session(client, 'patched', now - 60_000, {
+      turnEnded: activity === 'running'
+    });
+    const recent = session(client, 'recent', now - 1_000, { turnEnded: true });
+    const original = {
+      periods: {
+        today: {
+          totalTokens: 2000, cacheReadTokens: 1200, cacheWriteTokens: 200,
+          inputTokens: 200, outputTokens: 400,
+          capabilities: { tokenComponents: true },
+          sessions: { [key]: row, [`${client}:recent`]: recent }
+        }
+      }
+    };
+    const liveActivity = { state: activity, observedAt: new Date(now).toISOString() };
+    const patched = applyActivityPatch(original, {
+      observations: [{ client, sessionId: 'patched', liveActivity }]
+    });
+    assert.equal(patched.periods.today.sessions, original.periods.today.sessions);
+    const [cell] = presentation.buildEdgeDockCells(patched, {
+      items: [{ type: 'stat', metric: 'cacheHit' }]
+    });
+    const projected = cell.sessions.find(row => row.key === key);
+    assert.equal(presentation.sessionActivityState(projected, now), activity);
+    assert.deepEqual(projected.liveActivity, liveActivity);
+    assert.equal(cell.runningCount, activity === 'running' ? 1 : 0);
+    assert.deepEqual(cell.sessions.map(row => row.key), activity === 'running'
+      ? [key] : [`${client}:recent`, key]);
+    assert.equal(cell.runningExpiresAt, now + 30_000);
+    assert.equal(cell.rate, 75);
+    assert.equal(projected.rate, 75);
+
+    t.mock.method(Date, 'now', () => now + 30_001);
+    const [expired] = presentation.buildEdgeDockCells(patched, {
+      items: [{ type: 'stat', metric: 'cacheHit' }]
+    });
+    assert.equal(expired.runningCount, activity === 'running' ? 0 : 1);
+  });
+}
 
 test('cacheHit expiry includes idle live observations in the fallback rows', () => {
   const now = Date.now();

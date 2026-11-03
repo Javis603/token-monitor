@@ -825,7 +825,8 @@
       const period = stats?.periods?.today || null;
       const summary = cacheHitSummary(period);
       const now = Date.now();
-      const rows = Object.values(period?.sessions || {})
+      const rows = Object.entries(period?.sessions || {})
+        .map(([key, session]) => sessionLive.sessionWithActivity(period, key, session))
         .filter(session => session?.sessionKind !== 'background-review')
         .map(session => cacheHitSessionRow(session))
         .filter(Boolean);
