@@ -2946,3 +2946,91 @@ test('Muse web weekly quota spans the row above its full-width balance', () => {
   ] }, '#0866FF');
   assert.ok(cli.children.every((row) => !row.classNames.has('limit-window-wide')));
 });
+
+test('history hover is automatic by default and optional without adding a separate icon or text button', async () => {
+  const pending = new Map();
+  const nativeSetTimeout = global.setTimeout, nativeClearTimeout = global.clearTimeout;
+  global.setTimeout = fn => { const key = {}; pending.set(key, fn); return key; };
+  global.clearTimeout = key => pending.delete(key);
+  try {
+    for (const mode of ['hover', 'click']) {
+      const opened = [], entered = [], left = [];
+      const history = { key: () => 'account', open: async (...args) => opened.push(args), enter: key => entered.push(key), leave: key => left.push(key) };
+      const row = dockView({ limitsHistoryOpenMode: mode }, { history }).renderLimitProviderRow('codex', 'Codex', {
+        provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 20, remainingPercent: 80 }]
+      }, '#123456');
+      row.isConnected = true;
+      row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+      row.listeners.pointerenter();
+      assert.deepEqual(entered, ['account']);
+      assert.equal(pending.size, mode === 'hover' ? 1 : 0);
+      for (const fn of pending.values()) fn();
+      pending.clear();
+      assert.equal(opened.length, mode === 'hover' ? 1 : 0);
+      row.listeners.pointerleave();
+      assert.deepEqual(left, ['account']);
+      row.listeners.click({ target: { closest: () => null } });
+      assert.equal(opened.at(-1)[2], true);
+      const before = opened.length;
+      row.listeners.click({ target: { closest: () => ({}) } });
+      assert.equal(opened.length, before, 'existing account controls keep their own action');
+      row.listeners.keydown({ target: row, key: 'Enter', preventDefault() {} });
+      assert.equal(opened.length, before + 1);
+      assert.equal(row.querySelectorAll('.limit-history-open').length, 0);
+    }
+  } finally { global.setTimeout = nativeSetTimeout; global.clearTimeout = nativeClearTimeout; }
+});
+
+test('a spend-only account can open history without inventing a percentage or adding an icon', () => {
+  const opened = [];
+  const history = { key: () => 'spend-account', open: async (...args) => opened.push(args), enter() {}, leave() {} };
+  const row = dockView({}, { history }).renderLimitProviderRow('mimo', 'MiMo', {
+    provider: 'mimo', status: 'ok', windows: [{ kind: 'billing', metric: 'spend', label: 'Usage credits', used: 5, currency: 'USD' }]
+  }, '#123456');
+  row.isConnected = true;
+  row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+  assert.equal(row.dataset.limitHistory, 'spend-account');
+  row.listeners.click({ target: { closest: () => null } });
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][2], true);
+});
+
+test('rebuilding account rows preserves the active quota preview on its source account only', () => {
+  const history = { key: provider => provider.accountKey, activeKey: () => 'selected', open: async () => {}, enter() {}, leave() {} };
+  for (const accountKey of ['selected', 'other']) {
+    const row = dockView({}, { history }).renderLimitProviderRow('codex', 'Codex', {
+      provider: 'codex', accountKey, status: 'ok', windows: [{ kind: 'weekly', usedPercent: 20 }]
+    }, '#123456');
+    assert.equal(row.classNames.has('is-history-active'), accountKey === 'selected');
+  }
+});
+
+test('off mode keeps quota cards without popup mouse or keyboard affordances', () => {
+  const history = { key() { throw Error('disabled preview must not create a key'); } };
+  const row = dockView({ limitsHistoryOpenMode: 'off' }, { history }).renderLimitProviderRow('codex', 'Codex', {
+    provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 20, remainingPercent: 80 }]
+  }, '#123456');
+  assert.equal(row.dataset.limitHistory, undefined);
+  assert.equal(row.tabIndex, undefined);
+  assert.equal(row.listeners?.pointerenter, undefined);
+  assert.equal(row.listeners?.click, undefined);
+  assert.equal(row.listeners?.keydown, undefined);
+  assert.ok(row.find('limit-window'), 'current quotas remain visible');
+});
+
+test('hovering a different account while a preview is open switches immediately without the initial delay', () => {
+  const nativeSetTimeout = global.setTimeout;
+  global.setTimeout = () => { throw Error('an open preview should not wait on another hover timer'); };
+  try {
+    const opened = [];
+    const history = { key: () => 'next', activeKey: () => 'previous', open: async (...args) => opened.push(args), enter() {}, leave() {} };
+    const row = dockView({}, { history }).renderLimitProviderRow('codex', 'Codex', {
+      provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 20 }]
+    }, '#123456');
+    row.isConnected = true;
+    row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+    row.listeners.pointerenter();
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0][0], 'next');
+  } finally { global.setTimeout = nativeSetTimeout; }
+});

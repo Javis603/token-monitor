@@ -52,6 +52,8 @@
   --red: #f47788;
   --shadow: rgba(0, 0, 0, 0.36);
 }
+
+.limit-row[data-limit-history]:focus-visible { outline: 1px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 * { box-sizing: border-box; }
 html, body {
   width: 100%;

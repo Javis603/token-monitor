@@ -39,6 +39,13 @@ const {
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limits/fetch');
+const { createLimitsHistoryStore } = require('./limits/historyStore');
+const { historyRowKey } = require('./limits/historyIdentity');
+const { createLimitsHistoryController } = require('./limits/historyController');
+const { LIMIT_PROVIDER_CATALOG: historyProviderCatalog } = require('../shared/limits/providers');
+const { isLimitWindowHidden: historyWindowHidden } = require('../shared/limits/usageItems');
+const { maskEmailAddress: historyMaskEmail } = require('./renderer/accountIdentity');
+const { vendorColors: historyVendorColors } = require('../shared/vendorPresentation');
 const {
   createSessionProxyApplier,
   createProxyReadyFetch,
@@ -767,6 +774,7 @@ function defaultSettings() {
     cursorManualAccountIds: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
+    limitsHistoryOpenMode: 'hover',
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
     // The key OpenCode stores for itself needs no setup, so tracking it is the
     // default. This turns that off for a machine that is signed in to an account
@@ -2736,6 +2744,7 @@ function readSettings() {
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
+    merged.limitsHistoryOpenMode = ['hover', 'click', 'off'].includes(merged.limitsHistoryOpenMode) ? merged.limitsHistoryOpenMode : 'hover';
     merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
     merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
     delete merged.workbuddyLocalAppEnabled;
@@ -3163,6 +3172,7 @@ function applyNativeMaterial(source = settings) {
   syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
   syncWindowsBackdrop(mainWindow, { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop });
   syncWindowsBackdrop(dashboardWindow, { enabled: nativeBlurEnabled(source) });
+  limitsHistoryController?.syncMaterial();
 }
 
 function withHistoryPreview(stats, devices) {
@@ -3207,6 +3217,62 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+let limitsHistoryStore = null;
+let limitsHistoryController = null;
+
+function getLimitsHistoryStore() {
+  if (!limitsHistoryStore) limitsHistoryStore = createLimitsHistoryStore(path.join(app.getPath('userData'), 'limits-history.sqlite'), {
+    onError: error => console.log(`[limits-history] ${error.message}`),
+    onChange: () => limitsHistoryController?.refresh()
+  });
+  return limitsHistoryStore;
+}
+
+async function limitsHistoryPayload(key) {
+  if (statsPushSource && (statsPushSource.generation !== hubModeGeneration
+    || statsPushSource.identity !== currentHubStatsIdentity())) return null;
+  const publication = latestStats;
+  const stats = electronPresentationStats(publication);
+  const provider = stats?.limits?.providers?.find(row => historyRowKey(row) === key);
+  if (!provider) return null;
+  const scope = currentHubStatsIdentity();
+  const history = await getLimitsHistoryStore().query(scope, provider);
+  if (scope !== currentHubStatsIdentity() || publication !== latestStats) return null;
+  history.windows = history.windows.filter(entry => !historyWindowHidden(settings?.limitProviderHiddenItems, provider.provider, entry.window)
+    && !(provider.provider === 'codex' && settings?.showCodexAdditionalLimits === false && entry.window.additional === true));
+  if (!history.windows.length) return null;
+  const email = provider.accountEmail || '';
+  const account = settings?.maskLimitAccountEmails === true
+    ? historyMaskEmail(email) : email;
+  const colorId = provider.provider === 'factory' ? 'droid' : provider.provider;
+  const palette = { ...historyVendorColors(), ...settings?.vendorColors };
+  return {
+    ...history, key,
+    source: crypto.createHash('sha256').update(scope).digest('hex'),
+    provider: provider.provider,
+    label: historyProviderCatalog.find(entry => entry.id === provider.provider)?.label || provider.provider,
+    account: account || provider.accountName || provider.accountLabel || '',
+    updatedAt: provider.updatedAt,
+    locale: trayMenuLocale(), colors: settings?.themeColors, textScale: fontSettingsApi.textScaleForSize(settings?.textSize),
+    color: palette[colorId] || palette.default,
+    interfaceFont: fontSettingsApi.resolveEffectiveFontSettings(settings).interfaceFont,
+    appearance: {
+      glassOpacity: settings.glassOpacity, glassBlur: settings.glassBlur, systemGlass: settings.systemGlass, reduceMotion: settings.reduceMotion,
+      systemReducedMotion: systemPreferences.getAnimationSettings?.().prefersReducedMotion === true,
+    }
+  };
+}
+
+function getLimitsHistoryController() {
+  if (!limitsHistoryController) limitsHistoryController = createLimitsHistoryController({
+    BrowserWindow, screen, ipcMain,
+    isOwner: win => win === mainWindow || win === dashboardWindow,
+    read: limitsHistoryPayload,
+    getOpenMode: () => settings.limitsHistoryOpenMode,
+    getMaterialOptions: () => ({ ...nativeMaterialOptions(), radius: 14 })
+  });
+  return limitsHistoryController;
+}
 let statsPushSource = null;
 let statsPushRevision = 0;
 let macWidgetSnapshotController = null;
@@ -5056,6 +5122,8 @@ function sendPush(payload, options = {}) {
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
+    getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
+    limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
     rendererPayload = {
       ...payload,
@@ -5699,6 +5767,7 @@ async function pushSystemUiThemeAfterChange() {
 
 function pushSettingsToRenderer() {
   const payload = settingsForRenderer();
+  limitsHistoryController?.refresh();
   syncDockSurfaces(payload);
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
@@ -5893,6 +5962,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     // list, so its Remaining/Used preference has to reach this renderer too.
     sessionContextMetric: source.sessionContextMetric,
     maskLimitAccountEmails: source.maskLimitAccountEmails,
+    limitsHistoryOpenMode: source.limitsHistoryOpenMode,
     edgeDockWarnColors: source.edgeDockWarnColors === true,
     edgeDockRunningIndicatorEnabled: source.edgeDockRunningIndicatorEnabled !== false,
     // The user's own subscription records, so the card's plan cell can decorate
@@ -6828,6 +6898,8 @@ function stopAll() {
   try { sessionUsageArchiveStore.close(); } catch (error) {
     console.log(`[session-archive] close failed: ${error?.message || error}`);
   }
+  limitsHistoryController?.dispose();
+  limitsHistoryStore?.closeSync();
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
 }
@@ -7645,6 +7717,7 @@ function createWindow(boundsOverride, options = {}) {
     stopFloatingBubbleAutoCollapseTimer();
   });
   win.on('blur', () => {
+    limitsHistoryController?.hide();
     nudgeTaskbarZOrder();
     if (!suppressNextBlurHide) sendMainWindowEvent('window:summonCancelled');
     if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) {
@@ -7653,8 +7726,7 @@ function createWindow(boundsOverride, options = {}) {
       if (wasVisible) {
         hidePopover();
         // Cocoa can send this blur before Tray.mouse-down for the same click.
-        // The cursor point lets that later click identify its own blur without
-        // mistaking a quick click on another app followed by a tray click.
+        // Retain its cursor point for that later tray press.
         if (point && tray?.isPointerOverIcon?.(point)) recentPopoverBlur = { at: performance.now(), point };
       }
     }
@@ -8356,6 +8428,7 @@ app.whenReady().then(() => {
       limitsRefreshMs: normalizeLimitsRefreshMs(patch.limitsRefreshMs ?? settings.limitsRefreshMs),
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
+      limitsHistoryOpenMode: ['hover', 'click', 'off'].includes(patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) ? (patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) : 'hover',
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),
@@ -8896,6 +8969,7 @@ app.whenReady().then(() => {
   ipcMain.handle('claude:removeWebAccount', (_event, id) => claudeAccountService().removeAccount(String(id || '')));
   ipcMain.handle('claude:setAccountEnabled', (_event, id, enabled) => claudeAccountService().setAccountEnabled(String(id || ''), enabled));
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
+  getLimitsHistoryController().register();
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   // Explicit panel refreshes collect only their provider. Save and clear reuse
@@ -9902,11 +9976,13 @@ app.whenReady().then(() => {
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
-// performQuit is synchronous through to the exit, so there is nothing to wait
-// for and deliberately no preventDefault: taking the quit over would cancel an
-// OS-initiated logout or restart on macOS.
+// Drain queued quota-history writes with a bounded synchronous worker barrier,
+// then keep performQuit synchronous through to the exit. No preventDefault:
+// taking the quit over would cancel an OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  limitsHistoryController?.dispose();
+  limitsHistoryStore?.closeSync();
   antigravityOAuthLoginController?.abort();
   workbuddyManagedAccountService?.cancelLogin();
   resetMacWidgetReloadThrottle();

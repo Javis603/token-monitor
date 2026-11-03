@@ -2232,6 +2232,37 @@
       renderProviderWindows(provider, color)
     );
     if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
+    if (deps.history && settings()?.limitsHistoryOpenMode !== 'off' && (provider.windows || []).some(window => (
+      typeof window.usedPercent === 'number' || window.metric === 'credits' && typeof window.remaining === 'number'
+      || window.metric === 'spend' && typeof window.used === 'number'
+    ))) {
+      const key = deps.history.key(provider);
+      const openHistory = (interactive) => {
+        if (!row.isConnected) return;
+        const rect = row.getBoundingClientRect();
+        void deps.history.open(key, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, interactive).catch(() => {});
+      };
+      let hoverTimer = null;
+      row.addEventListener('pointerenter', () => {
+        deps.history.enter(key);
+        if (settings()?.limitsHistoryOpenMode === 'click') return;
+        if (deps.history.activeKey?.()) openHistory(false);
+        else hoverTimer = setTimeout(() => openHistory(false), 160);
+      });
+      row.addEventListener('pointerleave', () => { clearTimeout(hoverTimer); deps.history.leave(key); });
+      row.dataset.limitHistory = key;
+      row.classList.toggle('is-history-active', deps.history.activeKey?.() === key);
+      row.tabIndex = 0;
+      row.setAttribute('aria-description', t('limits.history.open'));
+      row.addEventListener('keydown', event => {
+        if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault(); clearTimeout(hoverTimer); openHistory(true);
+      });
+      row.addEventListener('click', event => {
+        if (event.target.closest('button, a, input, select, summary, [role="button"]')) return;
+        clearTimeout(hoverTimer); openHistory(true);
+      });
+    }
     return row;
   }
 

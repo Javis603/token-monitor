@@ -61,7 +61,7 @@ test('before-quit hands over without taking the quit away from the OS', () => {
 });
 
 
-test('tray and signal quit flush plugin state before immediate exit', () => {
+test('tray and signal quit flush plugin and quota history state before immediate exit', () => {
   const vm = require('node:vm');
   const events = [];
   const context = { console, quitRequested: false, quitInProgress: false,
@@ -70,11 +70,12 @@ test('tray and signal quit flush plugin state before immediate exit', () => {
     stopSyncCollector() {}, stopIcloudRuntime() {}, terminateUsageHostSubprocesses() {},
     syncStatsPublication: { cancel() {} }, macWidgetSnapshotController: null, macWidgetDemand: null,
     stopEmbeddedHub() {}, stopDiscordRpc() {}, sessionUsageArchiveStore: { close() {} }, tray: null,
+    limitsHistoryController: null, limitsHistoryStore: { closeSync() { events.push('quota-close'); } },
     app: { exit() { events.push('exit'); } } };
   vm.runInNewContext(main.slice(main.indexOf('function stopAll()'), main.indexOf('\nlet quitRequested')) + '\n'
     + main.slice(main.indexOf('function performQuit()'), main.indexOf('// Write the export file set')), context);
   context.requestAppQuit();
-  assert.deepEqual(events, ['flush', 'exit']);
+  assert.deepEqual(events, ['flush', 'quota-close', 'exit']);
 });
 
 test('a failing plugin teardown cannot skip the host shutdown that follows it', () => {
