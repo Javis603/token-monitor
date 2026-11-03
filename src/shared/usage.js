@@ -1998,6 +1998,197 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
   return aggregate;
 }
 
+// Sessions re-shelled because Today did not mention them. mergeNormalizedPeriods
+// uses this to renormalize only the sessions a delta actually rebuilt.
+const reusedUnchangedSessions = new WeakSet();
+const deltaResults = new WeakSet();
+// Periods whose session records are already shells, not the anchor's records.
+const shelledPeriods = new WeakSet();
+
+// A session the fresh and anchor Today periods both omit cannot change. The deep
+// walk used to allocate a new object for every nested map anyway, so a watch
+// tick paid for the whole retained history. The shell is a new object — callers
+// mutate titles and costs on the result — while the model map stays the anchor's.
+// That map is an immutable snapshot; mergeSession copies it before adding.
+function reuseUnchangedSession(session) {
+  const copy = { ...session };
+  reusedUnchangedSessions.add(copy);
+  if (session.modelCosts && typeof session.modelCosts === 'object') copy.modelCosts = { ...session.modelCosts };
+  delete copy.parentSessionId;
+  delete copy.parentClient;
+  applyParentLink(copy, session.parentSessionId ? session : {});
+  if (isSessionReasoningEffortClient(session.client)) {
+    const retainedAt = timestampMs(session.lastUsedAt);
+    // Same branches as deltaValue's session block when fresh and anchor are both
+    // absent: a missing Today row does not clear or move a retained setting.
+    if (retainedAt > 0) {
+      if (hasOwn(session, 'reasoningEffort')) copy.reasoningEffort = normalizeReasoningEffort(session.reasoningEffort);
+      else delete copy.reasoningEffort;
+    } else if (!hasOwn(session, 'reasoningEffort')) delete copy.reasoningEffort;
+  }
+  return copy;
+}
+
+function copyStringMap(map) {
+  return map && typeof map === 'object' ? { ...map } : map;
+}
+
+function copyNullMap(map) {
+  if (!map || typeof map !== 'object') return map;
+  const copy = Object.create(null);
+  return Object.assign(copy, map);
+}
+
+function copyNestedMap(map) {
+  if (!map || typeof map !== 'object') return map;
+  const copy = {};
+  for (const [key, value] of Object.entries(map)) {
+    copy[key] = value && typeof value === 'object' ? { ...value } : value;
+  }
+  return copy;
+}
+
+function copyProjects(projects) {
+  const copy = Object.create(null);
+  for (const [key, project] of Object.entries(projects || {})) {
+    if (!project || typeof project !== 'object') continue;
+    copy[key] = {
+      ...project,
+      clients: project.clients && typeof project.clients === 'object' ? copyNullMap(project.clients) : Object.create(null),
+      ...(project.models && typeof project.models === 'object' ? { models: copyNullMap(project.models) } : {})
+    };
+  }
+  return copy;
+}
+
+function copyThroughput(map) {
+  const copy = Object.create(null);
+  for (const [model, counters] of Object.entries(map)) copy[model] = { ...counters };
+  return copy;
+}
+
+// Own every map addPeriodInto writes, but keep untouched session records shared
+// until a caller asks for a shell. Session identity is detached by detachSessions.
+function adoptNormalizedPeriod(base) {
+  const period = {
+    ...base,
+    capabilities: {
+      tokenComponents: base.capabilities?.tokenComponents === true,
+      throughput: base.capabilities?.throughput === true
+    },
+    clients: copyStringMap(base.clients),
+    clientCosts: copyStringMap(base.clientCosts),
+    clientCacheReads: copyStringMap(base.clientCacheReads),
+    clientCacheWrites: copyStringMap(base.clientCacheWrites),
+    clientOutputs: copyStringMap(base.clientOutputs),
+    clientUnclassifiedTokens: copyStringMap(base.clientUnclassifiedTokens),
+    clientUnpricedTokens: copyStringMap(base.clientUnpricedTokens),
+    models: copyStringMap(base.models),
+    modelCosts: copyStringMap(base.modelCosts),
+    modelCacheReads: copyStringMap(base.modelCacheReads),
+    modelCacheWrites: copyStringMap(base.modelCacheWrites),
+    modelOutputs: copyStringMap(base.modelOutputs),
+    modelUnclassifiedTokens: copyStringMap(base.modelUnclassifiedTokens),
+    modelUnpricedTokens: copyStringMap(base.modelUnpricedTokens),
+    clientModels: copyNestedMap(base.clientModels),
+    clientModelCosts: copyNestedMap(base.clientModelCosts),
+    clientModelUnpricedTokens: copyNestedMap(base.clientModelUnpricedTokens),
+    ...(base.modelThroughput ? { modelThroughput: copyThroughput(base.modelThroughput) } : {}),
+    projects: copyProjects(base.projects),
+    sessions: {}
+  };
+  for (const key of Object.keys(period)) if (period[key] === undefined) delete period[key];
+  return period;
+}
+
+function detachSessions(sessions) {
+  const copy = {};
+  for (const [key, session] of Object.entries(sessions || {})) {
+    copy[key] = session && typeof session === 'object' && session.client && session.sessionId
+      ? reuseUnchangedSession(session)
+      : session;
+  }
+  return copy;
+}
+
+function cloneSessionForMerge(session) {
+  const copy = { ...session };
+  if (session.models && typeof session.models === 'object') copy.models = { ...session.models };
+  if (session.modelCosts && typeof session.modelCosts === 'object') copy.modelCosts = { ...session.modelCosts };
+  if (session.providers && typeof session.providers === 'object') copy.providers = { ...session.providers };
+  if (session.modelTokenComponents && typeof session.modelTokenComponents === 'object') {
+    const components = Object.create(null);
+    for (const [model, row] of Object.entries(session.modelTokenComponents)) {
+      components[model] = row && typeof row === 'object' ? { ...row } : row;
+    }
+    copy.modelTokenComponents = components;
+  }
+  return copy;
+}
+
+function sessionAsMerged(session) {
+  const normalized = normalizeSession(session, sessionKey(session.client, session.sessionId) || undefined);
+  if (!normalized) return null;
+  const merged = emptySession(normalized.client, normalized.sessionId);
+  mergeSession(merged, normalized);
+  return merged;
+}
+
+function periodHasContribution(period) {
+  if (!period || typeof period !== 'object') return false;
+  return Number(period.totalTokens) > 0
+    || Number(period.costUsd) > 0
+    || Object.keys(period.sessions || {}).length > 0
+    || Object.keys(period.clients || {}).length > 0
+    || Object.keys(period.models || {}).length > 0
+    || Object.keys(period.projects || {}).length > 0;
+}
+
+// `base` is already normalized. `extra` may be a raw or normalized overlay
+// (WSL, Codex local ledger). The anchor's own session records are never reused
+// as the published summary: a delta has already re-shelled them, and a full
+// scan detaches here. The extra side is the only one passed through normalizePeriod.
+function mergeNormalizedPeriods(base, extra) {
+  if (!base || typeof base !== 'object') return mergePeriods(extra);
+  const target = adoptNormalizedPeriod(base);
+  // A delta result already re-shelled untouched sessions away from the anchor.
+  // Share those shells with the summary. Cloning them again made every watch
+  // tick copy the retained history twice. Sessions the delta rebuilt still have
+  // to pass through normalize+mergeSession, which is what mergePeriods used to
+  // do to the whole period.
+  const fromDelta = deltaResults.has(base);
+  const touched = [];
+  if (fromDelta) {
+    for (const [key, session] of Object.entries(base.sessions || {})) {
+      if (!reusedUnchangedSessions.has(session)) touched.push([key, session]);
+    }
+  }
+  if (fromDelta || shelledPeriods.has(base)) target.sessions = { ...base.sessions };
+  else target.sessions = detachSessions(base.sessions);
+  for (const [key, session] of touched) {
+    const merged = sessionAsMerged(session);
+    if (!merged) {
+      delete target.sessions[key];
+      continue;
+    }
+    const mergedKey = sessionKey(merged.client, merged.sessionId);
+    if (mergedKey && mergedKey !== key) delete target.sessions[key];
+    target.sessions[mergedKey || key] = merged;
+  }
+  if (periodHasContribution(extra)) {
+    const normalizedExtra = normalizePeriod(extra);
+    if (periodHasContribution(normalizedExtra)) {
+      for (const session of Object.values(normalizedExtra.sessions || {})) {
+        const key = sessionKey(session.client, session.sessionId);
+        if (key && target.sessions[key]) target.sessions[key] = cloneSessionForMerge(target.sessions[key]);
+      }
+      addPeriodInto(target, normalizedExtra);
+    }
+  }
+  shelledPeriods.add(target);
+  return target;
+}
+
 // Exact broader-period update from a fresh --today scan. Tokens written since the
 // anchor full scan belong to today AND every broader window simultaneously, and
 // session logs are append-only, so base + (freshToday − anchorToday) is an
@@ -2005,8 +2196,11 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
 // rolls past the one it was taken on — callers must run a full scan then.
 // Recurses over the union of keys so it covers every numeric field a period may
 // grow (clients/models/clientModels/sessions/...) without per-field bookkeeping.
+// Subtrees present only on the base are not rebuilt: unchanged sessions are
+// re-shelled once, and their model maps are reused.
 function applyPeriodDelta(base, freshToday, anchorToday) {
   const result = deltaValue(base, freshToday, anchorToday, '');
+  if (result && typeof result === 'object') deltaResults.add(result);
   if (result && (!base?.modelThroughput || !freshToday?.modelThroughput || !anchorToday?.modelThroughput)) {
     delete result.modelThroughput;
   }
@@ -2047,6 +2241,10 @@ function deltaValue(base, fresh, anchor, key) {
     const freshMs = timestampMs(fresh);
     if (baseMs && freshMs) return baseMs >= freshMs ? base : fresh;
     return base || fresh || '';
+  }
+  if (base != null && fresh == null && anchor == null && typeof base === 'object' && !Array.isArray(base)) {
+    if (base.client && base.sessionId) return reuseUnchangedSession(base);
+    return base;
   }
   const sample = base ?? fresh ?? anchor;
   if (typeof sample === 'number') return Math.max(0, asNumber(base) + asNumber(fresh) - asNumber(anchor));
@@ -2122,6 +2320,7 @@ module.exports = {
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
   mergeDeviceRecord,
+  mergeNormalizedPeriods,
   mergeSyncDeviceRecord,
   mergePeriods,
   normalizeClientName,
