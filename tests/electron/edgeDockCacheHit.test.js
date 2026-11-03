@@ -4,380 +4,109 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 const items = require(path.join(rendererDir, 'edgeDock', 'items'));
 const presentation = require(path.join(rendererDir, 'edgeDock', 'presentation'));
 const fixedPeriodRanges = require(path.join(rendererDir, 'fixedPeriodRanges'));
-const { applyActivityPatch } = require('../../src/shared/sessionActivityProjection');
-const { LANGUAGE_OPTIONS, MESSAGES, translate } = require(path.join(rendererDir, 'i18n'));
+const { LANGUAGE_OPTIONS, MESSAGES } = require(path.join(rendererDir, 'i18n'));
 
-const HOUR_MS = 60 * 60 * 1000;
-
-function session(client, sessionId, now, overrides = {}) {
-  return {
-    client,
-    sessionId,
-    title: sessionId,
-    totalTokens: 1000,
-    cacheReadTokens: 600,
-    cacheWriteTokens: 100,
-    inputTokens: 100,
-    outputTokens: 200,
-    lastUsedAt: new Date(now).toISOString(),
-    turnEnded: false,
-    ...overrides
-  };
+function cacheCell(today, otherPeriods = {}) {
+  return presentation.buildEdgeDockCells({ periods: { ...otherPeriods, today } }, {
+    items: [{ type: 'stat', metric: 'cacheHit' }]
+  })[0];
 }
 
-test('cacheHit projects one period total with active and recent session rows', () => {
-  const now = Date.now();
-  const sessions = {
-    'codex:running-a': session('codex', 'running-a', now),
-    'codex:running-b': session('codex', 'running-b', now, {
-      totalTokens: 500,
-      cacheReadTokens: 100,
-      cacheWriteTokens: 0,
-      inputTokens: 400,
-      outputTokens: 0
-    }),
-    'codex:idle': session('codex', 'idle', now, {
-      totalTokens: 2000,
-      cacheReadTokens: 1000,
-      cacheWriteTokens: 0,
-      inputTokens: 500,
-      outputTokens: 500,
-      lastUsedAt: new Date(now - 2 * HOUR_MS).toISOString(),
-      turnEnded: true
-    }),
-    'codex:output-only': session('codex', 'output-only', now, {
-      totalTokens: 100,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      inputTokens: 0,
-      outputTokens: 100,
-      turnEnded: true
-    }),
-    'codex:background': session('codex', 'background', now, {
-      sessionKind: 'background-review',
-      totalTokens: 400,
-      cacheReadTokens: 400,
-      cacheWriteTokens: 0,
-      inputTokens: 0,
-      outputTokens: 0
-    })
-  };
+test('cacheHit uses the shared Tool detail input split for the whole day', () => {
   const today = {
-    totalTokens: 4000,
-    cacheReadTokens: 2100,
-    cacheWriteTokens: 100,
-    inputTokens: 1000,
-    outputTokens: 800,
-    unclassifiedTokens: 0,
-    capabilities: { tokenComponents: true },
-    sessions
+    totalTokens: 4000, cacheReadTokens: 2100, cacheWriteTokens: 100,
+    outputTokens: 800, unclassifiedTokens: 0, capabilities: { tokenComponents: true }
   };
-  const items = [{ type: 'stat', metric: 'cacheHit' }];
-  const [cell] = presentation.buildEdgeDockCells({ periods: { today } }, { items });
-  const component = fixedPeriodRanges.tokenComponentBreakdown(today);
+  const cell = cacheCell(today, { month: { ...today, totalTokens: 8000 } });
+  const split = fixedPeriodRanges.tokenComponentBreakdown(today);
+  assert.deepEqual(cell, {
+    id: 'stat:cacheHit', kind: 'stat', metric: 'cacheHit', period: 'today',
+    available: true, hit: split.cacheRead, miss: split.cacheMiss, rate: 65.625
+  });
+});
 
-  assert.equal(items.length, 1);
-  assert.equal(cell.metric, 'cacheHit');
-  assert.equal(cell.period, 'today');
+test('cacheHit excludes unclassified tokens and output from the measured input', () => {
+  const cell = cacheCell({
+    totalTokens: 1000, cacheReadTokens: 600, cacheWriteTokens: 100,
+    outputTokens: 100, unclassifiedTokens: 100, capabilities: { tokenComponents: true }
+  });
+  assert.equal(cell.hit, 600);
+  assert.equal(cell.miss, 200);
+  assert.equal(cell.rate, 75);
+});
+
+test('cacheHit remains unavailable for missing, total-only, empty and output-only readings', () => {
+  for (const today of [undefined, { totalTokens: 300 },
+    { totalTokens: 0, capabilities: { tokenComponents: true } },
+    { totalTokens: 300, outputTokens: 300, capabilities: { tokenComponents: true } }]) {
+    const cell = cacheCell(today);
+    assert.equal(cell.available, false);
+    assert.equal(cell.rate, null);
+  }
+});
+
+test('cacheHit distinguishes measured zero hits from missing telemetry', () => {
+  const cell = cacheCell({
+    totalTokens: 300, outputTokens: 100, capabilities: { tokenComponents: true }
+  });
   assert.equal(cell.available, true);
-  assert.equal(cell.hit, 2100);
-  // Cache writes stay on the miss side, matching the Tool detail split.
-  assert.equal(cell.miss, 1100);
-  assert.ok(Math.abs(cell.rate - 65.625) < 1e-9);
-  assert.equal(Math.round(cell.rate), component.hitPct);
-  assert.deepEqual(cell.sessions.map((row) => row.key), ['codex:running-a', 'codex:running-b', 'codex:idle']);
-  assert.equal(cell.sessions[0].miss, 200);
-  assert.equal(cell.sessions[0].rate, 75);
-  assert.equal(cell.sessions[1].miss, 400);
-  assert.equal(cell.sessions[1].rate, 20);
-  assert.equal(cell.runningCount, 2);
-  assert.equal(presentation.runningSessionSummary(cell.sessions).count, 2);
-  assert.ok(cell.runningExpiresAt > now);
-  for (const row of cell.sessions.filter(row => presentation.sessionActivityState(row) === 'running')) {
-    assert.equal(row.client, 'codex');
-    assert.equal(row.lastUsedAt, new Date(now).toISOString());
-    assert.equal(row.turnEnded, false);
-    assert.equal(row.archived, false);
-    assert.equal(row.deleted, false);
-    assert.equal(row.sourceDeleted, false);
-  }
+  assert.equal(cell.hit, 0);
+  assert.equal(cell.miss, 200);
+  assert.equal(cell.rate, 0);
 });
 
-test('cacheHit uses the Sessions card timeline selection for mixed activity', (t) => {
-  const now = Date.now();
-  t.mock.method(Date, 'now', () => now);
-  const sessions = {};
-  for (let index = 0; index < 8; index += 1) {
-    sessions[`codex:session-${index}`] = session('codex', `session-${index}`, now - index * 1000, {
-      turnEnded: index < 4 || index === 7,
-      waitingForInput: index === 6
-    });
-  }
-  const [timeline, cache] = presentation.buildEdgeDockCells({ periods: { today: {
-    totalTokens: 8000, inputTokens: 800, cacheReadTokens: 4800,
-    cacheWriteTokens: 800, outputTokens: 1600,
-    capabilities: { tokenComponents: true }, sessions
-  } } }, { items: [{ type: 'stat', metric: 'sessions' }, { type: 'stat', metric: 'cacheHit' }] });
-  assert.deepEqual(cache.sessions.map(row => row.key), timeline.sessions.map(row => row.key));
-  assert.deepEqual(cache.sessions.map(row => row.key), [
-    'codex:session-0', 'codex:session-1', 'codex:session-2',
-    'codex:session-4', 'codex:session-5', 'codex:session-6'
-  ]);
-  assert.equal(cache.runningCount, 2);
-  assert.equal(presentation.sessionActivityState(cache.sessions.at(-1), now), 'waiting');
+test('cache writes remain misses even without an explicit component capability', () => {
+  const cell = cacheCell({ totalTokens: 100, cacheWriteTokens: 100 });
+  assert.equal(cell.available, true);
+  assert.equal(cell.hit, 0);
+  assert.equal(cell.miss, 100);
+  assert.equal(cell.rate, 0);
 });
 
-test('cacheHit falls back to the six most recently active rows when idle', () => {
-  const now = Date.now();
-  const sessions = {};
-  for (let index = 0; index < 7; index += 1) {
-    sessions[`codex:${index}`] = session('codex', `idle-${index}`, now, {
-      totalTokens: 1000,
-      cacheReadTokens: 100,
-      cacheWriteTokens: 0,
-      inputTokens: 200,
-      outputTokens: 700,
-      lastUsedAt: new Date(now - index * HOUR_MS).toISOString(),
-      turnEnded: true
-    });
-  }
-  const [cell] = presentation.buildEdgeDockCells({
-    periods: {
-      today: {
-        totalTokens: 7000,
-        cacheReadTokens: 700,
-        cacheWriteTokens: 0,
-        inputTokens: 1400,
-        outputTokens: 4900,
-        unclassifiedTokens: 0,
-        capabilities: { tokenComponents: true },
-        sessions
-      }
-    }
-  }, { items: [{ type: 'stat', metric: 'cacheHit' }] });
-
-  assert.equal(cell.sessions.length, 6);
-  assert.deepEqual(cell.sessions.map((row) => row.key), [
-    'codex:idle-0', 'codex:idle-1', 'codex:idle-2', 'codex:idle-3', 'codex:idle-4', 'codex:idle-5'
-  ]);
-  assert.equal(presentation.runningSessionSummary(cell.sessions).count, 0);
-});
-
-test('cacheHit omits total-only rows when cache telemetry is absent', () => {
-  const now = Date.now();
-  const [cell] = presentation.buildEdgeDockCells({
-    periods: {
-      today: {
-        totalTokens: 300,
-        inputTokens: 0,
-        outputTokens: 0,
-        unclassifiedTokens: 0,
-        sessions: {
-          'codex:total-only': {
-            client: 'codex',
-            sessionId: 'total-only',
-            title: 'total-only',
-            totalTokens: 300,
-            lastUsedAt: new Date(now).toISOString(),
-            turnEnded: false
-          }
-        }
-      }
-    }
-  }, { items: [{ type: 'stat', metric: 'cacheHit' }] });
-
-  assert.equal(cell.available, false);
-  assert.equal(cell.rate, null);
-  assert.deepEqual(cell.sessions, []);
-});
-
-test('cacheHit uses measured session input while the period keeps its own split', () => {
-  const now = Date.now();
-  const row = {
-    client: 'codex',
-    sessionId: 'measured-input',
-    title: 'measured-input',
-    totalTokens: 1000,
-    cacheReadTokens: 600,
-    cacheWriteTokens: 100,
-    inputTokens: 100,
-    outputTokens: 100,
-    lastUsedAt: new Date(now - 2 * HOUR_MS).toISOString(),
-    turnEnded: true
+test('cacheHit reads aggregate counters without accessing sessions or activity', () => {
+  const today = {
+    totalTokens: 1000, cacheReadTokens: 600, cacheWriteTokens: 100,
+    outputTokens: 200, capabilities: { tokenComponents: true }
   };
-  const [cell] = presentation.buildEdgeDockCells({
-    periods: {
-      today: {
-        totalTokens: 1000,
-        cacheReadTokens: 600,
-        cacheWriteTokens: 100,
-        inputTokens: 100,
-        outputTokens: 100,
-        unclassifiedTokens: 100,
-        capabilities: { tokenComponents: true },
-        sessions: { 'codex:measured-input': row }
-      }
-    }
-  }, { items: [{ type: 'stat', metric: 'cacheHit' }] });
-
-  assert.ok(Math.abs(cell.rate - 75) < 1e-9);
-  assert.equal(cell.sessions[0].miss, 200);
-  assert.ok(Math.abs(cell.sessions[0].rate - 75) < 1e-9);
-});
-
-for (const client of ['codex', 'claude']) for (const activity of ['running', 'waiting', 'idle']) {
-  test(`cacheHit joins ${client} ${activity} patches before selection and expiry`, (t) => {
-    const now = Date.now();
-    t.mock.method(Date, 'now', () => now);
-    const key = `${client}:patched`;
-    const row = session(client, 'patched', now - 60_000, {
-      turnEnded: activity === 'running'
-    });
-    const recent = session(client, 'recent', now - 1_000, { turnEnded: true });
-    const original = {
-      periods: {
-        today: {
-          totalTokens: 2000, cacheReadTokens: 1200, cacheWriteTokens: 200,
-          inputTokens: 200, outputTokens: 400,
-          capabilities: { tokenComponents: true },
-          sessions: { [key]: row, [`${client}:recent`]: recent }
-        }
-      }
-    };
-    const liveActivity = { state: activity, observedAt: new Date(now).toISOString() };
-    const patched = applyActivityPatch(original, {
-      observations: [{ client, sessionId: 'patched', liveActivity }]
-    });
-    assert.equal(patched.periods.today.sessions, original.periods.today.sessions);
-    const [cell] = presentation.buildEdgeDockCells(patched, {
-      items: [{ type: 'stat', metric: 'cacheHit' }]
-    });
-    const projected = cell.sessions.find(row => row.key === key);
-    assert.equal(presentation.sessionActivityState(projected, now), activity);
-    assert.deepEqual(projected.liveActivity, liveActivity);
-    assert.equal(cell.runningCount, activity === 'running' ? 1 : 0);
-    assert.deepEqual(cell.sessions.map(row => row.key), [`${client}:recent`, key]);
-    assert.equal(cell.runningExpiresAt, now + 30_000);
-    assert.equal(cell.rate, 75);
-    assert.equal(projected.rate, 75);
-
-    t.mock.method(Date, 'now', () => now + 30_001);
-    const [expired] = presentation.buildEdgeDockCells(patched, {
-      items: [{ type: 'stat', metric: 'cacheHit' }]
-    });
-    assert.equal(expired.runningCount, activity === 'running' ? 0 : 1);
+  for (const key of ['sessions', 'sessionActivity']) Object.defineProperty(today, key, {
+    get() { throw new Error(`Cache hit must not read ${key}`); }
   });
-}
-
-test('cacheHit expiry includes idle live observations in the fallback rows', () => {
-  const now = Date.now();
-  const observedAt = new Date(now).toISOString();
-  const row = session('codex', 'idle-observation', now, {
-    lastUsedAt: new Date(now - 2 * HOUR_MS).toISOString(),
-    turnEnded: true,
-    liveActivity: { state: 'idle', observedAt }
-  });
-  const [cell] = presentation.buildEdgeDockCells({
-    periods: {
-      today: {
-        totalTokens: 1000,
-        cacheReadTokens: 600,
-        cacheWriteTokens: 100,
-        inputTokens: 100,
-        outputTokens: 200,
-        unclassifiedTokens: 0,
-        capabilities: { tokenComponents: true },
-        sessions: { 'codex:idle-observation': row }
-      }
-    }
-  }, { items: [{ type: 'stat', metric: 'cacheHit' }] });
-
-  assert.equal(cell.runningCount, 0);
-  assert.equal(cell.sessions.length, 1);
-  assert.ok(cell.runningExpiresAt > now);
+  const cell = cacheCell(today);
+  assert.equal(cell.rate, 75);
+  for (const key of ['sessions', 'runningCount', 'runningExpiresAt']) assert.equal(Object.hasOwn(cell, key), false);
 });
 
-test('cacheHit preserves inferred Cursor bot identity', () => {
-  const now = Date.now();
-  const row = session('cursor', 'sand-subagent-one', now, {
-    models: { 'grok-bot-4': 1000 }
-  });
-  const [cell] = presentation.buildEdgeDockCells({
-    periods: {
-      today: {
-        totalTokens: 1000,
-        cacheReadTokens: 600,
-        cacheWriteTokens: 100,
-        inputTokens: 100,
-        outputTokens: 200,
-        unclassifiedTokens: 0,
-        capabilities: { tokenComponents: true },
-        sessions: { 'cursor:sand-subagent-one': row }
-      }
-    }
-  }, { items: [{ type: 'stat', metric: 'cacheHit' }] });
-
-  assert.equal(cell.sessions.length, 1);
-  assert.equal(cell.sessions[0].grokBotSession, true);
+test('the browser loads the canonical component split before dock presentation', () => {
+  const html = fs.readFileSync(path.join(rendererDir, 'edgeDock', 'index.html'), 'utf8');
+  const split = html.indexOf('src="../fixedPeriodRanges.js"');
+  assert.ok(split > 0);
+  assert.ok(split < html.indexOf('src="presentation.js"'));
 });
 
-test('cacheHit retains all running sessions beyond six and schedules re-projection', () => {
-  const now = Date.now();
-  const sessions = {};
-  for (let index = 0; index < 7; index += 1) {
-    sessions[`codex:${index}`] = session('codex', `running-${index}`, now, {
-      cacheReadTokens: 600 - index * 10
-    });
-  }
-  const [cell] = presentation.buildEdgeDockCells({
-    periods: {
-      today: {
-        totalTokens: 7000,
-        cacheReadTokens: 3990,
-        cacheWriteTokens: 700,
-        inputTokens: 700,
-        outputTokens: 1400,
-        unclassifiedTokens: 0,
-        capabilities: { tokenComponents: true },
-        sessions
-      }
-    }
-  }, { items: [{ type: 'stat', metric: 'cacheHit' }] });
-
-  assert.equal(cell.runningCount, 7);
-  assert.equal(cell.sessions.length, 7);
-  assert.ok(cell.runningExpiresAt > now);
-});
-
-test('cacheHit is registered and localized at every dock surface', () => {
+test('cacheHit remains selectable and localized at every dock surface', () => {
   assert.ok(items.STAT_METRICS.includes('cacheHit'));
   assert.deepEqual(items.normalizeEdgeDockItems([{ type: 'stat', metric: 'cacheHit' }]), [
     { type: 'stat', metric: 'cacheHit' }
   ]);
-
-  const dock = fs.readFileSync(path.join(rendererDir, 'edgeDock', 'dock.js'), 'utf8');
-  assert.match(dock, /t\('edgeDock\.cacheHit\.detail', \{/);
-  assert.match(dock, /clientLabel\(s\.client\)/);
-  assert.doesNotMatch(dock, /function cacheHit(?:Label|ShortLabel)\(/);
-
-  const rateStart = dock.indexOf('function formatCacheHitRate(');
-  const rateEnd = dock.indexOf('function cacheHitDetail(', rateStart);
-  const formatCacheHitRate = Function('state', `return (${dock.slice(rateStart, rateEnd).trim()})`)({
-    locale: 'pt-BR'
-  });
-  assert.equal(formatCacheHitRate(65.625), '65,6%');
-  assert.equal(formatCacheHitRate(0.05), '<0,1%');
-
-  for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
-    assert.ok(MESSAGES[locale]['edgeDock.period.cacheHit']?.trim(), locale);
-    assert.ok(MESSAGES[locale]['edgeDock.periodShort.cacheHit']?.trim(), locale);
-    assert.match(MESSAGES[locale]['edgeDock.cacheHit.detail'], /\{hit\}.*\{miss\}/u, locale);
+  for (const locale of LANGUAGE_OPTIONS.map(option => option.value).filter(value => value !== 'auto')) {
+    for (const key of ['edgeDock.period.cacheHit', 'edgeDock.periodShort.cacheHit',
+      'edgeDock.cacheHit.hit', 'edgeDock.cacheHit.miss', 'edgeDock.cacheHit.description',
+      'edgeDock.cacheHit.unavailable']) assert.ok(MESSAGES[locale][key]?.trim(), `${locale}: ${key}`);
+    assert.match(MESSAGES[locale]['edgeDock.cacheHit.detail'], /\{hit\}.*\{miss\}/u);
   }
-  assert.equal(translate('en', 'edgeDock.cacheHit.detail', { hit: 700, miss: 300 }), 'Hit 700 · Miss 300');
-  assert.equal(translate('zh-CN', 'edgeDock.cacheHit.detail', { hit: 700, miss: 300 }), '命中 700 · 未命中 300');
+});
+
+test('cacheHit formatting preserves locale, small nonzero readings, zero and unavailable', () => {
+  const dock = fs.readFileSync(path.join(rendererDir, 'edgeDock', 'dock.js'), 'utf8');
+  const start = dock.indexOf('function formatCacheHitRate(');
+  const end = dock.indexOf('function cacheHitDetail(', start);
+  const format = Function('state', `return (${dock.slice(start, end).trim()})`)({ locale: 'pt-BR' });
+  assert.equal(format(65.625), '65,6%');
+  assert.equal(format(0.05), '<0,1%');
+  assert.equal(format(0), '0,0%');
+  assert.equal(format(null), '—');
 });

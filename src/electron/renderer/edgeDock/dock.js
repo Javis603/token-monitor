@@ -1825,37 +1825,31 @@ function statCard(cell) {
   }
   if (cell.metric === presentation.SESSIONS_METRIC) return sessionsCard(cell, card, head);
   if (cell.metric === 'cacheHit') {
-    if (!cell.available) {
-      card.append(el('div', 'edge-dock-note', t('edgeDock.periodUnavailable')));
-      return card;
-    }
-    const running = Math.max(0, Number(cell.runningCount) || 0);
-    if (running > 0) {
-      head.classList.add('is-inline');
-      head.append(el('span', 'edge-dock-card-status', t('edgeDock.runningCount', { count: running })));
-    }
+    head.classList.add('is-inline');
+    head.append(el('span', 'edge-dock-card-status', t('edgeDock.period.today')));
+    limitWindowsView.setDetailTooltip(head.firstElementChild, [{ full: t('edgeDock.cacheHit.description') }]);
     const headline = el('div', 'edge-dock-stat-headline');
     headline.append(el('strong', '', formatCacheHitRate(cell.rate)));
     card.append(headline);
-    card.append(el('div', 'edge-dock-note', cacheHitDetail(cell)));
-    if ((cell.sessions || []).length) {
-      const list = el('div', 'edge-dock-session-list');
-      for (const s of cell.sessions) {
-        const row = el('div', 'edge-dock-session');
-        row.classList.toggle('is-running', presentation.sessionActivityState(s) === 'running');
-        const nameNode = el('span', 'edge-dock-session-name');
-        if (s.client) {
-          nameNode.append(markNode(s.client));
-          nameNode.append(el('span', 'sr-only', `${clientLabel(s.client)} `));
-        }
-        nameNode.append(el('span', 'edge-dock-session-title', s.title));
-        const meta = el('span', 'edge-dock-session-meta');
-        meta.append(el('span', 'edge-dock-session-description', cacheHitDetail(s)));
-        row.append(nameNode, el('span', 'edge-dock-session-tokens', formatCacheHitRate(s.rate)), meta);
-        list.append(row);
-      }
-      card.append(list);
+    if (!cell.available) {
+      card.append(el('div', 'edge-dock-note', t('edgeDock.cacheHit.unavailable')));
+      return card;
     }
+    const bar = el('div', 'edge-dock-cache-hit-bar');
+    bar.setAttribute('role', 'img');
+    bar.setAttribute('aria-label', cacheHitDetail(cell));
+    const fill = el('div', 'edge-dock-cache-hit-fill');
+    fill.style.width = `${cell.rate}%`;
+    bar.append(fill);
+    card.append(bar);
+    const totals = el('div', 'edge-dock-cache-hit-totals');
+    for (const kind of ['hit', 'miss']) {
+      const reading = el('div', `edge-dock-cache-hit-reading is-${kind}`);
+      reading.append(el('span', 'edge-dock-cache-hit-label', t(`edgeDock.cacheHit.${kind}`)),
+        el('span', 'edge-dock-cache-hit-value', formatTokens(cell[kind])));
+      totals.append(reading);
+    }
+    card.append(totals);
     return card;
   }
   if (!cell.available) {
