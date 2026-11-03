@@ -254,12 +254,22 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.equal(declaration(cssRule(css, '#cursorManualDetails'), 'margin-top'), '0');
 });
 
-test('Cursor removal is available only for accounts added manually in Token Monitor', () => {
+test('Cursor removal is available for manual accounts and expired desktop imports', () => {
   const main = readRendererFile('../main.js');
   assert.match(main, /cursorManualAccountIds: \[\]/);
-  assert.match(main, /removable: manual\.has\(account\.id\)/);
+  assert.match(main, /cursorDismissedDesktopTokens: \[\]/);
+  assert.match(main, /removable: manual\.has\(account\.id\) \|\| expired/);
+  assert.match(main, /detected: !manual\.has\(account\.id\)/);
   assert.match(main, /settings\.cursorManualAccountIds = normalizeCursorAccountIds\(\[/);
-  assert.match(main, /Only manually added Cursor accounts can be removed/);
+  assert.match(main, /Only manually added or expired Cursor accounts can be removed/);
+  // A detected account is re-probed in main before removal, and its token
+  // fingerprint is kept so discovery does not import it again.
+  const logout = main.match(/ipcMain\.handle\('cursor:logout'[\s\S]*?\n {2}\}\);/)?.[0] || '';
+  assert.match(logout, /cursorProbe\.probe\(account\.sessionToken\)[\s\S]*?probeResult\.error\?\.kind !== 'unauthorized'/);
+  assert.match(logout, /dismissedToken = cursorAuth\.cursorTokenFingerprint\(account\.sessionToken\)/);
+  assert.match(logout, /settings\.cursorDismissedDesktopTokens = normalizeCursorDismissedTokenFingerprints\(\[/);
+  const statusBody = functionBody(main, 'cursorStatusValue', 'rebuildWindow');
+  assert.match(statusBody, /dismissedTokenFingerprints: normalizeCursorDismissedTokenFingerprints\(settings\?\.cursorDismissedDesktopTokens\)/);
   assert.match(main, /ipcMain\.handle\('cursor:loginManual'[\s\S]*?if \(isExternalAgentActive\(\)\)/);
   assert.match(main, /ipcMain\.handle\('cursor:logout'[\s\S]*?if \(isExternalAgentActive\(\)\)/);
   const body = functionBody(readRendererFile('app.js'), 'renderCursorStatus', 'refreshCursorStatus');
@@ -271,7 +281,7 @@ test('Cursor account discovery runs automatically without a separate refresh act
   const main = readRendererFile('../main.js');
   const statusBody = functionBody(main, 'cursorStatusValue', 'rebuildWindow');
   assert.match(statusBody, /if \(discover && !managementBlocked\) \{/);
-  assert.match(statusBody, /await cursorAuth\.runCursorDiscover\(\)/);
+  assert.match(statusBody, /await cursorAuth\.runCursorDiscover\(\{/);
   assert.doesNotMatch(statusBody, /runCursorSync/);
   assert.match(statusBody, /managementBlocked/);
   assert.match(main, /options\?\.discover !== true/);

@@ -247,6 +247,7 @@ const {
 } = require('../shared/appUpdater');
 const cursorAuth = require('../shared/providers/cursor/auth');
 const cursorProbe = require('../shared/providers/cursor/probe');
+const { normalizeCursorDismissedTokenFingerprints } = require('../shared/providers/cursor/account');
 const { stepfunToken } = require('../shared/providers/stepfun/limits');
 const opencodeWeb = require('../shared/providers/opencode/web');
 const opencodeGoApi = require('../shared/providers/opencode/goApi');
@@ -765,6 +766,9 @@ function defaultSettings() {
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
     cursorManualAccountIds: [],
+    // Fingerprints of desktop-imported Cursor sign-ins the user removed, so
+    // discovery does not import the same token again.
+    cursorDismissedDesktopTokens: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
@@ -2817,6 +2821,7 @@ function readSettings() {
     merged.vendorColors = migrateVendorColors(merged.vendorColors);
     merged.cursorDisabledAccountIds = normalizeCursorDisabledAccountIds(merged.cursorDisabledAccountIds);
     merged.cursorManualAccountIds = normalizeCursorAccountIds(merged.cursorManualAccountIds);
+    merged.cursorDismissedDesktopTokens = normalizeCursorDismissedTokenFingerprints(merged.cursorDismissedDesktopTokens);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
     delete merged.workbuddyEndpoint;
@@ -7857,21 +7862,29 @@ async function cursorStatusValue({ discover = false } = {}) {
   const managementBlocked = isExternalAgentActive();
   let accounts = cursorAuth.listAccounts();
   if (discover && !managementBlocked) {
-    try { await cursorAuth.runCursorDiscover(); } catch (_) { /* signed-out or unavailable Cursor app */ }
+    try {
+      await cursorAuth.runCursorDiscover({
+        dismissedTokenFingerprints: normalizeCursorDismissedTokenFingerprints(settings?.cursorDismissedDesktopTokens)
+      });
+    } catch (_) { /* signed-out or unavailable Cursor app */ }
     accounts = cursorAuth.listAccounts();
   }
   const disabled = new Set(normalizeCursorDisabledAccountIds(settings?.cursorDisabledAccountIds));
   const manual = new Set(normalizeCursorAccountIds(settings?.cursorManualAccountIds));
   const safeAccounts = await Promise.all(accounts.map(async (account) => {
     const probeResult = await cursorProbe.probe(account.sessionToken);
+    const expired = !probeResult.ok && probeResult.error?.kind === 'unauthorized';
     return {
       id: account.id,
       enabled: !disabled.has(account.id),
-      removable: manual.has(account.id),
+      // Desktop-imported accounts stay ambient while Cursor accepts them; once
+      // Cursor rejects the token they can be removed like a manual account.
+      removable: manual.has(account.id) || expired,
+      detected: !manual.has(account.id),
       email: probeResult.ok ? probeResult.user?.email || '' : '',
       label: account.label || '',
       membershipType: probeResult.ok ? probeResult.usage.membershipType || '' : '',
-      expired: !probeResult.ok && probeResult.error?.kind === 'unauthorized',
+      expired,
       error: probeResult.ok ? '' : probeResult.error?.message || ''
     };
   }));
@@ -8961,8 +8974,20 @@ app.whenReady().then(() => {
     try {
       const removeId = String(accountId || '').trim();
       const manual = new Set(normalizeCursorAccountIds(settings.cursorManualAccountIds));
-      if (!removeId || !manual.has(removeId)) {
-        return { ok: false, error: 'Only manually added Cursor accounts can be removed' };
+      let dismissedToken = '';
+      if (!removeId) {
+        return { ok: false, error: 'Cursor account not found' };
+      }
+      if (!manual.has(removeId)) {
+        // A desktop-imported account may be removed only after Cursor rejects
+        // its token; a live desktop sign-in is disabled instead.
+        const account = cursorAuth.listAccounts().find((entry) => entry.id === removeId);
+        if (!account) return { ok: false, error: 'Cursor account not found' };
+        const probeResult = await cursorProbe.probe(account.sessionToken);
+        if (probeResult.ok || probeResult.error?.kind !== 'unauthorized') {
+          return { ok: false, error: 'Only manually added or expired Cursor accounts can be removed' };
+        }
+        dismissedToken = cursorAuth.cursorTokenFingerprint(account.sessionToken);
       }
       await cursorAuth.runCursorLogout({ accountId: removeId });
       const disabled = normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds)
@@ -8970,6 +8995,12 @@ app.whenReady().then(() => {
       const limitsChanged = disabled.length !== settings.cursorDisabledAccountIds.length;
       settings.cursorDisabledAccountIds = disabled;
       settings.cursorManualAccountIds = [...manual].filter((id) => id !== removeId);
+      if (dismissedToken) {
+        settings.cursorDismissedDesktopTokens = normalizeCursorDismissedTokenFingerprints([
+          ...normalizeCursorDismissedTokenFingerprints(settings.cursorDismissedDesktopTokens),
+          dismissedToken
+        ]);
+      }
       saveSettings({ throwOnError: true });
       if (limitsChanged) {
         deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());

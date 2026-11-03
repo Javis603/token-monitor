@@ -337,6 +337,14 @@ async function runCursorLogin(token, {
   });
 }
 
+// One-way digest of a stored session token. Settings keep only this digest to
+// remember a desktop sign-in the user removed, never the token itself.
+function cursorTokenFingerprint(token) {
+  const normalized = normalizeCursorSessionToken(token);
+  if (!normalized) return '';
+  return crypto.createHash('sha256').update(normalized).digest('hex');
+}
+
 async function runCursorDiscover(options = {}) {
   const accessToken = readCursorDesktopAccessToken(options);
   if (!accessToken) return { discovered: false, reason: 'not-signed-in' };
@@ -345,6 +353,12 @@ async function runCursorDiscover(options = {}) {
     const error = new Error('Cursor desktop access token has an invalid account identity');
     error.code = 'CURSOR_DESKTOP_TOKEN_INVALID';
     throw error;
+  }
+  // A desktop sign-in the user removed stays removed until Cursor desktop
+  // holds a different token (a new sign-in or a refreshed session).
+  const dismissed = options.dismissedTokenFingerprints;
+  if (dismissed && dismissed.includes(cursorTokenFingerprint(sessionToken))) {
+    return { discovered: false, reason: 'dismissed' };
   }
   const accountId = await (options.runLogin || runCursorLogin)(sessionToken, {
     home: options.home,
@@ -410,6 +424,7 @@ module.exports = {
   canonicalCursorUserId,
   credentialsPath,
   cursorDesktopStateCandidates,
+  cursorTokenFingerprint,
   listAccounts,
   normalizeCursorSessionToken,
   readActiveAccount,

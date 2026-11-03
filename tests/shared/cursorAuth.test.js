@@ -12,6 +12,7 @@ const {
   CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
   CURSOR_BACKGROUND_SYNC_TIMEOUT_MS,
   canonicalCursorUserId,
+  cursorTokenFingerprint,
   listAccounts,
   normalizeCursorSessionToken,
   readActiveAccount,
@@ -194,6 +195,48 @@ test('runCursorDiscover reports a signed-out desktop without mutating credential
     assert.equal(loginCalls, 0);
     assert.equal(readActiveAccount({ home }), null);
   } finally { cleanup(); }
+});
+
+test('runCursorDiscover skips a desktop token the user removed', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture');
+  const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01DESKTOP' })).toString('base64url');
+  const accessToken = `header.${payload}.signature`;
+  let loginCalls = 0;
+  try {
+    const dismissed = [cursorTokenFingerprint(accessToken)];
+    const result = await runCursorDiscover({
+      home,
+      platform: 'linux',
+      sqlite: sqliteReturning(accessToken),
+      dismissedTokenFingerprints: dismissed,
+      runLogin: async () => { loginCalls += 1; }
+    });
+    assert.deepEqual(result, { discovered: false, reason: 'dismissed' });
+    assert.equal(loginCalls, 0);
+
+    // A new desktop sign-in for the same user carries a different token and
+    // is imported again.
+    const refreshed = await runCursorDiscover({
+      home,
+      platform: 'linux',
+      sqlite: sqliteReturning(`header.${payload}.new-signature`),
+      dismissedTokenFingerprints: dismissed
+    });
+    assert.deepEqual(refreshed, { discovered: true, accountId: 'user_01DESKTOP' });
+  } finally { cleanup(); }
+});
+
+test('cursorTokenFingerprint hashes the canonical token form', () => {
+  const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01LOCAL' })).toString('base64url');
+  const jwt = `header.${payload}.signature`;
+  const fingerprint = cursorTokenFingerprint(jwt);
+  assert.match(fingerprint, /^[0-9a-f]{64}$/);
+  assert.equal(cursorTokenFingerprint(`user_01LOCAL%3A%3A${jwt}`), fingerprint);
+  assert.equal(fingerprint.includes(jwt), false);
+  assert.equal(cursorTokenFingerprint(''), '');
 });
 
 test('runCursorDiscover keeps an existing valid active account', async () => {
@@ -522,4 +565,16 @@ test('runCursorSync kills the child and keeps the abort error when superseded', 
 
   await assert.rejects(pending, (caught) => caught === reason);
   assert.equal(killed, 1);
+});
+
+test('normalizeCursorDismissedTokenFingerprints keeps the newest valid digests', () => {
+  const { normalizeCursorDismissedTokenFingerprints } = require('../../src/shared/providers/cursor/account');
+  const digest = (n) => n.toString(16).padStart(64, '0');
+  assert.deepEqual(normalizeCursorDismissedTokenFingerprints(null), []);
+  assert.deepEqual(
+    normalizeCursorDismissedTokenFingerprints([digest(1).toUpperCase(), digest(1), 'raw-token', '', digest(2)]),
+    [digest(1), digest(2)]
+  );
+  const many = Array.from({ length: 25 }, (_, index) => digest(index + 1));
+  assert.deepEqual(normalizeCursorDismissedTokenFingerprints(many), many.slice(-20));
 });

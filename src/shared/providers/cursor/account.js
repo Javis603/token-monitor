@@ -9,6 +9,17 @@ function normalizeCursorAccountIds(value) {
     .filter((id) => id && id.length <= 256))];
 }
 
+// Digests of removed desktop sign-ins (see auth.cursorTokenFingerprint). Only
+// the newest few matter: each one blocks a single desktop token.
+const CURSOR_DISMISSED_TOKEN_LIMIT = 20;
+function normalizeCursorDismissedTokenFingerprints(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .map((entry) => String(entry || '').trim().toLowerCase())
+    .filter((entry) => /^[0-9a-f]{64}$/.test(entry)))]
+    .slice(-CURSOR_DISMISSED_TOKEN_LIMIT);
+}
+
 module.exports = {
   id: 'cursor',
   fetch: 'fetchCursorLimits',
@@ -22,6 +33,7 @@ module.exports = {
     }
   ],
   normalizeCursorAccountIds,
+  normalizeCursorDismissedTokenFingerprints,
   urlPolicy: [
     { hosts: ['cursor.com', 'www.cursor.com'], pathPrefixes: ['/settings'], exactPaths: ['/', '/dashboard'] }
   ]

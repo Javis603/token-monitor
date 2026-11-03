@@ -21,7 +21,7 @@ Login, logout and sync share one lifecycle lane. This prevents an explicit accou
 
 Manual explicit sync allows Tokscale's dynamic budget of up to 1800 seconds plus 30 seconds for subprocess shutdown. Background collector self-sync keeps its 150-second budget and existing throttle/cadence; caller-supplied timeout budgets take precedence on both paths.
 
-Only accounts added manually by Token Monitor may be removed from its UI. Desktop discovery remains ambient ownership.
+Accounts added manually in Token Monitor may be removed from its UI at any time. A desktop-discovered account remains ambient ownership while Cursor accepts its token (disable it instead); once Cursor rejects the token it may be removed too. Removal re-probes the account in the main process, logs it out of the credential store and keeps a SHA-256 fingerprint of that token (never the token) in `cursorDismissedDesktopTokens`, so discovery does not import the same desktop token again. A new desktop sign-in, or any refreshed desktop token, is imported normally.
 
 ## Self-sync and sessions
 
