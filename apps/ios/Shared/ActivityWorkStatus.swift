@@ -25,7 +25,7 @@ struct ActivityWorkStatus: View {
     var body: some View {
         HStack(spacing: 6) {
             if agents.running == 1 && (agents.waiting ?? 0) == 0 {
-                ActivityWaveform(updatedAt: updatedAt, isStale: isStale, tint: tint)
+                ActivityWaveform(isStale: isStale, tint: tint)
             } else {
                 if agents.running > 0 {
                     Text(verbatim: agents.running.formatted())

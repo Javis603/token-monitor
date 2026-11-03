@@ -81,7 +81,6 @@ struct LiveActivityCustomizerView: View {
         ScrollView {
             VStack(spacing: DesignTokens.sectionSpacing) {
                 stage
-                    .environment(\.activityPreviewAnimated, true)
                 controls
                 presentationMode
                 if preferences.liveLayout.mode == .custom {
