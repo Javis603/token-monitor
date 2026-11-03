@@ -36,7 +36,7 @@ Official and community remote plugin sources are separate host-owned definitions
 
 ## Generated and registered state
 
-Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Never edit generated Worker metadata directly.
+Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Each PR adds at most one revision per changed component, pointing to its final build; regenerate from the base branch's registry after further changes. Never edit generated Worker metadata directly.
 
 Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, lint, test and verify never download the binary. `scripts/vendor/tokscale.json` pins its provenance. Its `override`/`upstream` mode does not bypass either verification gate, and its presentation describes the declared bundle, not verification of the selected executable.
 
@@ -174,6 +174,8 @@ Manual device removal requires a known remote device marked stale in main's late
 - Reads, pushes and activity patches use one stamped snapshot. Concurrent pushes supersede reads only within the same Hub source/generation; reads preserve transport status. Future peer timestamps cannot beat current local activity, and later remote aggregates must not erase fresh local observations. Live status may replace archived status without replacing archived counters.
 
 **Snapshot identity.** Published records are immutable because presentation and normalization caches key on object identity. Replace objects, never mutate in place. Main composes all-time detail on demand from the requested snapshot's captured inputs: per-publish summaries omit it *before* normalization. `rendererStats()` strips device sessions/projects and all-time sessions from IPC; `stats:allTimeSessions` resolves the requested snapshot ID, retaining its source generation. Completion must never combine newer `latestStats`/`lastCollectedDevice` accounting rows with older totals or cross generations. The renderer's `allTimeSessions.attach()` reuses its previously pulled session map on newer stats from the same source until a fresh pull arrives; neither attachment nor late pull results may cross source generations. Do not widen every push for a new detail reader. Bounded local identity projections, such as Grok Bot membership, must not force all-time completion or expand the wire record. Apply title hiding after activity joins.
+
+Session device labels are a desktop presentation projection resolved from the captured device session maps before IPC strips them. All-time labels use the same captured inputs as their lazy session list; they do not add provenance to the accounting wire record or force full-history completion on every publish.
 
 ## Settings and credentials
 

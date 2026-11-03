@@ -23,6 +23,8 @@ class Element {
     this.dataset = {};
   }
   append(...children) { children.forEach(child => { child.parentElement = this; this.children.push(child); }); }
+  prepend(...children) { children.forEach(child => { child.parentElement = this; }); this.children.unshift(...children); }
+  addEventListener() {}
   replaceChildren(...children) { this.children = []; this.append(...children); }
   querySelectorAll(selector) {
     return this.children.flatMap(child => [
@@ -235,8 +237,10 @@ test('closing sync settings or navigating away cancels the active picker', () =>
 });
 
 test('device versions get their own line rather than competing with sync status', () => {
+  const document = { createElement: () => { const element = new Element(); element.ownerDocument = document; return element; } };
   const context = vm.createContext({
-    document: { createElement: () => new Element() },
+    document,
+    state: { settings: {} }, deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
     window: { tokenMonitor: { deleteDevice() {} } },
     osIconFor: () => 'windows',
     t: key => key,
