@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 import Testing
 import WidgetKit
@@ -325,11 +326,31 @@ extension WidgetLayoutRenderTests {
     }
 
 
+    @Test func hundredthsProduceOneDistinctWaveFramePerPair() throws {
+        let font = CTFontCreateWithName("TokenMonitorActivityWaveSmooth" as CFString, 20, nil)
+        var glyphs = Set<CGGlyph>()
+        for frame in 0..<100 {
+            let text = String(format: "%02d", frame)
+            let value = NSAttributedString(string: text, attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): font
+            ])
+            let line = CTLineCreateWithAttributedString(value)
+            #expect(CTLineGetGlyphCount(line) == 1)
+            #expect(abs(CTLineGetTypographicBounds(line, nil, nil, nil) - 25) < 0.001)
+            let runs = CTLineGetGlyphRuns(line) as! [CTRun]
+            let run = try #require(runs.first)
+            var glyph: CGGlyph = 0
+            CTRunGetGlyphs(run, CFRange(location: 0, length: 1), &glyph)
+            glyphs.insert(glyph)
+        }
+        #expect(glyphs.count == 100)
+    }
+
     @Test func notchWaveSymbolAndMotionFallbacks() throws {
         let symbol = try #require(UIImage(named: "ActivityWave"))
         #expect(symbol.isSymbolImage)
-        let font = try #require(UIFont(name: "TokenMonitorActivityWave", size: 20))
-        #expect(font.fontName == "TokenMonitorActivityWave")
+        let font = try #require(UIFont(name: "TokenMonitorActivityWaveSmooth", size: 20))
+        #expect(font.fontName == "TokenMonitorActivityWaveSmooth")
         for (name, stale) in [
             ("running", false),
             ("stale", true)

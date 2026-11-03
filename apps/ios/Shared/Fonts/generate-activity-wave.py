@@ -1,6 +1,6 @@
 """Rebuild the bundled wave-frame TrueType font with Python's standard library.
 
-The ten digit glyphs sample the Desktop notch.css curve. Runtime font size 20
+The hundred two-digit ligatures sample the Desktop notch.css curve. Runtime font size 20
 maps the 1,250-unit advance to 25pt and the 920-unit ascender to 18.4pt.
 Only asset authoring uses this file; building/running iOS needs no Python.
 """
@@ -28,7 +28,7 @@ def glyph(frame):
     pts = []
     flags = []
     for i, h in enumerate(heights):
-        t = (frame / 10 + delays[i] / 1.05) % 1
+        t = (frame / 100 + delays[i] / 1.05) % 1
         t = t * 2 if t < 0.5 else (1 - t) * 2
         h = round(h * 50 * 1.15 * (1 - 0.6 * curve(t)))
         x = i * 275
@@ -45,7 +45,7 @@ def glyph(frame):
             out += S(p[dim] - prev)
             prev = p[dim]
     return out + b'\x00' * (len(out) % 2)
-glyphs = [b''] + [glyph(i) for i in range(10)]
+glyphs = [b''] + [glyph(i * 10) for i in range(10)] + [glyph(i) for i in range(100)]
 loca = [0]
 for g in glyphs:
     loca.append(loca[-1] + len(g))
@@ -59,7 +59,19 @@ tables['maxp'] = L(65536) + U(n, 50, 5, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0)
 tables['hmtx'] = b''.join((U(1250) + S(0) for _ in glyphs))
 fmt4 = U(4, 32, 0, 4, 4, 1, 0) + U(57, 65535) + U(0) + U(48, 65535) + S(-47, 1) + U(0, 0)
 tables['cmap'] = U(0, 1) + U(3, 1) + L(12) + fmt4
-names = {1: 'TokenMonitorActivityWave', 2: 'Regular', 3: 'TokenMonitorActivityWave-1', 4: 'Token Monitor Activity Wave', 6: 'TokenMonitorActivityWave'}
+# Required ligatures combine each hundredths pair into one 25pt wave frame.
+# Decimal punctuation separates the fractional pair from preceding clock fields.
+sets = []
+for tens in range(10):
+    ligatures = [U(11 + tens * 10 + ones, 2, 1 + ones) for ones in range(10)]
+    sets.append(U(10) + U(*(22 + 6 * i for i in range(10))) + b''.join(ligatures))
+coverage = U(1, 10, *range(1, 11))
+subtable = U(1, 26, 10) + U(*(50 + 82 * i for i in range(10))) + coverage + b''.join(sets)
+lookup_list = U(1, 4) + U(4, 0, 1, 8) + subtable
+script_list = U(1) + b'DFLT' + U(8) + U(4, 0) + U(0, 65535, 1, 0)
+feature_list = U(1) + b'rlig' + U(8) + U(0, 1, 0)
+tables['GSUB'] = L(65536) + U(10, 10 + len(script_list), 10 + len(script_list) + len(feature_list)) + script_list + feature_list + lookup_list
+names = {1: 'TokenMonitorActivityWaveSmooth', 2: 'Regular', 3: 'TokenMonitorActivityWaveSmooth-2', 4: 'Token Monitor Activity Wave', 6: 'TokenMonitorActivityWaveSmooth'}
 records = []
 data = b''
 for key, value in names.items():
