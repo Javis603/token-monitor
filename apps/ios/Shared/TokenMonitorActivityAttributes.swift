@@ -201,7 +201,7 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
     }
 
     enum CompactStyle: String, Codable, CaseIterable, Sendable {
-        case ring, providerIcon, appIcon, percent, percentReset, reset, tokens, cost, speed, agents, none
+        case ring, providerIcon, appIcon, percent, percentReset, reset, tokens, cost, speed, agents, agentIcons, activity, none
     }
 
     /// Shown when another app's activity shares the island.

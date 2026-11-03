@@ -89,7 +89,7 @@ struct TokenMonitorApp: App {
         #endif
         if usesSampleData {
             #if DEBUG
-            let snapshot = TokenMonitorSharedPayload.Snapshot.make(
+            var snapshot = TokenMonitorSharedPayload.Snapshot.make(
                 stats: usesLimitLayoutFixture ? .sampleLimitLayout : .sample,
                 history: .sample
             )
@@ -109,6 +109,10 @@ struct TokenMonitorApp: App {
                         .map { String($0.dropFirst(prefix.count)) }
                 }
                 var layout = preferences.liveLayout
+                if ProcessInfo.processInfo.arguments.contains("--sample-live-single") {
+                    layout.mode = .automatic
+                    snapshot.agents = .init(running: 1, clients: ["codex"])
+                }
                 if let value = option("leading").flatMap(LiveActivityLayout.CompactStyle.init) {
                     layout.compactLeading.style = value
                 }

@@ -118,6 +118,7 @@ struct SourceFreshnessTests {
         let snapshot = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: .empty, now: now)
         var preferences = TokenMonitorSharedPayload.Preferences.default
         preferences.liveLayout.compactLeading.source = .init(providerID: "kiro")
+        preferences.liveLayout.mode = .custom
         preferences.liveLayout.compactTrailing.source = .init(accountKey: "a")
         let state = LiveActivityController.contentState(snapshot: snapshot, preferences: preferences, now: now)
         // Three ranked records, then the named provider, the named account and the recent tool.
@@ -245,6 +246,7 @@ extension SourceFreshnessTests {
             allTime: .empty, limits: limits, activity: [])
         var preferences = TokenMonitorSharedPayload.Preferences.default
         preferences.liveLayout.compactLeading.source = .init(providerID: "volcengine", accountKey: limits.last?.accountKey)
+        preferences.liveLayout.mode = .custom
         let state = LiveActivityController.contentState(snapshot: snapshot, preferences: preferences, now: now)
         #expect(state.quotas.contains { $0.accountKey == limits.last?.accountKey })
         #expect(try JSONEncoder().encode(state).count <= TokenMonitorActivityAttributes.ContentState.byteBudget)

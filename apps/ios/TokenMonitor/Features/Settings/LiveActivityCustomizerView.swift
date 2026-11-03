@@ -659,7 +659,7 @@ struct LiveActivityCustomizerView: View {
             case .providerIcon: return SourceNeeds(provider: true)
             case .tokens, .cost: return SourceNeeds(usage: true, period: true)
             case .speed: return SourceNeeds(period: true)
-            case .appIcon, .agents, .none: return SourceNeeds()
+            case .appIcon, .agents, .agentIcons, .activity, .none: return SourceNeeds()
             }
         case .minimal:
             return layout.minimal == .providerIcon ? SourceNeeds(provider: true) : SourceNeeds(quota: true)
@@ -969,6 +969,8 @@ extension LiveActivityLayout.CompactStyle {
         case .cost: "Cost"
         case .speed: "Speed"
         case .agents: "Running sessions"
+        case .agentIcons: "Tools"
+        case .activity: "Activity"
         case .none: "Empty"
         }
     }

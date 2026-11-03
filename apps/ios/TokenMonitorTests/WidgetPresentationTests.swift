@@ -15,8 +15,8 @@ struct WidgetPresentationTests {
         var saved = LiveActivityLayout.automatic
         saved.compactTrailing = .init(style: .cost)
         let active = ActivityContext(state: state, layout: saved, isStale: false, now: now)
-        #expect(active.layout.compactLeading.style == .agents)
-        #expect(active.layout.compactTrailing.style == .none)
+        #expect(active.layout.compactLeading.style == .agentIcons)
+        #expect(active.layout.compactTrailing.style == .activity)
         state.agents = .none
         let alert = ActivityContext(state: state, layout: saved, isStale: false, now: now)
         #expect(alert.layout.compactLeading.style == .ring)
@@ -27,7 +27,7 @@ struct WidgetPresentationTests {
         #expect(idle.layout.compactTrailing.style == .tokens)
         #expect(idle.layout.minimal == .appIcon)
         state.agents = .init(running: 0, clients: ["codex"], waiting: 1)
-        #expect(ActivityContext(state: state, layout: saved, isStale: false, now: now).layout.compactLeading.style == .agents)
+        #expect(ActivityContext(state: state, layout: saved, isStale: false, now: now).layout.compactLeading.style == .agentIcons)
         #expect(ActivityContext(state: state, layout: saved, isStale: true, now: now).layout.compactTrailing.style == .tokens)
         #expect(saved.compactTrailing.style == .cost)
         saved.mode = .custom

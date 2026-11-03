@@ -81,8 +81,8 @@ struct ActivityContext {
         let fresh = !isStale && state.sourceStale != true
             && state.updatedAt <= now && now.timeIntervalSince(state.updatedAt) < 900
         if fresh && (state.agents.running > 0 || (state.agents.waiting ?? 0) > 0) {
-            result.compactLeading = .init(style: .agents)
-            result.compactTrailing = .init(style: .none)
+            result.compactLeading = .init(style: .agentIcons)
+            result.compactTrailing = .init(style: .activity)
             result.minimal = .providerIcon
             result.minimalSource = .init(providerID: state.agents.clients.first)
             result.expanded = .usage
@@ -572,24 +572,14 @@ struct ActivityFreshness: View {
     }
 }
 
-/// "● 2 running", shown only while sessions run.
+/// The same work indicator in expanded and Lock Screen headers, with no
+/// extra status sentence that can truncate beside a quota or currency value.
 struct ActivityRunningLabel: View {
     let agents: ActivityState.Agents
 
     var body: some View {
         if agents.running > 0 || (agents.waiting ?? 0) > 0 {
-            HStack(spacing: 6) {
-                if agents.running > 0 {
-                    Circle().fill(.green).frame(width: 6, height: 6)
-                    Text("\(agents.running) running")
-                }
-                if let waiting = agents.waiting, waiting > 0 {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text("\(waiting) waiting")
-                }
-            }
-            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-            .lineLimit(1)
+            ActivityWorkStatus(agents: agents)
         }
     }
 }
@@ -607,7 +597,7 @@ struct ActivityCompactItemView: View {
             .font(.system(size: 14, weight: .semibold).monospacedDigit())
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-            .opacity(context.sourceIsStale([.tokens, .cost, .speed, .agents, .none, .appIcon].contains(slot.style)
+            .opacity(context.sourceIsStale([.tokens, .cost, .speed, .agents, .agentIcons, .activity, .none, .appIcon].contains(slot.style)
                 ? nil : slot.source) ? 0.5 : 1)
     }
 
@@ -666,9 +656,73 @@ struct ActivityCompactItemView: View {
             }
         case .agents:
             ActivityAgentsMark(agents: context.state.agents)
+        case .agentIcons:
+            ActivityAgentIcons(agents: context.state.agents)
+        case .activity:
+            ActivityWorkStatus(agents: context.state.agents, isStale: context.isStale)
         case .none:
             EmptyView()
         }
+    }
+}
+
+/// macOS puts the distinct tool marks before the camera gap, never with the counters.
+struct ActivityAgentIcons: View {
+    let agents: ActivityState.Agents
+
+    var body: some View {
+        let clients = Array(agents.clients.prefix(3))
+        ZStack(alignment: .leading) {
+            ForEach(Array(clients.enumerated()), id: \.offset) { index, client in
+                ActivityMark(providerID: client, size: 19)
+                    .padding(1)
+                    .background(.black, in: Circle())
+                    .offset(x: CGFloat(index) * 13)
+                    .zIndex(Double(clients.count - index))
+            }
+            if clients.isEmpty { ActivityMark(providerID: nil, size: 19) }
+        }
+        .frame(width: CGFloat(max(0, clients.count - 1)) * 13 + 21, height: 21)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: clients.map { WidgetPresentation.displayName(for: $0) }.joined(separator: ", ")))
+    }
+}
+
+/// macOS's single-session waveform and separate running/waiting readings.
+struct ActivityWorkStatus: View {
+    let agents: ActivityState.Agents
+    var isStale = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var tint: Color { ActivityPalette.quotaTint(agents.clients.first) }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if agents.running == 1 && (agents.waiting ?? 0) == 0 {
+                Image(systemName: "waveform")
+                    .font(.system(size: 19, weight: .medium))
+                    .symbolEffect(.variableColor.iterative, isActive: !reduceMotion && !isStale)
+                    .foregroundStyle(tint)
+            } else {
+                if agents.running > 0 {
+                    Text(verbatim: agents.running.formatted())
+                        .font(.system(size: 16, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(tint)
+                }
+                if let waiting = agents.waiting, waiting > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "ellipsis.message")
+                            .font(.system(size: 10, weight: .medium))
+                        Text(verbatim: waiting.formatted())
+                            .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    }
+                    .foregroundStyle(.orange)
+                }
+            }
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("\(agents.running) running, \(agents.waiting ?? 0) waiting"))
     }
 }
 

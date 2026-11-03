@@ -301,11 +301,13 @@ extension WidgetLayoutRenderTests {
     @Test func automaticActivityRendersWorkAlertAndIdle() throws {
         typealias State = TokenMonitorActivityAttributes.ContentState
         let now = Date.now
-        for scenario in ["active", "waiting", "alert", "idle"] {
+        for scenario in ["single", "active", "waiting", "mixed", "alert", "idle"] {
             let state = State(updatedAt: now, usage: .init(today: .init(tokens: 45200, costUSD: 1.25), month: .init(tokens: 1000000)),
                 quotas: [.init(providerID: "codex", updatedAt: now,
                     windows: [.init(label: "Weekly", kind: "weekly", remainingPercent: scenario == "idle" ? 50 : 5)])],
-                agents: .init(running: scenario == "active" ? 2 : 0, clients: ["codex"], waiting: scenario == "waiting" ? 1 : nil))
+                agents: .init(running: scenario == "single" ? 1 : (["active", "mixed"].contains(scenario) ? 2 : 0),
+                    clients: ["active", "mixed"].contains(scenario) ? ["codex", "claude", "cursor"] : ["codex"],
+                    waiting: ["waiting", "mixed"].contains(scenario) ? 1 : nil))
             let context = ActivityContext(state: state, layout: .automatic, isStale: false, now: now)
             let view = VStack(spacing: 24) {
                 HStack {
