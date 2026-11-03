@@ -75,6 +75,7 @@ const {
   emptyNativeView
 } = require('./providers/reasonix/sessions');
 const { hostOsInfo, normalizeOsInfo } = require('./osVersion');
+const { hostDeviceKind } = require('./deviceHardware');
 const {
   clampTimerDelayMs,
   createSelfSyncThrottle,
@@ -1270,6 +1271,7 @@ async function collectUsageOnce(options) {
     deviceId,
     hostname: os.hostname(),
     platform: `${process.platform}-${process.arch}`,
+    deviceKind: hostDeviceKind(),
     ...(osInfo.name ? { osName: osInfo.name } : {}),
     ...(osInfo.version ? { osVersion: osInfo.version } : {}),
     updatedAt: collectedAt.toISOString(),
@@ -2973,6 +2975,7 @@ function startCollector(options) {
               const wsl = wslPeriodsForPreview(wslAnchor, anchor?.dateKey, todayKey);
               const preview = {
                 deviceId, hostname: os.hostname(),
+                deviceKind: hostDeviceKind(),
                 platform: `${process.platform}-${process.arch}`,
                 ...(deviceOsInfo.name ? { osName: deviceOsInfo.name } : {}),
                 ...(deviceOsInfo.version ? { osVersion: deviceOsInfo.version } : {}),
