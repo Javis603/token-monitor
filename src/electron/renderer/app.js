@@ -5916,6 +5916,10 @@ function isSettingsPanelOpen() {
   return Boolean(els.settingsPanel && !els.settingsPanel.classList.contains('hidden'));
 }
 
+function isNativeWindowTransfer() {
+  return globalThis[Symbol.for('token-monitor.window-view-state')]?.transferring === true;
+}
+
 function isRendererWindowHidden() {
   return document.hidden || !state.windowVisible;
 }
@@ -8144,8 +8148,7 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropInput.value = windowsGlass.backdropMode;
   }
   if (els.windowsBackdropNote) {
-    const accentFallback = windowsGlass.showAccentNote
-      && new URLSearchParams(window.location.search).get('windowsBackdropFallback') === '1';
+    const accentFallback = windowsGlass.showAccentNote && settings?.windowsBackdropFallback === true;
     els.windowsBackdropNote.textContent = t(accentFallback
       ? 'settings.appearance.windowsBackdropFallback'
       : 'settings.appearance.windowsBackdropNote');
@@ -8698,7 +8701,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   }
   if (options.renderContent === false) return;
   if (wasCollapsed && !state.floatingBubble.collapsed) {
-    if (isSettingsPanelOpen()) syncSettingsForm();
+    if (isSettingsPanelOpen() && !isNativeWindowTransfer()) syncSettingsForm();
     renderStatsUpdate();
   } else {
     renderFloatingBubbleContent();
@@ -14756,7 +14759,7 @@ function handleWindowVisibilityChange() {
     void refreshHubBuildStatus();
   }
   const settingsVisible = isSettingsSurfaceVisible();
-  if (settingsVisible || settingsDomSyncPending) syncSettingsForm();
+  if (settingsDomSyncPending || (settingsVisible && !isNativeWindowTransfer())) syncSettingsForm();
   statsRenderScheduler.flush();
   if (settingsVisible) {
     renderConnectionStatus();

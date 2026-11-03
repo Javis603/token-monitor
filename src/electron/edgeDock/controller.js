@@ -112,6 +112,7 @@ function createEdgeDockController(deps) {
   const placed = { rail: null, bubble: null };
   const fades = new Map();
   const backdrops = new Map();
+  const backdropShapes = new WeakMap();
   const intent = createEdgeDockIntent();
   let running = false;
   let pollTimer = null;
@@ -688,18 +689,7 @@ function createEdgeDockController(deps) {
       }
     });
     if (win32 || mac) installNonActivatingInput(win);
-    if (materialKey === 'win-host') {
-      try {
-        const backdrop = windowsBackdrop.attach(win, (enabled) => {
-          if (windows[surface] !== win) return;
-          nativeMaterial[surface] = enabled;
-          render(surface);
-        });
-        backdrops.set(win, backdrop);
-      } catch (error) {
-        logger(`[edge-dock] ${surface} HostBackdrop unavailable: ${error.message}`);
-      }
-    }
+    if (materialKey === 'win-host') attachWindowsBackdrop(surface, win);
     if (mac) {
       win.setAlwaysOnTop(true, 'floating');
       win.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
@@ -736,6 +726,25 @@ function createEdgeDockController(deps) {
     win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface, platform } })
       .catch((error) => logger(`[edge-dock] ${surface} load failed: ${error.message}`));
     return win;
+  }
+
+  function attachWindowsBackdrop(surface, win) {
+    try {
+      let attaching = true;
+      let backdrop;
+      backdrop = windowsBackdrop.attach(win, (enabled) => {
+        if (windows[surface] !== win || (!attaching && backdrops.get(win) !== backdrop)) return;
+        nativeMaterial[surface] = enabled;
+        render(surface);
+      });
+      attaching = false;
+      backdrops.set(win, backdrop);
+      const shape = backdropShapes.get(win);
+      if (shape) backdrop.update(shape);
+      backdrop.setOpacity(win.getOpacity());
+    } catch (error) {
+      logger(`[edge-dock] ${surface} HostBackdrop unavailable: ${error.message}`);
+    }
   }
 
   function disposeGlass(surface, options) {
@@ -871,7 +880,8 @@ function createEdgeDockController(deps) {
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline),
       ...(surface === 'bubble' ? { contentBounds: { y: bounds.cardY, height: bounds.cardHeight },
         contentTarget: { y: bounds.contentY, height: bounds.contentHeight } } : {}) };
-    backdrops.get(win)?.update({ key, commands: closed });
+    backdropShapes.set(win, { key, commands: closed });
+    backdrops.get(win)?.update(backdropShapes.get(win));
     if (glasses[surface] && (surface !== 'peek' || peekMode === 'refresh') && shapeGlass(surface, closed, width, height)) {
       // Shaped Liquid Glass needs no mask.
     } else if (builtGlass && platform === 'darwin' && nativeMaterial[surface]) {
@@ -964,7 +974,22 @@ function createEdgeDockController(deps) {
     const materialKey = !glass ? 'none'
       : platform === 'win32' ? (windowsBackdrop ? 'win-host' : 'none')
         : platform === 'darwin' ? (liquidGlass() && createGlass ? 'mac-glass' : 'mac') : 'none';
-    if (builtMaterial === materialKey && SURFACES.every((surface) => alive(windows[surface]))) return;
+    const windowsAlive = SURFACES.every((surface) => alive(windows[surface]));
+    if (builtMaterial === materialKey && windowsAlive) return;
+    if (platform === 'win32' && windowsAlive) {
+      builtMaterial = materialKey;
+      builtGlass = materialKey !== 'none';
+      for (const surface of SURFACES) {
+        const win = windows[surface];
+        if (materialKey === 'win-host') attachWindowsBackdrop(surface, win);
+        else {
+          backdrops.get(win)?.dispose();
+          backdrops.delete(win);
+          nativeMaterial[surface] = false;
+        }
+      }
+      return;
+    }
     destroyWindows();
     builtMaterial = materialKey;
     builtGlass = materialKey !== 'none';
