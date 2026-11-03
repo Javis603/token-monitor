@@ -164,6 +164,50 @@ struct SourceFreshnessTests {
         #expect(state.usage.today.outputTPS == 25)
     }
 
+    @Test func activityAgentsCountConversationGroupsLikeTheNotch() throws {
+        let now = Date.now
+        let at = now.addingTimeInterval(-1).formatted(.iso8601)
+        func session(_ id: String, _ extra: [String: Any] = [:]) -> [String: Any] {
+            ["client": "codex", "sessionId": id, "totalTokens": 1,
+             "lastUsedAt": at, "turnEnded": false].merging(extra) { _, new in new }
+        }
+        let conversation = "11111111-1111-4111-8111-111111111111"
+        let cases: [([String: Any], Int, Int)] = [
+            (["today": ["sessions": ["codex:a": session("a"), "codex:b": session("b"), "codex:c": session("c"),
+                "codex:child-a": session("child-a", ["parentSessionId": "a"]),
+                "codex:child-b": session("child-b", ["parentSessionId": "b"])]]], 3, 0),
+            (["today": ["sessions": ["codex:a": session("a", ["t3ThreadId": conversation]),
+                "codex:b": session("b", ["t3ThreadId": conversation])]]], 1, 0),
+            (["today": ["sessions": ["codex:a": session("a", ["nativeSessionId": conversation]),
+                "codex:b": session("b", ["nativeSessionId": conversation])]]], 1, 0),
+            (["today": ["sessions": ["codex:a": session("a"),
+                "codex:review": session("review", ["sessionKind": "background-review"])]]], 1, 0),
+            (["today": ["sessions": ["codex:a": session("a"),
+                "codex:child": session("child", ["parentSessionId": "a", "waitingForInput": true])]]], 1, 0),
+            (["today": ["sessions": ["codex:a": session("a", ["waitingForInput": true]),
+                "codex:child": session("child", ["parentSessionId": "a", "waitingForInput": true])]]], 0, 1),
+            (["today": ["sessions": ["codex:a": session("a"),
+                "codex:child": session("child", ["parentSessionId": "missing"])]]], 2, 0),
+            (["today": ["sessions": ["codex:a": session("a", ["turnEnded": true])]],
+              "month": ["sessions": ["codex:a": session("a")]]], 1, 0),
+            (["today": ["sessions": ["codex:a": session("a")],
+                        "sessionActivity": ["codex:a": ["state": "idle", "observedAt": at]]]], 0, 0),
+            (["today": ["sessions": ["codex:a": session("a", ["totalTokens": 0])]]], 1, 0),
+            (["today": ["sessions": ["cursor:sand-subagent-a": ["client": "cursor", "sessionId": "sand-subagent-a",
+                "totalTokens": 1, "lastUsedAt": at]]]], 0, 0),
+            (["today": ["sessions": [
+                "cursor:sand-subagent-a": ["client": "cursor", "sessionId": "sand-subagent-a", "totalTokens": 1, "lastUsedAt": at, "turnEnded": false],
+                "cursor:sand-subagent-b": ["client": "cursor", "sessionId": "sand-subagent-b", "totalTokens": 1, "lastUsedAt": at, "turnEnded": false]]]], 1, 0)
+        ]
+        for (periods, running, waiting) in cases {
+            let data = try JSONSerialization.data(withJSONObject: ["periods": periods])
+            let stats = try JSONDecoder().decode(HubStats.self, from: data)
+            let snapshot = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: .empty, now: now)
+            #expect(snapshot.agents?.running == running)
+            #expect((snapshot.agents?.waiting ?? 0) == waiting)
+        }
+    }
+
     @Test func activityQuotaExposesCreditsWindowsAsAmounts() throws {
         let now = Date.now
         let stats = try decode(#"{"limits":{"providers":[{"provider":"deepseek","status":"ok","balance":{"amount":20,"currency":"USD","monthSpend":80},"windows":[{"kind":"billing","metric":"credits"}]}]}}"#)

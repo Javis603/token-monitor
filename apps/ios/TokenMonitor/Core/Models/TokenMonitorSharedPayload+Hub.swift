@@ -60,28 +60,41 @@ extension TokenMonitorSharedPayload.Snapshot {
         return .init(client: client, today: share(.today), month: share(.month))
     }
 
-    /// Running sessions under the same rule the Hub pushes: today and month
-    /// detail merged by session key, newest first.
+    /// Match the macOS Notch: merge accounting periods, apply live overlays,
+    /// then count conversation groups rather than their individual records.
     private static func agents(
         from stats: HubStats,
         now: Date
     ) -> TokenMonitorActivityAttributes.ContentState.Agents {
-        var seen = Set<String>()
-        var running: [(client: String?, last: Date)] = []
-        var waiting: [(client: String?, last: Date)] = []
-        for key in [UsagePeriodKey.today, .month] {
-            for (id, session) in stats.period(key).sessions ?? [:] where seen.insert(id).inserted {
-                if session.isWaiting(at: now) {
-                    waiting.append((session.client?.lowercased(), session.lastActivity ?? .distantPast))
-                } else if session.isRunning(at: now) {
-                    running.append((session.client?.lowercased(), session.lastActivity ?? .distantPast))
-                }
+        var sessions: [String: SessionUsage] = [:]
+        for key in [UsagePeriodKey.month, .today] {
+            let period = stats.period(key)
+            for (id, session) in period.sessions ?? [:] {
+                if let previous = sessions[id], !previous.isArchived || session.isArchived { continue }
+                guard !session.isBackgroundReview, session.lastActivity != nil else { continue }
+                sessions[id] = period.sessionWithActivity(id, session, now: now)
             }
         }
-        running.sort { $0.last > $1.last }
-        waiting.sort { $0.last > $1.last }
+        let botIDs = SessionListEntry.grokBotIDs(stats.periods ?? [:], authoritative: stats.grokBotSessionIds)
+        let entries = SessionListEntry.rows(sessions, grokBotIDs: botIDs, includeZeroUsage: true, now: now)
+        let groups = entries.map { entry -> [SessionUsage] in
+            if !entry.members.isEmpty { return entry.members.map(\.session) }
+            if let session = entry.session { return [session] }
+            return entry.reviews.map { pair in
+                var session = pair.value
+                if entry.group == .grokBot { session.grokBotSession = true }
+                return session
+            }
+        }.sorted { lhs, rhs in
+            (lhs.compactMap(\.lastActivity).max() ?? .distantPast)
+                > (rhs.compactMap(\.lastActivity).max() ?? .distantPast)
+        }
+        let running = groups.filter { $0.contains { $0.isRunning(at: now) } }
+        let waiting = groups.filter { !$0.contains { $0.isRunning(at: now) } && $0.contains { $0.isWaiting(at: now) } }
+        let active = waiting.flatMap { $0.filter { $0.isWaiting(at: now) } }
+            + running.flatMap { $0.filter { $0.isRunning(at: now) } }
         var clients: [String] = []
-        for client in (waiting + running).compactMap(\.client) where !clients.contains(client) {
+        for client in active.compactMap({ $0.client?.lowercased() }) where !clients.contains(client) {
             clients.append(client)
         }
         return .init(running: running.count, clients: Array(clients.prefix(3)),

@@ -132,6 +132,7 @@ nonisolated struct SessionUsage: Decodable, Sendable {
         }
         guard isRecent(at: now) else { return .idle }
         if turnEnded == true { return .ended }
+        if isGrokBot(key: ""), turnEnded != false { return .idle }
         if client == "codex", waitingForInput == true { return .waiting }
         return .running
     }

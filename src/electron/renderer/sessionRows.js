@@ -16,6 +16,7 @@
     ? require('../../shared/sessionLive')
     : root?.TokenMonitorSessionLive;
   const sessionActivityState = sessionLive.sessionActivityState;
+  const sessionConversationIdentity = sessionLive.sessionConversationIdentity;
   const sessionContextForRow = sessionLive.sessionContextForRow;
   const isGrokBotSession = sessionLive.isGrokBotSession;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
@@ -660,68 +661,8 @@
   // A child whose parent is outside the period stays a row of its own.
   function groupSubagentRows(rows, options = {}) {
     const list = Array.isArray(rows) ? rows : [];
-    const eligible = row => row?.kind === 'session' && row.backgroundReview !== true && row.grokBot !== true;
-    // Independent conversations need neither alias resolution nor parent walks.
-    // Keep the full algorithm for repeated native/app identities and any link,
-    // including missing or cross-client parents.
-    const identities = new Set();
-    let needsGrouping = false;
-    for (const row of list) {
-      if (!eligible(row)) continue;
-      const id = sessionConversationIdentity(row);
-      if (row.parentKey || identities.has(id)) { needsGrouping = true; break; }
-      identities.add(id);
-    }
-    if (!needsGrouping) return list;
-    const byKey = new Map(list.filter(eligible).map(row => [row.key, row]));
-    // A verified native conversation can have several independent accounting
-    // rollouts. Resolve links through any visible alias, without changing those
-    // keys or pretending a continuation is a delegated child.
+    const { children, grouped, conflicts, parentLinks } = sessionLive.sessionGroupingPlan(list);
     const identity = sessionConversationIdentity;
-    const aliases = new Map();
-    for (const row of byKey.values()) {
-      const id = identity(row);
-      const previous = aliases.get(id);
-      if (!previous || row.key.localeCompare(previous.key) < 0) aliases.set(id, row);
-    }
-    const parentLinks = new Map();
-    const conflicts = new Set();
-    for (const row of byKey.values()) {
-      if (!row.parentKey) continue;
-      const id = identity(row);
-      const parent = byKey.get(row.parentKey);
-      const link = parent ? identity(parent) : row.parentKey;
-      if (link === id) continue;
-      if (parentLinks.has(id) && parentLinks.get(id).link !== link) conflicts.add(id);
-      else parentLinks.set(id, { link, parentKey: row.parentKey, subagentLabel: row.subagentLabel });
-    }
-    // Contradictory relationship facts never justify collapsing identities.
-    const canonical = row => conflicts.has(identity(row)) ? row : aliases.get(identity(row));
-    const rootOf = (row) => {
-      const seen = new Set();
-      let current = canonical(row);
-      while (!seen.has(current.key)) {
-        const parentKey = conflicts.has(identity(current)) ? current.parentKey
-          : parentLinks.get(identity(current))?.parentKey;
-        if (!parentKey) break;
-        seen.add(current.key);
-        const parent = byKey.get(parentKey);
-        if (!parent) break;
-        const next = canonical(parent);
-        if (seen.has(next.key)) return canonical(row);
-        current = next;
-      }
-      return current;
-    };
-    const children = new Map();
-    const grouped = new Set();
-    for (const row of byKey.values()) {
-      const root = rootOf(row);
-      if (root.key === row.key) continue;
-      if (!children.has(root.key)) children.set(root.key, []);
-      children.get(root.key).push(row);
-      grouped.add(row.key);
-    }
     if (grouped.size === 0) return list;
     return list
       .filter(row => !grouped.has(row?.key))
@@ -732,10 +673,6 @@
   // The group row is the parent's own row with the group's totals: members are
   // disjoint sessions, so their sum is the whole group and nothing is counted
   // twice. Its id moves to the group page, where the parent is listed first.
-  function sessionConversationIdentity(row) {
-    if (row.t3ThreadId) return `t3:${row.t3ThreadId}`;
-    return row.client === 'codex' && row.nativeSessionId ? `codex:${row.nativeSessionId}` : row.key;
-  }
 
   function subagentGroupRow(parent, members, options, splitIdentity = false, rootSubagentLabel) {
     const sameConversation = row => sessionConversationIdentity(row) === sessionConversationIdentity(parent);

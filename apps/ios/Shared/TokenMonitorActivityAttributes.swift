@@ -107,7 +107,7 @@ nonisolated struct TokenMonitorActivityAttributes: ActivityAttributes {
         }
 
         struct Agents: Codable, Hashable, Sendable {
-            /// Sessions currently running (the Sessions list's three-state rule).
+            /// Running conversation groups (the macOS Notch grouped-session rule).
             var running: Int
             /// Distinct active client ids, waiting first, newest per state, at most three.
             var clients: [String]
