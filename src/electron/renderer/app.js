@@ -4654,7 +4654,6 @@ window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
 });
 document.addEventListener('keydown', event => {
   if (event.key !== 'Escape' || !limitsHistoryOpen) return;
-  event.stopImmediatePropagation();
   event.preventDefault();
   window.tokenMonitor.limits.closeHistory();
 }, true);

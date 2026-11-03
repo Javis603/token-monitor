@@ -1410,3 +1410,36 @@ for (const sourceChange of [false, true]) test(`raw-only observations interrupt 
     assert.deepEqual((await store.query('local', raw)).windows[0].points.map(point => point.value), [80, 70, 60, 50]);
   }
 });
+
+for (const change of ['activity', 'quota', 'backend']) test(`a pending history read distinguishes ${change} publications`, async () => {
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = source.indexOf('async function limitsHistoryPayload(');
+  const end = source.indexOf('\nfunction getLimitsHistoryController(', start);
+  const row = provider(at(2, 10));
+  let complete;
+  const context = {
+    latestStats: { limits: { providers: [row] } }, statsPushSource: null, hubModeGeneration: 0, scope: 'local',
+    currentHubStatsIdentity: () => context.scope, electronPresentationStats: stats => stats,
+    historyRowKey, getLimitsHistoryStore: () => ({ query: () => new Promise(resolve => { complete = resolve; }) }),
+    settings: {}, historyWindowHidden: () => false, historyMaskEmail: value => value,
+    historyProviderCatalog: [], historyVendorColors: () => ({}),
+    fontSettingsApi: { textScaleForSize: () => 1, resolveEffectiveFontSettings: () => ({ interfaceFont: 'monospace' }) },
+    trayMenuLocale: () => 'en', crypto: require('node:crypto'), systemPreferences: {}
+  };
+  const read = vm.runInNewContext(source.slice(start, end) + '; limitsHistoryPayload;', context);
+  const pending = read(historyRowKey(row));
+  if (change === 'activity') {
+    const previous = context.latestStats;
+    context.latestStats = require('../../src/electron/syncDisplayStats').projectLocalActivity(previous, { observations: [], nativeSessions: {} });
+    assert.notEqual(context.latestStats, previous, 'the real activity publisher produces another stats object');
+  }
+  if (change === 'quota') context.latestStats = { ...context.latestStats, limits: { providers: [provider(at(2, 10, 5), 25)] } };
+  if (change === 'backend') context.scope = 'other-backend';
+  complete({ windows: [{ key: 'weekly', window: row.windows[0] }] });
+  const result = await pending;
+  if (change === 'activity') {
+    assert.ok(result, 'unrelated activity cannot cancel or close a quota preview');
+    assert.equal(result.windows.length, 1);
+  } else assert.equal(result, null, 'a changed quota or backend still invalidates the pending read');
+});

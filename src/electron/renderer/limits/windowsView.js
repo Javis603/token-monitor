@@ -2256,7 +2256,9 @@
       row.setAttribute('aria-description', t('limits.history.open'));
       row.addEventListener('keydown', event => {
         if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
-        event.preventDefault(); clearTimeout(hoverTimer); openHistory(true);
+        event.preventDefault();
+        if (event.repeat) return;
+        clearTimeout(hoverTimer); openHistory(true);
       });
       row.addEventListener('click', event => {
         if (event.target.closest('button, a, input, select, summary, [role="button"]')) return;

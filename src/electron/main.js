@@ -3237,7 +3237,8 @@ async function limitsHistoryPayload(key) {
   if (!provider) return null;
   const scope = currentHubStatsIdentity();
   const history = await getLimitsHistoryStore().query(scope, provider);
-  if (scope !== currentHubStatsIdentity() || publication !== latestStats) return null;
+  // Activity-only publications retain the quota snapshot and do not invalidate this read.
+  if (scope !== currentHubStatsIdentity() || publication?.limits !== latestStats?.limits) return null;
   history.windows = history.windows.filter(entry => !historyWindowHidden(settings?.limitProviderHiddenItems, provider.provider, entry.window)
     && !(provider.provider === 'codex' && settings?.showCodexAdditionalLimits === false && entry.window.additional === true));
   if (!history.windows.length) return null;

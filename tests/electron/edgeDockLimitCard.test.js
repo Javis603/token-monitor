@@ -2976,6 +2976,10 @@ test('history hover is automatic by default and optional without adding a separa
       assert.equal(opened.length, before, 'existing account controls keep their own action');
       row.listeners.keydown({ target: row, key: 'Enter', preventDefault() {} });
       assert.equal(opened.length, before + 1);
+      let preventedRepeats = 0;
+      for (const key of ['Enter', ' ']) row.listeners.keydown({ target: row, key, repeat: true, preventDefault() { preventedRepeats++; } });
+      assert.equal(opened.length, before + 1, 'holding an activation key cannot repeatedly toggle the preview');
+      assert.equal(preventedRepeats, 2, 'repeated Space cannot scroll the page');
       assert.equal(row.querySelectorAll('.limit-history-open').length, 0);
     }
   } finally { global.setTimeout = nativeSetTimeout; global.clearTimeout = nativeClearTimeout; }
