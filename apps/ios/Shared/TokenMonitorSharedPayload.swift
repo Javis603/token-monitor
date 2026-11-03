@@ -24,10 +24,10 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         let allTime: Usage
         let limits: [Limit]
         let activity: [Day]
-        /// Hub frame calendar day, independent of device freshness. Empty means unknown; nil is a legacy cache.
-        var todayDate: String? = nil
+        /// Hub frame calendar day, independent of device freshness. Empty means unknown.
+        var todayDate: String = ""
         var sourceStale: Bool? = nil
-        /// Running sessions for the Live Activity; nil in caches written before it existed.
+        /// Reported session activity; nil when unavailable.
         var agents: TokenMonitorActivityAttributes.ContentState.Agents? = nil
         /// The most recently used client and its share of usage, for Live Activity slots.
         var recent: TokenMonitorActivityAttributes.ContentState.Recent? = nil
@@ -51,7 +51,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         let outputTokens: Double
         let tools: [Breakdown]
         let models: [Breakdown]
-        // Additive metadata keeps the numeric widget API and old cache decoding.
+        // Availability metadata distinguishes unknown readings from measured zero.
         var tokensKnown: Bool? = nil
         var costKnown: Bool? = nil
         var tokenComponentsKnown: Bool? = nil
@@ -155,65 +155,6 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             self.languageCode = languageCode
             self.limitProviderOrder = limitProviderOrder
             self.hiddenLimitProviders = hiddenLimitProviders
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            self.init(
-                widgetContent: try container.decodeIfPresent(String.self, forKey: .widgetContent) ?? "overview",
-                widgetPeriod: try container.decodeIfPresent(String.self, forKey: .widgetPeriod) ?? "today",
-                widgetProviderID: try container.decodeIfPresent(String.self, forKey: .widgetProviderID),
-                widgetShowsCost: try container.decodeIfPresent(Bool.self, forKey: .widgetShowsCost) ?? true,
-                widgetShowsUpdateTime: try container.decodeIfPresent(Bool.self, forKey: .widgetShowsUpdateTime) ?? true,
-                widgetTextContrast: try container.decodeIfPresent(String.self, forKey: .widgetTextContrast) ?? "recommended",
-                widgetLimitLayout: try container.decodeIfPresent(String.self, forKey: .widgetLimitLayout) ?? "columns",
-                widgetShowsResetTime: try container.decodeIfPresent(Bool.self, forKey: .widgetShowsResetTime) ?? true,
-                widgetActivityLayout: try container.decodeIfPresent(String.self, forKey: .widgetActivityLayout) ?? "chart",
-                liveActivityEnabled: try container.decodeIfPresent(Bool.self, forKey: .liveActivityEnabled) ?? false,
-                liveLayout: (try? container.decodeIfPresent(LiveActivityLayout.self, forKey: .liveLayout))
-                    ?? LiveActivityLayout(),
-                currencyCode: try container.decodeIfPresent(String.self, forKey: .currencyCode) ?? "USD",
-                languageCode: try container.decodeIfPresent(String.self, forKey: .languageCode) ?? "auto",
-                limitProviderOrder: try container.decodeIfPresent([String].self, forKey: .limitProviderOrder),
-                hiddenLimitProviders: try container.decodeIfPresent([String].self, forKey: .hiddenLimitProviders)
-            )
-        }
-
-        func encode(to encoder: Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(widgetContent, forKey: .widgetContent)
-            try container.encode(widgetPeriod, forKey: .widgetPeriod)
-            try container.encodeIfPresent(widgetProviderID, forKey: .widgetProviderID)
-            try container.encode(widgetShowsCost, forKey: .widgetShowsCost)
-            try container.encode(widgetShowsUpdateTime, forKey: .widgetShowsUpdateTime)
-            try container.encode(widgetTextContrast, forKey: .widgetTextContrast)
-            try container.encode(widgetLimitLayout, forKey: .widgetLimitLayout)
-            try container.encode(widgetShowsResetTime, forKey: .widgetShowsResetTime)
-            try container.encode(widgetActivityLayout, forKey: .widgetActivityLayout)
-            try container.encode(liveActivityEnabled, forKey: .liveActivityEnabled)
-            try container.encode(liveLayout, forKey: .liveLayout)
-            try container.encodeIfPresent(currencyCode, forKey: .currencyCode)
-            try container.encodeIfPresent(languageCode, forKey: .languageCode)
-            try container.encodeIfPresent(limitProviderOrder, forKey: .limitProviderOrder)
-            try container.encodeIfPresent(hiddenLimitProviders, forKey: .hiddenLimitProviders)
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case widgetContent
-            case widgetPeriod
-            case widgetProviderID
-            case widgetShowsCost
-            case widgetShowsUpdateTime
-            case widgetTextContrast
-            case widgetLimitLayout
-            case widgetShowsResetTime
-            case widgetActivityLayout
-            case liveActivityEnabled
-            case liveLayout
-            case currencyCode
-            case languageCode
-            case limitProviderOrder
-            case hiddenLimitProviders
         }
 
         static let `default` = Preferences()

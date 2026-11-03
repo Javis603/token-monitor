@@ -64,8 +64,8 @@ final class SystemSurfaceCoordinator: SystemSurfacePublishing {
         latestSnapshot = nil
         lastWidgetReloadAt = nil
         lastLiveActivityUpdateAt = nil
-        // A legacy cache has no destination identity. Clear on first configuration
-        // too, rather than showing a previous Hub's data before the first response.
+        // The cache has no destination identity. Clear on first configuration too,
+        // rather than showing a previous Hub's data before the first response.
         try? snapshotStore.clearSnapshot()
         reloadWidgets()
         liveActivityController.configure(configuration)

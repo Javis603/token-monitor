@@ -374,7 +374,7 @@ extension WidgetLayoutRenderTests {
                            windows: [.init(label: "Weekly", kind: "weekly", remainingPercent: 40)]),
                      .init(providerID: "cursor", updatedAt: now.addingTimeInterval(-1000), stale: true,
                            windows: [.init(label: "Monthly", kind: "billing", remainingPercent: 5)])], agents: .none)
-        var layout = LiveActivityLayout()
+        var layout = LiveActivityLayout(mode: .custom)
         layout.expanded = .usage
         layout.expandedSource = .init(providerID: "cursor")
         layout.lockScreen = .overview

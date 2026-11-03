@@ -124,14 +124,12 @@ nonisolated struct TokenMonitorActivityAttributes: ActivityAttributes {
 /// Device-side Live Activity presentation, persisted in the shared app-group
 /// preferences. Like the desktop menu bar, each surface pairs an appearance
 /// with a data source; colour, type and wording follow the design system.
-/// Every field decodes leniently: a missing or unknown value falls back to its
-/// default instead of discarding the whole layout.
 nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
     enum Mode: String, Codable, CaseIterable, Sendable {
         case automatic, custom
     }
 
-    var mode: Mode = .custom
+    var mode: Mode = .automatic
     /// Where a reading comes from, as in the desktop menu bar composer.
     struct Source: Codable, Hashable, Sendable {
         enum Automatic: String, Codable, CaseIterable, Sendable {
@@ -179,25 +177,6 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
             self.period = period
             self.scope = scope
         }
-
-        init(from decoder: Decoder) throws {
-            let values = try decoder.container(keyedBy: CodingKeys.self)
-            func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
-                ((try? values.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
-            }
-            providerID = (try? values.decodeIfPresent(String.self, forKey: .providerID)) ?? nil
-            automatic = value(.automatic, .lowest)
-            accountKey = (try? values.decodeIfPresent(String.self, forKey: .accountKey)) ?? nil
-            window = value(.window, .primary)
-            windowLabel = (try? values.decodeIfPresent(String.self, forKey: .windowLabel)) ?? nil
-            self.value = value(.value, .remaining)
-            period = value(.period, .today)
-            scope = value(.scope, .all)
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case providerID, automatic, accountKey, window, windowLabel, value, period, scope
-        }
     }
 
     enum CompactStyle: String, Codable, CaseIterable, Sendable {
@@ -225,14 +204,6 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
             self.style = style
             self.source = source
         }
-
-        init(from decoder: Decoder) throws {
-            let values = try decoder.container(keyedBy: CodingKeys.self)
-            style = ((try? values.decodeIfPresent(CompactStyle.self, forKey: .style)) ?? nil) ?? .none
-            source = ((try? values.decodeIfPresent(Source.self, forKey: .source)) ?? nil) ?? Source()
-        }
-
-        private enum CodingKeys: String, CodingKey { case style, source }
     }
 
     var compactLeading = Slot(style: .ring)
@@ -244,35 +215,12 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
     var lockScreen: LockScreenTemplate = .overview
     var lockScreenSource = Source()
 
-    init() {}
+    init(mode: Mode = .automatic) {
+        self.mode = mode
+    }
 
     static var automatic: Self {
-        var value = Self()
-        value.mode = .automatic
-        return value
-    }
-
-    init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
-            ((try? values.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
-        }
-        let defaults = LiveActivityLayout()
-        // Existing layouts remain custom; only new installations start automatic.
-        mode = value(.mode, .custom)
-        compactLeading = value(.compactLeading, defaults.compactLeading)
-        compactTrailing = value(.compactTrailing, defaults.compactTrailing)
-        minimal = value(.minimal, defaults.minimal)
-        minimalSource = value(.minimalSource, defaults.minimalSource)
-        expanded = value(.expanded, defaults.expanded)
-        expandedSource = value(.expandedSource, defaults.expandedSource)
-        lockScreen = value(.lockScreen, defaults.lockScreen)
-        lockScreenSource = value(.lockScreenSource, defaults.lockScreenSource)
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case mode, compactLeading, compactTrailing, minimal, minimalSource
-        case expanded, expandedSource, lockScreen, lockScreenSource
+        Self()
     }
 
     private var sources: [Source] {

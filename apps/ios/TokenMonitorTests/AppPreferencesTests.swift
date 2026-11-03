@@ -19,6 +19,7 @@ struct AppPreferencesTests {
         #expect(preferences.homeLimitCount == 3)
         #expect(preferences.showsLiveTokenRate)
         #expect(!preferences.workbuddyQuotaTotalEnabled)
+        #expect(preferences.liveLayout.mode == .automatic)
 
         preferences.homeLimitCount = 0
         #expect(preferences.homeLimitCount == 1)
@@ -79,7 +80,7 @@ struct AppPreferencesTests {
         preferences.widgetShowsResetTime = false
         preferences.widgetActivityLayout = "summary"
         preferences.liveActivityEnabled = true
-        var layout = LiveActivityLayout()
+        var layout = LiveActivityLayout(mode: .custom)
         layout.compactLeading = .init(style: .percentReset, source: .init(providerID: "codex", accountKey: "work", window: .weekly, value: .used))
         layout.compactTrailing = .init(style: .tokens, source: .init(period: .month, scope: .recent))
         layout.expanded = .providers
@@ -157,53 +158,26 @@ struct AppPreferencesTests {
     }
 
     @Test
-    func legacySurfacePreferencesDecodeWithLayoutDefaults() throws {
-        // Old payloads carry removed live* keys; unknown keys are ignored and
-        // the layout falls back to its defaults.
-        let data = Data(
-            """
-            {
-              "widgetContent": "overview",
-              "widgetPeriod": "today",
-              "widgetShowsCost": true,
-              "widgetShowsUpdateTime": true,
-              "liveActivityEnabled": false,
-              "livePrimaryMetric": "tokens",
-              "livePeriod": "today",
-              "liveIconProviderID": "claude",
-              "liveCompactTrailingField": "cost",
-              "liveLockScreenBottomField": "progress",
-              "liveCompactLeading": "mark",
-              "currencyCode": "USD",
-              "languageCode": "auto"
-            }
-            """.utf8
-        )
-
-        let preferences = try JSONDecoder().decode(
-            TokenMonitorSharedPayload.Preferences.self,
-            from: data
-        )
-
-        #expect(preferences.liveLayout == LiveActivityLayout())
-        #expect(preferences.widgetTextContrast == "recommended")
-        #expect(preferences.widgetLimitLayout == "columns")
-        #expect(preferences.widgetShowsResetTime)
-        #expect(preferences.widgetActivityLayout == "chart")
+    func currentSurfacePreferencesRoundTripInBothModes() throws {
+        for mode in LiveActivityLayout.Mode.allCases {
+            var preferences = TokenMonitorSharedPayload.Preferences.default
+            preferences.liveLayout.mode = mode
+            preferences.liveLayout.compactLeading = .init(style: .agents,
+                source: .init(providerID: "claude", accountKey: "work", value: .used))
+            preferences.widgetLimitLayout = "rows"
+            let data = try JSONEncoder().encode(preferences)
+            #expect(try JSONDecoder().decode(TokenMonitorSharedPayload.Preferences.self, from: data) == preferences)
+        }
     }
 
     @Test
-    func liveLayoutDecodesUnknownValuesFieldByField() throws {
-        let data = Data(#"{"compactLeading":{"style":"agents","source":{"providerID":"claude","window":"hourly","value":"used"}},"compactTrailing":"bogus","expanded":"usage","lockScreenSource":{"scope":7}}"#.utf8)
-        let layout = try JSONDecoder().decode(LiveActivityLayout.self, from: data)
-        #expect(layout.compactLeading.style == .agents)
-        #expect(layout.compactLeading.source.providerID == "claude")
-        #expect(layout.compactLeading.source.window == .primary)
-        #expect(layout.compactLeading.source.value == .used)
-        #expect(layout.compactTrailing == LiveActivityLayout().compactTrailing)
-        #expect(layout.expanded == .usage)
-        #expect(layout.lockScreenSource == .init())
-        #expect(layout.lockScreen == .overview)
+    func incompleteLocalLayoutsAreNotMigratedToCustom() {
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(LiveActivityLayout.self, from: Data("{}".utf8))
+        }
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TokenMonitorSharedPayload.Preferences.self, from: Data("{}".utf8))
+        }
     }
 
     @Test

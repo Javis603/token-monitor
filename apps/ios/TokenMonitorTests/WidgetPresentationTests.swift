@@ -32,7 +32,7 @@ struct WidgetPresentationTests {
         #expect(saved.compactTrailing.style == .cost)
         saved.mode = .custom
         #expect(ActivityContext(state: state, layout: saved, isStale: false, now: now).layout == saved)
-        #expect(try JSONDecoder().decode(LiveActivityLayout.self, from: Data("{}".utf8)).mode == .custom)
+        #expect(LiveActivityLayout().mode == .automatic)
         #expect(TokenMonitorSharedPayload.Preferences.default.liveLayout.mode == .automatic)
         #expect(try JSONDecoder().decode(State.Agents.self, from: Data(#"{"running":1,"clients":["claude"]}"#.utf8)).waiting == nil)
     }
