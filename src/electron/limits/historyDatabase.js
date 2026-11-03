@@ -191,6 +191,15 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           if (point.at < retentionStart(now, 730) || point.at > now + 60_000) continue;
           const origin = originFor.get(id, source);
           if (origin && point.at <= origin.at) continue;
+          if (point.missing) {
+            const tail = latest.get(id);
+            if (tail && point.at > tail.until) {
+              noteOrigin.run(id, source, point.at);
+              conflict(id, tail, point, now);
+              markFailed.run(id);
+            }
+            continue;
+          }
           streamInsert.run(id, action.account);
           noteOrigin.run(id, source, point.at);
           const tail = latest.get(id);

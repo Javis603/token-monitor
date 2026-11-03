@@ -62,6 +62,10 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       const windows = [];
       for (const window of provider.windows || []) {
         const { primary, raw } = historyReadings(window);
+        // A raw-only reading ends any previously observed percentage interval.
+        if (['credits', 'spend'].includes(window.metric) && primary?.unit !== 'pp') {
+          windows.push({ id: windowId(scope, provider, window, { unit: 'pp' }), point: { at, missing: true } });
+        }
         for (const reading of [primary, raw].filter(Boolean)) {
           windows.push({ id: windowId(scope, provider, window, reading), point: { at, ...reading,
             reset: Number.isFinite(Date.parse(window.resetsAt)) ? Date.parse(window.resetsAt) : null,

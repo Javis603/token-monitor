@@ -1380,3 +1380,33 @@ test('enabling reduced motion or closing cancels native frame playback', async t
   assert.deepEqual(f.window.bounds, bounds);
   assert.equal(f.window.visible, false);
 });
+
+for (const sourceChange of [false, true]) test(`raw-only observations interrupt an existing percent stream across restart (source change: ${sourceChange})`, async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-missing-percent-'));
+  const file = path.join(directory, 'history.sqlite');
+  const options = { now: () => at(2, 12) };
+  let store = createLimitsHistoryStore(file, options);
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const row = (minute, remaining, limit, source = 'a') => ({
+    ...fundedProvider(at(2, 10, minute), remaining, limit), sourceDeviceId: source
+  });
+  await store.record('local', { providers: [row(0, 80, 100)] });
+  await store.record('local', { providers: [row(5, 70, null, sourceChange ? 'b' : 'a')] });
+  await store.close();
+  store = createLimitsHistoryStore(file, options);
+  await store.record('local', { providers: [row(10, 60, 100, sourceChange ? 'b' : 'a')] });
+  let entry = (await store.query('local', row(10, 60, 100))).windows[0];
+  assert.equal(entry.distribution.buckets.at(-1).value, null, 'the missing percentage interval is not measured consumption');
+  assert.equal(entry.distribution.buckets.at(-1).uncertain, true);
+  assert.equal(segments(entry.points).length, 2, 'the percentage curve cannot bridge the raw-only observation');
+  await store.record('local', { providers: [row(15, 50, 100, sourceChange ? 'b' : 'a')] });
+  entry = (await store.query('local', row(15, 50, 100))).windows[0];
+  assert.equal(entry.distribution.buckets.at(-1).value, 10, 'only the later fully observed increment counts');
+  assert.equal(entry.distribution.resets, 0);
+  const hourly = (await store.query('local', row(15, 50, 100), { grain: 'hour', day: dayKey(at(2, 12)) })).windows[0];
+  assert.equal(hourly.distribution.buckets.find(bucket => new Date(bucket.at).getHours() === 10).value, 10);
+  if (!sourceChange) {
+    const raw = row(15, 50, 100); raw.windows[0].showMeter = false;
+    assert.deepEqual((await store.query('local', raw)).windows[0].points.map(point => point.value), [80, 70, 60, 50]);
+  }
+});
