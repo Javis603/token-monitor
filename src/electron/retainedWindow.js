@@ -49,11 +49,25 @@ function captureRetainedWindowState(win) {
 }
 
 function restoreRetainedWindowState(win, restoreViewport = true) {
+  const entry = entries.get(win);
+  if (!entry || entry.owner !== win || win.isDestroyed()) return Promise.resolve();
   const visible = win.isVisible() && !win.isMinimized();
   if (!visible) win.once('show', () => {
+    if (entry.owner !== win || win.isDestroyed()) return;
     restoreRetainedWindowState(win, restoreViewport).catch(error => console.warn(`[window] view restore failed: ${error.message}`));
   });
-  return win.webContents.executeJavaScript(`(${restoreWindowViewState.toString()})(${JSON.stringify({ afterPaint: visible, restoreViewport })})`);
+  const restore = afterPaint => win.webContents.executeJavaScript(`(${restoreWindowViewState.toString()})(${JSON.stringify({ afterPaint, restoreViewport, releaseSnapshot: visible })})`);
+  const restored = restore(visible);
+  if (!visible) return restored;
+  return new Promise((resolve, reject) => {
+    // Occluded pages may pause RAF despite a visible native host. Finish the
+    // restore synchronously in the page before allowing another queued capture.
+    const timer = setTimeout(() => {
+      if (entry.owner !== win || win.isDestroyed()) { resolve(); return; }
+      restore(false).then(resolve, reject);
+    }, 1000);
+    restored.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
 }
 
 module.exports = { createRetainedWindow, captureRetainedWindowState, restoreRetainedWindowState };

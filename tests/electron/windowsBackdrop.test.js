@@ -194,8 +194,54 @@ function materialFixture(result = true) {
     setBackgroundColor: value => calls.push(['color', value])
   };
   const api = { apply: () => { calls.push(['accent']); return result; }, clear: () => { calls.push(['clear']); return true; } };
-  return { win, calls, sync: settings => syncWindowsBackdrop(win, settings, { platform: 'win32', api }) };
+  return { win, calls, api, sync: settings => syncWindowsBackdrop(win, settings, { platform: 'win32', api }) };
 }
+
+test('failed Accent cleanup keeps the old transition retryable instead of caching success', () => {
+  const f = materialFixture();
+  f.sync({ mode: 'accent' });
+  f.calls.length = 0;
+  let cleaned = false;
+  f.api.clear = () => { f.calls.push(['clear']); return cleaned; };
+  const failed = f.sync({ mode: 'acrylic' });
+  assert.equal(failed.mode, 'accent');
+  assert.deepEqual(f.calls, [['clear']]);
+  cleaned = true;
+  const recovered = f.sync({ mode: 'acrylic' });
+  assert.equal(recovered.mode, 'acrylic');
+  assert.deepEqual(f.calls, [['clear'], ['clear'], ['material', 'acrylic']]);
+});
+
+test('partial Accent application keeps failed cleanup pending until a later sync succeeds', () => {
+  const f = materialFixture(false);
+  let clean = false;
+  f.api.clear = () => { f.calls.push(['clear']); return clean; };
+  const failed = f.sync({ mode: 'accent' });
+  assert.equal(failed.accentCleanupPending, true);
+  assert.equal(failed.fallback, true);
+  f.api.clear = () => { f.calls.push(['clear']); throw new Error('native cleanup unavailable'); };
+  assert.equal(f.sync({ enabled: false }).accentCleanupPending, true);
+  assert.equal(f.calls.at(-1)[0], 'clear');
+  clean = true;
+  f.api.clear = () => { f.calls.push(['clear']); return clean; };
+  const restored = f.sync({ enabled: false });
+  assert.equal(restored.mode, 'transparent');
+  assert.equal(restored.accentCleanupPending, false);
+  assert.deepEqual(f.calls.slice(-3), [['clear'], ['material', 'none'], ['color', '#00000000']]);
+});
+
+test('appearance previews preserve fallback warnings unless the supplied patch replaces the flag', () => {
+  const start = app.indexOf('  if (els.windowsBackdropNote) {', app.indexOf('function applyAppearanceSettings('));
+  const snippet = app.slice(start, app.indexOf('  els.macBackdropRow', start));
+  const note = { classList: { toggle() {} } };
+  const context = { els: { windowsBackdropNote: note }, windowsGlass: { showAccentNote: true },
+    state: { settings: { windowsBackdropFallback: true } }, settings: {}, t: key => key };
+  require('node:vm').runInNewContext(snippet, context);
+  assert.equal(note.textContent, 'settings.appearance.windowsBackdropFallback');
+  context.settings = { windowsBackdropFallback: false };
+  require('node:vm').runInNewContext(snippet, context);
+  assert.equal(note.textContent, 'settings.appearance.windowsBackdropNote');
+});
 
 test('Acrylic and Accent switch both ways on the same window and unchanged preferences do no work', () => {
   const f = materialFixture();

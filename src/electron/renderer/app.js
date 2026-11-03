@@ -8148,7 +8148,8 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropInput.value = windowsGlass.backdropMode;
   }
   if (els.windowsBackdropNote) {
-    const accentFallback = windowsGlass.showAccentNote && settings?.windowsBackdropFallback === true;
+    const accentFallback = windowsGlass.showAccentNote
+      && (settings?.windowsBackdropFallback ?? state.settings?.windowsBackdropFallback) === true;
     els.windowsBackdropNote.textContent = t(accentFallback
       ? 'settings.appearance.windowsBackdropFallback'
       : 'settings.appearance.windowsBackdropNote');

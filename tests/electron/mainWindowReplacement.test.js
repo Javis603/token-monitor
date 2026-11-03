@@ -22,6 +22,7 @@ class Window extends EventEmitter {
   isMinimized() { return this.minimized; }
   getBounds() { return this.bounds; }
   focus() { this.focused = true; }
+  show() { this.visible = true; this.emit('show'); }
   minimize() { this.minimized = true; }
   destroy() { this.destroyed = true; this.emit('closed'); }
 }
@@ -31,22 +32,29 @@ function fixture(state = {}) {
   old.webContents = { draft: 'unfinished input', scroll: 85 };
   const creations = [];
   const context = {
-    process: { platform: 'win32' }, mainWindow: old, settings: {}, floatingBubbleState: {}, creations,
-    mainWindowChrome: {}, mainWindowReplacementEpoch: 0,
+    process: { platform: 'win32' }, mainWindow: old, settings: {}, floatingBubbleState: { collapsed: false }, creations,
+    mainWindowChrome: { collapsedFloatingBubble: false }, mainWindowReplacementEpoch: 0,
     mainWindowReplacementTask: Promise.resolve(),
     captureRetainedWindowState: async () => {}, restoreRetainedWindowState: async () => {},
     windowsBackdropFallback: () => false,
+    stopFloatingBubbleAutoCollapseTimer() {}, displayForBounds: () => null,
+    applyNativeMaterial() {}, persistWindowBounds() {}, WINDOW_LIMITS: {},
+    restoreFloatingBubbleWindow(win, bounds) { win.bounds = bounds; },
+    applyWindowSettings() {}, setTimeout: () => 0,
+    console: { warn() {} },
     handoffWindow, sendFloatingBubbleState() {},
     restoreWindowMaximized(win) { win.maximized = context.settings.windowMaximized === true; },
     revealWindow(win, options) { win.visible = true; if (!options.inactive) win.focus(); },
     createWindow(bounds, options) {
       creations.push({ bounds, options });
       context.mainWindow = new Window({ bounds, visible: false });
+      context.mainWindowChrome = { collapsedFloatingBubble: options.collapsedFloatingBubble === true };
       context.mainWindow.webContents = options.previousWindow?.webContents || {};
     }
   };
   vm.createContext(context);
   vm.runInContext(functionSource('replaceMainWindow', 'function discardFailedDashboardWindow('), context);
+  vm.runInContext(functionSource('expandFloatingBubble', 'function scheduleFloatingBubbleAutoCollapse('), context);
   return { context, old, creations };
 }
 
@@ -59,6 +67,33 @@ test('visible host replacement retains the page and focus, including maximized r
   assert.equal(context.mainWindow.maximized, true);
   assert.equal(context.mainWindow.focused, true);
   assert.equal(old.destroyed, true);
+});
+
+test('an in-place expansion cancels a collapse awaiting viewport capture', async () => {
+  const { context, old, creations } = fixture();
+  context.floatingBubbleState = { collapsed: true, expandedBounds: old.bounds };
+  let finishCapture;
+  context.captureRetainedWindowState = () => new Promise(resolve => { finishCapture = resolve; });
+  let restored = 0;
+  context.restoreRetainedWindowState = async () => { restored++; };
+  const collapse = context.replaceMainWindow({ width: 18, height: 34 }, { collapsedFloatingBubble: true });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(context.expandFloatingBubble({ focus: false }), true);
+  finishCapture();
+  await collapse;
+  assert.equal(context.floatingBubbleState.collapsed, false);
+  assert.equal(context.mainWindow, old);
+  assert.equal(creations.length, 0);
+  assert.equal(restored, 1, 'cancelled captures must release the transfer snapshot');
+});
+
+test('viewport capture failure does not abandon an already-requested collapse', async () => {
+  const { context, creations } = fixture();
+  context.floatingBubbleState.collapsed = true;
+  context.captureRetainedWindowState = async () => { throw new Error('page navigating'); };
+  await context.replaceMainWindow({ width: 18, height: 34 }, { collapsedFloatingBubble: true });
+  assert.equal(creations.length, 1);
+  assert.equal(context.mainWindowChrome.collapsedFloatingBubble, true);
 });
 
 test('hidden and minimized hosts stay hidden or minimized and release obsolete hosts immediately', async () => {

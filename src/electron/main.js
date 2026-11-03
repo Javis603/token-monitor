@@ -7740,8 +7740,19 @@ function replaceMainWindow(bounds, options = {}) {
     if (epoch !== mainWindowReplacementEpoch) return;
     const old = mainWindow;
     if (process.platform === 'win32') {
-      if (!mainWindowChrome.collapsedFloatingBubble) await captureRetainedWindowState(old);
-      if (epoch !== mainWindowReplacementEpoch || old !== mainWindow || old.isDestroyed()) return;
+      if (!mainWindowChrome.collapsedFloatingBubble) {
+        await captureRetainedWindowState(old)
+          .catch(error => console.warn(`[window] view capture failed: ${error.message}`));
+      }
+      if (epoch !== mainWindowReplacementEpoch || old !== mainWindow || old.isDestroyed()
+        || (options.collapsedFloatingBubble === true) !== floatingBubbleState.collapsed) {
+        // An in-place expansion can supersede a collapse while capture is in
+        // flight without requesting another native host. Release its snapshot.
+        if (old === mainWindow && !old.isDestroyed() && !mainWindowChrome.collapsedFloatingBubble) {
+          await restoreRetainedWindowState(old);
+        }
+        return;
+      }
     }
     const wasFocused = old && !old.isDestroyed() ? old.isFocused() : false;
     if (old && !old.isDestroyed()) old.removeAllListeners('close');

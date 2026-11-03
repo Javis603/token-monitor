@@ -3,7 +3,43 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
-const { createRetainedWindow } = require('../../src/electron/retainedWindow');
+const { createRetainedWindow, restoreRetainedWindowState } = require('../../src/electron/retainedWindow');
+
+test('frame-starved visible restores complete via synchronous fallback before the queue continues', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture();
+  const win = f.create({ width: 400, height: 600, show: true });
+  const scripts = [];
+  let finishFallback;
+  win.webContents.executeJavaScript = script => {
+    scripts.push(script);
+    return scripts.length === 1 ? new Promise(() => {}) : new Promise(resolve => { finishFallback = resolve; });
+  };
+  let complete = false;
+  const restored = restoreRetainedWindowState(win).then(() => { complete = true; });
+  t.mock.timers.tick(1000);
+  await Promise.resolve();
+  assert.equal(scripts.length, 2);
+  assert.match(scripts[1], /"afterPaint":false/);
+  assert.equal(complete, false, 'the queue must wait until the fallback actually restores the page');
+  finishFallback();
+  await restored;
+  assert.equal(complete, true);
+});
+
+test('hidden restores retain the viewport until show and obsolete owners cannot replay it', async () => {
+  const f = fixture();
+  const old = f.create({ width: 400, height: 600, show: false });
+  const scripts = [];
+  old.webContents.executeJavaScript = async script => { scripts.push(script); };
+  await restoreRetainedWindowState(old);
+  assert.match(scripts[0], /"releaseSnapshot":false/);
+  const win = f.create({ width: 400, height: 600, show: true }, old);
+  old.emit('show');
+  assert.equal(scripts.length, 1, 'a delayed show on an obsolete host must not touch the transferred page');
+  await restoreRetainedWindowState(win);
+  assert.match(scripts[1], /"releaseSnapshot":true/);
+});
 
 function fixture() {
   const views = [];

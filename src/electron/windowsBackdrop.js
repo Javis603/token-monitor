@@ -142,20 +142,26 @@ function syncWindowsBackdrop(win, { enabled = true, mode = 'acrylic' } = {}, opt
   if ((options.platform || process.platform) !== 'win32' || !win || win.isDestroyed?.()) return;
   const wanted = !enabled ? 'transparent' : mode === 'accent' ? 'accent' : 'acrylic';
   const previous = windowStates.get(win);
-  if (previous?.mode === wanted) return previous;
-  const api = options.api || (wanted === 'accent' || previous?.mode === 'accent' ? loadAccentApi() : null);
+  if (previous?.mode === wanted && !previous.accentCleanupPending) return previous;
+  const api = options.api || (wanted === 'accent' || previous?.mode === 'accent' || previous?.accentCleanupPending ? loadAccentApi() : null);
   const clearAccent = () => {
-    if (!api) return;
-    try { api.clear(hwndOf(win)); } catch (_) {}
+    if (!api) return true; // No native Accent API could have applied a policy.
+    try { return api.clear(hwndOf(win)) === true; } catch (_) { return false; }
   };
-  if (previous?.mode === 'accent') clearAccent();
+  if ((previous?.mode === 'accent' || previous?.accentCleanupPending) && !clearAccent()) {
+    console.warn('[window] Accent cleanup failed; retaining the current material until the next sync');
+    const state = { ...previous, accentCleanupPending: true };
+    windowStates.set(win, state);
+    return state;
+  }
   let fallback = false;
+  let accentCleanupPending = false;
   if (wanted === 'accent') {
     win.setBackgroundMaterial('none');
     // Electron resets the page background to white when removing a material.
     win.setBackgroundColor('#00000000');
     if (!applyWindowsAccentBlur(win, { ...options, api })) {
-      clearAccent(); // A failed apply can already have extended the DWM frame.
+      accentCleanupPending = !clearAccent(); // A failed apply can already have extended the DWM frame.
       win.setBackgroundMaterial('acrylic');
       console.warn('[window] AccentBlurBehind unavailable; falling back to Acrylic');
       fallback = true;
@@ -168,7 +174,7 @@ function syncWindowsBackdrop(win, { enabled = true, mode = 'acrylic' } = {}, opt
     // transparent, so restoring alpha reveals the desktop on the same HWND.
     win.setBackgroundColor('#00000000');
   }
-  const state = { mode: wanted, fallback };
+  const state = { mode: wanted, fallback, accentCleanupPending };
   windowStates.set(win, state);
   return state;
 }

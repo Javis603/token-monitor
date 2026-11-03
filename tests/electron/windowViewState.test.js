@@ -7,6 +7,72 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { captureWindowViewState, restoreWindowViewState } = require('../../src/electron/renderer/windowViewState');
 
+test('zero-offset scroll containers return to the top-left and release restored DOM references', async () => {
+  const vertical = { isConnected: true, scrollTop: 0, scrollLeft: 0, scrollHeight: 900, clientHeight: 200 };
+  const horizontal = { isConnected: true, scrollTop: 0, scrollLeft: 0, scrollWidth: 900, clientWidth: 200 };
+  const active = { isConnected: true, focus() {} };
+  const context = vm.createContext({ document: { activeElement: active, querySelectorAll: () => [vertical, horizontal] } });
+  vm.runInContext(`(${captureWindowViewState.toString()})()`, context);
+  vertical.scrollTop = 140; horizontal.scrollLeft = 75;
+  await vm.runInContext(`(${restoreWindowViewState.toString()})({afterPaint:false})`, context);
+  assert.equal(vertical.scrollTop, 0);
+  assert.equal(horizontal.scrollLeft, 0);
+  const snapshot = vm.runInContext("globalThis[Symbol.for('token-monitor.window-view-state')]", context);
+  assert.equal(snapshot.active, null);
+  assert.equal(snapshot.scroll.length, 0);
+});
+
+test('an immediate fallback cancels a paused frame restore before the next capture', async () => {
+  const scroller = { isConnected: true, scrollTop: 120, scrollLeft: 0 };
+  const frames = new Map();
+  let nextFrame = 0;
+  const context = vm.createContext({ document: { activeElement: null, querySelectorAll: () => [scroller] },
+    requestAnimationFrame(callback) { frames.set(++nextFrame, callback); return nextFrame; },
+    cancelAnimationFrame(id) { frames.delete(id); } });
+  vm.runInContext(`(${captureWindowViewState.toString()})()`, context);
+  const paused = vm.runInContext(`(${restoreWindowViewState.toString()})()`, context);
+  const lateFrame = frames.values().next().value;
+  scroller.scrollTop = 10;
+  await vm.runInContext(`(${restoreWindowViewState.toString()})({afterPaint:false})`, context);
+  assert.equal(frames.size, 0, 'fallback removes the old animation callback');
+  await paused;
+  assert.equal(scroller.scrollTop, 120);
+  vm.runInContext(`(${captureWindowViewState.toString()})()`, context);
+  scroller.scrollTop = 25;
+  lateFrame();
+  assert.equal(scroller.scrollTop, 25, 'a late callback cannot restore over a newer transfer');
+});
+
+test('a new capture invalidates a previous paused callback without restoring its viewport', async () => {
+  const scroll = { isConnected: true, scrollTop: 120, scrollLeft: 0 };
+  let callback;
+  const context = vm.createContext({ document: { activeElement: null, querySelectorAll: () => [scroll] },
+    requestAnimationFrame(fn) { callback = fn; return 1; }, cancelAnimationFrame() {} });
+  vm.runInContext(`(${captureWindowViewState.toString()})()`, context);
+  const paused = vm.runInContext(`(${restoreWindowViewState.toString()})()`, context);
+  scroll.scrollTop = 50;
+  vm.runInContext(`(${captureWindowViewState.toString()})()`, context);
+  await paused;
+  scroll.scrollTop = 10;
+  callback();
+  assert.equal(scroll.scrollTop, 10);
+  await vm.runInContext(`(${restoreWindowViewState.toString()})({afterPaint:false})`, context);
+  assert.equal(scroll.scrollTop, 50);
+});
+
+test('a hidden viewport is restored again after show before its DOM references are released', async () => {
+  const scroll = { isConnected: true, scrollTop: 120, scrollLeft: 0 };
+  const context = vm.createContext({ document: { activeElement: null, querySelectorAll: () => [scroll] } });
+  vm.runInContext(`(${captureWindowViewState.toString()})()`, context);
+  scroll.scrollTop = 10;
+  await vm.runInContext(`(${restoreWindowViewState.toString()})({afterPaint:false,releaseSnapshot:false})`, context);
+  assert.equal(scroll.scrollTop, 120);
+  scroll.scrollTop = 20;
+  await vm.runInContext(`(${restoreWindowViewState.toString()})({afterPaint:false})`, context);
+  assert.equal(scroll.scrollTop, 120);
+  assert.equal(vm.runInContext("globalThis[Symbol.for('token-monitor.window-view-state')].scroll.length", context), 0);
+});
+
 test('native transfer restores scroll and focus before the next paint without serializing DOM references', async () => {
   const focuses = [];
   const scroll = { isConnected: true, scrollTop: 120, scrollLeft: 30 };
