@@ -9984,6 +9984,8 @@ app.on('before-quit', () => {
   quitRequested = true;
   limitsHistoryController?.dispose();
   limitsHistoryStore?.closeSync();
+  // An updater can abort this quit; subsequent reads need an open store.
+  limitsHistoryStore = null;
   antigravityOAuthLoginController?.abort();
   workbuddyManagedAccountService?.cancelLogin();
   resetMacWidgetReloadThrottle();
