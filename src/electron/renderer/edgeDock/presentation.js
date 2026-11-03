@@ -829,14 +829,11 @@
         .map(([key, session]) => sessionLive.sessionWithActivity(period, key, session))
         .filter(session => session?.sessionKind !== 'background-review')
         .map(session => cacheHitSessionRow(session))
-        .filter(Boolean);
+        .filter(Boolean)
+        .sort((a, b) => b.lastUsed - a.lastUsed);
       const running = rows.filter(row => sessionActivityState(row, now) === 'running');
-      const ranked = running.length > 0 ? running : rows;
-      const sessions = ranked
-        .sort(running.length > 0
-          ? (a, b) => b.hit - a.hit
-          : (a, b) => b.lastUsed - a.lastUsed)
-        .slice(0, SESSIONS_RECENT_COUNT);
+      const sessions = selectRecentSessionRows(rows, SESSIONS_RECENT_COUNT, {},
+        row => sessionActivityState(row, now));
       return {
         id: `stat:${metric}`,
         kind: 'stat',
@@ -844,7 +841,7 @@
         period: 'today',
         available: summary.rate !== null,
         ...summary,
-        // The list is capped for the card; the status count is not.
+        // Like Sessions, retain every active row and fill with recent quiet rows.
         runningCount: running.length,
         runningExpiresAt: nextRunningExpiryAt(rows, now),
         sessions

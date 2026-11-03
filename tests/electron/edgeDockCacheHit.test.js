@@ -30,7 +30,7 @@ function session(client, sessionId, now, overrides = {}) {
   };
 }
 
-test('cacheHit projects one period total and the running session rows', () => {
+test('cacheHit projects one period total with active and recent session rows', () => {
   const now = Date.now();
   const sessions = {
     'codex:running-a': session('codex', 'running-a', now),
@@ -90,7 +90,7 @@ test('cacheHit projects one period total and the running session rows', () => {
   assert.equal(cell.miss, 1100);
   assert.ok(Math.abs(cell.rate - 65.625) < 1e-9);
   assert.equal(Math.round(cell.rate), component.hitPct);
-  assert.deepEqual(cell.sessions.map((row) => row.key), ['codex:running-a', 'codex:running-b']);
+  assert.deepEqual(cell.sessions.map((row) => row.key), ['codex:running-a', 'codex:running-b', 'codex:idle']);
   assert.equal(cell.sessions[0].miss, 200);
   assert.equal(cell.sessions[0].rate, 75);
   assert.equal(cell.sessions[1].miss, 400);
@@ -98,7 +98,7 @@ test('cacheHit projects one period total and the running session rows', () => {
   assert.equal(cell.runningCount, 2);
   assert.equal(presentation.runningSessionSummary(cell.sessions).count, 2);
   assert.ok(cell.runningExpiresAt > now);
-  for (const row of cell.sessions) {
+  for (const row of cell.sessions.filter(row => presentation.sessionActivityState(row) === 'running')) {
     assert.equal(row.client, 'codex');
     assert.equal(row.lastUsedAt, new Date(now).toISOString());
     assert.equal(row.turnEnded, false);
@@ -106,6 +106,30 @@ test('cacheHit projects one period total and the running session rows', () => {
     assert.equal(row.deleted, false);
     assert.equal(row.sourceDeleted, false);
   }
+});
+
+test('cacheHit uses the Sessions card timeline selection for mixed activity', (t) => {
+  const now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const sessions = {};
+  for (let index = 0; index < 8; index += 1) {
+    sessions[`codex:session-${index}`] = session('codex', `session-${index}`, now - index * 1000, {
+      turnEnded: index < 4 || index === 7,
+      waitingForInput: index === 6
+    });
+  }
+  const [timeline, cache] = presentation.buildEdgeDockCells({ periods: { today: {
+    totalTokens: 8000, inputTokens: 800, cacheReadTokens: 4800,
+    cacheWriteTokens: 800, outputTokens: 1600,
+    capabilities: { tokenComponents: true }, sessions
+  } } }, { items: [{ type: 'stat', metric: 'sessions' }, { type: 'stat', metric: 'cacheHit' }] });
+  assert.deepEqual(cache.sessions.map(row => row.key), timeline.sessions.map(row => row.key));
+  assert.deepEqual(cache.sessions.map(row => row.key), [
+    'codex:session-0', 'codex:session-1', 'codex:session-2',
+    'codex:session-4', 'codex:session-5', 'codex:session-6'
+  ]);
+  assert.equal(cache.runningCount, 2);
+  assert.equal(presentation.sessionActivityState(cache.sessions.at(-1), now), 'waiting');
 });
 
 test('cacheHit falls back to the six most recently active rows when idle', () => {
@@ -237,8 +261,7 @@ for (const client of ['codex', 'claude']) for (const activity of ['running', 'wa
     assert.equal(presentation.sessionActivityState(projected, now), activity);
     assert.deepEqual(projected.liveActivity, liveActivity);
     assert.equal(cell.runningCount, activity === 'running' ? 1 : 0);
-    assert.deepEqual(cell.sessions.map(row => row.key), activity === 'running'
-      ? [key] : [`${client}:recent`, key]);
+    assert.deepEqual(cell.sessions.map(row => row.key), [`${client}:recent`, key]);
     assert.equal(cell.runningExpiresAt, now + 30_000);
     assert.equal(cell.rate, 75);
     assert.equal(projected.rate, 75);
@@ -303,7 +326,7 @@ test('cacheHit preserves inferred Cursor bot identity', () => {
   assert.equal(cell.sessions[0].grokBotSession, true);
 });
 
-test('cacheHit keeps the uncapped running count and schedules re-projection', () => {
+test('cacheHit retains all running sessions beyond six and schedules re-projection', () => {
   const now = Date.now();
   const sessions = {};
   for (let index = 0; index < 7; index += 1) {
@@ -327,7 +350,7 @@ test('cacheHit keeps the uncapped running count and schedules re-projection', ()
   }, { items: [{ type: 'stat', metric: 'cacheHit' }] });
 
   assert.equal(cell.runningCount, 7);
-  assert.equal(cell.sessions.length, 6);
+  assert.equal(cell.sessions.length, 7);
   assert.ok(cell.runningExpiresAt > now);
 });
 
