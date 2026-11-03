@@ -51,7 +51,7 @@ function databaseFixture(t, clock = at(2, 12)) {
 test('trend axes show the complete advertised cycle regardless of when observation starts', () => {
   const weekly = { windowMinutes: 10080, resetsAt: new Date(at(6, 18)).toISOString() };
   for (const now of [at(1, 10), at(3, 11), at(6, 17)]) {
-    assert.deepEqual(trendBounds(weekly, now), { start: at(-1, 18), end: at(6, 18), cycle: true });
+    assert.deepEqual(trendBounds(weekly, now), { start: at(6, 18) - 7 * 86400_000, end: at(6, 18), cycle: true });
   }
   assert.deepEqual(trendBounds({ windowMinutes: 300, resetsAt: new Date(at(3, 18)).toISOString() }, at(3, 14)),
     { start: at(3, 13), end: at(3, 18), cycle: true });
@@ -78,8 +78,8 @@ for (const source of ['oauth', 'web']) {
     assert.ok(row.windows.every(window => window.windowMinutes === null));
     assert.deepEqual(row.windows.map(window => trendBounds(window, at(3, 11), row.provider)), [
       { start: at(3, 10), end: at(3, 15), cycle: true },
-      { start: at(-1, 18), end: at(6, 18), cycle: true },
-      { start: at(-2, 18), end: at(5, 18), cycle: true }
+      { start: at(6, 18) - 7 * 86400_000, end: at(6, 18), cycle: true },
+      { start: at(5, 18) - 7 * 86400_000, end: at(5, 18), cycle: true }
     ]);
   });
 }
@@ -1184,10 +1184,10 @@ test('a raw-money write failure rolls back percentage history and both summaries
   const file = path.join(directory, 'history.sqlite');
   const errors = [];
   const store = createLimitsHistoryStore(file, { now: () => at(2, 12), onError: e => errors.push(e.message) });
-  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  let db;
+  t.after(async () => { db?.close(); await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   await store.record('local', { providers: [fundedProvider(at(2, 10))] });
-  const db = new DatabaseSync(file);
-  t.after(() => db.close());
+  db = new DatabaseSync(file);
   db.exec("CREATE TRIGGER fail_raw BEFORE INSERT ON coverage WHEN (SELECT unit FROM runs WHERE id = NEW.run) = 'USD' BEGIN SELECT RAISE(ABORT, 'raw write fixture'); END");
   const next = fundedProvider(at(2, 10, 5), 75);
   await store.record('local', { providers: [next] });
