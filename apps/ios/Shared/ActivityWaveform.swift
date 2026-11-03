@@ -44,10 +44,10 @@ struct ActivityWaveform: View {
                         .fill(tint)
                 }
             } else {
-                // A custom insertion transition animates the five bars through
-                // one complete cycle when genuine content changes. No timer,
-                // repeatForever or additional Hub/APNs traffic is needed.
-                Color.clear
+                // The base view must carry the visible bars. System hosts may
+                // omit a custom transition, so transition-only artwork can
+                // disappear even though the app preview looks correct.
+                ActivityWaveShape(phase: 0).fill(tint)
                     .id(updatedAt)
                     .transition(.asymmetric(
                         insertion: .modifier(active: ActivityWavePulse(phase: -1, tint: tint),
@@ -94,6 +94,6 @@ private struct ActivityWavePulse: ViewModifier, Animatable {
     }
 
     func body(content: Content) -> some View {
-        content.overlay { ActivityWaveShape(phase: phase).fill(tint) }
+        content.hidden().overlay { ActivityWaveShape(phase: phase).fill(tint) }
     }
 }
