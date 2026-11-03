@@ -54,7 +54,7 @@ Local token usage needs no credential and stays on disk. The `qoder` limits prov
 ## Invariants and known gaps
 
 - Token history and credit quota remain separate units and surfaces.
-- A member's shared add-on credits come from the separate organization-shared-usages endpoint; never add `organization_pool`, which belongs to the whole team. Personal and shared allowances share one billing window, and when the personal allowance is zero the reset comes from the plan's `next_refresh_date` rather than the expired personal `next_reset_at`.
+- A member's shared add-on credits come from the separate organization-shared-usages endpoint; never add `organization_pool`, which belongs to the whole team. Personal and team allowances are separate billing windows (`Credits` and `Team credits`) so either can be hidden independently; a zero-limit allowance is omitted, and team credits without their own reset use the plan's `next_refresh_date` rather than the expired personal `next_reset_at`.
 - JSONL zero-token rows are not measured zero usage; they are uncountable with the currently persisted data.
 - JSONL reads are bounded and fail closed after source discovery begins.
 - The explicit Token Monitor projects override takes precedence over Qoder's config-root override.
