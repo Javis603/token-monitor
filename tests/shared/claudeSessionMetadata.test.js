@@ -969,7 +969,23 @@ test('a removed Desktop title also leaves anchored month and all-time rows on wa
   // The ledger entry must not be replayed as a T3 override over a Desktop rename.
   desktop('Renamed in Desktop');
   assert.deepEqual(titles(await watch()), ['Renamed in Desktop', 'Renamed in Desktop', 'Renamed in Desktop']);
+  const readdirSync = fs.readdirSync;
+  for (const dir of [path.dirname(path.dirname(store)), path.dirname(store), store]) {
+    t.mock.method(fs, 'readdirSync', (target, ...args) => {
+      if (target === dir) throw Object.assign(new Error('directory unavailable'), { code: 'EACCES' });
+      return readdirSync(target, ...args);
+    });
+    try {
+      assert.deepEqual(titles(await watch()), ['Renamed in Desktop', 'Renamed in Desktop', 'Renamed in Desktop']);
+      assert.equal(captured.t3Titles['claude:native'], 'Renamed in Desktop');
+    } finally { fs.readdirSync.mock.restore(); }
+  }
   fs.rmSync(path.join(store, 'local_a.json'));
+  fs.writeFileSync(path.join(store, 'local_unrelated.json'), '{');
+  const full = await collectUsageOnce({ ...options, onProgress: () => {}, sessionMetadataFallback: anchor });
+  assert.deepEqual(titles(full), ['', '', '']);
+  assert.equal(captured.t3Titles['claude:native'], null);
+  anchor.todayT3Titles = captured.t3Titles;
   assert.deepEqual(titles(await watch()), ['', '', '']);
   assert.deepEqual(titles(await watch()), ['', '', '']);
 });
@@ -986,7 +1002,7 @@ test('Desktop titles are also read from the Windows MSIX data root', (t) => {
   fs.mkdirSync(other, { recursive: true });
   fs.writeFileSync(path.join(other, 'local_b.json'), JSON.stringify({ cliSessionId: 'other', title: 'Unrelated' }));
 
-  assert.deepEqual(readDesktopSessionTitles(home, new Set(['msix', 'other'])), new Map([['msix', 'MSIX title']]));
+  assert.deepEqual(readDesktopSessionTitles(home, new Set(['msix', 'other'])).titles, new Map([['msix', 'MSIX title']]));
 });
 
 test('the MSIX data root follows LOCALAPPDATA except for a scoped home', (t) => {
@@ -1022,7 +1038,7 @@ test('a Desktop session file deleted after listing drops its title; other read e
   const file = path.join(store, 'local_a.json');
   fs.writeFileSync(file, JSON.stringify({ cliSessionId: 'session', title: 'Old title' }));
   const ids = new Set(['session']);
-  assert.equal(readDesktopSessionTitles(home, ids).get('session'), 'Old title');
+  assert.equal(readDesktopSessionTitles(home, ids).titles.get('session'), 'Old title');
 
   // The file is still listed, but reading it fails between the two steps.
   const statSync = fs.statSync;
@@ -1031,8 +1047,99 @@ test('a Desktop session file deleted after listing drops its title; other read e
     return statSync(target, ...rest);
   });
   failWith('EIO');
-  assert.equal(readDesktopSessionTitles(home, ids).get('session'), 'Old title');
+  assert.equal(readDesktopSessionTitles(home, ids).titles.get('session'), 'Old title');
   fs.statSync.mock.restore();
   failWith('ENOENT');
-  assert.equal(readDesktopSessionTitles(home, ids).get('session'), undefined);
+  assert.equal(readDesktopSessionTitles(home, ids).titles.get('session'), undefined);
+});
+
+test('Desktop title read failures preserve the saved ledger on a cold collection', async (t) => {
+  const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+  for (const failure of ['root', 'account', 'org', 'msix-discovery', 'file', 'json', 'missing-store']) {
+    await t.test(failure, async (t) => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-desktop-title-cold-'));
+      t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+      const projects = path.join(home, '.claude', 'projects', 'p');
+      fs.mkdirSync(projects, { recursive: true });
+      fs.writeFileSync(path.join(projects, 'native.jsonl'), `${JSON.stringify({ type: 'user', message: { content: 'hi' } })}\n`);
+      const msixData = path.join(home, 'AppData', 'Local', 'Claude-Data');
+      const root = failure === 'msix-discovery'
+        ? path.join(msixData, 'claude_publisher', 'claude-code-sessions')
+        : path.join(home, 'Library', 'Application Support', 'Claude', 'claude-code-sessions');
+      const store = path.join(root, 'account', 'org');
+      const file = path.join(store, 'local_a.json');
+      if (failure !== 'missing-store') {
+        fs.mkdirSync(store, { recursive: true });
+        fs.writeFileSync(file, failure === 'json' ? '{' : JSON.stringify({ cliSessionId: 'native', title: 'Current title' }));
+      }
+      let captured;
+      const ledger = { t3Titles: { 'claude:native': 'Saved Desktop title' }, catalogTitleSources: { 'claude:native': 'claude-desktop' } };
+      const options = {
+        clients: 'claude', homeDir: home, projectsEnabled: false, historyEnabled: false,
+        wslScanEnabled: false, osInfo: {}, sessionMetadataFallback: ledger,
+        sessionMetadataDeps: { scopedHome: true, claudeMetadataDeps: { cache: new Map() } },
+        runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 'native', model: 'claude-opus', input: 10, output: 0, cost: 0 }] }),
+        onAnchorComputed: (value) => { captured = value; }
+      };
+      const titles = summary => ['today', 'month', 'allTime'].map(period => summary[period].sessions['claude:native'].title || '');
+      const blockedDir = { root, account: path.dirname(store), org: store, 'msix-discovery': msixData }[failure];
+      if (blockedDir) {
+        const readdirSync = fs.readdirSync;
+        t.mock.method(fs, 'readdirSync', (target, ...args) => {
+          if (target === blockedDir) throw Object.assign(new Error('directory unavailable'), { code: 'EACCES' });
+          return readdirSync(target, ...args);
+        });
+      } else if (failure === 'file') {
+        const readFileSync = fs.readFileSync;
+        t.mock.method(fs, 'readFileSync', (target, ...args) => {
+          if (target === file) throw Object.assign(new Error('file unavailable'), { code: 'EIO' });
+          return readFileSync(target, ...args);
+        });
+      }
+      const initial = await collectUsageOnce(options);
+      assert.deepEqual(titles(initial), ['Saved Desktop title', 'Saved Desktop title', 'Saved Desktop title']);
+      assert.equal(captured.t3Titles['claude:native'], 'Saved Desktop title');
+      t.mock.restoreAll();
+      const anchor = {
+        dateKey: localTodayKey(), today: initial.today, month: initial.month, allTime: initial.allTime,
+        todayPartitions: captured.todayPartitions, t3Titles: captured.t3Titles, catalogTitleSources: captured.catalogTitleSources
+      };
+      const watch = async () => {
+        const summary = await collectUsageOnce({ ...options, sessionMetadataFallback: undefined, todayOnlyAnchor: anchor });
+        anchor.todayPartitions = captured.todayPartitions;
+        anchor.todayT3Titles = captured.t3Titles;
+        anchor.catalogTitleSources = captured.catalogTitleSources;
+        return summary;
+      };
+      fs.mkdirSync(store, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ cliSessionId: 'native', title: 'Recovered title' }));
+      assert.deepEqual(titles(await watch()), ['Recovered title', 'Recovered title', 'Recovered title']);
+      fs.rmSync(file);
+      assert.deepEqual(titles(await watch()), ['', '', '']);
+      assert.deepEqual(titles(await watch()), ['', '', '']);
+    });
+  }
+});
+
+test('MSIX discovery failures reuse cached roots without crossing scoped homes', (t) => {
+  const { readDesktopSessionTitles } = require('../../src/shared/providers/claude/desktopSessionTitles');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-desktop-msix-unavailable-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const msixData = path.join(home, 'AppData', 'Local', 'Claude-Data');
+  const store = path.join(msixData, 'claude_publisher', 'claude-code-sessions', 'account', 'org');
+  fs.mkdirSync(store, { recursive: true });
+  const file = path.join(store, 'local_a.json');
+  fs.writeFileSync(file, JSON.stringify({ cliSessionId: 'session', title: 'Cached title' }));
+  const ids = new Set(['session']);
+  assert.equal(readDesktopSessionTitles(home, ids).titles.get('session'), 'Cached title');
+  const readdirSync = fs.readdirSync;
+  t.mock.method(fs, 'readdirSync', (target, ...args) => {
+    if (target === msixData) throw Object.assign(new Error('discovery unavailable'), { code: 'EACCES' });
+    return readdirSync(target, ...args);
+  });
+  assert.equal(readDesktopSessionTitles(home, ids).titles.get('session'), 'Cached title');
+  assert.equal(readDesktopSessionTitles(path.join(home, 'scoped'), ids).titles.size, 0);
+  fs.readdirSync.mock.restore();
+  fs.rmSync(file);
+  assert.equal(readDesktopSessionTitles(home, ids).titles.has('session'), false);
 });

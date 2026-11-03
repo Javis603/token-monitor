@@ -669,7 +669,14 @@ function resolveSessionMetadata(sessionIds, context) {
     // A worker's copied env is case-sensitive even on Windows.
     const localAppData = deps.scopedHome ? '' : String(envValue(deps.env || process.env, 'LOCALAPPDATA') || '').trim();
     desktopTitles ||= readDesktopSessionTitles(home, sessionIds, localAppData);
-    return cleanTitle(desktopTitles.get(sessionId));
+    const title = cleanTitle(desktopTitles.titles.get(sessionId));
+    if (desktopTitles.titles.has(sessionId) || !desktopTitles.unavailableSessionIds.has(sessionId)) return title;
+    const key = `claude:${sessionId}`;
+    const cached = metadata.get(key);
+    // An unavailable store cannot remove the last known Desktop title. The
+    // ledger also covers a fresh process with no in-memory reader cache.
+    return cleanTitle(cached?.catalogTitleSource === DESKTOP_TITLE_SOURCE ? cached.catalogTitle
+      : deps.catalogTitleSources?.[key] === DESKTOP_TITLE_SOURCE ? deps.t3Titles?.[key] : '');
   };
   const applyFile = (sessionId, filePath) => {
     const cached = metadata.get(`claude:${sessionId}`);
@@ -702,6 +709,10 @@ function resolveSessionMetadata(sessionIds, context) {
       && deps.catalogTitleSources?.[key] === DESKTOP_TITLE_SOURCE) {
       invalidatedSessionIds.add(sessionId);
       deps.invalidatedTitleKeys?.add(key);
+      // A later metadata pass in this collection must not replay the old
+      // anchor if an unrelated Desktop file is still unreadable.
+      meta.catalogTitle = null;
+      meta.catalogTitleSource = DESKTOP_TITLE_SOURCE;
     }
     // The turn boundary rides the same scan and its cache, so asking for it
     // costs no second pass. Reported for every session rather than only a recent
