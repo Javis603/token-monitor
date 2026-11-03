@@ -316,6 +316,19 @@ for (const [runtime, api] of [
     assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quotas[0].windows[1].remainingPercent, 20);
   });
 
+  test(`${runtime} automatic activity keeps waiting distinct and prioritizes its client`, () => {
+    const timestamp = new Date(now).toISOString();
+    const stats = { periods: { today: { sessions: {
+      running: { client: 'claude', lastUsedAt: timestamp, turnEnded: false },
+      waiting: { client: 'codex', lastUsedAt: timestamp, waitingForInput: true }
+    } } } };
+    const state = api.buildLiveActivityContentState(stats, registration(), now);
+    assert.equal(state.agents.running, 1);
+    assert.equal(state.agents.waiting, 1);
+    assert.deepEqual(state.agents.clients, ['codex', 'claude']);
+    assert.equal(api.buildLiveActivityContentState(stats, registration(), now + 601000).agents.waiting, undefined);
+  });
+
   test(`${runtime} all stale devices override a recent source without rewriting its date`, () => {
     const stats = { devices: [{ updatedAt: new Date(now).toISOString(), stale: true }] };
     const state = api.buildLiveActivityContentState(stats, registration(), now);

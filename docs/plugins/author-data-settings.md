@@ -4,12 +4,14 @@ These are plugin `ctx` methods, not the [Hub HTTP API](../API.md). Use them from
 
 ## Read a snapshot
 
+See the [resource fields and coverage reference](author-data-resources.md) for what each resource returns, how to distinguish unavailable measurements from zero, and which data is not exposed. A subscription keeps snapshots current; it does not turn cumulative counters into a token-by-token stream.
+
 `await ctx.data.query(query)` reads captured data for the App's selected source. It does not probe providers or start another collector. The host defaults `version` to `1`; callers need not supply it.
 
 | Query option | Contract |
 | --- | --- |
-| `resource` | Required: `usage`, `models`, `tools`, `devices`, `projects`, `sessions`, `history`, `limits`, `subscriptions`, `status` |
-| `period` | `today` (default), `month`, `allTime` |
+| `resource` | Required: `usage`, `models`, `tools`, `devices`, `projects`, `sessions`, `history`, `limits`, `subscriptions`, `status`, `liveRate` |
+| `period` | `today` (default), `month`, `allTime`; `liveRate` accepts only `today` |
 | `filter` | Optional string-valued filters; see below. Use returned opaque IDs, not raw host IDs. |
 | `sort` | `{field, direction}`; default `id` / `asc`. Fields: `id`, `totalTokens`, `knownUsd`, `updatedAt`, `lastUsedAt`, `date`, `label`; direction `asc` or `desc`. Choose a field meaningful for the resource. |
 | `page` | `{limit, cursor?}`; default limit 100, range 1–500. Omit cursor for the first page. |
@@ -19,7 +21,7 @@ Supported filter keys (values are strings of at most 256 characters):
 
 | Resource | Filters |
 | --- | --- |
-| `usage`, `status` | `id`, `deviceId` |
+| `usage`, `status`, `liveRate` | `id`, `deviceId` |
 | `models` | `id`, `deviceId`, `model`, `search` |
 | `tools` | `id`, `deviceId`, `client`, `model`, `search` |
 | `devices` | `id`, `deviceId`, `search` |

@@ -2,7 +2,9 @@
 
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { performance } = require('node:perf_hooks');
+const fs = require('node:fs');
+const { createRequire } = require('node:module');
+const { compileFunction } = require('node:vm');
 const test = require('node:test');
 
 let archiveApi = {};
@@ -553,6 +555,22 @@ test('multi-model archive classification is independent of map property order', 
 });
 
 test('reapplies a large session archive without repeatedly normalizing growing periods', () => {
+  // Load an isolated instance so the spy cannot affect other archive tests.
+  // Count whole-period normalization, not wall time on a shared CI runner.
+  const filename = require.resolve('../../src/shared/usage/sessionUsageArchive');
+  const localRequire = createRequire(filename);
+  const helpers = localRequire('../archiveHelpers');
+  let targetNormalizations = 0;
+  const module = { exports: {} };
+  compileFunction(fs.readFileSync(filename, 'utf8'), ['require', 'module', 'exports'], { filename })(
+    id => id === '../archiveHelpers' ? {
+      ...helpers,
+      targetPeriod(...args) {
+        targetNormalizations += 1;
+        return helpers.targetPeriod(...args);
+      }
+    } : localRequire(id), module, module.exports
+  );
   const archive = { version: 1, sessions: {} };
   for (let index = 0; index < 2000; index += 1) {
     const sessionId = `session-${index}`;
@@ -573,14 +591,13 @@ test('reapplies a large session archive without repeatedly normalizing growing p
     };
   }
 
-  const startedAt = performance.now();
-  const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive, {
+  const visible = module.exports.applySessionUsageArchive({ allTime: { sessions: {} } }, archive, {
     now: new Date('2026-07-15T00:00:00.000Z')
   });
-  const elapsedMs = performance.now() - startedAt;
-
+  assert.equal(targetNormalizations, 1, 'normalize the target period once, not once per archived session');
   assert.equal(Object.keys(visible.allTime.sessions).length, 2000);
-  assert.ok(elapsedMs < 500, `large archive apply took ${elapsedMs.toFixed(1)}ms`);
+  assert.equal(visible.allTime.totalTokens, 2000 * 2001 / 2);
+  assert.equal(visible.allTime.models['gpt-5'], 2000 * 2001 / 2);
 });
 
 // Same invariant as the client archive: the periods a progressive preview omits

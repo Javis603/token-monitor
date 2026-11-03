@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A17000000000000000000002 /* ActivityAutomation.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A17000000000000000000001 /* ActivityAutomation.xcstrings */; };
 		6CD74ABCA4474BAF78FB5DF6 /* AppAlignment.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = CE62F50C31A95E10D40DFA17 /* AppAlignment.xcstrings */; };
 		A2EC73D10BDC4F021AF9EA94 /* MainAlignmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5215FFDDD541B836469AA618 /* MainAlignmentTests.swift */; };
 		7032DF86E812762717B3F438 /* LiveTokenRateTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEA051F2CD1A72F419BCD061 /* LiveTokenRateTracker.swift */; };
@@ -229,6 +230,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A17000000000000000000001 /* ActivityAutomation.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = "ActivityAutomation.xcstrings"; sourceTree = "<group>"; };
 		CE62F50C31A95E10D40DFA17 /* AppAlignment.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = "AppAlignment.xcstrings"; sourceTree = "<group>"; };
 		5215FFDDD541B836469AA618 /* MainAlignmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MainAlignmentTests.swift"; sourceTree = "<group>"; };
 		DEA051F2CD1A72F419BCD061 /* LiveTokenRateTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LiveTokenRateTracker.swift"; sourceTree = "<group>"; };
@@ -715,6 +717,7 @@
 		F5BF7D03C052D45A3D1879C1 /* TokenMonitor */ = {
 			isa = PBXGroup;
 			children = (
+				A17000000000000000000001 /* ActivityAutomation.xcstrings */,
 				CE62F50C31A95E10D40DFA17 /* AppAlignment.xcstrings */,
 				A6C1B422D40168D8CDB5A641 /* SystemSurfaceFittedPreview.swift */,
 				6F0307C2F462793909A9EC8E /* SystemSurfaceStatus.swift */,
@@ -860,6 +863,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A17000000000000000000002 /* ActivityAutomation.xcstrings in Resources */,
 				6CD74ABCA4474BAF78FB5DF6 /* AppAlignment.xcstrings in Resources */,
 				E71021000000000000000100 /* Config PrivacyInfo.xcprivacy in Resources */,
 				C8CFD16EF10BAD97C64842DC /* Assets.xcassets in Resources */,

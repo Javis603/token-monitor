@@ -298,6 +298,30 @@ struct WidgetLayoutRenderTests {
 
 
 extension WidgetLayoutRenderTests {
+    @Test func automaticActivityRendersWorkAlertAndIdle() throws {
+        typealias State = TokenMonitorActivityAttributes.ContentState
+        let now = Date.now
+        for scenario in ["active", "waiting", "alert", "idle"] {
+            let state = State(updatedAt: now, usage: .init(today: .init(tokens: 45200, costUSD: 1.25), month: .init(tokens: 1000000)),
+                quotas: [.init(providerID: "codex", updatedAt: now,
+                    windows: [.init(label: "Weekly", kind: "weekly", remainingPercent: scenario == "idle" ? 50 : 5)])],
+                agents: .init(running: scenario == "active" ? 2 : 0, clients: ["codex"], waiting: scenario == "waiting" ? 1 : nil))
+            let context = ActivityContext(state: state, layout: .automatic, isStale: false, now: now)
+            let view = VStack(spacing: 24) {
+                HStack {
+                    ActivityCompactItemView(context: context, slot: context.layout.compactLeading)
+                    Spacer().frame(width: 96)
+                    ActivityCompactItemView(context: context, slot: context.layout.compactTrailing)
+                }.padding(12).background(.black, in: Capsule())
+                ActivityExpandedPreview(context: context)
+                ActivityLockScreenView(context: context)
+            }.padding(16).frame(width: 360).environment(\.colorScheme, .dark).background(.black)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 3
+            write(try #require(renderer.uiImage), name: "automatic-\(scenario)")
+        }
+    }
+
     @Test func staleQuotaRemainsVisibleInUsageAndOverviewTemplates() throws {
         typealias State = TokenMonitorActivityAttributes.ContentState
         let now = Date.now

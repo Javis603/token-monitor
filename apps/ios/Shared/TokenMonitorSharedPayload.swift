@@ -134,7 +134,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             widgetShowsResetTime: Bool = true,
             widgetActivityLayout: String = "chart",
             liveActivityEnabled: Bool = false,
-            liveLayout: LiveActivityLayout = LiveActivityLayout(),
+            liveLayout: LiveActivityLayout = .automatic,
             currencyCode: String? = "USD",
             languageCode: String? = "auto",
             limitProviderOrder: [String]? = nil,

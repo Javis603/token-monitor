@@ -33,7 +33,7 @@ struct ActivityContext {
         now: Date = .now
     ) {
         self.state = state
-        self.layout = layout
+        self.layout = Self.resolvedLayout(layout, state: state, isStale: isStale, now: now)
         self.currencyCode = currencyCode
         self.locale = Self.locale(for: languageCode)
         self.isStale = isStale
@@ -70,6 +70,54 @@ struct ActivityContext {
         case "ko": Locale(identifier: "ko")
         default: .autoupdatingCurrent
         }
+    }
+
+    /// Mirrors macOS notch automaticSummary: live work, critical quota, today's usage.
+    static func resolvedLayout(_ saved: LiveActivityLayout, state: ActivityState,
+                               isStale: Bool, now: Date) -> LiveActivityLayout {
+        guard saved.mode == .automatic else { return saved }
+        var result = LiveActivityLayout()
+        result.mode = .custom
+        let fresh = !isStale && state.sourceStale != true
+            && state.updatedAt <= now && now.timeIntervalSince(state.updatedAt) < 900
+        if fresh && (state.agents.running > 0 || (state.agents.waiting ?? 0) > 0) {
+            result.compactLeading = .init(style: .agents)
+            result.compactTrailing = .init(style: .none)
+            result.minimal = .providerIcon
+            result.minimalSource = .init(providerID: state.agents.clients.first)
+            result.expanded = .usage
+            result.lockScreen = .overview
+        } else if let alert = state.quotas.filter({ quota in
+            quota.stale != true && quota.updatedAt.map {
+                $0 <= now && now.timeIntervalSince($0) < 900
+            } == true
+        }).flatMap({ quota in
+            quota.windows.compactMap { window -> (ActivityState.Quota, ActivityState.Window, Double)? in
+                guard let percent = window.remainingPercent, percent.isFinite,
+                      percent <= 10, window.creditsAmount == nil else { return nil }
+                return (quota, window, percent)
+            }
+        }).min(by: { $0.2 < $1.2 }) {
+            var source = ActivitySource(providerID: alert.0.providerID, accountKey: alert.0.accountKey,
+                window: ActivitySource.Window(rawValue: alert.1.kind ?? "") ?? .primary)
+            source.windowLabel = alert.1.label
+            result.compactLeading = .init(style: .ring, source: source)
+            result.compactTrailing = .init(style: .percent, source: source)
+            result.minimal = .ring
+            result.minimalSource = source
+            result.expanded = .quota
+            result.expandedSource = source
+            result.lockScreen = .quota
+            result.lockScreenSource = source
+        } else {
+            result.compactLeading = .init(style: .appIcon)
+            result.compactTrailing = .init(style: .tokens)
+            result.minimal = .appIcon
+            result.minimalSource = .init()
+            result.expanded = .usage
+            result.lockScreen = .overview
+        }
+        return result
     }
 
     func with(_ change: (inout LiveActivityLayout) -> Void) -> ActivityContext {
@@ -109,6 +157,10 @@ struct ActivityContext {
     /// Records are already ranked most constrained first, so the first match
     /// with the lowest remaining wins ties in the Hub's order.
     func reading(_ source: ActivitySource) -> Reading? {
+        func selectedWindow(_ quota: ActivityState.Quota) -> ActivityState.Window? {
+            if let label = source.windowLabel { return quota.windows.first { $0.label == label } }
+            return Self.window(in: quota, source.window)
+        }
         var candidates = state.quotas
         if let id = providerID(for: source) {
             let matches = candidates.filter { $0.providerID == id }
@@ -121,12 +173,12 @@ struct ActivityContext {
         }
         // A stale low balance must not outrank a healthy reading. Named
         // stale accounts remain selectable and are labelled at their source.
-        candidates = candidates.filter { Self.window(in: $0, source.window) != nil }
+        candidates = candidates.filter { selectedWindow($0) != nil }
         let healthy = candidates.filter { !quotaIsStale($0) }
         if !healthy.isEmpty { candidates = healthy }
         var best: (reading: Reading, remaining: Double)?
         for quota in candidates {
-            guard let window = Self.window(in: quota, source.window) else { continue }
+            guard let window = selectedWindow(quota) else { continue }
             let remaining = window.remainingPercent ?? .infinity
             if best == nil || remaining < best!.remaining {
                 best = (Reading(quota: quota, window: window, value: source.value), remaining)
@@ -525,13 +577,18 @@ struct ActivityRunningLabel: View {
     let agents: ActivityState.Agents
 
     var body: some View {
-        if agents.running > 0 {
-            HStack(spacing: 4) {
-                Circle().fill(.green).frame(width: 6, height: 6)
-                Text("\(agents.running) running")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+        if agents.running > 0 || (agents.waiting ?? 0) > 0 {
+            HStack(spacing: 6) {
+                if agents.running > 0 {
+                    Circle().fill(.green).frame(width: 6, height: 6)
+                    Text("\(agents.running) running")
+                }
+                if let waiting = agents.waiting, waiting > 0 {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text("\(waiting) waiting")
+                }
             }
+            .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
             .lineLimit(1)
         }
     }
@@ -621,16 +678,23 @@ struct ActivityAgentsMark: View {
     let agents: ActivityState.Agents
 
     var body: some View {
-        if agents.running > 0 {
+        if agents.running > 0 || (agents.waiting ?? 0) > 0 {
             HStack(spacing: 4) {
                 ActivityMark(providerID: agents.clients.first, size: 16)
-                Circle().fill(.green).frame(width: 5, height: 5)
-                if agents.running > 1 {
+                if (agents.waiting ?? 0) > 0 {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 9)).foregroundStyle(.orange)
+                    Text(verbatim: String(agents.waiting ?? 0))
+                }
+                if agents.running > 0 {
+                    Circle().fill(.green).frame(width: 5, height: 5)
+                }
+                if agents.running > 0 {
                     Text(verbatim: agents.running.formatted())
                 }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text("\(agents.running) running"))
+            .accessibilityLabel(Text("\(agents.running) running, \(agents.waiting ?? 0) waiting"))
         } else {
             ActivityMark(providerID: nil, size: 15)
                 .opacity(0.4)
@@ -647,6 +711,8 @@ struct ActivityMinimalView: View {
         let reading = context.reading(source)
         Group {
             switch context.layout.minimal {
+            case .appIcon:
+                ActivityMark(providerID: nil, size: 16)
             case .appRing, .ring:
                 ActivityRing(
                     fraction: context.fraction(reading),
@@ -663,9 +729,11 @@ struct ActivityMinimalView: View {
                 ActivityMark(providerID: context.providerID(for: source) ?? reading?.quota.providerID, size: 16)
             }
         }
-        .opacity(context.sourceIsStale(source) ? 0.5 : 1)
-        .accessibilityLabel(Text("AI limit"))
-        .accessibilityValue(context.valueText(reading?.window, source.value))
+        .opacity(context.sourceIsStale(context.layout.minimal == .appIcon ? nil : source) ? 0.5 : 1)
+        .accessibilityLabel(Text(context.layout.minimal == .appIcon ? "Usage" : "AI limit"))
+        .accessibilityValue(Text(verbatim: context.layout.minimal == .appIcon
+            ? context.compactTokensText(context.state.usage.today)
+            : context.valueText(reading?.window, source.value)))
     }
 }
 

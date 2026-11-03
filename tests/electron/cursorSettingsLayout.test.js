@@ -211,8 +211,11 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.match(details, /<div id="cursorManualPanel" class="opencode-add-form">/);
   assert.match(details, /<div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
   assert.match(details, /data-i18n="settings\.cursor\.addManual">Add account<\/span>/);
-  assert.match(details, /using the button above, then sign in/);
-  assert.match(details, /cursor\.com\/dashboard/);
+  assert.match(details, /using “Open Cursor dashboard”, then sign in/);
+  assert.match(details, /<code>cursor\.com<\/code>/);
+  assert.doesNotMatch(details, /cursorCookiePageButton/);
+  assert.match(details, /data-i18n="settings\.cursor\.cookiePage"[^>]*>[^<]*grok\.com\/dashboard/);
+  assert.match(details, /data-i18n="settings\.cursor\.cookieMissing"/);
   assert.doesNotMatch(details, /cursor\.com\/dashboard\/settings/);
   assert.doesNotMatch(details, /Tokscale|Add an account manually/);
   assert.doesNotMatch(details, /<details|<summary|cursorDetectButton|cursorManualLabel|accountLabel/);
@@ -231,7 +234,16 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.doesNotMatch(body, /cursor-account-row|radio|selectedAccountId|selectAccount/);
 
   const setup = readRendererFile('app.js');
-  assert.match(setup, /openExternal\('https:\/\/cursor\.com\/dashboard'\)/);
+  const navigationStart = setup.indexOf("  document.getElementById('cursorLoginButton').addEventListener");
+  const navigationEnd = setup.indexOf('  const cursorManualSubmit =', navigationStart);
+  const handlers = new Map();
+  const openedUrls = [];
+  vm.runInNewContext(setup.slice(navigationStart, navigationEnd), {
+    document: { getElementById: (id) => ({ addEventListener: (_event, handler) => handlers.set(id, handler) }) },
+    window: { tokenMonitor: { openExternal: (url) => openedUrls.push(url) } }
+  });
+  handlers.get('cursorLoginButton')();
+  assert.deepEqual(openedUrls, ['https://cursor.com']);
   assert.doesNotMatch(setup, /openExternal\('https:\/\/cursor\.com\/dashboard\/settings'\)/);
   assert.match(setup, /cursorAddAccountButton\?\.addEventListener\('click'/);
   assert.match(setup, /cursorManualDetails\?\.classList\.toggle\('hidden', !next\)/);
@@ -2842,7 +2854,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
     frameBody,
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
-  assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(frameBody, /count \? limitGroupCountText\(providerId, count\) : ''/);
   assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
 

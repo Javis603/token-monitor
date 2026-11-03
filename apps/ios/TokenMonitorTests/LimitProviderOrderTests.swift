@@ -54,7 +54,7 @@ struct LimitProviderOrderTests {
         #expect(LimitProviderOrder.ordered([provider("muse"), provider("claude")], order: ["muse"]).first?.provider == "muse")
         #expect(ClientPresentation.displayName(for: "senpi") == "OmO Native")
         #expect(ClientPresentation.assetName(for: "senpi") == "VendorSenpi")
-        #expect(WidgetPresentation.displayName(for: "muse") == "Muse Code")
+        #expect(WidgetPresentation.displayName(for: "muse") == "Muse")
     }
 
     @Test func savedOrderWinsThenCatalogFillsIn() {

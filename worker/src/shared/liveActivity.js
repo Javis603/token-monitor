@@ -323,20 +323,16 @@ function liveRecent(stats) {
   return { client, today: share('today'), month: share('month') };
 }
 
-function runningSessions(stats, nowMs) {
-  return sessionEntries(stats)
-    .filter((session) => sessionActivityState(session, nowMs) === 'running')
-    .map((session) => ({ client: normalizedProvider(session?.client), lastMs: timestampMs(session?.lastUsedAt) }))
-    .sort((left, right) => right.lastMs - left.lastMs);
-}
-
-// Running agents, most recent first. Clients are distinct ids for the marks;
-// `running` counts sessions, so two Claude sessions read as 2.
+// Running and waiting stay separate, with waiting clients first like macOS auto.
 function liveAgents(stats, nowMs) {
-  const running = runningSessions(stats, nowMs);
-  const clients = [...new Set(running.map((session) => session.client).filter(Boolean))]
+  const sessions = sessionEntries(stats);
+  const byState = (state) => sessions.filter((session) => sessionActivityState(session, nowMs) === state)
+    .sort((a, b) => timestampMs(b.lastUsedAt) - timestampMs(a.lastUsedAt));
+  const running = byState('running');
+  const waiting = byState('waiting');
+  const clients = [...new Set([...waiting, ...running].map((session) => normalizedProvider(session.client)).filter(Boolean))]
     .slice(0, MAX_AGENT_CLIENTS);
-  return { running: running.length, clients };
+  return { running: running.length, clients, ...(waiting.length ? { waiting: waiting.length } : {}) };
 }
 
 // When the running count next changes on its own. A session that goes quiet

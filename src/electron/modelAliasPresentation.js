@@ -344,11 +344,21 @@ function projectHistory(history, resolve, semantics) {
 function aliasPlan(modelIds, aliases, grouping) {
   const explicit = normalizeModelAliases(aliases);
   const automatic = inferModelAliases(modelIds, grouping);
+  const resolve = createModelAliasResolver(explicit, modelIds, grouping);
+  // Session/model maps repeat the same names throughout a projection. Discard
+  // these results with the plan so every new snapshot/settings gets a fresh one.
+  const resolved = new Map();
   return {
     explicit,
     automatic,
     active: Object.keys(explicit).length > 0 || Object.keys(automatic).length > 0,
-    resolve: createModelAliasResolver(explicit, modelIds, grouping)
+    resolve(model) {
+      const hit = resolved.get(model);
+      if (hit !== undefined) return hit;
+      const result = resolve(model);
+      resolved.set(model, result);
+      return result;
+    }
   };
 }
 

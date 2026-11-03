@@ -393,7 +393,7 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 
 .edge-dock-card {
   position: relative;
-  width: 280px;
+  width: var(--edge-dock-card-width, 280px);
   box-sizing: border-box;
   padding: 12px 14px 10px;
   display: flex;

@@ -29,7 +29,8 @@ nonisolated enum WidgetPresentation {
         case "goose": "Goose"
         case "catpaw": "CatPaw"
         case "notion": "Notion AI"
-        case "muse": "Muse Code"
+        case "manus": "Manus"
+        case "muse": "Muse"
         case "senpi": "OmO Native"
         default: providerID?.capitalized ?? "Provider"
         }
@@ -58,6 +59,7 @@ nonisolated enum WidgetPresentation {
         case "goose": "VendorGoose"
         case "catpaw": "VendorCatPaw"
         case "notion": "VendorNotion"
+        case "manus": "VendorManus"
         case "zed": "VendorZed"
         case "kilo", "kilocode": "VendorKiloCode"
         case "commandcode": "VendorCommandCode"

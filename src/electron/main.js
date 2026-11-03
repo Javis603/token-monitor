@@ -111,12 +111,14 @@ function ensureMimoExchangeFetch() {
   return mimoExchangeFetch;
 }
 
+// Muse's web action also needs Node headers and manual redirects. Reuse the
+// exchange transport so its requests inherit the same app/env/system proxy route.
 // Settings-side provider probes take the same transport as the collector's.
 // Most of them are what an account save is gated on, so leaving one on the
 // global fetch refuses to save an account on exactly the machines this
 // transport exists for.
 function electronProviderDeps(deps = {}) {
-  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch() };
+  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch(), museWebFetch: ensureMimoExchangeFetch() };
 }
 const {
   DEFAULT_CLIENTS,
@@ -466,6 +468,7 @@ const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
 const {
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockFloatingX,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
@@ -694,6 +697,7 @@ function defaultSettings() {
     edgeDockSize: 'medium',
     edgeDockCustomScale: 1,
     edgeDockSide: 'right',
+    edgeDockFloatingX: null,
     edgeDockOffset: null,
     edgeDockDisplayId: null,
     edgeDockItems: null,
@@ -710,6 +714,7 @@ function defaultSettings() {
     lastViewState: { period: 'today', breakdown: 'home' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
+    deviceIconOverrides: {},
     icloudWriterId: '',
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
@@ -1032,6 +1037,7 @@ function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
     mimoExchangeFetch: ensureMimoExchangeFetch(),
+    museWebFetch: ensureMimoExchangeFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     workbuddyFetch: async (url, init = {}, expectedSession = null) => {
       const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
@@ -2843,6 +2849,7 @@ function readSettings() {
     merged.edgeDockRefreshEnabled = parseBoolean(merged.edgeDockRefreshEnabled, false);
     merged.edgeDockRunningIndicatorEnabled = parseBoolean(merged.edgeDockRunningIndicatorEnabled, true);
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
+    merged.edgeDockFloatingX = normalizeEdgeDockFloatingX(merged.edgeDockFloatingX);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
     merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
@@ -2854,6 +2861,7 @@ function readSettings() {
     merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
+    merged.deviceIconOverrides = require('./renderer/deviceIcons').normalizeDeviceIconOverrides(merged.deviceIconOverrides);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
     merged.pluginInitialSetup = require('./plugins/initialSetup').normalizeInitialSetup(merged.pluginInitialSetup);
     merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
@@ -3217,6 +3225,7 @@ function syncProvenanceActive() {
 }
 
 const presentationCache = createStatsPresentationCache();
+const { projectSessionDeviceSessions, projectSessionDeviceStats } = require('./sessionDeviceSources');
 
 // Every input besides `stats` belongs in the cache key, or a settings change
 // would keep serving the projection it replaced.
@@ -3229,11 +3238,14 @@ function electronPresentationStats(stats) {
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
   const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
-  return presentationCache.get(stats, key, () => projectModelAliasStats(
-    projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
-    aliases,
-    { grouping }
-  ));
+  return presentationCache.get(stats, key, () => {
+    const sourced = projectSessionDeviceStats(stats, settings?.deviceId);
+    return projectModelAliasStats(
+      projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(sourced) : sourced, limitOptions),
+      aliases,
+      { grouping }
+    );
+  });
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
@@ -3258,7 +3270,11 @@ function rendererAllTimeSessions(stats) {
     const sessions = hubSnapshot
       ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
       : complete.periods?.allTime?.sessions || {};
-    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
+    const devices = hubSnapshot?.localDevice
+      ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
+      : complete.devices;
+    const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
+    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
   });
 }
 
@@ -5582,6 +5598,7 @@ function settingsForRenderer() {
     ...rendererSettings,
     syncContentStatus: getSyncContentRuntime().status(),
     locale: trayMenuLocale(),
+    deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
     // last-known cache behind it.
@@ -6233,8 +6250,9 @@ function ensureEdgeDockController() {
     },
     // The same setting the widget's rate readout toggles, so both stay in step.
     onToggleRateMode: toggleDockRateMode,
-    onPlacementChange: ({ side, offset, displayId }) => {
+    onPlacementChange: ({ side, offset, displayId, floatingX }) => {
       settings.edgeDockSide = normalizeEdgeDockSide(side);
+      settings.edgeDockFloatingX = normalizeEdgeDockFloatingX(floatingX);
       settings.edgeDockOffset = normalizeEdgeDockOffset(offset);
       settings.edgeDockDisplayId = normalizeEdgeDockDisplayId(displayId);
       saveSettings();
@@ -6381,7 +6399,10 @@ function setTrayContentFromMenu(value) {
 function setEdgeDockFromMenu(patch = {}) {
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
   if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
-  if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
+  if (patch.edgeDockSide !== undefined) {
+    settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
+    settings.edgeDockFloatingX = null;
+  }
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
   pushSettingsToRenderer();
@@ -7081,6 +7102,13 @@ function configureNativeAppUpdater() {
   appUpdateNativeConfigured = true;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  if (process.platform === 'win32' && appUpdateInstallSupport({
+    isPackaged: app.isPackaged, platform: process.platform, env: process.env
+  }).supported) {
+    // Keep NSIS updates in the running installation even if its registry records
+    // are missing. NsisUpdater forwards this through the installer's /D= option.
+    autoUpdater.installDirectory = path.dirname(process.execPath);
+  }
   // Notes for every release between this version and the latest, not only the
   // latest's, so the update card covers everything the user is about to receive.
   autoUpdater.fullChangelog = true;
@@ -8160,6 +8188,7 @@ app.whenReady().then(() => {
       if (bypassError) throw new Error(bypassError);
     }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
+    if (patch.deviceIconOverrides !== undefined) normalizedPatch.deviceIconOverrides = require('./renderer/deviceIcons').normalizeDeviceIconOverrides(patch.deviceIconOverrides);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
@@ -8242,6 +8271,7 @@ app.whenReady().then(() => {
       edgeDockRefreshEnabled: parseBoolean(patch.edgeDockRefreshEnabled ?? settings.edgeDockRefreshEnabled, false),
       edgeDockRunningIndicatorEnabled: parseBoolean(patch.edgeDockRunningIndicatorEnabled ?? settings.edgeDockRunningIndicatorEnabled, true),
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
+      edgeDockFloatingX: patch.edgeDockSide !== undefined ? null : normalizeEdgeDockFloatingX(settings.edgeDockFloatingX),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
       edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
@@ -9809,6 +9839,7 @@ app.whenReady().then(() => {
         businessAdapters: {
           sourceId: () => `${hubModeGeneration}:${mode}:${settings.hubMode}`,
           extras: stats => ({
+            liveRateContext: { hubMode: settings.hubMode, deviceId: settings.deviceId, clients: settings.clients },
             historyRevision: JSON.stringify([settings.historyEnabled !== false, stats?.deviceHistoryRevision || statsHistoryRevision(stats)]),
             subscriptions: effectiveSubscriptions(),
             subscriptionContext: { date: subscriptionDisplay.todayString(), rates: { ...(effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {})) } },

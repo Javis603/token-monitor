@@ -17,6 +17,7 @@ const fixtureRoot = path.join(__dirname, '..', 'fixtures', 'macos');
 const appPath = path.join(fixtureRoot, 'good-app.plist');
 const widgetPath = path.join(fixtureRoot, 'good-widget.plist');
 const APP_GROUP = 'group.com.example.tokenmonitor';
+const NOW = new Date('2026-01-02T00:00:00Z');
 
 function fixtureProfiles() {
   return {
@@ -102,6 +103,7 @@ test('parses ignorable XML markup without rewriting the source string', () => {
 
 test('validates fixture app and Widget profiles for the production App Group', () => {
   const result = validateProvisioningProfiles({
+    now: NOW,
     appProfilePath: appPath,
     widgetProfilePath: widgetPath,
     appBundleId: 'com.example.tokenmonitor',
@@ -140,16 +142,17 @@ test('requires profiles for group.* but not for a Team-prefixed App Group', () =
 test('rejects a missing group authorization', () => {
   const profile = fixtureProfiles().app;
   assert.throws(() => validateProvisioningProfile({ ...profile, applicationGroups: [] }, {
-    role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
+    now: NOW, role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
   }), /does not authorize App Group/);
 });
 
 test('rejects bundle and Team mismatches', () => {
   const { app, widget } = fixtureProfiles();
   assert.throws(() => validateProvisioningProfile(app, {
-    role: 'app', bundleId: 'com.other.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
+    now: NOW, role: 'app', bundleId: 'com.other.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
   }), /bundle identifier/);
   assert.throws(() => validateProvisioningProfiles({
+    now: NOW,
     appProfilePath: appPath,
     widgetProfilePath: widgetPath,
     appBundleId: 'com.example.tokenmonitor',
@@ -167,10 +170,10 @@ test('rejects bundle and Team mismatches', () => {
 test('rejects expired and development profiles', () => {
   const profile = fixtureProfiles().app;
   assert.throws(() => validateProvisioningProfile({ ...profile, expirationDate: new Date('2000-01-01T00:00:00Z') }, {
-    role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
+    now: NOW, role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
   }), /expired/);
   assert.throws(() => validateProvisioningProfile({ ...profile, getTaskAllow: true }, {
-    role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
+    now: NOW, role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
   }), /development profile/);
 });
 
@@ -181,14 +184,15 @@ test('rejects non-Developer ID provisioning profile channels', () => {
   assert.throws(() => validateProvisioningProfile({
     ...profile, provisionsAllDevices: false
   }, {
-    role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
+    now: NOW, role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
   }), /Developer ID distribution profile.*ProvisionsAllDevices/);
   assert.throws(() => validateProvisioningProfile({
     ...widgetProfile, hasProvisionedDevices: true
   }, {
-    role: 'extension', bundleId: 'com.example.tokenmonitor.widget', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
+    now: NOW, role: 'extension', bundleId: 'com.example.tokenmonitor.widget', appGroup: APP_GROUP, developmentTeam: 'ABCDE12345'
   }), /Developer ID distribution profile.*ProvisionedDevices/);
   assert.throws(() => validateProvisioningProfiles({
+    now: NOW,
     appProfilePath: appPath,
     widgetProfilePath: widgetPath,
     appBundleId: 'com.example.tokenmonitor',
@@ -203,19 +207,20 @@ test('rejects non-Developer ID provisioning profile channels', () => {
 test('requires a matching explicit Team ID for provisioning profiles when supplied', () => {
   const profile = fixtureProfiles().app;
   assert.throws(() => validateProvisioningProfile(profile, {
-    role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ZZZZZ99999'
+    now: NOW, role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP, developmentTeam: 'ZZZZZ99999'
   }), /does not match DEVELOPMENT_TEAM/);
 });
 
 test('requires an explicit Team ID for production provisioning validation', () => {
   assert.throws(() => validateProvisioningProfile(fixtureProfiles().app, {
-    role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP
+    now: NOW, role: 'app', bundleId: 'com.example.tokenmonitor', appGroup: APP_GROUP
   }), /DEVELOPMENT_TEAM is required/);
 });
 
 test('rejects app and extension profiles that authorize different groups', () => {
   const { app, widget } = fixtureProfiles();
   assert.throws(() => validateProvisioningProfiles({
+    now: NOW,
     appProfilePath: appPath,
     widgetProfilePath: widgetPath,
     appBundleId: 'com.example.tokenmonitor',

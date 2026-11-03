@@ -16,7 +16,7 @@ const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
 function mainFunction(name, dependencies) {
   const body = source.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n\\}`))?.[0];
   assert.ok(body);
-  return vm.runInNewContext(`(${body})`, { ...presentation, ...dependencies });
+  return vm.runInNewContext(`(${body})`, { ...presentation, ...require('../../src/electron/sessionDeviceSources'), ...dependencies });
 }
 
 test('Electron presentation applies aliases after limit projection without changing cached stats', () => {

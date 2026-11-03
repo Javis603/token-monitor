@@ -28,13 +28,15 @@ Native visibility and page activity cap each owner's demand without discarding r
 
 Business data reads reuse selected-source snapshots and existing history resolution, never launch provider probes or duplicate collectors, and remain independent of native session rendering. Active ownership, explicit query filters and host privacy preferences apply; there are no per-resource grants or plugin-specific account/device scopes. Ordinary updates preserve admitted immutable cursors; source/privacy changes revoke them. Work and memory limits protect host reads, not unrestricted backend work.
 
+The plugin `liveRate` resource reuses native matched-counter tracking over captured Today snapshots. The business-data service owns subscription lifetimes and supplies active device scopes to the rate reader. See the [live-rate contract](plugins/author-data-resources.md#live-token-rate).
+
 Package transactions release only their target plugin, after content-conflict and unsaved-work confirmations complete and the preview is revalidated. Cancellation before cleanup must preserve existing UI instances, drafts and backends. Recheck affected content selections after asynchronous lifecycle waits so an older confirmation cannot overwrite a newer choice. Content-source changes inspect only the departing replacement refs and targets; they must not release the provider's other mounts. Unrelated mounts, drafts and backends stay live, including during rollback. Preserve existing App data and credential contracts. Renderer-independent safe mode must remain available for recovery; it cannot undo arbitrary plugin filesystem effects. See [management and recovery](plugins/distribution-design.md).
 
 Official and community remote plugin sources are separate host-owned definitions. Remote official provenance comes only from `electron/plugins/officialSources.js`; catalog titles, authors and user-added source metadata cannot grant it. See [official catalog releases](plugins/distribution-design.md#official-catalog-releases) for distribution.
 
 ## Generated and registered state
 
-Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Never edit generated Worker metadata directly.
+Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Each PR adds at most one revision per changed component, pointing to its final build; regenerate from the base branch's registry after further changes. Never edit generated Worker metadata directly.
 
 Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, lint, test and verify never download the binary. `scripts/vendor/tokscale.json` pins its provenance. Its `override`/`upstream` mode does not bypass either verification gate, and its presentation describes the declared bundle, not verification of the selected executable.
 
@@ -135,6 +137,8 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 
 Windows 11 Edge Dock uses a single helper with HostBackdrop clipped to the renderer's curves; HWND-wide Acrylic/Accent cannot preserve the concave outline. Electron owns input. Native underlays stay disabled, nonactivating and directly below their content windows.
 
+Windows rail dragging and detail-card transitions follow renderer animation frames: a nominal 16 ms main-process timeout can round up to about 31 ms on Windows. Main still owns native cursor coordinates, placement, geometry and button-state checks; its timers and cursor polling remain fallbacks if frame delivery stops.
+
 Share renderer curves at physical display scale and position against `GetWindowRect`, not rounded Electron DIP bounds. Unchanged hover updates must not re-show underlays. Lower the tinted fallback only after native attachment succeeds; a failed generation retries only after all its surfaces are disposed. EOF, parent exit and content-window closure must remove native windows.
 
 Local Windows development requires `npm run build:windows-dock`. Packaging builds the helper with the OS .NET compiler/WinRT metadata and includes it outside ASAR, so Windows artifacts require a Windows build host. User-facing material settings are covered in [configuration](configuration.md#widget-gui).
@@ -170,6 +174,8 @@ Manual device removal requires a known remote device marked stale in main's late
 - Reads, pushes and activity patches use one stamped snapshot. Concurrent pushes supersede reads only within the same Hub source/generation; reads preserve transport status. Future peer timestamps cannot beat current local activity, and later remote aggregates must not erase fresh local observations. Live status may replace archived status without replacing archived counters.
 
 **Snapshot identity.** Published records are immutable because presentation and normalization caches key on object identity. Replace objects, never mutate in place. Main composes all-time detail on demand from the requested snapshot's captured inputs: per-publish summaries omit it *before* normalization. `rendererStats()` strips device sessions/projects and all-time sessions from IPC; `stats:allTimeSessions` resolves the requested snapshot ID, retaining its source generation. Completion must never combine newer `latestStats`/`lastCollectedDevice` accounting rows with older totals or cross generations. The renderer's `allTimeSessions.attach()` reuses its previously pulled session map on newer stats from the same source until a fresh pull arrives; neither attachment nor late pull results may cross source generations. Do not widen every push for a new detail reader. Bounded local identity projections, such as Grok Bot membership, must not force all-time completion or expand the wire record. Apply title hiding after activity joins.
+
+Session device labels are a desktop presentation projection resolved from the captured device session maps before IPC strips them. All-time labels use the same captured inputs as their lazy session list; they do not add provenance to the accounting wire record or force full-history completion on every publish.
 
 ## Settings and credentials
 

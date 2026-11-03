@@ -4,6 +4,39 @@ import Testing
 
 @MainActor
 struct WidgetPresentationTests {
+    @Test func automaticActivityFollowsWorkThenQuotaThenUsageWithoutChangingSavedSlots() throws {
+        typealias State = TokenMonitorActivityAttributes.ContentState
+        let now = Date.now
+        var state = State(updatedAt: now, usage: .init(today: .init(tokens: 1000), month: .init()),
+            quotas: [.init(providerID: "codex", accountKey: "work", updatedAt: now,
+                windows: [.init(label: "Session", kind: "session", remainingPercent: 80),
+                          .init(label: "Weekly", kind: "weekly", remainingPercent: 5)])],
+            agents: .init(running: 2, clients: ["claude"], waiting: 1))
+        var saved = LiveActivityLayout.automatic
+        saved.compactTrailing = .init(style: .cost)
+        let active = ActivityContext(state: state, layout: saved, isStale: false, now: now)
+        #expect(active.layout.compactLeading.style == .agents)
+        #expect(active.layout.compactTrailing.style == .none)
+        state.agents = .none
+        let alert = ActivityContext(state: state, layout: saved, isStale: false, now: now)
+        #expect(alert.layout.compactLeading.style == .ring)
+        #expect(alert.reading(alert.layout.compactTrailing.source)?.window.label == "Weekly")
+        #expect(alert.layout.lockScreen == .quota)
+        state.quotas[0].stale = true
+        let idle = ActivityContext(state: state, layout: saved, isStale: false, now: now)
+        #expect(idle.layout.compactTrailing.style == .tokens)
+        #expect(idle.layout.minimal == .appIcon)
+        state.agents = .init(running: 0, clients: ["codex"], waiting: 1)
+        #expect(ActivityContext(state: state, layout: saved, isStale: false, now: now).layout.compactLeading.style == .agents)
+        #expect(ActivityContext(state: state, layout: saved, isStale: true, now: now).layout.compactTrailing.style == .tokens)
+        #expect(saved.compactTrailing.style == .cost)
+        saved.mode = .custom
+        #expect(ActivityContext(state: state, layout: saved, isStale: false, now: now).layout == saved)
+        #expect(try JSONDecoder().decode(LiveActivityLayout.self, from: Data("{}".utf8)).mode == .custom)
+        #expect(TokenMonitorSharedPayload.Preferences.default.liveLayout.mode == .automatic)
+        #expect(try JSONDecoder().decode(State.Agents.self, from: Data(#"{"running":1,"clients":["claude"]}"#.utf8)).waiting == nil)
+    }
+
     private let reference = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func age(_ seconds: TimeInterval) -> String {

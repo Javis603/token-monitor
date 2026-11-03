@@ -3,27 +3,25 @@
 ## What's changed
 
 <!-- app-update-notes:en:start -->
-### Added
-- **Network proxy:** Adds a proxy URL and bypass list in Settings → General → Advanced for supported quota and account requests. (#1049)
-
-### Changed
-- **Claude plans:** Displays Max and Ultra in place of the former Max 5x and Max 20x names. (#1288)
-
 ### Improved
-- **Codex archive scanning:** Reduces peak memory use when skipping oversized compressed session archives. (#1285)
-- **Large session histories:** Reduces processing overhead during usage updates. (#1287)
+- **Edge Dock:** Detail cards move and fade smoothly when switching selections. (#1309)
+- **Notch sessions:** Removes repeated tool names to leave more room for model, reasoning effort and time. (#1325)
+- **Cursor setup:** Clarifies how to return from Grok sign-in redirects and find the correct Cookie. (#1303)
 
 ### Fixed
-- **Trae CN credits:** Supports a manually supplied browser Cookie when IDE credentials are rejected. (#1282)
-- **Claude CLI quota:** Accepts weekly-only quota output instead of reporting it as unavailable. (#1288)
+- **Windows updates:** Updates started from this version keep the current installation directory even when installation records are missing. (#1277)
+- **Kiro quota:** Restores quota readings when the CLI defaults to the v3 engine, avoiding a billed model prompt on refresh. (#1320)
+- **Notch month:** Shows the current month by default and the selected day's month on hover or keyboard focus. (#1316)
+- **Cursor dashboard:** Restores the account setup button's browser launch. (#1312)
+- **Copilot quota:** Removes extra space below Chat when no reset time is shown. (#1313)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.83.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.83.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-Setup-0.83.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.83.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.84.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.84.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-Setup-0.84.1.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.84.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -58,28 +56,26 @@ Tokscale is bundled with this app and updated through Token Monitor releases. Se
 ## 更新内容
 
 <!-- app-update-notes:zh:start -->
-### 新增
-- **网络代理：** 可在“设置 → 常规 → 高级”中配置代理地址和绕过列表，用于支持的额度与账号请求。 （#1049）
-
-### 变更
-- **Claude 套餐：** 原 Max 5x 和 Max 20x 分别显示为 Max 和 Ultra。 （#1288）
-
 ### 改进
-- **Codex 历史扫描：** 降低跳过超大压缩会话文件时的内存峰值。 （#1285）
-- **大量会话记录：** 减少用量更新时的处理开销。 （#1287）
+- **侧边栏：** 切换详情卡片时，位置与内容平滑过渡。 （#1309）
+- **刘海会话：** 不再重复显示工具名，为模型、推理强度和时间留出更多空间。 （#1325）
+- **Cursor 设置：** 补充登录跳转到 Grok 后返回 Cursor、获取正确 Cookie 的指引。 （#1303）
 
 ### 修复
-- **Trae CN 积分：** IDE 凭证被拒绝时，可改用手动填写的浏览器 Cookie。 （#1282）
-- **Claude CLI 额度：** 仅返回每周额度时也可正常显示，不再误报为不可用。 （#1288）
+- **Windows 更新：** 从此版本发起更新时，即使安装记录缺失，也会保留当前安装目录。 （#1277）
+- **Kiro 额度：** 修复 CLI 默认使用 v3 引擎时无法读取额度的问题，避免刷新触发付费模型请求。 （#1320）
+- **刘海月份：** 默认显示当前月份，悬停或通过键盘聚焦某一天时显示该日期的月份。 （#1316）
+- **Cursor 控制台：** 修复账号设置中的按钮无法打开浏览器的问题。 （#1312）
+- **Copilot 额度：** 移除 Chat 未显示重置时间时下方的多余空白。 （#1313）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.83.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.83.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-Setup-0.83.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.83.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.84.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.84.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-Setup-0.84.1.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.84.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -110,7 +106,7 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.82.0...v0.83.0">v0.82.0...v0.83.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.84.0...v0.84.1">v0.84.0...v0.84.1</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -127,28 +123,26 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 更新內容
 
 <!-- app-update-notes:zh-TW:start -->
-### 新增
-- **網路代理：** 可在「設定 → 一般 → 進階」中配置代理位址與繞過清單，用於支援的額度與帳號請求。 （#1049）
-
-### 變更
-- **Claude 方案：** 原 Max 5x 與 Max 20x 分別顯示為 Max 與 Ultra。 （#1288）
-
 ### 改進
-- **Codex 歷史掃描：** 降低跳過超大壓縮會話檔案時的記憶體峰值。 （#1285）
-- **大量會話紀錄：** 減少用量更新時的處理負擔。 （#1287）
+- **側邊欄：** 切換詳細卡片時，位置與內容平滑過渡。 （#1309）
+- **瀏海工作階段：** 不再重複顯示工具名稱，為模型、推理強度與時間留出更多空間。 （#1325）
+- **Cursor 設定：** 補充登入轉到 Grok 後返回 Cursor、取得正確 Cookie 的指引。 （#1303）
 
 ### 修復
-- **Trae CN 點數：** IDE 憑證遭拒時，可改用手動填入的瀏覽器 Cookie。 （#1282）
-- **Claude CLI 額度：** 僅傳回每週額度時也可正常顯示，不再誤報為無法使用。 （#1288）
+- **Windows 更新：** 從此版本發起更新時，即使安裝記錄遺失，也會保留目前的安裝目錄。 （#1277）
+- **Kiro 額度：** 修復 CLI 預設使用 v3 引擎時無法讀取額度的問題，避免重新整理觸發付費模型請求。 （#1320）
+- **瀏海月份：** 預設顯示目前月份，游標停留或透過鍵盤聚焦某一天時顯示該日期的月份。 （#1316）
+- **Cursor 控制台：** 修復帳號設定中的按鈕無法開啟瀏覽器的問題。 （#1312）
+- **Copilot 額度：** 移除 Chat 未顯示重設時間時下方的多餘空白。 （#1313）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.83.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.83.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-Setup-0.83.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.83.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.84.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.84.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-Setup-0.84.1.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.84.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.AppImage)
 
 </details>
 
@@ -160,28 +154,26 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 업데이트 내용
 
 <!-- app-update-notes:ko:start -->
-### 추가
-- **네트워크 프록시:** 설정 → 일반 → 고급에서 지원되는 한도 및 계정 요청에 사용할 프록시 URL과 제외 목록을 설정할 수 있습니다. (#1049)
-
-### 변경
-- **Claude 요금제:** 기존 Max 5x와 Max 20x를 각각 Max와 Ultra로 표시합니다. (#1288)
-
 ### 개선
-- **Codex 기록 스캔:** 크기 제한을 초과한 압축 세션 파일을 건너뛸 때 최대 메모리 사용량을 줄였습니다. (#1285)
-- **대규모 세션 기록:** 사용량 업데이트에 드는 처리 비용을 줄였습니다. (#1287)
+- **가장자리 도크:** 세부 카드를 전환할 때 위치와 내용이 부드럽게 바뀝니다. (#1309)
+- **노치 세션:** 도구 이름의 중복 표시를 없애 모델, 추론 강도와 시간을 보여줄 공간을 확보했습니다. (#1325)
+- **Cursor 설정:** Grok 로그인으로 이동한 뒤 Cursor로 돌아와 올바른 Cookie를 찾는 방법을 안내합니다. (#1303)
 
 ### 수정
-- **Trae CN 크레딧:** IDE 인증 정보가 거부되면 브라우저 Cookie를 직접 입력해 사용할 수 있습니다. (#1282)
-- **Claude CLI 한도:** 주간 한도만 반환되어도 사용 불가로 처리하지 않고 표시합니다. (#1288)
+- **Windows 업데이트:** 이 버전에서 업데이트하면 설치 기록이 없어도 현재 설치 폴더를 유지합니다. (#1277)
+- **Kiro 할당량:** CLI 기본 엔진이 v3일 때 할당량을 읽지 못하던 문제를 수정하고, 새로고침 시 유료 모델 요청이 발생하지 않도록 했습니다. (#1320)
+- **노치 월 표시:** 기본적으로 현재 월을 표시하고, 날짜에 마우스를 올리거나 키보드로 포커스하면 해당 날짜의 월을 표시합니다. (#1316)
+- **Cursor 대시보드:** 계정 설정 버튼으로 브라우저가 열리지 않던 문제를 수정했습니다. (#1312)
+- **Copilot 할당량:** Chat에 초기화 시간이 표시되지 않을 때 아래에 남던 빈 공간을 제거했습니다. (#1313)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.83.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.83.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-Setup-0.83.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.83.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.84.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.84.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-Setup-0.84.1.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.84.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.AppImage)
 
 </details>
 
@@ -193,28 +185,26 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 更新内容
 
 <!-- app-update-notes:ja:start -->
-### 追加
-- **ネットワークプロキシ:** 「設定 → 一般 → 詳細設定」で、対応する上限・アカウント関連のリクエストに使うプロキシ URLと除外リストを設定できます。 (#1049)
-
-### 変更
-- **Claudeのプラン:** 従来のMax 5xとMax 20xを、それぞれMaxとUltraとして表示します。 (#1288)
-
 ### 改善
-- **Codexの履歴スキャン:** サイズ制限を超えた圧縮セッションファイルをスキップする際のメモリ使用量のピークを抑えました。 (#1285)
-- **大量のセッション履歴:** 使用量の更新にかかる処理負荷を軽減しました。 (#1287)
+- **エッジドック:** 詳細カードの切り替え時に、位置と内容が滑らかに変化します。 (#1309)
+- **ノッチのセッション:** ツール名の重複表示をなくし、モデル、推論強度、時間を表示するスペースを広げました。 (#1325)
+- **Cursorの設定:** ログイン後にGrokへ転送された場合、Cursorに戻って正しいCookieを取得する手順を案内します。 (#1303)
 
 ### 修正
-- **Trae CNのクレジット:** IDEの認証情報が拒否される場合、ブラウザのCookieを手動で入力して利用できます。 (#1282)
-- **Claude CLIの上限:** 週間上限のみが返された場合も、利用不可とせず表示します。 (#1288)
+- **Windowsの更新:** このバージョンから更新する際は、インストール情報が失われていても現在のインストール先を維持します。 (#1277)
+- **Kiroの利用枠:** CLIの既定エンジンがv3の場合に利用枠を取得できない問題を修正し、更新のたびに有料のモデルリクエストが発生するのを防ぎます。 (#1320)
+- **ノッチの月表示:** 通常は現在の月を表示し、日付にカーソルを合わせるかキーボードで選択すると、その日付の月を表示します。 (#1316)
+- **Cursorダッシュボード:** アカウント設定のボタンでブラウザが開かない問題を修正。 (#1312)
+- **Copilotの利用枠:** Chatにリセット時刻が表示されない場合の余分な下余白を削除しました。 (#1313)
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.83.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.83.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-Setup-0.83.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.83.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.83.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.83.0/Token-Monitor-0.83.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.84.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.84.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-Setup-0.84.1.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.84.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.84.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.84.1/Token-Monitor-0.84.1.AppImage)
 
 </details>
 

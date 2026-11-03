@@ -109,8 +109,10 @@ nonisolated struct TokenMonitorActivityAttributes: ActivityAttributes {
         struct Agents: Codable, Hashable, Sendable {
             /// Sessions currently running (the Sessions list's three-state rule).
             var running: Int
-            /// Distinct client ids of those sessions, most recent first, at most three.
+            /// Distinct active client ids, waiting first, newest per state, at most three.
             var clients: [String]
+            /// Optional for cached states and Hubs written before automatic mode.
+            var waiting: Int? = nil
 
             static let none = Agents(running: 0, clients: [])
         }
@@ -125,6 +127,11 @@ nonisolated struct TokenMonitorActivityAttributes: ActivityAttributes {
 /// Every field decodes leniently: a missing or unknown value falls back to its
 /// default instead of discarding the whole layout.
 nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
+    enum Mode: String, Codable, CaseIterable, Sendable {
+        case automatic, custom
+    }
+
+    var mode: Mode = .custom
     /// Where a reading comes from, as in the desktop menu bar composer.
     struct Source: Codable, Hashable, Sendable {
         enum Automatic: String, Codable, CaseIterable, Sendable {
@@ -157,6 +164,7 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
         /// nil picks the provider's lowest-remaining account.
         var accountKey: String?
         var window: Window = .primary
+        var windowLabel: String? = nil
         var value: Value = .remaining
         var period: Period = .today
         var scope: Scope = .all
@@ -181,13 +189,14 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
             automatic = value(.automatic, .lowest)
             accountKey = (try? values.decodeIfPresent(String.self, forKey: .accountKey)) ?? nil
             window = value(.window, .primary)
+            windowLabel = (try? values.decodeIfPresent(String.self, forKey: .windowLabel)) ?? nil
             self.value = value(.value, .remaining)
             period = value(.period, .today)
             scope = value(.scope, .all)
         }
 
         private enum CodingKeys: String, CodingKey {
-            case providerID, automatic, accountKey, window, value, period, scope
+            case providerID, automatic, accountKey, window, windowLabel, value, period, scope
         }
     }
 
@@ -197,7 +206,7 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
 
     /// Shown when another app's activity shares the island.
     enum MinimalStyle: String, Codable, CaseIterable, Sendable {
-        case appRing, ring, percent, providerIcon
+        case appRing, ring, percent, providerIcon, appIcon
     }
 
     enum ExpandedTemplate: String, Codable, CaseIterable, Sendable {
@@ -237,12 +246,20 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
 
     init() {}
 
+    static var automatic: Self {
+        var value = Self()
+        value.mode = .automatic
+        return value
+    }
+
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
             ((try? values.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
         }
         let defaults = LiveActivityLayout()
+        // Existing layouts remain custom; only new installations start automatic.
+        mode = value(.mode, .custom)
         compactLeading = value(.compactLeading, defaults.compactLeading)
         compactTrailing = value(.compactTrailing, defaults.compactTrailing)
         minimal = value(.minimal, defaults.minimal)
@@ -254,7 +271,7 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case compactLeading, compactTrailing, minimal, minimalSource
+        case mode, compactLeading, compactTrailing, minimal, minimalSource
         case expanded, expandedSource, lockScreen, lockScreenSource
     }
 
@@ -264,12 +281,14 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
 
     /// Providers the layout names explicitly; the Hub sends them beside the ranked records.
     var referencedProviderIDs: [String] {
+        guard mode == .custom else { return [] }
         var ids: [String] = []
         for id in sources.compactMap(\.providerID) where !ids.contains(id) { ids.append(id) }
         return ids
     }
 
     var referencedAccountKeys: [String] {
+        guard mode == .custom else { return [] }
         var keys: [String] = []
         for key in sources.compactMap(\.accountKey) where !keys.contains(key) { keys.append(key) }
         return keys

@@ -68,18 +68,24 @@ extension TokenMonitorSharedPayload.Snapshot {
     ) -> TokenMonitorActivityAttributes.ContentState.Agents {
         var seen = Set<String>()
         var running: [(client: String?, last: Date)] = []
+        var waiting: [(client: String?, last: Date)] = []
         for key in [UsagePeriodKey.today, .month] {
             for (id, session) in stats.period(key).sessions ?? [:] where seen.insert(id).inserted {
-                guard session.isRunning(at: now) else { continue }
-                running.append((session.client?.lowercased(), session.lastActivity ?? .distantPast))
+                if session.isWaiting(at: now) {
+                    waiting.append((session.client?.lowercased(), session.lastActivity ?? .distantPast))
+                } else if session.isRunning(at: now) {
+                    running.append((session.client?.lowercased(), session.lastActivity ?? .distantPast))
+                }
             }
         }
         running.sort { $0.last > $1.last }
+        waiting.sort { $0.last > $1.last }
         var clients: [String] = []
-        for client in running.compactMap(\.client) where !clients.contains(client) {
+        for client in (waiting + running).compactMap(\.client) where !clients.contains(client) {
             clients.append(client)
         }
-        return .init(running: running.count, clients: Array(clients.prefix(3)))
+        return .init(running: running.count, clients: Array(clients.prefix(3)),
+                     waiting: waiting.isEmpty ? nil : waiting.count)
     }
 
     private static func usage(

@@ -11,6 +11,7 @@ nonisolated enum ClientPresentation {
         case "opencode": "OpenCode"
         case "copilot": "GitHub Copilot"
         case "micode": "MiMo Code"
+        case "muse": "Muse Code"
         case "grok": "Grok Build"
         default: ProviderPresentation.displayName(for: client)
         }
