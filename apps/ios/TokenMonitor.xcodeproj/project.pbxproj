@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A51100000000000000000001 /* ActivityWave.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A51100000000000000000003 /* ActivityWave.ttf */; };
 		A17000000000000000000002 /* ActivityAutomation.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A17000000000000000000001 /* ActivityAutomation.xcstrings */; };
 		6CD74ABCA4474BAF78FB5DF6 /* AppAlignment.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = CE62F50C31A95E10D40DFA17 /* AppAlignment.xcstrings */; };
 		A2EC73D10BDC4F021AF9EA94 /* MainAlignmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5215FFDDD541B836469AA618 /* MainAlignmentTests.swift */; };
@@ -234,6 +235,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A51100000000000000000003 /* ActivityWave.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/TokenMonitorActivityWave.ttf; sourceTree = "<group>"; };
 		A17000000000000000000001 /* ActivityAutomation.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = "ActivityAutomation.xcstrings"; sourceTree = "<group>"; };
 		CE62F50C31A95E10D40DFA17 /* AppAlignment.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = "AppAlignment.xcstrings"; sourceTree = "<group>"; };
 		5215FFDDD541B836469AA618 /* MainAlignmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MainAlignmentTests.swift"; sourceTree = "<group>"; };
@@ -504,6 +506,7 @@
 			children = (
 				110000000000000000000036 /* Localizable.xcstrings */,
 				11000000000000000000000D /* SharedAssets.xcassets */,
+				A51100000000000000000003 /* ActivityWave.ttf */,
 				110000000000000000000007 /* SharedSnapshotStore.swift */,
 				110000000000000000000008 /* TokenMonitorActivityAttributes.swift */,
 				110000000000000000000042 /* ActivityViews.swift */,
@@ -878,6 +881,7 @@
 				DCA200000000000000000002 /* DesktopNavigation.LICENSE.txt in Resources */,
 				120000000000000000000036 /* Localizable.xcstrings in Resources */,
 				12000000000000000000000D /* SharedAssets.xcassets in Resources */,
+				A51100000000000000000001 /* ActivityWave.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -328,11 +328,13 @@ extension WidgetLayoutRenderTests {
     @Test func notchWaveSymbolAndMotionFallbacks() throws {
         let symbol = try #require(UIImage(named: "ActivityWave"))
         #expect(symbol.isSymbolImage)
+        let font = try #require(UIFont(name: "TokenMonitorActivityWave", size: 20))
+        #expect(font.fontName == "TokenMonitorActivityWave")
         for (name, stale) in [
             ("running", false),
             ("stale", true)
         ] {
-            let view = ActivityWaveform(isStale: stale, tint: ActivityPalette.quotaTint("codex"))
+            let view = ActivityWaveform(updatedAt: .now.addingTimeInterval(-5), isStale: stale, tint: ActivityPalette.quotaTint("codex"))
                 .padding(20).background(.black)
             let renderer = ImageRenderer(content: view)
             renderer.scale = 3
