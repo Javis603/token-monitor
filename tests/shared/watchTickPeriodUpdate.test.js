@@ -129,6 +129,57 @@ test('a second overlay still matches mergePeriods and does not alias the anchor'
   assert.equal(summary.sessions['codex:dots'].totalTokens, 10);
 });
 
+test('a timing-only overlay still merges every throughput field mergePeriods would', () => {
+  const { base } = watchTick(4);
+  base.timedTokens = 10;
+  base.timedOutputTokens = 4;
+  base.timedDurationMs = 100;
+  base.outputTokens = 4;
+  base.modelThroughput = {
+    'claude-opus': { timedTokens: 10, timedOutputTokens: 4, timedDurationMs: 100 }
+  };
+  const timingOnly = {
+    capabilities: { tokenComponents: true, throughput: true },
+    timedTokens: 80,
+    timedOutputTokens: 20,
+    timedDurationMs: 500,
+    outputTokens: 20,
+    modelThroughput: {
+      'claude-opus': { timedTokens: 80, timedOutputTokens: 20, timedDurationMs: 500 }
+    }
+  };
+  const summary = mergeNormalizedPeriods(base, timingOnly);
+  assert.deepEqual(summary, mergePeriods(base, timingOnly));
+  assert.equal(summary.timedTokens, base.timedTokens + 80);
+  assert.equal(summary.timedDurationMs, base.timedDurationMs + 500);
+  assert.equal(summary.modelThroughput['claude-opus'].timedTokens, 90);
+
+  const unavailable = emptyPeriod();
+  unavailable.capabilities = { tokenComponents: true, throughput: false };
+  const cleared = mergeNormalizedPeriods(base, unavailable);
+  assert.deepEqual(cleared, mergePeriods(base, unavailable));
+  assert.equal(cleared.capabilities.throughput, false);
+
+  const withoutThroughputMap = { totalTokens: 0, costUsd: 0, timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+  const dropped = mergeNormalizedPeriods(base, withoutThroughputMap);
+  assert.deepEqual(dropped, mergePeriods(base, withoutThroughputMap));
+  assert.equal(dropped.modelThroughput, undefined);
+});
+
+test('full-scan normalization collapses decorated titles without doing so on a watch tick', () => {
+  const { base } = watchTick(2);
+  const key = 'claude:s1';
+  base.sessions[key].title = '  hello   world  ';
+  base.sessions[key].projectLabel = '  My Proj  ';
+  const watched = mergeNormalizedPeriods(base, emptyPeriod());
+  assert.equal(watched.sessions[key].title, '  hello   world  ');
+  assert.equal(watched.sessions[key].projectLabel, '  My Proj  ');
+  const fullScan = mergeNormalizedPeriods(normalizePeriod(base), emptyPeriod());
+  assert.equal(fullScan.sessions[key].title, 'hello world');
+  assert.equal(fullScan.sessions[key].projectLabel, 'My Proj');
+  assert.equal(fullScan.sessions[key].totalTokens, base.sessions[key].totalTokens);
+});
+
 test('watch-tick period update stays well under the old full-history rebuild', () => {
   const { base, anchorToday, fresh } = watchTick(8000);
   const started = performance.now();
