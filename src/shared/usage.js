@@ -2137,14 +2137,33 @@ function sessionAsMerged(session) {
   return merged;
 }
 
-function periodHasContribution(period) {
+const OVERLAY_NUMERIC_FIELDS = [
+  'totalTokens', 'costUsd', 'unpricedTokens',
+  'cacheReadTokens', 'cacheWriteTokens', 'outputTokens', 'unclassifiedTokens',
+  'timedTokens', 'timedOutputTokens', 'timedDurationMs'
+];
+const OVERLAY_MAP_FIELDS = [
+  'sessions', 'clients', 'clientCosts', 'clientCacheReads', 'clientCacheWrites',
+  'clientOutputs', 'clientUnclassifiedTokens', 'clientUnpricedTokens',
+  'models', 'modelCosts', 'modelCacheReads', 'modelCacheWrites', 'modelOutputs',
+  'modelUnclassifiedTokens', 'modelUnpricedTokens',
+  'clientModels', 'clientModelCosts', 'clientModelUnpricedTokens',
+  'projects', 'modelThroughput'
+];
+
+// True when addPeriodInto(base, period) can change base. A false capability
+// flag clears provenance, and a missing modelThroughput map deletes the base
+// map; zero counters and empty maps do not. Call this on a normalized period.
+function normalizedOverlayChangesMerge(period) {
   if (!period || typeof period !== 'object') return false;
-  return Number(period.totalTokens) > 0
-    || Number(period.costUsd) > 0
-    || Object.keys(period.sessions || {}).length > 0
-    || Object.keys(period.clients || {}).length > 0
-    || Object.keys(period.models || {}).length > 0
-    || Object.keys(period.projects || {}).length > 0;
+  if (OVERLAY_NUMERIC_FIELDS.some((field) => Number(period[field]) > 0)) return true;
+  if (OVERLAY_MAP_FIELDS.some((field) => {
+    const value = period[field];
+    return Boolean(value && typeof value === 'object' && Object.keys(value).length > 0);
+  })) return true;
+  if (period.capabilities?.tokenComponents === false || period.capabilities?.throughput === false) return true;
+  if (!period.modelThroughput) return true;
+  return false;
 }
 
 // `base` is already normalized. `extra` may be a raw or normalized overlay
@@ -2178,9 +2197,9 @@ function mergeNormalizedPeriods(base, extra) {
     if (mergedKey && mergedKey !== key) delete target.sessions[key];
     target.sessions[mergedKey || key] = merged;
   }
-  if (periodHasContribution(extra)) {
+  if (extra && typeof extra === 'object') {
     const normalizedExtra = normalizePeriod(extra);
-    if (periodHasContribution(normalizedExtra)) {
+    if (normalizedOverlayChangesMerge(normalizedExtra)) {
       for (const session of Object.values(normalizedExtra.sessions || {})) {
         const key = sessionKey(session.client, session.sessionId);
         if (key && target.sessions[key]) target.sessions[key] = cloneSessionForMerge(target.sessions[key]);

@@ -32,6 +32,7 @@ const {
   mergeNormalizedPeriods,
   mergePeriods,
   normalizeClientName,
+  normalizePeriod,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
@@ -1127,6 +1128,17 @@ async function collectUsageOnce(options) {
     // Partition metadata is internal but must remain as complete as the public
     // period: a later targeted tick re-merges these sessions into `today`.
     propagateTodayProjects(today, Object.values(todayPartitions), { ...localSessionMetadataDeps, projectsFromToday: true });
+  }
+
+  // Decoration can replace a title or project label after the scan's own
+  // normalizePeriod. The previous merge normalized the host period again on the
+  // way out. Do that once on a full scan, before these objects become the
+  // anchor, so later watch ticks shell the normalized text. A watch tick must
+  // not: normalizePeriod walks every retained session.
+  if (!anchorUsed && normalizedClients) {
+    today = normalizePeriod(today);
+    month = normalizePeriod(month);
+    allTime = normalizePeriod(allTime);
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
