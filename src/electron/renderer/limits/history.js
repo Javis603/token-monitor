@@ -74,7 +74,7 @@
       let d = '';
       segment.forEach((point, index) => {
         const y = Y(moneyAxis ? point.value : 100 - point.value);
-        d += index === 0 ? `M${X(point.at)},${y}` : `H${X(point.at)}V${y}`;
+        d += `${index === 0 ? 'M' : 'L'}${X(point.at)},${y}`;
       });
       plot.append(svgNode('path', { d, class: 'quota-history-curve' }));
       if (segment.length === 1) {
