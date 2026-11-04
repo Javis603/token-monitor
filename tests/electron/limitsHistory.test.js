@@ -1683,3 +1683,34 @@ for (const missing of ['empty snapshot', 'unreadable window', 'failure']) {
     assert.equal((await store.query('local', recovered)).windows[0].distribution.buckets.at(-1).value, 10);
   });
 }
+
+for (const flat of [false, true]) for (const switched of [false, true]) {
+  test(`compatible trend endpoints connect across a sampling gap without changing accounting (flat: ${flat}, switched: ${switched})`, t => {
+    const f = databaseFixture(t);
+    const value = n => flat ? 0 : n;
+    f.record([action(at(2, 10), value(20), { source: 'a' }), action(at(2, 10, 5), value(22), { source: 'a' })]);
+    f.reopen();
+    const source = switched ? 'b' : 'a';
+    f.record([action(at(2, 10, 50), value(25), { source }), action(at(2, 10, 55), value(27), { source })]);
+    f.reopen();
+    for (const grain of ['day', 'hour']) {
+      const entry = f.query({ grain, day: dayKey(f.clock) }).windows[0];
+      assert.equal(segments(entry.points).length, 1, 'elapsed time or a compatible observer handoff alone cannot cut the visible line');
+      const bucket = entry.distribution.buckets.find(b => grain === 'day' ? b.key === dayKey(f.clock) : new Date(b.at).getHours() === 10);
+      assert.equal(bucket.value, flat ? 0 : 4, 'only fully observed increments count');
+      assert.equal(bucket.uncertain, true);
+      assert.equal(entry.distribution.unallocated, flat ? 0 : 3, 'the gap delta remains unallocated');
+      assert.equal(entry.distribution.resets, 0);
+    }
+  });
+}
+
+test('connecting observed trend endpoints does not extrapolate before or after them', () => {
+  const points = [point(at(2, 10), 20), { ...point(at(2, 10, 45), 25), uncertainBefore: true }];
+  assert.deepEqual(segments(points), [points]);
+  assert.equal(segments(points)[0][0].at, at(2, 10));
+  assert.equal(segments(points)[0].at(-1).at, at(2, 10, 45));
+  const result = distribution(points, { now: at(2, 12) });
+  assert.equal(result.buckets.at(-1).value, null);
+  assert.equal(result.unallocated, 5);
+});

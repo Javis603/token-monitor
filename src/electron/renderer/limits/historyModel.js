@@ -124,11 +124,11 @@
     const result = [];
     for (const point of points) {
       const segment = result.at(-1), previous = segment?.at(-1);
-      // The curve connects compatible endpoints; distribution separately decides
-      // whether their net change belongs to one time bucket.
+      // Sampling gaps and uncertain handoffs affect accounting, not the line
+      // between compatible observed endpoints. Explicit failures/conflicts still
+      // break the curve; distribution separately retains unknown coverage.
       if (!previous || !sameCycle(previous, point)
-        || !point.allowanceMissingBefore && (point.uncertainBefore === true || point.breakBefore === true || !coveredInterval(previous, point)
-        && point.at - previous.at > Math.max(point.interval, previous.interval) * 2.5)) result.push([point]);
+        || point.breakBefore === true && !point.allowanceMissingBefore) result.push([point]);
       else segment.push(point);
     }
     return result;
