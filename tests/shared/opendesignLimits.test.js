@@ -187,3 +187,22 @@ test('OpenDesign keeps an unidentified authorization failure alongside a known w
     assert.equal(unauthorized.sourceDeviceId, 'failed');
   }
 });
+
+test('OpenDesign hides setup placeholders only when a known workspace exists', async () => {
+  const healthy = await fetchOpendesignLimits(options, deps());
+  for (const core of [require('../../src/shared/limits/core'), require('../../worker/src/shared/limits/core')]) {
+    for (const status of ['notConfigured', 'disabled']) {
+      const placeholder = { provider: 'opendesign', status, windows: [], updatedAt: healthy.updatedAt };
+      const devices = [
+        { deviceId: 'workspace', limits: { providers: [healthy] } },
+        { deviceId: 'no-cookie', limits: { providers: [placeholder] } }
+      ];
+      const result = core.aggregateLimits(devices, 0, Date.parse(healthy.updatedAt));
+      assert.equal(result.providers.length, 1, status);
+      assert.equal(result.providers[0].accountKey, healthy.accountKey);
+      const alone = core.aggregateLimits([devices[1]], 0, Date.parse(healthy.updatedAt));
+      assert.equal(alone.providers.length, 1);
+      assert.equal(alone.providers[0].status, status);
+    }
+  }
+});

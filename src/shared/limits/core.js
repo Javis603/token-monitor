@@ -1033,8 +1033,12 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   // Map.set() would arbitrarily overwrite the fresh one with the stale one.
   const hasKnownWorkbuddyAccount = Array.from(byKey.values()).some((candidate) =>
     candidate.provider === 'workbuddy' && candidate.accountKey && !isWorkbuddyPlaceholder(candidate));
+  const hasKnownOpendesignWorkspace = Array.from(byKey.values()).some((candidate) =>
+    candidate.provider === 'opendesign' && isConfiguredProvider(candidate));
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
+    if (hasKnownOpendesignWorkspace && candidate.provider === 'opendesign'
+      && ['notConfigured', 'disabled'].includes(candidate.status)) continue;
     // A local-app sentinel is an onboarding hint, not an extra account. Real
     // identities keep their own failure hints even when none has credentials.
     if (hasKnownWorkbuddyAccount && isWorkbuddyPlaceholder(candidate)) continue;
