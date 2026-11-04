@@ -3387,7 +3387,7 @@ function sessionPresentationOptions() {
     subagents: {
       countLabel: (count) => t('sessions.subagentCount', { count }),
       unattributedLabel: t('dashboard.tooltip.unclassified'),
-      separateClients: state.settings?.hermesMergeSubagents === false ? new Set(['hermes']) : undefined
+      separateClients: sessionRowsApi.separateSubagentClients(state.settings)
     },
     backgroundReviews: {
       label: t('sessions.backgroundReviews'),

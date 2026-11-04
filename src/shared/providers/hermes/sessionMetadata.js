@@ -17,14 +17,43 @@ const SUBAGENT_SOURCE = 'subagent';
 // only ids the database does not (yet) hold are retried when it changes.
 const databaseCache = new Map();
 
+// The collector forwards Hermes custom scan paths, plus inherited `hermes:`
+// TOKSCALE_EXTRA_DIRS entries, to Tokscale, which reads every state.db below
+// them at any depth. A scoped WSL home scans neither, like the other resolvers.
+function extraScanRoots(deps, env) {
+  if (deps.scopedHome) return [];
+  const configured = Array.isArray(deps.customScanPaths?.hermes) ? deps.customScanPaths.hermes : [];
+  const inherited = String(env.TOKSCALE_EXTRA_DIRS || '').split(',').map((entry) => {
+    const separator = entry.indexOf(':');
+    return separator !== -1 && entry.slice(0, separator).trim() === 'hermes' ? entry.slice(separator + 1).trim() : '';
+  });
+  return [...configured, ...inherited].filter((dir) => typeof dir === 'string' && dir.trim());
+}
+
+// ponytail: walks each extra root on every lookup, as Tokscale does per scan;
+// cache by root fingerprint if a large custom root makes this measurable.
+function stateDatabasesBelow(root) {
+  try {
+    return fs.readdirSync(root, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name === 'state.db')
+      .map((entry) => path.join(entry.parentPath, entry.name));
+  } catch (_) {
+    return [];
+  }
+}
+
 function hermesDatabasePaths(context = {}) {
   const deps = context.deps || {};
+  const env = deps.scopedHome ? {} : (deps.env || process.env);
   const home = resolveHermesHome({
-    env: deps.scopedHome ? {} : (deps.env || process.env),
+    env,
     homeDir: context.home,
     platform: deps.scopedHome ? 'linux' : (deps.platform || process.platform)
   });
-  return [home, ...discoverHermesProfileScanPaths(home)].map((dir) => path.join(dir, 'state.db'));
+  return [...new Set([
+    ...[home, ...discoverHermesProfileScanPaths(home)].map((dir) => path.join(dir, 'state.db')),
+    ...extraScanRoots(deps, env).flatMap(stateDatabasesBelow)
+  ])];
 }
 
 function fileStamp(filePath) {

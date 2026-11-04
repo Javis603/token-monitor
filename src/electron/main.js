@@ -6183,7 +6183,8 @@ function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
     liveRate: edgeDockLiveRateSample(visibleStats),
-    tokenRateMode: settings?.tokenRateMode
+    tokenRateMode: settings?.tokenRateMode,
+    hermesMergeSubagents: settings?.hermesMergeSubagents
   });
 }
 

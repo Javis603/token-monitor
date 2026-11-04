@@ -121,3 +121,19 @@ test('a missing database adds nothing and a late subagent row is found after the
     db.close();
   }
 });
+
+test('custom scan roots resolve state.db at any depth, but not for a scoped home', { skip: !sqlite }, (t) => {
+  const root = tempRoot(t, 'hermes-custom-');
+  const configured = path.join(root, 'backup');
+  const inherited = path.join(root, 'inherited');
+  createStateDb(path.join(configured, 'a', 'b'), [['custom-sub', 'subagent', 'custom-main']]).close();
+  createStateDb(inherited, [['env-sub', 'subagent', 'env-main']]).close();
+  const ids = new Set(['custom-sub', 'env-sub']);
+  const deps = (extra) => ({ sqlite, env: { TOKSCALE_EXTRA_DIRS: `claude:${root},hermes:${inherited}` },
+    customScanPaths: { hermes: [configured] }, hermesDatabaseCache: new Map(), ...extra });
+
+  const host = resolveSessionMetadata(ids, { home: root, deps: deps() });
+  assert.equal(host.get('custom-sub')?.parentSessionId, 'custom-main');
+  assert.equal(host.get('env-sub')?.parentSessionId, 'env-main');
+  assert.equal(resolveSessionMetadata(ids, { home: root, deps: deps({ scopedHome: true }) }).size, 0);
+});
