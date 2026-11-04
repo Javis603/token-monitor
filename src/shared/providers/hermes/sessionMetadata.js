@@ -32,14 +32,22 @@ function extraScanRoots(deps, env) {
 
 // ponytail: walks each extra root on every lookup, as Tokscale does per scan;
 // cache by root fingerprint if a large custom root makes this measurable.
+// One readdir per directory: a recursive readdir throws on the first
+// unreadable descendant and would drop every database already found.
 function stateDatabasesBelow(root) {
-  try {
-    return fs.readdirSync(root, { recursive: true, withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name === 'state.db')
-      .map((entry) => path.join(entry.parentPath, entry.name));
-  } catch (_) {
-    return [];
+  const found = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const dir = pending.pop();
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { continue; }
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) pending.push(entryPath);
+      else if (entry.isFile() && entry.name === 'state.db') found.push(entryPath);
+    }
   }
+  return found;
 }
 
 function hermesDatabasePaths(context = {}) {

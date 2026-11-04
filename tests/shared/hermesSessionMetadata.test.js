@@ -137,3 +137,21 @@ test('custom scan roots resolve state.db at any depth, but not for a scoped home
   assert.equal(host.get('env-sub')?.parentSessionId, 'env-main');
   assert.equal(resolveSessionMetadata(ids, { home: root, deps: deps({ scopedHome: true }) }).size, 0);
 });
+
+test('an unreadable directory below a custom root does not hide the rest of it', {
+  skip: !sqlite || process.platform === 'win32' || process.getuid?.() === 0
+}, (t) => {
+  const root = tempRoot(t, 'hermes-locked-');
+  const custom = path.join(root, 'custom');
+  createStateDb(path.join(custom, 'open'), [['open-sub', 'subagent', 'open-main']]).close();
+  const locked = path.join(custom, 'locked');
+  fs.mkdirSync(locked);
+  fs.chmodSync(locked, 0o000);
+  t.after(() => fs.chmodSync(locked, 0o755));
+
+  const result = resolveSessionMetadata(new Set(['open-sub']), {
+    home: root, deps: { sqlite, env: {}, customScanPaths: { hermes: [custom] }, hermesDatabaseCache: new Map() }
+  });
+
+  assert.equal(result.get('open-sub')?.parentSessionId, 'open-main');
+});
