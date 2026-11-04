@@ -335,6 +335,23 @@ test('contradictory devices cannot fabricate resets or jumps during a healthy so
   assert.deepEqual(f.query({ grain: 'hour', day: dayKey(f.clock) }).windows[0].distribution, before);
 });
 
+test('a compatible takeover after device disagreement keeps its conflict boundary', t => {
+  const f = databaseFixture(t);
+  f.record([action(at(2, 10), 78, { source: 'a' }), action(at(2, 10, 5), 80, { source: 'a' }),
+    action(at(2, 10, 10), 0, { source: 'b' }), action(at(2, 10, 15), 81, { source: 'a' })]);
+  f.reopen();
+  f.record([action(at(2, 10, 35), 85, { source: 'b' }), action(at(2, 10, 40), 86, { source: 'b' })]);
+  f.reopen();
+  for (const grain of ['day', 'hour']) {
+    const entry = f.query({ grain, day: dayKey(f.clock) }).windows[0];
+    const bucket = entry.distribution.buckets.find(b => grain === 'day' ? b.key === dayKey(f.clock) : new Date(b.at).getHours() === 10);
+    assert.equal(bucket.value, 3, 'a guarded takeover is not measured consumption');
+    assert.equal(entry.distribution.unallocated, 5);
+    assert.equal(entry.distribution.resets, 0);
+    assert.deepEqual(segments(entry.points).map(s => s.map(p => p.value)), [[78, 80], [81], [85, 86]]);
+  }
+});
+
 test('inactive device failures do not interrupt an active observer; active failures permit uncertain takeover', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 20, { source: 'a' }), { account: accountA, source: 'b', failed: true },
@@ -348,9 +365,9 @@ test('inactive device failures do not interrupt an active observer; active failu
   for (const grain of ['day', 'hour']) {
     const data = f.query({ grain, day: dayKey(f.clock) }).windows[0].distribution;
     const bucket = grain === 'day' ? data.buckets.at(-1) : data.buckets.find(b => new Date(b.at).getHours() === 10);
-    assert.equal(bucket.value, 4);
+    assert.equal(bucket.value, 7);
     assert.equal(bucket.uncertain, true);
-    assert.equal(data.unallocated, 3);
+    assert.equal(data.unallocated, 0);
     assert.equal(data.resets, 0);
   }
   assert.deepEqual(f.query().windows[0].points.map(p => p.value), [20, 22, 25, 26, 27]);
@@ -479,13 +496,13 @@ test('180-day cleanup retains daily observations for two years without fabricati
   assert.deepEqual(fixture.query(range).windows[0].distribution, archived.distribution);
 });
 
-test('late or future readings never overwrite newer data, and long gaps retain unallocated consumption', t => {
+test('late or future readings never overwrite newer data, and only cross-day changes stay unallocated', t => {
   const fixture = databaseFixture(t);
   fixture.record([action(at(1, 23, 55), 20), action(at(2, 0, 5), 25), action(at(2, 10), 30)]);
   fixture.record([action(at(2, 0), 90), action(fixture.clock + 120_000, 95)]);
   const result = fixture.query().windows[0].distribution;
-  assert.equal(result.unallocated, 10);
-  assert.equal(result.buckets.at(-1).value, null);
+  assert.equal(result.unallocated, 5);
+  assert.equal(result.buckets.at(-1).value, 5);
   assert.equal(result.buckets.at(-1).observations, 2);
   assert.equal(result.buckets.at(-1).uncertain, true);
   assert.equal(fixture.sql('SELECT MAX(until) AS last FROM runs')[0].last, at(2, 10));
@@ -624,7 +641,7 @@ test('shutdown drains queued worker writes without taking over the native quit f
   finally { db.close(); }
 });
 
-test('hourly deltas do not smear changes across hour boundaries or offline gaps', () => {
+test('hourly deltas do not smear changes across hour boundaries', () => {
   const points = [point(at(2, 9, 50), 10), point(at(2, 9, 55), 12), point(at(2, 10), 15), point(at(2, 10, 5), 16), point(at(2, 11, 5), 21)];
   const hourly = distribution(points, { grain: 'hour', day: '2026-11-02', now: at(2, 12) });
   const hour9 = hourly.buckets.find(b => new Date(b.at).getHours() === 9);
@@ -636,8 +653,8 @@ test('hourly deltas do not smear changes across hour boundaries or offline gaps'
   assert.equal(hour8.value, null);
   assert.equal(hourly.unallocated, 8);
   const daily = distribution(points, { now: at(2, 12) });
-  assert.equal(daily.buckets.at(-1).value, 6);
-  assert.equal(daily.unallocated, 5);
+  assert.equal(daily.buckets.at(-1).value, 11);
+  assert.equal(daily.unallocated, 0);
 });
 
 test('resets, refills, and changing rolling deadlines break curves and consumption intervals', () => {
@@ -1686,7 +1703,7 @@ for (const missing of ['empty snapshot', 'unreadable window', 'failure']) {
 }
 
 for (const flat of [false, true]) for (const switched of [false, true]) {
-  test(`compatible trend endpoints connect across a sampling gap without changing accounting (flat: ${flat}, switched: ${switched})`, t => {
+  test(`compatible same-bucket endpoints count their net change across a sampling gap (flat: ${flat}, switched: ${switched})`, t => {
     const f = databaseFixture(t);
     const value = n => flat ? 0 : n;
     f.record([action(at(2, 10), value(20), { source: 'a' }), action(at(2, 10, 5), value(22), { source: 'a' })]);
@@ -1698,9 +1715,9 @@ for (const flat of [false, true]) for (const switched of [false, true]) {
       const entry = f.query({ grain, day: dayKey(f.clock) }).windows[0];
       assert.equal(segments(entry.points).length, 1, 'elapsed time or a compatible observer handoff alone cannot cut the visible line');
       const bucket = entry.distribution.buckets.find(b => grain === 'day' ? b.key === dayKey(f.clock) : new Date(b.at).getHours() === 10);
-      assert.equal(bucket.value, flat ? 0 : 4, 'only fully observed increments count');
+      assert.equal(bucket.value, flat ? 0 : 7, 'same-bucket compatible endpoints establish the net change');
       assert.equal(bucket.uncertain, true);
-      assert.equal(entry.distribution.unallocated, flat ? 0 : 3, 'the gap delta remains unallocated');
+      assert.equal(entry.distribution.unallocated, 0, 'the same-bucket gap delta is attributed');
       assert.equal(entry.distribution.resets, 0);
     }
   });
@@ -1712,12 +1729,12 @@ test('connecting observed trend endpoints does not extrapolate before or after t
   assert.equal(segments(points)[0][0].at, at(2, 10));
   assert.equal(segments(points)[0].at(-1).at, at(2, 10, 45));
   const result = distribution(points, { now: at(2, 12) });
-  assert.equal(result.buckets.at(-1).value, null);
-  assert.equal(result.unallocated, 5);
+  assert.equal(result.buckets.at(-1).value, 5);
+  assert.equal(result.unallocated, 0);
 });
 
 for (const unit of ['percent', 'balance', 'spend']) {
-  test(`every provider reconnects compatible ${unit} readings after a failed refresh without changing usage accounting`, async t => {
+  test(`every provider attributes compatible same-day ${unit} changes after a failed refresh`, async t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-recovered-curve-'));
     const file = path.join(directory, 'history.sqlite');
     const options = { now: () => at(2, 12) };
@@ -1742,18 +1759,18 @@ for (const unit of ['percent', 'balance', 'spend']) {
     for (const row of returned) {
       const entry = (await store.query('local', row)).windows[0];
       assert.equal(segments(entry.points).length, 1, row.provider);
-      assert.equal(entry.distribution.buckets.at(-1).value, row.provider === 'codex' ? 0 : 2, row.provider);
-      assert.equal(entry.distribution.unallocated, row.provider === 'codex' ? 0 : 3, row.provider);
+      assert.equal(entry.distribution.buckets.at(-1).value, row.provider === 'codex' ? 0 : 5, row.provider);
+      assert.equal(entry.distribution.unallocated, 0, row.provider);
       assert.equal(entry.distribution.buckets.at(-1).uncertain, true, row.provider);
     }
   });
 }
 
 for (const jitter of [-1001, -1000, 1000, 1001]) {
-  test(`trend-only reset timestamp tolerance handles ${jitter} milliseconds without relaxing accounting`, () => {
+  test(`trend and accounting share the reset timestamp tolerance for ${jitter} milliseconds`, () => {
     const points = [point(at(2, 10), 100, at(8, 0)), point(at(2, 10, 5), 100, at(8, 0) + jitter)];
     assert.equal(segments(points).length, Math.abs(jitter) <= 1000 ? 1 : 2);
-    assert.equal(require('../../src/electron/renderer/limits/historyModel').sameCycle(...points), false, 'accounting keeps its existing strict boundary');
+    assert.equal(require('../../src/electron/renderer/limits/historyModel').sameCycle(...points), Math.abs(jitter) <= 1000, 'accounting shares the same rounding boundary');
   });
 }
 
@@ -1781,4 +1798,72 @@ test('a superseded quota refresh keeps the visible history card and its frame un
   f.pending = Promise.resolve(null);
   await f.controller.refresh();
   assert.equal(f.window.visible, false, 'a genuinely removed account still closes its history');
+});
+
+for (const failed of [false, true]) test(`same-day compatible net changes belong to today despite a sampling interruption (failed: ${failed})`, t => {
+  const f = databaseFixture(t);
+  f.record([action(at(2, 10), 20), action(at(2, 10, 5), 29)]);
+  if (failed) f.record([{ account: accountA, source: 'a', failed: true }]);
+  f.record([action(at(2, 10, 50), 30)]);
+  f.reopen();
+  const entry = f.query().windows[0];
+  assert.equal(entry.distribution.buckets.at(-1).value, 10);
+  assert.equal(entry.distribution.unallocated, 0);
+  assert.equal(entry.distribution.buckets.at(-1).uncertain, true);
+  assert.equal(segments(entry.points).length, 1);
+});
+
+test('same-day net changes stay in the stored daily summary after detailed retention expires', t => {
+  const f = databaseFixture(t);
+  f.record([action(at(2, 10), 20), action(at(2, 10, 5), 29), action(at(2, 10, 50), 30)]);
+  const originalDay = dayKey(f.clock);
+  assert.equal(f.sql('SELECT value, unallocated FROM daily').at(-1).value, 10);
+  f.clock += 181 * 86400_000;
+  f.reopen();
+  const result = f.query({ grain: 'day', day: originalDay }).windows[0];
+  assert.equal(result.summaryOnly, true);
+  assert.equal(result.distribution.buckets.at(-1).value, 10);
+  assert.equal(result.distribution.unallocated, 0);
+});
+
+for (const drift of [-1000, 1000]) for (const source of ['a', 'b']) test(`reset rounding retains daily/hourly consumption (drift: ${drift}, source: ${source})`, t => {
+  const f = databaseFixture(t);
+  const reset = at(8, 10);
+  f.record([action(at(2, 10), 20, { source: 'a', reset }), action(at(2, 10, 5), 21, { source, reset: reset + drift })]);
+  f.reopen();
+  for (const grain of ['day', 'hour']) {
+    const result = f.query({ grain, day: dayKey(f.clock) }).windows[0].distribution;
+    const bucket = grain === 'day' ? result.buckets.at(-1) : result.buckets.find(b => new Date(b.at).getHours() === 10);
+    assert.equal(bucket.value, 1);
+    assert.equal(result.unallocated, 0);
+    assert.equal(result.resets, 0);
+  }
+});
+
+for (const drift of [-1000, 1000]) test(`rounding cannot count through either crossed reset deadline (drift: ${drift})`, t => {
+  const f = databaseFixture(t);
+  const first = at(2, 10), second = at(2, 10, 5);
+  const reset = second + (drift < 0 ? 1000 : 0);
+  f.record([action(first, 20, { reset }), action(second, 21, { reset: reset + drift })]);
+  assert.equal(f.query().windows[0].distribution.buckets.at(-1).value, null);
+  assert.equal(f.query().windows[0].distribution.resets, 1);
+});
+
+test('daily summaries keep the collection date when the device changes timezone', t => {
+  const previousTimezone = process.env.TZ;
+  try {
+    process.env.TZ = 'Asia/Hong_Kong';
+    const start = Date.parse('2026-11-02T00:10:00+08:00');
+    const f = databaseFixture(t, start + 3600_000);
+    f.record([action(start, 20), action(start + 300000, 25)]);
+    process.env.TZ = 'America/Los_Angeles';
+    f.reopen();
+    f.clock = Date.parse('2026-11-02T12:00:00-08:00');
+    const result = f.query({ grain: 'day', day: '2026-11-02' }).windows[0].distribution;
+    assert.equal(result.buckets.find(b => b.key === '2026-11-02').value, 5);
+    assert.equal(result.buckets.find(b => b.key === '2026-11-01').value, null);
+  } finally {
+    if (previousTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  }
 });

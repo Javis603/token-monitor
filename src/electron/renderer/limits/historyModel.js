@@ -6,7 +6,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitsHistoryModel = api;
 })(typeof window !== 'undefined' ? window : globalThis, function createApi(windowLabels) {
-  function sameCycle(a, b, resetToleranceMs = 0) {
+  function sameCycle(a, b, resetToleranceMs = 1000) {
     if (a.unit !== b.unit || a.balance !== b.balance) return false;
     if ((a.basis || '') !== (b.basis || '')) return false;
     if (a.reset !== b.reset && !(resetToleranceMs > 0 && Number.isFinite(a.reset) && Number.isFinite(b.reset)
@@ -92,8 +92,11 @@
       const affected = buckets.filter(b => b.at <= p.at && b.end >= previous.at);
       if (!affected.length) continue;
       const allowanceRecovered = p.allowanceMissingBefore === true && sameCycle(previous, p);
+      // An ordinary sampling gap still establishes a net change between
+      // compatible endpoints. Only a confirmed interruption blocks attribution.
+      const comparable = sameCycle(previous, p) && (previous.uncertainUntil == null || allowanceRecovered);
       if (allowanceRecovered) affected.forEach(b => { b.uncertain = true; });
-      if (p.uncertainBefore && !allowanceRecovered) {
+      if (p.uncertainBefore && !comparable) {
         affected.forEach(b => { b.uncertain = true; });
         if (sameCycle(previous, p)) unallocated += Math.max(0, p.balance ? previous.value - p.value : p.value - previous.value);
         continue;
@@ -108,11 +111,12 @@
         continue;
       }
       const delta = Math.max(0, p.balance ? previous.value - p.value : p.value - previous.value);
-      // Matching endpoints around a missing allowance establish the net change
-      // inside one bucket. Changes crossing hours/days still cannot be apportioned.
+      // Comparable endpoints establish net change inside one bucket even when
+      // sampling was interrupted. Cross-bucket changes cannot be apportioned.
       const gap = p.breakBefore === true || !coveredInterval(previous, p)
         && p.at - previous.at > Math.max(previous.interval, p.interval) * 2.5;
-      if (gap && !allowanceRecovered || bucketKey(previous.at, grain) !== bucketKey(p.at, grain)) {
+      if (gap) affected.forEach(b => { b.uncertain = true; });
+      if (gap && !comparable || bucketKey(previous.at, grain) !== bucketKey(p.at, grain)) {
         unallocated += delta;
         // A timely unchanged reading over a bucket boundary adds no unknown
         // quantity, but cannot establish a measured interval inside a bucket.
@@ -129,8 +133,8 @@
       // Failed attempts only mark breakBefore. A conflict or confirmed missing
       // quota also records uncertainUntil on the preceding observation.
       const confirmedBreak = point.breakBefore === true && previous?.uncertainUntil != null && !point.allowanceMissingBefore;
-      // Countdown-derived deadlines can differ by one second. This tolerance
-      // and reconnecting failed attempts affect only drawing, never accounting.
+      // Drawing and accounting share the same one-second countdown rounding
+      // tolerance, while either crossed reset deadline still separates cycles.
       if (!previous || !sameCycle(previous, point, 1000) || confirmedBreak) result.push([point]);
       else segment.push(point);
     }
