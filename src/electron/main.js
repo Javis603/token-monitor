@@ -779,6 +779,7 @@ function defaultSettings() {
     maskLimitAccountEmails: false,
     limitsHistoryOpenMode: 'hover',
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
+    claudeCliFallbackEnabled: true,
     // The key OpenCode stores for itself needs no setup, so tracking it is the
     // default. This turns that off for a machine that is signed in to an account
     // the user does not want reported.
@@ -2745,6 +2746,7 @@ function readSettings() {
     merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
     merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.claudeCliFallbackEnabled = parseBoolean(merged.claudeCliFallbackEnabled, true);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
     merged.limitsHistoryOpenMode = ['hover', 'click', 'off'].includes(merged.limitsHistoryOpenMode) ? merged.limitsHistoryOpenMode : 'hover';
@@ -3516,13 +3518,16 @@ function limitInvalidationKey(scope) {
 }
 
 function rememberPendingLimitInvalidation(scope, reason, options = {}) {
-  const clear = options.clear === true;
   const refresh = options.refresh !== false;
   const normalized = { ...scope, provider: String(scope?.provider || '').trim().toLowerCase() };
   const key = limitInvalidationKey(normalized);
+  let clear = options.clear === true || pendingLimitInvalidations.get(key)?.clear === true;
   if (key.endsWith(':*')) {
     for (const pendingKey of pendingLimitInvalidations.keys()) {
-      if (pendingKey.startsWith(`${normalized.provider}:`)) pendingLimitInvalidations.delete(pendingKey);
+      if (pendingKey.startsWith(`${normalized.provider}:`)) {
+        clear = clear || pendingLimitInvalidations.get(pendingKey).clear;
+        pendingLimitInvalidations.delete(pendingKey);
+      }
     }
   }
   pendingLimitInvalidations.set(key, { scope: normalized, reason, clear, refresh });
@@ -8440,6 +8445,7 @@ app.whenReady().then(() => {
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       limitsHistoryOpenMode: ['hover', 'click', 'off'].includes(patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) ? (patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) : 'hover',
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
+      claudeCliFallbackEnabled: parseBoolean(patch.claudeCliFallbackEnabled ?? settings.claudeCliFallbackEnabled, true),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),
       showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),

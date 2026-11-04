@@ -148,7 +148,7 @@ test('the renderer receives no credential values except the two hub secrets', ()
 
 test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refresh scopes)', () => {
   assert.deepEqual(LIMIT_PROVIDER_SETTING_KEYS, {
-    claude: ['claudeWebCookie', 'claudeWebOrganizationId'],
+    claude: ['claudeWebCookie', 'claudeWebOrganizationId', 'claudeCliFallbackEnabled'],
     codex: ['codexManagedAccounts'],
     opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
     cursor: ['cursorDisabledAccountIds'],
