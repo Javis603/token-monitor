@@ -447,7 +447,7 @@ test('retention trims a long compressed handoff run without moving its uncertain
   assert.equal(f.sql('SELECT COUNT(*) AS n FROM history_origins')[0].n, 0);
 });
 
-test('a failure without windows interrupts a multi-hour flat run after restarting SQLite', t => {
+test('a failed refresh interrupts accounting but reconnects a compatible flat trend after restarting SQLite', t => {
   const fixture = databaseFixture(t);
   const actions = [];
   for (let time = at(2, 8); time <= at(2, 10, 5); time += 300_000) actions.push(action(time));
@@ -455,7 +455,7 @@ test('a failure without windows interrupts a multi-hour flat run after restartin
   fixture.reopen();
   fixture.record([action(at(2, 10, 10)), action(at(2, 10, 15))]);
   assert.equal(fixture.sql('SELECT id FROM runs').length, 2);
-  assert.equal(segments(fixture.query().windows[0].points).length, 2);
+  assert.equal(segments(fixture.query().windows[0].points).length, 1);
   assert.equal(fixture.query().windows[0].distribution.buckets.at(-1).uncertain, true);
 });
 
@@ -575,7 +575,7 @@ test('worker SQLite persists private hashed identities, deduplicates cached read
   await store.record('local', { providers: [provider(at(2, 10, 10))] });
   const data = await store.query('local', row);
   assert.equal(data.persistent, true);
-  assert.equal(segments(data.windows[0].points).length, 2);
+  assert.equal(segments(data.windows[0].points).length, 1);
   assert.equal(data.windows[0].distribution.buckets.at(-1).observations, 2);
   assert.equal((await store.query('other', row)).windows[0].points.length, 0);
   assert.equal((await store.query('local', { ...row, accountKey: 'other' })).windows[0].points.length, 0);
@@ -1713,4 +1713,52 @@ test('connecting observed trend endpoints does not extrapolate before or after t
   const result = distribution(points, { now: at(2, 12) });
   assert.equal(result.buckets.at(-1).value, null);
   assert.equal(result.unallocated, 5);
+});
+
+for (const unit of ['percent', 'balance', 'spend']) {
+  test(`every provider reconnects compatible ${unit} readings after a failed refresh without changing usage accounting`, async t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-recovered-curve-'));
+    const file = path.join(directory, 'history.sqlite');
+    const options = { now: () => at(2, 12) };
+    let store = createLimitsHistoryStore(file, options);
+    t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+    const reading = (id, minute, value, source) => {
+      const used = id === 'codex' ? 100 : value;
+      let row = unit === 'percent' ? { ...provider(at(2, 10, minute), used), provider: id }
+        : unit === 'balance' ? fundedProvider(at(2, 10, minute), 100 - used, 100, id)
+          : { ...provider(at(2, 10, minute), used), provider: id,
+            windows: [{ kind: 'billing', metric: 'spend', used, currency: 'CNY', showMeter: false }] };
+      if (unit === 'balance') row.windows[0].showMeter = false;
+      return { ...normalizeLimitProvider(row), sourceDeviceId: source };
+    };
+    for (const [minute, used] of [[0, 20], [5, 22]]) {
+      await store.record('local', { providers: LIMIT_PROVIDER_IDS.map(id => reading(id, minute, used, 'a')) });
+    }
+    await store.record('local', { providers: LIMIT_PROVIDER_IDS.map(id => ({ ...reading(id, 10, 22, 'a'), status: 'error', windows: [] })) });
+    await store.close(); store = createLimitsHistoryStore(file, options);
+    const returned = LIMIT_PROVIDER_IDS.map(id => reading(id, 15, 25, 'b'));
+    await store.record('local', { providers: returned });
+    for (const row of returned) {
+      const entry = (await store.query('local', row)).windows[0];
+      assert.equal(segments(entry.points).length, 1, row.provider);
+      assert.equal(entry.distribution.buckets.at(-1).value, row.provider === 'codex' ? 0 : 2, row.provider);
+      assert.equal(entry.distribution.unallocated, row.provider === 'codex' ? 0 : 3, row.provider);
+      assert.equal(entry.distribution.buckets.at(-1).uncertain, true, row.provider);
+    }
+  });
+}
+
+for (const jitter of [-1001, -1000, 1000, 1001]) {
+  test(`trend-only reset timestamp tolerance handles ${jitter} milliseconds without relaxing accounting`, () => {
+    const points = [point(at(2, 10), 100, at(8, 0)), point(at(2, 10, 5), 100, at(8, 0) + jitter)];
+    assert.equal(segments(points).length, Math.abs(jitter) <= 1000 ? 1 : 2);
+    assert.equal(require('../../src/electron/renderer/limits/historyModel').sameCycle(...points), false, 'accounting keeps its existing strict boundary');
+  });
+}
+
+test('trend deadline rounding never joins a crossed reset or an unknown deadline', () => {
+  const previous = point(at(2, 10), 20, at(2, 10, 5));
+  assert.equal(segments([previous, point(at(2, 10, 5), 20, at(2, 10, 5) + 1000)]).length, 2);
+  assert.equal(segments([previous, point(at(2, 10, 1), 20, null)]).length, 2);
+  assert.equal(segments([point(at(2, 10), 20, at(2, 10, 5) + 1000), point(at(2, 10, 5), 20, at(2, 10, 5))]).length, 2);
 });

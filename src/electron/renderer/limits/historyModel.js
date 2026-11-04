@@ -6,11 +6,13 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitsHistoryModel = api;
 })(typeof window !== 'undefined' ? window : globalThis, function createApi(windowLabels) {
-  function sameCycle(a, b) {
+  function sameCycle(a, b, resetToleranceMs = 0) {
     if (a.unit !== b.unit || a.balance !== b.balance) return false;
     if ((a.basis || '') !== (b.basis || '')) return false;
-    if (a.reset !== b.reset) return false;
+    if (a.reset !== b.reset && !(resetToleranceMs > 0 && Number.isFinite(a.reset) && Number.isFinite(b.reset)
+      && Math.abs(a.reset - b.reset) <= resetToleranceMs)) return false;
     if (a.reset !== null && a.reset > a.at && a.reset <= b.at) return false;
+    if (b.reset !== null && b.reset > a.at && b.reset <= b.at) return false;
     return b.balance ? b.value <= a.value : b.value >= a.value;
   }
 
@@ -124,11 +126,12 @@
     const result = [];
     for (const point of points) {
       const segment = result.at(-1), previous = segment?.at(-1);
-      // Sampling gaps and uncertain handoffs affect accounting, not the line
-      // between compatible observed endpoints. Explicit failures/conflicts still
-      // break the curve; distribution separately retains unknown coverage.
-      if (!previous || !sameCycle(previous, point)
-        || point.breakBefore === true && !point.allowanceMissingBefore) result.push([point]);
+      // Failed attempts only mark breakBefore. A conflict or confirmed missing
+      // quota also records uncertainUntil on the preceding observation.
+      const confirmedBreak = point.breakBefore === true && previous?.uncertainUntil != null && !point.allowanceMissingBefore;
+      // Countdown-derived deadlines can differ by one second. This tolerance
+      // and reconnecting failed attempts affect only drawing, never accounting.
+      if (!previous || !sameCycle(previous, point, 1000) || confirmedBreak) result.push([point]);
       else segment.push(point);
     }
     return result;
