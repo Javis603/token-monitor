@@ -457,6 +457,7 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
     document,
     t,
     settings: appearance,
+    tooltipTop: () => surface === 'bubble' ? (state.payload?.shape?.contentBounds?.y ?? 0) / (state.payload?.zoom || 1) : 0,
     currentLocale: () => state.locale,
     presentation: limitPresentationApi,
     // Which device a row's reading came from — "· imac-m1" beside the provider's
@@ -552,6 +553,26 @@ function updateShape(payload) {
   if (shapeLayer.dataset.key === key) return;
   shapeLayer.dataset.key = key;
   shapeLayer.replaceChildren();
+  if (surface === 'bubble') {
+    // The whole reading travels with the painted frame. The clip is offset
+    // into the same local space, so content cannot vanish between distant cells.
+    contentLayer.style.transform = shape?.contentBounds ? `translateY(${shape.contentBounds.y / (payload.zoom || 1)}px)` : '';
+    contentLayer.style.height = '';
+    contentLayer.style.overflow = '';
+    contentLayer.style.clipPath = shape?.contentBounds ? 'url(#edge-dock-card-clip)' : '';
+    if (shape?.contentBounds) {
+      const defs = document.createElementNS(SVG_NS, 'defs');
+      const clip = document.createElementNS(SVG_NS, 'clipPath');
+      clip.setAttribute('id', 'edge-dock-card-clip');
+      clip.setAttribute('clipPathUnits', 'userSpaceOnUse');
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', shape.d);
+      path.setAttribute('transform', `translate(0 ${-shape.contentBounds.y / (payload.zoom || 1)}) scale(${1 / (payload.zoom || 1)})`);
+      clip.append(path);
+      defs.append(clip);
+      shapeLayer.append(defs);
+    }
+  }
   if (!shape?.d) return;
   shapeLayer.setAttribute('viewBox', `0 0 ${shape.width} ${shape.height}`);
   shapeLayer.setAttribute('preserveAspectRatio', 'none');
@@ -666,13 +687,13 @@ if (surface === 'peek') root.addEventListener('click', () => {
   if (state.payload?.peekMode !== 'refresh') bridge.click(null);
 });
 
-// On macOS the handle's window passes the pointer through with its moves still
+// On macOS the handle and floating rail pass the pointer through with moves still
 // forwarded here, so reporting them lets the main process take the pointer as
 // it reaches the handle rather than at its next cursor poll. The report carries
 // no position: the main process reads the cursor itself.
-if (surface === 'peek') {
+if (surface === 'peek' || surface === 'rail' || surface === 'bubble') {
   const reportPointer = () => {
-    if (state.payload?.peekMode !== 'refresh') bridge.pointer();
+    if (surface !== 'peek' ? state.payload?.platform === 'darwin' : state.payload?.peekMode !== 'refresh') bridge.pointer();
   };
   document.addEventListener('mousemove', reportPointer);
   document.documentElement.addEventListener('mouseleave', reportPointer);
@@ -812,7 +833,14 @@ function providerCellNode(cell) {
   // answers "what does the primary window say" (0% when a quota is spent).
   // Splitting the two lets a tight secondary window warn without turning the
   // headline into whichever window is lowest this minute.
-  value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
+  // A cell printing a balance has no quota percentage behind it, and `unknown`
+  // would grey the figure out as if nothing had answered. The money is the answer,
+  // so it keeps the normal ink; a balance that does carry a reading — OpenRouter's
+  // derived percentage — is still coloured by how tight that reading is.
+  const severitySource = cell.severityPercent ?? cell.remainingPercent;
+  value.dataset.severity = hasCreditsAmount && (severitySource === null || severitySource === undefined)
+    ? 'ok'
+    : displaySeverity(severitySource);
   node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider), waitingRingStart(cell.id, waiting > 0)), value);
   // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
@@ -1180,6 +1208,7 @@ function animateRingResets(snapshot, scope = railNode) {
 // the same settle the widget's limits panel gets, for both the rail's own
 // motions and the card animator's.
 function settleDockMotions() {
+  clearCardSwitch();
   for (const animation of root.getAnimations({ subtree: true })) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -1297,26 +1326,82 @@ function renderRail(payload) {
 }
 
 let gesture = null;
+let nextGestureId = 0;
+
+function startDragFrames() {
+  if (state.payload?.platform !== 'win32') return;
+  // Windows can round a main-process 16ms timeout up to two system ticks
+  // (~31ms). Follow the display's paint clock while dragging instead; the
+  // main process still reads the native cursor and owns release/cancellation.
+  const id = gesture.id;
+  const frame = () => {
+    if (gesture?.id !== id || !gesture.dragging) return;
+    bridge.dragFrame(id);
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+let cardMotionId = null;
+let cardFrameLoop = false;
+
+function pumpCardFrames() {
+  if (cardMotionId === null) {
+    cardFrameLoop = false;
+    return;
+  }
+  bridge.cardFrame(cardMotionId);
+  if (cardMotionId !== null) requestAnimationFrame(pumpCardFrames);
+}
+
+bridge.onCardMotion?.(({ motionId, active }) => {
+  if (state.payload?.platform !== 'win32') return;
+  if (!active) {
+    if (cardMotionId === motionId) cardMotionId = null;
+    return;
+  }
+  cardMotionId = motionId;
+  if (!cardFrameLoop) {
+    cardFrameLoop = true;
+    requestAnimationFrame(pumpCardFrames);
+  }
+});
+
+bridge.onDragEnded?.(({ gestureId }) => {
+  if (gesture?.id !== gestureId) return;
+  gesture = null;
+  railNode?.classList.remove('is-dragging');
+});
 
 function bindRailGestures(rail) {
   rail.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || gesture) return;
     gesture = {
+      id: ++nextGestureId,
       pointerId: event.pointerId,
       startX: event.screenX,
       startY: event.screenY,
       grabOffsetY: event.clientY,
+      grabOffsetX: event.clientX,
       cellIndex: indexFromTarget(event.target),
       dragging: false
     };
     rail.setPointerCapture(event.pointerId);
   });
   rail.addEventListener('pointermove', (event) => {
-    if (!gesture || gesture.pointerId !== event.pointerId || gesture.dragging) return;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    // A later move can prove release even if capture was lost and the native
+    // button reader is unavailable. Capture loss alone still proves nothing.
+    if (event.buttons === 0) {
+      finish(event);
+      return;
+    }
+    if (gesture.dragging) return;
     if (Math.hypot(event.screenX - gesture.startX, event.screenY - gesture.startY) < DRAG_THRESHOLD_PX) return;
     gesture.dragging = true;
     rail.classList.add('is-dragging');
-    bridge.dragStart(gesture.grabOffsetY);
+    bridge.dragStart(gesture.grabOffsetY, gesture.grabOffsetX, gesture.id);
+    startDragFrames();
   });
   const finish = (event) => {
     if (!gesture || gesture.pointerId !== event.pointerId) return;
@@ -1327,8 +1412,15 @@ function bindRailGestures(rail) {
     else if (event.type === 'pointerup') bridge.click(ended.cellIndex);
   };
   rail.addEventListener('pointerup', finish);
-  rail.addEventListener('pointercancel', finish);
-  rail.addEventListener('lostpointercapture', finish);
+  // Cancellation and capture loss do not prove physical release. Main continues
+  // while native tracking works, or restores saved placement when it cannot.
+  const captureLost = (event) => {
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (gesture.dragging) bridge.dragCaptureLost?.(gesture.id);
+    else finish(event);
+  };
+  rail.addEventListener('pointercancel', captureLost);
+  rail.addEventListener('lostpointercapture', captureLost);
 }
 
 function indexFromTarget(target) {
@@ -1830,9 +1922,9 @@ function sessionsCard(cell, card, head) {
 }
 
 // Cards are built in a hidden staging layer and measured there. The visible
-// card is only replaced once the main process reports that the window has been
-// sized and shaped for exactly that card, so a new card never paints into a
-// window still at the previous card's size (which read as a flash).
+// card is only replaced once the main process has accepted its measured size.
+// While switching, the content layer follows the painted frame inside the
+// fixed native canvas; text remains unscaled under the moving clip.
 //
 // Both scroll containers, because which one scrolls depends on the card. Provider,
 // grouped Sessions, and period-breakdown cards scroll `.edge-dock-accounts`; the
@@ -1846,6 +1938,68 @@ const stagingLayer = document.createElement('div');
 stagingLayer.className = 'edge-dock-staging';
 if (surface === 'bubble') root.append(stagingLayer);
 
+let cardSwitchMotion = null;
+
+function clearCardSwitch() {
+  const motion = cardSwitchMotion;
+  cardSwitchMotion = null;
+  if (!motion) return;
+  motion.incoming.cancel();
+  motion.outgoing.cancel();
+  motion.ghost.remove();
+}
+
+function captureCardSwitch(previous, sameCard) {
+  if (surface !== 'bubble' || !previous || prefersReducedMotion() || document.visibilityState === 'hidden') {
+    clearCardSwitch();
+    return null;
+  }
+  if (sameCard) {
+    if (!cardSwitchMotion) return null;
+    // A live reading can rebuild this card halfway through the switch. Carry
+    // the existing timeline onto its replacement instead of snapping/restarting.
+    cardSwitchMotion.elapsed = cardSwitchMotion.incoming.currentTime;
+    cardSwitchMotion.incoming.cancel();
+    return cardSwitchMotion;
+  }
+  if (cardSwitchMotion) {
+    // A rapid selection takes over immediately. Restarting from the partially
+    // transparent incoming card would discard the still-visible outgoing one.
+    clearCardSwitch();
+    return null;
+  }
+  const ghost = previous.cloneNode(true);
+  const opacity = getComputedStyle(previous).opacity;
+  const scrollTops = [...previous.querySelectorAll(CARD_SCROLL_SELECTOR)].map(list => list.scrollTop);
+  clearCardSwitch();
+  ghost.inert = true;
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.removeAttribute('id');
+  for (const node of ghost.querySelectorAll('[id]')) node.removeAttribute('id');
+  Object.assign(ghost.style, { position: 'absolute', top: '0', left: '0', pointerEvents: 'none' });
+  return { ghost, opacity, scrollTops, elapsed: 0 };
+}
+
+function animateCardSwitch(card, motion) {
+  if (!motion) return;
+  // Both readings travel together with the painted frame.
+  // Crossfade the content without scaling its text.
+  contentLayer.append(motion.ghost);
+  [...motion.ghost.querySelectorAll(CARD_SCROLL_SELECTOR)].forEach((list, index) => {
+    list.scrollTop = motion.scrollTops[index];
+  });
+  const timing = { duration: 160, easing: 'ease-in-out', fill: 'both' };
+  motion.incoming = card.animate([{ opacity: 0 }, { opacity: 1 }], timing);
+  motion.incoming.currentTime = motion.elapsed;
+  if (!motion.outgoing) {
+    motion.outgoing = motion.ghost.animate([{ opacity: motion.opacity }, { opacity: 0 }], timing);
+    motion.outgoing.finished.then(() => {
+      if (cardSwitchMotion === motion) clearCardSwitch();
+    }, () => {});
+  }
+  cardSwitchMotion = motion;
+}
+
 function commitCard(card, cellId) {
   const previous = contentLayer.querySelector('.edge-dock-card');
   const sameCard = previous?.dataset.cellId === cellId
@@ -1854,7 +2008,8 @@ function commitCard(card, cellId) {
     .filter(list => !list.closest('.edge-dock-session-family'));
   const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
   const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
-  const resetSnapshot = cardResetAnimator.capture(contentLayer);
+  const switchMotion = captureCardSwitch(previous, sameCard);
+  const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
   contentLayer.replaceChildren(card);
   overflowText.refresh();
   if (focusedGroup) {
@@ -1866,6 +2021,7 @@ function commitCard(card, cellId) {
   // Measure reading targets only after mounting and restoring their scroll position.
   if (sameCard) overflowText.preserveReading(previous, card);
   cardResetAnimator.animate(card, resetSnapshot);
+  animateCardSwitch(card, switchMotion);
 }
 
 // The period card is a summary even when the period contains dozens of tools or
@@ -1912,9 +2068,12 @@ function fitCardTotal(card, scale = 1) {
 }
 
 function renderBubble(payload) {
+  const contentTransform = '';
   root.dataset.side = payload.side;
+  root.style.setProperty('--edge-dock-card-width', `${payload.cardWidth || 280}px`);
   const cell = payload.cell;
   if (!cell) {
+    clearCardSwitch();
     if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
     observedPluginCard = null;
     for (const body of root.querySelectorAll('.edge-dock-plugin-card')) pluginHost?.unmount(body);
@@ -1923,8 +2082,9 @@ function renderBubble(payload) {
     stagingLayer.replaceChildren();
     return;
   }
-  const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin');
+  const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin:not([aria-hidden="true"])');
   if (retained && retained.dataset.pluginRef === cell.ref && retained.dataset.cellId === cell.id) {
+    retained.style.transform = contentTransform;
     const view = pluginHost?.state('edgeDock', cell.ref);
     const caption = retained.querySelector('.edge-dock-stat-caption'); if (caption) caption.textContent = view?.title || cell.ref;
     retained.style.maxHeight = payload.maxCardHeight ? `${payload.maxCardHeight}px` : '';
@@ -1934,6 +2094,7 @@ function renderBubble(payload) {
   }
   const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
+  card.style.transform = contentTransform;
   pluginContent?.retain(cell.kind === 'plugin' ? [] : [`edgeDock.${cell.kind}.content`]);
   if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {
     const native = document.createElement('div'); native.className = 'plugin-native-content';
@@ -1968,7 +2129,10 @@ const bubbleSizeObserver = surface === 'bubble' && window.ResizeObserver ? new R
   }
 }) : null;
 bubbleSizeObserver?.observe(root);
-window.addEventListener('pagehide', () => bubbleSizeObserver?.disconnect(), { once: true });
+window.addEventListener('pagehide', () => {
+  clearCardSwitch();
+  bubbleSizeObserver?.disconnect();
+}, { once: true });
 
 const notchRenderer = surface === 'notch'
   ? window.TokenMonitorNotchRenderer.createNotchRenderer({
@@ -2009,6 +2173,16 @@ function deferBubbleRender() {
 }
 
 bridge.onRender(render);
+bridge.onShapeFrame?.(({ shape, side }) => {
+  if ((surface !== 'rail' && surface !== 'bubble') || !state.payload) return;
+  // Geometry can arrive before the next reading. A timer repaint in between
+  // must keep the current reading's destination until its full payload arrives.
+  const nextShape = surface === 'bubble'
+    ? { ...shape, contentTarget: state.payload.shape?.contentTarget } : shape;
+  state.payload = { ...state.payload, shape: nextShape, side };
+  root.dataset.side = side;
+  updateShape(state.payload);
+});
 // A repaint that no push triggers, because two readings here move on a clock
 // rather than on data: a session stops being running when its window expires
 // (sessionLive.RUNNING_WINDOW_MS) even with no new stats at all, and reset

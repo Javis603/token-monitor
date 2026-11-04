@@ -57,7 +57,7 @@ test('session detail renders its heading before loading, errors and empty result
       }
     };
   }
-  const els = { breakdown: element(), sessionDetail: element(), sessionDetailHead: element() };
+  const els = { sessionToolFilter: element(), breakdown: element(), sessionDetail: element(), sessionDetailHead: element() };
   const state = { detailSort: 'tokens', openSession: null };
   const start = rendererSource.indexOf('function renderSessionDetail(');
   const end = rendererSource.indexOf('function sessionGroupRunNode(', start);
@@ -829,7 +829,7 @@ test('live detail anchors the visible turn across growth and exchange reordering
     return exchange;
   }
   const context = {
-    els: { breakdown: { classList: container.classList }, sessionDetail: container,
+    els: { sessionToolFilter: {classList: container.classList}, breakdown: { classList: container.classList }, sessionDetail: container,
       sessionDetailHead: { classList: container.classList, replaceChildren() {}, append() {} } },
     state: { detailSort: 'time', openSession: {} },
     document: { createElement: () => ({ addEventListener() {} }) },

@@ -6,7 +6,8 @@ function settingsLimitInvalidationPlan(runtimeChange = {}, ensureProvider = '') 
     scopes.push({ provider: ensureProvider });
   }
   return scopes.map((scope) => ({
-    scope,
+    // Muse's only editable credential belongs to Web; CLI owns its login.
+    scope: scope.provider === 'muse' ? { ...scope, source: 'web' } : scope,
     reason: 'settings-change',
     options: { clear: true }
   }));

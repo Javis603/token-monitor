@@ -73,6 +73,8 @@ Codex can persist `token_count` after local tools finish. Its timestamp is there
 
 Keep rate timing independent from the existing session/activity span, including through incremental state serialization and cache migrations. The UI describes an estimated output rate, including first-output waiting, rather than pure model decoding. The vendored binary determines which timing behavior is available; app-side support alone does not update the scanner.
 
+Explicitly empty assistant completions without reasoning do not contribute speed samples, while their tokens and cost remain recorded. Short nonempty replies, reasoning and tool calls remain eligible even when the estimated rate is low; there is no minimum-rate cutoff.
+
 ## Limits sources
 
 The live account normally reads the ChatGPT/Codex backend with the current `auth.json`. The configured `chatgpt_base_url` selects the matching backend path family. The app-server RPC path is a fallback, not an interchangeable authority.

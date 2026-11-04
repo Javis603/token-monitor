@@ -13,6 +13,8 @@ const subscriptionApi = require('../../src/shared/subscriptionDisplay');
 const limitProviderPresentationApi = require('../../src/electron/renderer/limits/providerPresentation');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchClineLimits, CLINE_API_BASE, USAGE_LIMITS_PATH, USERS_ME_PATH } = require('../../src/shared/providers/cline/limits');
+test.beforeEach(t => t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-12T00:00:00Z') }));
+
 const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 
 function functionSource(name) {
@@ -37,7 +39,7 @@ function harness(live, saved, managed = []) {
   const state = { settings: { subscriptions: saved, workbuddyManagedAccounts: managed }, stats: { limits: { providers: [] } }, subscriptionFormBase: {} };
   let written;
   const context = vm.createContext({
-    accountIdentityApi, subscriptionApi, limitProviderPresentationApi, state, els,
+    Date, accountIdentityApi, subscriptionApi, limitProviderPresentationApi, state, els,
     currencyApi: { CURRENCY_CODES: ['USD'], normalizeCurrency: () => 'USD' }, localDeviceLimitsProviders: () => live,
     subscriptionText: { providerLabel: (id) => id }, document: { createElement: () => ({}) }, t: (key) => key,
     setSubscriptionFormKind() {}, setSubscriptionFormMode() {}, syncSubscriptionDateBounds() {}, positionSubscriptionEditor() {}, openSubscriptionEditor() {}, setSubscriptionError() {},

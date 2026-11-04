@@ -20,6 +20,7 @@ const TITLE_FUNCTIONS = [
   'limitAccountTitle',
   'limitAccountEmailsMasked',
   'limitAccountDefaultTitle',
+  'museSourceTitle',
   'codexAccountTitle',
   'opencodeAccountTitle',
   'namedApiAccountTitle',

@@ -115,6 +115,8 @@ function setup(t) {
   const requireService = createRequire(file);
   vm.runInNewContext(fs.readFileSync(file, 'utf8'), { module, exports: module.exports,
     require: name => name === './liveRate' ? { createLiveRateResource: options => createLiveRateResource({ ...options, setTimer: time.setTimer, clearTimer: time.clearTimer }) }
+      // These tests measure rate state and identity work, not CPU budgets.
+      : name === 'node:perf_hooks' ? { performance: { now: () => 0 } }
       : name === 'node:crypto' ? { ...crypto, createHmac(...args) { hmacCount++; return crypto.createHmac(...args); } } : requireService(name),
     Buffer, AbortController, setTimeout: time.setTimer, clearTimeout: time.clearTimer });
   const service = module.exports.createBusinessDataService({ now: time.now });
@@ -333,6 +335,7 @@ test('publication resolves device identities once per plugin instead of once per
   assert.ok(hmacs.count() <= 96, `64 devices and 16 scopes should not multiply identity work: ${hmacs.count()} HMACs`);
   time.advance(101);
   const result = await service.query({ version: 1, resource: 'liveRate', filter: { deviceId: devices.rows.at(-1).id } }, auth);
+  assert.equal(result.availability, 'available');
   assert.equal(result.rows[0].speed, 100);
 });
 

@@ -438,12 +438,18 @@ for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and
   ];
   f.panel.render(data);
   const home = f.find('notch-now-meta');
-  assert.ok(home.textContent.includes(`${client === 'codex' ? 'Codex' : 'Claude Code'} · 2 models · high`));
+  const toolName = client === 'codex' ? 'Codex' : 'Claude Code';
+  assert.ok(home.textContent.includes('2 models · high'));
+  assert.equal(home.textContent.includes(toolName), false, 'the heading icon already names the tool');
+  assert.equal(f.find('notch-now').querySelector('.notch-session-heading').querySelector('.sr-only').textContent, `${toolName} `);
   assert.equal(home.querySelector('.session-models').tooltipEntries.length, 2, 'model breakdown retains its tooltip');
   f.panel.selectPage('sessions');
   const page = f.find('notch-page-sessions');
   const active = page.querySelectorAll('.notch-active');
   assert.deepEqual(active.map(node => node.querySelector('.session-reasoning-effort').textContent), ['high', 'xhigh']);
+  assert.equal(active[0].querySelector('.notch-active-meta').textContent.includes(toolName), false);
+  assert.equal(active[0].querySelector('.notch-session-heading').querySelector('.sr-only').textContent, `${toolName} `);
+  assert.ok(active[0].querySelector('.notch-active-meta').textContent.includes('2 models · high'));
   const recent = page.querySelectorAll('.notch-recent');
   assert.deepEqual(recent.map(node => node.querySelector('.session-reasoning-effort')?.textContent), ['medium', 'high', undefined]);
   assert.equal(recent[0].querySelector('.notch-session-context'), null);
@@ -453,6 +459,65 @@ for (const client of ['codex', 'claude']) test(`${client} Notch Home, active and
     assert.equal(setting.getAttribute('tabindex'), undefined);
     assert.ok(setting.getAttribute('aria-label'));
   }
+});
+
+test('Notch replaces session age with weighted cache hit usage from projected sessions', t => {
+  const f = panelFixture(t), data = payload();
+  const now = Date.now();
+  const row = (id, extra = {}) => ({ client: 'codex', sessionId: id, title: id,
+    totalTokens: 100, models: { 'gpt-test': 100 }, reasoningEffort: 'high',
+    startedAt: new Date(now - 109 * 3600000).toISOString(), lastUsedAt: new Date(now).toISOString(),
+    ...extra });
+  const sessions = {
+    'codex:parent': row('parent', { inputTokens: 80, cacheReadTokens: 20 }),
+    'codex:child': row('child', { parentSessionId: 'parent', inputTokens: 100, cacheReadTokens: 800, cacheWriteTokens: 100 })
+  };
+  const render = () => {
+    const snapshot = Object.fromEntries(Object.entries(sessions).map(([key, value]) => [key, { ...value }]));
+    data.cells = buildEdgeDockCells({ periods: { month: { sessions: snapshot } } }, { items: [{ type: 'stat', metric: 'sessions' }] });
+    f.panel.render(data);
+  };
+  render();
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · Cache 75%');
+  f.panel.selectPage('sessions');
+  assert.equal(f.find('notch-active-meta').textContent, 'gpt-test · high · Cache 75%');
+  delete sessions['codex:child'];
+  for (const field of ['inputTokens', 'cacheReadTokens']) delete sessions['codex:parent'][field];
+  render();
+  assert.equal(f.find('notch-active-meta').textContent, 'gpt-test · high');
+  sessions['codex:parent'].inputTokens = 100;
+  sessions['codex:parent'].cacheReported = true;
+  render();
+  assert.equal(f.find('notch-active-meta').textContent, 'gpt-test · high · Cache 0%');
+  sessions['codex:parent'].liveActivity = { state: 'waiting', observedAt: new Date(now).toISOString() };
+  render();
+  assert.equal(f.find('notch-active-meta').querySelector('.notch-session-cache-hit').textContent, '0%');
+  sessions['codex:parent'].turnEnded = true;
+  delete sessions['codex:parent'].liveActivity;
+  f.panel.selectPage('home');
+  render();
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · 0% · just now');
+  sessions['codex:parent'].tokenDataUnavailable = true;
+  render();
+  assert.equal(f.find('notch-now-meta').textContent, 'gpt-test · high · just now');
+});
+
+for (const client of ['codex', 'claude']) test(`resumed ${client} native activity displays the accounting cache rate`, t => {
+  const f = panelFixture(t), data = payload(), now = Date.now();
+  const key = `${client}:resumed`;
+  const session = { client, sessionId: 'resumed', title: 'resumed',
+    lastUsedAt: new Date(now).toISOString(), totalTokens: 100,
+    models: { 'test-model': 100 }, inputTokens: 20, cacheReadTokens: 80 };
+  data.cells = buildEdgeDockCells({
+    periods: { month: { sessions: { [key]: { ...session, archived: true } } } },
+    nativeSessions: { today: { [key]: { client, sessionId: 'resumed',
+      lastUsedAt: session.lastUsedAt, tokenDataUnavailable: true,
+      totalTokens: 0, costUsd: 0, models: {} } } }
+  }, { items: [{ type: 'stat', metric: 'sessions' }] });
+  f.panel.render(data);
+  assert.equal(f.find('notch-now-meta').textContent, 'test-model · Cache 80%');
+  f.panel.selectPage('sessions');
+  assert.equal(f.find('notch-active-meta').textContent, 'test-model · Cache 80%');
 });
 
 test('cache expiry refreshes within the same minute without a new stats push', t => {
@@ -586,7 +651,8 @@ test('quiet sessions use concise age metadata and explicit empty-state copy', t 
   data.cells[1].sessions = [{ key: 'codex:old', client: 'codex', sessionId: 'old', title: 'Previous task',
     models: { 'model-a': 1 }, totalTokens: 1, lastUsedAt: new Date(Date.now() - 660000).toISOString() }];
   f.panel.render(data);
-  assert.match(f.find('notch-now-meta').textContent, /^Codex · model-a · /);
+  assert.match(f.find('notch-now-meta').textContent, /^model-a · /);
+  assert.doesNotMatch(f.find('notch-now-meta').textContent, /Codex/);
   assert.doesNotMatch(f.find('notch-now-meta').textContent, /Last active/);
   assert.equal(f.find('notch-now-caption'), null);
   assert.match(f.find('notch-now-tokens').attributes['aria-label'], /last session.*1/i);
@@ -607,6 +673,55 @@ test('session titles use shared hover reading and hand it across live updates', 
   assert.equal(f.overflowText.preserved.at(-1).previous.contains(previous), true);
   const current = f.find('notch-now-title'); f.panel.suspend();
   assert.ok(f.overflowText.stopped.includes(current));
+});
+
+test('home month follows the hovered or focused day and resets to the current month', t => {
+  const f = panelFixture(t), data = payload();
+  data.panel.week.days[0].date = '2026-09-30';
+  f.panel.render(data);
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+  f.all('notch-day')[0].fire('pointerenter');
+  assert.equal(f.find('notch-week-title').textContent, 'September');
+  f.find('notch-week-bars').fire('pointerleave');
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+  f.all('notch-day')[0].fire('focus');
+  assert.equal(f.find('notch-week-title').textContent, 'September');
+  f.all('notch-day')[0].fire('blur');
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+});
+
+test('hovering an unknown day retains its month across usage pushes', t => {
+  const f = panelFixture(t), data = payload();
+  data.panel.week.days[0] = { date: '2026-09-30', tokens: null };
+  f.panel.render(data);
+  f.all('notch-day')[0].fire('pointerenter');
+  assert.equal(f.find('notch-week-title').textContent, 'September');
+  data.cells[0].totalTokens = 200;
+  f.panel.render(data);
+  assert.equal(f.find('notch-week-title').textContent, 'September');
+  assert.equal(f.find('notch-big').textContent, '200');
+  f.find('notch-week-bars').fire('pointerleave');
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+});
+
+test('leaving a day after a month boundary shows the new current month', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload());
+  f.all('notch-day')[0].fire('pointerenter');
+  t.mock.timers.setTime(new Date(2026, 10, 1, 12).getTime());
+  f.find('notch-week-bars').fire('pointerleave');
+  assert.equal(f.find('notch-week-title').textContent, 'November');
+});
+
+test('returning Home clears the hovered month after a page change', t => {
+  const f = panelFixture(t), data = payload();
+  data.panel.week.days[0].date = '2026-09-30';
+  f.panel.render(data);
+  f.all('notch-day')[0].fire('pointerenter');
+  f.panel.selectPage('limits');
+  f.panel.selectPage('home');
+  assert.equal(f.find('notch-week-title').textContent, 'October');
+  assert.equal(f.find('notch-big').textContent, '100');
 });
 
 test('scrubbing freezes the historical reading and returning applies the latest push immediately', t => {

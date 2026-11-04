@@ -369,13 +369,18 @@ test('Dock family expansion keeps real member rows and requests the existing nat
 });
 
 test('native activity overlay retains archived accounting tokens, costs and models when a family resumes', () => {
-  const parent = session('codex', 'parent', { archived: true, totalTokens: 900, costUsd: 9, models: { prior: 900 } });
+  const parent = session('codex', 'parent', { archived: true, totalTokens: 900, costUsd: 9, models: { prior: 900 },
+    inputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 5, cacheReported: true });
   const stats = { periods: { month: { sessions: { 'codex:parent': parent,
     'claude:child': session('claude', 'child', { parentClient: 'codex', parentSessionId: 'parent' }) } } },
     nativeSessions: { today: { 'codex:parent': session('codex', 'parent', { totalTokens: 0, costUsd: 0, models: {} }) } } };
   const [group] = presentation.recentSessionRows(stats);
   assert.equal(group.totalTokens, 1000);
   assert.equal(group.costUsd, 10);
+  assert.equal(group.inputTokens, 20);
+  assert.equal(group.cacheReadTokens, 80);
+  assert.equal(group.cacheWriteTokens, 5);
+  assert.equal(group.cacheReported, true);
   assert.deepEqual(group.models, { prior: 900, shared: 100 });
   assert.equal(presentation.runningSessionSummary([group]).count, 1);
 });
@@ -435,7 +440,7 @@ test('Dock projects once per update for Sessions and multiple provider cards and
   let projections = 0;
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), {
-    module,
+    module, Date,
     require(id) {
       const api = load(id);
       if (id !== '../sessionRows') return api;
@@ -504,7 +509,7 @@ const NATIVE_MAIN = '01a128e7-84b0-7443-9d1d-af0368c81583';
 const NATIVE_CHILD = '01a1296b-e500-7b51-82c8-169dec45b59c';
 function continuations() {
   const rows = [
-    session('codex', 'rollout-1', { nativeSessionId: NATIVE_MAIN, turnEnded: true, lastUsedAt: '2026-01-01T00:00:00Z' }),
+    session('codex', 'rollout-1', { nativeSessionId: NATIVE_MAIN, turnEnded: true, lastUsedAt: new Date(Date.now() - 86_400_000).toISOString() }),
     session('codex', 'rollout-2', { nativeSessionId: NATIVE_MAIN, title: 'Current main', liveActivity: { state: 'running', source: 'test', observedAt: new Date().toISOString() } }),
     session('codex', 'child-1', { nativeSessionId: NATIVE_CHILD, parentSessionId: 'rollout-1', turnEnded: true }),
     session('codex', 'child-2', { nativeSessionId: NATIVE_CHILD, parentSessionId: 'rollout-2', turnEnded: true }),
