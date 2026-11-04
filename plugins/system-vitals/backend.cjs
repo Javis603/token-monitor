@@ -98,6 +98,13 @@ function createSampler({ now = Date.now, platform = process.platform } = {}) {
             return match ? Number(match[1]) : 0;
           };
           const total = os.totalmem();
+          // XNU counts speculative pages inside free_count, and vm_stat prints
+          // "Pages free" as free_count minus speculative_count
+          // (system_cmds/vm_stat/vm_stat.c: `sspstat("Pages free:", vm_stat
+          // .free_count - vm_stat.speculative_count)`). Reading that text and
+          // adding the speculative line back is therefore the real pool, not a
+          // double count; dropping it would understate available memory by the
+          // speculative pages.
           const available = Math.min(
             total,
             (pages('Pages free') + pages('Pages inactive') + pages('Pages speculative') + pages('Pages purgeable')) * pageSize
