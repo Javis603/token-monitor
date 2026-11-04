@@ -1690,6 +1690,21 @@ test('connectedLimitProviders falls back to the enabled set before the first sta
   assert.deepEqual(edgeDockPresentation.connectedLimitProviders({ limits: { providers: [] } }, options), []);
 });
 
+test('the pre-stats fallback appends enabled providers a partial saved order omits', () => {
+  // A saved order that predates a newly enabled provider must not omit it
+  // forever: after the ordered entries, the remaining enabled providers
+  // append in the enabled list's own order — the same rule providerOrder()
+  // applies to currently-reported providers.
+  const options = {
+    limitsEnabled: true,
+    limitProviders: 'opencode,deepseek,factory',
+    limitProviderOrder: 'factory,cursor'
+  };
+  assert.deepEqual(edgeDockPresentation.connectedLimitProviders(null, options), ['factory', 'opencode', 'deepseek']);
+  // No saved order at all: the enabled list's order stands alone.
+  assert.deepEqual(edgeDockPresentation.connectedLimitProviders(null, { ...options, limitProviderOrder: undefined }), ['opencode', 'deepseek', 'factory']);
+});
+
 test('the rail headline reports the pool that gates the account, not just the session', () => {
   const exhausted = provider('codex', {
     windows: [

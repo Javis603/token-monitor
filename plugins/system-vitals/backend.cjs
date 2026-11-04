@@ -14,18 +14,24 @@ const { execFile } = require('node:child_process');
 // CPU is a delta between os.cpus() samples; shorter than this and the window
 // is noise, so the previous reading is kept instead of publishing a spike.
 const CPU_MIN_SAMPLE_MS = 400;
-// vm_stat is a subprocess per reading; 3s is fresh enough for a glance meter.
+// vm_stat is a subprocess per reading; the cache TTL spans one extra tick, so
+// under the 2s cadence it refreshes about every 4 seconds — fresh enough for
+// a glance meter without spawning a process on every tick.
 const MEMORY_TTL_MS = 3000;
 // The publish cadence the dock refreshes at; the vitals just keep pace.
 const TICK_MS = 2000;
 // The card's load curve window: 90 points at the 2s cadence is three minutes.
 const HISTORY_LIMIT = 90;
 
-function createSampler({ now = Date.now } = {}) {
+function createSampler({ now = Date.now, platform = process.platform } = {}) {
   let previousCpu = sampleCpuTimes();
   let lastCpuPercent = null;
   let history = [];
   let memoryCache = { at: 0, value: null, inFlight: null };
+  // On darwin a failed vm_stat read must not fall back to os.freemem() — that
+  // overstates usage and shows a false spike — so the last successful reading
+  // is kept until the next successful one.
+  let lastDarwinReading = null;
 
   function sampleCpuTimes() {
     const cpus = os.cpus();
@@ -75,7 +81,7 @@ function createSampler({ now = Date.now } = {}) {
   function refreshMemory() {
     if (memoryCache.inFlight) return memoryCache.inFlight;
     if (memoryCache.value && now() - memoryCache.at < MEMORY_TTL_MS) return Promise.resolve(memoryCache.value);
-    const read = process.platform === 'darwin'
+    const read = platform === 'darwin'
       ? readDarwinMemory().catch(() => null)
       : Promise.resolve(null);
     memoryCache.inFlight = read
@@ -96,6 +102,8 @@ function createSampler({ now = Date.now } = {}) {
           );
           reading = { total, available, used: Math.max(0, total - available), source: 'vm_stat' };
         }
+        if (reading && platform === 'darwin') lastDarwinReading = reading;
+        if (!reading && platform === 'darwin') reading = lastDarwinReading;
         const value = reading || (() => {
           const total = os.totalmem();
           const free = os.freemem();
@@ -127,11 +135,13 @@ function createSampler({ now = Date.now } = {}) {
   function snapshot() {
     const cpuPercent = lastCpuPercent === null ? null : round(lastCpuPercent, 1);
     const memory = memoryCache.value;
-    const load = os.loadavg();
+    // os.loadavg() always reports [0, 0, 0] on Windows; that is not a
+    // measurement, so the card omits the line instead of printing zeros.
+    const load = platform === 'win32' ? null : os.loadavg();
     return {
       cpu: cpuPercent,
       cores: previousCpu.cores,
-      loadAvg: [round(load[0], 2), round(load[1], 2), round(load[2], 2)],
+      loadAvg: load ? [round(load[0], 2), round(load[1], 2), round(load[2], 2)] : null,
       mem: memory ? round((memory.used / Math.max(1, memory.total)) * 100, 1) : null,
       memUsedBytes: memory ? memory.used : null,
       memTotalBytes: memory ? memory.total : null,

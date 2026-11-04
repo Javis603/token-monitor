@@ -6,7 +6,9 @@
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const RING_RADIUS = 17;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
-const SPARK_POINTS = 90;
+// Card curve windows over the shared 90-point backend history: CPU moves fast
+// enough to read at one minute, memory pressure at two.
+const SPARK_POINTS = { cpu: 30, mem: 60 };
 
 const LABELS = {
   cpu: { en: 'CPU', 'zh-CN': 'CPU', 'zh-TW': 'CPU' },
@@ -52,10 +54,11 @@ function severityColor(percent) {
 
 // Fixed 0-100 axis: a rescaled line would let a quiet machine look busy. Null
 // ticks (before a first reading) are skipped; the line starts at the first one.
-function sparkSvg(points, color) {
+function sparkSvg(points, color, metric) {
   const width = 100;
   const height = 40;
-  const samples = (points || []).slice(-SPARK_POINTS).filter((value) => Number.isFinite(value));
+  const window = SPARK_POINTS[metric] || SPARK_POINTS.cpu;
+  const samples = (points || []).slice(-window).filter((value) => Number.isFinite(value));
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('class', 'sv-spark');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -95,7 +98,10 @@ function compactBytes(value) {
 }
 
 function readPercent(value, metric) {
-  const percent = value ? Number(value[metric]) : NaN;
+  // A missing reading (null from the backend before the first sample) must
+  // stay distinct from 0%: Number(null) is 0, so gate it out first.
+  const raw = value ? value[metric] : null;
+  const percent = raw === null || raw === undefined ? NaN : Number(raw);
   return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
 }
 
@@ -103,7 +109,8 @@ export function activate(ctx) {
   return {
     mount(container, context = {}) {
       const metric = context.viewId === 'mem' ? 'mem' : 'cpu';
-      const lang = locale();
+      // The locale is read at render time, not captured on mount: changing the
+      // app language repaints the card text and the ring label in place.
       let latest = context.data || null;
       let unsubscribe = null;
 
@@ -128,9 +135,9 @@ export function activate(ctx) {
         function renderUnknown() {
           strong.textContent = '—';
           strong.style.color = '';
-          sparkSlot.replaceChildren(sparkSvg([], null));
+          sparkSlot.replaceChildren(sparkSvg([], null, metric));
           caption.textContent = '';
-          note.textContent = NOTES.waiting[lang];
+          note.textContent = NOTES.waiting[locale()] || NOTES.waiting.en;
         }
         function render(value) {
           const percent = readPercent(value, metric);
@@ -142,15 +149,15 @@ export function activate(ctx) {
           strong.textContent = `${Math.round(percent)}%`;
           strong.style.color = color;
           const series = (value.history || []).map((point) => (point ? point[metric] : null));
-          sparkSlot.replaceChildren(sparkSvg(series, color));
+          sparkSlot.replaceChildren(sparkSvg(series, color, metric));
           const stepMs = Number(value.historyStepMs) || 2000;
           const drawn = series.filter((entry) => Number.isFinite(entry)).length;
           const minutes = Math.max(1, Math.round(((drawn - 1) * stepMs) / 60000));
-          caption.textContent = (CAPTIONS[lang] || CAPTIONS.en)(minutes);
+          caption.textContent = (CAPTIONS[locale()] || CAPTIONS.en)(minutes);
           if (metric === 'mem' && Number.isFinite(value.memUsedBytes) && Number.isFinite(value.memTotalBytes)) {
             note.textContent = `${compactBytes(value.memUsedBytes)} / ${compactBytes(value.memTotalBytes)}`;
           } else if (metric === 'cpu' && Array.isArray(value.loadAvg) && value.loadAvg.some(Number.isFinite)) {
-            note.textContent = (NOTES.load[lang] || NOTES.load.en)(value.loadAvg.map((entry) => Number(entry).toFixed(2)).join(' / '));
+            note.textContent = (NOTES.load[locale()] || NOTES.load.en)(value.loadAvg.map((entry) => Number(entry).toFixed(2)).join(' / '));
           } else {
             note.textContent = '';
           }
@@ -231,6 +238,9 @@ export function activate(ctx) {
       });
       return {
         update(next) {
+          // The label rides along even when the data is unchanged, so a
+          // language switch repaints it without waiting for the next sample.
+          label.textContent = metricLabel(metric);
           if (next?.data && next.data !== latest) {
             latest = next.data;
             renderCell(latest);

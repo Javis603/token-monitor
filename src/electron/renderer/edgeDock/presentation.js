@@ -819,9 +819,14 @@
       ? null
       : new Set(csv(options.limitProviders));
     const ordered = [];
-    for (const id of csv(options.limitProviderOrder)) {
-      if (enabled && !enabled.has(id)) continue;
-      if (!ordered.includes(id)) ordered.push(id);
+    const placed = new Set();
+    // The saved order comes first, then the enabled list itself: a partial
+    // saved order must not permanently omit an enabled provider, the same
+    // append rule providerOrder() applies to currently-reported providers.
+    for (const id of [...csv(options.limitProviderOrder), ...csv(options.limitProviders)]) {
+      if (placed.has(id) || (enabled && !enabled.has(id))) continue;
+      placed.add(id);
+      ordered.push(id);
     }
     return ordered;
   }
