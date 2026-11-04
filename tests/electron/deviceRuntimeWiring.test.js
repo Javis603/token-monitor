@@ -342,3 +342,42 @@ test('limits-only refresh waits for completion and reports errors without scanni
   assert.equal(completed, true);
   assert.deepEqual(errors, ['quota offline']);
 });
+
+test('changing only Claude CLI fallback retains last-good quota after a transient failure', async (t) => {
+  const { classifySettingsChange, limitsConfigFromSettings } = require('../../src/electron/runtimeConfig');
+  for (const status of ['sourceRateLimited', 'unavailable']) {
+    const before = { limitProviders: 'claude', claudeCliFallbackEnabled: true };
+    const after = { ...before, claudeCliFallbackEnabled: false };
+    const runtime = createLimitsRuntime(limitsConfigFromSettings(before), {
+      autoStart: false, autoRetry: false, cleanupGraceMs: 0,
+      probeProvider: async (_provider, config) => [
+        { provider: 'claude', accountKey: 'oauth', source: 'oauth', status: config.claudeCliFallbackEnabled ? 'ok' : status,
+          updatedAt: '2026-11-04T00:00:00Z', windows: config.claudeCliFallbackEnabled ? [{ kind: 'session', usedPercent: 25 }] : [] },
+        { provider: 'claude', accountKey: 'web', source: 'web', status: 'ok',
+          updatedAt: '2026-11-04T00:00:00Z', windows: [{ kind: 'session', usedPercent: 50 }] }
+      ]
+    });
+    t.after(() => runtime.stop());
+    await runtime.refresh({ provider: 'claude' }, 'startup');
+    const original = runtime.getSnapshot().providers;
+    runtime.reconfigure(limitsConfigFromSettings(after));
+    const plan = settingsLimitInvalidationPlan(classifySettingsChange(before, after));
+    assert.equal(plan[0].options.clear, false);
+    for (const entry of plan) await runLimitInvalidation({ clearLimits: runtime.clear, refreshLimits: runtime.refresh }, entry.scope, entry.reason, entry.options);
+    const rows = runtime.getSnapshot().providers;
+    const oauth = rows.find(row => row.accountKey === 'oauth');
+    assert.equal(oauth.status, status);
+    assert.deepEqual(oauth.windows, original.find(row => row.accountKey === 'oauth').windows);
+    assert.deepEqual(rows.find(row => row.accountKey === 'web').windows, original.find(row => row.accountKey === 'web').windows);
+  }
+});
+
+test('Claude credential changes still clear readings when fallback also changes', () => {
+  const { classifySettingsChange } = require('../../src/electron/runtimeConfig');
+  for (const key of ['claudeWebCookie', 'claudeWebOrganizationId']) {
+    const before = { claudeCliFallbackEnabled: true, [key]: 'old' };
+    const after = { claudeCliFallbackEnabled: false, [key]: 'new' };
+    const plan = settingsLimitInvalidationPlan(classifySettingsChange(before, after));
+    assert.deepEqual(plan, [{ scope: { provider: 'claude' }, reason: 'settings-change', options: { clear: true } }]);
+  }
+});

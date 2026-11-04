@@ -624,7 +624,7 @@ test('Claude CLI fallback defaults on and toggling it reconfigures only Claude l
     assert.equal(limitsConfigFromSettings(settings).claudeCliFallbackEnabled, enabled);
     const change = classifySettingsChange({ claudeCliFallbackEnabled: !enabled }, settings);
     assert.equal(change.limitsReconfigure, true);
-    assert.deepEqual(change.limitScopes, [{ provider: 'claude' }]);
+    assert.deepEqual(change.limitScopes, [{ provider: 'claude', preserveReadings: true }]);
     assert.equal(change.usageStructural, false);
     assert.equal(change.modeStructural, false);
   }
