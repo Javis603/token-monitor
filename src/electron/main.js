@@ -195,6 +195,7 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
@@ -8232,6 +8233,7 @@ app.whenReady().then(() => {
     patch = skinSelection.patch;
     const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
+    minimaxApiKeys.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousClients = settings.clients;
@@ -9500,6 +9502,23 @@ app.whenReady().then(() => {
     void queueLimitInvalidation({ provider: 'opencode' }, 'ambient-toggle', { clear: true });
     return { ok: true };
   });
+  const minimaxApiKeys = createMinimaxApiKeys({
+    getSettings: () => settings, saveSettings,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
+    changed: (accountKey, refresh, reason) => {
+      credentialCommands.noteSettingsPatch({ minimaxApiKey: '' });
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      void queueLimitInvalidation({ provider: 'minimax', source: 'api', accountKey }, reason, { clear: true, refresh });
+      pushSettingsToRenderer();
+    }
+  });
+  ipcMain.handle('minimax:getKeys', () => minimaxApiKeys.getKeys());
+  for (const method of ['addKey', 'removeKey']) {
+    ipcMain.handle(`minimax:${method}`, async (_event, ...args) => {
+      try { return await minimaxApiKeys[method](...args); }
+      catch (error) { return { ok: false, error: error?.message || 'Could not save MiniMax API key' }; }
+    });
+  }
   ipcMain.handle('openrouter:getProfiles', async () => {
     return {
       profiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles || {}),

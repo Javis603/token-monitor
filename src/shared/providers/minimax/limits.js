@@ -29,6 +29,10 @@ const MINIMAX_CODE_PLAN_REMAINS_URL_INTL = 'https://platform.minimax.io/backend/
 const MINIMAX_CODE_GROUP_STATE_KEY = 'minimax.code.group';
 const MINIMAX_CODE_PLAN_NAME_STATE_KEY = 'minimax.code.plan-name';
 const MINIMAX_CODE_PLAN_NAME_TTL_MS = 60 * 60_000;
+const MINIMAX_SPEND_STATE_KEY = 'minimax.api-spend';
+const MINIMAX_AFFILIATION_FAILURE_STATE_KEY = 'minimax.code.affiliation-failure';
+const MINIMAX_OPTIONAL_TIMEOUT_MS = 4_000;
+const MINIMAX_OPTIONAL_CACHE_TTL_MS = 5 * 60_000;
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
 
@@ -36,6 +40,14 @@ const MINIMAX_REGIONS = ['en', 'cn'];
 
 // Only a successful quota reading establishes region affinity.
 const MINIMAX_REGION_MEMORY_STATE_KEY = 'minimax.last-good-region';
+
+// Optional metadata and secondary readings must not hold quota for its full timeout.
+function minimaxOptionalDeps(deps = {}) {
+  const configured = Number(deps.fetchTimeoutMs);
+  return { ...deps, fetchTimeoutMs: Number.isFinite(configured) && configured > 0
+    ? Math.min(configured, MINIMAX_OPTIONAL_TIMEOUT_MS)
+    : MINIMAX_OPTIONAL_TIMEOUT_MS };
+}
 
 function rememberedMinimaxRegion(deps = {}) {
   if (!(deps.providerRuntimeState instanceof Map)) return '';
@@ -572,37 +584,48 @@ async function fetchMinimaxCodeLimits(deps = {}, context = {}, discovered = null
       const platformUrl = region === 'cn' ? MINIMAX_CODE_PLAN_REMAINS_URL_CN : MINIMAX_CODE_PLAN_REMAINS_URL_INTL;
       const platformHeaders = { ...headers, 'X-Group-Id': groupId };
       if (groupId && hasPlan) {
+        let planNamePromise = Promise.resolve('');
         if (/^\d+$/u.test(tierName)) {
           // A login epoch separates re-logins without invalidating ordinary token rotation.
           const nameKey = session.record.loginEpoch
             ? hashKey(session.authPath, session.record.loginEpoch, accountKey, tierName) : '';
           const cached = state?.get(MINIMAX_CODE_PLAN_NAME_STATE_KEY);
-          if (nameKey && cached?.key === nameKey && now - cached.at < MINIMAX_CODE_PLAN_NAME_TTL_MS) {
+          const cacheTtl = cached?.name ? MINIMAX_CODE_PLAN_NAME_TTL_MS : MINIMAX_OPTIONAL_CACHE_TTL_MS;
+          if (nameKey && cached?.key === nameKey && now - cached.at < cacheTtl) {
             planLabel = cached.name;
+            planNamePromise = Promise.resolve(cached.name);
           } else {
-            try {
-              const url = new URL('/v1/api/openplatform/charge/combo/cycle_audio_resource_package', platformUrl);
-              url.search = new URLSearchParams({ biz_line: '2', cycle_type: '3', resource_package_type: '7', business: 'Agent', device_platform: 'desktop' }).toString();
-              const metadata = await minimaxCodeRequest(url.href, { headers: platformHeaders }, deps);
-              const current = metadata?.current_subscribe;
-              // A catalog card alone is not evidence of the current subscription.
-              if (String(current?.curr_subscribe_combo_id ?? '').trim() === tierName) {
-                const card = metadata.current_combo_card;
-                const name = [String(card?.combo_id ?? '').trim() === tierName ? cleanSecret(card?.title) : '',
-                  cleanSecret(current.current_subscribe_title)].find(name => name && !/^\d+$/u.test(name));
-                if (name) {
-                  planLabel = name;
-                  if (nameKey) state?.set(MINIMAX_CODE_PLAN_NAME_STATE_KEY, { key: nameKey, name, at: now });
+            planNamePromise = (async () => {
+              try {
+                const url = new URL('/v1/api/openplatform/charge/combo/cycle_audio_resource_package', platformUrl);
+                url.search = new URLSearchParams({ biz_line: '2', cycle_type: '3', resource_package_type: '7', business: 'Agent', device_platform: 'desktop' }).toString();
+                const metadata = await minimaxCodeRequest(url.href, { headers: platformHeaders }, minimaxOptionalDeps(deps));
+                const current = metadata?.current_subscribe;
+                // A catalog card alone is not evidence of the current subscription.
+                if (String(current?.curr_subscribe_combo_id ?? '').trim() === tierName) {
+                  const card = metadata.current_combo_card;
+                  const name = [String(card?.combo_id ?? '').trim() === tierName ? cleanSecret(card?.title) : '',
+                    cleanSecret(current.current_subscribe_title)].find(name => name && !/^\d+$/u.test(name));
+                  if (name) {
+                    if (nameKey) state?.set(MINIMAX_CODE_PLAN_NAME_STATE_KEY, { key: nameKey, name, at: now });
+                    return name;
+                  }
                 }
+              } catch (_) {
+                if (deps.signal?.aborted) return '';
+                // Optional names cannot invalidate quota or trigger token rotation.
               }
-            } catch (error) {
-              if (deps.signal?.aborted) throw error;
-              // Optional names cannot invalidate quota or trigger token rotation.
-            }
+              if (nameKey && state?.get(MINIMAX_CODE_PLAN_NAME_STATE_KEY) === cached) {
+                state?.set(MINIMAX_CODE_PLAN_NAME_STATE_KEY, { key: nameKey, name: '', at: now });
+              }
+              return '';
+            })();
           }
         }
         try {
           const plan = await minimaxCodeRequest(platformUrl, { headers: platformHeaders }, deps);
+          const planName = await planNamePromise;
+          if (planName) planLabel = planName;
           if (parseNumberOrNull(plan?.base_resp?.status_code) !== 2062) {
             const planWindows = parseMinimaxCodePlan(plan);
             if (!planWindows.length) throw errorWithStatus('unavailable', 'MiniMax Code plan quota missing');
@@ -725,9 +748,25 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
       if (!windows.length && attempt.kind === 'tokenPlan' && next?.region === attempt.region) {
         throw errorWithStatus('unavailable', 'MiniMax token-plan response has no quota windows');
       }
-      const spend = attempt.kind === 'balance' && windows.length && !deps.probe
-        ? await minimaxCashSpend(attempt.url, headers, fetchJson, deps, now)
-        : {};
+      let spend = {};
+      if (attempt.kind === 'balance' && windows.length && !deps.probe) {
+        const state = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
+        const spendKey = `${MINIMAX_SPEND_STATE_KEY}:${accountKey}:${attempt.region}`;
+        const cached = state?.get(spendKey);
+        // Today and the dated Week/Month ranges move with the local calendar day.
+        if (cached && now - cached.at < MINIMAX_OPTIONAL_CACHE_TTL_MS
+          && new Date(cached.at).toDateString() === new Date(now).toDateString()) {
+          spend = cached.spend;
+        } else {
+          const optionalDeps = minimaxOptionalDeps(deps);
+          const spendJson = deps.fetchJson
+            ? deps.fetchJson
+            : (u, h) => minimaxJsonFetch(deps.fetch || fetch, u, { headers: h }, optionalDeps);
+          spend = await minimaxCashSpend(attempt.url, headers, spendJson, optionalDeps, now);
+          // A partial snapshot is shown but never cached, so failed periods are not filled from old figures.
+          if (Object.keys(spend).length === 4) state?.set(spendKey, { at: now, spend });
+        }
+      }
       if (windows.length) storeMinimaxRegionMemory(deps, attempt.region);
       return normalizeLimitProvider({
         ...account,
@@ -786,21 +825,33 @@ async function linkMinimaxAccounts(rows, options, deps, context, key, apiAccount
   let linked = (identity?.accountKey === code.accountKey && identity.confirmedApiKeys.has(apiAccountKey))
     || previous.some(row => row.region === 'cn' && row.accountKey === apiAccountKey
       && row.relatedAccountKey === code.accountKey);
+  const state = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
+  const now = Number(context?.now) || Date.now();
+  const affiliationKey = `${MINIMAX_AFFILIATION_FAILURE_STATE_KEY}:${apiAccountKey}:${code.accountKey}:${identity?.groupId || ''}:${normalizeMinimaxBillingMode(options.minimaxBillingMode)}`;
+  const failed = state?.get(affiliationKey);
+  let attempted = false;
   // New affiliations need CN pay-as-you-go; existing ones survive billing-type edits.
   if (!linked && identity?.accountKey === code.accountKey && apiRegion === 'cn'
-    && normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api' && api.status === 'ok' && code.status === 'ok') {
+    && normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api' && api.status === 'ok' && code.status === 'ok'
+    && !(failed && now - failed.at < MINIMAX_OPTIONAL_CACHE_TTL_MS)) {
+    attempted = true;
     try {
       const url = new URL(MINIMAX_TOKEN_PLAN_REMAINS_URL_CN);
       url.searchParams.set('GroupId', identity.groupId);
+      const optionalDeps = minimaxOptionalDeps(deps);
       const fetchJson = deps.fetchJson
-        || ((u, headers) => minimaxJsonFetch(deps.fetch || fetch, u, { headers, redirect: 'error' }, deps));
+        || ((u, headers) => minimaxJsonFetch(deps.fetch || fetch, u, { headers, redirect: 'error' }, optionalDeps));
       const body = await fetchJson(url.href, { Authorization: `Bearer ${key}`, Accept: 'application/json' }, deps);
       const status = parseNumberOrNull(body?.base_resp?.status_code);
       // 2062 means the authorized group has no subscription, not a bad key.
       linked = status === 2062 || (status === 0 && readMinimaxRows(body) !== null);
     } catch (_) { /* Optional affiliation failures cannot invalidate either reading. */ }
   }
-  if (!linked || deps.signal?.aborted) return;
+  if (!linked || deps.signal?.aborted) {
+    if (attempted && !deps.signal?.aborted) state?.set(affiliationKey, { at: now });
+    return;
+  }
+  state?.delete(affiliationKey);
   // Affiliation survives a cleared quota reading, but belongs to this Code identity.
   if (identity?.accountKey === code.accountKey) identity.confirmedApiKeys.add(apiAccountKey);
   const apiRow = rows.find(row => !row.removed && row.accountKey === apiAccountKey);
