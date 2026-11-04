@@ -1,0 +1,199 @@
+import SwiftUI
+
+struct SessionRow: View {
+    @Environment(AppPreferences.self) private var preferences
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let session: SessionUsage
+    let sessionKey: String
+    let maximum: Double
+    let now: Date
+    @State private var showsModels = false
+    @State private var showsTitle = false
+    @ScaledMetric(relativeTo: .subheadline) private var markSize = 18.0
+    @ScaledMetric(relativeTo: .subheadline) private var markInset = 26.0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.rowBarSpacing) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+            layout {
+                VStack(alignment: .leading, spacing: DesignTokens.rowLineSpacing) {
+                    if let title = session.displayTitle {
+                        Button { showsTitle = true } label: {
+                            Text(title)
+                                .font(DesignTokens.rowTitle)
+                                .lineLimit(1).truncationMode(.tail)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showsTitle) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                PopoverHeader("Session title")
+                                Text(title)
+                                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                            }
+                                .padding(16).frame(idealWidth: 280, maxWidth: 280, alignment: .leading)
+                                .presentationCompactAdaptation(.popover)
+                        }
+                        identity
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
+                    } else {
+                        identity
+                        .font(DesignTokens.rowTitle)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
+                        .accessibilityElement(children: .combine)
+                    }
+                    Text(activity).font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                        .minimumScaleFactor(0.9)
+                    if session.displayTitle == nil {
+                        Text(session.sessionId ?? sessionKey)
+                            .font(.caption2).foregroundStyle(.tertiary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, markInset)
+                .overlay(alignment: .topLeading) {
+                    ProviderMark(provider: session.client, size: markSize)
+                        .overlay(alignment: .bottomTrailing) {
+                            switch session.activityState(at: now) {
+                            case .running:
+                                Circle().fill(.mint).frame(width: 5, height: 5)
+                                    .overlay { Circle().stroke(.background, lineWidth: 1) }
+                                    .accessibilityHidden(true)
+                            case .waiting:
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 7))
+                                    .foregroundStyle(.orange)
+                                    .accessibilityHidden(true)
+                            case .ended, .idle:
+                                EmptyView()
+                            }
+                        }
+                }
+                metrics
+            }
+            UsageMeter(value: session.measuredTokens, maximum: maximum,
+                       color: ClientPresentation.color(for: session.client ?? "unknown"))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var clientName: String { ClientPresentation.displayName(for: session.client ?? "unknown") }
+    private var activity: String { session.activitySummary(now: now) }
+
+    @ViewBuilder private var identity: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(clientName)
+                modelLabel
+                if let effort = session.displayReasoningEffort {
+                    Text(verbatim: effort).accessibilityLabel(Text("Reasoning effort: \(effort)"))
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(clientName).fixedSize(horizontal: true, vertical: false)
+                if !session.modelEntries.isEmpty {
+                    Text("·")
+                    modelLabel
+                }
+                reasoningEffortLabel
+            }
+        }
+    }
+
+    @ViewBuilder private var reasoningEffortLabel: some View {
+        if let effort = session.displayReasoningEffort {
+            Text("·")
+            Text(verbatim: effort)
+                .accessibilityLabel(Text("Reasoning effort: \(effort)"))
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    @ViewBuilder private var modelLabel: some View {
+        if session.modelEntries.count > 1 {
+            Button { showsModels = true } label: {
+                Text("\(session.modelEntries.count) models").underline(color: .secondary)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showsModels) {
+                VStack(alignment: .leading, spacing: 12) {
+                    PopoverHeader("Models")
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                        ForEach(session.modelEntries) { model in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(model.id).font(.footnote).fixedSize(horizontal: false, vertical: true)
+                                HStack {
+                                    Text(MetricFormatter.exactTokens(model.value))
+                                    Spacer()
+                                    let total = max(session.measuredTokens ?? 0, session.modelEntries.reduce(0) { $0 + $1.value })
+                                    Text(MetricFormatter.percent(UsageRowPresentation.share(model.value, total: total) * 100))
+                                }.font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                            }
+                        }
+                        }
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                }
+                .padding(16)
+                .frame(idealWidth: 280, maxWidth: 280, idealHeight: 240, maxHeight: 320)
+                .presentationCompactAdaptation(.popover)
+            }
+        } else if let model = session.modelEntries.first {
+            Text(model.id).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
+        }
+    }
+
+    private var metrics: some View {
+        VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: DesignTokens.rowLineSpacing) {
+            if let tokens = session.measuredTokens {
+                Text(MetricFormatter.exactTokens(tokens)).font(DesignTokens.rowValue)
+            } else {
+                Text("Tokens unavailable").font(.footnote).foregroundStyle(.secondary)
+            }
+            if session.measuredTokens != nil, let cost = session.costUsd, cost.isFinite, cost >= 0 {
+                Text(MetricFormatter.compactUsageCost(cost, unpricedTokens: session.unpricedTokens ?? 0,
+                                                      currency: preferences.currency))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            SessionStatusView(session: session, now: now)
+        }
+        .monospacedDigit().fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+extension SessionUsage {
+    /// The "archived · subagent · time · calls · cache hit · tok/s" metadata
+    /// line — desktop's `activityParts` in sessionRows.js, shared by the
+    /// session row and the group row that quotes its display session.
+    func activitySummary(now: Date) -> String {
+        var parts: [String] = []
+        if isArchived { parts.append(String(localized: "Archived")) }
+        if isSubagent { parts.append(String(localized: "Subagent")) }
+        if let date = lastActivity {
+            let time = Date.FormatStyle.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)
+                .locale(Locale(identifier: "en_US_POSIX"))
+            parts.append(date.formatted(Calendar.current.isDate(date, inSameDayAs: now)
+                                        ? time : time.month(.twoDigits).day(.twoDigits)))
+        }
+        if let count = messageCount, count > 0 {
+            parts.append("\(MetricFormatter.exactTokens(Double(count))) \(count == 1 ? "call" : "calls")")
+        }
+        if let percent = cacheHitPercent {
+            parts.append(percent > 0 && percent < 1 ? "<1%" : MetricFormatter.percent(percent))
+        }
+        if measuredTokens != nil, let speed = outputTokensPerSecond, speed.rounded() > 0 {
+            parts.append("\(MetricFormatter.tokens(speed.rounded())) tok/s")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
