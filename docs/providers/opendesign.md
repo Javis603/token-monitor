@@ -21,7 +21,7 @@ OpenDesign reports the current workspace's five-hour and weekly subscription all
 
 ## Invariants and known gaps
 
-Windows are selected by duration (18000 / 604800 seconds), independent of array order. Subscription credits are allowance units, not money: they use ordinary session/weekly meters, without the monetary `credits` metric. Measured zero is retained; reset dates come only from valid reported timestamps. Ineligible plans, missing recognized windows, duplicates, invalid amounts or workspace mismatches report unavailable rather than an empty allowance. HTTP 401 maps to unauthorized access, HTTP 403 to unavailable access, and HTTP 429 to source throttling; these statuses do not establish the underlying cause. Requests use the injected transport, omit ambient credentials and reject redirects.
+Windows are selected by duration (18000 / 604800 seconds), independent of array order. Subscription credits are allowance units, not money: they use ordinary session/weekly meters, without the monetary `credits` metric. Measured zero is retained; reset dates come only from valid reported timestamps. Ineligible plans, duplicates, invalid amounts or workspace mismatches report unavailable rather than an empty allowance. If neither recognized window is present, usage is unavailable; if only one is present, that window is reported with status `ok`. HTTP 401 maps to unauthorized access, HTTP 403 to unavailable access, and HTTP 429 to source throttling; these statuses do not establish the underlying cause. Requests use the injected transport, omit ambient credentials and reject redirects.
 
 
 ## Verification
