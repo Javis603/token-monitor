@@ -1413,7 +1413,7 @@ for (const sourceChange of [false, true]) test(`raw-only observations interrupt 
   }
 });
 
-for (const change of ['activity', 'quota', 'backend']) test(`a pending history read distinguishes ${change} publications`, async () => {
+for (const change of ['activity', 'quota', 'removed', 'backend']) test(`a pending history read distinguishes ${change} publications`, async () => {
   const vm = require('node:vm');
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const start = source.indexOf('async function limitsHistoryPayload(');
@@ -1437,13 +1437,14 @@ for (const change of ['activity', 'quota', 'backend']) test(`a pending history r
     assert.notEqual(context.latestStats, previous, 'the real activity publisher produces another stats object');
   }
   if (change === 'quota') context.latestStats = { ...context.latestStats, limits: { providers: [provider(at(2, 10, 5), 25)] } };
+  if (change === 'removed') context.latestStats = { ...context.latestStats, limits: { providers: [] } };
   if (change === 'backend') context.scope = 'other-backend';
   complete({ windows: [{ key: 'weekly', window: row.windows[0] }] });
   const result = await pending;
   if (change === 'activity') {
     assert.ok(result, 'unrelated activity cannot cancel or close a quota preview');
     assert.equal(result.windows.length, 1);
-  } else assert.equal(result, null, 'a changed quota or backend still invalidates the pending read');
+  } else assert.equal(result, change === 'quota' ? undefined : null, 'a changed quota is superseded; a changed backend invalidates the card');
 });
 
 for (const interruption of ['allowance', 'reset', 'refill', 'failure', 'conflict']) {
@@ -1761,4 +1762,23 @@ test('trend deadline rounding never joins a crossed reset or an unknown deadline
   assert.equal(segments([previous, point(at(2, 10, 5), 20, at(2, 10, 5) + 1000)]).length, 2);
   assert.equal(segments([previous, point(at(2, 10, 1), 20, null)]).length, 2);
   assert.equal(segments([point(at(2, 10), 20, at(2, 10, 5) + 1000), point(at(2, 10, 5), 20, at(2, 10, 5))]).length, 2);
+});
+
+
+test('a superseded quota refresh keeps the visible history card and its frame until the next valid payload', async t => {
+  const f = previewFixture(t);
+  await f.open('a', true);
+  const payload = f.lastPayload;
+  const bounds = f.window.getBounds();
+  f.pending = Promise.resolve(undefined);
+  await f.controller.refresh();
+  assert.equal(f.window.visible, true);
+  assert.equal(f.lastPayload, payload);
+  assert.deepEqual(f.window.getBounds(), bounds);
+  f.pending = Promise.resolve({ source: 'a', updatedAt: 'new' });
+  await f.controller.refresh();
+  assert.equal(f.lastPayload.updatedAt, 'new');
+  f.pending = Promise.resolve(null);
+  await f.controller.refresh();
+  assert.equal(f.window.visible, false, 'a genuinely removed account still closes its history');
 });

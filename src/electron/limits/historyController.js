@@ -131,6 +131,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     try {
       const payload = await read(key);
       if (request !== revision || !visible) return;
+      if (payload === undefined) return; // superseded read, not a removed account
       if (!payload || payload.source !== source) return hide();
       send(payload);
     } catch (error) { logger(`[limits-history] ${error.message}`); }

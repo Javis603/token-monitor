@@ -3238,7 +3238,13 @@ async function limitsHistoryPayload(key) {
   const scope = currentHubStatsIdentity();
   const history = await getLimitsHistoryStore().query(scope, provider);
   // Activity-only publications retain the quota snapshot and do not invalidate this read.
-  if (scope !== currentHubStatsIdentity() || publication?.limits !== latestStats?.limits) return null;
+  if (scope !== currentHubStatsIdentity()) return null;
+  // A newer quota publication will trigger its own history refresh. Keep the
+  // current card visible while discarding this superseded query.
+  if (publication?.limits !== latestStats?.limits) {
+    const stillPresent = electronPresentationStats(latestStats)?.limits?.providers?.some(row => historyRowKey(row) === key);
+    return stillPresent ? undefined : null;
+  }
   history.windows = history.windows.filter(entry => !historyWindowHidden(settings?.limitProviderHiddenItems, provider.provider, entry.window)
     && !(provider.provider === 'codex' && settings?.showCodexAdditionalLimits === false && entry.window.additional === true));
   if (!history.windows.length) return null;
