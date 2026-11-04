@@ -149,6 +149,7 @@ function parseFeedEntries(feedText) {
   // entry-less feed means the response was empty/truncated or the format
   // drifted — never read that as "no incidents".
   if (!blocks.length) throw new Error('No feed entries');
+  if ((text.match(/<entry[\s>]/g) || []).length !== blocks.length) throw new Error('Incomplete feed entry');
   return blocks.map((block) => {
     const title = decodeXmlEntities((block.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1]).trim();
     const updated = String((block.match(/<updated[^>]*>([\s\S]*?)<\/updated>/) || [])[1] || '').trim();

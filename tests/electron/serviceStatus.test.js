@@ -269,6 +269,15 @@ test('summarizeAtomFeedProvider reports unknown when the feed cannot be parsed',
   assert.match(result.error, /Unexpected feed content/);
 });
 
+test('summarizeAtomFeedProvider rejects an unclosed active entry even when the feed closes', () => {
+  const resolved = atomEntry('Earlier incident', '2026-11-02T10:00:00Z', 'resolved', ['API']);
+  const active = atomEntry('API Unavailable', '2026-11-03T10:00:00Z', 'investigating', ['API']);
+  const malformed = atomFeedOf(resolved, active.replace('</entry>', ''));
+  const result = summarizeAtomFeedProvider(feedProvider, malformed);
+  assert.equal(result.status, 'unknown');
+  assert.match(result.error, /Incomplete feed entry/);
+});
+
 test('summarizeAtomFeedProvider rejects a feed truncated after a resolved entry', () => {
   const resolved = atomEntry('Earlier incident', '2026-11-02T10:00:00Z', 'resolved', ['API']);
   const active = atomEntry('API Unavailable', '2026-11-03T10:00:00Z', 'investigating', ['API']);
