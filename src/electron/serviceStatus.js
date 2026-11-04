@@ -143,7 +143,7 @@ function decodeXmlEntities(value) {
 
 function parseFeedEntries(feedText) {
   const text = String(feedText || '');
-  if (!/<feed[\s>]/.test(text)) throw new Error('Unexpected feed content');
+  if (!/<feed[\s>]/.test(text) || !/<\/feed\s*>\s*$/.test(text)) throw new Error('Unexpected feed content');
   const blocks = text.match(/<entry[\s>][\s\S]*?<\/entry>/g) || [];
   // The official page keeps its full event history in the feed, so an
   // entry-less feed means the response was empty/truncated or the format

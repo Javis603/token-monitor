@@ -269,6 +269,17 @@ test('summarizeAtomFeedProvider reports unknown when the feed cannot be parsed',
   assert.match(result.error, /Unexpected feed content/);
 });
 
+test('summarizeAtomFeedProvider rejects a feed truncated after a resolved entry', () => {
+  const resolved = atomEntry('Earlier incident', '2026-11-02T10:00:00Z', 'resolved', ['API']);
+  const active = atomEntry('API Unavailable', '2026-11-03T10:00:00Z', 'investigating', ['API']);
+  const complete = atomFeedOf(resolved, active);
+  assert.equal(summarizeAtomFeedProvider(feedProvider, complete).status, 'outage');
+  const truncated = complete.slice(0, complete.lastIndexOf('</entry>'));
+  const result = summarizeAtomFeedProvider(feedProvider, truncated);
+  assert.equal(result.status, 'unknown');
+  assert.match(result.error, /Unexpected feed content/);
+});
+
 test('service status client summarizes atom feeds through response text', async () => {
   const feed = atomFeedOf(
     atomEntry('DeepSeek 网页/API 部分中断（DeepSeek Web/API Partially Unavailable）',

@@ -5115,7 +5115,8 @@ function serviceStatusIconId(id) {
 function renderServiceStatus() {
   if (!serviceStatusSurfaceVisible()) return;
   if (!els.serviceStatusPanel) return;
-  const rows = serviceStatusRows().map((provider) => {
+  const rows = serviceStatusRows().map((source) => {
+    const provider = serviceStatusPresentationApi.localizeProvider(source, currentLocale());
     const row = document.createElement('button');
     row.type = 'button';
     row.className = `service-status-row service-status-${provider.status || 'unknown'}`;
