@@ -3038,3 +3038,26 @@ test('hovering a different account while a preview is open switches immediately 
     assert.equal(opened[0][0], 'next');
   } finally { global.setTimeout = nativeSetTimeout; }
 });
+
+for (const [id, hiddenWindow, hiddenItem, appearance] of [
+  ['commandcode', { kind: 'billing', metric: 'credits', remaining: 10, currency: 'USD' }, 'credits', {}],
+  ['mimo', { kind: 'billing', metric: 'spend', used: 5, currency: 'USD' }, 'spend', {}],
+  ['codex', { kind: 'weekly', usedPercent: 20 }, JSON.stringify(['weekly', '', '', false]), {}],
+  ['codex', { kind: 'weekly', additional: true, limitId: 'extra-pool', usedPercent: 20 }, null, { showCodexAdditionalLimits: false }]
+]) {
+  test(`history has no activation affordance when the only ${id} usage item is hidden (${hiddenItem || 'additional'})`, () => {
+    const history = { key: () => 'account', open: async () => {}, enter() {}, leave() {} };
+    const settings = { ...appearance, limitProviderHiddenItems: hiddenItem ? { [id]: [hiddenItem] } : {} };
+    const provider = { provider: id, status: 'ok', windows: [hiddenWindow] };
+    const row = dockView(settings, { history }).renderLimitProviderRow(id, id, provider, '#123456');
+    assert.equal(row.dataset.limitHistory, undefined);
+    assert.equal(row.tabIndex, undefined);
+    assert.equal(row.listeners?.pointerenter, undefined);
+    assert.equal(row.listeners?.click, undefined);
+    assert.equal(row.listeners?.keydown, undefined);
+    const visible = { kind: 'session', usedPercent: 10, remainingPercent: 90 };
+    const mixed = dockView(settings, { history }).renderLimitProviderRow(id, id, { ...provider, windows: [hiddenWindow, visible] }, '#123456');
+    assert.equal(mixed.dataset.limitHistory, 'account', 'another visible quota keeps history available');
+    assert.equal(mixed.tabIndex, 0);
+  });
+}

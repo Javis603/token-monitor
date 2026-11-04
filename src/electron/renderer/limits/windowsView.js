@@ -2233,8 +2233,10 @@
     );
     if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
     if (deps.history && settings()?.limitsHistoryOpenMode !== 'off' && (provider.windows || []).some(window => (
-      typeof window.usedPercent === 'number' || window.metric === 'credits' && typeof window.remaining === 'number'
-      || window.metric === 'spend' && typeof window.used === 'number'
+      !usageItems.isLimitWindowHidden(settings()?.limitProviderHiddenItems, provider.provider, window)
+      && !(provider.provider === 'codex' && settings()?.showCodexAdditionalLimits === false && window.additional === true)
+      && (typeof window.usedPercent === 'number' || window.metric === 'credits' && typeof window.remaining === 'number'
+      || window.metric === 'spend' && typeof window.used === 'number')
     ))) {
       const key = deps.history.key(provider);
       const openHistory = (interactive) => {
