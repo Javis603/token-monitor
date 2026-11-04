@@ -1803,7 +1803,10 @@ test('a superseded quota refresh keeps the visible history card and its frame un
 for (const failed of [false, true]) test(`same-day compatible net changes belong to today despite a sampling interruption (failed: ${failed})`, t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 20), action(at(2, 10, 5), 29)]);
-  if (failed) f.record([{ account: accountA, source: 'a', failed: true }]);
+  if (failed) {
+    f.record([{ account: accountA, source: '', failed: true }]);
+    assert.equal(f.sql('SELECT break_after FROM runs ORDER BY until DESC LIMIT 1')[0].break_after, 1, 'the failed refresh interrupts the recorded stream');
+  }
   f.record([action(at(2, 10, 50), 30)]);
   f.reopen();
   const entry = f.query().windows[0];
