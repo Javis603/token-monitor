@@ -45,17 +45,15 @@ function databaseStamp(dbPath) {
 
 // Returns Map<id, parentSessionId | ''> for the ids the database holds, or
 // null when the open or the query failed (the ids retry next pass). A schema
-// without the columns answers every id with no parent.
+// without the columns holds no answers: its ids stay misses, so a later
+// database is still consulted and a migrated file is re-read once it changes.
 function readParentLinks(dbPath, sqlite, wantedIds) {
   let db;
   try {
     db = openDb(dbPath, sqlite);
     const columns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map((column) => String(column.name)));
     const rows = new Map();
-    if (!columns.has('id') || !columns.has('source') || !columns.has('parent_session_id')) {
-      for (const id of wantedIds) rows.set(id, '');
-      return rows;
-    }
+    if (!columns.has('id') || !columns.has('source') || !columns.has('parent_session_id')) return rows;
     const statement = db.prepare('SELECT source, parent_session_id FROM sessions WHERE id = ?');
     for (const id of wantedIds) {
       const row = statement.get(id);

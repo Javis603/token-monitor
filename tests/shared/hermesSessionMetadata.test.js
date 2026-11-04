@@ -89,6 +89,22 @@ test('a schema without source infers no relationship', { skip: !sqlite }, (t) =>
   assert.equal(result.size, 0);
 });
 
+test('a legacy home database neither shadows a profile nor outlives its migration', { skip: !sqlite }, (t) => {
+  const root = tempRoot(t, 'hermes-migrate-');
+  const hermesHome = path.join(root, 'hermes');
+  const home = createStateDb(hermesHome, [['home-sub', 'main']], 'CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT)');
+  createStateDb(path.join(hermesHome, 'profiles', 'work'), [['work-sub', 'subagent', 'work-main']]).close();
+  const deps = { sqlite, env: { HERMES_HOME: hermesHome }, hermesDatabaseCache: new Map() };
+  const resolve = () => resolveSessionMetadata(new Set(['home-sub', 'work-sub']), { home: root, deps });
+  try {
+    assert.deepEqual([...resolve()], [['work-sub', { parentSessionId: 'work-main' }]]);
+    home.exec("ALTER TABLE sessions ADD COLUMN source TEXT; UPDATE sessions SET source = 'subagent'");
+    assert.equal(resolve().get('home-sub')?.parentSessionId, 'main');
+  } finally {
+    home.close();
+  }
+});
+
 test('a missing database adds nothing and a late subagent row is found after the database changes', { skip: !sqlite }, (t) => {
   const root = tempRoot(t, 'hermes-late-');
   const hermesHome = path.join(root, 'hermes');
