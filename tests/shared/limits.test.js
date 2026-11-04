@@ -828,6 +828,35 @@ test('publicLimits strips Codex account identity fields', () => {
   assert.equal(Object.hasOwn(payload.providers[0], 'workspaceKind'), false);
 });
 
+test('MiniMax peer links survive sync without merging identities or leaking through public stats', () => {
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const apiKey = `sha256:${'b'.repeat(64)}`;
+  const limits = { providers: [
+    { provider: 'minimax', accountKey: codeKey, source: 'oauth', status: 'ok', region: 'cn', windows: [] },
+    { provider: 'minimax', accountKey: apiKey, relatedAccountKey: codeKey, source: 'api', status: 'ok', region: 'cn', windows: [] }
+  ] };
+  assert.equal(syncLimits(limits).providers[1].relatedAccountKey, codeKey);
+  assert.equal(Object.hasOwn(publicLimits(limits).providers[1], 'relatedAccountKey'), false);
+  const aggregate = aggregateLimits([{ deviceId: 'mini', limits, receivedAt: new Date().toISOString() }]);
+  assert.equal(aggregate.providers.length, 2);
+  assert.deepEqual(new Set(aggregate.providers.map(row => row.accountKey)), new Set([codeKey, apiKey]));
+  assert.equal(aggregate.providers.find(row => row.source === 'api').relatedAccountKey, codeKey);
+
+  // A fresher unlinked observation of the same identity must not erase the link.
+  const later = new Date(Date.now() + 1000).toISOString();
+  const crossDevice = aggregateLimits([
+    { deviceId: 'mini', limits },
+    { deviceId: 'win', limits: { providers: [
+      { provider: 'minimax', accountKey: apiKey, source: 'api', status: 'ok', region: 'cn', updatedAt: later,
+        windows: [{ kind: 'weekly', usedPercent: 40 }] }
+    ] } }
+  ], 0, Date.parse(later) + 1);
+  const crossApi = crossDevice.providers.find(row => row.accountKey === apiKey);
+  assert.equal(crossApi.sourceDeviceId, 'win');
+  assert.equal(crossApi.relatedAccountKey, codeKey);
+  assert.equal(crossDevice.providers.some(row => row.accountKey === codeKey), true);
+});
+
 test('aggregateLimits drops a stale keyless MiniMax sentinel once a keyed identity exists', () => {
   const apiKey = `sha256:${'c'.repeat(64)}`;
   const rows = aggregateLimits([

@@ -1035,6 +1035,34 @@ test('MiniMax API and Code failures do not invalidate the other lane', async () 
   }
 });
 
+test('MiniMax links confirmed groups without carrying affiliation to a new key or login', async () => {
+  const fixture = writeCodeAuthFixture();
+  let group = 'group-A';
+  const deps = codeDeps(fixture, async (url, init) => {
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ has_token_plan: false, op_group_id: group }));
+    const target = new URL(url);
+    if (target.pathname === '/account/query_balance') return okResponse({ available_amount: '14.97' });
+    if (target.pathname === '/v1/token_plan/remains') {
+      assert.equal(target.searchParams.get('GroupId'), group);
+      const confirmed = group === 'group-A' && init.headers.Authorization === 'Bearer key-A';
+      return okResponse({ base_resp: { status_code: confirmed ? 2062 : 1004 } });
+    }
+    return okResponse({});
+  });
+  const options = { minimaxApiRegion: 'cn', minimaxBillingMode: 'api', minimaxApiKey: 'key-A' };
+  const first = await fetchMinimaxLimits(options, deps);
+  const api = first.find(row => row.source === 'api');
+  const code = first.find(row => row.source === 'oauth');
+  assert.equal(api.relatedAccountKey, code.accountKey);
+  assert.equal(code.relatedAccountKey, undefined);
+  const previousLimits = { providers: first };
+  const newKey = await fetchMinimaxLimits({ ...options, minimaxApiKey: 'key-B', previousLimits }, deps);
+  assert.ok(newKey.filter(row => !row.removed).every(row => !row.relatedAccountKey));
+  group = 'group-B';
+  const newLogin = await fetchMinimaxLimits({ ...options, previousLimits }, deps);
+  assert.ok(newLogin.filter(row => !row.removed).every(row => !row.relatedAccountKey));
+});
+
 test('MiniMax Code without a token plan shows membership plan_name, else Free', async () => {
   const fixture = writeCodeAuthFixture();
   for (const [planName, label] of [['Plus', 'Plus'], ['', 'Free']]) {
@@ -1316,6 +1344,7 @@ test('MiniMax profiles collect Code once and never let a rejected key invalidate
   const deps = codeDeps(fixture, async (url, init) => {
     if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ has_token_plan: false }));
     if (url.endsWith('/account/query_balance')) return init.headers.Authorization === 'Bearer bad' ? unauthorized() : okResponse({ available_amount: 8 });
+    if (new URL(url).searchParams.has('GroupId')) return okResponse({ base_resp: { status_code: init.headers.Authorization === 'Bearer good' ? 2062 : 1004 } });
     return okResponse({});
   });
   const rows = await fetchMinimaxLimits({ minimaxApiProfiles: {
@@ -1327,6 +1356,17 @@ test('MiniMax profiles collect Code once and never let a rejected key invalidate
   assert.equal(rows.find(row => row.accountKey === hashKey('minimax', 'good')).windows[0].remaining, 8);
   assert.equal(rows.find(row => row.source === 'oauth').windows[0].remaining, 4624);
   assert.equal(deps.requests.filter(url => url === MINIMAX_CODE_MEMBERSHIP_URL_CN).length, 1);
+  const oauth = rows.find(row => row.source === 'oauth');
+  assert.equal(rows.find(row => row.accountKey === hashKey('minimax', 'good')).relatedAccountKey, oauth.accountKey);
+  assert.equal(rows.find(row => row.accountKey === hashKey('minimax', 'other')).relatedAccountKey, undefined);
+  assert.equal(rows.find(row => row.accountKey === hashKey('minimax', 'other')).status, 'ok');
+  const single = await fetchMinimaxLimits({ minimaxBillingMode: 'token-plan', minimaxApiRegion: 'intl',
+    minimaxApiProfiles: { good: { apiKey: 'good', billingMode: 'api', apiRegion: 'cn' } }
+  }, deps);
+  const api = single.find(row => row.source === 'api');
+  const code = single.find(row => row.source === 'oauth');
+  assert.equal(api.relatedAccountKey, code.accountKey, 'single-key affiliation uses the profile billing/region, not legacy defaults');
+  assert.equal(code.relatedAccountKey, undefined);
 });
 
 test('MiniMax migrating an implicit legacy region preserves its environment pin', async () => {

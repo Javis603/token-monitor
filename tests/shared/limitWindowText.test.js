@@ -79,6 +79,13 @@ test('a provider rule only touches the window kind it belongs to', () => {
   assert.equal(text('zai', { kind: 'daily', remaining: 100, limit: 200 }).detail, '100 / 200');
   assert.equal(text('zai', { kind: 'billing', limitId: 'zcode-model:x', remaining: 100, limit: 200 }).detail, '100 / 200');
 
+  // MiniMax plan percentages stay bare. Only the video count uses the detail slot.
+  assert.equal(text('minimax', { kind: 'session', label: '5h', usedPercent: 30 }).detail, '');
+  assert.equal(text('minimax', { kind: 'weekly', label: 'Weekly', usedPercent: 10 }).detail, '');
+  assert.equal(text('minimax', { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17 }).detail, '17/20');
+  assert.equal(text('minimax', { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17 }, true).detail, '3/20');
+  assert.equal(text('minimax', { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624 }).detail, '');
+
   for (const id of ['kiro', 'qoder', 'zed', 'kimi']) {
     assert.equal(text(id, { kind: 'session', used: 1, limit: 4, detail: 'x' }).detail, '', id);
   }

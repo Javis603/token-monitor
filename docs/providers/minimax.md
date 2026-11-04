@@ -53,6 +53,8 @@ When the selected lease has expired, or membership/plan rejects it with HTTP 401
 
 Code identity hashes the server's regional group. API-key identity retains its existing key hash. Matching readings select one observation through shared aggregation; amounts are never added across devices. One current Code login can coexist with multiple API keys; multiple managed Code logins are unsupported.
 
+Each CN pay-as-you-go key can independently confirm affiliation with the current CN Code group through `GroupId`; an unsuccessful confirmation leaves the readings separate. A confirmed pair shares an account heading, even when other keys are configured, while retaining independent readings, identities and saved costs. Confirmation survives a billing-type edit or cleared quota reading; a different Code identity cannot inherit it. Affiliation never adds amounts or assigns API Spend to Code. Its peer hash is display-only and is stripped from public stats.
+
 An identified successful Code reading may retire the prior local OAuth identity through shared removal markers. A failed or unidentified read cannot prove logout or create a replacement account, and scoped work for a retired account must not adopt a newly logged-in account.
 
 ## Regions and display
