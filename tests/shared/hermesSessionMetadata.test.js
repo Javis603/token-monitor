@@ -147,11 +147,15 @@ test('an unreadable directory below a custom root does not hide the rest of it',
   const locked = path.join(custom, 'locked');
   fs.mkdirSync(locked);
   fs.chmodSync(locked, 0o000);
-  t.after(() => fs.chmodSync(locked, 0o755));
-
-  const result = resolveSessionMetadata(new Set(['open-sub']), {
-    home: root, deps: { sqlite, env: {}, customScanPaths: { hermes: [custom] }, hermesDatabaseCache: new Map() }
-  });
+  let result;
+  try {
+    result = resolveSessionMetadata(new Set(['open-sub']), {
+      home: root, deps: { sqlite, env: {}, customScanPaths: { hermes: [custom] }, hermesDatabaseCache: new Map() }
+    });
+  } finally {
+    // Restored before the temp-root cleanup hook runs.
+    fs.chmodSync(locked, 0o755);
+  }
 
   assert.equal(result.get('open-sub')?.parentSessionId, 'open-main');
 });
