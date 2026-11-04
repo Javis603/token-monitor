@@ -585,7 +585,10 @@ let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
 const sessionUsageArchiveStore = createSessionUsageArchiveStore({ cursorUsageEvents: createCursorUsageEventIndex() });
 let rendererViewState = normalizeInitialRendererViewState();
-const serviceStatusClient = createServiceStatusClient();
+// Cursor's status page now redirects to status.x.ai, which is unreachable from
+// mainland China without a proxy — on the global fetch that card would read
+// "Unable to check status" on exactly the networks this transport exists for.
+const serviceStatusClient = createServiceStatusClient({ fetchImpl: electronLimitsFetch() });
 const codexResetForecastClient = createCodexResetForecastClient({
   fetchImpl: electronLimitsFetch()
 });

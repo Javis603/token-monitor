@@ -1,7 +1,11 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+
+const ROOT = path.join(__dirname, '..', '..');
 
 const {
   SERVICE_STATUS_PROVIDERS,
@@ -216,4 +220,15 @@ test('service status client makes no request when providerIds is empty', async (
 
   assert.equal(calls, 0);
   assert.deepEqual(result.providers, []);
+});
+
+// The status card is the one place the app reports on a third party's own
+// network, and Cursor's page now redirects to status.x.ai, which never answers
+// from mainland China without a proxy. Probed on the global fetch the card is
+// pinned to "Unable to check status" on exactly the machines the runtime
+// transport exists for, so it has to resolve the same way the quota probes do.
+test('the status probe takes the runtime transport', () => {
+  const main = fs.readFileSync(path.join(ROOT, 'src', 'electron', 'main.js'), 'utf8');
+
+  assert.match(main, /createServiceStatusClient\(\{\s*fetchImpl: electronLimitsFetch\(\)\s*\}\)/);
 });
