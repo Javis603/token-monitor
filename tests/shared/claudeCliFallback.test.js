@@ -116,3 +116,31 @@ test('Claude delegated refresh remains enabled by default', async () => {
   assert.equal(result.accessToken, 'renewed-token');
   assert.equal(calls.status, 1);
 });
+
+test('disabled macOS CLI fallback rereads externally refreshed credentials after 401', async () => {
+  const { calls, deps } = depsWithCliCounter();
+  let reads = 0;
+  let requests = 0;
+  Object.assign(deps, {
+    env: {}, stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({ claudeAiOauth: { accessToken: ++reads === 1 ? 'old-token' : 'fresh-token' } }),
+    fetch: async (url, options) => {
+      requests++;
+      if (options.headers.authorization === 'Bearer old-token') return { ok: false, status: 401 };
+      assert.equal(options.headers.authorization, 'Bearer fresh-token');
+      return response(url.includes('/profile') ? profile : quota);
+    }
+  });
+  const result = await fetchClaudeLimits({ claudeCliFallbackEnabled: false }, deps);
+  assert.equal(result.source, 'oauth');
+  assert.equal(requests, 3);
+  assert.equal(reads, 2);
+  assert.deepEqual(calls, { auth: 0, usage: 0, status: 0, spawn: 0 });
+});
+
+test('disabled macOS CLI refresh reports unavailable when credentials have not changed', async () => {
+  const { calls, deps } = depsWithCliCounter();
+  await assert.rejects(refreshClaudeCredentials({ accessToken: deps.env.CLAUDE_CODE_OAUTH_TOKEN }, deps,
+    { claudeCliFallbackEnabled: false }), { status: 'unavailable' });
+  assert.deepEqual(calls, { auth: 0, usage: 0, status: 0, spawn: 0 });
+});

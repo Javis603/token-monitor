@@ -381,3 +381,18 @@ test('Claude credential changes still clear readings when fallback also changes'
     assert.deepEqual(plan, [{ scope: { provider: 'claude' }, reason: 'settings-change', options: { clear: true } }]);
   }
 });
+
+test('a pending Claude fallback refresh cannot discard an earlier credential clear', () => {
+  const vm = require('node:vm');
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const source = main.slice(main.indexOf('function limitInvalidationKey('), main.indexOf('function queueLimitInvalidation('));
+  for (const priorScope of [{ provider: 'claude' }, { provider: 'claude', accountKey: 'old-account' }]) {
+    const pending = new Map();
+    const context = { pendingLimitInvalidations: pending };
+    vm.runInNewContext(source, context);
+    context.rememberPendingLimitInvalidation(priorScope, 'credential-change', { clear: true });
+    context.rememberPendingLimitInvalidation({ provider: 'claude' }, 'settings-change', { clear: false });
+    assert.equal(pending.size, 1);
+    assert.equal(pending.get('claude:*').clear, true);
+  }
+});

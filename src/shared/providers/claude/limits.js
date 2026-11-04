@@ -1329,14 +1329,17 @@ async function resolveClaudeOauthIdentity(credentials, deps = {}) {
   }
 }
 
-async function delegatedClaudeRefresh(currentCredentials, deps = {}) {
+async function delegatedClaudeRefresh(currentCredentials, deps = {}, options = {}) {
   // Spawn `claude /status` in a PTY and let Claude Code itself refresh the token.
   // Matches CodexBar's strategy — Claude Code is a native Anthropic application,
   // so OAuth credential use stays within sanctioned channels. Best-effort: if the
   // probe fails we still re-read in case Claude Code touched the credentials.
-  await touchClaudeAuthPath(deps).catch(() => null);
+  if (options.claudeCliFallbackEnabled !== false) await touchClaudeAuthPath(deps).catch(() => null);
   const fresh = await readClaudeCredentials(deps);
   if (!fresh.accessToken || fresh.accessToken === currentCredentials.accessToken) {
+    if (options.claudeCliFallbackEnabled === false) {
+      throw errorWithStatus('unavailable', 'Claude CLI credential refresh is disabled');
+    }
     throw errorWithStatus('unauthorized', 'Claude Code did not refresh the OAuth token');
   }
   return fresh;
@@ -1344,12 +1347,7 @@ async function delegatedClaudeRefresh(currentCredentials, deps = {}) {
 
 async function refreshClaudeCredentials(currentCredentials, deps = {}, options = {}) {
   const platform = deps.platform || process.platform;
-  if (platform === 'darwin') {
-    if (options.claudeCliFallbackEnabled === false) {
-      throw errorWithStatus('unauthorized', 'Claude CLI credential refresh is disabled');
-    }
-    return delegatedClaudeRefresh(currentCredentials, deps);
-  }
+  if (platform === 'darwin') return delegatedClaudeRefresh(currentCredentials, deps, options);
   if (!currentCredentials.refreshToken) {
     throw errorWithStatus('unauthorized', 'No refresh token available');
   }
