@@ -150,3 +150,40 @@ test('OpenDesign aggregation keeps distinct workspaces and deduplicates the same
     assert.deepEqual(new Set(result.providers.map((p) => p.accountKey)), new Set([first.accountKey, second.accountKey]));
   }
 });
+
+test('OpenDesign freshness is scoped to its workspace across Node and Worker', async () => {
+  for (const core of [require('../../src/shared/limits/core'), require('../../worker/src/shared/limits/core')]) {
+    const first = await fetchOpendesignLimits(options, deps());
+    const body = usage(); body.workspaceId = 'workspace-b';
+    const second = await fetchOpendesignLimits(options, deps(body, { ...workspace, workspaceId: 'workspace-b' }));
+    const result = core.aggregateLimits([
+      { deviceId: 'stale-a', stale: true, limits: { providers: [first] } },
+      { deviceId: 'fresh-b', limits: { providers: [second] } }
+    ], 0, Date.parse(first.updatedAt));
+    assert.equal(result.providers.length, 2);
+    assert.equal(result.providers.find(p => p.accountKey === first.accountKey).stale, true);
+    const refreshed = core.aggregateLimits([
+      { deviceId: 'stale-a', stale: true, limits: { providers: [first] } },
+      { deviceId: 'fresh-a', limits: { providers: [first] } },
+      { deviceId: 'fresh-b', limits: { providers: [second] } }
+    ], 0, Date.parse(first.updatedAt));
+    assert.equal(refreshed.providers.length, 2);
+    assert.equal(refreshed.providers.find(p => p.accountKey === first.accountKey).stale, false);
+  }
+});
+
+test('OpenDesign keeps an unidentified authorization failure alongside a known workspace', async () => {
+  const healthy = await fetchOpendesignLimits(options, deps());
+  const failed = await fetchOpendesignLimits(options, { env: {}, fetch: async () => ({ status: 401 }) });
+  for (const core of [require('../../src/shared/limits/core'), require('../../worker/src/shared/limits/core')]) {
+    const result = core.aggregateLimits([
+      { deviceId: 'healthy', limits: { providers: [healthy] } },
+      { deviceId: 'failed', limits: { providers: [failed] } }
+    ], 0, Date.parse(healthy.updatedAt));
+    assert.equal(result.providers.length, 2);
+    const unauthorized = result.providers.find(p => p.status === 'unauthorized');
+    assert.ok(unauthorized);
+    assert.equal(unauthorized.accountKey, '');
+    assert.equal(unauthorized.sourceDeviceId, 'failed');
+  }
+});

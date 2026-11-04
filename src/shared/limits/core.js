@@ -981,6 +981,7 @@ function betterProvider(current, candidate) {
 // Muse's two products refresh independently; a fresh CLI observation cannot
 // retire the Web product's last-good quota, or vice versa.
 function providerFreshnessKey(provider) {
+  if (provider.provider === 'opendesign' && provider.accountKey) return `opendesign:${provider.accountKey}`;
   return provider.provider === 'muse' ? `muse:${provider.source}` : provider.provider;
 }
 
