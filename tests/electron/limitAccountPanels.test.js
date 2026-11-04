@@ -855,7 +855,9 @@ test('OpenDesign renders all four Cookie setup steps before its input, like Type
     }
     assert.equal(group.byId('opendesignCookieInput').placeholder, 'Cookie: ...');
     assert.deepEqual([...steps.walk()].filter((node) => node.tagName === 'code').map((node) => node.textContent), ['coding-plan-usage', 'amr-api.open-design.ai']);
-    assert.equal(i18n.translate(locale, 'settings.opendesign.step4'), i18n.translate(locale, 'settings.commandcode.step4'));
+    assert.equal(i18n.translate(locale, 'settings.opendesign.step4'), locale === 'ja'
+      ? '下に貼り付けて「Cookie を保存」をクリックします。'
+      : i18n.translate(locale, 'settings.commandcode.step4'));
     assert.equal(manual.children[1].id, 'opendesignCookieInput');
     assert.equal(manual.children[2].children[0].id, 'opendesignCredentialSubmit');
     assert.ok(!group.text.includes('settings.opendesign.'), `${locale}: untranslated key`);
@@ -868,4 +870,11 @@ test('OpenDesign Cookie instructions match the existing browser, DevTools and re
   assert.match(t('step2'), /DevTools \(F12 or Cmd\+Opt\+I\) -> Network.*subscription usage.*reload/);
   assert.match(t('step3After'), /full Cookie value from Headers -> Request Headers/);
   assert.match(t('step4'), /click Save cookie/);
+});
+
+test('OpenDesign save failures retain the underlying error in every locale', () => {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
+    const text = i18n.translate(locale, 'settings.opendesign.saveFailed', { message: 'fixture disk failure' });
+    assert.ok(text.includes('fixture disk failure'), locale);
+  }
 });
