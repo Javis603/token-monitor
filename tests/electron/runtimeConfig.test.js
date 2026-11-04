@@ -615,3 +615,17 @@ test('WorkBuddy managed field is private and owned by the managed service', () =
   assert.ok(rendererOmittedAccountKeys().includes('workbuddyManagedAccounts'));
   assert.equal(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.workbuddy.includes('workbuddyManagedAccounts'), false);
 });
+
+
+test('Claude CLI fallback defaults on and toggling it reconfigures only Claude limits', () => {
+  assert.equal(limitsConfigFromSettings({}).claudeCliFallbackEnabled, true);
+  for (const enabled of [false, true]) {
+    const settings = { claudeCliFallbackEnabled: enabled };
+    assert.equal(limitsConfigFromSettings(settings).claudeCliFallbackEnabled, enabled);
+    const change = classifySettingsChange({ claudeCliFallbackEnabled: !enabled }, settings);
+    assert.equal(change.limitsReconfigure, true);
+    assert.deepEqual(change.limitScopes, [{ provider: 'claude' }]);
+    assert.equal(change.usageStructural, false);
+    assert.equal(change.modeStructural, false);
+  }
+});

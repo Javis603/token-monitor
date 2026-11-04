@@ -64,7 +64,8 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsRefreshMode',
   'limitsRefreshMs',
   'cursorDisabledAccountIds',
-  'opencodeLocalLimitsEnabled'
+  'opencodeLocalLimitsEnabled',
+  'claudeCliFallbackEnabled'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 // Derived from the account declarations: every watched field plus a
@@ -141,6 +142,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     limitsRefreshMode: normalizeLimitsRefreshMode(settings.limitsRefreshMode),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
     claudePrepaidBalanceEnabled: settings.claudePrepaidBalanceEnabled !== false,
+    claudeCliFallbackEnabled: settings.claudeCliFallbackEnabled !== false,
     opencodeLocalLimitsEnabled: settings.opencodeLocalLimitsEnabled === true,
     opencodeAmbientEnabled: settings.opencodeAmbientEnabled !== false,
     // Every declared account field: settings lane, declared env fallbacks,
