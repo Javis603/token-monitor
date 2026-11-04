@@ -33,6 +33,8 @@ const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../
 const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
+const minimaxTestHome = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'minimax-renderer-home-'));
+test.after(() => fs.rmSync(minimaxTestHome, { recursive: true, force: true }));
 const { parseManusCredits } = require('../../src/shared/providers/manus/limits');
 const manusCreditsFixture = require('../fixtures/manusAvailableCredits.json');
 const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
@@ -453,7 +455,7 @@ test('MiniMax API balances reach the shared Limits and dock renderer in both cur
   for (const [region, currency, symbol] of [['cn', 'CNY', '¥'], ['intl', 'USD', '$']]) {
     for (const amount of [98.25, 0, -1.5]) {
       const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: region }, {
-        env: {}, fetchJson: async () => ({ available_amount: String(amount), base_resp: { status_code: 0 } })
+        env: {}, homeDir: minimaxTestHome, fetchJson: async () => ({ available_amount: String(amount), base_resp: { status_code: 0 } })
       });
       assert.equal(provider.status, 'ok');
       assert.equal(provider.windows[0].currency, currency);
@@ -490,7 +492,7 @@ test('MiniMax Balance is listed and can be hidden without disappearing from its 
 
 test('MiniMax Token Plan retains its quota pair and missing API balances do not invent a row', async () => {
   const plan = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-fixture', minimaxApiRegion: 'cn' }, {
-    env: {}, fetchJson: async () => ({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 75, current_weekly_remaining_percent: 50 }] } })
+    env: {}, homeDir: minimaxTestHome, fetchJson: async () => ({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 75, current_weekly_remaining_percent: 50 }] } })
   });
   const card = dockView().renderProviderWindows(plan, '#888888');
   assert.equal(plan.status, 'ok');
@@ -498,7 +500,7 @@ test('MiniMax Token Plan retains its quota pair and missing API balances do not 
   assert.equal(card.text.includes('Balance'), false);
   for (const available_amount of [undefined, 'invalid']) {
     const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' }, {
-      env: {}, fetchJson: async () => ({ available_amount, base_resp: { status_code: 0 } })
+      env: {}, homeDir: minimaxTestHome, fetchJson: async () => ({ available_amount, base_resp: { status_code: 0 } })
     });
     assert.equal(provider.status, 'unavailable');
     assert.equal(dockView().renderProviderWindows(provider, '#888888').children.length, 0);

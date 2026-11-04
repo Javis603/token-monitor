@@ -1,40 +1,68 @@
 ---
-summary: MiniMax billing type, region selection and endpoint fallbacks
+summary: MiniMax independent Code and API lanes, resource units and credential ownership
 ids: [minimax]
 read_when:
-  - Changing MiniMax billing type, region selection, credentials, or endpoint fallbacks
+  - Changing MiniMax limits, credentials, account identity, source selection or display
 ---
 
-## Data sources
+# MiniMax
 
-`minimaxBillingMode` selects `token-plan` (the default for existing installations) or `api` (pay-as-you-go). Token Plan keeps its quota endpoints and legacy Coding Plan fallback. API billing queries `/account/query_balance` on the selected MiniMax API host, as implemented in the [official MiniMax CLI](https://github.com/MiniMax-AI/cli/blob/a965e72ce424e465ae65ded102315bf73bef0aa3/src/client/endpoints.ts). It uses `available_amount`, not the cash-only balance, and emits one `credits` window in CNY for China or USD for International. Zero and negative balances are valid responses; missing or nonnumeric amounts are unavailable. No quota percentage, reset time or spend history is inferred.
+## Sources and resource pools
 
-Billing types never fall back to each other's endpoints. The selected type applies to both the credential-save probe and later collection; key prefixes do not override it. `MINIMAX_CODING_API_KEY` remains the Token Plan environment credential, and no new environment credential is auto-discovered.
+MiniMax Code OAuth and API keys are independent readings. Each key's billing type selects the Token Plan reader (`token-plan`, the default) or API billing (`api`); `minimaxBillingMode` remains the legacy/environment setting. Code uses the current local login regardless of those choices. Key changes never select or sign out Code. Key prefixes do not override the selected billing type, and Token Plan and API billing never fall back to each other. `MINIMAX_CODING_API_KEY` remains the environment credential for headless/agent runs; it is not shown in settings.
 
-## Source precedence
+| Lane | Credential | Readings |
+| --- | --- | --- |
+| Token Plan | API key with `token-plan` selected | Quota authorized by that key, with the existing legacy Coding Plan fallback |
+| API | API key with `api` selected | API wallet balance and optional server-reported cash Spend |
+| Code | Current local MiniMax Code OAuth login | Code points and applicable Code plan quotas |
 
-An explicit `minimaxApiRegion` choice wins over the legacy probe option `minimaxApiHost`, then `TOKEN_MONITOR_MINIMAX_API_REGION`, `MINIMAX_API_REGION`, and `MINIMAX_API_HOST`. Region and hostname aliases are exact matches. The default is `auto`: probe the last region that returned parseable quota first, or international first when no success is remembered. The other region remains a fallback for authentication rejection or transport failure. A China/International selection from settings or env always pins that region ahead of memory and prevents cross-region requests.
+M Plan is not a separate lane: its keys use the same subscription quota reader as Token Plan, and `token-plan` selects that reader, not a product generation or a combined allowance. Never add overlapping observations as extra allowance.
 
-Within each region, the Token Plan endpoint falls back to the legacy Coding Plan endpoint on the existing migration/error signals. A transport failure skips the remaining endpoint on the unreachable host. Runtime cancellation stops the probe without retrying another region; a per-request timeout remains eligible for fallback. HTTP failures such as 5xx or 429 and JSON parse failures do not trigger a cross-region retry.
+The producer of a request, the credential used to observe it, and the resource paying for it are different facts. Never assign cost from the client name, login method or token count.
 
-## Credentials and transport
+Code points use `CREDITS`, never CNY/USD. Membership's `op_credit_summary.total_remaining_amount` already combines purchased and gifted points; component balances must not be added again or emitted as independent balances. Plan quotas and the pay-as-you-go cash wallet remain separate pools.
 
-The API key stays in the main-process credential store. Region or billing-type changes retain the key, clear the old quota, and immediately refresh only MiniMax through the normal settings invalidation path. Calls use the injected transport and fixed MiniMax API URLs.
+## API keys
 
-If the fallback region rejects the key after a transport failure, report `unavailable` so the runtime retains the last known quota instead of prompting for a replacement key. When every attempted region rejects the key without a transport failure, report `unauthorized`.
+Environment credentials remain supported as a fallback, including for headless/agent runs, and are not shown in settings. Legacy and saved API keys take precedence over the environment key. Disabled saved entries still suppress environment fallback; removing the last saved entry restores it. Different credentials may observe the same wallet; never sum their balances or allowances.
 
-## Invariants and known gaps
+## Wallet and Spend
 
-An unchosen region stays empty in stored settings. Renderer projection and runtime config resolve the environment at use time; displaying Auto or saving a key must not freeze an implicit default. An explicit Auto selection is stored as `auto` and overrides the environment. The form's region saves independently (`submitWithCredential: false`); writes are serialized per field, and key submission waits for queued writes and omits the region from its credential draft. Failed writes show a panel message and leave the queue so later submissions can retry after settings resync.
+API wallet balance comes from `/account/query_balance.available_amount`, including usable vouchers, rather than `cash_balance` alone. It is one `credits` window in CNY for China or USD for International. Zero and negative balances are valid; a missing or nonnumeric amount is unavailable.
 
-The billing type also saves independently and stays visible after linking. Credential submission waits for that save and omits the type from its draft, so a stale renderer value cannot override the saved selection.
+Today, Week, Month and All time Spend are `consume_cash_sum` from `/account/amount` over the console's calendar dates (All time is undated). They are not recharge totals, page-row sums or balance deltas. Spend values are replacement snapshots that use the balance reading's key and region. A failed optional result leaves that figure unknown without invalidating the balance, changing region or selecting another credential.
 
-Open Browser follows the current China/International selection, including before the first successful probe. Auto follows the last successful probe's `en`/`cn` region, with the historical China landing page until a successful result exists. The wire region keeps `en`/`cn`; the setting's `intl`/`auto` vocabulary never replaces it.
+Code OAuth never queries the API wallet or borrows a saved API key, and its status is independent of API credential failures. Do not automatically merge lane identities or assign API Spend to Code. OAuth and a Token Plan key can observe the same subscription's quota; those are separate observations, not additional allowances.
 
-The browser path follows the billing type: Token Plan opens its plan page, and API billing opens the balance page. The descriptor's `pathByField` uses only declared paths, validated against the provider URL policy for every region.
+## OAuth ownership
 
-Region memory lives in the runtime's `providerRuntimeState` and resets with a new runtime. Only responses with quota windows update it; unavailable responses leave the last successful region intact. Changing a key can still resolve the other region through Auto's fallback.
+Discovery follows the [mcode data-directory rules](mcode.md), using `auth/prod/{cn,en}/mcode-public`, and checks China then International independently of the API region setting. Resource requests and delegated renewal use the discovered namespace's region. Each namespace contains one current login, not a managed account list. Each usable (unexpired and authenticated) regional login is read as its own Code account; an unusable login is neither shown nor renewed while another region has a usable one. When no login is usable, discovery selects the first present login.
+
+Select exactly one `workspace_type: 0` personal workspace (ID `0` is valid) and pass it explicitly to membership. Missing or ambiguous personal workspaces are unavailable; never change the official client's default workspace. Identity prefers the workspace's `op_group_id`, then membership's.
+
+Code's plan endpoint reports used percentages, unlike the API-key endpoint's remaining percentages. Status 3 means unlimited. `2062` omits an absent plan, while `1004` requires auth recovery. A transient plan failure keeps fresh points. Plan flags and tiers are entitlement hints, not evidence of payment, renewal or expiry.
+
+Code's `accountLabel` names the product, never the subscription. Its plan name comes from workspace or membership `token_plan_tier` when textual; without a token plan it is membership `plan_name`, or `Free` when that is empty, as in the official client. Pure-digit tiers are combo IDs, and only a matching current-subscription combo ID permits a name from the optional combo lookup. A catalog card alone never establishes the current subscription. Names must not cross namespaces, regions, groups, login epochs or combo IDs. Optional name failures leave the plan cell empty without invalidating quota. API-key plan cells stay empty; `Token Plan` and `Pay-as-you-go` are reader labels, not purchased tiers.
+
+Token Monitor reads the official credential and auth-state files without modifying them. It does not exchange refresh tokens, acquire official locks, retry credential writes or clear the official login.
+
+When the selected lease has expired, or membership/plan rejects it with HTTP 401/403 or business code `1004`, Token Monitor may invoke the installed official CLI once with `provider list --json` for that namespace's data root and region, then reread it. Healthy leases never invoke the CLI, and a missing CLI is never installed or updated automatically. The command initializes the official runtime and may migrate its configuration; it is not a side-effect-free status endpoint. A zero exit code does not establish renewal: require a changed, unexpired access token with the same nonempty login epoch after rereading.
+
+## Account identity and aggregation
+
+Code identity hashes the server's regional group. API-key identity retains its existing key hash. Matching readings select one observation through shared aggregation; amounts are never added across devices. One current Code login can coexist with multiple API keys; multiple managed Code logins are unsupported.
+
+An identified successful Code reading may retire the prior local OAuth identity through shared removal markers. A failed or unidentified read cannot prove logout or create a replacement account, and scoped work for a retired account must not adopt a newly logged-in account.
+
+## Regions and display
+
+Existing stored `apiRegion` pins remain supported. For the legacy/environment lane, `minimaxApiRegion` wins over legacy `minimaxApiHost`, then `TOKEN_MONITOR_MINIMAX_API_REGION`, `MINIMAX_API_REGION` and `MINIMAX_API_HOST`. An unset stored region follows the environment; explicit Auto ignores those pins. The wire keeps `cn`/`en`, distinct from settings' `intl`/`auto`.
+
+For API-key sources, Auto first tries the last region that returned quota windows, or International when none is remembered. A pinned region never crosses regions. HTTP 401/403, business `1004` (including its HTTP 400 form) and transport failures may drive the fallback; ordinary 400 errors, 5xx, 429 and JSON errors do not. Remember a region only after a usable reading.
+
+A healthy Code or API reading keeps the provider summary live; API key status never inherits Code's health. Both Code points and the API wallet use `metric: 'credits'` with their own units. Code points use the shared display-only balance meter; API cash Spend never supplies its denominator, and display estimates never enter the wire as quota percentages.
 
 ## Verification
 
-`node --test tests/shared/minimaxLimits.test.js tests/electron/limitAccountPanels.test.js tests/electron/limitProviderWiring.test.js tests/electron/credentialCommands.test.js` covers billing endpoint selection, balance parsing, region parsing, remembered-region precedence, transport and endpoint fallbacks, runtime quota retention, setup links, saved-settings/env precedence, and credential submission. Live quota or balance verification requires a key of the selected billing type in the selected region.
+Run the focused MiniMax tests (`node --test tests/shared/minimaxLimits.test.js`) and `npm run verify`. Live checks require a key of the selected billing type in the selected region; Code checks require the official local login. Mock responses do not establish current endpoint or billing semantics.
