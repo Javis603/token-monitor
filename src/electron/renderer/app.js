@@ -106,6 +106,7 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
+  minimax: 'settings.minimax.codeNote',
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
@@ -3598,14 +3599,27 @@ function subscriptionAccountChoices() {
     return saved.some((subscription) => subscription.provider === provider.provider && subscription.binding
       && !subscription.binding.accountKey && !subscription.binding.accountEmail && !subscription.binding.profileName);
   });
-  return visible.map((provider, index) => ({
-    provider,
-    value: subscriptionAccountValue(provider),
-    label: accountIdentityApi.accountTitleLabel(provider, visible, {
+  const choices = visible.map((provider, index) => {
+    const titled = accountIdentityApi.accountTitleLabel(provider, visible, {
       maskEmail: state.settings?.maskLimitAccountEmails === true,
       index
-    }) || subscriptionText.providerLabel(provider.provider)
-  }));
+    });
+    // MiniMax lane labels distinguish Code from API when no email or name does.
+    const lane = provider.provider === 'minimax' ? String(provider.accountLabel || '').trim() : '';
+    return {
+      provider,
+      value: subscriptionAccountValue(provider),
+      label: titled || lane || subscriptionText.providerLabel(provider.provider)
+    };
+  });
+  const seenLabels = new Map();
+  for (const choice of choices) {
+    if (choice.provider.provider !== 'minimax') continue;
+    const count = (seenLabels.get(choice.label) || 0) + 1;
+    seenLabels.set(choice.label, count);
+    if (count > 1) choice.label = `${choice.label} (${count})`;
+  }
+  return choices;
 }
 
 // A known key stays stable through renamed profiles, changed email metadata and
@@ -6676,6 +6690,7 @@ function homeLimitRows() {
         : providerEntries.length;
       if (accountCount > 1) {
         const accountTitle = limitAccountTitle(id, provider, index, providerEntries);
+        if (id === 'minimax' && !accountTitle) return providerTitle;
         return showProviderTitle ? `${providerTitle} · ${accountTitle}` : accountTitle;
       }
       if (id === 'mimo') {
@@ -17008,10 +17023,13 @@ function clearDisabledLimitProviderPendingChecks(enabledProviders) {
 }
 
 function externalProviderForAccount(providerName) {
+  // MiniMax's key form follows the API-key row. A Code login is not that credential.
   // Muse's manual credential panel owns only the web session, not its CLI login.
-  const provider = providerName === 'muse'
-    ? localProviderStatuses('muse').find((row) => row.source === 'web') || null
-    : localProviderStatus(providerName);
+  const provider = providerName === 'minimax'
+    ? localProviderStatuses(providerName).find((entry) => entry.source === 'api') || null
+    : providerName === 'muse'
+      ? localProviderStatuses('muse').find((row) => row.source === 'web') || null
+      : localProviderStatus(providerName);
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
@@ -17093,7 +17111,8 @@ function clearExternalProviderPendingStatus(providerName) {
     return;
   }
   if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
+  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName
+    || (providerName === 'minimax' && provider.source !== 'api'));
 }
 
 function nextCopilotSignInFlowId() {

@@ -478,6 +478,9 @@ function normalizeLimitProvider(input) {
   if (!provider) return null;
   const accountKey = input.accountKey ? String(input.accountKey) : '';
   const source = normalizeSource(input.source);
+  const relatedAccountKey = provider === 'minimax' && source === 'api' && typeof input.relatedAccountKey === 'string'
+    && /^sha256:[a-f0-9]{64}$/.test(input.relatedAccountKey) && input.relatedAccountKey !== accountKey
+    ? input.relatedAccountKey : '';
   const accountKeyAliases = provider === 'opencode'
     ? normalizeOpenCodeAccountKeyAliases(input.accountKeyAliases, accountKey)
     : [];
@@ -529,6 +532,7 @@ function normalizeLimitProvider(input) {
     provider,
     ...(adapterId ? { adapterId } : {}),
     accountKey,
+    ...(relatedAccountKey ? { relatedAccountKey } : {}),
     ...(provider === 'opencode' && input.webAccountKey
       ? { webAccountKey: String(input.webAccountKey) }
       : {}),
@@ -787,6 +791,16 @@ function carryProviderBalance(winner, loser) {
   return { ...winner, balance: loser.balance, windows };
 }
 
+// A confirmed MiniMax API/Code link is an account-level fact; do not drop it
+// when an unlinked observation of the same account and region wins.
+function carryMinimaxRelatedAccountKey(winner, loser) {
+  if (winner.provider !== 'minimax' || loser?.provider !== 'minimax') return winner;
+  if (!winner.accountKey || winner.accountKey !== loser.accountKey) return winner;
+  if (!winner.region || winner.region !== loser.region) return winner;
+  if (winner.relatedAccountKey || !loser.relatedAccountKey) return winner;
+  return { ...winner, relatedAccountKey: loser.relatedAccountKey };
+}
+
 function openCodeWindowKey(window) {
   const normalized = normalizeLimitWindow(window);
   if (!normalized) return '';
@@ -967,7 +981,7 @@ function pickBetterProvider(current, candidate) {
   if (!current) return candidate;
   const winner = betterProvider(current, candidate);
   const loser = winner === current ? candidate : current;
-  return carryProviderBalance(winner, loser);
+  return carryMinimaxRelatedAccountKey(carryProviderBalance(winner, loser), loser);
 }
 
 function betterProvider(current, candidate) {
@@ -1077,6 +1091,7 @@ function publicLimits(limits) {
     refreshMs: normalized.refreshMs,
     providers: normalized.providers.map(({
       accountKey,
+      relatedAccountKey,
       webAccountKey,
       accountKeyAliases,
       accountEmail,

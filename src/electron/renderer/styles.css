@@ -5951,6 +5951,7 @@ html.is-windows .limit-live-badge {
   font-size: 0.625rem;
   white-space: normal;
 }
+.limit-window-no-reset { align-content: start; }
 .limit-window-no-reset .limit-reset {
   display: none;
   min-height: 0;
