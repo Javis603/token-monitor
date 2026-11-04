@@ -13,11 +13,9 @@ function normalizeOpendesignCookieHeader(value) {
   if (typeof value !== 'string' || /[\u0000-\u001f\u007f]/u.test(value)) return '';
   const raw = value.trim().replace(/^cookie\s*:\s*/iu, '');
   if (!raw) return '';
-  const names = new Set();
   for (const pair of raw.split(';')) {
     const match = pair.trim().match(/^([!#$%&'*+.^_`|~0-9A-Za-z-]+)=([\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]*)$/u);
-    if (!match || names.has(match[1])) return '';
-    names.add(match[1]);
+    if (!match) return '';
   }
   return raw;
 }

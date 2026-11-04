@@ -48,7 +48,7 @@ test('OpenDesign discovers the workspace, selects windows by duration, and prese
 
 test('OpenDesign cookie boundary accepts full opaque headers and rejects malformed input without network', async () => {
   assert.equal(normalizeOpendesignCookieHeader('Cookie: a=one; b=two=='), 'a=one; b=two==');
-  for (const value of ['bare-token', 'a=x\r\nb=y', 'a=one; a=two', 'curl https://example.com', 'a=x; invalid', 123]) {
+  for (const value of ['bare-token', 'a=x\r\nb=y', 'curl https://example.com', 'a=x; invalid', 123]) {
     assert.equal(normalizeOpendesignCookieHeader(value), '');
     const d = deps();
     assert.equal((await fetchOpendesignLimits({ opendesignCookie: value }, d)).status, 'unavailable');
@@ -125,4 +125,28 @@ test('OpenDesign handles invalid JSON, transport failure, timeout and cancellati
   const result = await fetchOpendesignLimits(options, { env: {}, opendesignFetchTimeoutMs: 5,
     fetch: async (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) });
   assert.equal(result.status, 'unavailable');
+});
+
+test('OpenDesign passes repeated cookie names through unchanged', async () => {
+  const repeated = 'session=workspace-path; session=parent-path; other=value';
+  assert.equal(normalizeOpendesignCookieHeader(repeated), repeated);
+  const d = deps();
+  const result = await fetchOpendesignLimits({ opendesignCookie: repeated }, d);
+  assert.equal(result.status, 'ok');
+  assert.ok(d.calls.every(({ init }) => init.headers.Cookie === repeated));
+});
+
+test('OpenDesign aggregation keeps distinct workspaces and deduplicates the same workspace across devices', async () => {
+  for (const core of [require('../../src/shared/limits/core'), require('../../worker/src/shared/limits/core')]) {
+    const first = await fetchOpendesignLimits(options, deps());
+    const body = usage(); body.workspaceId = 'workspace-b';
+    const second = await fetchOpendesignLimits(options, deps(body, { ...workspace, workspaceId: 'workspace-b' }));
+    const result = core.aggregateLimits([
+      { deviceId: 'one', limits: { providers: [first] } },
+      { deviceId: 'two', limits: { providers: [second] } },
+      { deviceId: 'same-workspace', limits: { providers: [first] } }
+    ], 0, Date.parse(first.updatedAt));
+    assert.equal(result.providers.length, 2);
+    assert.deepEqual(new Set(result.providers.map((p) => p.accountKey)), new Set([first.accountKey, second.accountKey]));
+  }
 });

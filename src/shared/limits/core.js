@@ -648,6 +648,8 @@ function providerCollapseKey(provider) {
       // Notion allowances are per user AND workspace. Its verified composite
       // key is portable; neither a provider-only nor an email collapse is safe.
       || provider.provider === 'notion'
+      // OpenDesign workspace IDs are portable across devices.
+      || provider.provider === 'opendesign'
       // Manus keys hash the account's user id from its session, so the same
       // account hashes identically on every device.
       || provider.provider === 'manus'
