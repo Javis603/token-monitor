@@ -54,6 +54,7 @@
     alibaba: { web: 'Web' },
     stepfun: { web: 'Web' },
     manus: { local: 'Local', web: 'Web' },
+    openai: { api: 'API' },
     thirdparty: { api: 'API' }
   };
 
@@ -96,6 +97,7 @@
     stepfun: ['Coding/Token Plan', 'Web'],
     notion: ['Web', 'Manual'],
     manus: ['Auto', 'Desktop app', 'Manual'],
+    openai: ['Subscription', 'API key'],
     thirdparty: ['Relay', 'API']
   };
 

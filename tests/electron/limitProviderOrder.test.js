@@ -60,6 +60,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'stepfun',
     'notion',
     'manus',
+    'openai',
     'thirdparty'
   ]);
 });
