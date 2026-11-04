@@ -203,6 +203,12 @@
     animateMeasurement = animate && !opening && !reduceMotion();
     // No outgoing snapshot: the latest account is visible before the frame moves.
     render();
+    if (opening) {
+      // A hidden Windows window may not receive animation frames. Its first
+      // measurement must release the native show without waiting for a paint.
+      cancelAnimationFrame(measureFrame);
+      reportSize();
+    }
     if (!animate || reduceMotion()) return;
     contentAnimation = $('history-content').animate([{ opacity: opening ? 0 : .8 }, { opacity: 1 }],
       { duration: 150, easing: 'ease-out' });
