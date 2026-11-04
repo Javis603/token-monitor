@@ -1396,16 +1396,17 @@ for (const sourceChange of [false, true]) test(`raw-only observations interrupt 
   store = createLimitsHistoryStore(file, options);
   await store.record('local', { providers: [row(10, 60, 100, sourceChange ? 'b' : 'a')] });
   let entry = (await store.query('local', row(10, 60, 100))).windows[0];
-  assert.equal(entry.distribution.buckets.at(-1).value, null, 'the missing percentage interval is not measured consumption');
+  assert.equal(entry.distribution.buckets.at(-1).value, 20, 'matching same-day endpoints contribute their observed net quota change');
+  assert.equal(entry.distribution.unallocated, 0);
   assert.equal(entry.distribution.buckets.at(-1).uncertain, true);
   assert.equal(segments(entry.points).length, 1, 'the trend connects valid percentages across the raw-only observation');
   assert.deepEqual(segments(entry.points)[0].map(p => p.value), [20, 40]);
   await store.record('local', { providers: [row(15, 50, 100, sourceChange ? 'b' : 'a')] });
   entry = (await store.query('local', row(15, 50, 100))).windows[0];
-  assert.equal(entry.distribution.buckets.at(-1).value, 10, 'only the later fully observed increment counts');
+  assert.equal(entry.distribution.buckets.at(-1).value, 30, 'the net change and later fully observed increment both count');
   assert.equal(entry.distribution.resets, 0);
   const hourly = (await store.query('local', row(15, 50, 100), { grain: 'hour', day: dayKey(at(2, 12)) })).windows[0];
-  assert.equal(hourly.distribution.buckets.find(bucket => new Date(bucket.at).getHours() === 10).value, 10);
+  assert.equal(hourly.distribution.buckets.find(bucket => new Date(bucket.at).getHours() === 10).value, 30);
   if (!sourceChange) {
     const raw = row(15, 50, 100); raw.windows[0].showMeter = false;
     assert.deepEqual((await store.query('local', raw)).windows[0].points.map(point => point.value), [80, 70, 60, 50]);
@@ -1465,3 +1466,44 @@ for (const interruption of ['allowance', 'reset', 'refill', 'failure', 'conflict
     assert.equal(entry.distribution.buckets.at(-1).uncertain, true);
   });
 }
+
+for (const crossDay of [false, true]) test(`recovered allowance net changes are assigned only within their time bucket (cross day: ${crossDay})`, async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-net-buckets-'));
+  const clock = at(3, 12);
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => clock });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const firstAt = crossDay ? at(2, 23, 50) : at(3, 10, 50);
+  const recoveredAt = firstAt + 15 * 60000;
+  const first = fundedProvider(firstAt, 80, 100);
+  const missing = fundedProvider(firstAt + 5 * 60000, 70, null);
+  const recovered = fundedProvider(recoveredAt, 60, 100);
+  const next = fundedProvider(recoveredAt + 5 * 60000, 50, 100);
+  for (const row of [first, missing, recovered, recovered, next]) await store.record('local', { providers: [row] });
+  const daily = (await store.query('local', next)).windows[0].distribution;
+  assert.equal(daily.buckets.at(-1).value, crossDay ? 10 : 30);
+  assert.equal(daily.unallocated, crossDay ? 20 : 0);
+  assert.equal(daily.buckets.at(-1).uncertain, true);
+  assert.equal(daily.resets, 0);
+  const hourly = (await store.query('local', next, { grain: 'hour', day: dayKey(clock) })).windows[0].distribution;
+  assert.equal(hourly.buckets.find(b => new Date(b.at).getHours() === new Date(recoveredAt).getHours()).value, 10);
+  assert.equal(hourly.unallocated, 20, 'an hourly view cannot assign a change that crosses hours even when the daily view can');
+  assert.equal(hourly.resets, 0);
+});
+
+test('an unchanged percentage around a missing allowance is an observed net zero', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-net-zero-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const recovered = fundedProvider(at(2, 10, 10), 80, 100);
+  for (const row of [fundedProvider(at(2, 10), 80, 100), fundedProvider(at(2, 10, 5), 80, null), recovered]) {
+    await store.record('local', { providers: [row] });
+  }
+  for (const grain of ['day', 'hour']) {
+    const distribution = (await store.query('local', recovered, { grain, day: dayKey(at(2, 12)) })).windows[0].distribution;
+    const bucket = distribution.buckets.find(b => grain === 'day' ? b.key === dayKey(at(2, 12)) : new Date(b.at).getHours() === 10);
+    assert.equal(bucket.value, 0);
+    assert.equal(bucket.uncertain, true);
+    assert.equal(distribution.unallocated, 0);
+    assert.equal(distribution.resets, 0);
+  }
+});

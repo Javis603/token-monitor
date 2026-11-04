@@ -122,21 +122,22 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     return run && { at: run.until, value: run.value, unit: run.unit, balance: !!run.balance, ...(run.basis ? { basis: run.basis } : {}),
       reset: run.reset, interval: run.interval };
   }
-  function noteDaily(stream, previous, point, interrupted, now, ambiguous = false) {
+  function noteDaily(stream, previous, point, interruption, now, ambiguous = false) {
     const day = dayKey(point.at);
     dailyObserve.run(stream, day, point.at, point.at, point.value, point.value);
     if (!previous) return;
     const reset = !ambiguous && !sameCycle(previous, point);
-    const gap = ambiguous || interrupted || point.at - previous.at > Math.max(previous.interval, point.interval) * 2.5;
+    const allowanceRecovered = interruption === BREAK_ALLOWANCE_MISSING && sameCycle(previous, point);
+    const gap = ambiguous || interruption || point.at - previous.at > Math.max(previous.interval, point.interval) * 2.5;
     const delta = reset || ambiguous && !sameCycle(previous, point) ? 0 : Math.max(0, point.balance ? previous.value - point.value : point.value - previous.value);
     const crossDay = dayKey(previous.at) !== day;
-    if (!reset && !gap && !crossDay) dailyValue.run(delta, stream, day);
+    if (!reset && (!gap || allowanceRecovered) && !crossDay) dailyValue.run(delta, stream, day);
     if (reset || gap || crossDay && delta > 0) {
       const date = new Date(Math.max(previous.at, retentionStart(now, 730)));
       date.setHours(0, 0, 0, 0);
       for (; date.getTime() <= point.at; date.setDate(date.getDate() + 1)) dailyUnknown.run(stream, dayKey(date.getTime()));
     }
-    dailyExtra.run(!reset && (gap || crossDay) ? delta : 0, reset ? 1 : 0, stream, day);
+    dailyExtra.run(!reset && (crossDay || gap && !allowanceRecovered) ? delta : 0, reset ? 1 : 0, stream, day);
   }
 
   function conflict(stream, tail, point, now, reason = BREAK_INTERRUPTED) {
@@ -231,7 +232,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           const basisChanged = !!tail && (tail.basis || '') !== (point.basis || '');
           const ambiguous = basisChanged || switched && (!!head.guarded || !consistent || !healthy);
           const guarded = !!head?.guarded || ambiguous;
-          noteDaily(id, previous, point, !!tail?.break_after, now, ambiguous);
+          noteDaily(id, previous, point, tail?.break_after || 0, now, ambiguous);
           let run;
           if (tail && !ambiguous && !tail.break_after && tail.value === point.value && tail.interval === point.interval
             && consistent && point.at - previous.at <= point.interval * 2.5) {

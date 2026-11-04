@@ -89,7 +89,9 @@
       if (!previous) continue;
       const affected = buckets.filter(b => b.at <= p.at && b.end >= previous.at);
       if (!affected.length) continue;
-      if (p.uncertainBefore) {
+      const allowanceRecovered = p.allowanceMissingBefore === true && sameCycle(previous, p);
+      if (allowanceRecovered) affected.forEach(b => { b.uncertain = true; });
+      if (p.uncertainBefore && !allowanceRecovered) {
         affected.forEach(b => { b.uncertain = true; });
         if (sameCycle(previous, p)) unallocated += Math.max(0, p.balance ? previous.value - p.value : p.value - previous.value);
         continue;
@@ -104,11 +106,11 @@
         continue;
       }
       const delta = Math.max(0, p.balance ? previous.value - p.value : p.value - previous.value);
-      // Offline gaps and intervals crossing a bucket boundary cannot honestly
-      // be apportioned to hours/days. Keep that quantity separate, never smooth.
+      // Matching endpoints around a missing allowance establish the net change
+      // inside one bucket. Changes crossing hours/days still cannot be apportioned.
       const gap = p.breakBefore === true || !coveredInterval(previous, p)
         && p.at - previous.at > Math.max(previous.interval, p.interval) * 2.5;
-      if (gap || bucketKey(previous.at, grain) !== bucketKey(p.at, grain)) {
+      if (gap && !allowanceRecovered || bucketKey(previous.at, grain) !== bucketKey(p.at, grain)) {
         unallocated += delta;
         // A timely unchanged reading over a bucket boundary adds no unknown
         // quantity, but cannot establish a measured interval inside a bucket.
@@ -122,8 +124,8 @@
     const result = [];
     for (const point of points) {
       const segment = result.at(-1), previous = segment?.at(-1);
-      // Connecting valid endpoints is a visual choice. Consumption still uses
-      // breakBefore/uncertainBefore and never measures across this interval.
+      // The curve connects compatible endpoints; distribution separately decides
+      // whether their net change belongs to one time bucket.
       if (!previous || !sameCycle(previous, point)
         || !point.allowanceMissingBefore && (point.uncertainBefore === true || point.breakBefore === true || !coveredInterval(previous, point)
         && point.at - previous.at > Math.max(point.interval, previous.interval) * 2.5)) result.push([point]);
