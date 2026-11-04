@@ -52,13 +52,20 @@ function severityColor(percent) {
   return 'var(--accent, #4cb782)';
 }
 
+// The caption has to describe the span the curve actually draws, so both read
+// the same window: once the shared history passes the card's window, counting
+// the whole history would claim minutes the line does not cover.
+function sparkSeries(points, metric) {
+  const window = SPARK_POINTS[metric] || SPARK_POINTS.cpu;
+  return (points || []).slice(-window);
+}
+
 // Fixed 0-100 axis: a rescaled line would let a quiet machine look busy. Null
 // ticks (before a first reading) are skipped; the line starts at the first one.
 function sparkSvg(points, color, metric) {
   const width = 100;
   const height = 40;
-  const window = SPARK_POINTS[metric] || SPARK_POINTS.cpu;
-  const samples = (points || []).slice(-window).filter((value) => Number.isFinite(value));
+  const samples = sparkSeries(points, metric).filter((value) => Number.isFinite(value));
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('class', 'sv-spark');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -148,7 +155,7 @@ export function activate(ctx) {
           const color = severityColor(percent);
           strong.textContent = `${Math.round(percent)}%`;
           strong.style.color = color;
-          const series = (value.history || []).map((point) => (point ? point[metric] : null));
+          const series = sparkSeries((value.history || []).map((point) => (point ? point[metric] : null)), metric);
           sparkSlot.replaceChildren(sparkSvg(series, color, metric));
           const stepMs = Number(value.historyStepMs) || 2000;
           const drawn = series.filter((entry) => Number.isFinite(entry)).length;

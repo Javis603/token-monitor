@@ -28,9 +28,11 @@ function createSampler({ now = Date.now, platform = process.platform } = {}) {
   let lastCpuPercent = null;
   let history = [];
   let memoryCache = { at: 0, value: null, inFlight: null };
-  // On darwin a failed vm_stat read must not fall back to os.freemem() — that
-  // overstates usage and shows a false spike — so the last successful reading
-  // is kept until the next successful one.
+  // On darwin a failed vm_stat read must not fall back to os.freemem(): that
+  // counts only fully free pages and overstates usage. The last successful
+  // reading is kept until the next one succeeds, and while there is none the
+  // vital stays unknown rather than showing a number no later sample agrees
+  // with.
   let lastDarwinReading = null;
 
   function sampleCpuTimes() {
@@ -104,11 +106,16 @@ function createSampler({ now = Date.now, platform = process.platform } = {}) {
         }
         if (reading && platform === 'darwin') lastDarwinReading = reading;
         if (!reading && platform === 'darwin') reading = lastDarwinReading;
-        const value = reading || (() => {
+        // On macOS os.freemem() counts only fully free pages and ignores the
+        // inactive and purgeable ones, so it reports far more memory in use
+        // than vm_stat does. With no vm_stat reading yet, publish null (an
+        // unknown vital) instead of a number that would sit in the history
+        // and disagree with every later sample.
+        const value = reading || (platform === 'darwin' ? null : (() => {
           const total = os.totalmem();
           const free = os.freemem();
           return { total, available: free, used: Math.max(0, total - free), source: 'os' };
-        })();
+        })());
         memoryCache = { at: now(), value, inFlight: null };
         return value;
       })
