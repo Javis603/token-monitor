@@ -97,6 +97,8 @@ Archive projection can share canonical live session rows read-only while copying
 
 ## Limits collector
 
+The desktop records successful displayed quota observations in its own bounded history store; it never adds history to the wire record or probes on hover. The [quota history guide](limits-history.md) describes sampling gaps, reset boundaries and time-bucket semantics.
+
 `src/shared/usage/deviceRuntime.js` separates usage from limits. `LimitsRuntime` owns scheduling, bounded concurrency, per-provider latest-wins lanes, deadlines, backoff and last-good/last-attempt retention. Credential changes refresh only the affected lane, without restarting usage; provider exceptions are documented in their notes.
 
 - Fixed/adaptive mode is separate from the interval value. Local token usage never triggers a limits refresh, and `burn-rate` never bypasses cooldowns. Manual refresh waits for usage while limits run in the background; successful button feedback is not proof that every provider succeeded.
