@@ -1673,6 +1673,23 @@ test('automatic items follow the limits order and enabled set, capped at the def
   assert.equal(edgeDockCellSignature(buildEdgeDockCells(stats, { limitsEnabled: false })), '');
 });
 
+test('connectedLimitProviders falls back to the enabled set before the first stats push', () => {
+  // A plugin placement right after launch lands before the collector's first
+  // stats push. No provider "reports data" yet, so the reportable-data gate
+  // returns nothing — but that emptiness is about timing, not connection, and
+  // materialising the automatic dock list from it wipes the quota cells. The
+  // enabled-provider setting is stats-independent, so it stands in.
+  const options = {
+    limitsEnabled: true,
+    limitProviders: 'opencode,deepseek,factory',
+    limitProviderOrder: 'claude,codex,opencode,cursor,factory,kimi,deepseek'
+  };
+  assert.deepEqual(edgeDockPresentation.connectedLimitProviders(null, options), ['opencode', 'factory', 'deepseek']);
+  // With stats the reportable-data rule stays authoritative: an empty read
+  // means nothing is connected, not that stats have not arrived.
+  assert.deepEqual(edgeDockPresentation.connectedLimitProviders({ limits: { providers: [] } }, options), []);
+});
+
 test('the rail headline reports the pool that gates the account, not just the session', () => {
   const exhausted = provider('codex', {
     windows: [
