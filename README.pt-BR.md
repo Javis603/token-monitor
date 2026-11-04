@@ -296,7 +296,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | Contagem de tokens de raciocínio | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
 | Detecção de início/conclusão de turno | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | Usa sinais de turno registrados pela ferramenta. Para outras ferramentas ou sem sinais válidos, estima como em execução por cerca de 10 minutos após a última atividade. |
 | Estado nativo: em execução/aguardando entrada | Claude Code, Codex | — |
-| Agrupamento de sessões pai e subagentes | Codex, Antigravity, Oh My Pi, ZCode; sessões do T3 Code com vínculos verificáveis à sessão pai | O agrupamento do Claude Code é oferecido pelo T3 Code. |
+| Agrupamento de sessões pai e subagentes | Codex, Antigravity, Oh My Pi, ZCode, Hermes Agent; sessões do T3 Code com vínculos verificáveis à sessão pai | O agrupamento do Claude Code é oferecido pelo T3 Code. |
 | Agrupamento de registros de continuação da mesma conversa | Codex; sessões do T3 Code com vínculos verificados à mesma thread | — |
 | Alternar contas locais | Codex | Alterna entre contas adicionadas ao Token Monitor. |
 | Horários de renovação de cota/contagem regressiva | Fontes que informam horários de renovação de cota, por exemplo: Claude Code, Codex, OpenCode, Cursor, Antigravity | — |

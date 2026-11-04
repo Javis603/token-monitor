@@ -296,7 +296,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | Reasoning token counts | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
 | Turn start/completion detection | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | Uses turn signals recorded by the tool. For other tools or without valid signals, running is estimated for about 10 minutes after the last activity. |
 | Native running/waiting-for-input status | Claude Code, Codex | — |
-| Parent/subagent grouping | Codex, Antigravity, Oh My Pi, ZCode; T3 Code sessions with verifiable parent links | Claude Code grouping is available through T3 Code. |
+| Parent/subagent grouping | Codex, Antigravity, Oh My Pi, ZCode, Hermes Agent; T3 Code sessions with verifiable parent links | Claude Code grouping is available through T3 Code. |
 | Continuation-record grouping for the same conversation | Codex; T3 Code sessions with verified thread links | — |
 | Switch local accounts | Codex | Switches between accounts added in Token Monitor. |
 | Quota reset times/countdowns | Sources exposing reset times, e.g. Claude Code, Codex, OpenCode, Cursor, Antigravity | — |

@@ -3386,7 +3386,8 @@ function sessionPresentationOptions() {
       name: deviceBreakdownApi.deviceLabel(localDevice), platform: localDevice.platform || '', deviceKind: localDevice.deviceKind || 'computer' } : undefined,
     subagents: {
       countLabel: (count) => t('sessions.subagentCount', { count }),
-      unattributedLabel: t('dashboard.tooltip.unclassified')
+      unattributedLabel: t('dashboard.tooltip.unclassified'),
+      separateClients: state.settings?.hermesMergeSubagents === false ? new Set(['hermes']) : undefined
     },
     backgroundReviews: {
       label: t('sessions.backgroundReviews'),
@@ -11300,7 +11301,7 @@ function patchRenderedNode(current, next) {
     const value = next.getAttribute(name);
     if (current.getAttribute(name) !== value) current.setAttribute(name, value);
   }
-  if (current instanceof HTMLInputElement && current.id.startsWith('codexDots') && current.type === 'checkbox') {
+  if (current instanceof HTMLInputElement && current.hasAttribute('data-setting-toggle') && current.type === 'checkbox') {
     current.checked = next.checked;
   }
   const currentChildren = Array.from(current.childNodes);
@@ -11429,9 +11430,7 @@ async function removeCustomScanPath(clientId, dir) {
   });
 }
 
-// Values are formatted here and nowhere else — the presentation helper returns
-// three semantic groups containing only raw numbers, timestamps and i18n keys.
-function codexDotsSettingState(key) {
+function settingToggleState(key) {
   let checked = key === 'codexDotsEnabled' ? state.settings?.[key] === true : state.settings?.[key] !== false;
   let pending = false;
   for (const patch of pendingSettingsPatches) {
@@ -11442,6 +11441,50 @@ function codexDotsSettingState(key) {
   return { checked, pending };
 }
 
+// A boolean setting inside a client's health panel. While its write is in
+// flight the pending patch drives the box, so a health refresh cannot flip it.
+function settingToggleRow(key, id, labelKey, describedBy) {
+  const row = document.createElement('label');
+  row.className = 'checkbox-label codex-dots-setting';
+  const label = document.createElement('span');
+  label.textContent = t(labelKey);
+  const input = document.createElement('input');
+  input.id = id;
+  input.type = 'checkbox';
+  input.setAttribute('data-setting-toggle', key);
+  const toggleState = settingToggleState(key);
+  input.checked = toggleState.checked;
+  input.disabled = toggleState.pending;
+  input.setAttribute('aria-describedby', describedBy);
+  input.addEventListener('change', async () => {
+    if (settingToggleState(key).pending) return;
+    input.disabled = true;
+    try {
+      await saveSettings({ [key]: input.checked });
+    } catch (_) {
+      input.checked = settingToggleState(key).checked;
+    } finally {
+      input.disabled = false;
+      refillOpenClientHealthPanel();
+    }
+  });
+  row.append(label, input);
+  return row;
+}
+
+function settingToggleGroup(noteId, noteKey, rows) {
+  const note = document.createElement('div');
+  note.id = noteId;
+  note.className = 'tool-health-group-meta';
+  note.textContent = t(noteKey);
+  const group = document.createElement('div');
+  group.className = 'codex-dots-settings';
+  group.append(...rows, note);
+  return group;
+}
+
+// Values are formatted here and nowhere else — the presentation helper returns
+// three semantic groups containing only raw numbers, timestamps and i18n keys.
 function clientHealthGroup(group, notes, clientId) {
   const section = document.createElement('section');
   section.className = `tool-health-group tool-health-group-${group.id}`;
@@ -11517,62 +11560,14 @@ function clientHealthGroup(group, notes, clientId) {
     summary.textContent = t(`settings.tools.health.sync.${group.state}`);
     body.append(summary);
     if (clientId === 'codex') {
-      const row = document.createElement('label');
-      row.className = 'checkbox-label codex-dots-setting';
-      const label = document.createElement('span');
-      label.textContent = t('settings.tools.codexDots');
-      const input = document.createElement('input');
-      input.id = 'codexDotsInput';
-      input.type = 'checkbox';
-      const collectionState = codexDotsSettingState('codexDotsEnabled');
-      input.checked = collectionState.checked;
-      input.disabled = collectionState.pending;
-      input.setAttribute('aria-describedby', 'codexDotsNote');
-      input.addEventListener('change', async () => {
-        if (codexDotsSettingState('codexDotsEnabled').pending) return;
-        input.disabled = true;
-        try {
-          await saveSettings({ codexDotsEnabled: input.checked });
-        } catch (_) {
-          input.checked = state.settings?.codexDotsEnabled === true;
-        } finally {
-          input.disabled = false;
-          refillOpenClientHealthPanel();
-        }
-      });
-      const note = document.createElement('div');
-      note.id = 'codexDotsNote';
-      note.className = 'tool-health-group-meta';
-      note.textContent = t('settings.tools.codexDotsNote');
-      row.append(label, input);
-      const visibility = document.createElement('label');
-      visibility.className = 'checkbox-label codex-dots-setting';
-      const visibilityLabel = document.createElement('span');
-      visibilityLabel.textContent = t('settings.tools.codexDotsVisible');
-      const visibilityInput = document.createElement('input');
-      visibilityInput.id = 'codexDotsVisibleInput';
-      visibilityInput.type = 'checkbox';
-      const visibilityState = codexDotsSettingState('codexDotsVisible');
-      visibilityInput.checked = visibilityState.checked;
-      visibilityInput.disabled = visibilityState.pending;
-      visibilityInput.setAttribute('aria-describedby', 'codexDotsNote');
-      visibilityInput.addEventListener('change', async () => {
-        if (codexDotsSettingState('codexDotsVisible').pending) return;
-        visibilityInput.disabled = true;
-        try {
-          await saveSettings({ codexDotsVisible: visibilityInput.checked });
-        } catch (_) {
-          visibilityInput.checked = state.settings?.codexDotsVisible !== false;
-        } finally {
-          visibilityInput.disabled = false;
-          refillOpenClientHealthPanel();
-        }
-      });
-      visibility.append(visibilityLabel, visibilityInput);
-      const dots = document.createElement('div');
-      dots.className = 'codex-dots-settings';
-      dots.append(row, visibility, note);
-      body.append(dots);
+      body.append(settingToggleGroup('codexDotsNote', 'settings.tools.codexDotsNote', [
+        settingToggleRow('codexDotsEnabled', 'codexDotsInput', 'settings.tools.codexDots', 'codexDotsNote'),
+        settingToggleRow('codexDotsVisible', 'codexDotsVisibleInput', 'settings.tools.codexDotsVisible', 'codexDotsNote')
+      ]));
+    } else if (clientId === 'hermes') {
+      body.append(settingToggleGroup('hermesMergeSubagentsNote', 'settings.tools.hermesMergeSubagentsNote', [
+        settingToggleRow('hermesMergeSubagents', 'hermesMergeSubagentsInput', 'settings.tools.hermesMergeSubagents', 'hermesMergeSubagentsNote')
+      ]));
     }
     const stamps = [
       ['lastAttemptAt', 'settings.tools.health.lastAttempt'],
@@ -11910,6 +11905,7 @@ function toolPreferenceRenderSignature() {
       state.settings?.compactTokenUnits || '',
       state.settings?.codexDotsEnabled === true,
       state.settings?.codexDotsVisible !== false,
+      state.settings?.hermesMergeSubagents !== false,
       JSON.stringify(state.settings?.customScanPaths || {})
     ],
     query: toolPreferenceQuery(),

@@ -41,9 +41,10 @@ function findInput(element, id) {
   return null;
 }
 
-for (const [key, id, initial] of [
-  ['codexDotsEnabled', 'codexDotsInput', false],
-  ['codexDotsVisible', 'codexDotsVisibleInput', true]
+for (const [key, id, initial, client] of [
+  ['codexDotsEnabled', 'codexDotsInput', false, 'codex'],
+  ['codexDotsVisible', 'codexDotsVisibleInput', true, 'codex'],
+  ['hermesMergeSubagents', 'hermesMergeSubagentsInput', true, 'hermes']
 ]) {
   for (const fail of [false, true]) {
     test(`${key} preserves pending choice across health refresh, then ${fail ? 'rolls back' : 'commits'}`, async () => {
@@ -54,7 +55,7 @@ for (const [key, id, initial] of [
       let current;
       let context;
       const render = () => {
-        const next = context.clientHealthGroup({ id: 'collection', key: 'collection', state: 'local' }, [], 'codex');
+        const next = context.clientHealthGroup({ id: 'collection', key: 'collection', state: 'local' }, [], client);
         const nextInput = findInput(next, id);
         if (current) context.patchRenderedNode(current, nextInput);
         else current = nextInput;
@@ -75,7 +76,7 @@ for (const [key, id, initial] of [
         }
       });
       vm.runInContext(functionsBetween('patchRenderedNode', 'fillClientHealthPanel')
-        + functionsBetween('codexDotsSettingState', 'localDayKey'), context);
+        + functionsBetween('settingToggleState', 'localDayKey'), context);
       render();
       current.checked = !initial;
       const saving = current.listeners.get('change')();

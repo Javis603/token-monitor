@@ -301,7 +301,7 @@ Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 
 | 推理 Token 數 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
 | 回合開始／完成辨識 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | 依據工具記錄的回合訊號。其他工具或缺少有效訊號時，最後活動後約 10 分鐘內估算為執行中。 |
 | 原生執行中／等待輸入狀態 | Claude Code, Codex | — |
-| 父會話／子代理分組 | Codex, Antigravity, Oh My Pi, ZCode；具有可驗證父會話連結的 T3 Code 會話 | Claude Code 的分組透過 T3 Code 提供。 |
+| 父會話／子代理分組 | Codex, Antigravity, Oh My Pi, ZCode, Hermes Agent；具有可驗證父會話連結的 T3 Code 會話 | Claude Code 的分組透過 T3 Code 提供。 |
 | 同一對話的延續紀錄分組 | Codex；具有已驗證討論串連結的 T3 Code 會話 | — |
 | 切換本機帳戶 | Codex | 可切換至已加入 Token Monitor 的帳戶。 |
 | 額度重設時間／倒數 | 提供重設時間的來源，例如 Claude Code, Codex, OpenCode, Cursor, Antigravity | — |

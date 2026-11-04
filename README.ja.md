@@ -301,7 +301,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカルデ
 | 推論トークン数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
 | ターンの開始／完了検出 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | ツールが記録したターンのシグナルを使用します。その他のツールや有効なシグナルがない場合は、最後のアクティビティから約 10 分間、実行中と推定します。 |
 | ネイティブの実行中／入力待ち状態 | Claude Code, Codex | — |
-| 親セッション／サブエージェントのグループ化 | Codex, Antigravity, Oh My Pi, ZCode；親セッションへのリンクを検証できる T3 Code セッション | Claude Code のグループ化は T3 Code 経由で提供します。 |
+| 親セッション／サブエージェントのグループ化 | Codex, Antigravity, Oh My Pi, ZCode, Hermes Agent；親セッションへのリンクを検証できる T3 Code セッション | Claude Code のグループ化は T3 Code 経由で提供します。 |
 | 同じ会話の継続レコードのグループ化 | Codex；検証済みのスレッドリンクを持つ T3 Code セッション | — |
 | ローカルアカウントの切り替え | Codex | Token Monitor に追加済みのアカウントへ切り替えます。 |
 | クォータのリセット時刻／カウントダウン | リセット時刻を提供するデータソース。例： Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
