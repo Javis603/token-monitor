@@ -79,6 +79,31 @@
       : null;
   }
 
+  // An account whose only figure is money — a Sub2API or custom third-party
+  // balance, Claude's prepaid credits, an Ollama cookie balance — ships it as a
+  // credits window with showMeter: false, because there is no quota denominator
+  // to divide by, and the collector says exactly that where it emits the window.
+  // The compact selection finds no pool, so the row used to reach the rail as an
+  // error cell printing `--` while the card, the tray and the Limits page all had
+  // the balance.
+  //
+  // The money is a legitimate glance figure, so the cell prints it. The
+  // percentage is not: the meters exclude this window precisely because such a
+  // figure would be invented, and the card already reads the same window as a
+  // wallet row rather than a meter. So this headline carries the window and no
+  // remaining, and the rail gets its number from the credits figure the renderer
+  // takes off the headline window.
+  function balanceOnlyHeadline(provider) {
+    if (!provider || provider.status !== 'ok' || provider.stale) return null;
+    for (const window of Array.isArray(provider.windows) ? provider.windows : []) {
+      if (!window || !balanceDisplay.isCreditsWindow(window)) continue;
+      if (window.showMeter !== false) continue;
+      if (balanceDisplay.creditsAmount(provider, window) === null) continue;
+      return { window, remaining: null };
+    }
+    return null;
+  }
+
   function accountSummary(provider, options = {}) {
     const windowKey = options.windowKey || '';
     const selection = trayText.compactLimitSelection(provider);
@@ -88,7 +113,7 @@
     const headline = windowKey
       ? (chosenWindow && trayText.remainingPercent(chosenWindow, provider) !== null
         ? { window: chosenWindow, remaining: trayText.remainingPercent(chosenWindow, provider) } : null)
-      : headlinePick(selection);
+      : (headlinePick(selection) || balanceOnlyHeadline(provider));
     return {
       status: provider?.status === 'ok' && !provider?.stale ? 'ok' : (provider?.stale ? 'stale' : 'error'),
       planLabel: String(provider?.planLabel || provider?.accountLabel || ''),
@@ -102,6 +127,10 @@
       // Automatic mode warns for the tightest metered pool. A pinned window
       // keeps both the number and its colour tied to that chosen pool.
       severityPercent: windowKey ? (headline?.remaining ?? null) : (selection ? selection.tightestPercent : null),
+      // The automatic headline fell through to a money-only account: it has a
+      // figure to print and no percentage to warn with. The cell picks this to
+      // keep such an account selectable after the percentage comparison.
+      headlineIsMoney: Boolean(headline && headline.remaining === null && headline.window),
       // The card renders its quota rows from the shared Limits view, which
       // reads the collector record itself. Projecting the windows here is what
       // made the card a second, less-informed implementation of the same rows:
@@ -539,14 +568,21 @@
     // If the active row is hidden or has no usable value, fall back to the
     // tightest visible account rather than leaving the rail blank.
     let tightest = null;
+    // A money-only account has no percentage to compare, so it cannot join the
+    // tightest race. It waits in its own lane and is used only when no account
+    // reported a metered pool, which keeps a real quota headline first.
+    let moneyOnly = null;
     for (const account of projected) {
-      if (account.summary.headlineRemaining === null) continue;
+      if (account.summary.headlineRemaining === null) {
+        if (!moneyOnly && account.summary.headlineIsMoney) moneyOnly = account;
+        continue;
+      }
       if (!tightest || account.summary.headlineRemaining < tightest.summary.headlineRemaining) tightest = account;
     }
     const activeHeadline = id === 'codex' && options.accountMode !== 'lowest'
       ? projected.find((account) => account.summary.active && account.summary.headlineRemaining !== null) || null
       : null;
-    const headline = activeHeadline || tightest;
+    const headline = activeHeadline || tightest || moneyOnly;
     const headlineWindow = headline?.summary.headlineWindow || null;
     const headlineCredits = headlineWindow && balanceDisplay.isCreditsWindow(headlineWindow)
       ? {

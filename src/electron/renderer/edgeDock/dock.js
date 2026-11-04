@@ -833,7 +833,14 @@ function providerCellNode(cell) {
   // answers "what does the primary window say" (0% when a quota is spent).
   // Splitting the two lets a tight secondary window warn without turning the
   // headline into whichever window is lowest this minute.
-  value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
+  // A cell printing a balance has no quota percentage behind it, and `unknown`
+  // would grey the figure out as if nothing had answered. The money is the answer,
+  // so it keeps the normal ink; a balance that does carry a reading — OpenRouter's
+  // derived percentage — is still coloured by how tight that reading is.
+  const severitySource = cell.severityPercent ?? cell.remainingPercent;
+  value.dataset.severity = hasCreditsAmount && (severitySource === null || severitySource === undefined)
+    ? 'ok'
+    : displaySeverity(severitySource);
   node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider), waitingRingStart(cell.id, waiting > 0)), value);
   // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
