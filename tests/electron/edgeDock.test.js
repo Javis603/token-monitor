@@ -1904,6 +1904,40 @@ test('a money-only account prints its balance on the rail without inventing a pe
   assert.equal(error.remainingPercent, null);
 });
 
+test('two balance-only accounts leave the one closest to empty on the rail', () => {
+  // One cell per provider, so a money-only pair still needs a single headline.
+  // The app's account rule is "the lowest"; for a balance the lowest reading is
+  // the least money left, so the account closest to empty wins and the order the
+  // collector returned them in does not decide it.
+  const money = (name, accountKey, amount, currency = 'USD') => provider('thirdparty', {
+    accountKey,
+    accountName: name,
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: amount, currency, showMeter: false }],
+    balance: { amount, currency }
+  });
+  const build = (records) => buildEdgeDockCells({ limits: { providers: records } }, { limitProviders: 'thirdparty' })[0];
+  assert.equal(build([money('rich', 'sha256:r', 21.53), money('poor', 'sha256:p', 0.18)]).credits.amount, 0.18);
+  assert.equal(build([money('poor', 'sha256:p', 0.18), money('rich', 'sha256:r', 21.53)]).credits.amount, 0.18);
+
+  // Balances in different units share no scale, and no exchange rate reaches this
+  // projection, so those keep the collector's order rather than comparing figures
+  // that mean different things.
+  assert.equal(build([
+    money('usd', 'sha256:u', 5),
+    money('points', 'sha256:c', 900, 'CREDITS')
+  ]).credits.amount, 5);
+
+  // Money still never outranks a metered pool.
+  const quota = provider('thirdparty', {
+    accountKey: 'sha256:q',
+    windows: [{ kind: 'weekly', label: 'Weekly', remainingPercent: 80 }],
+    balance: { amount: 999, currency: 'USD' }
+  });
+  const [mixed] = buildEdgeDockCells({ limits: { providers: [money('poor', 'sha256:p', 0.18), quota] } }, { limitProviders: 'thirdparty' });
+  assert.equal(mixed.windowKind, 'weekly');
+  assert.equal(mixed.credits, null);
+});
+
 test('a pinned rail window ignores automatic exhaustion and keeps its identity across refreshes', () => {
   const session = { kind: 'session', label: 'Session', remainingPercent: 85 };
   const weekly = { kind: 'weekly', label: 'Weekly', remainingPercent: 0 };
