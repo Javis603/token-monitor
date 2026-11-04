@@ -5,6 +5,11 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { sameCycle, hourStart, dayKey, trendBounds, observationPoints, distribution } = require('../renderer/limits/historyModel');
 
+// Independent flags: an ordinary interruption must still break the visible
+// curve even when the same interval also lost its allowance.
+const BREAK_INTERRUPTED = 1;
+const BREAK_ALLOWANCE_MISSING = 2;
+
 function retentionStart(now, days) {
   const date = new Date(now);
   date.setHours(0, 0, 0, 0);
@@ -104,8 +109,8 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     ON CONFLICT(stream, source) DO UPDATE SET at = excluded.at`);
   const noteSource = sql(`INSERT INTO history_run_sources VALUES (?, ?, ?, ?, 1)
     ON CONFLICT(run, source) DO UPDATE SET last_at = excluded.last_at, samples = samples + 1`);
-  const breakRun = sql('UPDATE runs SET break_after = 1 WHERE id = ?');
-  const markConflict = sql('UPDATE runs SET break_after = 1, uncertain_until = MAX(COALESCE(uncertain_until, until), ?) WHERE id = ?');
+  const breakRun = sql(`UPDATE runs SET break_after = break_after | ${BREAK_INTERRUPTED} WHERE id = ?`);
+  const markConflict = sql('UPDATE runs SET break_after = break_after | ?, uncertain_until = MAX(COALESCE(uncertain_until, until), ?) WHERE id = ?');
   const markFailed = sql('UPDATE streams SET failed = 1 WHERE id = ?');
   const guardHead = sql('UPDATE streams SET guarded = 1 WHERE id = ?');
   const ambiguousStart = sql('UPDATE runs SET uncertain_before = 1 WHERE id = ?');
@@ -134,9 +139,9 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     dailyExtra.run(!reset && (gap || crossDay) ? delta : 0, reset ? 1 : 0, stream, day);
   }
 
-  function conflict(stream, tail, point, now) {
+  function conflict(stream, tail, point, now, reason = BREAK_INTERRUPTED) {
     guardHead.run(stream);
-    markConflict.run(point.at, tail.id);
+    markConflict.run(reason, point.at, tail.id);
     const date = new Date(Math.max(tail.until, retentionStart(now, 730)));
     date.setHours(0, 0, 0, 0);
     for (; date.getTime() <= point.at; date.setDate(date.getDate() + 1)) dailyUnknown.run(stream, dayKey(date.getTime()));
@@ -195,7 +200,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             const tail = latest.get(id);
             if (tail && point.at > tail.until) {
               noteOrigin.run(id, source, point.at);
-              conflict(id, tail, point, now);
+              conflict(id, tail, point, now, BREAK_ALLOWANCE_MISSING);
               markFailed.run(id);
             }
             continue;
@@ -226,7 +231,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           const basisChanged = !!tail && (tail.basis || '') !== (point.basis || '');
           const ambiguous = basisChanged || switched && (!!head.guarded || !consistent || !healthy);
           const guarded = !!head?.guarded || ambiguous;
-          noteDaily(id, previous, point, tail?.break_after === 1, now, ambiguous);
+          noteDaily(id, previous, point, !!tail?.break_after, now, ambiguous);
           let run;
           if (tail && !ambiguous && !tail.break_after && tail.value === point.value && tail.interval === point.interval
             && consistent && point.at - previous.at <= point.interval * 2.5) {
@@ -259,7 +264,8 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     for (const row of rows) {
       let run = runs.at(-1);
       if (!run || run.id !== row.id) {
-        run = { id: row.id, ...pointOf(row), breakAfter: !!row.break_after, uncertainBefore: !!row.uncertain_before && row.part_at === row.at,
+        run = { id: row.id, ...pointOf(row), breakAfter: !!row.break_after, allowanceMissingAfter: row.break_after === BREAK_ALLOWANCE_MISSING,
+          uncertainBefore: !!row.uncertain_before && row.part_at === row.at,
           uncertainUntil: row.uncertain_until, coverage: [] };
         runs.push(run);
       }

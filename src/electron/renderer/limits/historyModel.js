@@ -122,9 +122,11 @@
     const result = [];
     for (const point of points) {
       const segment = result.at(-1), previous = segment?.at(-1);
+      // Connecting valid endpoints is a visual choice. Consumption still uses
+      // breakBefore/uncertainBefore and never measures across this interval.
       if (!previous || !sameCycle(previous, point)
-        || point.uncertainBefore === true || point.breakBefore === true || !coveredInterval(previous, point)
-        && point.at - previous.at > Math.max(point.interval, previous.interval) * 2.5) result.push([point]);
+        || !point.allowanceMissingBefore && (point.uncertainBefore === true || point.breakBefore === true || !coveredInterval(previous, point)
+        && point.at - previous.at > Math.max(point.interval, previous.interval) * 2.5)) result.push([point]);
       else segment.push(point);
     }
     return result;
@@ -144,15 +146,19 @@
   function observationPoints(runs) {
     const points = [];
     let interrupted = false;
+    let allowanceMissing = false;
     for (const run of runs) {
       let first = true;
       for (const part of run.coverage) {
         const point = { at: part.at, value: run.value, reset: run.reset, interval: run.interval, ...(run.basis ? { basis: run.basis } : {}),
-          unit: run.unit, balance: run.balance, ...(first && run.uncertainBefore ? { uncertainBefore: true } : {}), ...(interrupted ? { breakBefore: true } : {}) };
+          unit: run.unit, balance: run.balance, ...(first && run.uncertainBefore ? { uncertainBefore: true } : {}),
+          ...(interrupted ? { breakBefore: true } : {}), ...(allowanceMissing ? { allowanceMissingBefore: true } : {}) };
         points.push(point);
-        if (part.until > part.at) points.push({ ...point, at: part.until, breakBefore: false, ...(point.uncertainBefore ? { uncertainBefore: false } : {}),
+        if (part.until > part.at) points.push({ ...point, at: part.until, breakBefore: false,
+          ...(point.uncertainBefore ? { uncertainBefore: false } : {}), ...(point.allowanceMissingBefore ? { allowanceMissingBefore: false } : {}),
           coveredFrom: part.at, maxGap: part.maxGap, observations: part.samples - 1 });
         interrupted = false;
+        allowanceMissing = false;
         first = false;
       }
       // A date-range query can return only an earlier portion of a flat run.
@@ -161,6 +167,7 @@
         points.at(-1).uncertainUntil = run.uncertainUntil;
       }
       interrupted = run.breakAfter === true;
+      allowanceMissing = run.allowanceMissingAfter === true;
     }
     return points;
   }

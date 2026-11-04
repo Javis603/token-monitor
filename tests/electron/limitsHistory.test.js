@@ -1398,7 +1398,8 @@ for (const sourceChange of [false, true]) test(`raw-only observations interrupt 
   let entry = (await store.query('local', row(10, 60, 100))).windows[0];
   assert.equal(entry.distribution.buckets.at(-1).value, null, 'the missing percentage interval is not measured consumption');
   assert.equal(entry.distribution.buckets.at(-1).uncertain, true);
-  assert.equal(segments(entry.points).length, 2, 'the percentage curve cannot bridge the raw-only observation');
+  assert.equal(segments(entry.points).length, 1, 'the trend connects valid percentages across the raw-only observation');
+  assert.deepEqual(segments(entry.points)[0].map(p => p.value), [20, 40]);
   await store.record('local', { providers: [row(15, 50, 100, sourceChange ? 'b' : 'a')] });
   entry = (await store.query('local', row(15, 50, 100))).windows[0];
   assert.equal(entry.distribution.buckets.at(-1).value, 10, 'only the later fully observed increment counts');
@@ -1443,3 +1444,24 @@ for (const change of ['activity', 'quota', 'backend']) test(`a pending history r
     assert.equal(result.windows.length, 1);
   } else assert.equal(result, null, 'a changed quota or backend still invalidates the pending read');
 });
+
+for (const interruption of ['allowance', 'reset', 'refill', 'failure', 'conflict']) {
+  test(`a missing allowance does not hide a later ${interruption} boundary`, async t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-allowance-boundary-'));
+    const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+    t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+    const first = fundedProvider(at(2, 10), 80, 100);
+    const missing = fundedProvider(at(2, 10, 5), 70, null);
+    await store.record('local', { providers: [first] });
+    await store.record('local', { providers: [missing] });
+    if (interruption === 'failure') await store.record('local', { providers: [{ ...missing, status: 'error' }] });
+    if (interruption === 'conflict') await store.record('local', { providers: [{ ...fundedProvider(at(2, 10), 50, 100), sourceDeviceId: 'other' }] });
+    const recovered = fundedProvider(at(2, 10, 10), interruption === 'refill' ? 90 : 60, interruption === 'allowance' ? 200 : 100);
+    if (interruption === 'reset') recovered.windows[0].resetsAt = new Date(at(10, 0)).toISOString();
+    await store.record('local', { providers: [recovered] });
+    const entry = (await store.query('local', recovered)).windows[0];
+    assert.equal(segments(entry.points).length, 2, 'other discontinuities still split the trend');
+    assert.equal(entry.distribution.buckets.at(-1).value, null, 'the boundary contributes no measured consumption');
+    assert.equal(entry.distribution.buckets.at(-1).uncertain, true);
+  });
+}
