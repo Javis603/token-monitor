@@ -218,8 +218,10 @@ test('a stale probe that was rejected still reports superseded, not invalid', as
 
 test('clearing removes the form credential through the same settings write', async () => {
   const { api, patches } = commands();
-  assert.deepEqual(await api.clearCredential('minimax'), { cleared: true, settings: { projected: true } });
-  assert.deepEqual(patches, [{ minimaxApiKey: '' }]);
+  assert.deepEqual(await api.clearCredential('minimax'), { cleared: false, errorCode: 'customForm' });
+  assert.deepEqual(patches, []);
+  assert.equal((await api.clearCredential('kimi')).cleared, true);
+  assert.equal(patches.length, 1);
   assert.deepEqual(await api.clearCredential('codex'), { cleared: false });
 });
 

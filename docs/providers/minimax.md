@@ -25,7 +25,13 @@ Code points use `CREDITS`, never CNY/USD. Membership's `op_credit_summary.total_
 
 ## API keys
 
-Environment credentials remain supported as a fallback, including for headless/agent runs, and are not shown in settings. Legacy and saved API keys take precedence over the environment key. Disabled saved entries still suppress environment fallback; removing the last saved entry restores it. Different credentials may observe the same wallet; never sum their balances or allowances.
+Add each API key with its billing type and region; Auto is the default and no user-defined account name is needed. Readding the same key updates its entry instead of collecting it twice. Removing a saved key never signs out Code. Environment credentials remain supported as a fallback, including for headless/agent runs, and are not shown in settings. Legacy and saved API keys take precedence over the environment key. Disabled saved entries still suppress environment fallback; removing the last saved entry restores it. Different credentials may observe the same wallet; never sum their balances or allowances.
+
+The settings list labels each saved key `Account N` in saved order. These are display labels; limits surfaces still group readings by confirmed GroupId.
+
+Existing `minimaxApiKey`, billing and region settings remain readable without a startup migration; an explicit key change imports the legacy key with its billing type and region, including an unset region that follows the environment. Explicitly readding a disabled key enables it. Raw keys never return to the renderer.
+
+Saving a key selects MiniMax and enables limits, following shared credential-save behavior; removing one preserves both. Save-time probes validate only the supplied API key, without Code or Spend. Code discovery runs once, independently of the number of API keys; refresh and region memory belong to each credential. Removing a key retires its local API reading without retiring Code or an available environment fallback. Each key's browser link follows its billing type and pinned or last-successful region.
 
 ## Wallet and Spend
 
@@ -59,7 +65,7 @@ An identified successful Code reading may retire the prior local OAuth identity 
 
 ## Regions and display
 
-Existing stored `apiRegion` pins remain supported. For the legacy/environment lane, `minimaxApiRegion` wins over legacy `minimaxApiHost`, then `TOKEN_MONITOR_MINIMAX_API_REGION`, `MINIMAX_API_REGION` and `MINIMAX_API_HOST`. An unset stored region follows the environment; explicit Auto ignores those pins. The wire keeps `cn`/`en`, distinct from settings' `intl`/`auto`.
+Each key added in settings stores the Auto, China or International region chosen beside its billing type; Auto is the default. Existing stored `apiRegion` pins remain supported. For the legacy/environment lane, `minimaxApiRegion` wins over legacy `minimaxApiHost`, then `TOKEN_MONITOR_MINIMAX_API_REGION`, `MINIMAX_API_REGION` and `MINIMAX_API_HOST`. An unset stored region follows the environment; explicit Auto ignores those pins. The wire keeps `cn`/`en`, distinct from settings' `intl`/`auto`.
 
 For API-key sources, Auto first tries the last region that returned quota windows, or International when none is remembered. A pinned region never crosses regions. HTTP 401/403, business `1004` (including its HTTP 400 form) and transport failures may drive the fallback; ordinary 400 errors, 5xx, 429 and JSON errors do not. Remember a region only after a usable reading.
 
@@ -67,4 +73,4 @@ A healthy Code or API reading keeps the provider summary live; API key status ne
 
 ## Verification
 
-Run the focused MiniMax tests (`node --test tests/shared/minimaxLimits.test.js`) and `npm run verify`. Live checks require a key of the selected billing type in the selected region; Code checks require the official local login. Mock responses do not establish current endpoint or billing semantics.
+Run the focused MiniMax tests (`node --test tests/shared/minimaxLimits.test.js tests/electron/minimaxApiKeys.test.js`) and `npm run verify`. Live checks require a key of the selected billing type in the selected region; Code checks require the official local login. Mock responses do not establish current endpoint or billing semantics.

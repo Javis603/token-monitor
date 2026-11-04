@@ -1991,11 +1991,9 @@ test('account validation reads the local device raw limits, not the collapsed ag
   assert.match(helper, /localProviders !== null/);
   // Legacy stats without raw device rows retain aggregate fallback.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
-  // The default account form reads the local row. MiniMax follows its API-key
-  // row, and Muse follows its web session.
+  // The default account form reads the local row. Muse follows its web session.
   const externalAccount = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
   assert.match(externalAccount, /localProviderStatus\(providerName\);/);
-  assert.match(externalAccount, /source === 'api'/);
   assert.match(externalAccount, /source === 'web'/);
 });
 

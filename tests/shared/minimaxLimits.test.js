@@ -725,6 +725,70 @@ test('MiniMax cash Spend is a server snapshot and a failed period leaves the bal
     weekSpend: null, monthSpend: 0, allTimeSpend: 12.34, trackingSince: null });
 });
 
+function spendRefreshDeps(state, clock, failing) {
+  return {
+    env: {}, providerRuntimeState: state, now: () => clock.now,
+    fetch: async (url) => {
+      const target = new URL(url);
+      if (target.pathname === '/account/query_balance') return okResponse({ available_amount: '14.97', base_resp: { status_code: 0 } });
+      const period = target.searchParams.get('start_date') ? 'dated' : 'all';
+      if (failing(period)) return okResponse({ base_resp: { status_code: 1032 } });
+      return okResponse({ consume_cash_sum: String(clock.spend), base_resp: { status_code: 0 } });
+    }
+  };
+}
+
+test('MiniMax Spend refreshes over an expired cache use only the fresh snapshot', async () => {
+  const options = { minimaxBillingMode: 'api', minimaxApiRegion: 'cn', minimaxApiKey: 'mock-key' };
+  for (const failing of [period => period === 'all', () => true]) {
+    const state = new Map();
+    const clock = { now: new Date(2026, 2, 10, 12).getTime(), spend: 1 };
+    let fail = false;
+    const deps = spendRefreshDeps(state, clock, period => fail && failing(period));
+    assert.equal((await fetchMinimaxLimits(options, deps)).balance.allTimeSpend, 1);
+    fail = true;
+    clock.spend = 2;
+    clock.now += 6 * 60_000;
+    const partial = await fetchMinimaxLimits(options, deps);
+    assert.equal(partial.status, 'ok');
+    assert.equal(partial.balance?.allTimeSpend ?? null, null, 'a failed period is not filled from the old snapshot');
+    if (partial.balance) assert.equal(partial.balance.todaySpend, 2);
+    fail = false;
+    clock.spend = 3;
+    clock.now += 60_000;
+    assert.equal((await fetchMinimaxLimits(options, deps)).balance.todaySpend, 3, 'a failed refresh does not renew the old cache');
+  }
+});
+
+test('MiniMax Spend cache does not cross a local date or month boundary', async () => {
+  const options = { minimaxBillingMode: 'api', minimaxApiRegion: 'cn', minimaxApiKey: 'mock-key' };
+  for (const [before, after] of [
+    [new Date(2026, 2, 10, 23, 59), new Date(2026, 2, 11, 0, 1)],
+    [new Date(2026, 2, 31, 23, 59), new Date(2026, 3, 1, 0, 1)]
+  ]) {
+    const state = new Map();
+    const clock = { now: before.getTime(), spend: 5 };
+    const ranges = [];
+    const deps = spendRefreshDeps(state, clock, () => false);
+    const fetchSpend = deps.fetch;
+    deps.fetch = async (url, init) => {
+      const start = new URL(url).searchParams.get('start_date');
+      if (start) ranges.push(start);
+      return fetchSpend(url, init);
+    };
+    await fetchMinimaxLimits(options, deps);
+    clock.now = after.getTime();
+    clock.spend = 0;
+    ranges.length = 0;
+    const row = await fetchMinimaxLimits(options, deps);
+    assert.equal(row.balance.todaySpend, 0);
+    assert.equal(row.balance.monthSpend, 0);
+    const day = after.toLocaleDateString('en-CA');
+    assert.ok(ranges.includes(day), 'Today is requested for the new date');
+    assert.ok(ranges.includes(`${day.slice(0, 8)}01`), 'Month starts on the new month');
+  }
+});
+
 const CODE_NOW = 1790000000000;
 const ACCESS_ONFILE = 'test-access-onfile';
 const REFRESH_ONFILE = 'test-refresh-onfile';
@@ -1054,7 +1118,6 @@ test('MiniMax links confirmed groups without carrying affiliation to a new key o
   const api = first.find(row => row.source === 'api');
   const code = first.find(row => row.source === 'oauth');
   assert.equal(api.relatedAccountKey, code.accountKey);
-  assert.equal(code.relatedAccountKey, undefined);
   const previousLimits = { providers: first };
   const newKey = await fetchMinimaxLimits({ ...options, minimaxApiKey: 'key-B', previousLimits }, deps);
   assert.ok(newKey.filter(row => !row.removed).every(row => !row.relatedAccountKey));
@@ -1378,4 +1441,45 @@ test('MiniMax migrating an implicit legacy region preserves its environment pin'
     });
     assert.equal(row.region, region, 'an inherited region must keep following the environment after migration');
   }
+});
+
+test('MiniMax keeps affiliation through a billing edit', async t => {
+  const { createMinimaxApiKeys } = require('../../src/electron/providers/minimax/apiKeys');
+  const { runLimitInvalidation } = require('../../src/electron/deviceRuntimeCoordinator');
+  const fixture = writeCodeAuthFixture();
+  const settings = { limitProviders: 'minimax', minimaxApiProfiles: {
+    a: { apiKey: 'key-A', billingMode: 'api', apiRegion: 'cn' },
+    b: { apiKey: 'key-B', billingMode: 'api', apiRegion: 'cn' }
+  } };
+  let group = 'group-A';
+  const deps = codeDeps(fixture, async url => {
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) return okResponse(membershipBody({ has_token_plan: false, op_group_id: group }));
+    if (new URL(url).searchParams.has('GroupId')) {
+      return okResponse({ base_resp: { status_code: group === 'group-A' ? 2062 : 1004 } });
+    }
+    return okResponse(url.endsWith('/account/query_balance') ? { available_amount: 8 } : windowsBody);
+  });
+  const runtime = createLimitsRuntime(settings, { ...deps, autoStart: false, autoRetry: false });
+  t.after(() => runtime.stop());
+  const refreshes = [];
+  const api = createMinimaxApiKeys({
+    getSettings: () => settings, saveSettings() {}, env: {}, probeDeps: () => deps,
+    changed: (accountKey, refresh, reason) => {
+      runtime.reconfigure(settings);
+      refreshes.push(runLimitInvalidation({ clearLimits: runtime.clear, refreshLimits: runtime.refresh },
+        { provider: 'minimax', source: 'api', accountKey }, reason, { clear: true, refresh }));
+    }
+  });
+  await runtime.refresh({ provider: 'minimax' }, 'manual');
+  const before = runtime.getSnapshot().providers;
+  const codeKey = before.find(row => row.source === 'oauth').accountKey;
+  assert.ok(before.filter(row => row.source === 'api').every(row => row.relatedAccountKey === codeKey));
+  assert.equal((await api.addKey({ apiKey: 'key-B', billingMode: 'token-plan', apiRegion: 'cn' })).ok, true);
+  await Promise.all(refreshes);
+  const after = runtime.getSnapshot().providers.find(row => row.accountKey === hashKey('minimax', 'key-B'));
+  assert.equal(after.status, 'ok');
+  assert.equal(after.relatedAccountKey, codeKey, 'clearing the changed key reading must retain confirmed ownership');
+  group = 'group-B';
+  await runtime.refresh({ provider: 'minimax' }, 'manual');
+  assert.ok(runtime.getSnapshot().providers.every(row => !row.relatedAccountKey), 'a different Code account cannot inherit links');
 });

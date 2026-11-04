@@ -456,6 +456,17 @@ test('account projections redact secrets while preserving profile metadata and s
   assert.equal(status.clineCredentialSource, 'settings');
 });
 
+test('MiniMax profiles keep the legacy configured flag truthful', () => {
+  const profiles = accountStatusProjection({ minimaxApiProfiles: { work: { apiKey: 'saved-secret', billingMode: 'api' } } }, {});
+  assert.equal(profiles.minimaxApiKeyConfigured, true);
+  assert.equal(profiles.minimaxApiKeySource, 'settings');
+  for (const env of [{}, { MINIMAX_CODING_API_KEY: 'env-secret' }]) {
+    const disabled = accountStatusProjection({ minimaxApiProfiles: { work: { apiKey: 'saved-secret', enabled: false } } }, env);
+    assert.equal(disabled.minimaxApiKeyConfigured, false);
+    assert.equal(disabled.minimaxApiKeySource, '');
+  }
+});
+
 test('the renderer receives serializable account forms but no credential declarations', () => {
   const forms = limitAccountFormsForRenderer();
   const generated = LIMIT_PROVIDER_IDS.filter((id) => forms.some((form) => form.id === id));

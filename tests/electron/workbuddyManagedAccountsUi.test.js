@@ -92,7 +92,7 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   h.state.stats = { limits: { providers: [] }, devices: [] };
   for (const name of ['renderConnectionStatus', 'render', 'renderCodexAccounts', 'renderMimoStatus',
     'renderSettingsSummaries', 'renderLimitProviderCheckboxes', 'renderToolPreferences', 'renderWslPanel',
-    'updateOpenRouterProfilesStatus', 'updateThirdPartyProfilesStatus', 'renderExternalProviderStatus',
+    'updateOpenRouterProfilesStatus', 'updateMinimaxApiKeysStatus', 'updateThirdPartyProfilesStatus', 'renderExternalProviderStatus',
     'renderCopilotStatus', 'signalContentReady']) h.context[name] = () => {};
   let settingsVisible = true, hidden = false;
   h.context.visibleStatsSurface = () => hidden ? null : 'main';
