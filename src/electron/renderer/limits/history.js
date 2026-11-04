@@ -25,7 +25,6 @@
   let hoveredBucket = '';
   let restoreReading = () => {};
   let contentAnimation = null;
-  let measureFrame = null;
   let animateMeasurement = false;
   const reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -188,9 +187,6 @@
     $('error').textContent = t('persistenceError');
     drawDistribution(entry);
     drawTrend();
-    // A reused window may reopen at its default bounds with identical content.
-    // ResizeObserver alone cannot report an unchanged content size again.
-    scheduleSize();
   }
 
   function reduceMotion() {
@@ -203,12 +199,8 @@
     animateMeasurement = animate && !opening && !reduceMotion();
     // No outgoing snapshot: the latest account is visible before the frame moves.
     render();
-    if (opening) {
-      // A hidden Windows window may not receive animation frames. Its first
-      // measurement must release the native show without waiting for a paint.
-      cancelAnimationFrame(measureFrame);
-      reportSize();
-    }
+    // Reopening unchanged content must also release the native show.
+    scheduleSize(opening);
     if (!animate || reduceMotion()) return;
     contentAnimation = $('history-content').animate([{ opacity: opening ? 0 : .8 }, { opacity: 1 }],
       { duration: 150, easing: 'ease-out' });
@@ -247,19 +239,21 @@
   });
   bridge.onNativeMaterial(next => { material = glass.normalizeNativeMaterialState(next); appearance(); });
   new ResizeObserver(drawTrend).observe($('trend'));
-  function reportSize() {
-    measureFrame = null;
+  const cardLayout = window.TokenMonitorCardLayout.createCardLayout({
+    measure() {
+      const style = getComputedStyle($('history'));
+      const inset = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((sum, key) => sum + parseFloat(style[key]), 0);
+      return Math.ceil($('history-content').getBoundingClientRect().height + inset);
+    },
+    report(height, content) {
+      bridge.resize(height, content.renderToken, content.animate, content.reduce);
+      animateMeasurement = false;
+    }
+  });
+  function scheduleSize(opening = false) {
     if (!payload) return;
-    const style = getComputedStyle($('history'));
-    const inset = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((sum, key) => sum + parseFloat(style[key]), 0);
-    const height = Math.ceil($('history-content').getBoundingClientRect().height + inset);
-    bridge.resize(height, payload.renderToken, animateMeasurement, reduceMotion());
-    animateMeasurement = false;
+    cardLayout.prepare({ renderToken: payload.renderToken, animate: animateMeasurement, reduce: reduceMotion() }, { opening, afterPaint: true });
   }
-  function scheduleSize() {
-    if (measureFrame !== null) return;
-    // Let the new content paint before moving the native frame onto its anchor.
-    measureFrame = requestAnimationFrame(() => { measureFrame = requestAnimationFrame(reportSize); });
-  }
-  new ResizeObserver(scheduleSize).observe($('history-content'));
+  window.addEventListener('pagehide', () => cardLayout.cancel(), { once: true });
+  new ResizeObserver(() => scheduleSize()).observe($('history-content'));
 })();

@@ -2067,6 +2067,16 @@ function fitCardTotal(card, scale = 1) {
   if (base > 0) number.style.fontSize = `${Math.max(12, Math.floor(base * (available - 1) / natural))}px`;
 }
 
+const bubbleLayout = window.TokenMonitorCardLayout.createCardLayout({
+  measure: ({ card, payload }) => Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity),
+  report(height, { card, payload, commit = false }) {
+    if (!(height > 0)) return;
+    const cellId = payload.cell.id;
+    if (commit && payload.placed?.cellId === cellId && payload.placed.height === height) commitCard(card, cellId);
+    else if (payload.placed?.cellId !== cellId || payload.placed.height !== height) bridge.reportBubbleSize(cellId, height);
+  }
+});
+
 function renderBubble(payload) {
   const contentTransform = '';
   root.dataset.side = payload.side;
@@ -2074,6 +2084,7 @@ function renderBubble(payload) {
   const cell = payload.cell;
   if (!cell) {
     clearCardSwitch();
+    bubbleLayout.cancel();
     if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
     observedPluginCard = null;
     for (const body of root.querySelectorAll('.edge-dock-plugin-card')) pluginHost?.unmount(body);
@@ -2088,8 +2099,7 @@ function renderBubble(payload) {
     const view = pluginHost?.state('edgeDock', cell.ref);
     const caption = retained.querySelector('.edge-dock-stat-caption'); if (caption) caption.textContent = view?.title || cell.ref;
     retained.style.maxHeight = payload.maxCardHeight ? `${payload.maxCardHeight}px` : '';
-    const height = Math.min(Math.ceil(retained.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
-    if (payload.placed?.cellId !== cell.id || payload.placed.height !== height) bridge.reportBubbleSize(cell.id, height);
+    bubbleLayout.prepare({ card: retained, payload });
     return;
   }
   const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
@@ -2111,12 +2121,7 @@ function renderBubble(payload) {
   clampBreakdownList(card);
   if (observedPluginCard) bubbleSizeObserver?.observe(observedPluginCard);
   if (cell.kind === 'provider') reserveAccountHeight(card, payload.maxCardHeight);
-  const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
-  if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
-    commitCard(card, cell.id);
-  } else {
-    bridge.reportBubbleSize(cell.id, height);
-  }
+  bubbleLayout.prepare({ card, payload, commit: true });
 }
 
 
@@ -2124,12 +2129,12 @@ const bubbleSizeObserver = surface === 'bubble' && window.ResizeObserver ? new R
   const card = observedPluginCard?.isConnected ? observedPluginCard : contentLayer.querySelector('.edge-dock-card') || stagingLayer.querySelector('.edge-dock-card');
   const payload = state.payload;
   if (card && payload?.cell?.id === card.dataset.cellId) {
-    const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
-    if (height > 0 && payload.placed?.height !== height) bridge.reportBubbleSize(card.dataset.cellId, height);
+    bubbleLayout.prepare({ card, payload });
   }
 }) : null;
 bubbleSizeObserver?.observe(root);
 window.addEventListener('pagehide', () => {
+  bubbleLayout.cancel();
   clearCardSwitch();
   bubbleSizeObserver?.disconnect();
 }, { once: true });

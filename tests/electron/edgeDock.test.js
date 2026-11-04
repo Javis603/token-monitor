@@ -87,10 +87,12 @@ test('the detail total follows the main app compact toggle and unit threshold', 
   assert.match(dock, /if \(compact\) \{[\s\S]*?el\('span', 'edge-dock-total-compact', compact\)[\s\S]*?totalRow\.append\(compactNode\)/);
 });
 
+const cardLayoutApi = require('../../src/electron/renderer/cardLayout');
+
 test('a long detail total shrinks beside its compact reading instead of wrapping', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
-  const source = dock.slice(dock.indexOf('function fitCardTotal('), dock.indexOf('function renderBubble(')).trim();
+  const source = dock.slice(dock.indexOf('function fitCardTotal('), dock.indexOf('const bubbleLayout =')).trim();
   const fitCardTotal = Function('getComputedStyle', `return (${source})`)((node) => (
     node.columnGap === undefined ? { fontSize: '30px' } : { columnGap: '8px' }
   ));
@@ -118,12 +120,12 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   const bubble = dock.slice(dock.indexOf('function renderBubble('));
   const freshCard = bubble.slice(bubble.indexOf('const card = cell.kind'));
   assert.ok(freshCard.indexOf('fitCardTotal(card);') >= 0);
-  assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('const height = '));
+  assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('bubbleLayout.prepare('));
 });
 
 test('a card commits after its reported height is clamped to the work area', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
+  const source = dock.slice(dock.indexOf('const bubbleLayout ='), dock.indexOf('const bubbleSizeObserver ='));
   for (const kind of ['provider', 'stat']) {
     for (const { measured, maxCardHeight, expected } of [
       // Chromium at 175% scaling can measure a max-height: 851px card this way.
@@ -135,6 +137,7 @@ test('a card commits after its reported height is clamped to the work area', () 
       const reports = [];
       const card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: measured }) };
       const renderBubble = Function('deps', `
+        const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
         const { root, stagingLayer, providerCard, statCard, fitCardTotal,
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
         let observedPluginCard = null;
@@ -142,6 +145,7 @@ test('a card commits after its reported height is clamped to the work area', () 
         ${source}
         return renderBubble;
       `)({
+        cardLayoutApi,
         root: { dataset: {}, style: { setProperty() {} }, classList: { toggle() {} } },
         stagingLayer: { replaceChildren() {} },
         providerCard: () => card,
@@ -190,14 +194,15 @@ test('a no-cell payload unmounts committed and staged plugin cards and removes t
   }
   const retained = [], unobserved = [];
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
+  const source = dock.slice(dock.indexOf('const bubbleLayout ='), dock.indexOf('const bubbleSizeObserver ='));
   const { renderBubble, observed } = Function('deps', `
+    const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
     const { root, contentLayer, stagingLayer, pluginHost, pluginContent, bubbleSizeObserver } = deps;
     let observedPluginCard = deps.card;
     const clearCardSwitch = () => {};
     ${source}
     return { renderBubble, observed: () => observedPluginCard };
-  `)({ root, contentLayer, stagingLayer, pluginHost, card: cards[1].card,
+  `)({ cardLayoutApi, root, contentLayer, stagingLayer, pluginHost, card: cards[1].card,
     pluginContent: { retain: targets => retained.push(targets) },
     bubbleSizeObserver: { unobserve: card => unobserved.push(card) } });
   renderBubble({ side: 'right', cell: null });
@@ -3495,6 +3500,7 @@ for (const kind of ['provider', 'stat']) {
       const source = dock.slice(dock.indexOf('let cardSwitchMotion ='), dock.indexOf('const bubbleSizeObserver ='));
       const pluginSource = dock.slice(dock.indexOf('function pluginCard('), dock.indexOf('const codexAccountControl ='));
       const { renderBubble } = Function('deps', `
+        const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
         const { document, el, root, contentLayer, stagingLayer, bridge, pluginHost } = deps;
         const surface = 'bubble', CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list', BREAKDOWN_VISIBLE_ROWS = 6;
         const prefersReducedMotion = () => false, getComputedStyle = () => ({ opacity: '1' });
@@ -3506,7 +3512,7 @@ for (const kind of ['provider', 'stat']) {
         ${pluginSource}
         ${source}
         return { renderBubble };
-      `)({ document, el, root, contentLayer, stagingLayer,
+      `)({ cardLayoutApi, document, el, root, contentLayer, stagingLayer,
         bridge: { reportBubbleSize: (id, height) => reports.push({ id, height }) },
         pluginHost: { state: () => ({ title: 'Plugin reading' }), mount: body => { mounts++; body.textContent = 'Live plugin content'; } }
       });

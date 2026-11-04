@@ -9,11 +9,12 @@ const vm = require('node:vm');
 test('history opening reports its size without paint callbacks; visible switches still wait for paint', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/limits/history.js'), 'utf8');
   const content = source.slice(source.indexOf('  function renderContent('), source.indexOf('  reducedMotionMedia.addEventListener('));
-  const sizing = source.slice(source.indexOf('  function reportSize('), source.indexOf('  new ResizeObserver(scheduleSize)'));
+  const sizing = source.slice(source.indexOf('  const cardLayout ='), source.indexOf('  new ResizeObserver(() => scheduleSize())'));
   const frames = new Map(), reports = [];
   let sequence = 0;
   const context = vm.createContext({
     payload: { renderToken: 5 },
+    window: { addEventListener() {} },
     bridge: { resize: (...args) => reports.push(args) },
     reduceMotion: () => false,
     $: () => ({ getBoundingClientRect: () => ({ height: 320 }), animate: () => ({ finished: Promise.resolve(), cancel() {} }) }),
@@ -21,8 +22,9 @@ test('history opening reports its size without paint callbacks; visible switches
     requestAnimationFrame: callback => { frames.set(++sequence, callback); return sequence; },
     cancelAnimationFrame: id => frames.delete(id)
   });
-  vm.runInContext(`let contentAnimation = null, measureFrame = null, animateMeasurement = false;
-    function render() { scheduleSize(); }
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/cardLayout.js'), 'utf8'), context);
+  vm.runInContext(`let contentAnimation = null, animateMeasurement = false;
+    function render() {}
     ${content}\n${sizing}`, context);
   const paint = () => {
     const pending = [...frames.values()];
