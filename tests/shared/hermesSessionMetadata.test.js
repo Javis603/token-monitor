@@ -51,6 +51,37 @@ test('only delegated subagents link to their parent session', { skip: !sqlite },
   assert.deepEqual(parents, { main: undefined, sub: 'main', continued: undefined, self: undefined, unknown: undefined });
 });
 
+test('a running session is last used at its newest message, not where tokscale dates it', { skip: !sqlite }, (t) => {
+  const root = tempRoot(t, 'hermes-activity-');
+  const hermesHome = path.join(root, 'hermes');
+  const db = createStateDb(hermesHome, [['main', 'cli', null]]);
+  db.exec('CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, timestamp REAL)');
+  const say = db.prepare('INSERT INTO messages (session_id, timestamp) VALUES (?, ?)');
+  const deps = { sqlite, env: { HERMES_HOME: hermesHome }, hermesDatabaseCache: new Map() };
+  // Tokscale reports one timestamp per Hermes session: its first message.
+  const started = '2026-11-04T14:02:46.174Z';
+  const decorate = () => {
+    const periods = { today: { sessions: { 'hermes:main': {
+      client: 'hermes', sessionId: 'main', totalTokens: 1, startedAt: started, lastUsedAt: started
+    } } } };
+    applySessionMetadata(periods, root, deps);
+    return periods.today.sessions['hermes:main'];
+  };
+  try {
+    say.run('main', Date.parse(started) / 1000);
+    say.run('main', Date.parse('2026-11-04T14:40:00.500Z') / 1000);
+    assert.equal(decorate().lastUsedAt, '2026-11-04T14:40:00.500Z');
+    // A turn written while the session is still open moves it again.
+    say.run('main', Date.parse('2026-11-04T14:45:46.000Z') / 1000);
+    const row = decorate();
+    assert.equal(row.lastUsedAt, '2026-11-04T14:45:46.000Z');
+    assert.equal(row.startedAt, started);
+    assert.equal(row.parentSessionId, undefined);
+  } finally {
+    db.close();
+  }
+});
+
 test('profile databases resolve their own subagents', { skip: !sqlite }, (t) => {
   const root = tempRoot(t, 'hermes-profiles-');
   const hermesHome = path.join(root, 'hermes');

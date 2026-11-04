@@ -1,8 +1,8 @@
 ---
-summary: "Hermes Agent session metadata: subagent parent links from state.db and the per-device grouping preference."
+summary: "Hermes Agent session metadata: subagent parent links and last activity from state.db, and the per-device grouping preference."
 ids: [hermes]
 read_when:
-  - Changing Hermes session parent links or the state.db roots they are read from
+  - Changing Hermes session parent links, last activity, or the state.db roots they are read from
   - Changing the hermesMergeSubagents setting or how Hermes subagents group
 ---
 
@@ -14,7 +14,11 @@ Tokscale reads Hermes usage from `state.db` without parent links. The session-me
 
 Only rows with `source = 'subagent'` expose `parent_session_id` as a grouping link; that is how `delegate_task` children are recorded. A context-compression continuation carries `parent_session_id` too but keeps its parent's `source`, so it stays its own row. A schema without `source` or `parent_session_id` gives no grouping and answers nothing, so it cannot shadow a profile database that has the columns.
 
-Databases open read-only. A found row is cached for the process because its link never changes; an id the database does not hold yet, including every id of an unsupported schema, is retried once the main file or WAL fingerprint changes. Missing or unreadable databases add no metadata and must not fail collection.
+## Last activity
+
+Tokscale gives each Hermes session a single timestamp, its first message, so its `lastUsedAt` never moves while the session runs and the running state (`sessionActivityState`) expires ten minutes after the session started. The same resolver reads `MAX(messages.timestamp)` (epoch seconds) for each session it answers and reports it as `lastUsedAt`, which `applySessionMetadata` only ever moves forward.
+
+Databases open read-only. Answers are reused until the main file or WAL fingerprint changes, then every id is read again, since a running session's newest message moves with each write; an id the database does not hold, including every id of an unsupported schema, is retried the same way. Missing or unreadable databases add no metadata and must not fail collection.
 
 ## Grouping preference
 
@@ -26,4 +30,4 @@ Databases open read-only. A found row is cached for the process because its link
 node --test tests/shared/hermesSessionMetadata.test.js tests/electron/sessionRows.test.js tests/electron/codexDotsSettings.test.js
 ```
 
-Tests cannot cover a real Hermes install: `npm run agent:once -- --dry-run --clients hermes` should show `parentSessionId` on every `source = 'subagent'` session, and in the app the parent's group row should split into separate rows when the toggle is turned off.
+Tests cannot cover a real Hermes install: `npm run agent:once -- --dry-run --clients hermes` should show `parentSessionId` on every `source = 'subagent'` session and, for a session Hermes is still writing, a `lastUsedAt` seconds old rather than its `startedAt`; in the app the parent's group row should split into separate rows when the toggle is turned off.

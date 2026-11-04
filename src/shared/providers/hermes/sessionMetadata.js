@@ -12,9 +12,8 @@ const { discoverHermesProfileScanPaths, resolveHermesHome } = require('./profile
 // it is the same conversation, not a delegated child, so it keeps its own row.
 const SUBAGENT_SOURCE = 'subagent';
 
-// Module-level on purpose: it outlives one collection tick. A row's parent
-// link never changes once written, so a found row is settled for the process;
-// only ids the database does not (yet) hold are retried when it changes.
+// Module-level on purpose: it outlives one collection tick. Answers are reused
+// until the database changes; a running session's newest message moves with it.
 const databaseCache = new Map();
 
 // The collector forwards Hermes custom scan paths, plus inherited `hermes:`
@@ -80,23 +79,39 @@ function databaseStamp(dbPath) {
   return main ? `${main}|${fileStamp(`${dbPath}-wal`)}` : '';
 }
 
-// Returns Map<id, parentSessionId | ''> for the ids the database holds, or
-// null when the open or the query failed (the ids retry next pass). A schema
-// without the columns holds no answers: its ids stay misses, so a later
-// database is still consulted and a migrated file is re-read once it changes.
-function readParentLinks(dbPath, sqlite, wantedIds) {
+function tableColumns(db, table) {
+  return new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => String(column.name)));
+}
+
+// Returns Map<id, metadata> for the ids the database holds, or null when the
+// open or the query failed (the ids retry next pass). A schema without the
+// columns holds no answers: its ids stay misses, so a later database is still
+// consulted and a migrated file is re-read once it changes.
+//
+// Tokscale dates a Hermes session by its first message, so without the newest
+// message time a running session would never look active after it started.
+function readSessionRows(dbPath, sqlite, wantedIds) {
   let db;
   try {
     db = openDb(dbPath, sqlite);
-    const columns = new Set(db.prepare('PRAGMA table_info(sessions)').all().map((column) => String(column.name)));
+    const columns = tableColumns(db, 'sessions');
     const rows = new Map();
     if (!columns.has('id') || !columns.has('source') || !columns.has('parent_session_id')) return rows;
     const statement = db.prepare('SELECT source, parent_session_id FROM sessions WHERE id = ?');
+    const messageColumns = tableColumns(db, 'messages');
+    const lastMessage = messageColumns.has('session_id') && messageColumns.has('timestamp')
+      ? db.prepare('SELECT MAX(timestamp) AS at FROM messages WHERE session_id = ?')
+      : null;
     for (const id of wantedIds) {
       const row = statement.get(id);
       if (row === undefined) continue;
+      const meta = {};
       const parent = row.source === SUBAGENT_SOURCE ? String(row.parent_session_id || '').trim() : '';
-      rows.set(id, parent !== id ? parent : '');
+      if (parent && parent !== id) meta.parentSessionId = parent;
+      // Hermes writes time.time(): epoch seconds.
+      const at = Number(lastMessage?.get(id)?.at);
+      if (Number.isFinite(at) && at > 0) meta.lastUsedAt = new Date(Math.round(at * 1000)).toISOString();
+      rows.set(id, meta);
     }
     return rows;
   } catch (_) {
@@ -119,6 +134,7 @@ function resolveSessionMetadata(sessionIds, context = {}) {
     if (!cached) cache.set(dbPath, cached = { stamp, rows: new Map(), misses: new Set() });
     if (cached.stamp !== stamp) {
       cached.stamp = stamp;
+      cached.rows.clear();
       cached.misses.clear();
     }
     const wanted = [];
@@ -128,7 +144,7 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       else if (!cached.misses.has(id)) wanted.push(id);
     }
     if (wanted.length === 0) continue;
-    const read = readParentLinks(dbPath, sqlite, wanted);
+    const read = readSessionRows(dbPath, sqlite, wanted);
     if (!read) continue;
     for (const id of wanted) {
       if (!read.has(id)) { cached.misses.add(id); continue; }
@@ -136,10 +152,10 @@ function resolveSessionMetadata(sessionIds, context = {}) {
       settled.set(id, read.get(id));
     }
   }
-  for (const [id, parentSessionId] of settled) {
-    if (parentSessionId) result.set(id, { parentSessionId });
+  for (const [id, meta] of settled) {
+    if (Object.keys(meta).length > 0) result.set(id, meta);
   }
   return result;
 }
 
-module.exports = { hermesDatabasePaths, readParentLinks, resolveSessionMetadata };
+module.exports = { hermesDatabasePaths, readSessionRows, resolveSessionMetadata };
