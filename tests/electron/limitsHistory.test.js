@@ -1398,7 +1398,7 @@ for (const sourceChange of [false, true]) test(`raw-only observations interrupt 
   let entry = (await store.query('local', row(10, 60, 100))).windows[0];
   assert.equal(entry.distribution.buckets.at(-1).value, 20, 'matching same-day endpoints contribute their observed net quota change');
   assert.equal(entry.distribution.unallocated, 0);
-  assert.equal(entry.distribution.buckets.at(-1).uncertain, true);
+  assert.equal(entry.distribution.buckets.at(-1).uncertain, !sourceChange);
   assert.equal(segments(entry.points).length, 1, 'the trend connects valid percentages across the raw-only observation');
   assert.deepEqual(segments(entry.points)[0].map(p => p.value), [20, 40]);
   await store.record('local', { providers: [row(15, 50, 100, sourceChange ? 'b' : 'a')] });
@@ -1507,3 +1507,179 @@ test('an unchanged percentage around a missing allowance is an observed net zero
     assert.equal(distribution.resets, 0);
   }
 });
+
+for (const missingKind of ['absent window', 'empty percentage', 'empty monetary']) {
+  test(`successful snapshots mark ${missingKind} coverage missing without affecting later valid intervals`, async t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-empty-snapshot-'));
+    const file = path.join(directory, 'history.sqlite');
+    const options = { now: () => at(2, 12) };
+    let store = createLimitsHistoryStore(file, options);
+    t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+    const reading = (minute, used) => ({ ...(missingKind === 'empty monetary'
+      ? fundedProvider(at(2, 10, minute), 100 - used, 100) : provider(at(2, 10, minute), used)), sourceDeviceId: 'a' });
+    const first = reading(0, 20);
+    const missing = { ...reading(5, 20), windows: missingKind === 'absent window' ? [] : first.windows.map(w => ({
+      ...w, usedPercent: null, remainingPercent: null, remaining: null, used: null
+    })) };
+    await store.record('local', { providers: [first] });
+    await store.record('local', { providers: [missing] });
+    assert.equal((await store.query('local', first)).windows[0].distribution.buckets.at(-1).uncertain, true,
+      'a known missing observation is visible before the next valid reading');
+    await store.record('local', { providers: [{ ...missing, updatedAt: new Date(at(2, 10, 3)).toISOString() }] });
+    await store.record('local', { providers: [reading(4, 22)] });
+    assert.deepEqual((await store.query('local', first)).windows[0].points.map(p => p.value), [20], 'older missing snapshots cannot roll back the observation fence');
+    await store.close(); store = createLimitsHistoryStore(file, options);
+    await store.record('local', { providers: [reading(10, 30)] });
+    const recovered = (await store.query('local', reading(10, 30))).windows[0];
+    assert.equal(recovered.distribution.buckets.at(-1).value, null);
+    assert.equal(recovered.distribution.unallocated, 10);
+    assert.equal(segments(recovered.points).length, 2);
+    await store.record('local', { providers: [missing] });
+    await store.record('local', { providers: [reading(15, 35)] });
+    for (const grain of ['day', 'hour']) {
+      const entry = (await store.query('local', reading(15, 35), { grain, day: dayKey(at(2, 12)) })).windows[0];
+      const bucket = entry.distribution.buckets.find(b => grain === 'day' ? b.key === dayKey(at(2, 12)) : new Date(b.at).getHours() === 10);
+      assert.equal(bucket.value, 5, 'a cached old missing snapshot cannot interrupt the recovered source');
+      assert.equal(bucket.uncertain, true);
+      assert.equal(entry.distribution.unallocated, 10);
+      assert.equal(entry.distribution.resets, 0);
+    }
+  });
+}
+
+test('an omitted quota does not interrupt other windows still present in the same successful snapshot', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-partial-snapshot-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const first = provider(at(2, 10), 20);
+  const session = { kind: 'session', usedPercent: 40, windowMinutes: 300, resetsAt: new Date(at(2, 14)).toISOString() };
+  await store.record('local', { providers: [{ ...first, windows: [...first.windows, session] }] });
+  await store.record('local', { providers: [provider(at(2, 10, 5), 25)] });
+  const returned = { ...provider(at(2, 10, 10), 30), windows: [...provider(at(2, 10, 10), 30).windows, { ...session, usedPercent: 50 }] };
+  await store.record('local', { providers: [returned] });
+  const [weekly, restored] = (await store.query('local', returned)).windows;
+  assert.equal(weekly.distribution.buckets.at(-1).value, 10);
+  assert.equal(weekly.distribution.buckets.at(-1).uncertain, false);
+  assert.equal(restored.distribution.buckets.at(-1).value, null);
+  assert.equal(restored.distribution.unallocated, 10);
+  assert.equal(restored.distribution.buckets.at(-1).uncertain, true);
+});
+
+test('an inactive source missing its allowance cannot guard a healthy observer or block later consistent reports', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-foreign-missing-'));
+  const file = path.join(directory, 'history.sqlite');
+  const options = { now: () => at(2, 12) };
+  let store = createLimitsHistoryStore(file, options);
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const reading = (minute, remaining, limit, source) => ({ ...fundedProvider(at(2, 10, minute), remaining, limit), sourceDeviceId: source });
+  await store.record('local', { providers: [reading(0, 80, 100, 'a')] });
+  await store.record('local', { providers: [reading(5, 75, null, 'b')] });
+  await store.close(); store = createLimitsHistoryStore(file, options);
+  await store.record('local', { providers: [reading(10, 70, 100, 'a')] });
+  const latest = reading(15, 65, 100, 'b');
+  await store.record('local', { providers: [latest] });
+  for (const raw of [false, true]) {
+    const selected = raw ? { ...latest, windows: latest.windows.map(w => ({ ...w, showMeter: false })) } : latest;
+    const entry = (await store.query('local', selected)).windows[0];
+    assert.deepEqual(entry.points.map(p => p.value), raw ? [80, 70, 65] : [20, 30, 35]);
+    assert.equal(entry.distribution.buckets.at(-1).value, 15);
+    assert.equal(entry.distribution.buckets.at(-1).uncertain, false);
+    assert.equal(entry.distribution.unallocated, 0);
+  }
+});
+
+test('missing allowance from a replacement source still marks a gap when the previous observer expired', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-expired-observer-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const reading = (minute, remaining, limit, source) => ({ ...fundedProvider(at(2, 10, minute), remaining, limit), sourceDeviceId: source });
+  for (const row of [reading(0, 80, 100, 'a'), reading(30, 70, null, 'b'), reading(35, 60, 100, 'b')]) await store.record('local', { providers: [row] });
+  const entry = (await store.query('local', reading(35, 60, 100, 'b'))).windows[0];
+  assert.equal(entry.distribution.buckets.at(-1).value, 20);
+  assert.equal(entry.distribution.buckets.at(-1).uncertain, true);
+});
+
+for (const identified of [false, true]) test(`Claude CLI history scopes only the unidentified fallback to its device (identified: ${identified})`, async t => {
+  const { mapClaudeCliUsageToProvider } = require('../../src/shared/providers/claude/limits');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-cli-identity-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const rows = [20, 50].map((used, index) => ({ ...mapClaudeCliUsageToProvider(`Current session\n${used}% used`, {
+    now: new Date(at(2, 10, index * 5)), updatedAt: new Date(at(2, 10, index * 5)).toISOString()
+  }), ...(identified ? { accountKey: 'verified-oauth-account-key' } : {}), sourceDeviceId: index ? 'b' : 'a' }));
+  assert.equal(rows[0].accountEmail, '', 'a verified UUID may have no email');
+  assert.equal(historyAccountKey(rows[0]) === historyAccountKey(rows[1]), identified);
+  const context = {};
+  vmForIdentity(context);
+  for (const row of rows) assert.equal(context.TokenMonitorLimitsHistoryIdentity.historyRowKey(row), historyRowKey(row), 'main and browser agree on identity');
+  for (const row of rows) await store.record('local', { providers: [row] });
+  for (const [index, row] of rows.entries()) {
+    const entry = (await store.query('local', row)).windows[0];
+    assert.deepEqual(entry.points.map(p => p.value), identified ? [20, 50] : [index ? 50 : 20]);
+    assert.equal(entry.distribution.buckets.at(-1).value, identified ? 30 : null);
+    assert.equal(entry.distribution.buckets.at(-1).uncertain, false);
+  }
+});
+
+function vmForIdentity(context) {
+  require('node:vm').runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/electron/limits/historyIdentity.js'), 'utf8'), context);
+}
+
+for (const snapshotAt of [at(2, 13), at(2, 12) - 731 * 86400_000]) {
+  test(`out-of-horizon successful snapshots cannot interrupt current history (${snapshotAt})`, t => {
+    const f = databaseFixture(t);
+    f.record([action(at(2, 10), 20)]);
+    f.record([{ account: accountA, snapshotAt, windows: [] }]);
+    f.record([action(at(2, 10, 10), 30)]);
+    const entry = f.query().windows[0];
+    assert.equal(entry.distribution.buckets.at(-1).value, 10);
+    assert.equal(entry.distribution.buckets.at(-1).uncertain, false);
+    assert.equal(segments(entry.points).length, 1);
+  });
+}
+
+for (const change of ['metadata only', 'reset', 'refill']) {
+  test(`a foreign raw reading missing allowance preserves ${change === 'metadata only' ? 'healthy continuity' : `a genuine ${change} conflict`}`, t => {
+    const f = databaseFixture(t);
+    const raw = (minute, value, source, basis = null, reset = at(8, 0)) => {
+      const entry = action(at(2, 10, minute), value, { source, reset });
+      Object.assign(entry.windows[0].point, { unit: 'USD', balance: true, ...(basis ? { basis } : {}) });
+      return entry;
+    };
+    f.record([raw(0, 80, 'a', '100')]);
+    f.record([raw(change === 'metadata only' ? 0 : 5, change === 'refill' ? 90 : 80, 'b', null,
+      change === 'reset' ? at(9, 0) : at(8, 0))]);
+    f.record([raw(10, 70, 'a', '100')]);
+    f.record([raw(15, 65, 'b', '100')]);
+    const entry = f.query().windows[0];
+    assert.deepEqual(entry.points.map(p => p.value), change === 'metadata only' ? [80, 70, 65] : [80, 70]);
+    assert.equal(entry.distribution.buckets.at(-1).uncertain, change !== 'metadata only');
+  });
+}
+
+for (const missing of ['empty snapshot', 'unreadable window', 'failure']) {
+  test(`a replacement observer's ${missing} interrupts an earlier allowance-only gap across restart`, async t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-replacement-gap-'));
+    const file = path.join(directory, 'history.sqlite');
+    const options = { now: () => at(2, 12) };
+    let store = createLimitsHistoryStore(file, options);
+    t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+    const reading = (minute, remaining, limit, source) => ({ ...normalizeLimitProvider(fundedProvider(at(2, 10, minute), remaining, limit)), sourceDeviceId: source });
+    await store.record('local', { providers: [reading(0, 80, 100, 'a')] });
+    await store.record('local', { providers: [reading(30, 70, null, 'b')] });
+    await store.close(); store = createLimitsHistoryStore(file, options);
+    const absent = reading(35, null, null, 'b');
+    if (missing === 'empty snapshot') absent.windows = [];
+    if (missing === 'failure') absent.status = 'error';
+    await store.record('local', { providers: [absent] });
+    const recovered = reading(40, 60, 100, 'b');
+    await store.record('local', { providers: [recovered] });
+    const entry = (await store.query('local', recovered)).windows[0];
+    assert.equal(entry.distribution.buckets.at(-1).value, null, 'a missing observation cannot qualify as allowance-only');
+    assert.equal(entry.distribution.unallocated, 20);
+    assert.equal(entry.distribution.resets, 0);
+    assert.equal(segments(entry.points).length, 2);
+    await store.record('local', { providers: [reading(45, 50, 100, 'b')] });
+    assert.equal((await store.query('local', recovered)).windows[0].distribution.buckets.at(-1).value, 10);
+  });
+}

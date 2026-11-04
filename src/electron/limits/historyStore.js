@@ -59,20 +59,22 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       if (provider.status !== 'ok' || provider.stale) { actions.push({ account, source, failed: true }); continue; }
       const at = Date.parse(provider.updatedAt);
       if (!Number.isFinite(at)) continue;
+      const interval = Math.max(60_000, Number(limits.refreshMs) || 300_000);
       const windows = [];
       for (const window of provider.windows || []) {
         const { primary, raw } = historyReadings(window);
         // A raw-only reading ends any previously observed percentage interval.
-        if (['credits', 'spend'].includes(window.metric) && primary?.unit !== 'pp') {
-          windows.push({ id: windowId(scope, provider, window, { unit: 'pp' }), point: { at, missing: true } });
+        if (primary && ['credits', 'spend'].includes(window.metric) && primary.unit !== 'pp') {
+          windows.push({ id: windowId(scope, provider, window, { unit: 'pp' }), point: { at, interval, missing: true } });
         }
         for (const reading of [primary, raw].filter(Boolean)) {
           windows.push({ id: windowId(scope, provider, window, reading), point: { at, ...reading,
             reset: Number.isFinite(Date.parse(window.resetsAt)) ? Date.parse(window.resetsAt) : null,
-            interval: Math.max(60_000, Number(limits.refreshMs) || 300_000) } });
+            interval } });
         }
       }
-      if (windows.length) actions.push({ account, source, windows });
+      // A successful provider result is a full snapshot, including empty windows.
+      actions.push({ account, source, snapshotAt: at, windows });
     }
     if (!actions.length || closed) return;
     try { await rpc('record', [actions, now()]); }

@@ -110,12 +110,12 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
   const noteSource = sql(`INSERT INTO history_run_sources VALUES (?, ?, ?, ?, 1)
     ON CONFLICT(run, source) DO UPDATE SET last_at = excluded.last_at, samples = samples + 1`);
   const breakRun = sql(`UPDATE runs SET break_after = break_after | ${BREAK_INTERRUPTED} WHERE id = ?`);
-  const markConflict = sql('UPDATE runs SET break_after = break_after | ?, uncertain_until = MAX(COALESCE(uncertain_until, until), ?) WHERE id = ?');
+  const markInterruption = sql('UPDATE runs SET break_after = break_after | ?, uncertain_until = MAX(COALESCE(uncertain_until, until), ?) WHERE id = ?');
   const markFailed = sql('UPDATE streams SET failed = 1 WHERE id = ?');
   const guardHead = sql('UPDATE streams SET guarded = 1 WHERE id = ?');
   const ambiguousStart = sql('UPDATE runs SET uncertain_before = 1 WHERE id = ?');
   const basisInsert = sql('INSERT INTO run_basis VALUES (?, ?)');
-  const failAccount = sql(`SELECT r.id, s.id AS stream FROM streams s
+  const failAccount = sql(`SELECT r.id, r.until, s.id AS stream FROM streams s
     JOIN runs r ON r.id = (SELECT id FROM runs WHERE stream = s.id ORDER BY until DESC LIMIT 1)
     WHERE s.account = ? AND s.source = ?`);
   function pointOf(run) {
@@ -140,12 +140,16 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     dailyExtra.run(!reset && (crossDay || gap && !allowanceRecovered) ? delta : 0, reset ? 1 : 0, stream, day);
   }
 
-  function conflict(stream, tail, point, now, reason = BREAK_INTERRUPTED) {
-    guardHead.run(stream);
-    markConflict.run(reason, point.at, tail.id);
+  function interrupt(stream, tail, point, now, reason = BREAK_INTERRUPTED) {
+    markInterruption.run(reason, point.at, tail.id);
     const date = new Date(Math.max(tail.until, retentionStart(now, 730)));
     date.setHours(0, 0, 0, 0);
     for (; date.getTime() <= point.at; date.setDate(date.getDate() + 1)) dailyUnknown.run(stream, dayKey(date.getTime()));
+  }
+
+  function conflict(stream, tail, point, now) {
+    guardHead.run(stream);
+    interrupt(stream, tail, point, now);
   }
 
   function prune(now) {
@@ -193,6 +197,17 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           }
           continue;
         }
+        if (action.snapshotAt !== undefined) {
+          if (action.snapshotAt < retentionStart(now, 730) || action.snapshotAt > now + 60_000) continue;
+          const present = new Set(action.windows.map(window => window.id));
+          for (const tail of failAccount.all(action.account, source)) {
+            const origin = originFor.get(tail.stream, source);
+            if (present.has(tail.stream) || action.snapshotAt <= tail.until || origin && action.snapshotAt <= origin.at) continue;
+            noteOrigin.run(tail.stream, source, action.snapshotAt);
+            interrupt(tail.stream, tail, { at: action.snapshotAt }, now);
+            markFailed.run(tail.stream);
+          }
+        }
         for (const { id, point } of action.windows) {
           if (point.at < retentionStart(now, 730) || point.at > now + 60_000) continue;
           const origin = originFor.get(id, source);
@@ -200,8 +215,13 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           if (point.missing) {
             const tail = latest.get(id);
             if (tail && point.at > tail.until) {
+              const head = headFor.get(id);
+              const healthy = !head.failed && point.at - tail.until <= Math.max(tail.interval, point.interval) * 2.5;
+              if (head.source !== source && healthy) continue;
               noteOrigin.run(id, source, point.at);
-              conflict(id, tail, point, now, BREAK_ALLOWANCE_MISSING);
+              interrupt(id, tail, point, now, BREAK_ALLOWANCE_MISSING);
+              // The accepted replacement owns subsequent missing/failure reports.
+              setHead.run(source, head.guarded, id);
               markFailed.run(id);
             }
             continue;
@@ -211,8 +231,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           const tail = latest.get(id);
           const head = headFor.get(id);
           const previous = pointOf(tail);
+          const missingBasisOnly = !!previous?.basis && !point.basis
+            && sameCycle(previous, { ...point, basis: previous.basis });
           if (tail && point.at <= tail.until) {
             if (point.at === tail.until) {
+              if (head.source !== source && missingBasisOnly && tail.value === point.value) continue;
               if (tail.value !== point.value || tail.reset !== point.reset || (tail.basis || '') !== (point.basis || '')) conflict(id, tail, point, now);
               else noteSource.run(tail.id, source, point.at, point.at);
             }
@@ -226,7 +249,8 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           // or expires, the replacement starts an uncertain baseline, not a
           // fabricated reset or a jump in measured consumption.
           if (switched && healthy && (head.guarded || !consistent)) {
-            if (!consistent) conflict(id, tail, point, now);
+            // Omitted allowance metadata cannot establish a conflicting quota pool.
+            if (!consistent && !missingBasisOnly) conflict(id, tail, point, now);
             continue;
           }
           const basisChanged = !!tail && (tail.basis || '') !== (point.basis || '');
