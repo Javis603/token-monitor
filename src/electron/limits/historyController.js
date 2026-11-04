@@ -89,7 +89,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     currentPayload = payload;
     expectedRender = ++renderSequence;
     syncMaterial();
-    win.webContents.send('limitsHistory:render', { ...payload, opening, renderToken: expectedRender,
+    win.webContents.send('limitsHistory:render', { ...payload, opening: opening || !win.isVisible(), renderToken: expectedRender,
       layoutWidth: placement.bounds.width / win.webContents.getZoomFactor(), nativeMaterial: getNativeMaterialState(win) });
   }
   function cancelClose() { clearTimer(timer); timer = null; }

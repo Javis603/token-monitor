@@ -1349,6 +1349,23 @@ test('a preview waits for a current rendered size before its first native reveal
   assert.equal(f.window.bounds.height, 360);
 });
 
+test('refreshing before the first size acknowledgement keeps hidden renders opening', async t => {
+  const f = previewFixture(t);
+  f.autoMeasure = false;
+  await f.open();
+  const firstToken = f.lastPayload.renderToken;
+  await f.controller.refresh();
+  assert.equal(f.window.visible, false);
+  assert.equal(f.lastPayload.opening, true, 'a hidden refresh must not wait for animation frames');
+  assert.notEqual(f.lastPayload.renderToken, firstToken);
+  f.handlers.get('limitsHistory:resize')({ sender: f.window.webContents }, 360, firstToken, false, false);
+  assert.equal(f.window.visible, false, 'the superseded opening cannot reveal stale content');
+  f.fromPanel('resize', 420);
+  assert.equal(f.window.visible, true);
+  await f.controller.refresh();
+  assert.equal(f.lastPayload.opening, false, 'visible refreshes retain their paint handoff');
+});
+
 test('account changes use the sidebar frame spring and retarget from the current frame', async t => {
   const f = previewFixture(t);
   await f.open();
