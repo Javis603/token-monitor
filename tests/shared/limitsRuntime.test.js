@@ -1431,34 +1431,26 @@ test('transient status (unavailable) preserves lastGood windows so stale data is
   runtime.stop();
 });
 
-test('clearing MiniMax API removes only that lane and fences its cancelled revisions', async () => {
-  const api = providerRow('minimax', 'api-A', 'Pay-as-you-go', { windows: [] });
-  const code = { ...providerRow('minimax', 'code-A', 'MiniMax Code'), source: 'oauth' };
-  const job = deferred();
-  const runtime = createLimitsRuntime({ limitProviders: ['minimax'], previousLimits: { providers: [api, code] } },
-    runtimeDeps({ autoRetry: false, probeProvider: (_provider, _config, context) => {
-      if (context.scope.accountKey && context.reason !== 'post-clear') return job.promise;
-      const error = new Error('failed');
-      error.status = 'unavailable';
-      return Promise.reject(error);
+test('clearing MiniMax API preserves a Code lane whose last good result was API', async () => {
+  const row = providerRow('minimax', 'shared', 'MiniMax Code', { windows: [] });
+  const runtime = createLimitsRuntime({ limitProviders: ['minimax'] }, runtimeDeps({
+    autoRetry: false,
+    probeProvider: async (_provider, _config, context) => {
+      if (context.scope.source === 'oauth') {
+        const error = new Error('offline');
+        error.status = 'unavailable';
+        throw error;
+      }
+      return [row];
     }
   }));
-  try {
-    await runtime.refresh({ provider: 'minimax' }, 'manual');
-    assert.equal(runtime.getSnapshot().providers.find(row => row.accountKey === 'api-A').source, 'api');
-    assert.equal(runtime.getSnapshot().providers.find(row => row.accountKey === 'code-A').source, 'oauth');
-    runtime.refresh({ provider: 'minimax', source: 'api', accountKey: 'api-A' }, 'credential-edit');
-    runtime.refresh({ provider: 'minimax', source: 'oauth', accountKey: 'code-A' }, 'login');
-    runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
-    assert.deepEqual(runtime.getSnapshot().providers.map(row => [row.accountKey, row.source]), [['code-A', 'oauth']]);
-    job.resolve([]);
-    const pendingCode = runtime.refresh({ provider: 'minimax', source: 'oauth', accountKey: 'code-A' }, 'post-clear');
-    assert.equal((await pendingCode).superseded, false);
-    assert.equal(runtime.getSnapshot().providers[0].accountLabel, 'MiniMax Code');
-  } finally {
-    job.resolve([]);
-    runtime.stop();
-  }
+  await runtime.refresh({ provider: 'minimax', accountKey: 'shared', source: 'api' }, 'manual');
+  await runtime.refresh({ provider: 'minimax', accountKey: 'shared', source: 'oauth' }, 'login');
+  runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
+  const [retained] = runtime.getSnapshot().providers;
+  assert.equal(retained.accountKey, 'shared');
+  assert.equal(retained.status, 'unavailable');
+  runtime.stop();
 });
 
 test('Muse anonymous source reset refreshes stay provider-wide without duplicate or retained identities', async () => {

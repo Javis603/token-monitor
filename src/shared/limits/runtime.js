@@ -830,22 +830,25 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         cancelLane(lane, reason);
         resetRetryPolicy(lane);
         if (provider === 'minimax' && normalized.source === 'api') {
-          // Capture queued API identities before cancelLane drops their intents.
+          // Fence each affected API identity once, including an in-flight
+          // request which has not committed its first attempt yet.
+          const removed = new Set();
           for (const intent of [...lane.pending.values(), lane.active?.intent]) {
-            if (intent?.scope.source === 'api') lane.accountRevisions.delete(intent.identityKey);
+            if (intent?.scope.source === 'api') removed.add(intent.identityKey);
           }
-        }
-        if (provider === 'muse' && scope.source === 'web') {
-          lane.identities.delete('muse:source:web');
-          lane.accountRevisions.clear();
-        } else if (provider === 'minimax' && normalized.source === 'api') {
           for (const [identityKey, state] of lane.identities) {
             const row = state.lastAttempt?.row || state.lastGood;
             if (row?.source === 'api') {
               lane.identities.delete(identityKey);
-              lane.accountRevisions.delete(identityKey);
+              removed.add(identityKey);
             }
           }
+          for (const identityKey of removed) {
+            lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
+          }
+        } else if (provider === 'muse' && scope.source === 'web') {
+          lane.identities.delete('muse:source:web');
+          lane.accountRevisions.clear();
         } else {
           lane.identities.clear();
           lane.accountRevisions.clear();
