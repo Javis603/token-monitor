@@ -2700,7 +2700,7 @@
     if (providerId === 'minimax') {
       const groups = minimaxAccountGroups(providers);
       if (groups.length === 1 && providers.length > 1) {
-        const account = renderMinimaxAccount(label, providers, color);
+        const account = renderMinimaxAccount(label, groups[0], color);
         if (account) return account;
         const { row } = renderLimitProviderGroupFrame(providerId, label, providers, color, { count: 0 });
         row.style.display = 'none';

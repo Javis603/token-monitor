@@ -552,6 +552,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         windows: existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label))
       };
     }
+    if (lane.provider === 'minimax' && !row.source && !row.accountKey) {
+      const previous = existing.lastAttempt?.row || existing.lastGood;
+      if (previous?.source) row = { ...row, source: previous.source };
+    }
     if (lane.provider === 'workbuddy' && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
       // A partial discovery can miss an encrypted identity which has never
       // produced lastGood quota. Preserve its last known metadata as well as
@@ -620,7 +624,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         : expected.size ? [...expected] : [`${lane.provider}:*`];
       for (const identityKey of targets) {
         if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
-        applyAttempt(lane, identityKey, { provider: lane.provider }, status, attemptAt);
+        applyAttempt(lane, identityKey, { provider: lane.provider, source: dispatch.scope.source }, status, attemptAt);
       }
       rebuildSnapshot();
       return [];
@@ -682,6 +686,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       runtimeEpoch,
       providerEpoch: lane.epoch,
       accountScoped: intent.accountScoped,
+      scope: intent.scope,
       identityKey: intent.identityKey,
       accountRevision: lane.accountRevisions.get(intent.identityKey) || 0,
       accountRevisions: new Map(lane.accountRevisions),
@@ -824,27 +829,20 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       if (!isAccountScope(normalized)) {
         cancelLane(lane, reason);
         resetRetryPolicy(lane);
+        if (provider === 'minimax' && normalized.source === 'api') {
+          // Capture queued API identities before cancelLane drops their intents.
+          for (const intent of [...lane.pending.values(), lane.active?.intent]) {
+            if (intent?.scope.source === 'api') lane.accountRevisions.delete(intent.identityKey);
+          }
+        }
         if (provider === 'muse' && scope.source === 'web') {
           lane.identities.delete('muse:source:web');
           lane.accountRevisions.clear();
         } else if (provider === 'minimax' && normalized.source === 'api') {
           for (const [identityKey, state] of lane.identities) {
-            const row = state.lastGood || state.lastAttempt?.row;
-            // Generic fallback attempts carry { provider } without a source;
-            // they still belong to the API lane when the identity is API-keyed.
-            // Code rows always have source: 'oauth'; API rows have 'api'.
-            // A source-less attempt on a keyed identity can only be an API row.
-            const isApi = row?.source === normalized.source
-              || (!row?.source && identityKey !== 'minimax:*');
-            if (isApi) {
+            const row = state.lastAttempt?.row || state.lastGood;
+            if (row?.source === 'api') {
               lane.identities.delete(identityKey);
-              lane.accountRevisions.delete(identityKey);
-            }
-          }
-          // queueScope creates revisions before identities commit; cancelLane
-          // drops the intent without cleaning them up.
-          for (const identityKey of lane.accountRevisions.keys()) {
-            if (identityKey !== 'minimax:*' && !lane.identities.has(identityKey)) {
               lane.accountRevisions.delete(identityKey);
             }
           }
