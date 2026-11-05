@@ -468,6 +468,77 @@ test('successful idle completion permits immediate reactivation without requirin
   assert.equal(f.calls('thread/resume').length, 2, 'normal idle completion must not retain recovery backoff');
 });
 
+for (const failure of ['rejection', 'timeout']) {
+  test(`completion during pending resume preserves retry backoff after ${failure}`, async (t) => {
+    const f = subscriptionFixture(t, [{ ...LOCAL }]);
+    f.source.start();
+    await f.source.whenIdle();
+    const socket = f.sockets[0];
+    socket.heldMethods.add('thread/resume');
+    await new Promise(setImmediate);
+    socket.notify('turn/completed', { threadId: ID });
+    let elapsed = 0;
+    if (failure === 'timeout') { await f.tick(15000); elapsed = 15000; }
+    else {
+      const reply = new Event('message');
+      reply.data = JSON.stringify({ id: f.calls('thread/resume')[0].id, error: { code: -1, message: 'fixture failure' } });
+      socket.dispatchEvent(reply);
+      await f.settle();
+    }
+    socket.heldMethods.delete('thread/resume');
+    assert.equal(f.calls('thread/unsubscribe').length, 1);
+    for (; elapsed < 25000; elapsed += 5000) await f.tick();
+    assert.equal(f.calls('thread/resume').length, 1, 'failed recovery retains its deadline despite completion');
+    await f.tick();
+    assert.equal(f.calls('thread/resume').length, 2);
+  });
+}
+
+for (const invalid of ['inconsistent-counters', 'missing-turn']) {
+  test(`invalid ${invalid} notification does not consume the subscription baseline`, async (t) => {
+    const f = subscriptionFixture(t, [{ ...LOCAL }]);
+    f.source.start();
+    await f.settle();
+    const socket = f.sockets[0];
+    socket.notify('thread/tokenUsage/updated', {
+      threadId: ID, ...(invalid === 'missing-turn' ? {} : { turnId: 'invalid' }),
+      tokenUsage: invalid === 'inconsistent-counters' ? { last: TOTAL, total: LAST } : { last: LAST, total: TOTAL }
+    });
+    socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+    assert.equal(f.store.rows().length, 0, 'first valid snapshot is a baseline, not a new request');
+    socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'new-work', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
+    assert.equal(f.store.rows().length, 1);
+  });
+}
+
+test('all listed nonlocal threads stop accounting before the bounded cleanup workers wait', async (t) => {
+  const listed = Array.from({ length: 5 }, (_, i) => ({ ...LOCAL, id: `${ID}-${i}` }));
+  const f = subscriptionFixture(t, listed);
+  f.source.start();
+  await f.settle();
+  const socket = f.sockets[0];
+  const id = listed[4].id;
+  socket.notify('thread/tokenUsage/updated', { threadId: id, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+  socket.notify('thread/tokenUsage/updated', { threadId: id, turnId: 'local-work', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
+  socket.heldMethods.add('thread/unsubscribe');
+  for (let i = 0; i < listed.length; i++) listed[i] = { ...listed[i], environments: [{ environmentId: 'other-device', cwd: '/work/project' }] };
+  t.mock.timers.tick(5000);
+  await new Promise(setImmediate);
+  assert.equal(f.calls('thread/unsubscribe').length, 4);
+  socket.notify('thread/tokenUsage/updated', { threadId: id, turnId: 'remote-work', tokenUsage: { last: LAST, total: addCounters(addCounters(TOTAL, LAST), LAST) } });
+  assert.equal(f.store.rows().length, 1, 'queued fifth thread must already reject remote usage');
+  for (let i = 0; i < 5; i++) {
+    const pending = f.calls('thread/unsubscribe')[i];
+    assert.ok(pending, 'every invalidated listener must still be unsubscribed');
+    const reply = new Event('message');
+    reply.data = JSON.stringify({ id: pending.id, result: {} });
+    socket.dispatchEvent(reply);
+    await new Promise(setImmediate);
+  }
+  await f.settle();
+  assert.equal(f.source.getDiagnostics().subscriptions, 0);
+});
+
 for (const resumeState of ['pending', 'completed']) {
   test(`turn completion clears recovery backoff before idle discovery with resume ${resumeState}`, async (t) => {
     const f = subscriptionFixture(t, [{ ...LOCAL }]);

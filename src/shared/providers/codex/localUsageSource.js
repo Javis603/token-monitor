@@ -161,7 +161,8 @@ function createLocalUsageSource(options = {}, deps = {}) {
     const retry = resumeRetries.get(thread.id);
     if (retry && Date.now() < retry.at) return;
     const attempts = Math.min((retry?.attempts || 0) + 1, 5);
-    resumeRetries.set(thread.id, { attempts, at: Date.now() + Math.min(300000, 30000 * 2 ** (attempts - 1)) });
+    const attemptRetry = { attempts, at: Date.now() + Math.min(300000, 30000 * 2 ** (attempts - 1)) };
+    resumeRetries.set(thread.id, attemptRetry);
     subscribing.add(thread.id);
     // Install metadata before resume: the server can notify while its reply
     // is in flight. No turn/configuration/approval request is ever sent.
@@ -174,7 +175,12 @@ function createLocalUsageSource(options = {}, deps = {}) {
       }
     } catch (_) {
       // A timeout can arrive after the server attached the listener.
-      if (connection === current) await unsubscribe(thread.id, current);
+      if (connection === current) {
+        // Completion can precede the reply and clear the deadline. A failed
+        // resume still needs its backoff, even if the turn happened to finish.
+        if (!resumeRetries.has(thread.id)) resumeRetries.set(thread.id, attemptRetry);
+        await unsubscribe(thread.id, current);
+      }
     } finally {
       if (connection === current) subscribing.delete(thread.id);
     }
@@ -192,7 +198,15 @@ function createLocalUsageSource(options = {}, deps = {}) {
       });
       if (stopped || connection !== current) return;
       const candidates = Array.isArray(page.data) ? page.data : [];
-      for (const thread of candidates) if (typeof thread?.id === 'string') seen.add(thread.id);
+      for (const thread of candidates) {
+        if (typeof thread?.id !== 'string') continue;
+        seen.add(thread.id);
+        // Invalidate nonlocal metadata for the whole page before cleanup can
+        // block the worker pool. The notification ownership guard then rejects
+        // even queued entries, while subscribe still releases each listener.
+        const entry = threads.get(thread.id);
+        if (entry && !localThreadEnvironment(thread, executorIds)) entry.thread = thread;
+      }
       let index = 0;
       await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
         while (!stopped && connection === current && index < candidates.length) {
@@ -229,6 +243,11 @@ function createLocalUsageSource(options = {}, deps = {}) {
       if (entry.turnModels.size > 32) entry.turnModels.delete(entry.turnModels.keys().next().value);
     }
     if (message.method === 'thread/tokenUsage/updated') {
+      const total = usageCounters(params.tokenUsage?.total);
+      const last = usageCounters(params.tokenUsage?.last);
+      // Match the store's initial acceptance contract before consuming the
+      // baseline; valid individual counters can still be inconsistent together.
+      if (!turnId || !total || !last || Object.keys(last).some((key) => last[key] > total[key])) return;
       if (shouldYield() || !store.claimObserver(owner)) { disconnect(); store.releaseObserver(owner); return; }
       if (store.observe({
         accountKey, thread: { ...entry.thread, model: entry.turnModels.get(turnId) || 'unknown' }, ...entry.local, turnId,
@@ -238,11 +257,7 @@ function createLocalUsageSource(options = {}, deps = {}) {
         lastUsageAt = now().toISOString();
         changed();
       }
-      // A malformed notification must not consume the reconnect baseline.
-      if (usageCounters(params.tokenUsage?.total)
-        && usageCounters(params.tokenUsage?.last)) {
-        entry.baselinePending = false;
-      }
+      entry.baselinePending = false;
     } else if (message.method === 'turn/started' || message.method === 'turn/completed') {
       const ended = message.method === 'turn/completed';
       entry.thread.status = { type: ended ? 'idle' : 'active' };
