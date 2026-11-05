@@ -246,6 +246,7 @@ function createLocalUsageSource(options = {}, deps = {}) {
     } else if (message.method === 'turn/started' || message.method === 'turn/completed') {
       const ended = message.method === 'turn/completed';
       entry.thread.status = { type: ended ? 'idle' : 'active' };
+      if (ended) resumeRetries.delete(params.threadId);
       if (store.updateThread(accountKey, params.threadId, { turnEnded: ended })) changed();
     } else if (message.method === 'thread/name/updated') {
       entry.thread.name = params.threadName || '';

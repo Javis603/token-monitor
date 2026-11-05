@@ -468,6 +468,25 @@ test('successful idle completion permits immediate reactivation without requirin
   assert.equal(f.calls('thread/resume').length, 2, 'normal idle completion must not retain recovery backoff');
 });
 
+for (const resumeState of ['pending', 'completed']) {
+  test(`turn completion clears recovery backoff before idle discovery with resume ${resumeState}`, async (t) => {
+    const f = subscriptionFixture(t, [{ ...LOCAL }]);
+    f.source.start();
+    await f.source.whenIdle();
+    if (resumeState === 'pending') {
+      f.sockets[0].heldMethods.add('thread/resume');
+      await new Promise(setImmediate);
+    } else await f.settle();
+    assert.equal(f.calls('thread/resume').length, 1);
+    f.sockets[0].notify('turn/completed', { threadId: ID });
+    f.sockets[0].close();
+    await f.tick();
+    assert.equal(f.sockets.length, 2);
+    assert.equal(f.calls('thread/resume').length, 2, 'completed work must not delay the next active turn after reconnect');
+    assert.equal(f.store.rows().length, 0, 'completion does not backfill unobserved usage');
+  });
+}
+
 test('environment recovery backs off even on a healthy observer socket and releases old listeners', async (t) => {
   const f = subscriptionFixture(t, [{ ...LOCAL }]);
   f.source.start();
