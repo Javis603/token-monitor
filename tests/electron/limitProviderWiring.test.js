@@ -101,6 +101,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
     stepfunToken: ['providers', 'stepfun', 'token'],
     notionCookie: ['providers', 'notion', 'cookie'],
+    opendesignCookie: ['providers', 'opendesign', 'cookie'],
     manusSessionToken: ['providers', 'manus', 'sessionToken'],
     openaiAdminKey: ['providers', 'openai', 'apiKey'],
     museWebCookie: ['providers', 'muse', 'webCookie'],
@@ -149,7 +150,7 @@ test('the renderer receives no credential values except the two hub secrets', ()
 
 test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refresh scopes)', () => {
   assert.deepEqual(LIMIT_PROVIDER_SETTING_KEYS, {
-    claude: ['claudeWebCookie', 'claudeWebOrganizationId'],
+    claude: ['claudeWebCookie', 'claudeWebOrganizationId', 'claudeCliFallbackEnabled'],
     codex: ['codexManagedAccounts'],
     opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
     cursor: ['cursorDisabledAccountIds'],
@@ -169,6 +170,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     typesafe: ['typesafeCookie'],
     stepfun: ['stepfunToken'],
     notion: ['notionCookie', 'notionWorkspaceId'],
+    opendesign: ['opendesignCookie'],
     manus: ['manusSessionToken'],
     openai: ['openaiAdminKey', 'openaiPlan', 'openaiRenewalDate'],
     muse: ['museWebCookie'],
@@ -287,7 +289,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie',
+    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie', 'opendesignCookie',
     'openaiAdminKey', 'openaiPlan', 'openaiRenewalDate'
   ].sort());
   for (const key of normalizedKeys) {

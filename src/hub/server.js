@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('node:http');
+const { UPLOAD_HEADER, UPLOAD_VERSION, createUploadBaselines } = require('../shared/uploadDelta');
 const path = require('node:path');
 const { URL } = require('node:url');
 const {
@@ -74,6 +75,7 @@ function createHub({
   store.syncTitlePolicies = Object.assign(Object.create(null), store.syncTitlePolicies || {});
   store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
   const bindHost = resolveBindHost(host, secret);
+  const uploadBaselines = createUploadBaselines();
   let persistTimer = null;
   let persistPending = false;
   let stopping = false;
@@ -242,6 +244,7 @@ function createHub({
       throw new Error('deviceId_required');
     }
     const deviceId = String(payload.deviceId || payload.id);
+    uploadBaselines.forget(deviceId);
     const record = mergeSyncDeviceRecord(store.devices[deviceId], { ...payload, receivedAt: new Date().toISOString() }, {
       preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], payload.sessionTitleSyncGeneration)
     });
@@ -253,6 +256,7 @@ function createHub({
   }
 
   function deleteDevice(deviceId) {
+    uploadBaselines.forget(deviceId);
     // Commit deletion and revocation together, keeping a generation tombstone.
     const previousPolicy = store.syncTitlePolicies[deviceId];
     const previousDevice = store.devices[deviceId];
@@ -306,6 +310,7 @@ function createHub({
     const previous = store.syncTitlePolicies[deviceId];
     const next = nextTitlePolicy(previous, enabled);
     if (enabled && normalizeTitlePolicy(previous).enabled) return next;
+    uploadBaselines.forget(deviceId);
     const previousDevice = store.devices[deviceId];
     const previousSavedAt = store.savedAt;
     store.syncTitlePolicies[deviceId] = next;
@@ -486,13 +491,20 @@ function createHub({
       return;
     }
 
-    if (req.method === 'POST' && url.pathname === '/api/ingest') {
+    if (req.method === 'POST' && ['/api/ingest', '/api/ingest/delta'].includes(url.pathname)) {
       try {
-        const payload = await readJsonBody(req);
+        const incoming = await readJsonBody(req);
+        const delta = url.pathname === '/api/ingest/delta';
+        const payload = delta ? uploadBaselines.prepare(incoming) : incoming;
         const record = ingestRecord(payload);
-        const response = { ok: true, deviceId: record.deviceId };
+        const upload = delta || req.headers[UPLOAD_HEADER] === UPLOAD_VERSION
+          ? uploadBaselines.commit(record.deviceId, stripSessionTextFromDeviceRecord(payload, {
+              preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[record.deviceId], payload.sessionTitleSyncGeneration)
+            })) : undefined;
+        const response = { ok: true, deviceId: record.deviceId, ...(upload ? { upload } : {}) };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });
       } catch (error) {
+        if (error.status) return sendJson(res, error.status, { error: error.code });
         if (error.message === 'deviceId_required') return sendJson(res, 400, { error: 'deviceId_required' });
         if (error.code === 'payload_too_large') {
           res.shouldKeepAlive = false;

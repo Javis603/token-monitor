@@ -127,6 +127,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     fetch: async () => ({ ok: true, json: async () => aggregate() }),
     modeQueue: Promise.resolve(), setLatestHubStatsCache() {},
     getSyncContentRuntime: () => ({ notifyStats() {} }), electronPresentationStats: stats => stats,
+    getLimitsHistoryStore: () => ({ record() {} }), limitsHistoryController: null,
     migrateCodexAdditionalLimits() {}, scheduleMacWidgetSnapshot() {}, updateEdgeDockCells() {}, pluginRuntime: null,
     syncCodexPresentationActiveAccount() {}, updateTrayDisplay() {}, statsHistoryRevision: () => '',
     maybeAdoptSharedSubscriptionRevision() {}, withoutSessionTitles: titles.withoutSessionTitles,

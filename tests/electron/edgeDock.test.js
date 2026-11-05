@@ -87,10 +87,13 @@ test('the detail total follows the main app compact toggle and unit threshold', 
   assert.match(dock, /if \(compact\) \{[\s\S]*?el\('span', 'edge-dock-total-compact', compact\)[\s\S]*?totalRow\.append\(compactNode\)/);
 });
 
+const cardLayoutApi = require('../../src/electron/renderer/cardLayout');
+const cardMotionApi = require('../../src/electron/renderer/cardMotion');
+
 test('a long detail total shrinks beside its compact reading instead of wrapping', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
-  const source = dock.slice(dock.indexOf('function fitCardTotal('), dock.indexOf('function renderBubble(')).trim();
+  const source = dock.slice(dock.indexOf('function fitCardTotal('), dock.indexOf('const bubbleLayout =')).trim();
   const fitCardTotal = Function('getComputedStyle', `return (${source})`)((node) => (
     node.columnGap === undefined ? { fontSize: '30px' } : { columnGap: '8px' }
   ));
@@ -118,12 +121,12 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   const bubble = dock.slice(dock.indexOf('function renderBubble('));
   const freshCard = bubble.slice(bubble.indexOf('const card = cell.kind'));
   assert.ok(freshCard.indexOf('fitCardTotal(card);') >= 0);
-  assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('const height = '));
+  assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('bubbleLayout.prepare('));
 });
 
 test('a card commits after its reported height is clamped to the work area', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
+  const source = dock.slice(dock.indexOf('const bubbleLayout ='), dock.indexOf('const bubbleSizeObserver ='));
   for (const kind of ['provider', 'stat']) {
     for (const { measured, maxCardHeight, expected } of [
       // Chromium at 175% scaling can measure a max-height: 851px card this way.
@@ -135,6 +138,7 @@ test('a card commits after its reported height is clamped to the work area', () 
       const reports = [];
       const card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: measured }) };
       const renderBubble = Function('deps', `
+        const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
         const { root, stagingLayer, providerCard, statCard, fitCardTotal,
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
         let observedPluginCard = null;
@@ -142,6 +146,7 @@ test('a card commits after its reported height is clamped to the work area', () 
         ${source}
         return renderBubble;
       `)({
+        cardLayoutApi,
         root: { dataset: {}, style: { setProperty() {} }, classList: { toggle() {} } },
         stagingLayer: { replaceChildren() {} },
         providerCard: () => card,
@@ -190,14 +195,15 @@ test('a no-cell payload unmounts committed and staged plugin cards and removes t
   }
   const retained = [], unobserved = [];
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
+  const source = dock.slice(dock.indexOf('const bubbleLayout ='), dock.indexOf('const bubbleSizeObserver ='));
   const { renderBubble, observed } = Function('deps', `
+    const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
     const { root, contentLayer, stagingLayer, pluginHost, pluginContent, bubbleSizeObserver } = deps;
     let observedPluginCard = deps.card;
     const clearCardSwitch = () => {};
     ${source}
     return { renderBubble, observed: () => observedPluginCard };
-  `)({ root, contentLayer, stagingLayer, pluginHost, card: cards[1].card,
+  `)({ cardLayoutApi, root, contentLayer, stagingLayer, pluginHost, card: cards[1].card,
     pluginContent: { retain: targets => retained.push(targets) },
     bubbleSizeObserver: { unobserve: card => unobserved.push(card) } });
   renderBubble({ side: 'right', cell: null });
@@ -1810,6 +1816,100 @@ test('the rail headline reports the pool that gates the account, not just the se
   assert.equal(cells6[0].windowKind, 'session');
 });
 
+test('a money-only account prints its balance on the rail without inventing a percentage', () => {
+  // A Sub2API or custom third-party account reports a balance and no quota total,
+  // so its credits window ships showMeter: false and the compact selection finds
+  // no pool. That left the rail cell an error printing `--` while the card, the
+  // tray and the Limits page all showed the balance.
+  //
+  // The money is the answer, so the cell prints it. The percentage is not: the
+  // meters exclude this window precisely because there is no denominator, which
+  // is what Claude's own collector says where it emits the window. Inferring one
+  // here would give the rail a figure no other surface agrees with, so the
+  // headline carries the window and no remaining.
+  const sub2api = provider('thirdparty', {
+    planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, showMeter: false }],
+    balance: { amount: 12.5, currency: 'USD', monthSpend: 2.5 }
+  });
+  const [cell] = buildEdgeDockCells({ limits: { providers: [sub2api] } }, { limitProviders: 'thirdparty' });
+  assert.equal(cell.status, 'ok');
+  assert.equal(cell.windowKind, 'billing');
+  assert.deepEqual(cell.credits, { amount: 12.5, currency: 'USD' });
+  assert.equal(cell.remainingPercent, null);
+  assert.equal(cell.severityPercent, null);
+
+  // Claude's prepaid credits are the same shape and the case that matters most:
+  // an independently expiring tranche must not read as a percentage that only
+  // this one surface derived.
+  const claude = provider('claude', {
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 30, currency: 'CREDITS', showMeter: false }],
+    balance: { amount: 30, currency: 'CREDITS' }
+  });
+  const [credits] = buildEdgeDockCells({ limits: { providers: [claude] } }, { limitProviders: 'claude' });
+  assert.equal(credits.status, 'ok');
+  assert.deepEqual(credits.credits, { amount: 30, currency: 'CREDITS' });
+  assert.equal(credits.remainingPercent, null);
+
+  // A metered credits window keeps the reading it already had: OpenRouter derives
+  // a real percentage from an explicit total, and that path is untouched.
+  const metered = provider('openrouter', {
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, limit: 25, usedPercent: 50, showMeter: true }],
+    balance: { amount: 12.5, currency: 'USD' }
+  });
+  const [pct] = buildEdgeDockCells({ limits: { providers: [metered] } }, { limitProviders: 'openrouter' });
+  assert.equal(pct.remainingPercent, 50);
+  assert.deepEqual(pct.credits, { amount: 12.5, currency: 'USD' });
+
+  // Unlimited is the other money answer, and it has no amount to print.
+  const unlimited = provider('thirdparty', {
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', detail: 'Unlimited', showMeter: false }],
+    balance: { amount: null, currency: 'USD' }
+  });
+  const [blank] = buildEdgeDockCells({ limits: { providers: [unlimited] } }, { limitProviders: 'thirdparty' });
+  assert.equal(blank.credits, null);
+  assert.equal(blank.remainingPercent, null);
+
+  // A real quota pool always wins, in one account or across two: a money-only
+  // row cannot take the headline from a metered one, because it has no figure to
+  // lose the race on.
+  const mixed = provider('thirdparty', {
+    windows: [
+      { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, showMeter: false },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 40 }
+    ],
+    balance: { amount: 12.5, currency: 'USD' }
+  });
+  const [quota] = buildEdgeDockCells({ limits: { providers: [mixed] } }, { limitProviders: 'thirdparty' });
+  assert.equal(quota.windowKind, 'weekly');
+  assert.equal(quota.remainingPercent, 40);
+  assert.equal(quota.credits, null);
+
+  const twoAccounts = provider('thirdparty', {
+    accountKey: 'sha256:money',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, showMeter: false }],
+    balance: { amount: 12.5, currency: 'USD' }
+  });
+  const [paired] = buildEdgeDockCells(
+    { limits: { providers: [twoAccounts, provider('thirdparty', { accountKey: 'sha256:quota', windows: [{ kind: 'weekly', label: 'Weekly', remainingPercent: 65 }] })] } },
+    { limitProviders: 'thirdparty' }
+  );
+  assert.equal(paired.windowKind, 'weekly');
+  assert.equal(paired.remainingPercent, 65);
+
+  // An account that failed to answer keeps its error cell; the fallback reads the
+  // collector's status, not just the presence of a window.
+  const failed = provider('thirdparty', {
+    status: 'unauthorized',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, showMeter: false }],
+    balance: { amount: 12.5, currency: 'USD' }
+  });
+  const [error] = buildEdgeDockCells({ limits: { providers: [failed] } }, { limitProviders: 'thirdparty' });
+  assert.equal(error.status, 'error');
+  assert.equal(error.credits, null);
+  assert.equal(error.remainingPercent, null);
+});
+
 test('a pinned rail window ignores automatic exhaustion and keeps its identity across refreshes', () => {
   const session = { kind: 'session', label: 'Session', remainingPercent: 85 };
   const weekly = { kind: 'weekly', label: 'Weekly', remainingPercent: 0 };
@@ -3125,13 +3225,13 @@ for (const platform of ['win32', 'darwin']) {
 for (const platform of ['win32', 'darwin']) {
   test(`${platform} card transitions request renderer frames only on Windows`, () => {
     const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-    const source = dock.slice(dock.indexOf('let cardMotionId = null;'), dock.indexOf('bridge.onDragEnded'));
+    const source = dock.slice(dock.indexOf('const cardFrames ='), dock.indexOf('let gesture = null;'));
     const frames = [], callbacks = [];
     let motion;
-    Function('bridge', 'state', 'requestAnimationFrame', `${source};`)(
+    Function('bridge', 'state', 'window', `${source};`)(
       { cardFrame: id => frames.push(id), onCardMotion: fn => { motion = fn; } },
       { payload: { platform } },
-      fn => callbacks.push(fn)
+      { TokenMonitorCardMotion: { createCardFrameLoop: options => cardMotionApi.createCardFrameLoop({ ...options, requestFrame: fn => callbacks.push(fn) }) } }
     );
     motion({ motionId: 42, active: true });
     assert.equal(callbacks.length, platform === 'win32' ? 1 : 0, 'only Windows starts a paint loop');
@@ -3401,6 +3501,7 @@ for (const kind of ['provider', 'stat']) {
       const source = dock.slice(dock.indexOf('let cardSwitchMotion ='), dock.indexOf('const bubbleSizeObserver ='));
       const pluginSource = dock.slice(dock.indexOf('function pluginCard('), dock.indexOf('const codexAccountControl ='));
       const { renderBubble } = Function('deps', `
+        const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
         const { document, el, root, contentLayer, stagingLayer, bridge, pluginHost } = deps;
         const surface = 'bubble', CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list', BREAKDOWN_VISIBLE_ROWS = 6;
         const prefersReducedMotion = () => false, getComputedStyle = () => ({ opacity: '1' });
@@ -3412,7 +3513,7 @@ for (const kind of ['provider', 'stat']) {
         ${pluginSource}
         ${source}
         return { renderBubble };
-      `)({ document, el, root, contentLayer, stagingLayer,
+      `)({ cardLayoutApi, document, el, root, contentLayer, stagingLayer,
         bridge: { reportBubbleSize: (id, height) => reports.push({ id, height }) },
         pluginHost: { state: () => ({ title: 'Plugin reading' }), mount: body => { mounts++; body.textContent = 'Live plugin content'; } }
       });

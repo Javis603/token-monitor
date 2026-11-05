@@ -123,6 +123,7 @@ const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
   registerProvider(require('../providers/stepfun/account'), () => require('../providers/stepfun/limits')),
   registerProvider(require('../providers/notion/account'), () => require('../providers/notion/limits')),
   registerProvider(require('../providers/manus/account'), () => require('../providers/manus/limits')),
+  registerProvider(require('../providers/opendesign/account'), () => require('../providers/opendesign/limits')),
   registerProvider(require('../providers/openai/account'), () => require('../providers/openai/limits')),
   registerProvider(require('../providers/thirdparty/account'), () => require('../providers/thirdparty/limits'))
 ].map((decl) => Object.freeze({

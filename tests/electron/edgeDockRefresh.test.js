@@ -64,6 +64,8 @@ function fixture() {
     statsHistoryRevision: (stats) => stats?.historyRevision,
     injectLocalDeviceStatus: (stats) => stats,
     getSyncContentRuntime: () => ({ notifyStats() {} }),
+    getLimitsHistoryStore: () => ({ record: (...args) => calls.push(['history', ...args]) }),
+    limitsHistoryController: null,
     migrateCodexAdditionalLimits() {},
     rendererSnapshots: { stamp: (_, stats) => stats },
     rendererStats: (stats) => stats,
