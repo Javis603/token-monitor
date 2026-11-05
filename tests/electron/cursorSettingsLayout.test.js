@@ -269,7 +269,7 @@ test('Cursor removal is available only for accounts added manually in Token Moni
 
 test('Cursor account discovery runs automatically without a separate refresh action', () => {
   const main = readRendererFile('../main.js');
-  const statusBody = functionBody(main, 'cursorStatusValue', 'rebuildWindow');
+  const statusBody = functionBodyBeforeMarker(main, 'cursorStatusValue', '// Plugin hosts load');
   assert.match(statusBody, /if \(discover && !managementBlocked\) \{/);
   assert.match(statusBody, /await cursorAuth\.runCursorDiscover\(\)/);
   assert.doesNotMatch(statusBody, /runCursorSync/);

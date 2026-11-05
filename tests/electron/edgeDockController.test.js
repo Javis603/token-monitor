@@ -871,7 +871,7 @@ test('Windows HostBackdrop follows shape, fade, resume and cleanup without using
   assert.equal(sentPayload(fixture.windowFor('rail'), 'rail').glass, false, 'ignore obsolete helper callbacks');
 });
 
-test('Windows dock material switches independently and rebuilds native underlays only when needed', (t) => {
+test('Windows dock material replaces only native underlays while retaining renderer windows', (t) => {
   const adapters = [];
   const options = { nativeGlass: true, windowsBackdrop: {
     attach(win, onMaterial) {
@@ -892,6 +892,7 @@ test('Windows dock material switches independently and rebuilds native underlays
   fixture.controller.sync();
   assert.ok(adapters.every((adapter) => adapter.disposed));
   const plain = fixture.windowFor('rail');
+  assert.equal(plain, inheritedRail, 'glass-off preserves the renderer and its state');
   plain.webContents.emit('did-finish-load');
   assert.equal(sentPayload(plain, 'rail').glass, false);
   assert.ok(plain.shapeCalls.at(-1).length > 0, 'transparent mode keeps curved hit regions');
@@ -902,10 +903,14 @@ test('Windows dock material switches independently and rebuilds native underlays
   fixture.controller.sync();
   assert.equal(adapters.length, 6, 'native glass can be restored without restarting the app');
   const rail = fixture.windowFor('rail');
-  const native = adapters.find((adapter) => adapter.win === rail);
+  assert.equal(rail, inheritedRail, 'glass-on reuses the same renderer');
+  assert.equal(FakeBrowserWindow.instances.length, 3);
+  const native = adapters.findLast((adapter) => adapter.win === rail);
   rail.webContents.emit('did-finish-load');
   native.onMaterial(true);
   assert.equal(sentPayload(rail, 'rail').glass, true);
+  adapters.find((adapter) => adapter.win === rail).onMaterial(false);
+  assert.equal(sentPayload(rail, 'rail').glass, true, 'disposed underlay cannot overwrite its replacement');
   options.nativeGlass = false;
   fixture.controller.sync();
   assert.equal(fixture.windowFor('rail'), rail, 'an explicit dock style overrides System Glass');

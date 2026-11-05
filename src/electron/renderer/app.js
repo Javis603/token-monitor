@@ -4640,8 +4640,33 @@ const { limitWindowText } = window.TokenMonitorLimitWindowText;
 // so its card is the same DOM rather than a second rendering of the same data.
 // Everything the builder needs from this page is handed over here; it reads no
 // globals of its own.
+let limitsHistoryOpen = false;
+let limitsHistoryActiveKey = '';
+document.addEventListener('pointerdown', event => {
+  if (limitsHistoryOpen && !event.target.closest('[data-limit-history]')) window.tokenMonitor.limits.closeHistory();
+}, true);
+window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
+  limitsHistoryOpen = open === true;
+  limitsHistoryActiveKey = limitsHistoryOpen ? key : '';
+  for (const row of document.querySelectorAll('[data-limit-history]')) {
+    row.classList.toggle('is-history-active', row.dataset.limitHistory === limitsHistoryActiveKey);
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || !limitsHistoryOpen) return;
+  event.preventDefault();
+  window.tokenMonitor.limits.closeHistory();
+}, true);
+
 const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
   document,
+  history: window.tokenMonitor?.limits?.openHistory ? {
+    key: window.TokenMonitorLimitsHistoryIdentity.historyRowKey,
+    activeKey: () => limitsHistoryActiveKey,
+    open: (key, rect, interactive) => window.tokenMonitor.limits.openHistory(key, rect, interactive),
+    enter: key => window.tokenMonitor.limits.enterHistory(key),
+    leave: key => window.tokenMonitor.limits.leaveHistory(key)
+  } : null,
   t,
   settings: () => state.settings,
   currentLocale,
@@ -4975,6 +5000,7 @@ function renderLimits() {
     settings: [
       state.settings?.showLimitSource === true,
       state.settings?.maskLimitAccountEmails === true,
+      state.settings?.limitsHistoryOpenMode,
       state.settings?.showLimitUsed === true,
       state.settings?.showToolIcons !== false,
       state.settings?.claudePrepaidBalanceEnabled !== false,
@@ -5089,7 +5115,8 @@ function serviceStatusIconId(id) {
 function renderServiceStatus() {
   if (!serviceStatusSurfaceVisible()) return;
   if (!els.serviceStatusPanel) return;
-  const rows = serviceStatusRows().map((provider) => {
+  const rows = serviceStatusRows().map((source) => {
+    const provider = serviceStatusPresentationApi.localizeProvider(source, currentLocale());
     const row = document.createElement('button');
     row.type = 'button';
     row.className = `service-status-row service-status-${provider.status || 'unknown'}`;
@@ -5914,6 +5941,10 @@ function viewLabelById(id) {
 
 function isSettingsPanelOpen() {
   return Boolean(els.settingsPanel && !els.settingsPanel.classList.contains('hidden'));
+}
+
+function isNativeWindowTransfer() {
+  return globalThis[Symbol.for('token-monitor.window-view-state')]?.transferring === true;
 }
 
 function isRendererWindowHidden() {
@@ -8145,7 +8176,7 @@ function applyAppearanceSettings(settings) {
   }
   if (els.windowsBackdropNote) {
     const accentFallback = windowsGlass.showAccentNote
-      && new URLSearchParams(window.location.search).get('windowsBackdropFallback') === '1';
+      && (settings?.windowsBackdropFallback ?? state.settings?.windowsBackdropFallback) === true;
     els.windowsBackdropNote.textContent = t(accentFallback
       ? 'settings.appearance.windowsBackdropFallback'
       : 'settings.appearance.windowsBackdropNote');
@@ -8698,7 +8729,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   }
   if (options.renderContent === false) return;
   if (wasCollapsed && !state.floatingBubble.collapsed) {
-    if (isSettingsPanelOpen()) syncSettingsForm();
+    if (isSettingsPanelOpen() && !isNativeWindowTransfer()) syncSettingsForm();
     renderStatsUpdate();
   } else {
     renderFloatingBubbleContent();
@@ -10125,7 +10156,7 @@ function applyPreferenceOrder(kind, order) {
     if (!row) continue;
     list.appendChild(row);
     const companionId = kind === 'view'
-      ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
+      ? ({ home: 'homeSettingsContainer', limits: 'limitsViewSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
       : kind === 'homeModule'
         ? HOME_MODULE_SUBGROUPS[id]?.[1]
         : '';
@@ -10157,6 +10188,7 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
 }
 
 const VIEW_PREFERENCE_SUBGROUPS = {
+  limits: ['limitsViewSettingsExpanded', 'limitsViewSettingsContainer'],
   home: ['homeSettingsExpanded', 'homeSettingsContainer'],
   trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
   project: ['projectSettingsExpanded', 'projectSettingsContainer'],
@@ -10363,6 +10395,29 @@ function renderViewPreferences() {
     row.append(name, actions);
     row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
     els.viewDisplayList.appendChild(row);
+    if (id === 'limits') {
+      row.classList.add('has-subgroup');
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = `view-subgroup-toggle${state.limitsViewSettingsExpanded ? ' is-expanded' : ''}`;
+      toggle.setAttribute('aria-label', t('settings.views.configureLimits', { name: label }));
+      toggle.setAttribute('aria-expanded', String(Boolean(state.limitsViewSettingsExpanded)));
+      const toggleIcon = document.createElement('span');
+      toggleIcon.className = 'view-subgroup-icon';
+      toggleIcon.setAttribute('aria-hidden', 'true');
+      toggle.append(toggleIcon);
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
+      actions.insertBefore(toggle, visibility);
+
+      const listContainer = document.createElement('div');
+      listContainer.id = 'limitsViewSettingsContainer';
+      listContainer.className = `accordion-animated-container${state.limitsViewSettingsExpanded ? '' : ' hidden'}`;
+      const inner = document.createElement('div');
+      inner.className = 'accordion-animation-inner';
+      inner.appendChild(renderLimitsViewSettingsList());
+      listContainer.appendChild(inner);
+      els.viewDisplayList.appendChild(listContainer);
+    }
     if (id === 'home') {
       row.classList.add('has-subgroup');
       const toggle = document.createElement('button');
@@ -10815,6 +10870,35 @@ function renderHomeActivitySettings() {
   frag.append(daysRow);
 
   return frag;
+}
+
+function renderLimitsViewSettingsList() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const row = document.createElement('label');
+  row.className = 'settings-item';
+  const text = document.createElement('span');
+  text.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('limits.history.openMode');
+  text.appendChild(title);
+  const input = document.createElement('select');
+  input.id = 'limitsHistoryOpenModeInput';
+  for (const [value, key] of [['hover', 'openModeHover'], ['click', 'openModeClick'], ['off', 'openModeOff']]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = t(`limits.history.${key}`);
+    input.appendChild(option);
+  }
+  input.value = state.settings?.limitsHistoryOpenMode || 'hover';
+  input.addEventListener('change', async () => {
+    await saveSettings({ limitsHistoryOpenMode: input.value });
+    renderLimits();
+  });
+  row.append(text, input);
+  wrap.appendChild(row);
+  return wrap;
 }
 
 function renderTrendSettingsList() {
@@ -12552,6 +12636,11 @@ const LIMIT_PROVIDER_SETTINGS = {
     titleKey: 'settings.limits.prepaidBalance',
     descKey: 'settings.limits.prepaidBalanceDesc',
     requiresConfiguredKey: 'claudeWebCookieConfigured',
+    defaultValue: true
+  }, {
+    key: 'claudeCliFallbackEnabled',
+    titleKey: 'settings.limits.claudeCliFallback',
+    descKey: 'settings.limits.claudeCliFallbackDesc',
     defaultValue: true
   }],
   codex: [{
@@ -14756,7 +14845,7 @@ function handleWindowVisibilityChange() {
     void refreshHubBuildStatus();
   }
   const settingsVisible = isSettingsSurfaceVisible();
-  if (settingsVisible || settingsDomSyncPending) syncSettingsForm();
+  if (settingsDomSyncPending || (settingsVisible && !isNativeWindowTransfer())) syncSettingsForm();
   statsRenderScheduler.flush();
   if (settingsVisible) {
     renderConnectionStatus();

@@ -837,3 +837,44 @@ test('account setting errors are reported through the persistent panel message',
   assert.equal(messages[0].message.params.message, 'disk full');
   assert.deepEqual(renders, ['minimax', 'minimax']);
 });
+
+test('OpenDesign renders all four Cookie setup steps before its input, like TypeSafe', () => {
+  const forms = limitAccountFormsForRenderer();
+  const form = forms.find(({ id }) => id === 'opendesign');
+  const peer = forms.find(({ id }) => id === 'typesafe');
+  assert.deepEqual(form.manual.map((block) => Object.keys(block)), peer.manual.map((block) => Object.keys(block)));
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
+    const { group } = renderPanel(form, { translate: (key) => i18n.translate(locale, key) });
+    const manual = group.byId('opendesignManualPanel');
+    const steps = manual.children[0];
+    assert.deepEqual([...steps.walk()].filter((node) => node.tagName === 'strong').map((node) => node.textContent), ['1.', '2.', '3.', '4.']);
+    for (const step of form.manual[0].steps) {
+      for (const part of Array.isArray(step) ? step : [step]) {
+        if (typeof part === 'string') assert.ok(steps.text.includes(i18n.translate(locale, part)));
+      }
+    }
+    assert.equal(group.byId('opendesignCookieInput').placeholder, 'Cookie: ...');
+    assert.deepEqual([...steps.walk()].filter((node) => node.tagName === 'code').map((node) => node.textContent), ['coding-plan-usage', 'amr-api.open-design.ai']);
+    assert.equal(i18n.translate(locale, 'settings.opendesign.step4'), locale === 'ja'
+      ? '下に貼り付けて「Cookie を保存」をクリックします。'
+      : i18n.translate(locale, 'settings.commandcode.step4'));
+    assert.equal(manual.children[1].id, 'opendesignCookieInput');
+    assert.equal(manual.children[2].children[0].id, 'opendesignCredentialSubmit');
+    assert.ok(!group.text.includes('settings.opendesign.'), `${locale}: untranslated key`);
+  }
+});
+
+test('OpenDesign Cookie instructions match the existing browser, DevTools and request-header flow', () => {
+  const t = (key) => i18n.translate('en', 'settings.opendesign.' + key);
+  assert.match(t('step1'), /browser \(button above\).*sign in.*workspace/);
+  assert.match(t('step2'), /DevTools \(F12 or Cmd\+Opt\+I\) -> Network.*subscription usage.*reload/);
+  assert.match(t('step3After'), /full Cookie value from Headers -> Request Headers/);
+  assert.match(t('step4'), /click Save cookie/);
+});
+
+test('OpenDesign save failures retain the underlying error in every locale', () => {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
+    const text = i18n.translate(locale, 'settings.opendesign.saveFailed', { message: 'fixture disk failure' });
+    assert.ok(text.includes('fixture disk failure'), locale);
+  }
+});
