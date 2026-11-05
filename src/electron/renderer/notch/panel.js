@@ -872,8 +872,16 @@
       const sub = el('div', 'notch-limit-sub');
       if (records.length > 1) {
         const shown = limitAccountTitle(entry.provider, record, records.indexOf(record), records);
-        if (shown || entry.provider !== 'minimax') {
-          const accountName = text('notch-limit-account', shown || t('settings.codex.nAccounts', { count: records.length }), shown);
+        const minimaxFallback = entry.provider === 'minimax' && !shown
+          ? record?.source === 'oauth' ? (record.accountLabel || 'MiniMax Code')
+            : record?.source === 'api' ? t('settings.minimax.accountFallback', {
+              number: records.filter(value => value.source === 'api').indexOf(record) + 1
+            }) : ''
+          : '';
+        const title = shown || minimaxFallback || (entry.provider !== 'minimax'
+          ? t('settings.codex.nAccounts', { count: records.length }) : '');
+        if (title) {
+          const accountName = text('notch-limit-account', title, title);
           accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
           overflowText.bind(accountName);
           sub.append(accountName);

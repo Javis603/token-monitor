@@ -18183,9 +18183,9 @@ function minimaxKeyErrorText(result) {
 
 function minimaxBillingUrl(key) {
   const rows = localProviderStatuses('minimax').filter(row => row.source === 'api');
-  const row = key.accountKey ? rows.find(row => row.accountKey === key.accountKey) : rows[0];
+  const row = key.accountKey ? rows.find(row => row.accountKey === key.accountKey) : null;
   const region = key.apiRegion || state.settings?.minimaxApiRegion || 'auto';
-  const intl = region === 'intl' || (region === 'auto' && row?.region === 'en');
+  const intl = region === 'intl' || (region === 'auto' && row?.region !== 'cn');
   const origin = intl ? 'https://platform.minimax.io' : 'https://platform.minimaxi.com';
   return `${origin}/user-center/payment/${key.billingMode === 'api' ? 'balance' : 'token-plan'}`;
 }

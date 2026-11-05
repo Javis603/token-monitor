@@ -613,7 +613,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         return row;
       })
       .filter(Boolean);
-    const expected = new Set(dispatch.expectedIdentityKeys);
+    // A MiniMax API-only settings refresh shares the provider executor with Code,
+    // but it does not own Code's retained identity or freshness.
+    const apiOnly = lane.provider === 'minimax' && dispatch.scope.source === 'api' && !dispatch.accountScoped;
+    const belongsToApi = (identityKey) => {
+      if (!apiOnly) return true;
+      const state = lane.identities.get(identityKey);
+      return (state?.lastAttempt?.row?.source || state?.lastGood?.source) === 'api';
+    };
+    const expected = new Set(dispatch.expectedIdentityKeys.filter(belongsToApi));
     const represented = new Set();
     const committedRows = [];
 
@@ -621,7 +629,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const status = attemptError.status || (attemptError.code === 'PROBE_TIMEOUT' ? 'timeout' : 'unavailable');
       const targets = dispatch.accountScoped
         ? [dispatch.identityKey]
-        : expected.size ? [...expected] : [`${lane.provider}:*`];
+        : expected.size ? [...expected] : apiOnly && lane.identities.size ? [] : [`${lane.provider}:*`];
       for (const identityKey of targets) {
         if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
         applyAttempt(lane, identityKey, { provider: lane.provider, source: dispatch.scope.source }, status, attemptAt);
@@ -634,12 +642,24 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       && rowIdentityKey(normalizedRows[0]) === `${lane.provider}:*`
       && !TRANSIENT_STATUSES.has(normalizedRows[0].status)
       && normalizedRows[0].status !== 'ok';
-    if (genericTerminal && !dispatch.accountScoped) lane.identities.clear();
+    if (genericTerminal && !dispatch.accountScoped) {
+      if (apiOnly) {
+        for (const identityKey of expected) lane.identities.delete(identityKey);
+        // Without API credentials, the collector hides this optional placeholder
+        // whenever a real Code account is already present.
+        if ([...lane.identities.values()].some(state =>
+          (state.lastAttempt?.row?.source || state.lastGood?.source) === 'oauth')) {
+          rebuildSnapshot();
+          return [];
+        }
+      } else lane.identities.clear();
+    }
 
     for (const removal of removals) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
       if (identityKey === `${lane.provider}:*`) continue;
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
+      if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
       represented.add(identityKey);
       lane.identities.delete(identityKey);
@@ -648,6 +668,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     for (const row of normalizedRows) {
       let identityKey = rowIdentityKey(row);
       if (identityKey === `${lane.provider}:*` && dispatch.accountScoped) identityKey = dispatch.identityKey;
+      if (apiOnly && identityKey !== `${lane.provider}:*`
+        && lane.identities.has(identityKey) && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) identityKey = dispatch.identityKey;
 
@@ -827,15 +849,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const lane = lanes.get(provider);
       if (!lane) continue;
       if (!isAccountScope(normalized)) {
+        // cancelLane empties pending, so capture API work before cancelling.
+        const pendingApi = provider === 'minimax' && normalized.source === 'api'
+          ? [...lane.pending.values(), lane.active?.intent]
+            .filter(intent => intent?.scope.source === 'api').map(intent => intent.identityKey)
+          : [];
         cancelLane(lane, reason);
         resetRetryPolicy(lane);
         if (provider === 'minimax' && normalized.source === 'api') {
-          // Fence each affected API identity once, including an in-flight
-          // request which has not committed its first attempt yet.
-          const removed = new Set();
-          for (const intent of [...lane.pending.values(), lane.active?.intent]) {
-            if (intent?.scope.source === 'api') removed.add(intent.identityKey);
-          }
+          // Fence only API identities, retaining OAuth revisions.
+          const removed = new Set(pendingApi);
           for (const [identityKey, state] of lane.identities) {
             const row = state.lastAttempt?.row || state.lastGood;
             if (row?.source === 'api') {

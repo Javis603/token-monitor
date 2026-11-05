@@ -29,7 +29,7 @@ function createMinimaxApiKeys({ getSettings, saveSettings, probeDeps, changed, e
       const next = profiles();
       const key = candidate.minimaxApiKey;
       const id = Object.keys(next).find(id => next[id].apiKey === key) || randomUUID();
-      next[id] = { apiKey: key, enabled: true, billingMode: candidate.minimaxBillingMode, apiRegion: values.apiRegion };
+      next[id] = { apiKey: key, enabled: true, billingMode: candidate.minimaxBillingMode, apiRegion: candidate.minimaxApiRegion };
       const settings = getSettings();
       settings.limitProviders = providerSelectionIncluding(settings.limitProviders, 'minimax');
       settings.limitsEnabled = true;

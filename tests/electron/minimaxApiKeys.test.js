@@ -84,6 +84,10 @@ test('MiniMax key saves reject empty input, default to Auto and use the shared i
   assert.equal(f.settings().minimaxApiProfiles.work.apiKey, 'saved-secret');
   assert.equal(f.settings().minimaxApiProfiles.work.apiRegion, 'auto');
   assert.equal(f.api.getKeys()[0].apiRegion, 'auto');
+  assert.equal((await f.api.addKey({ apiKey: 'saved-secret', billingMode: 'api',
+    apiRegion: 'not-a-region' })).ok, true);
+  assert.equal(f.settings().minimaxApiProfiles.work.apiRegion, 'auto',
+    'the stored region must use the same canonical value as the shared probe');
 });
 
 test('MiniMax key saves persist private keys and notify the runtime with the committed configuration', async t => {
@@ -121,4 +125,25 @@ test('MiniMax key saves persist private keys and notify the runtime with the com
   assert.equal(saved.profiles.default.apiKey, 'legacy-secret');
   assert.equal(saved.profiles[profiles.getKeys().find(key => key.accountKey === hashKey('minimax', 'work-secret')).id].apiKey, 'work-secret');
   assert.equal(saved.apiKey, 'legacy-secret');
+});
+
+test('MiniMax billing links use only the selected key region and default Auto to International', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const match = source.match(/function minimaxBillingUrl\(key\) \{[\s\S]*?\n\}/);
+  assert.ok(match, 'exercise the renderer implementation rather than a duplicated link policy');
+  const rows = [
+    { source: 'api', accountKey: 'cn-key', region: 'cn' },
+    { source: 'api', accountKey: 'en-key', region: 'en' }
+  ];
+  const billingUrl = Function('localProviderStatuses', 'state', `return (${match[0]})`)(
+    () => rows, { settings: { minimaxApiRegion: 'auto' } });
+  assert.equal(billingUrl({ billingMode: 'api', apiRegion: 'auto' }),
+    'https://platform.minimax.io/user-center/payment/balance');
+  assert.equal(billingUrl({ accountKey: 'en-key', billingMode: 'api', apiRegion: 'auto' }),
+    'https://platform.minimax.io/user-center/payment/balance');
+  assert.equal(billingUrl({ accountKey: 'cn-key', billingMode: 'api', apiRegion: 'auto' }),
+    'https://platform.minimaxi.com/user-center/payment/balance');
+  assert.equal(billingUrl({ accountKey: 'missing', billingMode: 'token-plan', apiRegion: 'cn' }),
+    'https://platform.minimaxi.com/user-center/payment/token-plan');
 });

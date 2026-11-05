@@ -3176,3 +3176,28 @@ for (const [id, hiddenWindow, hiddenItem, appearance] of [
     assert.equal(mixed.tabIndex, 0);
   });
 }
+
+test('nested MiniMax API history click does not open its parent Code history', () => {
+  const opened = [];
+  const history = { key: provider => provider.accountKey, open: async key => opened.push(key),
+    enter() {}, leave() {} };
+  const code = { provider: 'minimax', status: 'ok', source: 'oauth', accountKey: 'code-history',
+    region: 'cn', windows: [{ kind: 'weekly', usedPercent: 20 }] };
+  const api = { provider: 'minimax', status: 'ok', source: 'api', accountKey: 'api-history',
+    relatedAccountKey: 'code-history', region: 'cn',
+    windows: [{ kind: 'billing', metric: 'credits', remaining: 10, currency: 'CNY' }] };
+  const parent = dockView({ limitsHistoryOpenMode: 'click' }, { history })
+    .renderLimitProviderGroup('minimax', 'MiniMax', [api, code], '#123456');
+  const child = [...parent.walk()].find(node => node.dataset.limitHistory === 'api-history');
+  assert.ok(child?.listeners?.click, 'the linked API row has its own history action');
+  for (const row of [parent, child]) {
+    row.isConnected = true;
+    row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+  }
+  const childTarget = { closest: selector => selector === '.limit-row' ? child : null };
+  child.listeners.click({ target: childTarget });
+  parent.listeners.click({ target: childTarget });
+  assert.deepEqual(opened, ['api-history'], 'an API click does not bubble into Code history');
+  parent.listeners.click({ target: { closest: selector => selector === '.limit-row' ? parent : null } });
+  assert.deepEqual(opened, ['api-history', 'code-history']);
+});

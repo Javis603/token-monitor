@@ -1431,6 +1431,40 @@ test('transient status (unavailable) preserves lastGood windows so stale data is
   runtime.stop();
 });
 
+test('MiniMax API-only refresh leaves Code identities unchanged across outcomes', async () => {
+  const code = { ...providerRow('minimax', 'code-A', 'MiniMax Code'), source: 'oauth' };
+  const api = providerRow('minimax', 'api-A', 'Pay-as-you-go');
+  for (const outcome of ['throw', 'api-only', 'not-configured', 'transient']) {
+    const runtime = createLimitsRuntime({ limitProviders: ['minimax'] }, runtimeDeps({
+      autoRetry: false,
+      probeProvider: async (_provider, _config, context) => {
+        if (context.scope.source !== 'api') return [code, api];
+        if (outcome === 'throw') {
+          const error = new Error('API offline');
+          error.status = 'unavailable';
+          throw error;
+        }
+        if (outcome === 'api-only') return [api];
+        return [{ provider: 'minimax', source: 'api', status: outcome === 'transient'
+          ? 'unavailable' : 'notConfigured', windows: [] }];
+      }
+    }));
+    try {
+      await runtime.refresh({ provider: 'minimax' }, 'manual');
+      await runtime.refresh({ provider: 'minimax', source: 'api' }, 'settings-change');
+      for (const afterClear of [false, true]) {
+        if (afterClear) runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
+        const retained = runtime.getSnapshot().providers.find(row => row.accountKey === 'code-A');
+        assert.equal(retained?.status, 'ok', `${outcome} / clear=${afterClear}`);
+        assert.equal(retained?.source, 'oauth', outcome);
+        assert.equal(retained?.windows[0]?.usedPercent, 20, outcome);
+      }
+    } finally {
+      runtime.stop();
+    }
+  }
+});
+
 test('clearing MiniMax API preserves a Code lane whose last good result was API', async () => {
   const row = providerRow('minimax', 'shared', 'MiniMax Code', { windows: [] });
   const runtime = createLimitsRuntime({ limitProviders: ['minimax'] }, runtimeDeps({

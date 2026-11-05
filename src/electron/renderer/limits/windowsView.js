@@ -2288,6 +2288,8 @@
         clearTimeout(hoverTimer); openHistory(true);
       });
       row.addEventListener('click', event => {
+        const clickedRow = event.target.closest('.limit-row');
+        if (clickedRow && clickedRow !== row) return;
         if (event.target.closest('button, a, input, select, summary, [role="button"]')) return;
         clearTimeout(hoverTimer); openHistory(true);
       });
