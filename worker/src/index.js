@@ -40,9 +40,9 @@ function jsonResponse(status, payload, extra = {}, request = null) {
   });
 }
 
-// Delta is a new endpoint: bound incoming bytes before JSON materialization,
-// including chunked requests, without changing legacy full-ingest admission.
-async function readUploadDelta(request) {
+// Bound full and delta ingest bytes before JSON materialization, including
+// requests without Content-Length.
+async function readIngestJson(request) {
   const reader = request.body?.getReader();
   if (!reader) return JSON.parse('');
   const chunks = [];
@@ -562,7 +562,7 @@ export class HubDO {
     if (request.method === 'POST' && ['/api/ingest', '/api/ingest/delta'].includes(url.pathname)) {
       const delta = url.pathname === '/api/ingest/delta';
       let payload;
-      try { payload = delta ? await readUploadDelta(request) : await request.json(); }
+      try { payload = await readIngestJson(request); }
       catch (error) {
         return jsonResponse(error.status === 413 ? 413 : 400, {
           error: error.status === 413 ? 'payload_too_large' : 'bad_request', message: error.message
