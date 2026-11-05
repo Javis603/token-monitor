@@ -694,7 +694,27 @@ test('hourly history keeps both occurrences of a repeated daylight-saving hour',
   }
 });
 
-test('the side window flips left and clamps onto the selected display', () => {
+test('history opens toward the display interior even when both sides fit', () => {
+  const work = { x: 0, y: 0, width: 1600, height: 900 };
+  const rect = { y: 50 };
+  const leftOwner = { x: 400, y: 100, width: 300, height: 700 };
+  const rightOwner = { ...leftOwner, x: 900 };
+  assert.equal(historyBounds(leftOwner, rect, work).x, 708);
+  assert.equal(historyBounds(rightOwner, rect, work).x, 582);
+  assert.equal(historyBounds(rightOwner, rect, work).y, 128);
+  assert.equal(historyBounds({ ...leftOwner, x: 650 }, rect, work).x, 332);
+});
+
+test('history uses the selected display centre with zoom and negative coordinates', () => {
+  const work = { x: -1920, y: -200, width: 1920, height: 1080 };
+  const owner = { x: -800, y: -100, width: 400, height: 700 };
+  const bounds = historyBounds(owner, { y: 50 }, work, 1.5);
+  assert.equal(bounds.x, -1273);
+  assert.equal(bounds.y, -47);
+  assert.equal(bounds.width, 465);
+});
+
+test('the side window opens inward and clamps onto the selected display', () => {
   const work = { x: -1600, y: 0, width: 1600, height: 900 };
   const owner = { x: -350, y: 700, width: 300, height: 180 };
   const bounds = historyBounds(owner, { y: 50 }, work);

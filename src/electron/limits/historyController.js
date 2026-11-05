@@ -15,8 +15,10 @@ function historyBounds(owner, rect, workArea, zoom = 1) {
   const height = Math.min(Math.round(420 * zoom), workArea.height - 16);
   const right = owner.x + owner.width + 8;
   const left = owner.x - width - 8;
-  const x = right + width <= workArea.x + workArea.width - 8 ? right
-    : left >= workArea.x + 8 ? left : owner.x + owner.width - width;
+  const preferLeft = owner.x + owner.width / 2 >= workArea.x + workArea.width / 2;
+  const candidates = preferLeft ? [left, right] : [right, left];
+  const x = candidates.find(candidate => candidate >= workArea.x + 8
+    && candidate + width <= workArea.x + workArea.width - 8) ?? owner.x + owner.width - width;
   return {
     x: Math.round(Math.max(workArea.x + 8, Math.min(x, workArea.x + workArea.width - width - 8))),
     y: Math.round(Math.max(workArea.y + 8, Math.min(owner.y + rect.y * zoom - 22, workArea.y + workArea.height - height - 8))),
