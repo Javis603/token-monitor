@@ -112,7 +112,7 @@ const SERVICE_STATUS_PROVIDERS = [
     pageUrl: 'https://www.google.com/appsstatus/dashboard',
     summaryUrl: 'https://www.google.com/appsstatus/dashboard/incidents.json',
     summaryFormat: 'google-feed',
-    serviceName: 'Gemini'
+    productId: 'npdyhgECDJ6tB66MxXyo'
   }
 ];
 
@@ -345,13 +345,24 @@ function summarizeAtomFeedProvider(provider, feedText, options = {}) {
   }
 }
 
-// Instatus pages answer /summary.json with page.status UP/HASISSUES plus
-// ranked active incidents. Healthy pages omit the incident arrays entirely, so
-// a missing array is empty rather than malformed.
+// Instatus v3 exposes granular page statuses alongside ranked active incidents.
+// Healthy pages omit the incident arrays entirely, so a missing array is empty
+// rather than malformed.
 const INSTATUS_IMPACT_TO_INDICATOR = new Map([
   ['majoroutage', 'critical'],
   ['partialoutage', 'major'],
   ['degradedperformance', 'minor']
+]);
+
+const INSTATUS_PAGE_TO_INDICATOR = new Map([
+  ['up', 'none'], ['hasissues', 'minor'], ['undermaintenance', 'none'],
+  ...['all', 'some', 'one'].flatMap((prefix) => [
+    [`${prefix}undermaintenance`, 'none'],
+    [`${prefix}degradedperformance`, 'minor'],
+    [`${prefix}partialoutage`, 'major'],
+    [`${prefix}minoroutage`, 'minor'],
+    [`${prefix}majoroutage`, 'critical']
+  ])
 ]);
 
 function summarizeInstatusProvider(provider, payload, options = {}) {
@@ -359,7 +370,7 @@ function summarizeInstatusProvider(provider, payload, options = {}) {
   try {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Unexpected payload');
     const pageStatus = normalizeStatus(payload.page?.status);
-    if (!['up', 'hasissues', 'undermaintenance'].includes(pageStatus)) throw new Error('Unexpected page status');
+    if (!INSTATUS_PAGE_TO_INDICATOR.has(pageStatus)) throw new Error('Unexpected page status');
     for (const key of ['activeIncidents', 'activeMaintenances']) {
       if (payload[key] !== undefined && !Array.isArray(payload[key])) throw new Error(`Unexpected ${key}`);
     }
@@ -373,7 +384,7 @@ function summarizeInstatusProvider(provider, payload, options = {}) {
     // degrade rather than report a false green.
     // Planned maintenance stays in maintenanceCount; concurrent incidents can
     // still raise the provider's severity.
-    let worst = pageStatus === 'hasissues' ? 'minor' : 'none';
+    let worst = INSTATUS_PAGE_TO_INDICATOR.get(pageStatus);
     for (const incident of incidents) worst = worstIndicator(worst, incident.indicator);
     const headline = incidents.find((incident) => incident.indicator === worst && incident.title);
     return {
@@ -395,9 +406,8 @@ function summarizeInstatusProvider(provider, payload, options = {}) {
   }
 }
 
-// Google Workspace incidents carry their service directly or through
-// affected_products, an open incident has no `end`, and severity is low /
-// medium / high. Unknown severities degrade to minor rather than reading green.
+// Google Workspace incidents identify services by stable affected_products IDs.
+// An open incident has no `end`, and severity is low / medium / high. Unknown severities degrade to minor rather than reading green.
 const GOOGLE_SEVERITY_TO_INDICATOR = new Map([['low', 'minor'], ['medium', 'major'], ['high', 'critical']]);
 
 // Feed entries lead with a "**Summary:**" / "**Title**" marker and the short
@@ -423,13 +433,10 @@ function summarizeGoogleFeedProvider(provider, payload, options = {}) {
     // empty or non-array body is a truncated response or format drift — never
     // "no incidents".
     if (!Array.isArray(payload) || !payload.length) throw new Error('Unexpected feed content');
-    const serviceName = normalizeStatus(provider.serviceName);
-    if (!serviceName) throw new Error('Missing service name');
-    const serviceIncidents = payload.filter((incident) => incident && (
-      normalizeStatus(incident.service_name) === serviceName
-      || (Array.isArray(incident.affected_products)
-        && incident.affected_products.some((product) => normalizeStatus(product?.title) === serviceName))
-    ));
+    const productId = provider.productId;
+    if (!productId) throw new Error('Missing product ID');
+    const serviceIncidents = payload.filter((incident) => Array.isArray(incident?.affected_products)
+      && incident.affected_products.some((product) => product?.id === productId));
     const incidents = serviceIncidents
       .filter((incident) => !incident.end)
       .map((incident) => ({

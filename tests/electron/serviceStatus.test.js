@@ -138,7 +138,7 @@ test('default providers cover the tracked tools with per-format summary endpoint
   assert.equal(byId.get('deepseek').summaryFormat, 'atom-feed');
   // Google, OpenCode and Zed publish non-Statuspage feeds with their own shape.
   assert.equal(byId.get('gemini').summaryFormat, 'google-feed');
-  assert.equal(byId.get('gemini').serviceName, 'Gemini');
+  assert.equal(byId.get('gemini').productId, 'npdyhgECDJ6tB66MxXyo');
   assert.equal(byId.get('opencode').summaryFormat, 'opencode-json');
   assert.equal(byId.get('zed').summaryFormat, 'instatus');
   for (const entry of SERVICE_STATUS_PROVIDERS.filter((item) => !item.summaryFormat)) {
@@ -364,6 +364,27 @@ test('summarizeInstatusProvider degrades HASISSUES without readable incident det
   assert.equal(result.incidentTitle, '');
 });
 
+test('summarizeInstatusProvider maps granular v3 page statuses and preserves incidents', () => {
+  for (const prefix of ['ALL', 'SOME', 'ONE']) {
+    for (const [suffix, indicator] of [
+      ['UNDERMAINTENANCE', 'none'], ['DEGRADEDPERFORMANCE', 'minor'],
+      ['PARTIALOUTAGE', 'major'], ['MINOROUTAGE', 'minor'], ['MAJOROUTAGE', 'critical']
+    ]) {
+      const page = { status: prefix + suffix };
+      const result = summarizeInstatusProvider(instatusProvider, { page });
+      assert.equal(result.indicator, indicator, page.status);
+      const concurrent = summarizeInstatusProvider(instatusProvider, {
+        page, activeIncidents: [{ name: 'Outage', impact: 'MAJOROUTAGE' }],
+        activeMaintenances: [{ name: 'Maintenance' }]
+      });
+      assert.equal(concurrent.indicator, 'critical', page.status);
+      assert.equal(concurrent.incidentTitle, 'Outage');
+      assert.equal(concurrent.incidentCount, 1);
+      assert.equal(concurrent.maintenanceCount, 1);
+    }
+  }
+});
+
 test('summarizeInstatusProvider reports unknown on malformed payloads', () => {
   for (const payload of [null, 'nope', [], { page: {} }, { page: { status: 'WEIRD' } }, { page: { status: 'UP' }, activeIncidents: 'nope' }]) {
     const result = summarizeInstatusProvider(instatusProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
@@ -378,7 +399,7 @@ const googleProvider = {
   pageUrl: 'https://www.google.com/appsstatus/dashboard',
   summaryUrl: 'https://www.google.com/appsstatus/dashboard/incidents.json',
   summaryFormat: 'google-feed',
-  serviceName: 'Gemini'
+  productId: 'npdyhgECDJ6tB66MxXyo'
 };
 
 function googleIncident(overrides = {}) {
@@ -389,7 +410,7 @@ function googleIncident(overrides = {}) {
     modified: '2026-11-05T09:00:00+00:00',
     severity: 'medium',
     external_desc: '**Summary:**\nElevated error rates with Gemini in Workspace.\n**Description:**\nWe are investigating.',
-    affected_products: [{ title: 'Gemini' }],
+    affected_products: [{ title: 'Gemini', id: 'npdyhgECDJ6tB66MxXyo' }],
     ...overrides
   };
 }
@@ -414,13 +435,23 @@ test('summarizeGoogleFeedProvider surfaces an open Gemini incident with headline
 
 test('summarizeGoogleFeedProvider matches incidents through affected_products too', () => {
   const payload = [
-    googleIncident({ service_name: 'Google Vids', affected_products: [{ title: 'Gemini' }], severity: 'high' })
+    googleIncident({ service_name: 'Google Vids', affected_products: [{ title: 'Gemini', id: 'npdyhgECDJ6tB66MxXyo' }], severity: 'high' })
   ];
 
   const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
 
   assert.equal(result.indicator, 'critical');
   assert.deepEqual(result.componentIssues, [{ name: 'Gemini', status: 'major_outage' }]);
+});
+
+test('summarizeGoogleFeedProvider matches stable product IDs despite renamed or missing names', () => {
+  const result = summarizeGoogleFeedProvider(googleProvider, [
+    googleIncident({ service_name: undefined, affected_products: [{ id: googleProvider.productId, title: 'Renamed product' }] }),
+    googleIncident({ affected_products: [{ id: 'other', title: 'Gemini' }], severity: 'high' })
+  ]);
+  assert.equal(result.incidentCount, 1);
+  assert.equal(result.indicator, 'major');
+  assert.deepEqual(result.componentIssues, [{ name: 'Renamed product', status: 'partial_outage' }]);
 });
 
 test('summarizeGoogleFeedProvider treats resolved-only history as operational with a fresh timestamp', () => {
@@ -464,8 +495,8 @@ test('summarizeGoogleFeedProvider reads inline titles after the marker', () => {
 
 test('summarizeGoogleFeedProvider keeps outage products ahead of degraded ones', () => {
   const payload = [
-    googleIncident({ severity: 'medium', affected_products: [{ title: 'Gemini' }, { title: 'Shared' }] }),
-    googleIncident({ severity: 'high', modified: '2026-11-05T08:30:00+00:00', affected_products: [{ title: 'Gemini API' }, { title: 'Shared' }] })
+    googleIncident({ severity: 'medium', affected_products: [{ title: 'Gemini', id: 'npdyhgECDJ6tB66MxXyo' }, { title: 'Shared' }] }),
+    googleIncident({ severity: 'high', modified: '2026-11-05T08:30:00+00:00', affected_products: [{ title: 'Gemini API', id: 'npdyhgECDJ6tB66MxXyo' }, { title: 'Shared' }] })
   ];
 
   const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
