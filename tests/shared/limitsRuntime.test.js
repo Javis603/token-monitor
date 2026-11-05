@@ -1431,6 +1431,31 @@ test('transient status (unavailable) preserves lastGood windows so stale data is
   runtime.stop();
 });
 
+test('MiniMax API-only dispatch reaches the collector without changing other probe scopes', async () => {
+  const seen = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['minimax', 'claude'] }, runtimeDeps({
+    autoRetry: false,
+    probeProvider: async (provider, config) => {
+      seen.push([provider, config.limitRefreshScope]);
+      return [];
+    }
+  }));
+  try {
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    await runtime.refresh({ provider: 'minimax', source: 'api' }, 'settings-change');
+    await runtime.refresh({ provider: 'claude', source: 'web' }, 'manual');
+    await runtime.refresh({ provider: 'claude', accountKey: 'work' }, 'account-state');
+    assert.deepEqual(seen, [
+      ['minimax', undefined],
+      ['minimax', { provider: 'minimax', source: 'api' }],
+      ['claude', undefined],
+      ['claude', { provider: 'claude', accountKey: 'work' }]
+    ]);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('MiniMax API-only refresh leaves Code identities unchanged across outcomes', async () => {
   const code = { ...providerRow('minimax', 'code-A', 'MiniMax Code'), source: 'oauth' };
   const api = providerRow('minimax', 'api-A', 'Pay-as-you-go');

@@ -723,8 +723,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         : config;
       const configSnapshot = cloneValue(resolved || config);
       configSnapshot.limitProviders = [lane.provider];
-      if (intent.accountScoped) configSnapshot.limitRefreshScope = cloneValue(intent.scope);
-      else delete configSnapshot.limitRefreshScope;
+      if (intent.accountScoped || (lane.provider === 'minimax' && intent.scope.source === 'api')) {
+        configSnapshot.limitRefreshScope = cloneValue(intent.scope);
+      } else delete configSnapshot.limitRefreshScope;
       // A provider that must remove a vanished local identity compares against
       // the rows this runtime actually accepted, not a mutable probe-side cache.
       // A superseded probe therefore cannot consume a removal before commit.
