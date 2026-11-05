@@ -124,8 +124,8 @@ test('default providers cover the tracked tools with per-format summary endpoint
   // stay in sync. Ids are unique — they are the hidden/display-order keys.
   const ids = SERVICE_STATUS_PROVIDERS.map((entry) => entry.id);
   assert.deepEqual(ids, [
-    'claude', 'openai', 'cursor', 'github', 'deepseek', 'gemini',
-    'kimi', 'minimax', 'minimax-intl', 'opencode', 'zed', 'devin', 'factory'
+    'claude', 'openai', 'opencode', 'cursor', 'factory', 'kimi', 'github',
+    'zed', 'deepseek', 'devin', 'minimax', 'minimax-intl', 'gemini'
   ]);
   assert.equal(new Set(ids).size, ids.length);
   for (const entry of SERVICE_STATUS_PROVIDERS) {
@@ -306,7 +306,7 @@ const instatusProvider = {
   id: 'zed',
   label: 'Zed',
   pageUrl: 'https://status.zed.dev',
-  summaryUrl: 'https://status.zed.dev/summary.json',
+  summaryUrl: 'https://status.zed.dev/v3/summary.json',
   summaryFormat: 'instatus'
 };
 

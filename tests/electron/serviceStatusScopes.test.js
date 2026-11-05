@@ -66,10 +66,12 @@ test('Copilot notices a related incident before the component status changes', (
 });
 
 test('Copilot reports unknown if its components are missing from the feed', () => {
-  const result = summarizeStatuspageProvider(copilot, {
-    status: { indicator: 'none' }, components: [actionsComponent]
-  });
-  assert.equal(result.status, 'unknown');
+  for (const components of [[actionsComponent], [copilotComponent], [modelComponent], [copilotComponent, copilotComponent]]) {
+    const result = summarizeStatuspageProvider(copilot, {
+      status: { indicator: 'none' }, components
+    });
+    assert.equal(result.status, 'unknown', JSON.stringify(components));
+  }
 });
 
 test('Zed preserves maintenance without counting it as an outage', () => {
@@ -105,7 +107,7 @@ test('MiniMax exposes independent China and international status and fetch prefe
     fetchImpl: async (url) => {
       fetched.push(url);
       return { ok: true, json: async () => ({
-        status: { indicator: url.includes('minimax.io') ? 'major' : 'none' }
+        status: { indicator: url === 'https://status.minimax.io/api/v2/summary.json' ? 'major' : 'none' }
       }) };
     }
   });
@@ -126,6 +128,36 @@ test('status settings and pre-fetch rows match the main provider labels and link
   const declaration = app.match(/const SERVICE_STATUS_PLACEHOLDERS = (\[[\s\S]*?\n\]);/)[1];
   const rows = JSON.parse(JSON.stringify(vm.runInNewContext(declaration)));
   assert.deepEqual(rows, SERVICE_STATUS_PROVIDERS.map(({ id, label, pageUrl }) => ({ id, label, pageUrl })));
+});
+
+test('status defaults follow README tool order and preserve saved custom ordering', () => {
+  const readme = fs.readFileSync(path.join(__dirname, '../../README.md'), 'utf8');
+  const iconIds = [...readme.matchAll(/^\| <img src="\.github\/assets\/tools-icon\/([^".]+)\.png"/gm)].map((match) => match[1]);
+  const toolIcons = { openai: 'codex', github: 'copilot', factory: 'droid', 'minimax-intl': 'minimax' };
+  const listed = SERVICE_STATUS_PROVIDERS.filter(({ id }) => id !== 'gemini');
+  const expected = [...listed].sort((a, b) => (
+    iconIds.indexOf(toolIcons[a.id] || a.id) - iconIds.indexOf(toolIcons[b.id] || b.id)
+  ));
+  for (const { id } of listed) assert.ok(iconIds.includes(toolIcons[id] || id), id);
+  assert.deepEqual(SERVICE_STATUS_PROVIDERS.map(({ id }) => id), [...expected.map(({ id }) => id), 'gemini']);
+  const preferences = require('../../src/electron/renderer/serviceStatusProviderPreferences');
+  assert.deepEqual(preferences.visibleOrder(SERVICE_STATUS_PROVIDERS, 'zed,github,claude', '').slice(0, 3), ['zed', 'github', 'claude']);
+});
+
+test('Zed fetches its documented v3 API and exposes incident details', async () => {
+  const client = createServiceStatusClient({
+    providers: [zed],
+    fetchImpl: async (url) => {
+      assert.equal(url, 'https://status.zed.dev/v3/summary.json');
+      return { ok: true, json: async () => ({
+        page: { status: 'HASISSUES' },
+        activeIncidents: [{ name: 'Editing degraded', impact: 'DEGRADEDPERFORMANCE', updatedAt: '2026-11-05T09:00:00Z' }]
+      }) };
+    }
+  });
+  const result = (await client.getServiceStatus()).providers[0];
+  assert.equal(result.incidentTitle, 'Editing degraded');
+  assert.equal(result.updatedAt, '2026-11-05T09:00:00Z');
 });
 
 test('status external links admit Google dashboard only at its exact URL', () => {

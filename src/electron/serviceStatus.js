@@ -14,6 +14,7 @@ const USER_AGENT = `TokenMonitor/${appVersion()} (+https://github.com/Javis603/t
 // and are dispatched to a matching summarizer below. Providers without a
 // usable public page (grok and kiro front theirs with bot checks that also
 // 403 server-side; z.ai and qoder expose none) must not be added speculatively.
+// Follow the README tool order. Gemini has no tracked-tool row and comes last.
 const SERVICE_STATUS_PROVIDERS = [
   {
     id: 'claude',
@@ -28,10 +29,31 @@ const SERVICE_STATUS_PROVIDERS = [
     summaryUrl: 'https://status.openai.com/api/v2/summary.json'
   },
   {
+    id: 'opencode',
+    label: 'OpenCode',
+    // OpenCode's official status API uses a custom JSON schema instead of the
+    // Statuspage shape.
+    pageUrl: 'https://status.opencode.ai',
+    summaryUrl: 'https://status.opencode.ai/api/status',
+    summaryFormat: 'opencode-json'
+  },
+  {
     id: 'cursor',
     label: 'Cursor',
     pageUrl: 'https://status.cursor.com',
     summaryUrl: 'https://status.cursor.com/api/v2/summary.json'
+  },
+  {
+    id: 'factory',
+    label: 'Factory Droid',
+    pageUrl: 'https://status.factory.ai',
+    summaryUrl: 'https://status.factory.ai/api/v2/summary.json'
+  },
+  {
+    id: 'kimi',
+    label: 'Kimi',
+    pageUrl: 'https://status.moonshot.cn',
+    summaryUrl: 'https://status.moonshot.cn/api/v2/summary.json'
   },
   {
     id: 'github',
@@ -41,6 +63,13 @@ const SERVICE_STATUS_PROVIDERS = [
     // GitHub's page also covers Actions, Pages and other unrelated services.
     // These are the Copilot and Copilot AI Model Providers component ids.
     componentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82']
+  },
+  {
+    id: 'zed',
+    label: 'Zed',
+    pageUrl: 'https://status.zed.dev',
+    summaryUrl: 'https://status.zed.dev/v3/summary.json',
+    summaryFormat: 'instatus'
   },
   {
     id: 'deepseek',
@@ -57,21 +86,10 @@ const SERVICE_STATUS_PROVIDERS = [
     summaryFormat: 'atom-feed'
   },
   {
-    id: 'gemini',
-    label: 'Gemini',
-    // Google publishes one incidents feed for every Workspace service; the
-    // summarizer filters it down to the Gemini entries. There is no
-    // Gemini-only host, so the page link is the dashboard path.
-    pageUrl: 'https://www.google.com/appsstatus/dashboard',
-    summaryUrl: 'https://www.google.com/appsstatus/dashboard/incidents.json',
-    summaryFormat: 'google-feed',
-    serviceName: 'Gemini'
-  },
-  {
-    id: 'kimi',
-    label: 'Kimi',
-    pageUrl: 'https://status.moonshot.cn',
-    summaryUrl: 'https://status.moonshot.cn/api/v2/summary.json'
+    id: 'devin',
+    label: 'Devin',
+    pageUrl: 'https://www.devinstatus.com',
+    summaryUrl: 'https://www.devinstatus.com/api/v2/summary.json'
   },
   {
     id: 'minimax',
@@ -86,32 +104,15 @@ const SERVICE_STATUS_PROVIDERS = [
     summaryUrl: 'https://status.minimax.io/api/v2/summary.json'
   },
   {
-    id: 'opencode',
-    label: 'OpenCode',
-    // OpenCode's official status API uses a custom JSON schema instead of the
-    // Statuspage shape.
-    pageUrl: 'https://status.opencode.ai',
-    summaryUrl: 'https://status.opencode.ai/api/status',
-    summaryFormat: 'opencode-json'
-  },
-  {
-    id: 'zed',
-    label: 'Zed',
-    pageUrl: 'https://status.zed.dev',
-    summaryUrl: 'https://status.zed.dev/summary.json',
-    summaryFormat: 'instatus'
-  },
-  {
-    id: 'devin',
-    label: 'Devin',
-    pageUrl: 'https://www.devinstatus.com',
-    summaryUrl: 'https://www.devinstatus.com/api/v2/summary.json'
-  },
-  {
-    id: 'factory',
-    label: 'Factory Droid',
-    pageUrl: 'https://status.factory.ai',
-    summaryUrl: 'https://status.factory.ai/api/v2/summary.json'
+    id: 'gemini',
+    label: 'Gemini',
+    // Google publishes one incidents feed for every Workspace service; the
+    // summarizer filters it down to the Gemini entries. There is no
+    // Gemini-only host, so the page link is the dashboard path.
+    pageUrl: 'https://www.google.com/appsstatus/dashboard',
+    summaryUrl: 'https://www.google.com/appsstatus/dashboard/incidents.json',
+    summaryFormat: 'google-feed',
+    serviceName: 'Gemini'
   }
 ];
 
@@ -178,7 +179,8 @@ function componentIssues(components) {
 function scopeStatuspagePayload(payload, componentIds) {
   const components = (Array.isArray(payload.components) ? payload.components : [])
     .filter((component) => componentIds.includes(component?.id));
-  if (!components.length) throw new Error('Missing status components');
+  const returnedIds = new Set(components.map((component) => component.id));
+  if (componentIds.some((id) => !returnedIds.has(id))) throw new Error('Missing status components');
   const affectsScope = (item) => Array.isArray(item?.components)
     && item.components.some((component) => componentIds.includes(component?.id));
   const incidents = activeItems(payload.incidents, INACTIVE_INCIDENT).filter(affectsScope);

@@ -305,17 +305,17 @@ const VIEW_ICON_CLASSES = {
 const SERVICE_STATUS_PLACEHOLDERS = [
   { id: 'claude', label: 'Claude', pageUrl: 'https://status.claude.com' },
   { id: 'openai', label: 'OpenAI', pageUrl: 'https://status.openai.com' },
+  { id: 'opencode', label: 'OpenCode', pageUrl: 'https://status.opencode.ai' },
   { id: 'cursor', label: 'Cursor', pageUrl: 'https://status.cursor.com' },
-  { id: 'github', label: 'Copilot', pageUrl: 'https://www.githubstatus.com' },
-  { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' },
-  { id: 'gemini', label: 'Gemini', pageUrl: 'https://www.google.com/appsstatus/dashboard' },
+  { id: 'factory', label: 'Factory Droid', pageUrl: 'https://status.factory.ai' },
   { id: 'kimi', label: 'Kimi', pageUrl: 'https://status.moonshot.cn' },
+  { id: 'github', label: 'Copilot', pageUrl: 'https://www.githubstatus.com' },
+  { id: 'zed', label: 'Zed', pageUrl: 'https://status.zed.dev' },
+  { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' },
+  { id: 'devin', label: 'Devin', pageUrl: 'https://www.devinstatus.com' },
   { id: 'minimax', label: 'MiniMax (China)', pageUrl: 'https://status.minimaxi.com' },
   { id: 'minimax-intl', label: 'MiniMax (International)', pageUrl: 'https://status.minimax.io' },
-  { id: 'opencode', label: 'OpenCode', pageUrl: 'https://status.opencode.ai' },
-  { id: 'zed', label: 'Zed', pageUrl: 'https://status.zed.dev' },
-  { id: 'devin', label: 'Devin', pageUrl: 'https://www.devinstatus.com' },
-  { id: 'factory', label: 'Factory Droid', pageUrl: 'https://status.factory.ai' }
+  { id: 'gemini', label: 'Gemini', pageUrl: 'https://www.google.com/appsstatus/dashboard' }
 ];
 const SERVICE_PROVIDER_OPTIONS = SERVICE_STATUS_PLACEHOLDERS.map((entry) => ({ id: entry.id, label: entry.label }));
 const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/token-monitor';
