@@ -773,6 +773,37 @@ function waitForCondition(predicate, timeoutMs = 4000) {
   });
 }
 
+test('a pricing revision alone no longer throws the anchor away', () => {
+  // Tokens do not depend on prices. Treating a pricing refresh as a config change
+  // forced a full rescan whose multi-day periods read empty until the history
+  // graph landed — the "TOTAL/30D went to zero" window, several times a week.
+  const { collectorAnchorTrust, configFingerprint, anchorConfigKey } = freshCollector();
+  const now = new Date(2026, 7, 8, 10, 0, 0);
+  const base = { clients: 'claude', allTimeSince: '2024-01-01', projectsEnabled: true, now };
+  const key = anchorConfigKey('claude', '2024-01-01', true);
+  const saved = {
+    dateKey: '2026-08-08',
+    today: {}, month: {}, allTime: {},
+    configKey: key,
+    configFingerprint: configFingerprint('claude', '2024-01-01', true, '', '', null, 'price-old'),
+    fullScanAt: new Date(now.getTime() - 60_000).toISOString()
+  };
+  // Same token identity, different price revision: still usable, but flagged so
+  // the tick runs the full scan that reprices instead of the today-only delta.
+  const trusted = collectorAnchorTrust(saved, { ...base, pricingRevision: 'price-new' });
+  assert.equal(trusted.capturedAtMs, now.getTime() - 60_000);
+  assert.equal(trusted.pricingChanged, true);
+  // Same price revision: no reprice is due, so the delta path stays available.
+  const unchanged = collectorAnchorTrust(saved, { ...base, pricingRevision: 'price-old' });
+  assert.equal(unchanged.pricingChanged, false);
+  // A real config change still invalidates it.
+  assert.equal(collectorAnchorTrust(saved, { ...base, clients: 'claude,codex' }), null);
+  // An anchor written before the split keeps the old, stricter rule.
+  const legacy = { ...saved };
+  delete legacy.configKey;
+  assert.equal(collectorAnchorTrust(legacy, { ...base, pricingRevision: 'price-new' }), null);
+});
+
 test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   // One policy, two consumers: startCollector reuses the periods and only loses
   // its incremental shortcut when the capture time is unusable, while the

@@ -2259,7 +2259,12 @@ function pricingFingerprint(options = {}) {
   return hash.digest('hex');
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, pricingRevision = pricingFingerprint(), sourceOptions = {}, catpawRevision = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
+// Everything about the anchor that decides *which tokens* it counted. Pricing is
+// deliberately absent: a pricing refresh changes what those tokens cost, not how
+// many there were, and treating it as a config change threw away a perfectly good
+// anchor — forcing a full rescan whose multi-day periods read empty until the
+// history graph landed. That window is what users saw as "TOTAL/30D went to zero".
+function anchorConfigKey(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, sourceOptions = {}, catpawRevision = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
   const qoderCn = String(qoderCnDbPath || '').trim();
@@ -2273,7 +2278,14 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
   const catpawPart = catpawRevision ? `|catpaw:${catpawRevision}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}`;
+}
+
+// Token identity plus the price revision the anchor's costs were derived under.
+// Costs are recomputed by the hourly full scan, so a mismatch here is a cue to
+// reprice — never a reason to discard token counts.
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, pricingRevision = pricingFingerprint(), sourceOptions = {}, catpawRevision = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
+  return `${anchorConfigKey(clientsCsv, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, sourceOptions, catpawRevision)}|pricing:${pricingRevision}`;
 }
 
 function qoderCnSourcesForClients(clientsCsv, options = {}) {
@@ -2312,11 +2324,28 @@ function collectorAnchorTrust(saved, options = {}) {
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
-  const pricingRevision = options.pricingRevision ?? pricingFingerprint(options);
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, pricingRevision, options)) return null;
+  const key = anchorConfigKey(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, options);
+  if (saved.configKey) {
+    // Anchors written since the split: token identity only. A price revision is
+    // not a reason to drop a day of token counts — the hourly full scan reprices.
+    if (saved.configKey !== key) return null;
+  } else {
+    // Anchors written before the split carry only the combined fingerprint, which
+    // includes pricing; keep honouring it so an upgrade does not re-scan for
+    // nothing. The next full scan rewrites the anchor with `configKey`.
+    const pricingRevision = options.pricingRevision ?? pricingFingerprint(options);
+    if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, pricingRevision, options)) return null;
+  }
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
-  return { capturedAtMs };
+  // The anchor stays usable, but its stored costs were priced under another
+  // revision: ask for a full scan so the numbers are repriced, without dropping
+  // the token baseline that keeps month/allTime on screen meanwhile.
+  const storedPricing = /\|pricing:([^|]*)$/.exec(String(saved.configFingerprint || ''));
+  const pricingChanged = saved.configKey !== undefined
+    && storedPricing !== null
+    && storedPricing[1] !== String(options.pricingRevision ?? pricingFingerprint(options));
+  return { capturedAtMs, pricingChanged };
 }
 
 // Force a full scan at least this often even when the anchor is otherwise
@@ -2792,8 +2821,10 @@ function startCollector(options) {
         wslAnchor = options.wslScanEnabled !== false ? (saved.wslBundle || null) : null;
         wslStatusAnchor = options.wslScanEnabled !== false ? (saved.wslStatus || null) : null;
         // An untrustworthy capture time leaves lastFullScanAt at 0, which forces
-        // a full scan on the first interval tick (see loop()).
-        if (trust.capturedAtMs !== null) lastFullScanAt = trust.capturedAtMs;
+        // a full scan on the first interval tick (see loop()). A pricing change
+        // takes the same path on purpose: the baseline is kept for display, but
+        // the scan it would otherwise skip is exactly the one that reprices.
+        if (trust.capturedAtMs !== null && trust.pricingChanged !== true) lastFullScanAt = trust.capturedAtMs;
       }
     } catch (_) {}
   }
@@ -2818,6 +2849,9 @@ function startCollector(options) {
         wslStatus: wslStatusAnchor,
         ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
         ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
+        // `configKey` decides anchor validity (tokens); `configFingerprint` keeps the
+        // price revision the stored costs were derived under, for repricing.
+        configKey: anchorConfigKey(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, sourceOptions, tickSourceRevision),
         configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision, sourceOptions, tickSourceRevision),
         fullScanAt: new Date(lastFullScanAt).toISOString()
       }));
@@ -3830,6 +3864,7 @@ module.exports = {
   computePeriodWindows,
   collectorAnchorTrust,
   pricingFingerprint,
+  anchorConfigKey,
   configFingerprint,
   qoderCnDbPathForClients,
   qoderCnProjectsDirForClients,
