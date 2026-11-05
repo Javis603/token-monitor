@@ -3,6 +3,7 @@
 const os = require('node:os');
 const path = require('node:path');
 const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
+const { CARD_FADE_IN_MS: FADE_IN_MS, CARD_FADE_OUT_MS: FADE_OUT_MS, CARD_FRAME_MS: FADE_STEP_MS, parkedCardBounds, createCardWindowVisibility } = require('../cardWindow');
 const {
   EDGE_DOCK_METRICS,
   createEdgeDockIntent,
@@ -39,11 +40,8 @@ const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
 // Space transition itself takes longer than this, so a faster poll would only
 // spend window-list reads without making the dock react sooner.
 const FULL_SCREEN_POLL_MS = 500;
-const FADE_IN_MS = 150;
-const FADE_OUT_MS = 120;
 const REFRESH_RESULT_HOLD_MS = 900;
 const REFRESH_FADE_OUT_MS = 200;
-const FADE_STEP_MS = 16;
 const WAKE_TOPMOST_RETRY_MS = 500;
 const RAIL_MORPH_MS = 160;
 const CARD_FRAME_STALE_MS = 64;
@@ -110,7 +108,6 @@ function createEdgeDockController(deps) {
   // the bounds the layout wants while a surface is parked.
   const parked = { rail: false, bubble: false };
   const placed = { rail: null, bubble: null };
-  const fades = new Map();
   const backdrops = new Map();
   const backdropShapes = new WeakMap();
   const intent = createEdgeDockIntent();
@@ -338,11 +335,8 @@ function createEdgeDockController(deps) {
     return SURFACES.find((surface) => alive(windows[surface]) && windows[surface].webContents === sender) || null;
   }
 
-  function cancelFade(win) {
-    const timer = fades.get(win);
-    if (timer) clearInterval(timer);
-    fades.delete(win);
-  }
+  const cardVisibility = createCardWindowVisibility({ reducedMotion: prefersReducedMotion, setOpacity });
+  const { cancel: cancelFade } = cardVisibility;
 
   function setOpacity(win, opacity) {
     win.setOpacity(opacity);
@@ -351,31 +345,6 @@ function createEdgeDockController(deps) {
 
   function reorderBackdrops() {
     for (const backdrop of backdrops.values()) backdrop.reorder();
-  }
-
-  function fade(win, to, duration, done) {
-    if (!alive(win)) return;
-    cancelFade(win);
-    if (prefersReducedMotion() || duration <= 0) {
-      setOpacity(win, to);
-      done?.();
-      return;
-    }
-    const from = win.getOpacity();
-    const steps = Math.max(1, Math.round(duration / FADE_STEP_MS));
-    let step = 0;
-    const timer = setInterval(() => {
-      if (!alive(win)) { cancelFade(win); return; }
-      step += 1;
-      const t = step / steps;
-      const eased = 1 - Math.pow(1 - t, 3);
-      setOpacity(win, from + (to - from) * eased);
-      if (step >= steps) {
-        cancelFade(win);
-        done?.();
-      }
-    }, FADE_STEP_MS);
-    fades.set(win, timer);
   }
 
   // Surfaces are shown once and then only faded and made click-through, never
@@ -392,32 +361,21 @@ function createEdgeDockController(deps) {
     else if (surface === 'rail' && platform === 'darwin') syncRailPointer();
     else if (surface === 'bubble' && platform === 'darwin') syncBubblePointer();
     else win.setIgnoreMouseEvents(ignore);
-    if (!win.isVisible()) {
-      setOpacity(win, 0);
-      win.showInactive();
-      // Reassert native topmost and taskbar exclusion after showInactive. The
-      // floating level can be demoted when Electron moves the HWND behind a
-      // non-topmost taskbar, and the constructor's skipTaskbar call ran while
-      // the HWND was still hidden.
-      if (platform === 'win32') {
+    cardVisibility.setVisible(win, visible, duration, { beforeFade(firstShow) {
+      if (platform === 'win32' && firstShow) {
+        // Reassert stacking after the first non-activating native show.
         win.setSkipTaskbar?.(true);
         win.setAlwaysOnTop(true, 'pop-up-menu');
+      } else if (platform === 'win32' && revealing) {
+        restoreWindowsTopmost(true);
       }
-    } else if (platform === 'win32' && revealing) {
-      // Restoring only the newly revealed card leaves an already-visible rail
-      // behind other windows. Repair the visible Dock together, even when its
-      // HWNDs still report topmost, preserving the card/refresh stacking.
-      restoreWindowsTopmost(true);
-    }
-    // The nested refresh circle overlaps the rail's transparent shoulder, but
-    // macOS still hit-tests that rail rectangle. Keep the action above it,
-    // including when the rail finishes loading after the refresh frame.
-    if (visible && peekMode === 'refresh' && !peekPaintPending
-      && (surface === 'peek' || (surface === 'rail' && refreshVisible))) {
-      windows.peek?.moveTop?.();
-    }
-    if (visible) unpark(surface);
-    fade(win, visible ? 1 : 0, duration, visible ? undefined : () => park(surface));
+      // Keep the nested refresh action above the rail's transparent shoulder.
+      if (visible && peekMode === 'refresh' && !peekPaintPending
+        && (surface === 'peek' || (surface === 'rail' && refreshVisible))) {
+        windows.peek?.moveTop?.();
+      }
+      if (visible) unpark(surface);
+    }, afterFade: visible ? undefined : () => park(surface) });
     if (platform === 'win32') reorderBackdrops();
   }
 
@@ -426,9 +384,7 @@ function createEdgeDockController(deps) {
   }
 
   function parkedBounds(bounds) {
-    let right = -Infinity;
-    for (const { bounds: d } of screen.getAllDisplays?.() || [display()]) right = Math.max(right, d.x + d.width);
-    return { x: right + bounds.width, y: bounds.y, width: bounds.width, height: bounds.height };
+    return parkedCardBounds(bounds, screen.getAllDisplays?.() || [display()]);
   }
 
   // Runs when a fade out finishes; a reveal in the meantime cancels the fade.

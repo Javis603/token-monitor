@@ -2,6 +2,7 @@
 
 (() => {
   const bridge = window.limitsHistory;
+  document.documentElement.classList.toggle('is-windows', bridge.platform === 'win32');
   const model = window.TokenMonitorLimitsHistoryModel;
   const i18n = window.TokenMonitorI18n;
   const $ = id => document.getElementById(id);
@@ -201,8 +202,8 @@
     render();
     // Reopening unchanged content must also release the native show.
     scheduleSize(opening);
-    if (!animate || reduceMotion()) return;
-    contentAnimation = $('history-content').animate([{ opacity: opening ? 0 : .8 }, { opacity: 1 }],
+    if (opening || !animate || reduceMotion()) return;
+    contentAnimation = $('history-content').animate([{ opacity: .8 }, { opacity: 1 }],
       { duration: 150, easing: 'ease-out' });
     contentAnimation.finished.catch(() => {});
   }

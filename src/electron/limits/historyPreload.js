@@ -3,6 +3,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('limitsHistory', {
+  platform: process.platform,
   onNativeMaterial(callback) {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('appearance:nativeMaterial', listener);
