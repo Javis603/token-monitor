@@ -840,7 +840,10 @@ function renderHomeLimitFixture(rows) {
     isCreditsWindow: balanceDisplay.isCreditsWindow, formatCompactMoney: balanceDisplay.formatCompactMoney,
     currentLocale: () => 'en', formatPercent: (n) => `${n}%`,
     limitModeSuffix: limitDisplayMode.limitModeSuffix, limitFillPercent: limitDisplayMode.limitFillPercent,
-    formatLimitBoundary: () => '', optionalFiniteNumber: (n) => n == null ? null : Number(n)
+    formatLimitBoundary: () => '', optionalFiniteNumber: (n) => n == null ? null : Number(n),
+    // The card also draws the "spent today" line for credits-only providers;
+    // this fixture has no poll history, so it reports none.
+    creditSpendToday: () => 0, formatCredits: String
   };
   vm.runInNewContext(`${functions}\nthis.result = renderHomeLimitModule();`, context);
   return context.result;

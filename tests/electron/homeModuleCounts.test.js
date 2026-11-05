@@ -67,6 +67,10 @@ test('Tools, Models and Devices render more than their old hardcoded caps with u
     homeOverviewApi: overview, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }),
     t: key => key, modelRowsForPeriod: () => rows, homeToolSourceRows: () => rows,
     fixedPeriodDevices: () => devices, applyHomeListMark() {}, iconKindFor() {},
+    // The tool module also draws the credits badge and the credits-only row;
+    // this test is about counts, so both are stubbed to "no ledger here".
+    localCreditsView: () => null, creditOnlyToolNotes: () => [], formatCredits: String,
+    clientColors: {}, LIMIT_PROVIDERS: [],
     formatCompact: String, formatPercent: String, deviceAccent: '#fff', deviceStaleColor: '#888'
   };
   for (const [name, next, count] of [

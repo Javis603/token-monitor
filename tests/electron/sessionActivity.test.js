@@ -31,6 +31,8 @@ test('host and iCloud activity snapshots retain the captured local history for T
       presentationCache: publisher.createStatsPresentationCache(), allTimeSessionsCache: publisher.createStatsPresentationCache(),
       mergedLocalAllTimeSessions, projectModelAliasSessions: (_stats, sessions) => sessions,
       electronPresentationStats: stats => stats, updateEdgeDockCells: () => {}, sendPush: () => {},
+      // The push path logs a dev-only stats line; this sandbox has no logger.
+      logStatsDiag: () => {},
       withoutSessionTitles: titles.withoutSessionTitles, pluginRuntime: null
     };
     vm.runInNewContext(source.slice(publishStart, publishEnd) + '\n' + source.slice(pullStart, pullEnd), context);
@@ -131,7 +133,9 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     maybeAdoptSharedSubscriptionRevision() {}, withoutSessionTitles: titles.withoutSessionTitles,
     mainWindow: { isDestroyed: () => false, webContents: { send: (_topic, payload) => pushes.push(payload) } },
     dashboardWindow: null,
-    ipcMain: { handle: (channel, handler) => { if (channel === 'stats:get') get = handler; } }
+    ipcMain: { handle: (channel, handler) => { if (channel === 'stats:get') get = handler; } },
+    // The push path logs a dev-only stats line; this harness has no logger.
+    logStatsDiag() {}
   };
   vm.runInNewContext(body('function hubModeRequestIsCurrent(', '\nfunction currentHubStatsIdentity(')
     + body('function ownsUsageRuntime(', '\nasync function deleteDeviceFromHub(')

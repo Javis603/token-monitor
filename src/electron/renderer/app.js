@@ -6767,11 +6767,11 @@ function creditsBadgeElement(view) {
   credits.textContent = view.today != null
     ? t('home.creditsToday', { value: formatCredits(view.today) })
     : t('home.creditsTotal', { value: formatCredits(view.total) });
-  const tooltip = creditsTooltipText(view.calibration);
-  credits.title = tooltip;
-  // Keyboard/screen-reader parity with the hover tooltip.
+  // No native `title`: this app renders its own tooltips, and a browser bubble
+  // would be the only unstyled surface in the window. The calibration detail
+  // stays available to assistive tech through the label.
   credits.setAttribute('role', 'note');
-  credits.setAttribute('aria-label', tooltip);
+  credits.setAttribute('aria-label', creditsTooltipText(view.calibration));
   return credits;
 }
 
@@ -6826,7 +6826,6 @@ function renderHomeToolModule(period) {
     unit.className = 'home-list-aux';
     unit.textContent = 'credits';
     item.append(mark, name, value, unit);
-    item.title = t('home.creditsSource');
     body.append(item);
   }
   return module;

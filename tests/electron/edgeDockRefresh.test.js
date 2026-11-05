@@ -40,6 +40,8 @@ function fixture() {
     ownsUsageRuntime: () => Boolean(context.deviceRuntimeHandle),
     runManualDeviceRefresh,
     electronPresentationStats: (stats) => stats,
+    // The push path logs a dev-only stats line; this harness has no logger.
+    logStatsDiag() {},
     edgeDockController: { isRunning: () => true },
     notchController: null,
     pushEdgeDockCells: (cells) => { context.dockStats = cells.stats; context.dockPeriods = cells.derivedPeriods; },

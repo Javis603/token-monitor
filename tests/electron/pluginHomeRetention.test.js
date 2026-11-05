@@ -98,6 +98,9 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
     homeToolSourceRows: p => Object.entries(p.clients).map(([key, value]) => ({ key, name: key, value })),
     homeOverviewApi: { homeToolRows: rows => rows.map(row => ({ ...row, share: 1 })), homeActivityScrollTarget: () => 0 },
     applyHomeListMark() {}, iconKindFor: () => 'dot', formatCompact: String, formatPercent: String,
+    // The tool module also owns the WorkBuddy credits badge and the credits-only
+    // row; both are out of scope here, so no ledger is reported.
+    localCreditsView: () => null, creditOnlyToolNotes: () => [], formatCredits: String,
     t: key => key, VIEW_ICON_CLASSES: {}, renderBreakdownChange: id => navigations.push(id),
     renderHomeModelModule() { return context.homeModuleShell('model', 'Models', 'model').module; },
     renderHomeTrendsModule() {
