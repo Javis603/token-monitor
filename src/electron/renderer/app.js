@@ -310,7 +310,8 @@ const SERVICE_STATUS_PLACEHOLDERS = [
   { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' },
   { id: 'gemini', label: 'Gemini', pageUrl: 'https://www.google.com/appsstatus/dashboard' },
   { id: 'kimi', label: 'Kimi', pageUrl: 'https://status.moonshot.cn' },
-  { id: 'minimax', label: 'MiniMax', pageUrl: 'https://status.minimaxi.com' },
+  { id: 'minimax', label: 'MiniMax (China)', pageUrl: 'https://status.minimaxi.com' },
+  { id: 'minimax-intl', label: 'MiniMax (International)', pageUrl: 'https://status.minimax.io' },
   { id: 'opencode', label: 'OpenCode', pageUrl: 'https://status.opencode.ai' },
   { id: 'zed', label: 'Zed', pageUrl: 'https://status.zed.dev' },
   { id: 'devin', label: 'Devin', pageUrl: 'https://www.devinstatus.com' },
@@ -5121,7 +5122,7 @@ function serviceStatusRows() {
 
 // Status ids whose vendor mark lives under a different name; every other id
 // has a `.row-icon-<id>` mask installed from the vendor table.
-const SERVICE_STATUS_ICON_ALIASES = new Map([['openai', 'codex'], ['github', 'copilot']]);
+const SERVICE_STATUS_ICON_ALIASES = new Map([['openai', 'codex'], ['github', 'copilot'], ['minimax-intl', 'minimax']]);
 
 function serviceStatusIconId(id) {
   return SERVICE_STATUS_ICON_ALIASES.get(id) || id;

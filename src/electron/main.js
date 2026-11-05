@@ -593,7 +593,10 @@ const serviceStatusClient = createServiceStatusClient({ fetchImpl: electronLimit
 const codexResetForecastClient = createCodexResetForecastClient({
   fetchImpl: electronLimitsFetch()
 });
-const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
+const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS
+  .map((provider) => new URL(provider.pageUrl))
+  .filter((url) => url.pathname === '/')
+  .map((url) => url.hostname));
 // Status pages on a deep path (the Gemini dashboard lives under
 // www.google.com) are not admitted by the host-root rule, so each page's exact
 // URL is allowlisted too.

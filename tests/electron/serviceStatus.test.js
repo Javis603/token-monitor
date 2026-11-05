@@ -125,7 +125,7 @@ test('default providers cover the tracked tools with per-format summary endpoint
   const ids = SERVICE_STATUS_PROVIDERS.map((entry) => entry.id);
   assert.deepEqual(ids, [
     'claude', 'openai', 'cursor', 'github', 'deepseek', 'gemini',
-    'kimi', 'minimax', 'opencode', 'zed', 'devin', 'factory'
+    'kimi', 'minimax', 'minimax-intl', 'opencode', 'zed', 'devin', 'factory'
   ]);
   assert.equal(new Set(ids).size, ids.length);
   for (const entry of SERVICE_STATUS_PROVIDERS) {
@@ -336,9 +336,9 @@ test('summarizeInstatusProvider ranks active incidents by impact', () => {
   const payload = {
     page: { status: 'HASISSUES' },
     activeIncidents: [
-      { name: 'Degraded editing', impact: 'DEGRADEDPERFORMANCE', updated: '2026-11-05T09:00:00Z' },
-      { name: 'Collaboration outage', impact: 'MAJOROUTAGE', updated: '2026-11-05T09:30:00Z' },
-      { name: 'Partial outage', impact: 'PARTIALOUTAGE', updated: '2026-11-05T09:15:00Z' }
+      { name: 'Degraded editing', impact: 'DEGRADEDPERFORMANCE', updatedAt: '2026-11-05T09:00:00Z' },
+      { name: 'Collaboration outage', impact: 'MAJOROUTAGE', updatedAt: '2026-11-05T09:30:00Z' },
+      { name: 'Partial outage', impact: 'PARTIALOUTAGE', updatedAt: '2026-11-05T09:15:00Z' }
     ],
     activeMaintenances: [{ name: 'DB upgrade' }]
   };
@@ -574,7 +574,7 @@ test('summarizeOpenCodeProvider reports unknown on malformed payloads', () => {
 });
 
 test('service status client dispatches each summaryFormat to its summarizer', async () => {
-  const instatusPayload = { page: { status: 'HASISSUES' }, activeIncidents: [{ name: 'Editing degraded', impact: 'DEGRADEDPERFORMANCE', updated: '2026-11-05T09:00:00Z' }] };
+  const instatusPayload = { page: { status: 'HASISSUES' }, activeIncidents: [{ name: 'Editing degraded', impact: 'DEGRADEDPERFORMANCE', updatedAt: '2026-11-05T09:00:00Z' }] };
   const googlePayload = [googleIncident()];
   const openCodePayload = { updatedAt: 1793836106718, status: 'operational', components: [] };
   const client = createServiceStatusClient({

@@ -37,7 +37,10 @@ const SERVICE_STATUS_PROVIDERS = [
     id: 'github',
     label: 'Copilot',
     pageUrl: 'https://www.githubstatus.com',
-    summaryUrl: 'https://www.githubstatus.com/api/v2/summary.json'
+    summaryUrl: 'https://www.githubstatus.com/api/v2/summary.json',
+    // GitHub's page also covers Actions, Pages and other unrelated services.
+    // These are the Copilot and Copilot AI Model Providers component ids.
+    componentIds: ['pjmpxvq2cmr2', 'cnnb39dkkk82']
   },
   {
     id: 'deepseek',
@@ -72,9 +75,15 @@ const SERVICE_STATUS_PROVIDERS = [
   },
   {
     id: 'minimax',
-    label: 'MiniMax',
+    label: 'MiniMax (China)',
     pageUrl: 'https://status.minimaxi.com',
     summaryUrl: 'https://status.minimaxi.com/api/v2/summary.json'
+  },
+  {
+    id: 'minimax-intl',
+    label: 'MiniMax (International)',
+    pageUrl: 'https://status.minimax.io',
+    summaryUrl: 'https://status.minimax.io/api/v2/summary.json'
   },
   {
     id: 'opencode',
@@ -164,8 +173,46 @@ function componentIssues(components) {
     }));
 }
 
+// A shared status page's aggregate indicator cannot describe a single product.
+// Scope both its health and supporting details to the declared components.
+function scopeStatuspagePayload(payload, componentIds) {
+  const components = (Array.isArray(payload.components) ? payload.components : [])
+    .filter((component) => componentIds.includes(component?.id));
+  if (!components.length) throw new Error('Missing status components');
+  const affectsScope = (item) => Array.isArray(item?.components)
+    && item.components.some((component) => componentIds.includes(component?.id));
+  const incidents = activeItems(payload.incidents, INACTIVE_INCIDENT).filter(affectsScope);
+  const maintenances = activeItems(payload.scheduled_maintenances, INACTIVE_MAINTENANCE).filter(affectsScope);
+  let indicator = 'none';
+  for (const component of components) {
+    const status = normalizeStatus(component.status);
+    const severity = COMPONENT_NON_ISSUE.has(status) ? 'none'
+      : status === 'major_outage' ? 'critical'
+      : status === 'partial_outage' ? 'major' : 'minor';
+    indicator = worstIndicator(indicator, severity);
+  }
+  for (const incident of incidents) {
+    const impact = normalizeStatus(incident.impact);
+    indicator = worstIndicator(indicator, INDICATOR_RANK.has(impact) ? impact : 'minor');
+  }
+  return {
+    ...payload,
+    status: { indicator, description: canonicalDescription(indicator) },
+    components,
+    incidents,
+    scheduled_maintenances: maintenances
+  };
+}
+
 function summarizeStatuspageProvider(provider, payload, options = {}) {
   const checkedAt = options.checkedAt || new Date().toISOString();
+  if (!options.error && payload && provider.componentIds) {
+    try {
+      payload = scopeStatuspagePayload(payload, provider.componentIds);
+    } catch (error) {
+      return summarizeStatuspageProvider(provider, null, { checkedAt, error });
+    }
+  }
   if (options.error || !payload || typeof payload !== 'object') {
     return {
       id: provider.id,
@@ -310,7 +357,7 @@ function summarizeInstatusProvider(provider, payload, options = {}) {
   try {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Unexpected payload');
     const pageStatus = normalizeStatus(payload.page?.status);
-    if (pageStatus !== 'up' && pageStatus !== 'hasissues') throw new Error('Unexpected page status');
+    if (!['up', 'hasissues', 'undermaintenance'].includes(pageStatus)) throw new Error('Unexpected page status');
     for (const key of ['activeIncidents', 'activeMaintenances']) {
       if (payload[key] !== undefined && !Array.isArray(payload[key])) throw new Error(`Unexpected ${key}`);
     }
@@ -318,11 +365,13 @@ function summarizeInstatusProvider(provider, payload, options = {}) {
       // An unreadable impact still means the page reports a problem.
       indicator: INSTATUS_IMPACT_TO_INDICATOR.get(normalizeStatus(incident?.impact)) || 'minor',
       title: String(incident?.name || '').trim(),
-      updatedAt: String(incident?.updated || '').trim()
+      updatedAt: String(incident?.updatedAt || '').trim()
     }));
     // HASISSUES with no incident detail still means something is wrong —
     // degrade rather than report a false green.
-    let worst = pageStatus === 'up' ? 'none' : 'minor';
+    // Planned maintenance stays in maintenanceCount; concurrent incidents can
+    // still raise the provider's severity.
+    let worst = pageStatus === 'hasissues' ? 'minor' : 'none';
     for (const incident of incidents) worst = worstIndicator(worst, incident.indicator);
     const headline = incidents.find((incident) => incident.indicator === worst && incident.title);
     return {

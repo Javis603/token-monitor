@@ -337,7 +337,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
       isAllowedVerificationUrl,
       isAllowedCodexLoginUrl,
       limitProviderUrlAllowed,
-      STATUS_PAGE_HOSTS: new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname)),
+      STATUS_PAGE_HOSTS: evalTopLevel(mainSource, 'const STATUS_PAGE_HOSTS = ', '\n// Status pages', { URL, SERVICE_STATUS_PROVIDERS }),
       STATUS_PAGE_URLS: new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).toString()))
     }
   );
@@ -387,6 +387,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://www.google.com/appsstatus/dashboard',
     'https://status.moonshot.cn/',
     'https://status.minimaxi.com/',
+    'https://status.minimax.io/',
     'https://status.opencode.ai/',
     'https://status.zed.dev/',
     'https://www.devinstatus.com/',
