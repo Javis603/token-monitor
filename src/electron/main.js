@@ -322,7 +322,8 @@ const {
   HUB_STREAM_VERSION,
   createStatsStreamReceiver
 } = require('../shared/hubProtocol');
-const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
+const { createSyncPayloadUploader, syncPayload } = require('../shared/syncPayload');
+const postSyncPayload = createSyncPayloadUploader();
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
   MIMO_PLATFORM_CONSOLE_URL,
@@ -3281,7 +3282,7 @@ function getLimitsHistoryController() {
     isOwner: win => win === mainWindow || win === dashboardWindow,
     read: limitsHistoryPayload,
     getOpenMode: () => settings.limitsHistoryOpenMode,
-    getMaterialOptions: () => ({ ...nativeMaterialOptions(), radius: 14 })
+    getMaterialOptions: () => ({ ...nativeMaterialOptions(), windowsBackdrop: settings.windowsBackdrop, radius: 14 })
   });
   return limitsHistoryController;
 }
@@ -5423,6 +5424,9 @@ function stopStatsStream() {
 
 async function startStatsStream(options = {}) {
   stopStatsStream();
+  // Legacy History needs reconciliation after reconnect. Negotiated uploads
+  // keep their independent baseline and recover through 409 if the Hub lost it.
+  postSyncPayload.resetHistory({ preserveDelta: !options.resetSnapshot });
   const generation = hubModeGeneration;
   const widgetProducerOwner = captureMacWidgetProducerOwner();
   if (settings?.hubMode !== 'client') return;
