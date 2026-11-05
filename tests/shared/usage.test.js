@@ -1859,3 +1859,56 @@ test('aggregateDevices folds a pre-rename micode device into the mimo row', () =
   assert.equal(aggregate.periods.today.clients.micode, undefined);
   assert.equal(aggregate.periods.today.clientCosts.mimo, 2);
 });
+
+test('aggregateHistory ignores only confirmed empty legacy devices when computing completeness', () => {
+  const complete = {
+    deviceId: 'complete', allTime: { totalTokens: 30 },
+    history: {
+      daily: [{ date: '2026-06-07', tokens: 20 }],
+      dailyTotals: [{ date: '2024-01-01', tokens: 10 }, { date: '2026-06-07', tokens: 20 }],
+      monthly: [], summary: { activeDays: 2, activeDaysComplete: true }
+    }
+  };
+  for (const aggregate of [aggregateHistory, require('../../worker/src/shared/usage').aggregateHistory]) {
+    const emptyCurrent = aggregate([{ allTime: { totalTokens: 0 }, history: {
+      daily: [], monthly: [], dailyTotals: [], summary: { activeDaysComplete: true }
+    } }]);
+    assert.equal(emptyCurrent.summary.activeDaysComplete, true);
+    for (const allTime of [{ totalTokens: 0 }, { total_tokens: '0' }]) {
+      const legacy = { deviceId: 'empty', periods: { allTime }, history: { daily: [], monthly: [], summary: {} } };
+      const merged = aggregate([complete, legacy], { todayKey: '2026-06-07' });
+      assert.equal(merged.summary.activeDaysComplete, true);
+      assert.equal(merged.summary.activeDays, 2);
+    }
+    for (const legacy of [
+      { allTime: { totalTokens: 10 }, history: { daily: [], monthly: [], summary: {} } },
+      { history: { daily: [], monthly: [], summary: {} } },
+      { allTime: { totalTokens: 0 }, history: { summary: { activeDays: 1 } } },
+      { allTime: { totalTokens: 0 }, history: { summary: { totalTokens: 10 } } },
+      { allTime: { totalTokens: 0 }, history: { monthly: [{ month: '2024-01', tokens: 10 }] } },
+      { allTime: { totalTokens: 0 }, history: { daily: [{ date: '2024-01-01', tokens: 10 }] } },
+      { allTime: { totalTokens: 0 }, history: { dailyTotalsOmitted: 500, summary: { activeDaysComplete: false } } }
+    ]) {
+      const merged = aggregate([complete, { deviceId: 'legacy', ...legacy }], { todayKey: '2026-06-07' });
+      assert.equal(merged.summary.activeDaysComplete, false, JSON.stringify(legacy));
+    }
+  }
+});
+
+test('aggregateHistory checks usage counters without traversing unrelated device detail', () => {
+  const unrelated = () => { throw new Error('History aggregation must not normalize unrelated detail'); };
+  for (const aggregate of [aggregateHistory, require('../../worker/src/shared/usage').aggregateHistory]) {
+    for (const nested of [false, true]) {
+      for (const history of [undefined, null, { daily: [], monthly: [], summary: {} }]) {
+        const allTime = { total_tokens: '20' };
+        Object.defineProperty(allTime, 'sessions', { get: unrelated });
+        Object.defineProperty(allTime, 'projects', { get: unrelated });
+        const record = { deviceId: 'legacy', history, ...(nested ? { periods: { allTime } } : { allTime }) };
+        Object.defineProperty(record, 'limits', { get: unrelated });
+        Object.defineProperty(record, 'today', { get: unrelated });
+        const merged = aggregate([record]);
+        assert.equal(merged.summary.activeDaysComplete, false);
+      }
+    }
+  }
+});
