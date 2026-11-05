@@ -256,6 +256,9 @@ async function fetchTraeLimits(options = {}, deps = {}) {
       balance: {
         amount: window.remaining,
         currency: 'CREDITS',
+        // The counter itself is the only lifetime figure Trae gives; today's and
+        // the rolling windows come from the poll history above.
+        allTimeSpend: window.used,
         ...(spend
           ? {
             todaySpend: spend.todaySpend,
