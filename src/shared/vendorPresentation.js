@@ -64,6 +64,7 @@
     { id: 'proma', color: '#000000', widgetInk: true },
     { id: 'catpaw', color: '#00FFA2' },
     { id: 'qoder', color: '#2ADB5C' },
+    { id: 'qwenwork', label: 'QwenWork', color: '#7771F4' },
     { id: 'qodercn', color: '#2ADB5C' },
     { id: 'reasonix', color: '#4d6bfe' },
     { id: 'dsh', color: '#4d6bfe' },
