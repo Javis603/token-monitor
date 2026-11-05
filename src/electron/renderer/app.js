@@ -7368,7 +7368,9 @@ function renderHomeTrendsModule() {
   const preview = state.stats?.historyPreview || { daily: [] };
   const history = homeOverviewApi.pickHomeHistory(state.homeHistory, preview);
   const rawDaily = history.daily || [];
-  if (!historyEnabled || rawDaily.length === 0) {
+  const summary = state.stats?.historyPreview?.summary;
+  const hasLifetimeActivity = summary?.activeDaysComplete === true && summary.activeDays > 0;
+  if (!historyEnabled || (rawDaily.length === 0 && !hasLifetimeActivity)) {
     const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends');
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -7416,12 +7418,14 @@ function renderHomeTrendsModule() {
   });
   const activeDaysPresentation = homeOverviewApi.homeActiveDaysPresentation({
     requestedWindow: state.settings?.homeActiveDaysWindow || 'all',
-    summary: state.stats?.historyPreview?.summary,
-    cells: activity.cells
+    summary,
+    cells: activity.cells,
+    rollingComplete: state.homeHistory != null
+      && state.homeHistoryLoadedSignature === homeOverviewApi.homeHistorySignature(state.stats)
   });
   const activeDaysWindow = activeDaysPresentation.window;
   const displayActiveDays = activeDaysPresentation.count;
-  const activeDaysLabel = activeDaysWindow === 'year'
+  const activeDaysLabel = displayActiveDays == null ? '' : activeDaysWindow === 'year'
     ? t('home.activeDaysYear', { count: displayActiveDays })
     : t('home.activeDays', { count: displayActiveDays });
   const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', activeDaysLabel);
