@@ -9,6 +9,11 @@ const DEFAULT_ERROR_CACHE_MS = 10_000;
 const DEFAULT_TIMEOUT_MS = 5_000;
 const USER_AGENT = `TokenMonitor/${appVersion()} (+https://github.com/Javis603/token-monitor)`;
 
+// Each entry summarizes one official status source. Statuspage-shaped pages
+// (`/api/v2/summary.json`) need no format field; the rest carry `summaryFormat`
+// and are dispatched to a matching summarizer below. Providers without a
+// usable public page (grok and kiro front theirs with bot checks that also
+// 403 server-side; z.ai and qoder expose none) must not be added speculatively.
 const SERVICE_STATUS_PROVIDERS = [
   {
     id: 'claude',
@@ -29,6 +34,12 @@ const SERVICE_STATUS_PROVIDERS = [
     summaryUrl: 'https://status.cursor.com/api/v2/summary.json'
   },
   {
+    id: 'github',
+    label: 'Copilot',
+    pageUrl: 'https://www.githubstatus.com',
+    summaryUrl: 'https://www.githubstatus.com/api/v2/summary.json'
+  },
+  {
     id: 'deepseek',
     label: 'DeepSeek',
     // status.deepseek.com moved off Atlassian Statuspage to a Flashcat-hosted
@@ -41,6 +52,57 @@ const SERVICE_STATUS_PROVIDERS = [
     pageUrl: 'https://status.deepseek.com',
     summaryUrl: 'https://status.deepseek.com/feed.atom',
     summaryFormat: 'atom-feed'
+  },
+  {
+    id: 'gemini',
+    label: 'Gemini',
+    // Google publishes one incidents feed for every Workspace service; the
+    // summarizer filters it down to the Gemini entries. There is no
+    // Gemini-only host, so the page link is the dashboard path.
+    pageUrl: 'https://www.google.com/appsstatus/dashboard',
+    summaryUrl: 'https://www.google.com/appsstatus/dashboard/incidents.json',
+    summaryFormat: 'google-feed',
+    serviceName: 'Gemini'
+  },
+  {
+    id: 'kimi',
+    label: 'Kimi',
+    pageUrl: 'https://status.moonshot.cn',
+    summaryUrl: 'https://status.moonshot.cn/api/v2/summary.json'
+  },
+  {
+    id: 'minimax',
+    label: 'MiniMax',
+    pageUrl: 'https://status.minimaxi.com',
+    summaryUrl: 'https://status.minimaxi.com/api/v2/summary.json'
+  },
+  {
+    id: 'opencode',
+    label: 'OpenCode',
+    // OpenCode's official status API uses a custom JSON schema instead of the
+    // Statuspage shape.
+    pageUrl: 'https://status.opencode.ai',
+    summaryUrl: 'https://status.opencode.ai/api/status',
+    summaryFormat: 'opencode-json'
+  },
+  {
+    id: 'zed',
+    label: 'Zed',
+    pageUrl: 'https://status.zed.dev',
+    summaryUrl: 'https://status.zed.dev/summary.json',
+    summaryFormat: 'instatus'
+  },
+  {
+    id: 'devin',
+    label: 'Devin',
+    pageUrl: 'https://www.devinstatus.com',
+    summaryUrl: 'https://www.devinstatus.com/api/v2/summary.json'
+  },
+  {
+    id: 'factory',
+    label: 'Factory Droid',
+    pageUrl: 'https://status.factory.ai',
+    summaryUrl: 'https://status.factory.ai/api/v2/summary.json'
   }
 ];
 
@@ -61,6 +123,29 @@ function providerTone(indicator) {
   if (value === 'minor') return 'degraded';
   if (value === 'major' || value === 'critical') return 'outage';
   return 'unknown';
+}
+
+// The Statuspage indicator vocabulary is the module's common denominator:
+// every summarizer maps its source's severities onto it, and the renderer
+// only knows these four states.
+const INDICATOR_RANK = new Map([['none', 0], ['minor', 1], ['major', 2], ['critical', 3]]);
+
+function worstIndicator(left, right) {
+  return (INDICATOR_RANK.get(right) || 0) > (INDICATOR_RANK.get(left) || 0) ? right : left;
+}
+
+function canonicalDescription(indicator) {
+  if (indicator === 'critical') return 'Major Outage';
+  if (indicator === 'major') return 'Partial Service Outage';
+  if (indicator === 'minor') return 'Degraded Performance';
+  return 'All Systems Operational';
+}
+
+// Component rows reuse the Statuspage component vocabulary.
+function indicatorToComponentStatus(indicator) {
+  if (indicator === 'critical') return 'major_outage';
+  if (indicator === 'major') return 'partial_outage';
+  return 'degraded_performance';
 }
 
 function activeItems(items, inactiveStatuses) {
@@ -211,6 +296,205 @@ function summarizeAtomFeedProvider(provider, feedText, options = {}) {
   }
 }
 
+// Instatus pages answer /summary.json with page.status UP/HASISSUES plus
+// ranked active incidents. Healthy pages omit the incident arrays entirely, so
+// a missing array is empty rather than malformed.
+const INSTATUS_IMPACT_TO_INDICATOR = new Map([
+  ['majoroutage', 'critical'],
+  ['partialoutage', 'major'],
+  ['degradedperformance', 'minor']
+]);
+
+function summarizeInstatusProvider(provider, payload, options = {}) {
+  const checkedAt = options.checkedAt || new Date().toISOString();
+  try {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Unexpected payload');
+    const pageStatus = normalizeStatus(payload.page?.status);
+    if (pageStatus !== 'up' && pageStatus !== 'hasissues') throw new Error('Unexpected page status');
+    for (const key of ['activeIncidents', 'activeMaintenances']) {
+      if (payload[key] !== undefined && !Array.isArray(payload[key])) throw new Error(`Unexpected ${key}`);
+    }
+    const incidents = (payload.activeIncidents || []).map((incident) => ({
+      // An unreadable impact still means the page reports a problem.
+      indicator: INSTATUS_IMPACT_TO_INDICATOR.get(normalizeStatus(incident?.impact)) || 'minor',
+      title: String(incident?.name || '').trim(),
+      updatedAt: String(incident?.updated || '').trim()
+    }));
+    // HASISSUES with no incident detail still means something is wrong —
+    // degrade rather than report a false green.
+    let worst = pageStatus === 'up' ? 'none' : 'minor';
+    for (const incident of incidents) worst = worstIndicator(worst, incident.indicator);
+    const headline = incidents.find((incident) => incident.indicator === worst && incident.title);
+    return {
+      id: provider.id,
+      label: provider.label,
+      pageUrl: provider.pageUrl,
+      status: providerTone(worst),
+      indicator: worst,
+      description: canonicalDescription(worst),
+      checkedAt,
+      updatedAt: headline?.updatedAt || '',
+      componentIssues: [],
+      incidentTitle: headline?.title || '',
+      incidentCount: incidents.length,
+      maintenanceCount: (payload.activeMaintenances || []).length
+    };
+  } catch (error) {
+    return summarizeStatuspageProvider(provider, null, { checkedAt, error });
+  }
+}
+
+// Google Workspace incidents carry their service directly or through
+// affected_products, an open incident has no `end`, and severity is low /
+// medium / high. Unknown severities degrade to minor rather than reading green.
+const GOOGLE_SEVERITY_TO_INDICATOR = new Map([['low', 'minor'], ['medium', 'major'], ['high', 'critical']]);
+
+// Feed entries lead with a "**Summary:**" / "**Title**" marker line and the
+// short headline the official dashboard shows follows it; older entries start
+// with plain prose, so the first line is the fallback.
+function googleHeadline(externalDesc) {
+  const lines = String(externalDesc || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^\*\*(summary|title):?\*\*:?\s*$/i.test(lines[index])) return lines[index + 1] || '';
+  }
+  return lines[0] || '';
+}
+
+function summarizeGoogleFeedProvider(provider, payload, options = {}) {
+  const checkedAt = options.checkedAt || new Date().toISOString();
+  try {
+    // The live feed always carries every Workspace service's history, so an
+    // empty or non-array body is a truncated response or format drift — never
+    // "no incidents".
+    if (!Array.isArray(payload) || !payload.length) throw new Error('Unexpected feed content');
+    const serviceName = normalizeStatus(provider.serviceName);
+    if (!serviceName) throw new Error('Missing service name');
+    const serviceIncidents = payload.filter((incident) => incident && (
+      normalizeStatus(incident.service_name) === serviceName
+      || (Array.isArray(incident.affected_products)
+        && incident.affected_products.some((product) => normalizeStatus(product?.title) === serviceName))
+    ));
+    const incidents = serviceIncidents
+      .filter((incident) => !incident.end)
+      .map((incident) => ({
+        indicator: GOOGLE_SEVERITY_TO_INDICATOR.get(normalizeStatus(incident.severity)) || 'minor',
+        title: googleHeadline(incident.external_desc),
+        updatedAt: String(incident.modified || '').trim(),
+        components: (Array.isArray(incident.affected_products) ? incident.affected_products : [])
+          .map((product) => String(product?.title || '').trim())
+          .filter(Boolean)
+      }));
+    let worst = { indicator: 'none', title: '', updatedAt: '' };
+    for (const incident of incidents) {
+      if (INDICATOR_RANK.get(incident.indicator) > INDICATOR_RANK.get(worst.indicator)) worst = incident;
+    }
+    // Outage incidents first, so a product hit by both an outage and a
+    // degradation keeps the higher severity under de-duplication (mirrors the
+    // atom feed summarizer).
+    const seen = new Set();
+    const componentIssues = [];
+    const ordered = [...incidents].sort((a, b) => INDICATOR_RANK.get(b.indicator) - INDICATOR_RANK.get(a.indicator));
+    for (const incident of ordered) {
+      for (const name of incident.components) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        componentIssues.push({ name, status: indicatorToComponentStatus(incident.indicator) });
+      }
+    }
+    // With no open incident the page still reports when it last changed, so the
+    // newest event's timestamp — resolved ones included — stands in for the
+    // page-level updated_at the other formats carry.
+    const lastModified = serviceIncidents
+      .map((incident) => String(incident.modified || '').trim())
+      .filter(Boolean)
+      .sort((a, b) => (Date.parse(b) || 0) - (Date.parse(a) || 0))[0] || '';
+    return {
+      id: provider.id,
+      label: provider.label,
+      pageUrl: provider.pageUrl,
+      status: providerTone(worst.indicator),
+      indicator: worst.indicator,
+      description: canonicalDescription(worst.indicator),
+      checkedAt,
+      updatedAt: worst.updatedAt || lastModified,
+      componentIssues,
+      incidentTitle: worst.title,
+      incidentCount: incidents.length,
+      maintenanceCount: 0
+    };
+  } catch (error) {
+    return summarizeStatuspageProvider(provider, null, { checkedAt, error });
+  }
+}
+
+// status.opencode.ai/api/status is OpenCode's official feed with a custom JSON
+// schema: a top-level status plus live per-service components. Unknown
+// non-operational statuses degrade to minor — report "something is wrong"
+// rather than a false green.
+const OPENCODE_STATUS_TO_INDICATOR = new Map([
+  ['operational', 'none'],
+  ['degraded', 'minor'],
+  ['degraded_performance', 'minor'],
+  ['maintenance', 'minor'],
+  ['under_maintenance', 'minor'],
+  ['partial_outage', 'major'],
+  ['major_outage', 'critical'],
+  ['full_outage', 'critical'],
+  ['outage', 'critical']
+]);
+
+function openCodeStatusToIndicator(status) {
+  return OPENCODE_STATUS_TO_INDICATOR.get(normalizeStatus(status)) || 'minor';
+}
+
+function summarizeOpenCodeProvider(provider, payload, options = {}) {
+  const checkedAt = options.checkedAt || new Date().toISOString();
+  try {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Unexpected payload');
+    if (typeof payload.status !== 'string' || !payload.status.trim()) throw new Error('Missing status');
+    if (payload.components !== undefined && !Array.isArray(payload.components)) throw new Error('Unexpected components');
+    let worst = openCodeStatusToIndicator(payload.status);
+    const componentIssues = [];
+    // A malformed component entry must not be skipped: swallowing it would let
+    // an otherwise-broken payload read green.
+    for (const component of payload.components || []) {
+      if (!component || typeof component !== 'object'
+        || typeof component.service !== 'string' || !component.service.trim()
+        || typeof component.status !== 'string') throw new Error('Unexpected component entry');
+      const indicator = openCodeStatusToIndicator(component.status);
+      worst = worstIndicator(worst, indicator);
+      if (indicator !== 'none') {
+        componentIssues.push({ name: component.service.trim(), status: indicatorToComponentStatus(indicator) });
+      }
+    }
+    // The feed carries the reading's millisecond epoch instead of an ISO
+    // page timestamp.
+    const updatedAt = Number.isFinite(payload.updatedAt) && payload.updatedAt > 0
+      ? new Date(payload.updatedAt).toISOString()
+      : '';
+    return {
+      id: provider.id,
+      label: provider.label,
+      pageUrl: provider.pageUrl,
+      status: providerTone(worst),
+      indicator: worst,
+      // The affected service names are the closest thing this format has to an
+      // incident headline.
+      description: worst === 'none'
+        ? canonicalDescription(worst)
+        : (componentIssues.map((issue) => issue.name).join('; ') || canonicalDescription(worst)),
+      checkedAt,
+      updatedAt,
+      componentIssues,
+      incidentTitle: '',
+      incidentCount: 0,
+      maintenanceCount: 0
+    };
+  } catch (error) {
+    return summarizeStatuspageProvider(provider, null, { checkedAt, error });
+  }
+}
+
 // The abort timer must stay armed while the body is read as well: a server
 // that sends headers and then stalls the body would otherwise leave the
 // request pending forever and freeze the cached status snapshot.
@@ -252,6 +536,15 @@ function createServiceStatusClient(options = {}) {
         if (provider.summaryFormat === 'atom-feed') {
           return summarizeAtomFeedProvider(provider, body, { checkedAt });
         }
+        if (provider.summaryFormat === 'instatus') {
+          return summarizeInstatusProvider(provider, body, { checkedAt });
+        }
+        if (provider.summaryFormat === 'google-feed') {
+          return summarizeGoogleFeedProvider(provider, body, { checkedAt });
+        }
+        if (provider.summaryFormat === 'opencode-json') {
+          return summarizeOpenCodeProvider(provider, body, { checkedAt });
+        }
         return summarizeStatuspageProvider(provider, body, { checkedAt });
       } catch (error) {
         return summarizeStatuspageProvider(provider, null, { checkedAt, error });
@@ -270,5 +563,8 @@ module.exports = {
   SERVICE_STATUS_PROVIDERS,
   createServiceStatusClient,
   summarizeAtomFeedProvider,
+  summarizeGoogleFeedProvider,
+  summarizeInstatusProvider,
+  summarizeOpenCodeProvider,
   summarizeStatuspageProvider
 };

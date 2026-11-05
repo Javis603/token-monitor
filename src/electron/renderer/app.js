@@ -299,11 +299,22 @@ const VIEW_ICON_CLASSES = {
   limits: 'view-icon-limits',
   trends: 'view-icon-trends'
 };
+// Mirrors SERVICE_STATUS_PROVIDERS in src/electron/serviceStatus.js — same ids,
+// labels and order — so the rows and the settings list render before the first
+// fetch. The two lists must stay in sync.
 const SERVICE_STATUS_PLACEHOLDERS = [
   { id: 'claude', label: 'Claude', pageUrl: 'https://status.claude.com' },
   { id: 'openai', label: 'OpenAI', pageUrl: 'https://status.openai.com' },
   { id: 'cursor', label: 'Cursor', pageUrl: 'https://status.cursor.com' },
-  { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' }
+  { id: 'github', label: 'Copilot', pageUrl: 'https://www.githubstatus.com' },
+  { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' },
+  { id: 'gemini', label: 'Gemini', pageUrl: 'https://www.google.com/appsstatus/dashboard' },
+  { id: 'kimi', label: 'Kimi', pageUrl: 'https://status.moonshot.cn' },
+  { id: 'minimax', label: 'MiniMax', pageUrl: 'https://status.minimaxi.com' },
+  { id: 'opencode', label: 'OpenCode', pageUrl: 'https://status.opencode.ai' },
+  { id: 'zed', label: 'Zed', pageUrl: 'https://status.zed.dev' },
+  { id: 'devin', label: 'Devin', pageUrl: 'https://www.devinstatus.com' },
+  { id: 'factory', label: 'Factory Droid', pageUrl: 'https://status.factory.ai' }
 ];
 const SERVICE_PROVIDER_OPTIONS = SERVICE_STATUS_PLACEHOLDERS.map((entry) => ({ id: entry.id, label: entry.label }));
 const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/token-monitor';
@@ -5108,8 +5119,12 @@ function serviceStatusRows() {
     .sort((a, b) => rank.get(a.id) - rank.get(b.id));
 }
 
+// Status ids whose vendor mark lives under a different name; every other id
+// has a `.row-icon-<id>` mask installed from the vendor table.
+const SERVICE_STATUS_ICON_ALIASES = new Map([['openai', 'codex'], ['github', 'copilot']]);
+
 function serviceStatusIconId(id) {
-  return id === 'openai' ? 'codex' : id; // claude/cursor/deepseek map 1:1
+  return SERVICE_STATUS_ICON_ALIASES.get(id) || id;
 }
 
 function renderServiceStatus() {
