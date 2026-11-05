@@ -2289,7 +2289,7 @@
       });
       row.addEventListener('click', event => {
         const clickedRow = event.target.closest('.limit-row');
-        if (clickedRow && clickedRow !== row) return;
+        if (clickedRow && clickedRow !== row && clickedRow.dataset.limitLead === undefined) return;
         if (event.target.closest('button, a, input, select, summary, [role="button"]')) return;
         clearTimeout(hoverTimer); openHistory(true);
       });
@@ -2668,6 +2668,8 @@
       if (windows) {
         const leadLane = document.createElement('div');
         leadLane.className = 'limit-row limit-account-row';
+        // This is the lead account's own quota, not a separate history row.
+        leadLane.dataset.limitLead = '';
         windows.remove();
         leadLane.append(windows);
         list.append(leadLane);

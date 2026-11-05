@@ -3201,3 +3201,40 @@ test('nested MiniMax API history click does not open its parent Code history', (
   parent.listeners.click({ target: { closest: selector => selector === '.limit-row' ? parent : null } });
   assert.deepEqual(opened, ['api-history', 'code-history']);
 });
+
+test('grouped MiniMax Code quota opens its own history but non-history subrows do not', () => {
+  const opened = [];
+  const history = { key: provider => provider.accountKey, open: async key => opened.push(key),
+    enter() {}, leave() {} };
+  const code = { provider: 'minimax', status: 'ok', source: 'oauth', accountKey: 'code-history',
+    region: 'cn', windows: [{ kind: 'weekly', usedPercent: 20 }] };
+  const noHistoryApi = { provider: 'minimax', status: 'unavailable', source: 'api',
+    accountKey: 'no-history-api', relatedAccountKey: 'code-history', region: 'cn', windows: [] };
+  const parent = dockView({ limitsHistoryOpenMode: 'click' }, { history })
+    .renderLimitProviderGroup('minimax', 'MiniMax', [noHistoryApi, code], '#123456');
+  const leadLane = [...parent.walk()].find(node => node.dataset.limitLead !== undefined);
+  const silentLane = [...parent.walk()].find(node =>
+    node !== parent && node !== leadLane && node.classList.contains('limit-row'));
+  assert.ok(leadLane?.find('limit-windows'), 'Code quota is moved into the marked lead lane');
+  assert.ok(silentLane, 'the linked API lane remains rendered');
+  assert.equal(silentLane.dataset.limitHistory, undefined, 'unavailable API has no history action');
+  parent.isConnected = true;
+  parent.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+
+  // Walk the rendered parent chain as a DOM click would bubble, using a real
+  // nearest-row lookup instead of a hardcoded target in the handler.
+  const clickFrom = origin => {
+    const target = { closest(selector) {
+      if (selector !== '.limit-row') return null;
+      for (let node = origin; node; node = node.parent) {
+        if (node.classList?.contains('limit-row')) return node;
+      }
+      return null;
+    } };
+    for (let node = origin; node; node = node.parent) node.listeners?.click?.({ target });
+  };
+  clickFrom(leadLane.find('limit-windows'));
+  assert.deepEqual(opened, ['code-history'], 'clicking the Code quota opens Code history');
+  clickFrom(silentLane);
+  assert.deepEqual(opened, ['code-history'], 'clicking a lane without history cannot open Code history');
+});
