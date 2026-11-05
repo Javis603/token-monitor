@@ -1914,3 +1914,23 @@ test('aggregateHistory checks usage counters without traversing unrelated device
     }
   }
 });
+
+test('ingress retains missing lifetime counter provenance across storage and limits-only updates', () => {
+  for (const api of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const complete = { deviceId: 'complete', allTime: { totalTokens: 10 }, history: {
+      daily: [], monthly: [], dailyTotals: [{ date: '2024-01-01', tokens: 10 }],
+      summary: { activeDaysComplete: true }
+    } };
+    for (const history of [undefined, null, { daily: [], monthly: [], summary: {} }]) {
+      let record = api.mergeSyncDeviceRecord(null, { deviceId: 'partial', today: { totalTokens: 5 }, history });
+      record = api.normalizeDeviceRecord(JSON.parse(JSON.stringify(record)));
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, false);
+      record = api.mergeSyncDeviceRecord(record, { deviceId: 'partial', limitsOnly: true, limits: { providers: [] } });
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, false);
+      record = api.mergeSyncDeviceRecord(record, { deviceId: 'partial', allTime: { totalTokens: 0 }, history: null });
+      assert.equal(record.allTimeTokensUnavailable, undefined);
+      record = api.mergeSyncDeviceRecord(record, { deviceId: 'partial', limitsOnly: true, limits: { providers: [] } });
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, true);
+    }
+  }
+});

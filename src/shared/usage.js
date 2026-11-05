@@ -1444,6 +1444,11 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(historyFields, 'historyAvailable')) normalized.historyAvailable = historyFields.historyAvailable;
   if (hasOwn(historyFields, 'history')) normalized.history = historyFields.history;
   if (hasOwn(historyFields, 'periodWindows')) normalized.periodWindows = historyFields.periodWindows;
+  const allTime = record.allTime || record.periods?.allTime;
+  if (record.allTimeTokensUnavailable === true
+    || (allTime?.totalTokens ?? allTime?.total_tokens) == null) {
+    normalized.allTimeTokensUnavailable = true;
+  }
   for (const periodName of PERIODS) {
     normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
       projectsEnabled: normalized.projectsEnabled !== false
@@ -1649,6 +1654,8 @@ function mergeDeviceRecord(existing, incoming) {
   }
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
+    delete normalizedIncoming.allTimeTokensUnavailable;
+    if (normalizedExisting.allTimeTokensUnavailable === true) normalizedIncoming.allTimeTokensUnavailable = true;
     // The three attribution fields describe the usage this branch is carrying
     // forward, so they have to travel with it. Scoped to `limitsOnly` on
     // purpose: a full update from an agent too old to send them is stating that
@@ -1810,7 +1817,8 @@ function aggregateHistory(devices, options = {}) {
   for (const record of devices) {
     const normalized = normalizeRecordHistoryFields(record);
     const allTime = record.allTime || record.periods?.allTime;
-    const totalTokens = allTime?.totalTokens ?? allTime?.total_tokens;
+    const totalTokens = record.allTimeTokensUnavailable === true
+      ? undefined : allTime?.totalTokens ?? allTime?.total_tokens;
     if (!hasOwn(normalized, 'history') || normalized.history === null) {
       // A legacy/history-disabled device with unknown or positive usage may own active
       // dates absent from the histories we can merge. Include an incomplete
