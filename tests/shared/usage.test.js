@@ -1934,3 +1934,29 @@ test('ingress retains missing lifetime counter provenance across storage and lim
     }
   }
 });
+
+test('lifetime completeness rejects malformed counters and contradictory stored zeros', () => {
+  for (const api of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const complete = { deviceId: 'complete', allTime: { totalTokens: 10 }, history: {
+      daily: [], monthly: [], dailyTotals: [{ date: '2024-01-01', tokens: 10 }],
+      summary: { activeDaysComplete: true }
+    } };
+    for (const value of ['unknown', '', ' ', {}, [], false, Infinity]) {
+      const record = api.mergeSyncDeviceRecord(null, { deviceId: 'malformed', allTime: { totalTokens: value } });
+      assert.equal(record.allTimeTokensUnavailable, true, String(value));
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, false);
+    }
+    for (const value of [0, '0', '0.0', '1,000', 20]) {
+      const record = api.normalizeDeviceRecord({ allTime: { totalTokens: value } });
+      assert.equal(record.allTimeTokensUnavailable, undefined, String(value));
+    }
+    for (const period of ['today', 'month']) {
+      for (const history of [undefined, null, { daily: [], monthly: [], summary: {} }]) {
+        const stored = { deviceId: 'stored-legacy', periods: { allTime: { totalTokens: 0 }, [period]: { totalTokens: 5 } }, history };
+        assert.equal(api.aggregateHistory([complete, stored]).summary.activeDaysComplete, false);
+      }
+    }
+    const empty = api.normalizeDeviceRecord({ allTime: { totalTokens: '0.0' } });
+    assert.equal(api.aggregateHistory([complete, empty]).summary.activeDaysComplete, true);
+  }
+});
