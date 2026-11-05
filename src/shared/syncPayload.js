@@ -1,5 +1,9 @@
 'use strict';
 
+const { createHash } = require('node:crypto');
+const { statsPatch } = require('./hubDelta');
+const { UPLOAD_HEADER, UPLOAD_VERSION } = require('./uploadDelta');
+
 const { MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits/core');
 const { stripSessionTextFromDeviceRecord } = require('./usage');
@@ -177,6 +181,7 @@ function sessionsWithoutReasonix(sessions) {
 }
 
 function buildSyncPayload(summary, {
+  omitHistory = false,
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
   omitModelThroughput = false,
@@ -192,6 +197,7 @@ function buildSyncPayload(summary, {
       .map((key) => [key, period[key]]));
   };
   const source = { ...summary, limits: syncLimits(summary.limits) };
+  if (omitHistory) delete source.history;
   if (hasOwn(source, 'allTime')) source.allTime = withoutAllTimeSessions(source.allTime);
   if (source.periods && typeof source.periods === 'object' && hasOwn(source.periods, 'allTime')) {
     source.periods = { ...source.periods, allTime: withoutAllTimeSessions(source.periods.allTime) };
@@ -203,7 +209,7 @@ function buildSyncPayload(summary, {
   if (syncSessionTitles === true && Number.isSafeInteger(sessionTitleSyncGeneration) && sessionTitleSyncGeneration > 0) {
     payload.sessionTitleSyncGeneration = sessionTitleSyncGeneration;
   }
-  if (summary.history && typeof summary.history === 'object') {
+  if (!omitHistory && summary.history && typeof summary.history === 'object') {
     payload.history = historyForSync(summary.history, summary.periodWindows);
     if (omitHistoryTokenComponents) {
       payload.history = historyWithoutTokenComponents(payload.history);
@@ -301,8 +307,13 @@ function syncPayload(summary, options = {}) {
   return serializeSyncPayload(summary, options).payload;
 }
 
-async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false, sessionTitleSyncGeneration } = {}) {
+async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false, sessionTitleSyncGeneration, acknowledgedHistoryKey } = {}) {
   const syncOptions = { syncSessionTitles, sessionTitleSyncGeneration };
+  if (acknowledgedHistoryKey && summary?.history !== undefined
+    && historyKey(historyForSync(summary.history, summary.periodWindows)) === acknowledgedHistoryKey) {
+    // Omit before cloning and sizing: the freed budget belongs to live detail.
+    syncOptions.omitHistory = true;
+  }
   let serialized = serializeSyncPayload(summary, syncOptions);
   if (serialized.payload?.allTimeProjectsOmitted === true && typeof logger === 'function') {
     logger(`all-time project breakdown omitted; payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
@@ -341,9 +352,93 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
   return { response, payload: serialized.payload, retried: canRetryReduced };
 }
 
+const HISTORY_RECONCILE_MS = 15 * 60 * 1000;
+
+function historyKey(history) {
+  return createHash('sha256').update(JSON.stringify(history)).digest('hex');
+}
+
+// Producers serialize sends through the widget scheduler or agent ordered sink.
+// Keep one acknowledged wire baseline; older Hubs use History omission instead.
+function createSyncPayloadUploader({ now = Date.now } = {}) {
+  let identity = null;
+  let acknowledged = null;
+  let deltaBaseline = null;
+  let generation = 0;
+
+  function resetHistory() {
+    acknowledged = null;
+    deltaBaseline = null;
+    generation += 1;
+  }
+
+  async function upload(fetchFn, url, options = {}) {
+    const headers = new Headers(options.headers);
+    const binding = createHash('sha256').update(JSON.stringify([
+      url, options.summary?.deviceId || options.summary?.id,
+      headers.get('authorization'), headers.get('x-token-monitor-secret')
+    ])).digest('hex');
+    if (binding !== identity) {
+      resetHistory();
+      identity = binding;
+    }
+    const requestGeneration = ++generation;
+    const startedAt = now();
+    const baseline = acknowledged && startedAt >= acknowledged.at
+      && startedAt - acknowledged.at < HISTORY_RECONCILE_MS
+      ? acknowledged.key : undefined;
+    try {
+      const send = async (target, request) => {
+        const fullHeaders = new Headers(request.headers);
+        fullHeaders.set(UPLOAD_HEADER, UPLOAD_VERSION);
+        if (deltaBaseline) {
+          const body = JSON.stringify({ deviceId: options.summary.deviceId || options.summary.id,
+            baseRevision: deltaBaseline.revision, patch: statsPatch(deltaBaseline.payload, JSON.parse(request.body)) });
+          if (Buffer.byteLength(body) < Buffer.byteLength(request.body)) {
+            const response = await fetchFn(`${target}/delta`, { ...request, headers: Object.fromEntries(fullHeaders), body });
+            if (![400, 404, 405, 409, 413].includes(response.status)) return response;
+            // A lost ACK, evicted baseline or downgraded Hub needs exactly one
+            // current full snapshot. Never replay a queue of obsolete patches.
+            try { await response.arrayBuffer(); } catch (_) { /* drain before recovery */ }
+            deltaBaseline = null;
+          }
+        }
+        return fetchFn(target, { ...request, headers: Object.fromEntries(fullHeaders) });
+      };
+      const result = await postSyncPayload(send, url, { ...options,
+        acknowledgedHistoryKey: deltaBaseline ? undefined : baseline });
+      // Read a clone so existing callers still consume the legacy/minimal ACK.
+      const ack = result.response.ok ? await result.response.clone().json().catch(() => null) : null;
+      if (requestGeneration === generation) {
+        if (!ack?.ok || ack.deviceId !== (options.summary?.deviceId || options.summary?.id)) {
+          acknowledged = null;
+          deltaBaseline = null;
+        } else {
+          deltaBaseline = ack.upload?.version === 1 && typeof ack.upload.revision === 'string'
+            && ack.upload.revision.length > 0 && ack.upload.revision.length <= 128
+            ? { revision: ack.upload.revision, payload: JSON.parse(JSON.stringify(result.payload)) } : null;
+          if (hasOwn(result.payload, 'history')) {
+            // A 413 retry may have sent reduced history. Remember exactly what
+            // was accepted, so omitted detail can be restored on a later upload.
+            acknowledged = { key: historyKey(result.payload.history), at: startedAt };
+          }
+        }
+      }
+      return result;
+    } catch (error) {
+      if (requestGeneration === generation) { acknowledged = null; deltaBaseline = null; }
+      throw error;
+    }
+  }
+
+  upload.resetHistory = resetHistory;
+  return upload;
+}
+
 module.exports = {
   SYNC_PAYLOAD_BUDGET_BYTES,
   buildSyncPayload,
+  createSyncPayloadUploader,
   postSyncPayload,
   serializeSyncPayload,
   syncPayload
