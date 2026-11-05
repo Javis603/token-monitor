@@ -345,6 +345,9 @@ test('native rollout precedence does not resurrect an archived supplemental row'
 class FakeSocket extends EventTarget {
   readyState = 1;
   sent = [];
+  threads = [LOCAL, { ...LOCAL, id: 'cloud', originator: 'orbit_cca_desktop' }, { ...LOCAL, id: 'other-mac', environments: [{ environmentId: 'executor-other', cwd: '/work/project' }] }];
+  rpcErrors = new Set();
+  heldMethods = new Set();
   notify(method, params, id) {
     const event = new Event('message');
     event.data = JSON.stringify({ method, params, ...(id == null ? {} : { id }) });
@@ -354,15 +357,187 @@ class FakeSocket extends EventTarget {
     const message = JSON.parse(text);
     this.sent.push(message);
     if (message.id == null) return;
-    const result = message.method === 'thread/list' ? { data: [LOCAL, { ...LOCAL, id: 'cloud', originator: 'orbit_cca_desktop' }, { ...LOCAL, id: 'other-mac', environments: [{ environmentId: 'executor-other', cwd: '/work/project' }] }], nextCursor: null } : {};
+    if (this.heldMethods.has(message.method)) return;
+    const result = message.method === 'thread/list' ? { data: this.threads, nextCursor: null } : {};
     queueMicrotask(() => {
       if (this.readyState !== 1) return;
       const event = new Event('message');
-      event.data = JSON.stringify({ id: message.id, result });
+      event.data = JSON.stringify({ id: message.id, ...(this.rpcErrors.has(message.method) ? { error: { code: -1, message: 'fixture failure' } } : { result }) });
       this.dispatchEvent(event);
     });
   }
   close() { this.readyState = 3; this.dispatchEvent(new Event('close')); }
+}
+
+function subscriptionFixture(t, listedThreads) {
+  const { store } = fixture(t);
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
+  const sockets = [];
+  const source = createLocalUsageSource({ store }, {
+    shouldYield: () => false,
+    localExecutorIds: () => new Set(['executor-local']),
+    readAuth: () => ({ accessToken: 'fixture', accountId: 'account' }),
+    makeSocket() {
+      const socket = new FakeSocket();
+      socket.threads = listedThreads;
+      sockets.push(socket);
+      queueMicrotask(() => socket.dispatchEvent(new Event('open')));
+      return { socket };
+    }
+  });
+  t.after(() => source.stop());
+  const settle = async () => { await new Promise(setImmediate); await source.whenIdle(); };
+  return { source, store, sockets, settle,
+    async tick(ms = 5000) { t.mock.timers.tick(ms); await settle(); },
+    calls(method) { return sockets.flatMap((socket) => socket.sent.filter((item) => item.method === method)); }
+  };
+}
+
+test('historical idle threads never resume, including after reconnect; newly active work still records usage', async (t) => {
+  const listed = Array.from({ length: 90 }, (_, i) => ({ ...LOCAL, id: `${ID}-${i}`, status: { type: 'idle' } }));
+  listed.push({ ...LOCAL, id: 'unknown-status', status: undefined }, { ...LOCAL, id: 'not-loaded', status: { type: 'notLoaded' } });
+  const f = subscriptionFixture(t, listed);
+  f.source.start();
+  await f.settle();
+  f.sockets[0].notify('thread/started', { thread: listed[0] });
+  await f.tick();
+  assert.equal(f.calls('thread/resume').length, 0);
+  f.sockets[0].close();
+  await f.tick();
+  assert.equal(f.sockets.length, 2);
+  assert.equal(f.calls('thread/resume').length, 0);
+  listed[0] = { ...listed[0], status: { type: 'active' } };
+  await f.tick();
+  assert.deepEqual(f.calls('thread/resume').map((item) => item.params), [{ threadId: listed[0].id, excludeTurns: true }]);
+  const socket = f.sockets[1];
+  socket.notify('thread/tokenUsage/updated', { threadId: listed[0].id, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+  socket.notify('thread/tokenUsage/updated', { threadId: listed[0].id, turnId: 'new-work', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
+  assert.equal(f.store.rows().length, 1);
+  assert.equal(f.store.rows()[0].usage.total, LAST.totalTokens);
+  socket.notify('turn/completed', { threadId: listed[0].id });
+  listed[0] = { ...listed[0], status: { type: 'idle' } };
+  await f.tick();
+  assert.deepEqual(f.calls('thread/unsubscribe').map((item) => item.params), [{ threadId: listed[0].id }]);
+  assert.equal(f.source.getDiagnostics().subscriptions, 0);
+  assert.equal(f.store.rows().length, 1, 'releasing a listener preserves collected usage');
+  await f.tick();
+  assert.equal(f.calls('thread/resume').length, 1);
+  listed[0] = { ...listed[0], status: { type: 'active' } };
+  await f.tick();
+  assert.equal(f.calls('thread/resume').length, 2, 'continued work can attach again after releasing its idle listener');
+  socket.notify('thread/tokenUsage/updated', { threadId: listed[0].id, turnId: 'reconnect-baseline', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
+  socket.notify('thread/tokenUsage/updated', { threadId: listed[0].id, turnId: 'continued-work', tokenUsage: { last: LAST, total: addCounters(addCounters(TOTAL, LAST), LAST) } });
+  assert.equal(f.store.rows().length, 2);
+});
+
+test('failed resumes back off across polling and socket reconnects instead of retrying every discovery', async (t) => {
+  const f = subscriptionFixture(t, [{ ...LOCAL }]);
+  f.source.start();
+  await f.source.whenIdle();
+  f.sockets[0].rpcErrors.add('thread/resume');
+  await f.settle();
+  assert.equal(f.calls('thread/resume').length, 1);
+  assert.equal(f.source.getDiagnostics().subscriptions, 0);
+  for (let i = 0; i < 5; i++) await f.tick();
+  assert.equal(f.calls('thread/resume').length, 1);
+  await f.tick();
+  assert.equal(f.calls('thread/resume').length, 2);
+  f.sockets[0].close();
+  await f.tick();
+  assert.equal(f.sockets.length, 2);
+  assert.equal(f.calls('thread/resume').length, 2, 'reconnecting preserves the thread retry deadline');
+  for (let i = 0; i < 10; i++) await f.tick();
+  assert.equal(f.calls('thread/resume').length, 2);
+  await f.tick();
+  assert.equal(f.calls('thread/resume').length, 3);
+  assert.equal(f.source.getDiagnostics().subscriptions, 1);
+});
+
+test('environment recovery backs off even on a healthy observer socket and releases old listeners', async (t) => {
+  const f = subscriptionFixture(t, [{ ...LOCAL }]);
+  f.source.start();
+  await f.settle();
+  const socket = f.sockets[0];
+  for (let round = 0; round < 3; round++) {
+    socket.notify('thread/environment/disconnected', { threadId: ID, environmentId: 'executor-other' });
+    await f.tick();
+    assert.equal(f.calls('thread/unsubscribe').length, round);
+    socket.notify('thread/environment/disconnected', { threadId: ID, environmentId: 'executor-local' });
+    await f.tick();
+    assert.equal(f.calls('thread/unsubscribe').length, round + 1);
+    const resumes = f.calls('thread/resume').length;
+    for (let i = 0; i < 4; i++) await f.tick();
+    assert.equal(f.calls('thread/resume').length, resumes);
+    for (let i = 0; i < 60 && f.calls('thread/resume').length === resumes; i++) await f.tick();
+    assert.equal(f.calls('thread/resume').length, resumes + 1);
+  }
+  assert.equal(f.sockets.length, 1, 'thread recovery does not require reconnecting the observer');
+  assert.equal(f.calls('thread/resume').length, 4);
+});
+
+test('threads removed from discovery release their subscription; failed cleanup closes the socket', async (t) => {
+  const listed = [{ ...LOCAL }];
+  const f = subscriptionFixture(t, listed);
+  f.source.start();
+  await f.settle();
+  f.sockets[0].rpcErrors.add('thread/unsubscribe');
+  listed.length = 0;
+  await f.tick();
+  assert.equal(f.calls('thread/unsubscribe').length, 1);
+  assert.equal(f.sockets[0].readyState, 3);
+  assert.equal(f.source.getDiagnostics().subscriptions, 0);
+  await f.tick();
+  assert.equal(f.calls('thread/resume').length, 1);
+});
+
+test('a timed-out resume releases a potentially attached listener before retrying', async (t) => {
+  const f = subscriptionFixture(t, [{ ...LOCAL }]);
+  f.source.start();
+  await f.source.whenIdle();
+  f.sockets[0].heldMethods.add('thread/resume');
+  // Discovery is waiting for resume, so only drain the initial microtasks here.
+  await new Promise(setImmediate);
+  assert.equal(f.calls('thread/resume').length, 1);
+  await f.tick(15000);
+  assert.equal(f.calls('thread/unsubscribe').length, 1);
+  assert.equal(f.source.getDiagnostics().subscriptions, 0);
+  assert.equal(f.sockets[0].readyState, 1);
+  await f.tick();
+  assert.equal(f.calls('thread/resume').length, 1);
+});
+
+for (const cleanup of ['reply', 'timeout']) {
+  test(`leaving the local environment stops accounting before unsubscribe ${cleanup}`, async (t) => {
+    const listed = [{ ...LOCAL }];
+    const f = subscriptionFixture(t, listed);
+    f.source.start();
+    await f.settle();
+    const socket = f.sockets[0];
+    const notify = (total) => socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'work', tokenUsage: { last: LAST, total } });
+    notify(TOTAL);
+    notify(addCounters(TOTAL, LAST));
+    assert.equal(f.store.rows().length, 1);
+    socket.heldMethods.add('thread/unsubscribe');
+    listed[0] = { ...LOCAL, environments: [{ environmentId: 'other-device', cwd: '/work/project' }] };
+    t.mock.timers.tick(5000);
+    await new Promise(setImmediate);
+    const pending = f.calls('thread/unsubscribe');
+    assert.equal(pending.length, 1);
+    notify(addCounters(addCounters(TOTAL, LAST), LAST));
+    assert.equal(f.store.rows().length, 1, 'late remote usage must not be attributed to this device');
+    if (cleanup === 'reply') {
+      const reply = new Event('message');
+      reply.data = JSON.stringify({ id: pending[0].id, result: {} });
+      socket.dispatchEvent(reply);
+      await f.settle();
+      assert.equal(socket.readyState, 1);
+    } else {
+      await f.tick(15000);
+      assert.equal(socket.readyState, 3);
+    }
+    assert.equal(f.source.getDiagnostics().subscriptions, 0);
+    assert.equal(f.store.rows().length, 1);
+  });
 }
 
 test('ownership standby retries promptly without probing until the lease is available', async (t) => {
