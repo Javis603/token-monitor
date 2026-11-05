@@ -6746,6 +6746,18 @@ function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
 function renderHomeLimitModule() {
   const { module, body } = homeModuleShell('limits', t('home.limits'), 'limits');
   const rows = homeLimitRows();
+  // The WorkBuddy credit ledger is not a limit provider (nothing polls it), so it
+  // is appended rather than merged: it must not compete with real quotas for the
+  // configured card count, their ordering, or the empty states below. `typeof`
+  // guards keep this module runnable in the sliced renderer sandboxes that only
+  // provide the globals their own assertions need.
+  const creditsView = typeof localCreditsView === 'function' ? localCreditsView() : null;
+  const creditsAccount = creditsView && typeof workbuddyCreditsAccount === 'function' && rows.length > 0
+    && state.settings?.limitsEnabled !== false
+    ? workbuddyCreditsAccount(creditsView)
+    : null;
+  const hasWorkbuddyQuota = rows.some((row) => String(row.providerId || '').toLowerCase() === 'workbuddy');
+  if (creditsAccount && !hasWorkbuddyQuota) rows.push(creditsAccount);
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -6843,7 +6855,7 @@ function renderHomeLimitModule() {
     // A credits-only provider can say what it spent today but never what it spent
     // tokens on, so the number belongs next to the quota it drains — not in the
     // token ranking, where it would have no share and sink to the bottom.
-    const todaySpend = creditSpendToday(row.providerId);
+    const todaySpend = row.synthetic ? Number(row.today) || 0 : creditSpendToday(row.providerId);
     if (todaySpend) {
       const note = document.createElement('div');
       note.className = 'home-limit-spend-note';
@@ -6940,7 +6952,48 @@ function localCreditsView() {
   return {
     today: homeOverviewApi.creditsSpentToday(credits),
     total: Number(credits?.totals?.credits) || 0,
+    requests: Number(credits?.totals?.requests) || 0,
+    byModel: credits?.totals?.byModel || null,
     calibration: credits.calibration || null
+  };
+}
+
+// The credits ledger is a local read of WorkBuddy's database, not a quota the
+// vendor reports on demand, so it never appears among the limit providers. It
+// still belongs beside them: same card shape, spent-instead-of-remaining, and an
+// ⓘ that opens the per-model split behind the single total.
+function workbuddyCreditsAccount(view) {
+  if (!view || !(view.total > 0)) return null;
+  const rows = Object.entries(view.byModel || {})
+    .filter(([, credits]) => Number(credits) > 0)
+    .sort(([, a], [, b]) => Number(b) - Number(a))
+    .slice(0, 6)
+    .map(([model, credits]) => [model, formatCredits(Number(credits))]);
+  // The card's own value is the lifetime total, so the tooltip only needs to
+  // explain the split behind it.
+  const detailEntries = rows.length > 0 ? rows : undefined;
+  return {
+    key: 'workbuddy:credits',
+    providerId: 'workbuddy',
+    name: 'WorkBuddy',
+    plan: '',
+    color: clientColors.workbuddy || '',
+    iconId: 'workbuddy',
+    synthetic: true,
+    today: view.today,
+    windows: [{
+      kind: 'billing',
+      metric: 'credits',
+      // "Spent", not "Credits": Trae's card shows what is left of a quota, and
+      // the same word here would read as a balance this ledger does not have.
+      label: 'Spent',
+      currency: 'CREDITS',
+      remaining: view.total,
+      remainingPercent: null,
+      resetsAt: null,
+      showMeter: false,
+      ...(detailEntries ? { detailEntries } : {})
+    }]
   };
 }
 

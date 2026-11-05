@@ -574,7 +574,11 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
           optionalFiniteNumber: Number,
           limitWindowsView: view,
           t: (key) => key,
-          limitProviderPresentationApi: limitPresentationApi
+          limitProviderPresentationApi: limitPresentationApi,
+          // The module appends the WorkBuddy ledger card when one exists; this
+          // fixture is about plan text, so there is none.
+          localCreditsView: () => null, workbuddyCreditsAccount: () => null,
+          creditSpendToday: () => 0, formatCredits: String
         });
         assert.deepEqual(body.children.map((row) => row.find('home-limit-plan')?.textContent || ''), limitsPlans);
         for (const row of body.children) {
@@ -843,7 +847,10 @@ function renderHomeLimitFixture(rows) {
     formatLimitBoundary: () => '', optionalFiniteNumber: (n) => n == null ? null : Number(n),
     // The card also draws the "spent today" line for credits-only providers;
     // this fixture has no poll history, so it reports none.
-    creditSpendToday: () => 0, formatCredits: String
+    creditSpendToday: () => 0, formatCredits: String,
+    // The module also appends the WorkBuddy credit ledger card and reads the
+    // provider's own spend line; this fixture has neither.
+    localCreditsView: () => null, workbuddyCreditsAccount: () => null
   };
   vm.runInNewContext(`${functions}\nthis.result = renderHomeLimitModule();`, context);
   return context.result;
