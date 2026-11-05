@@ -501,6 +501,9 @@ test('a confirmed MiniMax account stays one heading, and a saved cost stays reac
   assert.doesNotMatch(paired.text, /Pay-as-you-go|Token Plan/);
   assert.doesNotMatch(paired.text, /Account 1|2 accounts|Subscriptions/);
   assert.match(card([{ ...code, planLabel: 'Starter' }, api]).text, /Starter/);
+  const reversed = card([api, { ...code, planLabel: 'Starter' }]);
+  assert.match(reversed.text, /Starter/, 'the Code row leads the group even when the API row comes first');
+  assert.doesNotMatch(reversed.text, /Pay-as-you-go|Token Plan/);
   const other = { ...api, accountKey: `sha256:${'c'.repeat(64)}`, relatedAccountKey: undefined };
   const mixed = card([code, api, other]);
   assert.match(mixed.text, /2 accounts/);

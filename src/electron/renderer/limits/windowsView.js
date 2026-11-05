@@ -2461,7 +2461,10 @@
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(provider);
     }
-    return [...groups.values()];
+    // The Code row owns plan and subscription identity, so it leads its group.
+    return [...groups.values()].map((group) => group.sort(
+      (a, b) => Number(b.source === 'oauth') - Number(a.source === 'oauth')
+    ));
   }
 
   function minimaxAccountTitle(provider, index, providers) {
