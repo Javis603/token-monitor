@@ -593,14 +593,7 @@ const serviceStatusClient = createServiceStatusClient({ fetchImpl: electronLimit
 const codexResetForecastClient = createCodexResetForecastClient({
   fetchImpl: electronLimitsFetch()
 });
-const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS
-  .map((provider) => new URL(provider.pageUrl))
-  .filter((url) => url.pathname === '/')
-  .map((url) => url.hostname));
-// Status pages on a deep path (the Gemini dashboard lives under
-// www.google.com) are not admitted by the host-root rule, so each page's exact
-// URL is allowlisted too.
-const STATUS_PAGE_URLS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).toString()));
+const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
 const diagnosticJournal = createDiagnosticJournal();
 const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServicesRecovery();
 
@@ -7613,7 +7606,6 @@ function isAllowedExternalUrl(value) {
   // Provider console links come from each account declaration's urlPolicy.
   if (limitProviderUrlAllowed(parsed.hostname, parsed.pathname)) return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
-  if (!parsed.search && !parsed.hash && STATUS_PAGE_URLS.has(parsed.toString())) return true;
   return false;
 }
 

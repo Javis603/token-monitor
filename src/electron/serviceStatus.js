@@ -14,7 +14,7 @@ const USER_AGENT = `TokenMonitor/${appVersion()} (+https://github.com/Javis603/t
 // and are dispatched to a matching summarizer below. Providers without a
 // usable public page (grok and kiro front theirs with bot checks that also
 // 403 server-side; z.ai and qoder expose none) must not be added speculatively.
-// Follow the README tool order. Gemini has no tracked-tool row and comes last.
+// Follow the README tool order.
 const SERVICE_STATUS_PROVIDERS = [
   {
     id: 'claude',
@@ -102,17 +102,6 @@ const SERVICE_STATUS_PROVIDERS = [
     label: 'MiniMax (International)',
     pageUrl: 'https://status.minimax.io',
     summaryUrl: 'https://status.minimax.io/api/v2/summary.json'
-  },
-  {
-    id: 'gemini',
-    label: 'Gemini',
-    // Google publishes one incidents feed for every Workspace service; the
-    // summarizer filters it down to the Gemini entries. There is no
-    // Gemini-only host, so the page link is the dashboard path.
-    pageUrl: 'https://www.google.com/appsstatus/dashboard',
-    summaryUrl: 'https://www.google.com/appsstatus/dashboard/incidents.json',
-    summaryFormat: 'google-feed',
-    productId: 'npdyhgECDJ6tB66MxXyo'
   }
 ];
 
@@ -406,90 +395,6 @@ function summarizeInstatusProvider(provider, payload, options = {}) {
   }
 }
 
-// Google Workspace incidents identify services by stable affected_products IDs.
-// An open incident has no `end`, and severity is low / medium / high. Unknown severities degrade to minor rather than reading green.
-const GOOGLE_SEVERITY_TO_INDICATOR = new Map([['low', 'minor'], ['medium', 'major'], ['high', 'critical']]);
-
-// Feed entries lead with a "**Summary:**" / "**Title**" marker and the short
-// headline the official dashboard shows either follows on the next line or is
-// inline after the marker ("**Title** : ..."); older entries start with plain
-// prose, so the first line is the fallback.
-function googleHeadline(externalDesc) {
-  const lines = String(externalDesc || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  for (let index = 0; index < lines.length; index += 1) {
-    const marker = lines[index].match(/^\*\*(summary|title):?\*\*\s*(.*)$/i);
-    if (!marker) continue;
-    const inline = marker[2].replace(/^:\s*/, '');
-    if (inline) return inline;
-    return lines[index + 1] || '';
-  }
-  return lines[0] || '';
-}
-
-function summarizeGoogleFeedProvider(provider, payload, options = {}) {
-  const checkedAt = options.checkedAt || new Date().toISOString();
-  try {
-    // The live feed always carries every Workspace service's history, so an
-    // empty or non-array body is a truncated response or format drift — never
-    // "no incidents".
-    if (!Array.isArray(payload) || !payload.length) throw new Error('Unexpected feed content');
-    const productId = provider.productId;
-    if (!productId) throw new Error('Missing product ID');
-    const serviceIncidents = payload.filter((incident) => Array.isArray(incident?.affected_products)
-      && incident.affected_products.some((product) => product?.id === productId));
-    const incidents = serviceIncidents
-      .filter((incident) => !incident.end)
-      .map((incident) => ({
-        indicator: GOOGLE_SEVERITY_TO_INDICATOR.get(normalizeStatus(incident.severity)) || 'minor',
-        title: googleHeadline(incident.external_desc),
-        updatedAt: String(incident.modified || '').trim(),
-        components: (Array.isArray(incident.affected_products) ? incident.affected_products : [])
-          .map((product) => String(product?.title || '').trim())
-          .filter(Boolean)
-      }));
-    let worst = { indicator: 'none', title: '', updatedAt: '' };
-    for (const incident of incidents) {
-      if (INDICATOR_RANK.get(incident.indicator) > INDICATOR_RANK.get(worst.indicator)) worst = incident;
-    }
-    // Outage incidents first, so a product hit by both an outage and a
-    // degradation keeps the higher severity under de-duplication (mirrors the
-    // atom feed summarizer).
-    const seen = new Set();
-    const componentIssues = [];
-    const ordered = [...incidents].sort((a, b) => INDICATOR_RANK.get(b.indicator) - INDICATOR_RANK.get(a.indicator));
-    for (const incident of ordered) {
-      for (const name of incident.components) {
-        if (seen.has(name)) continue;
-        seen.add(name);
-        componentIssues.push({ name, status: indicatorToComponentStatus(incident.indicator) });
-      }
-    }
-    // With no open incident the page still reports when it last changed, so the
-    // newest event's timestamp — resolved ones included — stands in for the
-    // page-level updated_at the other formats carry.
-    const lastModified = serviceIncidents
-      .map((incident) => String(incident.modified || '').trim())
-      .filter(Boolean)
-      .sort((a, b) => (Date.parse(b) || 0) - (Date.parse(a) || 0))[0] || '';
-    return {
-      id: provider.id,
-      label: provider.label,
-      pageUrl: provider.pageUrl,
-      status: providerTone(worst.indicator),
-      indicator: worst.indicator,
-      description: canonicalDescription(worst.indicator),
-      checkedAt,
-      updatedAt: worst.updatedAt || lastModified,
-      componentIssues,
-      incidentTitle: worst.title,
-      incidentCount: incidents.length,
-      maintenanceCount: 0
-    };
-  } catch (error) {
-    return summarizeStatuspageProvider(provider, null, { checkedAt, error });
-  }
-}
-
 // status.opencode.ai/api/status is OpenCode's official feed with a custom JSON
 // schema: a top-level status plus live per-service components. Unknown
 // non-operational statuses degrade to minor — report "something is wrong"
@@ -602,9 +507,6 @@ function createServiceStatusClient(options = {}) {
         if (provider.summaryFormat === 'instatus') {
           return summarizeInstatusProvider(provider, body, { checkedAt });
         }
-        if (provider.summaryFormat === 'google-feed') {
-          return summarizeGoogleFeedProvider(provider, body, { checkedAt });
-        }
         if (provider.summaryFormat === 'opencode-json') {
           return summarizeOpenCodeProvider(provider, body, { checkedAt });
         }
@@ -626,7 +528,6 @@ module.exports = {
   SERVICE_STATUS_PROVIDERS,
   createServiceStatusClient,
   summarizeAtomFeedProvider,
-  summarizeGoogleFeedProvider,
   summarizeInstatusProvider,
   summarizeOpenCodeProvider,
   summarizeStatuspageProvider

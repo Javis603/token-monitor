@@ -1520,8 +1520,7 @@ test('Cline account form keeps sign-in precedence, accessible input, and allowli
       isAllowedVerificationUrl: () => false,
       isAllowedCodexLoginUrl: () => false,
       limitProviderUrlAllowed: require('../../src/shared/limits/accounts').limitProviderUrlAllowed,
-      STATUS_PAGE_HOSTS: new Set(),
-      STATUS_PAGE_URLS: new Set()
+      STATUS_PAGE_HOSTS: new Set()
     }
   );
   assert.deepEqual(Array.from(allowed), [true, false, false, false]);

@@ -134,12 +134,12 @@ test('status defaults follow README tool order and preserve saved custom orderin
   const readme = fs.readFileSync(path.join(__dirname, '../../README.md'), 'utf8');
   const iconIds = [...readme.matchAll(/^\| <img src="\.github\/assets\/tools-icon\/([^".]+)\.png"/gm)].map((match) => match[1]);
   const toolIcons = { openai: 'codex', github: 'copilot', factory: 'droid', 'minimax-intl': 'minimax' };
-  const listed = SERVICE_STATUS_PROVIDERS.filter(({ id }) => id !== 'gemini');
+  const listed = SERVICE_STATUS_PROVIDERS;
   const expected = [...listed].sort((a, b) => (
     iconIds.indexOf(toolIcons[a.id] || a.id) - iconIds.indexOf(toolIcons[b.id] || b.id)
   ));
   for (const { id } of listed) assert.ok(iconIds.includes(toolIcons[id] || id), id);
-  assert.deepEqual(SERVICE_STATUS_PROVIDERS.map(({ id }) => id), [...expected.map(({ id }) => id), 'gemini']);
+  assert.deepEqual(SERVICE_STATUS_PROVIDERS.map(({ id }) => id), expected.map(({ id }) => id));
   const preferences = require('../../src/electron/renderer/serviceStatusProviderPreferences');
   assert.deepEqual(preferences.visibleOrder(SERVICE_STATUS_PROVIDERS, 'zed,github,claude', '').slice(0, 3), ['zed', 'github', 'claude']);
 });
@@ -160,7 +160,7 @@ test('Zed fetches its documented v3 API and exposes incident details', async () 
   assert.equal(result.updatedAt, '2026-11-05T09:00:00Z');
 });
 
-test('status external links admit Google dashboard only at its exact URL', () => {
+test('status external links admit provider roots and reject unrelated Google URLs', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const declarations = main.slice(main.indexOf('const STATUS_PAGE_HOSTS'), main.indexOf('const diagnosticJournal'));
   const start = main.indexOf('function isAllowedExternalUrl(');
@@ -168,11 +168,10 @@ test('status external links admit Google dashboard only at its exact URL', () =>
     URL, SERVICE_STATUS_PROVIDERS, settings: {}, process: { env: {} },
     isAllowedVerificationUrl: () => false, isAllowedCodexLoginUrl: () => false, limitProviderUrlAllowed: () => false
   });
-  assert.equal(allowed('https://www.google.com/appsstatus/dashboard'), true);
   assert.equal(allowed('https://status.minimax.io/'), true);
   assert.equal(allowed('https://status.minimaxi.com/'), true);
   for (const url of [
-    'https://www.google.com/', 'https://www.google.com/?q=test', 'https://www.google.com/#test',
+    'https://www.google.com/appsstatus/dashboard', 'https://www.google.com/', 'https://www.google.com/?q=test', 'https://www.google.com/#test',
     'https://www.google.com/appsstatus/dashboard?q=test', 'https://www.google.com/appsstatus/dashboard#test'
   ]) assert.equal(allowed(url), false, url);
 });

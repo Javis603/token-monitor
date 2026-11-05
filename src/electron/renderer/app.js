@@ -314,8 +314,7 @@ const SERVICE_STATUS_PLACEHOLDERS = [
   { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' },
   { id: 'devin', label: 'Devin', pageUrl: 'https://www.devinstatus.com' },
   { id: 'minimax', label: 'MiniMax (China)', pageUrl: 'https://status.minimaxi.com' },
-  { id: 'minimax-intl', label: 'MiniMax (International)', pageUrl: 'https://status.minimax.io' },
-  { id: 'gemini', label: 'Gemini', pageUrl: 'https://www.google.com/appsstatus/dashboard' }
+  { id: 'minimax-intl', label: 'MiniMax (International)', pageUrl: 'https://status.minimax.io' }
 ];
 const SERVICE_PROVIDER_OPTIONS = SERVICE_STATUS_PLACEHOLDERS.map((entry) => ({ id: entry.id, label: entry.label }));
 const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/token-monitor';

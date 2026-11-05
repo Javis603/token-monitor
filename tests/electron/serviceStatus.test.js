@@ -11,7 +11,6 @@ const {
   SERVICE_STATUS_PROVIDERS,
   createServiceStatusClient,
   summarizeAtomFeedProvider,
-  summarizeGoogleFeedProvider,
   summarizeInstatusProvider,
   summarizeOpenCodeProvider,
   summarizeStatuspageProvider
@@ -125,7 +124,7 @@ test('default providers cover the tracked tools with per-format summary endpoint
   const ids = SERVICE_STATUS_PROVIDERS.map((entry) => entry.id);
   assert.deepEqual(ids, [
     'claude', 'openai', 'opencode', 'cursor', 'factory', 'kimi', 'github',
-    'zed', 'deepseek', 'devin', 'minimax', 'minimax-intl', 'gemini'
+    'zed', 'deepseek', 'devin', 'minimax', 'minimax-intl'
   ]);
   assert.equal(new Set(ids).size, ids.length);
   for (const entry of SERVICE_STATUS_PROVIDERS) {
@@ -136,9 +135,7 @@ test('default providers cover the tracked tools with per-format summary endpoint
   // official page's Atom feed instead of the stale statuspage.io mirror.
   assert.equal(byId.get('deepseek').summaryUrl, 'https://status.deepseek.com/feed.atom');
   assert.equal(byId.get('deepseek').summaryFormat, 'atom-feed');
-  // Google, OpenCode and Zed publish non-Statuspage feeds with their own shape.
-  assert.equal(byId.get('gemini').summaryFormat, 'google-feed');
-  assert.equal(byId.get('gemini').productId, 'npdyhgECDJ6tB66MxXyo');
+  // OpenCode and Zed publish non-Statuspage feeds with their own shape.
   assert.equal(byId.get('opencode').summaryFormat, 'opencode-json');
   assert.equal(byId.get('zed').summaryFormat, 'instatus');
   for (const entry of SERVICE_STATUS_PROVIDERS.filter((item) => !item.summaryFormat)) {
@@ -393,132 +390,6 @@ test('summarizeInstatusProvider reports unknown on malformed payloads', () => {
   }
 });
 
-const googleProvider = {
-  id: 'gemini',
-  label: 'Gemini',
-  pageUrl: 'https://www.google.com/appsstatus/dashboard',
-  summaryUrl: 'https://www.google.com/appsstatus/dashboard/incidents.json',
-  summaryFormat: 'google-feed',
-  productId: 'npdyhgECDJ6tB66MxXyo'
-};
-
-function googleIncident(overrides = {}) {
-  return {
-    service_name: 'Gemini',
-    begin: '2026-11-05T08:00:00+00:00',
-    end: '',
-    modified: '2026-11-05T09:00:00+00:00',
-    severity: 'medium',
-    external_desc: '**Summary:**\nElevated error rates with Gemini in Workspace.\n**Description:**\nWe are investigating.',
-    affected_products: [{ title: 'Gemini', id: 'npdyhgECDJ6tB66MxXyo' }],
-    ...overrides
-  };
-}
-
-test('summarizeGoogleFeedProvider surfaces an open Gemini incident with headline and products', () => {
-  const payload = [
-    { service_name: 'Gmail', begin: '2026-11-05T07:00:00+00:00', end: '', severity: 'high', external_desc: 'Gmail down', modified: '2026-11-05T08:00:00+00:00' },
-    googleIncident()
-  ];
-
-  const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
-
-  assert.equal(result.status, 'outage');
-  assert.equal(result.indicator, 'major');
-  assert.equal(result.description, 'Partial Service Outage');
-  assert.equal(result.incidentTitle, 'Elevated error rates with Gemini in Workspace.');
-  assert.equal(result.incidentCount, 1);
-  assert.equal(result.maintenanceCount, 0);
-  assert.equal(result.updatedAt, '2026-11-05T09:00:00+00:00');
-  assert.deepEqual(result.componentIssues, [{ name: 'Gemini', status: 'partial_outage' }]);
-});
-
-test('summarizeGoogleFeedProvider matches incidents through affected_products too', () => {
-  const payload = [
-    googleIncident({ service_name: 'Google Vids', affected_products: [{ title: 'Gemini', id: 'npdyhgECDJ6tB66MxXyo' }], severity: 'high' })
-  ];
-
-  const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
-
-  assert.equal(result.indicator, 'critical');
-  assert.deepEqual(result.componentIssues, [{ name: 'Gemini', status: 'major_outage' }]);
-});
-
-test('summarizeGoogleFeedProvider matches stable product IDs despite renamed or missing names', () => {
-  const result = summarizeGoogleFeedProvider(googleProvider, [
-    googleIncident({ service_name: undefined, affected_products: [{ id: googleProvider.productId, title: 'Renamed product' }] }),
-    googleIncident({ affected_products: [{ id: 'other', title: 'Gemini' }], severity: 'high' })
-  ]);
-  assert.equal(result.incidentCount, 1);
-  assert.equal(result.indicator, 'major');
-  assert.deepEqual(result.componentIssues, [{ name: 'Renamed product', status: 'partial_outage' }]);
-});
-
-test('summarizeGoogleFeedProvider treats resolved-only history as operational with a fresh timestamp', () => {
-  const payload = [
-    googleIncident({ end: '2026-09-11T20:22:00+00:00', modified: '2026-09-11T20:45:42+00:00' }),
-    googleIncident({ end: '2026-06-10T17:30:00+00:00', modified: '2026-06-16T17:41:16+00:00' })
-  ];
-
-  const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
-
-  assert.equal(result.status, 'ok');
-  assert.equal(result.indicator, 'none');
-  assert.equal(result.incidentCount, 0);
-  // The newest resolved event stands in for the page-level updated_at the
-  // other formats carry.
-  assert.equal(result.updatedAt, '2026-09-11T20:45:42+00:00');
-});
-
-test('summarizeGoogleFeedProvider falls back to unknown severity and plain-prose headlines', () => {
-  const payload = [googleIncident({ severity: '???', external_desc: 'Gemini errors in Workspace\nMore detail follows.' })];
-
-  const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
-
-  assert.equal(result.indicator, 'minor');
-  assert.equal(result.incidentTitle, 'Gemini errors in Workspace');
-});
-
-test('summarizeGoogleFeedProvider reads inline titles after the marker', () => {
-  // Both inline spacings appear in the live feed ("**Title** : text",
-  // "**Title**: text"); the marker itself must never reach the panel.
-  for (const [desc, headline] of [
-    ['**Title** : Some customers may have seen errors.', 'Some customers may have seen errors.'],
-    ['**Title**: Some customers may have seen errors.', 'Some customers may have seen errors.'],
-    ['**Summary:**\nElevated error rates in Workspace.', 'Elevated error rates in Workspace.']
-  ]) {
-    const payload = [googleIncident({ external_desc: desc })];
-    const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
-    assert.equal(result.incidentTitle, headline, desc);
-  }
-});
-
-test('summarizeGoogleFeedProvider keeps outage products ahead of degraded ones', () => {
-  const payload = [
-    googleIncident({ severity: 'medium', affected_products: [{ title: 'Gemini', id: 'npdyhgECDJ6tB66MxXyo' }, { title: 'Shared' }] }),
-    googleIncident({ severity: 'high', modified: '2026-11-05T08:30:00+00:00', affected_products: [{ title: 'Gemini API', id: 'npdyhgECDJ6tB66MxXyo' }, { title: 'Shared' }] })
-  ];
-
-  const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
-
-  assert.equal(result.incidentCount, 2);
-  assert.deepEqual(result.componentIssues, [
-    { name: 'Gemini API', status: 'major_outage' },
-    { name: 'Shared', status: 'major_outage' },
-    { name: 'Gemini', status: 'partial_outage' }
-  ]);
-});
-
-test('summarizeGoogleFeedProvider reports unknown for an empty or non-array feed', () => {
-  // The live feed always carries Workspace-wide history; an empty body is a
-  // truncation or format drift, never "no incidents".
-  for (const payload of [null, 'nope', {}, []]) {
-    const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
-    assert.equal(result.status, 'unknown', JSON.stringify(payload));
-    assert.match(result.error, /Unexpected feed content|Unexpected payload/);
-  }
-});
-
 const openCodeProvider = {
   id: 'opencode',
   label: 'OpenCode',
@@ -606,16 +477,14 @@ test('summarizeOpenCodeProvider reports unknown on malformed payloads', () => {
 
 test('service status client dispatches each summaryFormat to its summarizer', async () => {
   const instatusPayload = { page: { status: 'HASISSUES' }, activeIncidents: [{ name: 'Editing degraded', impact: 'DEGRADEDPERFORMANCE', updatedAt: '2026-11-05T09:00:00Z' }] };
-  const googlePayload = [googleIncident()];
   const openCodePayload = { updatedAt: 1793836106718, status: 'operational', components: [] };
   const client = createServiceStatusClient({
-    providers: [instatusProvider, googleProvider, openCodeProvider],
+    providers: [instatusProvider, openCodeProvider],
     now: () => 0,
     fetchImpl: async (url) => ({
       ok: true,
       json: async () => {
         if (url === instatusProvider.summaryUrl) return instatusPayload;
-        if (url === googleProvider.summaryUrl) return googlePayload;
         return openCodePayload;
       }
     })
@@ -625,7 +494,6 @@ test('service status client dispatches each summaryFormat to its summarizer', as
   const byId = new Map(result.providers.map((entry) => [entry.id, entry]));
 
   assert.equal(byId.get('zed').indicator, 'minor');
-  assert.equal(byId.get('gemini').indicator, 'major');
   assert.equal(byId.get('opencode').indicator, 'none');
 });
 

@@ -337,8 +337,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
       isAllowedVerificationUrl,
       isAllowedCodexLoginUrl,
       limitProviderUrlAllowed,
-      STATUS_PAGE_HOSTS: evalTopLevel(mainSource, 'const STATUS_PAGE_HOSTS = ', '\n// Status pages', { URL, SERVICE_STATUS_PROVIDERS }),
-      STATUS_PAGE_URLS: new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).toString()))
+      STATUS_PAGE_HOSTS: evalTopLevel(mainSource, 'const STATUS_PAGE_HOSTS = ', '\nconst diagnosticJournal', { URL, SERVICE_STATUS_PROVIDERS })
     }
   );
   const allowed = [
@@ -384,7 +383,6 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://status.cursor.com/',
     'https://status.deepseek.com/',
     'https://www.githubstatus.com/',
-    'https://www.google.com/appsstatus/dashboard',
     'https://status.moonshot.cn/',
     'https://status.minimaxi.com/',
     'https://status.minimax.io/',
@@ -436,6 +434,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://bailian.console.aliyun.com/',
     'https://bailian.console.aliyun.com/us-west-1',
     'https://status.claude.com/incidents',
+    'https://www.google.com/appsstatus/dashboard',
     'https://www.google.com/appsstatus/dashboard/other',
     'https://codex-resets.com/path',
     'https://github.com/junhoyeo',
