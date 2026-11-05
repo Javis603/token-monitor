@@ -1483,3 +1483,82 @@ test('MiniMax keeps affiliation through a billing edit', async t => {
   await runtime.refresh({ provider: 'minimax' }, 'manual');
   assert.ok(runtime.getSnapshot().providers.every(row => !row.relatedAccountKey), 'a different Code account cannot inherit links');
 });
+
+
+test('MiniMax links same-region pay-as-you-go keys and rejects cross-region or wrong GroupId', async () => {
+  const MEMBERSHIP_URL_EN = 'https://agent.minimax.io/matrix/api/v1/commerce/get_membership_info';
+  const fixture = writeCodeAuthFixture({ region: 'en' });
+  const deps = codeDeps(fixture, async (url, init) => {
+    if (url === MEMBERSHIP_URL_EN) return okResponse(membershipBody({ has_token_plan: false, op_group_id: 'group-en' }));
+    const target = new URL(url);
+    if (target.pathname === '/account/query_balance') {
+      assert.equal(target.hostname, 'api.minimax.io');
+      return okResponse({ available_amount: '9.5' });
+    }
+    if (target.pathname === '/v1/token_plan/remains') {
+      assert.equal(target.hostname, 'api.minimax.io');
+      assert.equal(target.searchParams.get('GroupId'), 'group-en');
+      const confirmed = init.headers.Authorization === 'Bearer en-key';
+      return okResponse({ base_resp: { status_code: confirmed ? 2062 : 1004 } });
+    }
+    return okResponse({});
+  });
+  const linked = await fetchMinimaxLimits({
+    minimaxApiKey: 'en-key', minimaxApiRegion: 'intl', minimaxBillingMode: 'api'
+  }, deps);
+  const api = linked.find(row => row.source === 'api');
+  const code = linked.find(row => row.source === 'oauth');
+  assert.equal(code.region, 'en');
+  assert.equal(api.region, 'en');
+  assert.equal(api.relatedAccountKey, code.accountKey);
+
+  const wrongGroup = await fetchMinimaxLimits({
+    minimaxApiKey: 'other-en-key', minimaxApiRegion: 'intl', minimaxBillingMode: 'api'
+  }, deps);
+  assert.equal(wrongGroup.find(row => row.source === 'api').relatedAccountKey, undefined,
+    'GroupId confirmation 1004 must leave readings separate');
+
+  const cnFixture = writeCodeAuthFixture({ region: 'cn', prefix: 'minimax-code-cross-' });
+  const crossDeps = codeDeps(cnFixture, async (url) => {
+    if (url === MINIMAX_CODE_MEMBERSHIP_URL_CN) {
+      return okResponse(membershipBody({ has_token_plan: false, op_group_id: 'group-cn' }));
+    }
+    const target = new URL(url);
+    if (target.pathname === '/account/query_balance') {
+      assert.equal(target.hostname, 'api.minimax.io');
+      return okResponse({ available_amount: '3' });
+    }
+    if (target.pathname === '/v1/token_plan/remains') {
+      assert.fail(`cross-region affiliation must not probe GroupId: ${url}`);
+    }
+    return okResponse({});
+  });
+  const cross = await fetchMinimaxLimits({
+    minimaxApiKey: 'en-key', minimaxApiRegion: 'intl', minimaxBillingMode: 'api'
+  }, crossDeps);
+  assert.equal(cross.find(row => row.source === 'oauth').region, 'cn');
+  assert.equal(cross.find(row => row.source === 'api').region, 'en');
+  assert.equal(cross.find(row => row.source === 'api').relatedAccountKey, undefined);
+
+  const enOnly = writeCodeAuthFixture({ region: 'en', prefix: 'minimax-code-cn-key-' });
+  const cnKeyDeps = codeDeps(enOnly, async (url) => {
+    if (url === MEMBERSHIP_URL_EN) {
+      return okResponse(membershipBody({ has_token_plan: false, op_group_id: 'group-en' }));
+    }
+    const target = new URL(url);
+    if (target.pathname === '/account/query_balance') {
+      assert.equal(target.hostname, 'api.minimaxi.com');
+      return okResponse({ available_amount: '4' });
+    }
+    if (target.pathname === '/v1/token_plan/remains') {
+      assert.fail(`cross-region affiliation must not probe GroupId: ${url}`);
+    }
+    return okResponse({});
+  });
+  const cnKey = await fetchMinimaxLimits({
+    minimaxApiKey: 'cn-key', minimaxApiRegion: 'cn', minimaxBillingMode: 'api'
+  }, cnKeyDeps);
+  assert.equal(cnKey.find(row => row.source === 'oauth').region, 'en');
+  assert.equal(cnKey.find(row => row.source === 'api').region, 'cn');
+  assert.equal(cnKey.find(row => row.source === 'api').relatedAccountKey, undefined);
+});

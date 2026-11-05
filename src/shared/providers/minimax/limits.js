@@ -572,12 +572,15 @@ async function fetchMinimaxCodeLimits(deps = {}, context = {}, discovered = null
       const credits = minimaxCodeCredits(membership?.op_credit_summary?.total_remaining_amount)
         ?? minimaxCodeCredits(workspace.opcredit_balance ?? membership?.opcredit_balance);
       if (credits === null) return row('unavailable');
-      if (region === 'cn' && groupId) {
-        context.codeIdentity = state?.get(MINIMAX_CODE_GROUP_STATE_KEY);
-        if (context.codeIdentity?.accountKey !== accountKey) {
-          context.codeIdentity = { accountKey, groupId, confirmedApiKeys: new Set() };
+      if (groupId) {
+        const stateKey = `${MINIMAX_CODE_GROUP_STATE_KEY}:${region}`;
+        let identity = state?.get(stateKey);
+        if (identity?.accountKey !== accountKey) {
+          identity = { accountKey, groupId, confirmedApiKeys: new Set() };
         }
-        state?.set(MINIMAX_CODE_GROUP_STATE_KEY, context.codeIdentity);
+        context.codeIdentities ||= Object.create(null);
+        context.codeIdentities[region] = identity;
+        state?.set(stateKey, identity);
       }
       const windows = [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: credits,
         currency: 'CREDITS' }];
@@ -815,28 +818,30 @@ async function linkMinimaxAccounts(rows, options, deps, context, key, apiAccount
   const previous = (options.previousLimits?.providers || []).filter(row => row.provider === 'minimax');
   const api = rows.find(row => !row.removed && row.source === 'api' && row.accountKey === apiAccountKey)
     || previous.find(row => row.source === 'api' && row.accountKey === apiAccountKey);
-  const code = rows.find(row => !row.removed && row.source === 'oauth' && row.region === 'cn')
-    || previous.find(row => row.source === 'oauth' && row.region === 'cn');
-  const apiRegion = api?.region || previous.find(row => row.accountKey === apiAccountKey)?.region;
-  if (!key || api?.accountKey !== apiAccountKey || !code?.accountKey || code.region !== 'cn'
-    || (api.region && api.region !== 'cn')
-    || minimaxRegion(options, deps.env || process.env) === 'intl' || deps.signal?.aborted) return;
-  const identity = context.codeIdentity || deps.providerRuntimeState?.get(MINIMAX_CODE_GROUP_STATE_KEY);
-  let linked = (identity?.accountKey === code.accountKey && identity.confirmedApiKeys.has(apiAccountKey))
-    || previous.some(row => row.region === 'cn' && row.accountKey === apiAccountKey
-      && row.relatedAccountKey === code.accountKey);
+  const matchedRegion = api?.region || previous.find(row => row.accountKey === apiAccountKey)?.region;
+  if (!key || api?.accountKey !== apiAccountKey || !MINIMAX_REGIONS.includes(matchedRegion)
+    || deps.signal?.aborted) return;
+  const code = rows.find(row => !row.removed && row.source === 'oauth' && row.region === matchedRegion)
+    || previous.find(row => row.source === 'oauth' && row.region === matchedRegion);
+  if (!code?.accountKey) return;
   const state = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
+  const identity = context.codeIdentities?.[matchedRegion]
+    || state?.get(`${MINIMAX_CODE_GROUP_STATE_KEY}:${matchedRegion}`);
+  let linked = (identity?.accountKey === code.accountKey && identity.confirmedApiKeys.has(apiAccountKey))
+    || previous.some(row => row.region === matchedRegion && row.accountKey === apiAccountKey
+      && row.relatedAccountKey === code.accountKey);
   const now = Number(context?.now) || Date.now();
   const affiliationKey = `${MINIMAX_AFFILIATION_FAILURE_STATE_KEY}:${apiAccountKey}:${code.accountKey}:${identity?.groupId || ''}:${normalizeMinimaxBillingMode(options.minimaxBillingMode)}`;
   const failed = state?.get(affiliationKey);
   let attempted = false;
-  // New affiliations need CN pay-as-you-go; existing ones survive billing-type edits.
-  if (!linked && identity?.accountKey === code.accountKey && apiRegion === 'cn'
+  // New affiliations need same-region pay-as-you-go; existing ones survive billing-type edits.
+  if (!linked && identity?.accountKey === code.accountKey
     && normalizeMinimaxBillingMode(options.minimaxBillingMode) === 'api' && api.status === 'ok' && code.status === 'ok'
     && !(failed && now - failed.at < MINIMAX_OPTIONAL_CACHE_TTL_MS)) {
     attempted = true;
     try {
-      const url = new URL(MINIMAX_TOKEN_PLAN_REMAINS_URL_CN);
+      const url = new URL(matchedRegion === 'cn'
+        ? MINIMAX_TOKEN_PLAN_REMAINS_URL_CN : MINIMAX_TOKEN_PLAN_REMAINS_URL_EN);
       url.searchParams.set('GroupId', identity.groupId);
       const optionalDeps = minimaxOptionalDeps(deps);
       const fetchJson = deps.fetchJson
@@ -857,7 +862,7 @@ async function linkMinimaxAccounts(rows, options, deps, context, key, apiAccount
   const apiRow = rows.find(row => !row.removed && row.accountKey === apiAccountKey);
   if (apiRow) {
     apiRow.relatedAccountKey = code.accountKey;
-    apiRow.region ||= 'cn';
+    apiRow.region ||= matchedRegion;
   }
 }
 
@@ -868,10 +873,14 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
   if (deps.probe) return fetchMinimaxApiLimits(options, deps, context);
   const accounts = configuredMinimaxAccounts(options, deps);
   const apiKeys = new Set(accounts.map(account => hashKey('minimax', account.apiKey)));
-  const identity = deps.providerRuntimeState?.get(MINIMAX_CODE_GROUP_STATE_KEY);
-  if (identity) {
-    for (const key of identity.confirmedApiKeys) {
-      if (!apiKeys.has(key)) identity.confirmedApiKeys.delete(key);
+  const runtimeState = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
+  if (runtimeState) {
+    for (const region of MINIMAX_REGIONS) {
+      const identity = runtimeState.get(`${MINIMAX_CODE_GROUP_STATE_KEY}:${region}`);
+      if (!identity?.confirmedApiKeys) continue;
+      for (const key of identity.confirmedApiKeys) {
+        if (!apiKeys.has(key)) identity.confirmedApiKeys.delete(key);
+      }
     }
   }
   const scope = options.limitRefreshScope?.provider === 'minimax' ? options.limitRefreshScope : null;
