@@ -50,5 +50,21 @@ for (const kind of ['Node', 'Worker']) {
     stored = await devices();
     assert.equal(stored[0].history.daily.length, 151);
     assert.equal(stored[0].periods.today.totalTokens, 200002);
+    // Exercise the actual ingress boundary, which normalizes missing totals.
+    const post = async payload => {
+      const response = await request(`${base}/api/ingest`, { method: 'POST', headers, body: JSON.stringify(payload) });
+      assert.equal(response.status, 200);
+    };
+    await post({ deviceId: 'bandwidth-fixture', allTime: { totalTokens: 10 }, history: {
+      daily: [], monthly: [], dailyTotals: [{ date: '2024-01-01', tokens: 10 }],
+      summary: { activeDaysComplete: true }
+    } });
+    const history = async () => await (await request(`${base}/api/history`, { headers })).json();
+    await post({ deviceId: 'unknown-lifetime', today: { totalTokens: 5 } });
+    assert.equal((await history()).summary.activeDaysComplete, false);
+    stored = await devices();
+    assert.equal(stored.find(record => record.deviceId === 'unknown-lifetime').allTimeTokensUnavailable, true);
+    await post({ deviceId: 'unknown-lifetime', allTime: { totalTokens: 0 } });
+    assert.equal((await history()).summary.activeDaysComplete, true);
   });
 }
