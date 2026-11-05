@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
@@ -24,6 +25,18 @@ const {
   appearanceState,
   normalizeWindowsBackdropMode: normalizeRendererMode
 } = require('../../src/electron/renderer/windowsGlass');
+
+test('history material options follow the live main-window Windows backdrop setting', () => {
+  const source = main.slice(main.indexOf('function getLimitsHistoryController()'), main.indexOf('let statsPushSource'));
+  const settings = { windowsBackdrop: 'accent' };
+  const context = vm.createContext({ settings, BrowserWindow: {}, screen: {}, ipcMain: {}, mainWindow: {}, dashboardWindow: {},
+    limitsHistoryPayload() {}, nativeMaterialOptions: () => ({ enabled: true }), createLimitsHistoryController: options => options });
+  vm.runInContext(`let limitsHistoryController = null; ${source}`, context);
+  const controller = vm.runInContext('getLimitsHistoryController()', context);
+  assert.equal(controller.getMaterialOptions().windowsBackdrop, 'accent');
+  settings.windowsBackdrop = 'acrylic';
+  assert.equal(controller.getMaterialOptions().windowsBackdrop, 'acrylic');
+});
 
 test('Windows backdrop modes fail closed to documented Acrylic', () => {
   assert.equal(normalizeRendererMode, normalizeWindowsBackdropMode);
