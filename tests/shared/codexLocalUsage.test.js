@@ -453,6 +453,21 @@ test('failed resumes back off across polling and socket reconnects instead of re
   assert.equal(f.source.getDiagnostics().subscriptions, 1);
 });
 
+test('successful idle completion permits immediate reactivation without requiring a recorded usage delta', async (t) => {
+  const listed = [{ ...LOCAL }];
+  const f = subscriptionFixture(t, listed);
+  f.source.start();
+  await f.settle();
+  f.sockets[0].notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+  listed[0] = { ...LOCAL, status: { type: 'idle' } };
+  await f.tick();
+  assert.equal(f.calls('thread/unsubscribe').length, 1);
+  assert.equal(f.store.rows().length, 0);
+  listed[0] = { ...LOCAL };
+  await f.tick();
+  assert.equal(f.calls('thread/resume').length, 2, 'normal idle completion must not retain recovery backoff');
+});
+
 test('environment recovery backs off even on a healthy observer socket and releases old listeners', async (t) => {
   const f = subscriptionFixture(t, [{ ...LOCAL }]);
   f.source.start();

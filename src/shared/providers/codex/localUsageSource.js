@@ -148,6 +148,9 @@ function createLocalUsageSource(options = {}, deps = {}) {
       if (store.updateThread(hashAccountKey(context.accountId), thread.id, {
         title: String(thread.name || '').trim(), turnEnded: thread.status?.type === 'idle'
       })) changed();
+      // Normal idle completion is not failed recovery. A later active turn can
+      // attach immediately even if this subscription only received its baseline.
+      if (thread.status?.type === 'idle' && previous.resumed && !previous.disconnected) resumeRetries.delete(thread.id);
       if (thread.status?.type !== 'active' || previous.disconnected) await unsubscribe(thread.id, current);
       return;
     }
@@ -165,6 +168,10 @@ function createLocalUsageSource(options = {}, deps = {}) {
     threads.set(thread.id, { thread, local, baselinePending: true, turnModels: new Map() });
     try {
       await request('thread/resume', { threadId: thread.id, excludeTurns: true });
+      if (connection === current) {
+        const entry = threads.get(thread.id);
+        if (entry) entry.resumed = true;
+      }
     } catch (_) {
       // A timeout can arrive after the server attached the listener.
       if (connection === current) await unsubscribe(thread.id, current);
