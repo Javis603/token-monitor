@@ -3,6 +3,8 @@
 const { createDeviceState } = require('./deviceState');
 const { createLimitsRuntime } = require('../limits/runtime');
 const { createUsageRuntime } = require('./usageRuntime');
+const { sharedDataDir } = require('../config');
+const path = require('node:path');
 
 let nextRuntimeEpoch = 1;
 const SUPERSEDED_USAGE_DIAGNOSTIC_CODES = new Set(['subprocess-termination-unconfirmed']);
@@ -110,6 +112,13 @@ function createDeviceRuntime(options = {}, deps = {}) {
   };
   const limitsDeps = {
     ...(deps.limitsDeps || {}),
+    // Trae publishes a cumulative consumed counter and no history at all, so its
+    // daily/weekly spend can only come from remembering the counter between
+    // polls. Resolved once here — the single place both the Electron app and the
+    // headless agent build their limits runtime — so providers never invent a
+    // path of their own. Tests pass their own path (or none, which disables it).
+    spendHistoryPath: (deps.limitsDeps && deps.limitsDeps.spendHistoryPath)
+      || path.join(sharedDataDir(), 'trae-credit-spend.json'),
     onUpdate(summary) {
       if (!active) return;
       deviceState.updateLimits(summary, 'limits', { epoch });

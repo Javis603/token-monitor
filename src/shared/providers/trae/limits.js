@@ -5,6 +5,7 @@ const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
+const spendHistory = require('./spendHistory');
 
 const TRAE_FETCH_TIMEOUT_MS = 12_000;
 const TRAE_API_ORIGIN = 'https://api.trae.cn';
@@ -226,6 +227,25 @@ async function fetchTraeLimits(options = {}, deps = {}) {
       }
       ({ window } = parseTraeEntUsage(body));
     }
+    // Trae publishes one cumulative counter and no history, so the only way to
+    // say anything about *spend* is to remember the counter between polls.
+    //
+    // Only when a caller hands us a store: the limits runtime resolves one path
+    // for the app and the agent, while unit tests and one-off probes pass none —
+    // otherwise a fixture with `used: 10` would poison the real counter and
+    // manufacture a five-figure "spend" on the next real poll.
+    const spend = deps.spendHistoryPath
+      ? spendHistory.trackSpend({
+        used: window.used,
+        at: (deps.now || Date.now)(),
+        options: {
+          spendHistoryPath: deps.spendHistoryPath,
+          env: deps.env,
+          platform: deps.platform,
+          homeDir: deps.homeDir
+        }
+      })
+      : null;
     return normalizeLimitProvider({
       provider: 'trae',
       accountKey: hashKey('trae', cookie || accessToken),
@@ -235,7 +255,14 @@ async function fetchTraeLimits(options = {}, deps = {}) {
       windows: [window],
       balance: {
         amount: window.remaining,
-        currency: 'CREDITS'
+        currency: 'CREDITS',
+        ...(spend
+          ? {
+            todaySpend: spend.todaySpend,
+            weekSpend: spend.weekSpend,
+            monthSpend: spend.monthSpend
+          }
+          : {})
       },
       region: 'cn'
     });

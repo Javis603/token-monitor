@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -230,6 +233,42 @@ test('Trae CN web session exchanges JWT then reads authoritative credit summary 
     assert.equal(init.credentials, 'omit');
   }
   assert.doesNotMatch(JSON.stringify(provider), /web-account|web-jwt|legacy|telemetry/);
+});
+
+test('Trae publishes poll-derived spend only when a store is supplied', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-trae-limits-spend-'));
+  const spendHistoryPath = path.join(dir, 'trae-credit-spend.json');
+  const at = (iso) => new Date(iso).getTime();
+  const fetchWith = (consumed) => async (url) => {
+    if (url.endsWith('/GetUserToken')) return response({ Result: { Token: 'jwt' } });
+    if (url.endsWith('/user_current_entitlement_list')) return response({
+      is_credits_billing: true, usage_summary: { total_amount: 7900, consumed_amount: consumed }
+    });
+    return response({ code: 1001 }, 401);
+  };
+  try {
+    const first = await fetchTraeLimits(
+      { traeCookie: 'sessionid=x' },
+      { env: {}, fetch: fetchWith(1528.06), spendHistoryPath, now: () => at('2026-11-05T09:00:00') }
+    );
+    // First poll of the day only seeds the baseline.
+    assert.equal(first.balance.todaySpend, 0);
+
+    const second = await fetchTraeLimits(
+      { traeCookie: 'sessionid=x' },
+      { env: {}, fetch: fetchWith(1543.06), spendHistoryPath, now: () => at('2026-11-05T12:00:00') }
+    );
+    assert.equal(second.balance.todaySpend, 15);
+    assert.equal(second.balance.weekSpend, 15);
+    assert.equal(second.windows[0].used, 1543.06);
+
+    // No store → no spend keys at all, so a probe cannot invent history.
+    const bare = await fetchTraeLimits({ traeCookie: 'sessionid=x' }, { env: {}, fetch: fetchWith(1600) });
+    assert.equal(bare.balance.todaySpend, null);
+    assert.equal(bare.balance.amount, 7900 - 1600);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('Trae web rejects expired sessions and malformed token/summary without falling back to IDE credentials', async () => {
