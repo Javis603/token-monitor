@@ -830,8 +830,19 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         } else if (provider === 'minimax' && normalized.source === 'api') {
           for (const [identityKey, state] of lane.identities) {
             const row = state.lastGood || state.lastAttempt?.row;
-            if (row?.source === normalized.source) {
+            // Generic fallback attempts carry { provider } without a source;
+            // they still belong to the API lane when the identity is API-keyed.
+            const isApi = row?.source === normalized.source
+              || (!row?.source && identityKey.startsWith('minimax:sha256:'));
+            if (isApi) {
               lane.identities.delete(identityKey);
+              lane.accountRevisions.delete(identityKey);
+            }
+          }
+          // queueScope creates revisions before identities commit; cancelLane
+          // drops the intent without cleaning them up.
+          for (const identityKey of lane.accountRevisions.keys()) {
+            if (identityKey.startsWith('minimax:sha256:') && !lane.identities.has(identityKey)) {
               lane.accountRevisions.delete(identityKey);
             }
           }

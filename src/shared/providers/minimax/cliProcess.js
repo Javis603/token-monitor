@@ -73,7 +73,11 @@ function runCapturedCliProcess(command, args, options) {
           cleanup = new Promise(resolve => { complete = resolve; });
           const root = envValue(options.env, 'SystemRoot') || 'C:\\Windows';
           const finished = error => {
-            const failure = error && errorWithStatus('unavailable', 'CLI process tree could not be stopped');
+            // taskkill exits 128 when the shim already exited; nothing is left
+            // to stop, so that is successful cleanup, not a failure.
+            const notFound = error && (error.code === 128
+              || /not found|no running instance|没有运行|找不到/iu.test(error.message || ''));
+            const failure = error && !notFound && errorWithStatus('unavailable', 'CLI process tree could not be stopped');
             if (failure) failure.code = 'CLI_PROCESS_CLEANUP_FAILED';
             complete(failure || null);
             kill(signal);
