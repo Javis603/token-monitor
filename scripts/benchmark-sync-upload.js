@@ -46,7 +46,7 @@ async function main() {
     const after = await measure(scenario, true);
     assert.equal(before.requests, after.requests);
     assert.equal(before.firstBytes, after.firstBytes);
-    assert.equal(after.histories, scenario.changeHistory ? 75 : scenario.ticks === 750 ? 2 : 1);
+    assert.equal(after.histories, scenario.changeHistory ? before.requests : scenario.ticks === 750 ? 2 : 1);
     assert.ok(after.bytes <= before.bytes);
     results.push({ ...scenario, before, after, savedPercent: Number(((1 - after.bytes / before.bytes) * 100).toFixed(2)) });
   }

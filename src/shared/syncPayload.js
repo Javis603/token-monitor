@@ -366,19 +366,18 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
   let deltaBaseline = null;
   let generation = 0;
 
-  function resetHistory() {
+  function resetHistory({ preserveDelta = false } = {}) {
     acknowledged = null;
-    deltaBaseline = null;
+    if (!preserveDelta) deltaBaseline = null;
     generation += 1;
   }
 
   async function upload(fetchFn, url, options = {}) {
     const headers = new Headers(options.headers);
-    const binding = createHash('sha256').update(JSON.stringify([
-      url, options.summary?.deviceId || options.summary?.id,
-      headers.get('authorization'), headers.get('x-token-monitor-secret')
-    ])).digest('hex');
-    if (binding !== identity) {
+    // Private destination equality, not a stored password verifier or wire ID.
+    const binding = [url, options.summary?.deviceId || options.summary?.id,
+      headers.get('authorization'), headers.get('x-token-monitor-secret')];
+    if (!identity || binding.some((value, index) => value !== identity[index])) {
       resetHistory();
       identity = binding;
     }

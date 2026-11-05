@@ -40,6 +40,31 @@ function jsonResponse(status, payload, extra = {}, request = null) {
   });
 }
 
+// Delta is a new endpoint: bound incoming bytes before JSON materialization,
+// including chunked requests, without changing legacy full-ingest admission.
+async function readUploadDelta(request) {
+  const reader = request.body?.getReader();
+  if (!reader) return JSON.parse('');
+  const chunks = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > uploadDelta.MAX_UPLOAD_BYTES) {
+        await reader.cancel();
+        throw Object.assign(new Error('payload_too_large'), { status: 413 });
+      }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const body = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return JSON.parse(new TextDecoder().decode(body));
+}
+
 function textResponse(status, body, contentType = 'text/plain; charset=utf-8') {
   return new Response(body, { status, headers: { 'content-type': contentType, ...CORS_HEADERS } });
 }
@@ -535,10 +560,14 @@ export class HubDO {
     }
 
     if (request.method === 'POST' && ['/api/ingest', '/api/ingest/delta'].includes(url.pathname)) {
-      let payload;
-      try { payload = await request.json(); }
-      catch (error) { return jsonResponse(400, { error: 'bad_request', message: error.message }); }
       const delta = url.pathname === '/api/ingest/delta';
+      let payload;
+      try { payload = delta ? await readUploadDelta(request) : await request.json(); }
+      catch (error) {
+        return jsonResponse(error.status === 413 ? 413 : 400, {
+          error: error.status === 413 ? 'payload_too_large' : 'bad_request', message: error.message
+        });
+      }
       let record, upload;
       try {
         record = await this.mutate(async () => {

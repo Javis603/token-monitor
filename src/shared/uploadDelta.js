@@ -54,4 +54,4 @@ function createUploadBaselines({ maxEntries = 32, maxBytes = 16 * MAX_UPLOAD_BYT
   return { prepare, commit, forget, clear() { entries.clear(); bytes = 0; } };
 }
 
-module.exports = { UPLOAD_HEADER, UPLOAD_VERSION, createUploadBaselines };
+module.exports = { UPLOAD_HEADER, UPLOAD_VERSION, MAX_UPLOAD_BYTES, createUploadBaselines };

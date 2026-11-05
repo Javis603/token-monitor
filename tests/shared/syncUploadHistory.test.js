@@ -125,3 +125,58 @@ test('413 reduction acknowledges only accepted history detail, permitting later 
   const restored = await upload(fetchFn, 'https://hub.invalid', { summary });
   assert.equal(restored.payload.history.daily.at(-1).outputTokens, 123);
 });
+
+test('negotiated delta baselines never cross destination, device or either credential header', async () => {
+  const upload = createSyncPayloadUploader();
+  const bodies = [];
+  const fetchFn = async (url, request) => {
+    const body = JSON.parse(request.body);
+    bodies.push({ url, body });
+    return Response.json({ ok: true, deviceId: body.deviceId,
+      upload: { version: 1, revision: `revision-${bodies.length}` } });
+  };
+  let url = 'https://first.invalid/api/ingest';
+  let summary = summaryForUpload();
+  let headers = { Authorization: 'Bearer first', 'X-Token-Monitor-Secret': 'first' };
+  const send = () => upload(fetchFn, url, { summary, headers });
+  await send();
+  await send();
+  assert.equal(bodies.at(-1).url.endsWith('/delta'), true);
+  for (const change of [
+    () => { headers = { ...headers, Authorization: 'Bearer rotated' }; },
+    () => { headers = { ...headers, 'X-Token-Monitor-Secret': 'rotated' }; },
+    () => { url = 'https://second.invalid/api/ingest'; },
+    () => { summary = { ...summary, deviceId: 'second-device' }; }
+  ]) {
+    change();
+    await send();
+    assert.equal(bodies.at(-1).url.endsWith('/delta'), false);
+    assert.ok(bodies.at(-1).body.history);
+    await send();
+    assert.equal(bodies.at(-1).url.endsWith('/delta'), true);
+  }
+});
+
+test('SSE retries preserve a negotiated upload baseline but reconcile legacy History', async () => {
+  const upload = createSyncPayloadUploader();
+  const urls = [];
+  const fetchFn = async (url, request) => {
+    urls.push(url);
+    const { deviceId } = JSON.parse(request.body);
+    return Response.json({ ok: true, deviceId, upload: { version: 1, revision: `revision-${urls.length}` } });
+  };
+  const send = () => upload(fetchFn, 'https://hub.invalid/api/ingest', { summary: summaryForUpload() });
+  await send();
+  upload.resetHistory({ preserveDelta: true });
+  await send();
+  assert.equal(urls.at(-1).endsWith('/delta'), true);
+  upload.resetHistory();
+  await send();
+  assert.equal(urls.at(-1).endsWith('/delta'), false);
+
+  const legacy = harness();
+  await legacy.send();
+  assert.equal(Object.hasOwn((await legacy.send()).payload, 'history'), false);
+  legacy.upload.resetHistory({ preserveDelta: true });
+  assert.ok((await legacy.send()).payload.history);
+});

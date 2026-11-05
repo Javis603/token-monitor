@@ -41,17 +41,18 @@ async function main() {
   if (process.argv[2]) {
     const { snapshots } = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
     groups = [];
-    for (const device of snapshots[0].devices) {
+    const deviceIds = new Set(snapshots.flatMap(snapshot => snapshot.devices.map(device => device.deviceId)));
+    for (const deviceId of deviceIds) {
       const records = [];
       let receipt;
       for (const snapshot of snapshots) {
-        const current = snapshot.devices.find(row => row.deviceId === device.deviceId);
+        const current = snapshot.devices.find(row => row.deviceId === deviceId);
         if (!current || current.receivedAt === receipt) continue;
         receipt = current.receivedAt;
         const { periods, receivedAt: _receivedAt, ...rest } = current;
         records.push({ ...rest, ...periods });
       }
-      if (records.length > 1) groups.push({ name: device.deviceId, records });
+      if (records.length > 1) groups.push({ name: deviceId, records });
     }
   } else {
     groups = [{ name: 'synthetic-151-days', records: Array.from({ length: 75 }, (_, tick) => summaryForUpload({ tick })) }];

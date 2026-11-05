@@ -38,7 +38,7 @@ async function backend(kind, t) {
     return response;
   };
   return {
-    requests, headers, fetchFn,
+    requests, headers, fetchFn, send,
     async request(route, body, method = 'POST', extra = {}) {
       return fetchFn(`https://hub.invalid${route}`, { method, headers: { ...headers, ...extra }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     },
@@ -157,3 +157,31 @@ for (const kind of ['Node', 'Worker']) {
     assert.equal((await hub.device()).history.daily.at(-1).outputTokens, 123);
   });
 }
+
+test('Worker bounds chunked delta input before JSON parsing and cancels an oversized body', async t => {
+  const hub = await backend('Worker', t);
+  let cancelled = false;
+  let chunks = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (chunks++ < 3) controller.enqueue(new Uint8Array(600000));
+      else controller.close();
+    },
+    cancel() { cancelled = true; }
+  });
+  const response = await hub.send('https://hub.invalid/api/ingest/delta', {
+    method: 'POST', headers: hub.headers, body, duplex: 'half'
+  });
+  assert.equal(response.status, 413, 'unparseable oversized input is rejected before JSON.parse');
+  assert.equal(cancelled, true);
+  assert.equal(await hub.device(), undefined);
+
+  const first = await hub.request('/api/ingest', summaryForUpload(), 'POST', { 'x-token-monitor-upload': '1' });
+  const { upload } = await first.json();
+  const encoded = new TextEncoder().encode(JSON.stringify({ deviceId: 'bandwidth-fixture', baseRevision: upload.revision, patch: [] }));
+  const valid = new ReadableStream({ start(controller) {
+    controller.enqueue(encoded.slice(0, 17)); controller.enqueue(encoded.slice(17)); controller.close();
+  } });
+  const accepted = await hub.send('https://hub.invalid/api/ingest/delta', { method: 'POST', headers: hub.headers, body: valid, duplex: 'half' });
+  assert.equal(accepted.status, 200);
+});
