@@ -6808,7 +6808,35 @@ function renderHomeToolModule(period) {
     if (creditsView && String(row.key).toLowerCase() === 'workbuddy') item.append(creditsBadgeElement(creditsView));
     body.append(item);
   }
+  // A tool that publishes credits but no tokens can never earn a row in a token
+  // ranking — it would have no share and sink to the bottom. Name it underneath,
+  // in its own unit, so the absence reads as "credits only" rather than "not
+  // tracked".
+  for (const note of creditOnlyToolNotes(rows)) {
+    const line = document.createElement('div');
+    line.className = 'home-tool-note';
+    line.textContent = `${note.name} · ${t('home.creditsToday', { value: formatCredits(note.spend) })}`;
+    line.title = t('home.creditsSource');
+    body.append(line);
+  }
   return module;
+}
+
+// Derived from the limit providers rather than a hardcoded id, so any future
+// credits-only vendor shows up here without new code.
+function creditOnlyToolNotes(rows) {
+  if (state.period !== 'today') return [];
+  const known = new Set((rows || []).map((row) => String(row.key).toLowerCase()));
+  const labels = new Map(LIMIT_PROVIDERS.map((entry) => [entry.id, entry.label]));
+  const notes = [];
+  for (const provider of state.stats?.limits?.providers || []) {
+    const id = String(provider?.provider || '').toLowerCase();
+    if (!id || known.has(id)) continue;
+    const spend = Number(provider?.balance?.todaySpend);
+    if (!Number.isFinite(spend) || spend <= 0) continue;
+    notes.push({ id, name: labels.get(id) || id, spend });
+  }
+  return notes.sort((a, b) => b.spend - a.spend).slice(0, 3);
 }
 
 function homeSessionAgo(value) {
