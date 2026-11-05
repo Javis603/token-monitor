@@ -832,8 +832,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
             const row = state.lastGood || state.lastAttempt?.row;
             // Generic fallback attempts carry { provider } without a source;
             // they still belong to the API lane when the identity is API-keyed.
+            // Code rows always have source: 'oauth'; API rows have 'api'.
+            // A source-less attempt on a keyed identity can only be an API row.
             const isApi = row?.source === normalized.source
-              || (!row?.source && identityKey.startsWith('minimax:sha256:'));
+              || (!row?.source && identityKey !== 'minimax:*');
             if (isApi) {
               lane.identities.delete(identityKey);
               lane.accountRevisions.delete(identityKey);
@@ -842,7 +844,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
           // queueScope creates revisions before identities commit; cancelLane
           // drops the intent without cleaning them up.
           for (const identityKey of lane.accountRevisions.keys()) {
-            if (identityKey.startsWith('minimax:sha256:') && !lane.identities.has(identityKey)) {
+            if (identityKey !== 'minimax:*' && !lane.identities.has(identityKey)) {
               lane.accountRevisions.delete(identityKey);
             }
           }

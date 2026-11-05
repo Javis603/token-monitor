@@ -71,6 +71,13 @@ Existing `minimaxApiKey`, billing and region settings remain readable without a 
 
 Saving a key selects MiniMax and enables limits, following shared credential-save behavior; removing one preserves both. Save-time probes validate only the supplied API key, without Code or Spend. Code discovery runs once, independently of the number of API keys; refresh and region memory belong to each credential. Removing a key retires its local API reading without retiring Code or an available environment fallback. Each key's browser link follows its billing type and pinned or last-successful region.
 
+## Invariants and known gaps
+
+- Do not split China and international account behavior into separate UI or business flows.
+- Do not call MiniMax CLI, read MiniMax Code credentials, or import MiniMax Code profiles for Plan-only setups.
+- When Code has no local account, Plan still uses the provider-level configured-key path and must not enter the CLI path.
+- Do not infer that a stored login has an effective plan by using a default quota when `remains_percent` or equivalent fields are missing.
+
 ## Verification
 
 Run the focused MiniMax tests (`node --test tests/shared/minimaxLimits.test.js tests/electron/minimaxApiKeys.test.js`) and `npm run verify`. Live checks require a key of the selected billing type in the selected region; Code checks require the official local login. Mock responses do not establish current endpoint or billing semantics.
