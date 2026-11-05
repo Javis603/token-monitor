@@ -46,3 +46,19 @@ git push
 2. **远端 origin（GitHub 备份）**：每批改动完成即 push main；PR #1207 等人类 review（CodeRabbit 意见当天修）；issue #1208 等 Trae 上游回复。PR 合入后：删 pr 分支，把 `manualUsageBases`（用户申报历史基数，通用功能）整理成第二个 PR。
 3. **本机**：widget 跑本地工作树，代码更新=一次重启；**settings.json 修改必须先停 widget**（运行中会回写覆盖，已踩坑两次）；基数数值文档化在本文件，settings 在 userData 不进仓库。
 4. **数据补录**：任何官方页面能读到的总数/分量（像 2026-10-27 的 Claude /stats 截图），发来即可补进基数——支持 tokens/output/cacheRead/cacheWrite/cost 五个分量、按模型细分。费用（costUsd）目前无申报数字，Claude 公司机账单金额给我即可补上。
+
+## 一·c、2026-11-05 同步记录（v0.79.0 → v0.86.0）
+
+两次合并：`e193eb2e`（v0.84.1，5 处冲突）、`776f6d8c`（v0.86.0，**只有 2 处，且都是生成的 hubBuildRegistry.json**）。后者说明冲突面确实只在生成物与少量挂钩上，`app.js`/`limits/core.js` 全是自动合并。
+
+**三个必须记住的坑**（这次都踩了）：
+
+1. **别名环境变量会杀死 Electron**：WorkBuddy 会导出 `ELECTRON_RUN_AS_NODE=1` 和 `NODE_OPTIONS`，直接 `npm start` 会当纯 Node 跑、窗口不出现。启动一律用
+   `env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS npm start`。
+2. **`npm ci` 之后两个二进制都得手工补**（GitHub 直连下载会超时）：
+   - Electron：`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node node_modules/electron/install.js`
+   - tokscale：`gh release download <releaseTag> --repo Javis603/tokscale --pattern tokscale-win32-x64.exe`，覆盖到 `node_modules/@tokscale/cli-win32-x64-msvc/bin/tokscale.exe`，再跑 `node scripts/ensure-vendored-tokscale.js` 校验 sha256。
+3. **git 不要走 WorkBuddy 的出口代理**（`https_proxy=127.0.0.1:51930` 会 502）：
+   `env -u https_proxy -u HTTPS_PROXY -u http_proxy -u HTTP_PROXY git push`。
+
+**本轮功能落点**：积分账本 + 校准（fork 独有）、credits-only 提供方（Trae CN）在首页与工具明细各占一行、`limits/core.js` 的 `detailEntries`（权益包 ⓘ）、collector 锚点把 `pricing` 从指纹里拆出（修「TOTAL/30D 归零」）。上游 v0.86 的 quota history（#1352/#1360）已自带积分消耗趋势，但数值只进悬停预览窗，**主面板拿不到**，所以 `trae-credit-spend.json` 那套同步数字仍然保留，两者是同一事实的两个出口。
