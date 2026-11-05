@@ -329,7 +329,7 @@
     return Math.max(0, summaryPeak || 0, dailyPeak);
   }
 
-  function homeActiveDaysPresentation({ requestedWindow = 'all', summary = {}, cells = [] } = {}) {
+  function homeActiveDaysPresentation({ requestedWindow = 'all', summary = {}, cells = [], rollingComplete = true } = {}) {
     const rollingCount = (Array.isArray(cells) ? cells : [])
       .reduce((count, cell) => count + (Math.max(0, finiteNumber(cell?.tokens) || 0) > 0 ? 1 : 0), 0);
     const allTimeCount = finiteNumber(summary?.activeDays);
@@ -340,7 +340,7 @@
     ) {
       return { window: 'all', count: Math.max(0, Math.round(allTimeCount)) };
     }
-    return { window: 'year', count: rollingCount };
+    return { window: 'year', count: rollingComplete ? rollingCount : null };
   }
 
   function homeActivityHeatmapLayout() {

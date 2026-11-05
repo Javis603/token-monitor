@@ -1226,3 +1226,50 @@ test('Home drops the rows unchecked on a provider\'s usage-item list, MiMo\'s sy
   assert.deepEqual(byProvider.claude, ['Session']);
   assert.deepEqual(byProvider.mimo, ['Balance']);
 });
+
+test('Home withholds a year count until full history is available', () => {
+  assert.deepEqual(homeActiveDaysPresentation({
+    summary: { activeDays: 450, activeDaysComplete: false },
+    cells: [{ tokens: 10 }], rollingComplete: false
+  }), { window: 'year', count: null });
+  assert.deepEqual(homeActiveDaysPresentation({
+    summary: { activeDays: 450, activeDaysComplete: true },
+    cells: [], rollingComplete: false
+  }), { window: 'all', count: 450 });
+});
+
+test('Home renders lifetime-only activity and never labels the preview as a full year', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf('function renderHomeTrendsModule()');
+  const end = app.indexOf('  const activityScroll =', start);
+  const renderHeader = `${app.slice(start, end)}return module;\n}`;
+  const overview = require('../../src/electron/renderer/homeOverview');
+  const charts = require('../../src/electron/renderer/usageCharts');
+  const context = {
+    window: { TokenMonitorUsageCharts: charts }, homeOverviewApi: overview,
+    dailyWithHeatIntensity: rows => rows,
+    document: { createElement: () => ({ append() {} }) },
+    t: (key, vars) => vars ? `${key}:${vars.count}` : key,
+    homeModuleShell: (_id, _title, _settings, label = '') => ({ module: { label }, body: { append() {} } })
+  };
+  const state = context.state = {
+    settings: {}, stats: { historyRevision: 'current', historyPreview: {
+      daily: [], summary: { activeDays: 42, activeDaysComplete: true }
+    } }
+  };
+  vm.createContext(context);
+  vm.runInContext(renderHeader, context);
+  const render = () => vm.runInContext('renderHomeTrendsModule()', context).label;
+  assert.equal(render(), 'home.activeDays:42');
+  state.stats.historyPreview = {
+    daily: [{ date: charts.localDayKey(), tokens: 10 }],
+    summary: { activeDays: 42, activeDaysComplete: false }
+  };
+  assert.equal(render(), '', 'preview alone cannot prove the annual count');
+  state.homeHistory = { daily: state.stats.historyPreview.daily };
+  state.homeHistoryLoadedSignature = 'old';
+  assert.equal(render(), '', 'an older full-history response is not current evidence');
+  state.homeHistoryLoadedSignature = 'current';
+  state.stats.periods = { today: { totalTokens: 10 } };
+  assert.equal(render(), 'home.activeDaysYear:1');
+});
