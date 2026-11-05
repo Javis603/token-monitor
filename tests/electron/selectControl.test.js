@@ -317,6 +317,15 @@ test('plain and rich options share control; icons also appear in the selected tr
   f.control.destroy();
 });
 
+test('option annotations sit beside the label and remain part of its accessible description', () => {
+  const f = harness({ metadata: { local: { annotation: 'Detected' } } });
+  const row = f.popup.children[0];
+  assert.equal(row.children[1].children[1].hidden, true);
+  assert.equal(row.children[2].textContent, 'Detected');
+  assert.equal(row.getAttribute('aria-describedby'), row.children[2].id);
+  f.control.destroy();
+});
+
 test('sync updates translations, value and availability without events or needless row replacement', () => {
   const metadata = { local: { description: 'This device only.' } };
   const f = harness({ metadata });
@@ -372,6 +381,11 @@ test('only one control is open and window blur, hidden anchor and detachment can
 
 test('scroll and resize are frame-coalesced and destroy releases listeners and restores source', () => {
   const f = harness();
+  const contains = f.popup.contains.bind(f.popup);
+  f.popup.contains = node => {
+    assert.notEqual(node, f.window, 'DOM contains accepts Nodes, not the Window resize target');
+    return contains(node);
+  };
   open(f);
   send(f.window, 'resize');
   send(f.window, 'resize');

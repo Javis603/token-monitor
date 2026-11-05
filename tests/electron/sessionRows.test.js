@@ -1369,7 +1369,7 @@ test('group sections keep main continuations above children without changing usa
       return this.selectors.get(selector);
     }
   });
-  const els = { breakdown: node(), sessionDetail: node(), sessionDetailHead: node() };
+  const els = { sessionToolFilter: node(), breakdown: node(), sessionDetail: node(), sessionDetailHead: node() };
   const render = Function('els', 'document', 't', 'closeSessionDetail', 'bindHoverMarquee',
     'detailNote', 'formatNumber', 'formatCost', 'sessionGroupRunNode', `${body}\nreturn renderSessionGroupDetail;`)(
     els, { createElement: node }, key => ({ 'sessions.mainSession': '主會話', 'sessions.subagent': '子代理' })[key] || key,

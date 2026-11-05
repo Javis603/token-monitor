@@ -197,6 +197,7 @@ const {
   toolIconsEnabled
 } = breakdownRenderPolicyApi;
 const deviceBreakdownApi = window.TokenMonitorDeviceBreakdown;
+const deviceIconsApi = window.TokenMonitorDeviceIcons;
 const toolDetailsApi = window.TokenMonitorToolDetails;
 const usageAttributionRowsApi = window.TokenMonitorUsageAttributionRows;
 const projectRowsApi = window.TokenMonitorProjectRows;
@@ -368,6 +369,7 @@ state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
 state.periodMenuOpen = false;
+state.sessionToolFilter = '';
 state.sessionPage = 0;
 state.sessionPagerSignature = '';
 let directBreakdownOverride = null;
@@ -387,8 +389,9 @@ const pendingSettingsPatches = new Set();
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
+let viewSwitcherRenderKey = '';
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), sessionToolFilter: document.getElementById('sessionToolFilter'), sessionToolFilterItems: document.getElementById('sessionToolFilterItems'), sessionToolPrevious: document.getElementById('sessionToolPrevious'), sessionToolNext: document.getElementById('sessionToolNext'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
@@ -481,6 +484,8 @@ Object.assign(els, {
   syncConnectionCancel: document.getElementById('syncConnectionCancel'),
   syncConnectionSaveError: document.getElementById('syncConnectionSaveError'),
   syncDeviceSettings: document.getElementById('syncDeviceSettings'),
+  deviceIconInput: document.getElementById('deviceIconInput'),
+  deviceIconLocalRow: document.getElementById('deviceIconLocalRow'),
   syncUploadIntervalRow: document.getElementById('syncUploadIntervalRow'),
   hubHostFields: document.getElementById('hubHostFields'),
   hubPortInput: document.getElementById('hubPortInput'),
@@ -645,6 +650,9 @@ const syncModeSelect = window.TokenMonitorSelectControl?.enhance(els.hubModeOpti
   getOptionMeta: option => ({ description: t(SYNC_MODE_DESCRIPTIONS[option.value]), icon: syncModeIcons[option.value] })
 });
 window.addEventListener('unload', () => syncModeSelect?.destroy(), { once: true });
+window.addEventListener('unload', () => {
+  for (const select of document.querySelectorAll('.device-icon-select, #deviceIconInput')) deviceIconsApi.destroyDeviceIconSelect(select);
+}, { once: true });
 
 function toggleAccordionRow(row) {
   const isExpanded = row.classList.contains('expanded');
@@ -753,6 +761,8 @@ const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
     console.log(`[codex] post-switch update failed: ${error?.message || error}`);
   }
 });
+
+window.TokenMonitorContentBlur.create({ document, window, root: els.shell });
 
 const diagnosticsPanel = window.TokenMonitorDiagnosticsPanel?.createDiagnosticsPanel({
   api: window.tokenMonitor,
@@ -2363,7 +2373,7 @@ function rowTemplate(rowData) {
   // `.row-live` is absolutely positioned over the mark's corner and `.row-context`
   // is the third metrics line; both stay empty and hidden on every row that is
   // not a live session, so the shared template keeps building one shape.
-  row.innerHTML = `<div class="row-head"><div class="row-name"><span class="row-mark"></span><span class="row-live" aria-hidden="true">${rowLiveMarkup}</span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div><div class="row-context hidden"><span class="row-context-meter"><span class="row-context-fill"></span></span><span class="row-context-value"></span></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>`;
+  row.innerHTML = `<div class="row-head"><div class="row-name"><span class="row-mark"></span><span class="row-live" aria-hidden="true">${rowLiveMarkup}</span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-device hidden"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div><div class="row-context hidden"><span class="row-context-meter"><span class="row-context-fill"></span></span><span class="row-context-value"></span></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>`;
   row.querySelector('.row-title').textContent = name;
   row.querySelector('.row-subtitle').textContent = subtitle || '';
   row.querySelector('.row-activity').textContent = activity || '';
@@ -2371,6 +2381,7 @@ function rowTemplate(rowData) {
   bindHoverMarquee(row.querySelector('.row-title'));
   bindHoverMarquee(row.querySelector('.row-subtitle'));
   bindHoverMarquee(row.querySelector('.row-activity'));
+  bindHoverMarquee(row.querySelector('.row-device'));
   bindHoverMarquee(row.querySelector('.row-detail'));
   return row;
 }
@@ -2756,7 +2767,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, activity, detail, value, cost, unpricedTokens, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, clientLabel, sourceDevice, kind, modelSource, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, titleModelLabel, reasoningEffort, tokenDataUnavailable, sessionDetailAvailable, sessionGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2810,10 +2821,15 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
       content.replaceChildren(subtitleTextEl, count);
       bindHoverMarquee(subtitleTextEl);
     }
-    subtitleEl.querySelector('.session-subagent-count').textContent = `${subtitleIdentity ? ' · ' : ''}${subagentCountLabel}`;
+  }
+  const subtitleText = sessionRowsApi.sessionSubtitleForDisplay(
+    { client, clientLabel }, splitSubtitle ? subtitleIdentity || '' : subtitle,
+    { keepClient: iconKind.kind !== 'icon' }
+  );
+  if (splitSubtitle) {
+    subtitleEl.querySelector('.session-subagent-count').textContent = `${subtitleText ? ' · ' : ''}${subagentCountLabel}`;
     overflowText.update(subtitleEl);
   }
-  const subtitleText = splitSubtitle ? subtitleIdentity || '' : subtitle;
   // A multi-model session abbreviates to "N models"; that label opens the same
   // tooltip the context gauge carries, one row per model with its tokens and
   // share of the session. A titled row prints the label inside the
@@ -2847,12 +2863,29 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   if (!subtitleShowsModel && !titleModelLabel && hasMetadata && metadataLabel && String(name || '').endsWith(metadataLabel)) {
     replaceMetadata(titleEl, name, name.length - metadataLabel.length);
   }
-  subtitleEl.classList.toggle('hidden', !subtitle);
+  subtitleEl.classList.toggle('hidden', !subtitleText && !subagentCountLabel);
   // The activity line carries time, calls, cache hit and tok/s; a narrow window
   // fades and scrolls it on hover the way the title does rather than wrapping.
   const activityEl = row.querySelector('.row-activity');
   setHoverMarqueeText(activityEl, activity);
   activityEl.classList.toggle('hidden', !activity);
+  // Local sessions keep their usual density; only a confirmed remote source
+  // adds a separate line below the session's activity.
+  const deviceEl = row.querySelector('.row-device');
+  const remoteDevice = state.settings?.deviceId && sourceDevice?.deviceId
+    && sourceDevice.deviceId !== state.settings.deviceId && sourceDevice.name ? sourceDevice : null;
+  setHoverMarqueeText(deviceEl, remoteDevice?.name || '');
+  deviceEl.classList.toggle('hidden', !remoteDevice);
+  if (remoteDevice) {
+    const deviceKind = deviceIconsApi.deviceIconKind(state.settings, remoteDevice);
+    const content = deviceEl.querySelector('.overflow-text-content') || deviceEl;
+    const existingIcon = content.querySelector('.device-kind-icon');
+    const icon = existingIcon || deviceIconsApi.deviceIconNode(document, deviceKind);
+    icon.className = `device-kind-icon device-kind-${deviceKind}`;
+    limitWindowsView.setDetailTooltip(icon, [{ full: `${remoteDevice.name} · ${t(`devices.kind.${deviceKind}`)}` }]);
+    if (!existingIcon) content.prepend(icon);
+    overflowText.update(deviceEl);
+  }
   // A titled session already has name, client/model and activity lines. Move
   // its ID into Details, but keep the ID when only two lines remain so untitled
   // sessions can still be distinguished (including when titles are disabled).
@@ -3037,8 +3070,79 @@ function renderSessionPager(page) {
   pager.querySelector('.session-page-status').textContent = t('sessions.pageRange', page);
 }
 
+function updateSessionToolScrollButtons() {
+  const strip = els.sessionToolFilterItems;
+  const overflow = strip.scrollWidth > strip.clientWidth + 1;
+  els.sessionToolFilter.classList.toggle('has-overflow', overflow);
+  els.sessionToolPrevious.disabled = !overflow || strip.scrollLeft <= 1;
+  els.sessionToolNext.disabled = !overflow || strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 1;
+}
+
+function scrollSessionTools(direction) {
+  els.sessionToolFilterItems.scrollBy({
+    left: direction * els.sessionToolFilterItems.clientWidth * 0.75,
+    behavior: prefersReducedMotion() ? 'instant' : 'smooth'
+  });
+}
+
+function sessionToolClients(row) {
+  if (row.kind !== 'session' && row.kind !== 'summary') return [];
+  return [row.client, ...(row.groupRows || []).map(member => member.client)].filter(Boolean);
+}
+
+// Filter only the session list; shared projections also feed Home and details.
+function renderSessionToolFilter(rows) {
+  const host = els.sessionToolFilter;
+  const strip = els.sessionToolFilterItems;
+  const clients = [...new Set(rows.flatMap(sessionToolClients))];
+  clients.sort((a, b) => KNOWN_CLIENTS.findIndex(client => client.id === a) - KNOWN_CLIENTS.findIndex(client => client.id === b) || a.localeCompare(b));
+  if (state.sessionToolFilter && (clients.length < 2 || !clients.includes(state.sessionToolFilter))) {
+    state.sessionToolFilter = '';
+    state.sessionPage = 0;
+  }
+  host.classList.toggle('hidden', clients.length < 2);
+  host.setAttribute('aria-label', t('sessions.filterTools'));
+  els.sessionToolPrevious.setAttribute('aria-label', t('sessions.toolsPrevious'));
+  els.sessionToolNext.setAttribute('aria-label', t('sessions.toolsNext'));
+  const signature = JSON.stringify([currentLocale(), clients, state.sessionToolFilter]);
+  if (host.dataset.signature !== signature) {
+    host.dataset.signature = signature;
+    const focused = strip.contains(document.activeElement) ? document.activeElement.dataset.client : null;
+    const buttons = ['', ...clients].map(client => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'session-tool-filter-button';
+      button.dataset.client = client;
+      const label = client ? clientLabels[client] || client : t('sessions.allTools');
+      button.setAttribute('aria-label', label);
+      button.setAttribute('aria-pressed', String(state.sessionToolFilter === client));
+      if (client && clientsWithIcon.has(client)) {
+        const icon = document.createElement('span');
+        icon.className = `row-icon row-icon-${client}`;
+        icon.setAttribute('aria-hidden', 'true');
+        button.append(icon);
+      } else {
+        button.textContent = label;
+      }
+      button.addEventListener('click', () => {
+        state.sessionToolFilter = state.sessionToolFilter === client ? '' : client;
+        state.sessionPage = 0;
+        state.rowSignature = '';
+        els.breakdown.scrollTop = 0;
+        render();
+      });
+      return button;
+    });
+    strip.replaceChildren(...buttons);
+    if (focused !== null) buttons.find(button => button.dataset.client === focused)?.focus({ preventScroll: true });
+  }
+  updateSessionToolScrollButtons();
+  return state.sessionToolFilter ? rows.filter(row => sessionToolClients(row).includes(state.sessionToolFilter)) : rows;
+}
+
 function renderRows(rows, { incompleteHint = '' } = {}) {
   if (sessionTooltipShouldHoldRender()) return;
+  if (state.breakdown === 'session') rows = renderSessionToolFilter(rows);
   if (rows.length === 0 && !incompleteHint) {
     els.breakdown.replaceChildren();
     renderSessionPager(null);
@@ -3071,6 +3175,8 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     currencyRatesEffective: state.settings?.currencyRatesEffective || null,
     locale: currentLocale(),
     showToolIcons: toolIconsEnabled(state.settings?.showToolIcons),
+    deviceIconOverrides: state.settings?.deviceIconOverrides,
+    deviceIconScope: state.settings?.deviceIconScope,
     // The context gauge carries its own Remaining/Used preference, so flipping
     // either it or the limits meters has to invalidate these rows.
     showLimitUsed: state.settings?.showLimitUsed === true,
@@ -3271,6 +3377,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 }
 
 function sessionPresentationOptions() {
+  const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
     clientLabels,
     clientColors,
@@ -3283,6 +3390,8 @@ function sessionPresentationOptions() {
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
+    localSourceDevice: localDevice ? { deviceId: localDevice.deviceId,
+      name: deviceBreakdownApi.deviceLabel(localDevice), platform: localDevice.platform || '', deviceKind: localDevice.deviceKind || 'computer' } : undefined,
     subagents: {
       countLabel: (count) => t('sessions.subagentCount', { count }),
       unattributedLabel: t('dashboard.tooltip.unclassified')
@@ -4505,7 +4614,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.is-hover-reading, .detail-heading.is-hover-reading, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-panel:not(.hidden) .home-session-row .is-hover-reading, .home-panel:not(.hidden) .home-session-meta .limit-detail-tooltip-wrap:hover, .home-panel:not(.hidden) .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.is-hover-reading, .detail-heading.is-hover-reading, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -4539,8 +4648,33 @@ const { limitWindowText } = window.TokenMonitorLimitWindowText;
 // so its card is the same DOM rather than a second rendering of the same data.
 // Everything the builder needs from this page is handed over here; it reads no
 // globals of its own.
+let limitsHistoryOpen = false;
+let limitsHistoryActiveKey = '';
+document.addEventListener('pointerdown', event => {
+  if (limitsHistoryOpen && !event.target.closest('[data-limit-history]')) window.tokenMonitor.limits.closeHistory();
+}, true);
+window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
+  limitsHistoryOpen = open === true;
+  limitsHistoryActiveKey = limitsHistoryOpen ? key : '';
+  for (const row of document.querySelectorAll('[data-limit-history]')) {
+    row.classList.toggle('is-history-active', row.dataset.limitHistory === limitsHistoryActiveKey);
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || !limitsHistoryOpen) return;
+  event.preventDefault();
+  window.tokenMonitor.limits.closeHistory();
+}, true);
+
 const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
   document,
+  history: window.tokenMonitor?.limits?.openHistory ? {
+    key: window.TokenMonitorLimitsHistoryIdentity.historyRowKey,
+    activeKey: () => limitsHistoryActiveKey,
+    open: (key, rect, interactive) => window.tokenMonitor.limits.openHistory(key, rect, interactive),
+    enter: key => window.tokenMonitor.limits.enterHistory(key),
+    leave: key => window.tokenMonitor.limits.leaveHistory(key)
+  } : null,
   t,
   settings: () => state.settings,
   currentLocale,
@@ -4874,6 +5008,7 @@ function renderLimits() {
     settings: [
       state.settings?.showLimitSource === true,
       state.settings?.maskLimitAccountEmails === true,
+      state.settings?.limitsHistoryOpenMode,
       state.settings?.showLimitUsed === true,
       state.settings?.showToolIcons !== false,
       state.settings?.claudePrepaidBalanceEnabled !== false,
@@ -4988,7 +5123,8 @@ function serviceStatusIconId(id) {
 function renderServiceStatus() {
   if (!serviceStatusSurfaceVisible()) return;
   if (!els.serviceStatusPanel) return;
-  const rows = serviceStatusRows().map((provider) => {
+  const rows = serviceStatusRows().map((source) => {
+    const provider = serviceStatusPresentationApi.localizeProvider(source, currentLocale());
     const row = document.createElement('button');
     row.type = 'button';
     row.className = `service-status-row service-status-${provider.status || 'unknown'}`;
@@ -5259,6 +5395,7 @@ function sessionDetailBack() {
 }
 
 function renderSessionDetail({ detail, loading, error, preserveScroll = false } = {}) {
+  els.sessionToolFilter.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
@@ -5478,6 +5615,7 @@ function sessionGroupRunNode(row, max, parent) {
 }
 
 function renderSessionGroupDetail(request) {
+  els.sessionToolFilter.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
@@ -5811,6 +5949,10 @@ function viewLabelById(id) {
 
 function isSettingsPanelOpen() {
   return Boolean(els.settingsPanel && !els.settingsPanel.classList.contains('hidden'));
+}
+
+function isNativeWindowTransfer() {
+  return globalThis[Symbol.for('token-monitor.window-view-state')]?.transferring === true;
 }
 
 function isRendererWindowHidden() {
@@ -6176,6 +6318,8 @@ function setPeriodMenuOpen(open, { restoreFocus = false, focus = '' } = {}) {
   state.periodMenuOpen = Boolean(open);
   els.monthPeriodMenu?.closest('.titlebar')?.classList.toggle('period-menu-open', state.periodMenuOpen);
   els.monthPeriodMenu?.classList.toggle('hidden', !state.periodMenuOpen);
+  if (state.periodMenuOpen) els.monthPeriodMenu?.showPopover();
+  else els.monthPeriodMenu?.hidePopover();
   els.monthPeriodTab?.setAttribute('aria-expanded', String(state.periodMenuOpen));
   for (const button of periodMenuButtons()) {
     button.tabIndex = state.periodMenuOpen && button.classList.contains('is-current') ? 0 : -1;
@@ -6266,16 +6410,21 @@ function updateViewSwitcherOpenState({ focusMenu = false, focusDisclosure = fals
   const menu = els.viewSwitcher.querySelector('#viewSwitcherMenu');
   const disclosure = els.viewSwitcher.querySelector('.view-switcher-disclosure');
   if (!menu || !disclosure) return false;
+  const wasOpen = menu.matches(':popover-open');
 
   els.viewSwitcher.classList.toggle('is-open', state.viewSwitcherOpen);
   els.viewSwitcher.classList.toggle('has-opened', state.viewSwitcherHasOpened);
   disclosure.setAttribute('aria-expanded', String(state.viewSwitcherOpen));
   menu.classList.toggle('hidden', !state.viewSwitcherOpen);
+  if (state.viewSwitcherOpen !== wasOpen) {
+    if (state.viewSwitcherOpen) menu.showPopover();
+    else menu.hidePopover();
+  }
   menu.setAttribute('aria-hidden', String(!state.viewSwitcherOpen));
   for (const item of menu.querySelectorAll('.view-switcher-menu-item')) {
     item.tabIndex = state.viewSwitcherOpen && item.classList.contains('is-current') ? 0 : -1;
   }
-  if (state.viewSwitcherOpen) requestAnimationFrame(() => menu.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' }));
+  if (state.viewSwitcherOpen && (!wasOpen || focusMenu)) requestAnimationFrame(() => menu.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' }));
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
   if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
   if (visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed) {
@@ -6300,6 +6449,12 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   const currentLabel = viewLabelById(currentId);
   const nextId = nextBreakdown(currentId);
   const nextLabel = viewLabelById(nextId);
+  const renderKey = JSON.stringify([currentId, order.map(id => [id, viewLabelById(id)]),
+    pluginPageOptions().map(page => [page.id, page.icon, page.identityIcon]),
+    t('views.switcher.choose'), t('views.switcher.next', { view: nextLabel })]);
+  // Usage pushes repaint the page without changing navigation. Keep the same
+  // popover/rows so hover, focus, scroll and its entry animation survive them.
+  if (renderKey === viewSwitcherRenderKey && updateViewSwitcherOpenState({ focusMenu, focusDisclosure })) return;
 
   const current = document.createElement('button');
   current.type = 'button';
@@ -6356,6 +6511,7 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
 
   const menu = document.createElement('div');
   menu.id = 'viewSwitcherMenu';
+  menu.setAttribute('popover', 'manual');
   menu.className = `view-switcher-menu${state.viewSwitcherOpen ? '' : ' hidden'}`;
   menu.setAttribute('role', 'menu');
   menu.setAttribute('aria-label', t('views.switcher.choose'));
@@ -6405,6 +6561,8 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
   els.viewSwitcher.classList.toggle('is-open', state.viewSwitcherOpen);
   els.viewSwitcher.classList.toggle('has-opened', state.viewSwitcherHasOpened);
   els.viewSwitcher.replaceChildren(current, disclosure, menu);
+  viewSwitcherRenderKey = renderKey;
+  if (state.viewSwitcherOpen) menu.showPopover();
   if (state.viewSwitcherOpen) requestAnimationFrame(() => menu.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' }));
   if (focusMenu) requestAnimationFrame(() => menu.querySelector('.is-current')?.focus());
   if (focusDisclosure) requestAnimationFrame(() => disclosure.focus());
@@ -7635,6 +7793,7 @@ function renderAppContent() {
     return;
   }
   ensureBreakdownVisible();
+  if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
   if (pluginPage) {
@@ -7679,6 +7838,7 @@ function renderAppContent() {
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
+    els.sessionToolFilter.classList.add('hidden');
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
     updateTotalCompact(fixedUnavailable ? 0 : Number(period.totalTokens || 0));
@@ -8152,7 +8312,7 @@ function applyAppearanceSettings(settings) {
   }
   if (els.windowsBackdropNote) {
     const accentFallback = windowsGlass.showAccentNote
-      && new URLSearchParams(window.location.search).get('windowsBackdropFallback') === '1';
+      && (settings?.windowsBackdropFallback ?? state.settings?.windowsBackdropFallback) === true;
     els.windowsBackdropNote.textContent = t(accentFallback
       ? 'settings.appearance.windowsBackdropFallback'
       : 'settings.appearance.windowsBackdropNote');
@@ -8705,7 +8865,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   }
   if (options.renderContent === false) return;
   if (wasCollapsed && !state.floatingBubble.collapsed) {
-    if (isSettingsPanelOpen()) syncSettingsForm();
+    if (isSettingsPanelOpen() && !isNativeWindowTransfer()) syncSettingsForm();
     renderStatsUpdate();
   } else {
     renderFloatingBubbleContent();
@@ -9188,6 +9348,8 @@ function renderSyncPanel() {
   const hubMode = state.settings?.hubMode || 'local';
   const shared = SHARED_SYNC_MODES.has(hubMode)
     && (hubMode !== 'icloud' || state.appInfo?.platform === 'darwin');
+  if (els.deviceIconLocalRow) els.deviceIconLocalRow.hidden = shared && state.mode === 'sync'
+    && state.stats?.devices?.some(device => device.deviceId === state.settings?.deviceId);
   els.syncDevicePanel.hidden = !shared;
   if (!shared) {
     syncPanelRows = [];
@@ -9281,6 +9443,7 @@ function renderSyncPanelDevices(rows) {
     state.settings?.hubHostPort, state.settings?.hubHostSecret
   ]);
   if (scope !== syncPanelListScope) {
+    for (const select of list.querySelectorAll('.device-icon-select')) deviceIconsApi.destroyDeviceIconSelect(select);
     for (const remove of list.querySelectorAll('.device-delete-button')) resetDeviceDeleteConfirmation(remove);
     list.replaceChildren();
     syncPanelListScope = scope;
@@ -9289,6 +9452,8 @@ function renderSyncPanelDevices(rows) {
   const wanted = new Set(rows.map(row => row.key));
   for (const [key, item] of existing) {
     if (wanted.has(key)) continue;
+    const select = item.querySelector('.device-icon-select');
+    if (select) deviceIconsApi.destroyDeviceIconSelect(select);
     const remove = item.querySelector('.device-delete-button');
     if (remove) resetDeviceDeleteConfirmation(remove);
     item.remove();
@@ -9353,8 +9518,20 @@ function syncDeviceRow(row) {
   return item;
 }
 
+let deviceIconSave = Promise.resolve();
+function saveDeviceIcon(deviceId, kind, detectedKind) {
+  const scope = state.settings.deviceIconScope || 'local';
+  const save = deviceIconSave.then(() => saveSettings(deviceIconsApi.deviceIconPatch(
+    { ...state.settings, deviceIconScope: scope }, deviceId, kind, detectedKind
+  )));
+  deviceIconSave = save.catch(() => {});
+  return save;
+}
+
 function updateSyncDeviceRow(item, row) {
+  const iconKind = deviceIconsApi.deviceIconKind(state.settings, { ...row, deviceId: row.key });
   const signature = JSON.stringify([
+    iconKind, row.deviceKind, deviceIconsApi.deviceIconOverride(state.settings, row.key), state.settings?.deviceIconScope,
     currentLocale(), row.name, row.hostname, row.platform, row.osName, row.osVersion,
     row.agentVersion, row.agentRuntime, row.isLocal, row.stale, row.canRemove,
     devicesBeingDeleted.has(row.key), Boolean(window.tokenMonitor.deleteDevice)
@@ -9383,6 +9560,29 @@ function updateSyncDeviceRow(item, row) {
     [deviceRuntimeLabel(row.agentRuntime), row.agentVersion ? `v${row.agentVersion}` : ''].filter(Boolean).join(' ')
   ].filter(Boolean).join(' · ');
   const side = item.querySelector('.sync-device-side');
+  let iconSelect = item.querySelector('.device-icon-select');
+  if (!iconSelect) {
+    const control = document.createElement('span');
+    control.className = 'sync-device-icon-control';
+    iconSelect = document.createElement('select');
+    iconSelect.className = 'device-icon-select';
+    iconSelect.addEventListener('change', async () => {
+      iconSelect.disabled = true;
+      deviceIconsApi.syncDeviceIconSelect(iconSelect);
+      try { await saveDeviceIcon(row.key, iconSelect.value, iconSelect.dataset.detectedKind); }
+      finally {
+        iconSelect.disabled = false;
+        iconSelect.value = deviceIconsApi.deviceIconKind(state.settings, { deviceId: row.key, deviceKind: iconSelect.dataset.detectedKind });
+        deviceIconsApi.syncDeviceIconSelect(iconSelect);
+      }
+    });
+    control.append(iconSelect);
+    title.append(control);
+  }
+  iconSelect.setAttribute('aria-label', `${t('devices.icon.label')} · ${row.name}`);
+  deviceIconsApi.populateDeviceIconSelect(iconSelect, t, row.deviceKind);
+  iconSelect.value = iconKind;
+  deviceIconsApi.syncDeviceIconSelect(iconSelect);
   let remove = side.querySelector('.device-delete-button');
   if (row.canRemove && row.stale && !row.isLocal && window.tokenMonitor.deleteDevice) {
     if (!remove) {
@@ -9699,6 +9899,13 @@ function syncHubDraftFields() {
   }
   syncHubConnectionUi();
   syncHubSaveButton();
+  const iconSelect = els.deviceIconInput;
+  if (iconSelect && !iconSelect.disabled) {
+    const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
+    deviceIconsApi.populateDeviceIconSelect(iconSelect, t, localDevice?.deviceKind);
+    iconSelect.value = deviceIconsApi.deviceIconKind(state.settings, { deviceId: state.settings?.deviceId, deviceKind: localDevice?.deviceKind });
+    deviceIconsApi.syncDeviceIconSelect(iconSelect);
+  }
 }
 
 // Keep this aligned with main's normalizeHubPort: dirty state must describe
@@ -10085,7 +10292,7 @@ function applyPreferenceOrder(kind, order) {
     if (!row) continue;
     list.appendChild(row);
     const companionId = kind === 'view'
-      ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
+      ? ({ home: 'homeSettingsContainer', limits: 'limitsViewSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
       : kind === 'homeModule'
         ? HOME_MODULE_SUBGROUPS[id]?.[1]
         : '';
@@ -10117,6 +10324,7 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
 }
 
 const VIEW_PREFERENCE_SUBGROUPS = {
+  limits: ['limitsViewSettingsExpanded', 'limitsViewSettingsContainer'],
   home: ['homeSettingsExpanded', 'homeSettingsContainer'],
   trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
   project: ['projectSettingsExpanded', 'projectSettingsContainer'],
@@ -10323,6 +10531,29 @@ function renderViewPreferences() {
     row.append(name, actions);
     row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
     els.viewDisplayList.appendChild(row);
+    if (id === 'limits') {
+      row.classList.add('has-subgroup');
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = `view-subgroup-toggle${state.limitsViewSettingsExpanded ? ' is-expanded' : ''}`;
+      toggle.setAttribute('aria-label', t('settings.views.configureLimits', { name: label }));
+      toggle.setAttribute('aria-expanded', String(Boolean(state.limitsViewSettingsExpanded)));
+      const toggleIcon = document.createElement('span');
+      toggleIcon.className = 'view-subgroup-icon';
+      toggleIcon.setAttribute('aria-hidden', 'true');
+      toggle.append(toggleIcon);
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
+      actions.insertBefore(toggle, visibility);
+
+      const listContainer = document.createElement('div');
+      listContainer.id = 'limitsViewSettingsContainer';
+      listContainer.className = `accordion-animated-container${state.limitsViewSettingsExpanded ? '' : ' hidden'}`;
+      const inner = document.createElement('div');
+      inner.className = 'accordion-animation-inner';
+      inner.appendChild(renderLimitsViewSettingsList());
+      listContainer.appendChild(inner);
+      els.viewDisplayList.appendChild(listContainer);
+    }
     if (id === 'home') {
       row.classList.add('has-subgroup');
       const toggle = document.createElement('button');
@@ -10775,6 +11006,35 @@ function renderHomeActivitySettings() {
   frag.append(daysRow);
 
   return frag;
+}
+
+function renderLimitsViewSettingsList() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const row = document.createElement('label');
+  row.className = 'settings-item';
+  const text = document.createElement('span');
+  text.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('limits.history.openMode');
+  text.appendChild(title);
+  const input = document.createElement('select');
+  input.id = 'limitsHistoryOpenModeInput';
+  for (const [value, key] of [['hover', 'openModeHover'], ['click', 'openModeClick'], ['off', 'openModeOff']]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = t(`limits.history.${key}`);
+    input.appendChild(option);
+  }
+  input.value = state.settings?.limitsHistoryOpenMode || 'hover';
+  input.addEventListener('change', async () => {
+    await saveSettings({ limitsHistoryOpenMode: input.value });
+    renderLimits();
+  });
+  row.append(text, input);
+  wrap.appendChild(row);
+  return wrap;
 }
 
 function renderTrendSettingsList() {
@@ -12513,6 +12773,11 @@ const LIMIT_PROVIDER_SETTINGS = {
     descKey: 'settings.limits.prepaidBalanceDesc',
     requiresConfiguredKey: 'claudeWebCookieConfigured',
     defaultValue: true
+  }, {
+    key: 'claudeCliFallbackEnabled',
+    titleKey: 'settings.limits.claudeCliFallback',
+    descKey: 'settings.limits.claudeCliFallbackDesc',
+    defaultValue: true
   }],
   codex: [{
     key: 'codexResetForecastEnabled',
@@ -13832,6 +14097,13 @@ for (const [field, inputId] of HUB_DRAFT_FIELDS) {
 els.syncUploadIntervalInput?.addEventListener('change', async () => {
   await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });
 });
+els.deviceIconInput?.addEventListener('change', async event => {
+  const select = event.currentTarget;
+  select.disabled = true;
+  deviceIconsApi.syncDeviceIconSelect(select);
+  try { await saveDeviceIcon(state.settings.deviceId, select.value, select.dataset.detectedKind); }
+  finally { select.disabled = false; syncHubDraftFields(); }
+});
 els.collectionCadenceInput?.addEventListener('change', async () => {
   const value = els.collectionCadenceInput.value;
   await saveSettings({
@@ -14015,6 +14287,11 @@ for (const input of els.reduceMotionInputs || []) {
   });
 }
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
+els.sessionToolFilterItems.addEventListener('scroll', updateSessionToolScrollButtons, { passive: true });
+els.sessionToolPrevious.addEventListener('click', () => scrollSessionTools(-1));
+els.sessionToolNext.addEventListener('click', () => scrollSessionTools(1));
+new ResizeObserver(updateSessionToolScrollButtons).observe(els.sessionToolFilterItems);
+
 els.toolIconsInput.addEventListener('change', async () => {
   state.settings.showToolIcons = els.toolIconsInput.checked;
   renderHomeIfVisible();
@@ -14704,7 +14981,7 @@ function handleWindowVisibilityChange() {
     void refreshHubBuildStatus();
   }
   const settingsVisible = isSettingsSurfaceVisible();
-  if (settingsVisible || settingsDomSyncPending) syncSettingsForm();
+  if (settingsDomSyncPending || (settingsVisible && !isNativeWindowTransfer())) syncSettingsForm();
   statsRenderScheduler.flush();
   if (settingsVisible) {
     renderConnectionStatus();

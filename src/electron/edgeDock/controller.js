@@ -2,6 +2,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
+const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
 const {
   EDGE_DOCK_METRICS,
   createEdgeDockIntent,
@@ -45,7 +46,6 @@ const REFRESH_FADE_OUT_MS = 200;
 const FADE_STEP_MS = 16;
 const WAKE_TOPMOST_RETRY_MS = 500;
 const RAIL_MORPH_MS = 160;
-const CARD_MOVE_MS = 650;
 const CARD_FRAME_STALE_MS = 64;
 
 function edgeDockSupported(platform = process.platform) {
@@ -84,7 +84,7 @@ function createEdgeDockController(deps) {
     createGlass,
     windowsBackdrop,
     prefersReducedMotion = () => false,
-    cardSpring = { response: 0.5, damping: 0.86 },
+    cardSpring = CARD_SPRING,
     onPlacementChange,
     onWebSurfaceChanged = () => {},
     applyShapeMask,
@@ -112,6 +112,7 @@ function createEdgeDockController(deps) {
   const placed = { rail: null, bubble: null };
   const fades = new Map();
   const backdrops = new Map();
+  const backdropShapes = new WeakMap();
   const intent = createEdgeDockIntent();
   let running = false;
   let pollTimer = null;
@@ -688,18 +689,7 @@ function createEdgeDockController(deps) {
       }
     });
     if (win32 || mac) installNonActivatingInput(win);
-    if (materialKey === 'win-host') {
-      try {
-        const backdrop = windowsBackdrop.attach(win, (enabled) => {
-          if (windows[surface] !== win) return;
-          nativeMaterial[surface] = enabled;
-          render(surface);
-        });
-        backdrops.set(win, backdrop);
-      } catch (error) {
-        logger(`[edge-dock] ${surface} HostBackdrop unavailable: ${error.message}`);
-      }
-    }
+    if (materialKey === 'win-host') attachWindowsBackdrop(surface, win);
     if (mac) {
       win.setAlwaysOnTop(true, 'floating');
       win.setVisibleOnAllWorkspaces?.(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
@@ -736,6 +726,25 @@ function createEdgeDockController(deps) {
     win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface, platform } })
       .catch((error) => logger(`[edge-dock] ${surface} load failed: ${error.message}`));
     return win;
+  }
+
+  function attachWindowsBackdrop(surface, win) {
+    try {
+      let attaching = true;
+      let backdrop;
+      backdrop = windowsBackdrop.attach(win, (enabled) => {
+        if (windows[surface] !== win || (!attaching && backdrops.get(win) !== backdrop)) return;
+        nativeMaterial[surface] = enabled;
+        render(surface);
+      });
+      attaching = false;
+      backdrops.set(win, backdrop);
+      const shape = backdropShapes.get(win);
+      if (shape) backdrop.update(shape);
+      backdrop.setOpacity(win.getOpacity());
+    } catch (error) {
+      logger(`[edge-dock] ${surface} HostBackdrop unavailable: ${error.message}`);
+    }
   }
 
   function disposeGlass(surface, options) {
@@ -871,7 +880,8 @@ function createEdgeDockController(deps) {
     shapes[surface] = { key, width, height, d: toSvgPath(closed), outline: toSvgPath(outline),
       ...(surface === 'bubble' ? { contentBounds: { y: bounds.cardY, height: bounds.cardHeight },
         contentTarget: { y: bounds.contentY, height: bounds.contentHeight } } : {}) };
-    backdrops.get(win)?.update({ key, commands: closed });
+    backdropShapes.set(win, { key, commands: closed });
+    backdrops.get(win)?.update(backdropShapes.get(win));
     if (glasses[surface] && (surface !== 'peek' || peekMode === 'refresh') && shapeGlass(surface, closed, width, height)) {
       // Shaped Liquid Glass needs no mask.
     } else if (builtGlass && platform === 'darwin' && nativeMaterial[surface]) {
@@ -964,7 +974,22 @@ function createEdgeDockController(deps) {
     const materialKey = !glass ? 'none'
       : platform === 'win32' ? (windowsBackdrop ? 'win-host' : 'none')
         : platform === 'darwin' ? (liquidGlass() && createGlass ? 'mac-glass' : 'mac') : 'none';
-    if (builtMaterial === materialKey && SURFACES.every((surface) => alive(windows[surface]))) return;
+    const windowsAlive = SURFACES.every((surface) => alive(windows[surface]));
+    if (builtMaterial === materialKey && windowsAlive) return;
+    if (platform === 'win32' && windowsAlive) {
+      builtMaterial = materialKey;
+      builtGlass = materialKey !== 'none';
+      for (const surface of SURFACES) {
+        const win = windows[surface];
+        if (materialKey === 'win-host') attachWindowsBackdrop(surface, win);
+        else {
+          backdrops.get(win)?.dispose();
+          backdrops.delete(win);
+          nativeMaterial[surface] = false;
+        }
+      }
+      return;
+    }
     destroyWindows();
     builtMaterial = materialKey;
     builtGlass = materialKey !== 'none';
@@ -1175,19 +1200,7 @@ function createEdgeDockController(deps) {
     const done = elapsed >= CARD_MOVE_MS || prefersReducedMotion();
     // The silhouette and its shared content layer follow one spring.
     // Rapid retargets preserve the outline's velocity.
-    const seconds = elapsed / 1000, omega = 2 * Math.PI / cardSpring.response;
-    const decayRate = cardSpring.damping * omega, frequency = omega * Math.sqrt(1 - cardSpring.damping ** 2);
-    const decay = Math.exp(-decayRate * seconds), cosine = Math.cos(frequency * seconds), sine = Math.sin(frequency * seconds);
-    motion.frame = Object.fromEntries(motion.keys.map(key => {
-      // This is the velocity carried into this motion, not the sample written
-      // below. Re-reading the latter turns the closed-form spring into feedback.
-      const speed = motion.initialVelocity[key] || 0;
-      const displacement = motion.from[key] - motion.to[key];
-      const b = (speed + decayRate * displacement) / frequency;
-      motion.velocity[key] = done ? 0 : decay * ((frequency * b - decayRate * displacement) * cosine
-        - (frequency * displacement + decayRate * b) * sine);
-      return [key, done ? motion.to[key] : Math.round(motion.to[key] + decay * (displacement * cosine + b * sine))];
-    }));
+    advanceCardFrame(motion, elapsed, cardSpring, done);
     paintBubble(motion.frame, motion.workArea, motion.to);
     if (done) cancelBubbleMotion();
   }

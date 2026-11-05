@@ -205,6 +205,15 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('claude:setAccountEnabled', id, enabled)
   },
   limits: {
+    openHistory: (key, rect, interactive = false) => ipcRenderer.invoke('limitsHistory:open', { key, rect, interactive }),
+    enterHistory: key => ipcRenderer.send('limitsHistory:enter', key),
+    leaveHistory: key => ipcRenderer.send('limitsHistory:leave', key),
+    closeHistory: () => ipcRenderer.send('limitsHistory:close'),
+    onHistoryState: callback => {
+      const listener = (_event, open, key) => callback(open, key);
+      ipcRenderer.on('limitsHistory:state', listener);
+      return () => ipcRenderer.removeListener('limitsHistory:state', listener);
+    },
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
     listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
     clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId),

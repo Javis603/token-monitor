@@ -348,6 +348,7 @@ test('senpi watches the OmO tree and the legacy senpi root, and the agent dir re
   assert.deepEqual(clientSourceRoots('senpi', options).senpi, [
     { id: 'senpi-sessions', dir: path.join(homeDir, '.senpi', 'agent', 'sessions') },
     { id: 'senpi-omo-sessions', dir: path.join(homeDir, '.omo', 'agent', 'sessions') },
+    { id: 'senpi-omo-memory', dir: path.join(homeDir, '.omo', 'memory') },
     { id: 'senpi-task-children', dir: path.join(homeDir, '.omo', 'senpi-task', 'children') }
   ]);
   const relocated = clientSourceRoots('senpi', {
@@ -356,7 +357,7 @@ test('senpi watches the OmO tree and the legacy senpi root, and the agent dir re
   }).senpi;
   assert.equal(relocated[0].dir, path.join('/custom/senpi-agent', 'sessions'));
   assert.equal(relocated[1].dir, path.join(homeDir, '.omo', 'agent', 'sessions'));
-  assert.equal(relocated[3].dir, '/custom/sessions');
+  assert.equal(relocated.at(-1).dir, '/custom/sessions');
 });
 
 test('shared home-relative directories retain exact source roots, checks and watch candidates', () => {
@@ -399,10 +400,10 @@ test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
 });
 
 // The two self-synced caches resolve differently upstream and the difference is
-// load-bearing on Windows: cursor.rs hardcodes a home-relative literal, while
+// load-bearing on Windows without an override: Cursor stays home-relative, while
 // antigravity.rs routes through get_config_dir(). Assert both in one place so a
 // future tidy-up cannot quietly collapse them onto whichever one it noticed.
-test('the Cursor cache stays home-relative while Antigravity follows the config dir', () => {
+test('the default Cursor cache stays home-relative while Antigravity follows the config dir', () => {
   const homeDir = 'C:\\Users\\alice';
   const appData = 'C:\\Users\\alice\\AppData\\Roaming';
   const env = { APPDATA: appData };
@@ -426,7 +427,7 @@ test('the Cursor cache stays home-relative while Antigravity follows the config 
   );
 });
 
-test('TOKSCALE_CONFIG_DIR moves the Antigravity cache but not the Cursor one', () => {
+test('TOKSCALE_CONFIG_DIR moves both self-synced caches', () => {
   const homeDir = 'C:\\Users\\alice';
   const env = {
     APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
@@ -436,7 +437,7 @@ test('TOKSCALE_CONFIG_DIR moves the Antigravity cache but not the Cursor one', (
 
   assert.deepEqual(roots.cursor, [{
     id: 'tokscale-cursor-cache',
-    dir: path.join(homeDir, '.config', 'tokscale', 'cursor-cache')
+    dir: path.join(env.TOKSCALE_CONFIG_DIR, 'cursor-cache')
   }]);
   assert.deepEqual(roots.antigravity, [{
     id: 'tokscale-antigravity-cache',
@@ -641,7 +642,7 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   const ids = (client) => checks[client].map((check) => check.id);
   // The desktop and CLI databases are distinct sources, not same-kind variants:
   // both can exist at once, so each reports its own check.
-  assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-data', 'copilot-session-store', 'vscode-workspace-storage']);
+  assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-data', 'copilot-session-store', 'vscode-workspace-storage', 'vscode-empty-window-sessions']);
   assert.deepEqual(ids('zed'), ['zed-threads']);
   assert.deepEqual(ids('cline'), ['cline-tasks', 'cline-cli-sessions']);
   // The extension database is a direct parser source alongside the synced IDE

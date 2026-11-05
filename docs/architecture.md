@@ -36,7 +36,7 @@ Official and community remote plugin sources are separate host-owned definitions
 
 ## Generated and registered state
 
-Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Never edit generated Worker metadata directly.
+Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Each PR adds at most one revision per changed component, pointing to its final build; regenerate from the base branch's registry after further changes. Never edit generated Worker metadata directly.
 
 Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, lint, test and verify never download the binary. `scripts/vendor/tokscale.json` pins its provenance. Its `override`/`upstream` mode does not bypass either verification gate, and its presentation describes the declared bundle, not verification of the selected executable.
 
@@ -97,6 +97,8 @@ Archive projection can share canonical live session rows read-only while copying
 
 ## Limits collector
 
+The desktop records successful displayed quota observations in its own bounded history store; it never adds history to the wire record or probes on hover. The [quota history guide](limits-history.md) describes sampling gaps, reset boundaries and time-bucket semantics.
+
 `src/shared/usage/deviceRuntime.js` separates usage from limits. `LimitsRuntime` owns scheduling, bounded concurrency, per-provider latest-wins lanes, deadlines, backoff and last-good/last-attempt retention. Credential changes refresh only the affected lane, without restarting usage; provider exceptions are documented in their notes.
 
 - Fixed/adaptive mode is separate from the interval value. Local token usage never triggers a limits refresh, and `burn-rate` never bypasses cooldowns. Manual refresh waits for usage while limits run in the background; successful button feedback is not proof that every provider succeeded.
@@ -133,9 +135,19 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 
 `sessionTitlesEnabled` defaults on and affects Electron presentation only. `src/electron/sessionTitleDisplay.js` hides titles from snapshots, all-time pulls and detail headings without changing collection, metadata caches or local archives. Sync consent is independent, defaults off, and requires the [shared sync protocol](#shared-sync-content).
 
+## Windows document windows
+
+Windows document windows are created transparent, including when system glass is enabled. `windowsBackdrop.js` changes Acrylic, Accent and Transparent on the same native host; it clears Accent's native policy when leaving that mode and restores the transparent background after removing a system material. `setBackgroundMaterial('none')` alone does not make an opaque host transparent. The Dashboard uses `BrowserWindow`; the main widget uses `BaseWindow` with a retained `WebContentsView` (`electron/retainedWindow.js`) because floating-bubble frame changes still require a new native host. The page, drafts and renderer subscriptions survive those frame changes. Other platforms retain `BrowserWindow`.
+
+The view's current host owns its cleanup. Closing an obsolete host must not close or resize a view already transferred to its replacement. Resolve IPC senders through their current owner, count native windows with `BaseWindow.getAllWindows()`, and register page listeners once per page rather than once per host.
+
+Native reparenting can scroll a previously focused input into view. Capture focus and scroll positions inside the retained page before moving it, including scrollable containers at zero offsets, and restore before the next visible paint. Keep the expanded snapshot while a floating bubble is collapsed or awaiting its hidden host's first show; release its DOM references after the visible viewport is restored. Host replacements are serialized and superseded requests are discarded before transfer, including when an in-place expansion cancels a pending collapse. A new capture must not overwrite a viewport still awaiting restoration. If animation frames pause, an immediate page restore completes before the queue advances and cancels the old frame callback. Visibility changes during transfer must not redundantly refill settings forms and discard drafts. Ordinary hidden windows remain suspended.
+
 ## Windows Edge Dock material
 
 Windows 11 Edge Dock uses a single helper with HostBackdrop clipped to the renderer's curves; HWND-wide Acrylic/Accent cannot preserve the concave outline. Electron owns input. Native underlays stay disabled, nonactivating and directly below their content windows.
+
+Changing the Windows dock material attaches or disposes only the native underlays. Content windows and any open detail card stay alive; a callback from a disposed underlay cannot update its replacement's material state.
 
 Windows rail dragging and detail-card transitions follow renderer animation frames: a nominal 16 ms main-process timeout can round up to about 31 ms on Windows. Main still owns native cursor coordinates, placement, geometry and button-state checks; its timers and cursor polling remain fallbacks if frame delivery stops.
 
@@ -174,6 +186,8 @@ Manual device removal requires a known remote device marked stale in main's late
 - Reads, pushes and activity patches use one stamped snapshot. Concurrent pushes supersede reads only within the same Hub source/generation; reads preserve transport status. Future peer timestamps cannot beat current local activity, and later remote aggregates must not erase fresh local observations. Live status may replace archived status without replacing archived counters.
 
 **Snapshot identity.** Published records are immutable because presentation and normalization caches key on object identity. Replace objects, never mutate in place. Main composes all-time detail on demand from the requested snapshot's captured inputs: per-publish summaries omit it *before* normalization. `rendererStats()` strips device sessions/projects and all-time sessions from IPC; `stats:allTimeSessions` resolves the requested snapshot ID, retaining its source generation. Completion must never combine newer `latestStats`/`lastCollectedDevice` accounting rows with older totals or cross generations. The renderer's `allTimeSessions.attach()` reuses its previously pulled session map on newer stats from the same source until a fresh pull arrives; neither attachment nor late pull results may cross source generations. Do not widen every push for a new detail reader. Bounded local identity projections, such as Grok Bot membership, must not force all-time completion or expand the wire record. Apply title hiding after activity joins.
+
+Session device labels are a desktop presentation projection resolved from the captured device session maps before IPC strips them. All-time labels use the same captured inputs as their lazy session list; they do not add provenance to the accounting wire record or force full-history completion on every publish.
 
 ## Settings and credentials
 

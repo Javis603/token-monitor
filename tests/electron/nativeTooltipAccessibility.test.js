@@ -118,9 +118,10 @@ test('service status buttons describe their affected components', () => {
   const context = {
     document, t, state: { settings: {} }, els: { serviceStatusPanel: panel },
     serviceStatusSurfaceVisible: () => true,
-    serviceStatusRows: () => [{ id: 'openai', label: 'OpenAI', status: 'degraded' }],
+    currentLocale: () => 'en',
+    serviceStatusRows: () => [{ id: 'openai', label: 'OpenAI', status: 'degraded', incidentTitle: 'Incident', componentIssues: [{ name: 'API' }, { name: 'ChatGPT' }] }],
     serviceStatusLabel: () => 'Degraded', serviceStatusMeta: () => '2 components',
-    serviceStatusPresentationApi: { statusHeadline: () => 'Incident', affectedComponentNames: () => ({ all: ['API', 'ChatGPT'] }) }
+    serviceStatusPresentationApi: require('../../src/electron/renderer/serviceStatusPresentation')
   };
   // The source boundary also includes the next async function's prefix.
   const source = section(app, 'renderServiceStatus', 'refreshServiceStatus').replace(/async\s*$/, '');
@@ -129,6 +130,33 @@ test('service status buttons describe their affected components', () => {
   assert.ok(button.getAttribute('aria-description').includes(t('serviceStatus.openPage', { name: 'OpenAI' })));
   assert.ok(button.getAttribute('aria-description').includes('API'));
   assert.ok(button.getAttribute('aria-description').includes('ChatGPT'));
+});
+
+test('DeepSeek rerenders its headline and accessible component names after a language switch', () => {
+  const panel = new Element();
+  let locale = 'zh-CN';
+  const context = {
+    document, t, state: { settings: {} }, els: { serviceStatusPanel: panel },
+    currentLocale: () => locale,
+    serviceStatusSurfaceVisible: () => true,
+    serviceStatusRows: () => [{
+      id: 'deepseek', label: 'DeepSeek', status: 'outage',
+      incidentTitle: 'DeepSeek 网页/API 部分中断（DeepSeek Web/API Partially Unavailable）',
+      componentIssues: [{ name: 'DeepSeek V4 Pro API服务(API Service)' }]
+    }],
+    serviceStatusLabel: () => 'Outage', serviceStatusMeta: () => '1 component',
+    serviceStatusPresentationApi: require('../../src/electron/renderer/serviceStatusPresentation')
+  };
+  const source = section(app, 'renderServiceStatus', 'refreshServiceStatus').replace(/async\s*$/, '');
+  const render = () => vm.runInNewContext(`${source}\nrenderServiceStatus();`, context);
+  render();
+  assert.equal(panel.querySelectorAll('.service-status-description')[0].textContent, 'DeepSeek 网页/API 部分中断');
+  assert.match(panel.children[0].getAttribute('aria-description'), /DeepSeek V4 Pro API服务/);
+  locale = 'zh-TW';
+  render();
+  assert.equal(panel.querySelectorAll('.service-status-description')[0].textContent, 'DeepSeek Web/API Partially Unavailable');
+  assert.match(panel.children[0].getAttribute('aria-description'), /DeepSeek V4 Pro API Service/);
+  assert.doesNotMatch(panel.children[0].getAttribute('aria-description'), /服务/);
 });
 
 test('named Dock session states are exposed while quiet decorations stay hidden', () => {
