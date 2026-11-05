@@ -138,6 +138,48 @@ function fetchJsonWithDeadline(url, init, deps = {}) {
   );
 }
 
+// The credit balance is the sum of grant packs (welcome offer, daily check-in,
+// monthly login, student verification…), and the web dashboard shows exactly
+// that breakdown. The API returns one entry per pack — 14 identical "签到奖励"
+// rows in practice — so aggregate by name before it becomes a tooltip.
+function creditGrantRows(packs) {
+  const byName = new Map();
+  for (const pack of Array.isArray(packs) ? packs : []) {
+    if (!pack || pack.is_hide === true) continue;
+    const quota = pack.quota || pack.entitlement_base_info?.quota || {};
+    const limit = Number(quota.credits_limit);
+    if (!Number.isFinite(limit) || limit <= 0) continue;
+    const usedRaw = Number(pack?.usage?.credits_amount);
+    const used = Number.isFinite(usedRaw) ? usedRaw : 0;
+    const remaining = Math.max(0, limit - used);
+    if (remaining <= 0) continue;
+    const name = String(pack.display_desc || pack.group_name || '').trim().slice(0, 24);
+    if (!name) continue;
+    const exp = Number(pack.expire_time);
+    const expiresAt = Number.isFinite(exp) && exp > 0 ? exp * 1000 : null;
+    const entry = byName.get(name);
+    if (!entry) {
+      byName.set(name, { limit, remaining, expiresAt, count: 1 });
+      continue;
+    }
+    entry.limit += limit;
+    entry.remaining += remaining;
+    entry.count += 1;
+    if (expiresAt !== null && (entry.expiresAt === null || expiresAt < entry.expiresAt)) entry.expiresAt = expiresAt;
+  }
+  const amount = (value) => value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const rows = [...byName.entries()]
+    .sort(([, a], [, b]) => (a.expiresAt || Infinity) - (b.expiresAt || Infinity))
+    .map(([name, entry]) => {
+      const date = entry.expiresAt === null
+        ? ''
+        : new Date(entry.expiresAt).toISOString().slice(0, 10);
+      const label = entry.count > 1 ? `${name} ×${entry.count}` : name;
+      return [label, `${amount(entry.remaining)} / ${amount(entry.limit)}`, date];
+    });
+  return rows.length > 0 ? rows : undefined;
+}
+
 async function fetchTraeWebCredits(cookie, deps) {
   const headers = {
     Accept: 'application/json',
@@ -174,11 +216,13 @@ async function fetchTraeWebCredits(cookie, deps) {
     throw new Error('Trae credits response has no usable usage summary');
   }
   const usedPercent = limit > 0 ? Math.min(100, used / limit * 100) : null;
+  const grants = creditGrantRows(payload?.user_entitlement_pack_list);
   return {
     kind: 'billing', label: 'Credits', metric: 'credits', currency: 'CREDITS',
     used, limit, remaining: Math.max(0, limit - used), usedPercent,
     remainingPercent: usedPercent === null ? null : 100 - usedPercent,
-    resetsAt: null, showMeter: limit > 0
+    resetsAt: null, showMeter: limit > 0,
+    ...(grants ? { detailEntries: grants } : {})
   };
 }
 

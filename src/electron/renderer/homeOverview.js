@@ -141,6 +141,10 @@
               planStatus: window.planStatus || '',
               showMeter: window.showMeter !== false,
               detail: window.detail || '',
+              // Rows behind the ⓘ: the buckets a single balance is summed from.
+              ...(Array.isArray(window.detailEntries) && window.detailEntries.length > 0
+                ? { detailEntries: window.detailEntries }
+                : {}),
               index: windowIndex
             };
           })

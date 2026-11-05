@@ -235,6 +235,39 @@ test('Trae CN web session exchanges JWT then reads authoritative credit summary 
   assert.doesNotMatch(JSON.stringify(provider), /web-account|web-jwt|legacy|telemetry/);
 });
 
+test('Trae credit packs aggregate into the tooltip rows behind the balance', async () => {
+  const pack = (desc, limit, used, expire, extra = {}) => ({
+    display_desc: desc, is_hide: false, expire_time: expire,
+    quota: { credits_limit: limit }, usage: { credits_amount: used }, ...extra
+  });
+  const expire = (iso) => Math.floor(new Date(iso).getTime() / 1000);
+  const provider = await fetchTraeLimits({ traeCookie: 'sessionid=x' }, {
+    env: {},
+    fetch: async (url) => {
+      if (url.endsWith('/GetUserToken')) return response({ Result: { Token: 'jwt' } });
+      if (url.endsWith('/user_current_entitlement_list')) return response({
+        is_credits_billing: true,
+        usage_summary: { total_amount: 7900, consumed_amount: 1620 },
+        user_entitlement_pack_list: [
+          pack('每日签到', 100, 0, expire('2026-11-23')),
+          pack('每日签到', 100, 0, expire('2026-11-24')),
+          pack('每月登录赠送', 500, 0, expire('2026-11-30')),
+          // Exhausted packs are dropped: they are not part of the balance.
+          pack('老用户福利', 4000, 4000, expire('2026-11-23')),
+          // Hidden packs never surface in the UI.
+          pack('内部测试', 999, 0, expire('2026-12-01'), { is_hide: true })
+        ]
+      });
+      return response({ code: 1001 }, 401);
+    }
+  });
+  const rows = provider.windows[0].detailEntries;
+  assert.equal(rows.length, 2);
+  // Same-name grants merge into one row with the earliest expiry and a count.
+  assert.deepEqual(rows[0], ['每日签到 ×2', '200 / 200', '2026-11-23']);
+  assert.deepEqual(rows[1], ['每月登录赠送', '500 / 500', '2026-11-30']);
+});
+
 test('Trae publishes poll-derived spend only when a store is supplied', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tl-trae-limits-spend-'));
   const spendHistoryPath = path.join(dir, 'trae-credit-spend.json');

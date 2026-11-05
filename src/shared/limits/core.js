@@ -166,6 +166,32 @@ function percentFromWindow(input, used, limit) {
   return null;
 }
 
+// Free-form rows for the tooltip behind a window's ⓘ: providers that aggregate
+// several priced buckets (or several grants of the same kind) have no other way
+// to show what the single remaining number is made of. Bounded because it rides
+// the device payload to the hub.
+const MAX_WINDOW_DETAIL_ROWS = 8;
+
+function normalizeWindowDetailEntries(input) {
+  if (!Array.isArray(input)) return undefined;
+  const rows = [];
+  for (const entry of input.slice(0, MAX_WINDOW_DETAIL_ROWS)) {
+    if (Array.isArray(entry)) {
+      const cells = entry.slice(0, 3).map((cell) => String(cell ?? '').slice(0, 40));
+      if (cells.some(Boolean)) rows.push(cells);
+      continue;
+    }
+    if (entry && typeof entry === 'object' && entry.full) {
+      rows.push({
+        full: String(entry.full).slice(0, 80),
+        ...(entry.caption === true ? { caption: true } : {}),
+        ...(entry.separated === true ? { separated: true } : {})
+      });
+    }
+  }
+  return rows.length > 0 ? rows : undefined;
+}
+
 function normalizeLimitWindow(input) {
   if (!input || typeof input !== 'object') return null;
   const kind = normalizeWindowKind(input.kind || input.type || input.name || input.window || input.windowKind);
@@ -180,12 +206,14 @@ function normalizeLimitWindow(input) {
   const usedPercent = percentFromWindow(input, used, limit);
   const limitId = normalizeWindowLimitId(input.limitId ?? input.limit_id);
   const boundaryKind = normalizeLimitBoundaryKind(input.boundaryKind ?? input.boundary_kind);
+  const detailEntries = normalizeWindowDetailEntries(input.detailEntries ?? input.detail_entries);
   return {
     kind,
     ...(metric ? { metric } : {}),
     ...(source ? { source } : {}),
     ...(limitId ? { limitId } : {}),
     ...(boundaryKind ? { boundaryKind } : {}),
+    ...(detailEntries ? { detailEntries } : {}),
     ...(input.additional === true ? { additional: true } : {}),
     label: normalizeWindowLabel(input.label || input.displayLabel || input.title),
     used,
