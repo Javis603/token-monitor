@@ -1815,10 +1815,10 @@ function aggregateHistory(devices, options = {}) {
     const allTime = record.allTime || record.periods?.allTime;
     const totalTokens = allTime?.totalTokens ?? allTime?.total_tokens;
     if (!hasOwn(normalized, 'history') || normalized.history === null) {
-      // A legacy/history-disabled device with all-time usage may own active
+      // A legacy/history-disabled device with unknown or positive usage may own active
       // dates absent from the histories we can merge. Include an incomplete
       // sentinel so mixed-version hubs never advertise an exact lifetime count.
-      if (Math.round(asNumber(totalTokens)) > 0) {
+      if (totalTokens == null || Math.round(asNumber(totalTokens)) > 0) {
         histories.push({ daily: [], monthly: [], summary: { activeDaysComplete: false } });
       }
       continue;

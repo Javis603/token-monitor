@@ -1881,6 +1881,8 @@ test('aggregateHistory ignores only confirmed empty legacy devices when computin
       assert.equal(merged.summary.activeDays, 2);
     }
     for (const legacy of [
+      {},
+      { history: null },
       { allTime: { totalTokens: 10 }, history: { daily: [], monthly: [], summary: {} } },
       { history: { daily: [], monthly: [], summary: {} } },
       { allTime: { totalTokens: 0 }, history: { summary: { activeDays: 1 } } },
