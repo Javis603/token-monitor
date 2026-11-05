@@ -32,6 +32,7 @@ const WORKER_SHARED_MODULES = Object.freeze([
   'deviceKind.js',
   'hubProtocol.js',
   'hubDelta.js',
+  'uploadDelta.js',
   'syncContent.js',
   'hubBuildIdentity.js'
 ]);
