@@ -280,6 +280,7 @@ const WINDOW_PRESENTATION_MENU_ITEMS = [
 
 const OPEN_VIEW_MENU_ITEMS = [
   ['home', 'views.home'],
+  ['provider', 'views.provider'],
   ['project', 'views.project'],
   ['session', 'views.session'],
   ['limits', 'views.limits'],

@@ -77,7 +77,7 @@ test('main and renderer keep their view display options in sync', () => {
   );
   assert.deepEqual(
     extractViewIds(rendererSource, 'VIEW_DISPLAY_OPTIONS'),
-    ['home', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status']
+    ['home', 'provider', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status']
   );
 });
 

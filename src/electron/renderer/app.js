@@ -257,6 +257,7 @@ const deviceStaleColor = '#8c97a7';
 const baseBreakdownOrder = ['tool', 'device', 'model', 'project', 'session'];
 const VIEW_DISPLAY_OPTIONS = [
   { id: 'home', labelKey: 'views.home' },
+  { id: 'provider', labelKey: 'views.provider' },
   { id: 'limits', labelKey: 'views.limits' },
   { id: 'tool', labelKey: 'views.tool' },
   { id: 'model', labelKey: 'views.model' },
@@ -267,7 +268,7 @@ const VIEW_DISPLAY_OPTIONS = [
   { id: 'status', labelKey: 'views.status' }
 ];
 const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
-const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
+const viewBreakdownValues = new Set(['home', 'provider', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
@@ -290,6 +291,7 @@ const VIEW_SWITCHER_LONG_PRESS_MS = 420;
 const VIEW_SWITCHER_HOVER_CLOSE_MS = 160;
 const VIEW_ICON_CLASSES = {
   home: 'view-icon-home',
+  provider: 'view-icon-tool',
   tool: 'view-icon-tool',
   status: 'view-icon-status',
   device: 'view-icon-device',
@@ -391,7 +393,7 @@ let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 let viewSwitcherRenderKey = '';
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), sessionToolFilter: document.getElementById('sessionToolFilter'), sessionToolFilterItems: document.getElementById('sessionToolFilterItems'), sessionToolPrevious: document.getElementById('sessionToolPrevious'), sessionToolNext: document.getElementById('sessionToolNext'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), providerPanel: document.getElementById('providerPanel'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), sessionToolFilter: document.getElementById('sessionToolFilter'), sessionToolFilterItems: document.getElementById('sessionToolFilterItems'), sessionToolPrevious: document.getElementById('sessionToolPrevious'), sessionToolNext: document.getElementById('sessionToolNext'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
@@ -745,7 +747,8 @@ const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
   translate: t,
   switchAccount: (accountId) => window.tokenMonitor.codex.switchSystemAccount(accountId),
   requestRender: () => {
-    renderLimits();
+    if (state.breakdown === 'provider') renderProviderPage();
+    else renderLimits();
     renderCodexAccounts();
     renderSettingsSummaries();
   },
@@ -3368,7 +3371,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
   return toolRowsForPeriod(period);
 }
 
-function sessionPresentationOptions() {
+function sessionPresentationOptions(periodName = state.period) {
   const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
     clientLabels,
@@ -3381,7 +3384,7 @@ function sessionPresentationOptions() {
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {},
+    nativeSessions: state.stats?.nativeSessions?.[periodName] || {},
     localSourceDevice: localDevice ? { deviceId: localDevice.deviceId,
       name: deviceBreakdownApi.deviceLabel(localDevice), platform: localDevice.platform || '', deviceKind: localDevice.deviceKind || 'computer' } : undefined,
     subagents: {
@@ -3458,7 +3461,7 @@ function effectiveViewDisplayOrderValue() {
 }
 
 function availableBreakdownIds() {
-  const order = ['home', baseBreakdownOrder[0], 'status', 'trends', ...baseBreakdownOrder.slice(1)];
+  const order = ['home', 'provider', baseBreakdownOrder[0], 'status', 'trends', ...baseBreakdownOrder.slice(1)];
   let available = state.settings?.historyEnabled === false ? order.filter((id) => id !== 'trends') : order;
   if (state.settings?.projectsEnabled === false) available = available.filter((id) => id !== 'project');
   return [...(limitViewAvailable() ? [...available, 'limits'] : available), ...pluginPageOptions().map(page => page.id)];
@@ -4663,7 +4666,13 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   history: window.tokenMonitor?.limits?.openHistory ? {
     key: window.TokenMonitorLimitsHistoryIdentity.historyRowKey,
     activeKey: () => limitsHistoryActiveKey,
-    open: (key, rect, interactive) => window.tokenMonitor.limits.openHistory(key, rect, interactive),
+    open: (key, rect, interactive) => {
+      if (state.breakdown === 'provider') {
+        if (interactive) providerPage.selectHistoryAccount(key);
+        return Promise.resolve(false);
+      }
+      return window.tokenMonitor.limits.openHistory(key, rect, interactive);
+    },
     enter: key => window.tokenMonitor.limits.enterHistory(key),
     leave: key => window.tokenMonitor.limits.leaveHistory(key)
   } : null,
@@ -4691,7 +4700,7 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
         if (limitDetailTooltipShouldHoldRender()) return;
         state.limitDetailTooltipActive = false;
         flushPendingLimitDetailTooltipRender();
-        if (state.breakdown === 'home' || state.breakdown === 'session') render();
+        if (state.breakdown === 'home' || state.breakdown === 'session' || state.breakdown === 'provider') render();
       });
     }
   },
@@ -4902,11 +4911,16 @@ function clearCodexResetForecastRetryTimer() {
   state.codexResetForecastRetryTimer = null;
 }
 
+function codexResetForecastSurfaceVisible() {
+  return state.breakdown === 'limits' || (state.breakdown === 'provider' && providerPage.selectedId() === 'codex');
+}
+
 function renderCodexResetForecastUpdate() {
-  if (state.breakdown !== 'limits') return null;
+  if (!codexResetForecastSurfaceVisible()) return null;
   const surface = visibleStatsSurface();
-  if (surface === 'main') renderLimits();
-  else if (!surface) statsRenderScheduler.request();
+  if (surface === 'main') {
+    if (state.breakdown === 'provider') renderProviderPage(); else renderLimits();
+  } else if (!surface) statsRenderScheduler.request();
   return surface;
 }
 
@@ -4951,7 +4965,7 @@ function maybeFetchCodexResetForecast() {
   } else if (!state.codexResetForecastRetryTimer) {
     state.codexResetForecastRetryTimer = setTimeout(() => {
       state.codexResetForecastRetryTimer = null;
-      if (state.breakdown === 'limits' && visibleStatsSurface() === 'main') {
+      if (codexResetForecastSurfaceVisible() && visibleStatsSurface() === 'main') {
         if (codexResetForecastExpired(state.codexResetForecast)) renderCodexResetForecastUpdate();
         maybeFetchCodexResetForecast();
       }
@@ -5114,6 +5128,7 @@ function serviceStatusIconId(id) {
 
 function renderServiceStatus() {
   if (!serviceStatusSurfaceVisible()) return;
+  if (state.breakdown === 'provider') { renderProviderPage(); return; }
   if (!els.serviceStatusPanel) return;
   const rows = serviceStatusRows().map((source) => {
     const provider = serviceStatusPresentationApi.localizeProvider(source, currentLocale());
@@ -5966,7 +5981,7 @@ function isSettingsSurfaceVisible() {
 
 function serviceStatusSurfaceVisible() {
   return visibleStatsSurface() === 'main'
-    && state.breakdown === 'status';
+    && (state.breakdown === 'status' || state.breakdown === 'provider');
 }
 
 function openHomeSettings() {
@@ -6284,6 +6299,7 @@ function fixedPeriodMessage(snapshot, breakdown = '') {
 function hidePeriodContentForMessage(message) {
   els.fixedPeriodMessage.textContent = message;
   els.fixedPeriodMessage.classList.remove('hidden');
+  els.providerPanel.classList.add('hidden');
   els.homePanel.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.serviceStatusPanel?.classList.add('hidden');
@@ -7507,6 +7523,125 @@ function renderHomePluginModule(id) {
   return module;
 }
 
+const providerPage = window.TokenMonitorProviderPage.createProviderPage({
+  document, root: els.providerPanel, translate: t, formatTokens: formatCompact, formatCost,
+  mark: (node, id) => applyHomeListMark(node, iconKindFor({ key: id }, 'limits'), limitProviderColor(id)),
+  onSelect: () => renderProviderPage(),
+  quotaNode: providerQuotaNode,
+  deferQuotaRender: () => codexAccountControl.deferRender(els.providerPanel),
+  readQuotaHistory: key => window.tokenMonitor.limits.getHistory(key),
+  modelRows: (period, client) => toolDetailsApi.modelRowsForTool(period, client),
+  detailRows: providerDetailRows,
+  rowNode: providerDetailRowNode,
+  modelColor,
+  openDetail: openProviderDetail,
+  statusLabel: serviceStatusLabel,
+  openExternal: url => window.tokenMonitor.openExternal?.(url)
+});
+function providerDetailRows(period, id, view, usage) {
+  if (view === 'model') return usageAttributionRowsApi.visibleAttributionRows(usage.models, formatCost).map(row => ({
+    ...row, name: row.unattributed ? t('dashboard.tooltip.unclassified') : row.name, color: modelColor(row.key)
+  }));
+  const options = sessionPresentationOptions(providerPage.usagePeriod());
+  const sessions = Object.fromEntries(Object.entries(period?.sessions || {}).filter(([, row]) =>
+    window.TokenMonitorProviderPage.providerForClient(row.client) === id));
+  if (view === 'session') {
+    const rows = sessionRowsApi.sessionRowsForPeriod({ ...period, sessions }, {
+      ...options, nativeSessions: Object.fromEntries(Object.entries(options.nativeSessions).filter(([, row]) =>
+        window.TokenMonitorProviderPage.providerForClient(row.client) === id))
+    });
+    return sessionRowsApi.groupSessionRows(rows, options);
+  }
+  return projectRowsApi.projectRowsForPeriod({ sessions }, {
+    clientLabels, clientColors, stableColor, modelColor, fallbackColors: fallbackModelColors,
+    unknownClientLabel: t('projects.unknownTool'), unknownModelLabel: t('projects.unknownModel')
+  });
+}
+function providerDetailRowNode(data, view, max, open) {
+  const node = rowTemplate(data);
+  updateRow(node, { ...data, barValue: data.value, max, color: data.color || 'var(--accent)' });
+  const mark = node.querySelector('.row-mark');
+  const icon = iconKindFor(data, view);
+  if (icon.kind === 'icon') { mark.className = `row-mark row-icon ${icon.iconClass}`; mark.style.background = ''; }
+  if (view === 'session') {
+    node.addEventListener('click', open);
+    node.addEventListener('keydown', sessionRowsApi.handleBreakdownRowKeydown);
+  }
+  return node;
+}
+function openProviderDetail(row, view, period) {
+  if (view !== 'session') return;
+  setPeriod(period);
+  setBreakdown('session');
+  state.sessionToolFilter = '';
+  const rows = sessionRowsForPeriod(state.stats?.periods?.[period]);
+  const index = rows.findIndex(candidate => candidate.key === row.key);
+  const size = breakdownRenderPolicyApi.SESSION_BREAKDOWN_PAGE_SIZE;
+  state.sessionPage = Math.floor(Math.max(0, index) / size);
+  render();
+  const target = [...els.breakdown.querySelectorAll('.row')].find(node => node.dataset.key === row.key);
+  target?.click();
+}
+function providerQuotaNode(id, label, accounts, multipleAccounts) {
+  const records = accounts.map(account => account.provider);
+  const color = limitProviderColor(id);
+  const title = multipleAccounts ? t('views.limits') : accounts[0].name || label;
+  const node = records.length > 1
+    ? renderLimitProviderGroup(id, title, records, color)
+    : renderLimitProviderSolo(id, title, records[0], color);
+  node.classList.add('provider-native-quota');
+  return node;
+}
+
+function renderProviderPage() {
+  allTimeSessions.ensure();
+  const usagePeriod = providerPage.usagePeriod();
+  const period = state.stats?.periods?.[usagePeriod];
+  const records = providersByLimitProviderId(state.stats?.limits?.providers || []);
+  providerPage.render({
+    stats: state.stats, period, periodId: usagePeriod, locale: currentLocale(),
+    sessionSources: { ...state.stats?.nativeSessions?.[usagePeriod], ...period?.sessions },
+    source: JSON.stringify([state.mode, state.settings?.hubMode, state.settings?.hubUrl, state.settings?.deviceId]),
+    quotaVersion: JSON.stringify([
+      state.settings?.showLimitSource, state.settings?.maskLimitAccountEmails, state.settings?.limitsHistoryOpenMode,
+      state.settings?.showLimitUsed, state.settings?.showToolIcons, state.settings?.claudePrepaidBalanceEnabled,
+      state.settings?.codexResetForecastEnabled, state.settings?.workbuddyQuotaTotalEnabled,
+      state.settings?.showCodexAdditionalLimits, state.settings?.limitProviderHiddenItems,
+      state.settings?.compactTokenUnits, state.settings?.currency, state.settings?.currencyRatesEffective,
+      state.settings?.subscriptions, state.settings?.codexManagedAccounts, state.codexActiveAccount,
+      codexAccountControl.stateSignature(), state.codexResetForecastBusy, state.codexResetForecast
+    ]),
+    historyVersion: JSON.stringify([state.settings?.maskLimitAccountEmails, state.settings?.limitProviderHiddenItems,
+      state.settings?.showCodexAdditionalLimits]),
+    providers: limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder),
+    clients: KNOWN_CLIENTS, enabledIds: state.settings?.limitsEnabled === false ? [] : [...enabledLimitProviderSet()],
+    quotaAccounts: [...records].flatMap(([id, peers]) => {
+      const selectionKeys = new Map();
+      if (id === 'mimo') for (const group of mimoAccountGroups(peers)) {
+        const key = JSON.stringify(group.map(window.TokenMonitorLimitsHistoryIdentity.historyAccountKey).sort());
+        for (const provider of group) selectionKeys.set(provider, key);
+      }
+      return peers.map((provider, index) => ({
+        provider, key: window.TokenMonitorLimitsHistoryIdentity.historyRowKey(provider),
+        selectionKey: selectionKeys.get(provider) || window.TokenMonitorLimitsHistoryIdentity.historyRowKey(provider),
+        name: limitAccountTitle(id, provider, index, peers),
+        historyName: id === 'mimo' ? mimoProductLabel(provider) : '',
+        plan: limitWindowsView.limitAccountPlan(provider, { grouped: peers.length > 1 }),
+        status: limitWindowsView.limitStatusLabel(provider.status),
+        hasHistory: Boolean(window.tokenMonitor.limits?.openHistory) && (provider.windows || []).some(w => typeof w.usedPercent === 'number' || w.metric === 'credits' || w.metric === 'spend'),
+        updated: provider.updatedAt ? formatAgo(Date.now() - Date.parse(provider.updatedAt)) : ''
+      }));
+    }),
+    status: serviceStatusRows(),
+    detailUnavailable: fixedPeriodRangesApi.isDerived(state.period),
+    sessionsIncomplete: sessionRowsApi.sessionBreakdownIncomplete(state.stats, usagePeriod),
+    projectsEnabled: state.settings?.projectsEnabled !== false,
+    historyEnabled: state.settings?.historyEnabled !== false
+  });
+  updateTitleFit();
+  if (providerPage.selectedId() === 'codex') maybeFetchCodexResetForecast();
+}
+
 function renderHome() {
   if (!els.homePanel) return;
   if (sessionTooltipShouldHoldRender()) {
@@ -7639,7 +7774,7 @@ function render() {
   pluginViewHost?.refreshContext({ includeContent: false });
   if (pluginContent) {
     const target = `main.${state.breakdown}.content`;
-    const roots = { home: els.homePanel, limits: els.limitsPanel, trends: els.trendsPanel, status: els.serviceStatusPanel };
+    const roots = { provider: els.providerPanel, home: els.homePanel, limits: els.limitsPanel, trends: els.trendsPanel, status: els.serviceStatusPanel };
     const native = state.breakdown === 'session' && state.openSession ? els.sessionDetail : roots[state.breakdown] || els.breakdown;
     const visible = visibleStatsSurface() === 'main' && !isSettingsPanelOpen() && !isRendererWindowHidden() && !state.floatingBubble.collapsed;
     pluginContent.retain(visible ? [target, 'main.navigation.content'] : []);
@@ -7660,6 +7795,8 @@ function renderAppContent() {
   if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
+  els.shell.classList.toggle('provider-mode', state.breakdown === 'provider');
+  els.providerPanel.classList.toggle('hidden', state.breakdown !== 'provider' || pluginPage);
   if (pluginPage) {
     stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip();
     cancelNumberAnimation();
@@ -7701,7 +7838,7 @@ function renderAppContent() {
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
-  if (fixedUnavailable || detailUnavailable) {
+  if (state.breakdown !== 'provider' && (fixedUnavailable || detailUnavailable)) {
     els.sessionToolFilter.classList.add('hidden');
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
@@ -7753,8 +7890,12 @@ function renderAppContent() {
   // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
   if (state.breakdown !== 'home') hideHomeActivityTooltip();
   if (state.breakdown !== 'trends') hideTrendTooltip();
-  if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
-  if (state.breakdown === 'home') {
+  if (state.breakdown === 'status' || state.breakdown === 'provider') ensureServiceStatusTicker(); else stopServiceStatusTicker();
+  if (state.breakdown === 'provider') {
+    for (const panel of [els.homePanel, els.breakdown, els.serviceStatusPanel, els.trendsPanel, els.limitsPanel]) panel.classList.add('hidden');
+    els.providerPanel.classList.remove('hidden');
+    renderProviderPage();
+  } else if (state.breakdown === 'home') {
     els.breakdown.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
     els.trendsPanel.classList.add('hidden');
@@ -14819,7 +14960,8 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
 // in a compact snapshot projection and does not need a full history pull.
 function allTimeSessionsNeeded() {
   if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
-  return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
+  return (state.breakdown === 'provider' && providerPage.usagePeriod() === 'allTime')
+    || state.period === 'allTime' && ['session', 'project'].includes(state.breakdown);
 }
 const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),
