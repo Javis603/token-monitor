@@ -56,13 +56,13 @@ const SESSION_TEXT_KEYS = [
 ];
 const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'factory', 'minimax']);
 
-function asNumber(value) {
+function asNumber(value, fallback = 0) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
     const parsed = Number(value.replace(/[$,]/g, ''));
     if (Number.isFinite(parsed)) return parsed;
   }
-  return 0;
+  return fallback;
 }
 
 function firstNumber(obj, keys) {
@@ -1449,7 +1449,7 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(historyFields, 'periodWindows')) normalized.periodWindows = historyFields.periodWindows;
   const allTime = record.allTime || record.periods?.allTime;
   if (record.allTimeTokensUnavailable === true
-    || (allTime?.totalTokens ?? allTime?.total_tokens) == null) {
+    || !Number.isFinite(asNumber(allTime?.totalTokens ?? allTime?.total_tokens, NaN))) {
     normalized.allTimeTokensUnavailable = true;
   }
   for (const periodName of PERIODS) {
@@ -1820,13 +1820,18 @@ function aggregateHistory(devices, options = {}) {
   for (const record of devices) {
     const normalized = normalizeRecordHistoryFields(record);
     const allTime = record.allTime || record.periods?.allTime;
-    const totalTokens = record.allTimeTokensUnavailable === true
-      ? undefined : allTime?.totalTokens ?? allTime?.total_tokens;
+    let totalTokens = record.allTimeTokensUnavailable === true
+      ? NaN : asNumber(allTime?.totalTokens ?? allTime?.total_tokens, NaN);
+    // Older stored records may have defaulted a missing lifetime counter to zero.
+    if (totalTokens === 0 && ['today', 'month'].some((name) => {
+      const period = record[name] || record.periods?.[name];
+      return asNumber(period?.totalTokens ?? period?.total_tokens) > 0;
+    })) totalTokens = NaN;
     if (!hasOwn(normalized, 'history') || normalized.history === null) {
       // A legacy/history-disabled device with unknown or positive usage may own active
       // dates absent from the histories we can merge. Include an incomplete
       // sentinel so mixed-version hubs never advertise an exact lifetime count.
-      if (totalTokens == null || Math.round(asNumber(totalTokens)) > 0) {
+      if (!Number.isFinite(totalTokens) || Math.round(totalTokens) > 0) {
         histories.push({ daily: [], monthly: [], summary: { activeDaysComplete: false } });
       }
       continue;
@@ -1835,7 +1840,7 @@ function aggregateHistory(devices, options = {}) {
     // Missing counters or any retained history evidence still fail closed.
     const history = normalized.history;
     if (history.summary.activeDaysComplete !== true
-      && totalTokens != null && Number(totalTokens) === 0
+      && totalTokens === 0
       && history.daily.length === 0 && history.monthly.length === 0
       && !history.dailyTotals?.length && !history.dailyTotalsOmitted
       && asNumber(history.summary.activeDays) === 0
