@@ -6653,9 +6653,32 @@ function renderHomeLimitModule() {
       windows.append(metric);
     }
     item.append(account, windows);
+    // A credits-only provider can say what it spent today but never what it spent
+    // tokens on, so the number belongs next to the quota it drains — not in the
+    // token ranking, where it would have no share and sink to the bottom.
+    const todaySpend = creditSpendToday(row.providerId);
+    if (todaySpend) {
+      const note = document.createElement('div');
+      note.className = 'home-limit-spend-note';
+      note.textContent = t('home.creditsToday', { value: formatCredits(todaySpend) });
+      item.append(note);
+    }
     body.append(item);
   }
   return module;
+}
+
+// Trae is the current case: the limit provider carries the poll-derived spend,
+// the token pipeline has nothing to say about it. Read from the provider map
+// rather than a hardcoded id, so any credits-only vendor lands here too.
+function creditSpendToday(providerId) {
+  if (state.period !== 'today') return 0;
+  const id = String(providerId || '').toLowerCase();
+  if (!id) return 0;
+  const provider = (state.stats?.limits?.providers || [])
+    .find((entry) => String(entry?.provider || '').toLowerCase() === id);
+  const spend = Number(provider?.balance?.todaySpend);
+  return Number.isFinite(spend) && spend > 0 ? spend : 0;
 }
 
 function renderHomeModelModule(period) {
