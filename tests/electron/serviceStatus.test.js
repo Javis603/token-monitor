@@ -10,6 +10,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const {
   SERVICE_STATUS_PROVIDERS,
   createServiceStatusClient,
+  summarizeAtomFeedProvider,
   summarizeStatuspageProvider
 } = require('../../src/electron/serviceStatus');
 
@@ -120,9 +121,204 @@ test('default providers cover claude, openai, cursor, and deepseek with summary 
   const ids = SERVICE_STATUS_PROVIDERS.map((entry) => entry.id);
   assert.deepEqual(ids, ['claude', 'openai', 'cursor', 'deepseek']);
   for (const entry of SERVICE_STATUS_PROVIDERS) {
-    assert.match(entry.summaryUrl, /\/api\/v2\/summary\.json$/);
     assert.ok(entry.pageUrl.startsWith('https://'), `${entry.id} pageUrl should be https`);
   }
+  // DeepSeek left Atlassian Statuspage; its events are summarized from the
+  // official page's Atom feed instead of the stale statuspage.io mirror.
+  const deepseek = SERVICE_STATUS_PROVIDERS.find((entry) => entry.id === 'deepseek');
+  assert.equal(deepseek.summaryUrl, 'https://status.deepseek.com/feed.atom');
+  assert.equal(deepseek.summaryFormat, 'atom-feed');
+  for (const entry of SERVICE_STATUS_PROVIDERS.filter((item) => item.id !== 'deepseek')) {
+    assert.match(entry.summaryUrl, /\/api\/v2\/summary\.json$/);
+  }
+});
+
+function atomEntry(title, updated, status, components) {
+  const summary = `&lt;p&gt;&lt;strong&gt;Status:&lt;/strong&gt; ${status}&lt;/p&gt;`
+    + `&lt;p&gt;&lt;strong&gt;Affected components:&lt;/strong&gt; ${components.join(', ')}&lt;/p&gt;`;
+  return `  <entry>\n    <title>${title}</title>\n    <updated>${updated}</updated>\n`
+    + `    <summary type="html">${summary}</summary>\n  </entry>`;
+}
+
+function atomFeedOf(...entries) {
+  return `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">\n`
+    + `${entries.join('\n')}\n</feed>`;
+}
+
+const feedProvider = {
+  id: 'deepseek',
+  label: 'DeepSeek',
+  pageUrl: 'https://status.deepseek.com',
+  summaryUrl: 'https://status.deepseek.com/feed.atom',
+  summaryFormat: 'atom-feed'
+};
+
+test('summarizeAtomFeedProvider reports an active outage incident from the feed', () => {
+  const feed = atomFeedOf(
+    atomEntry('DeepSeek 网页/API 部分中断（DeepSeek Web/API Partially Unavailable）',
+      '2026-11-03T18:04:53+08:00', 'monitoring', ['DeepSeek V4.1 Flash API服务(API Service)', '对话服务(Chatservice)']),
+    atomEntry('DeepSeek API 性能下降（DeepSeek API Degraded Performance）',
+      '2026-10-27T15:21:54+08:00', 'resolved', ['DeepSeek V4 Pro API服务(API Service)'])
+  );
+
+  const result = summarizeAtomFeedProvider(feedProvider, feed, { checkedAt: '2026-11-03T17:52:00Z' });
+
+  assert.equal(result.status, 'outage');
+  assert.equal(result.indicator, 'major');
+  assert.equal(result.description, 'Partial Service Outage');
+  assert.equal(result.incidentTitle, 'DeepSeek 网页/API 部分中断（DeepSeek Web/API Partially Unavailable）');
+  assert.equal(result.incidentCount, 1);
+  assert.equal(result.maintenanceCount, 0);
+  assert.equal(result.updatedAt, '2026-11-03T18:04:53+08:00');
+  assert.deepEqual(result.componentIssues, [
+    { name: 'DeepSeek V4.1 Flash API服务(API Service)', status: 'partial_outage' },
+    { name: '对话服务(Chatservice)', status: 'partial_outage' }
+  ]);
+  assert.equal(result.checkedAt, '2026-11-03T17:52:00Z');
+  assert.equal(result.pageUrl, 'https://status.deepseek.com');
+});
+
+test('summarizeAtomFeedProvider treats resolved-only feeds as operational', () => {
+  const feed = atomFeedOf(
+    atomEntry('DeepSeek API 性能下降（DeepSeek API Degraded Performance）',
+      '2026-10-27T15:21:54+08:00', 'resolved', ['DeepSeek V4 Pro API服务(API Service)'])
+  );
+
+  const result = summarizeAtomFeedProvider(feedProvider, feed, { checkedAt: '2026-11-03T17:52:00Z' });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.indicator, 'none');
+  assert.equal(result.description, 'All Systems Operational');
+  assert.equal(result.incidentTitle, '');
+  assert.equal(result.incidentCount, 0);
+  assert.deepEqual(result.componentIssues, []);
+  assert.equal(result.updatedAt, '2026-10-27T15:21:54+08:00');
+});
+
+test('summarizeAtomFeedProvider degrades on non-outage incidents and keeps maintenance separate', () => {
+  const feed = atomFeedOf(
+    atomEntry('搜索服务异常（Search service error）', '2026-11-02T10:00:00+08:00', 'investigating', ['搜索服务']),
+    atomEntry('计划维护（Scheduled maintenance）', '2026-11-01T10:00:00+08:00', 'monitoring', ['API Service'])
+  );
+
+  const result = summarizeAtomFeedProvider(feedProvider, feed, { checkedAt: '2026-11-03T17:52:00Z' });
+
+  assert.equal(result.status, 'degraded');
+  assert.equal(result.indicator, 'minor');
+  assert.equal(result.description, 'Degraded Performance');
+  assert.equal(result.incidentTitle, '搜索服务异常（Search service error）');
+  assert.equal(result.incidentCount, 1);
+  assert.equal(result.maintenanceCount, 1);
+  assert.deepEqual(result.componentIssues, [{ name: '搜索服务', status: 'degraded_performance' }]);
+});
+
+test('summarizeAtomFeedProvider assigns each component its own incident severity', () => {
+  const feed = atomFeedOf(
+    // Degraded incident is newer, but the outage incident must still win for
+    // the component both events share, and single-incident components keep
+    // their own severity.
+    atomEntry('搜索服务异常（Search service error）', '2026-11-03T10:00:00+08:00', 'investigating', ['搜索服务', '共享服务']),
+    atomEntry('DeepSeek API 部分中断（DeepSeek API Partially Unavailable）', '2026-11-03T09:00:00+08:00', 'monitoring', ['API 服务', '共享服务'])
+  );
+
+  const result = summarizeAtomFeedProvider(feedProvider, feed, { checkedAt: '2026-11-03T17:52:00Z' });
+
+  assert.equal(result.indicator, 'major');
+  // Outage incidents are processed first so the shared component keeps the
+  // higher severity under de-duplication.
+  assert.deepEqual(result.componentIssues, [
+    { name: 'API 服务', status: 'partial_outage' },
+    { name: '共享服务', status: 'partial_outage' },
+    { name: '搜索服务', status: 'degraded_performance' }
+  ]);
+});
+
+test('summarizeAtomFeedProvider reports unknown for a feed without entries', () => {
+  // The official page always carries its event history; an entry-less feed is
+  // an empty/truncated response or format drift, never "no incidents".
+  const result = summarizeAtomFeedProvider(feedProvider, '<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>', {
+    checkedAt: '2026-11-03T17:52:00Z'
+  });
+
+  assert.equal(result.status, 'unknown');
+  assert.match(result.error, /No feed entries/);
+});
+
+test('summarizeAtomFeedProvider treats events without a parseable status as active', () => {
+  // A format drift on the feed side must never regress into the original bug
+  // (showing "All Systems Operational" during an outage), so unknown statuses
+  // are kept in the active set.
+  const feed = atomFeedOf(
+    atomEntry('Something happened', '2026-11-02T10:00:00+08:00', '???', ['API Service'])
+  );
+
+  const result = summarizeAtomFeedProvider(feedProvider, feed, { checkedAt: '2026-11-03T17:52:00Z' });
+
+  assert.equal(result.incidentCount, 1);
+  assert.notEqual(result.status, 'ok');
+});
+
+test('summarizeAtomFeedProvider reports unknown when the feed cannot be parsed', () => {
+  const result = summarizeAtomFeedProvider(feedProvider, '<!DOCTYPE html><html>oops</html>', {
+    checkedAt: '2026-11-03T17:52:00Z'
+  });
+
+  assert.equal(result.status, 'unknown');
+  assert.equal(result.incidentTitle, '');
+  assert.equal(result.incidentCount, 0);
+  assert.match(result.error, /Unexpected feed content/);
+});
+
+test('summarizeAtomFeedProvider rejects an unclosed active entry even when the feed closes', () => {
+  const resolved = atomEntry('Earlier incident', '2026-11-02T10:00:00Z', 'resolved', ['API']);
+  const active = atomEntry('API Unavailable', '2026-11-03T10:00:00Z', 'investigating', ['API']);
+  const malformed = atomFeedOf(resolved, active.replace('</entry>', ''));
+  const result = summarizeAtomFeedProvider(feedProvider, malformed);
+  assert.equal(result.status, 'unknown');
+  assert.match(result.error, /Incomplete feed entry/);
+});
+
+test('summarizeAtomFeedProvider rejects a feed truncated after a resolved entry', () => {
+  const resolved = atomEntry('Earlier incident', '2026-11-02T10:00:00Z', 'resolved', ['API']);
+  const active = atomEntry('API Unavailable', '2026-11-03T10:00:00Z', 'investigating', ['API']);
+  const complete = atomFeedOf(resolved, active);
+  assert.equal(summarizeAtomFeedProvider(feedProvider, complete).status, 'outage');
+  const truncated = complete.slice(0, complete.lastIndexOf('</entry>'));
+  const result = summarizeAtomFeedProvider(feedProvider, truncated);
+  assert.equal(result.status, 'unknown');
+  assert.match(result.error, /Unexpected feed content/);
+});
+
+test('service status client summarizes atom feeds through response text', async () => {
+  const feed = atomFeedOf(
+    atomEntry('DeepSeek 网页/API 部分中断（DeepSeek Web/API Partially Unavailable）',
+      '2026-11-03T18:04:53+08:00', 'monitoring', ['API Service'])
+  );
+  const client = createServiceStatusClient({
+    providers: [feedProvider],
+    now: () => 0,
+    fetchImpl: async () => ({ ok: true, text: async () => feed })
+  });
+
+  const result = await client.getServiceStatus();
+
+  assert.equal(result.providers[0].status, 'outage');
+  assert.equal(result.providers[0].incidentTitle, 'DeepSeek 网页/API 部分中断（DeepSeek Web/API Partially Unavailable）');
+});
+
+test('service status client reports unknown when an atom feed fetch fails', async () => {
+  const client = createServiceStatusClient({
+    providers: [feedProvider],
+    now: () => 0,
+    fetchImpl: async () => {
+      throw new Error('network down');
+    }
+  });
+
+  const result = await client.getServiceStatus();
+
+  assert.equal(result.providers[0].status, 'unknown');
+  assert.equal(result.providers[0].error, 'network down');
 });
 
 test('service status client sends an identifying User-Agent header', async () => {

@@ -96,6 +96,7 @@
     stepfun: ['Coding/Token Plan', 'Web'],
     notion: ['Web', 'Manual'],
     manus: ['Auto', 'Desktop app', 'Manual'],
+    opendesign: ['Web', 'Manual'],
     thirdparty: ['Relay', 'API']
   };
 
