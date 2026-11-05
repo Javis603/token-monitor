@@ -3,6 +3,8 @@
 (() => {
   const bridge = window.limitsHistory;
   document.documentElement.classList.toggle('is-windows', bridge.platform === 'win32');
+  const cardFrames = window.TokenMonitorCardMotion.createCardFrameLoop({ sendFrame: id => bridge.cardFrame(id) });
+  bridge.onCardMotion(next => { if (bridge.platform === 'win32') cardFrames.update(next); });
   const model = window.TokenMonitorLimitsHistoryModel;
   const i18n = window.TokenMonitorI18n;
   const $ = id => document.getElementById(id);
@@ -255,6 +257,6 @@
     if (!payload) return;
     cardLayout.prepare({ renderToken: payload.renderToken, animate: animateMeasurement, reduce: reduceMotion() }, { opening, afterPaint: true });
   }
-  window.addEventListener('pagehide', () => cardLayout.cancel(), { once: true });
+  window.addEventListener('pagehide', () => { cardFrames.cancel(); cardLayout.cancel(); }, { once: true });
   new ResizeObserver(() => scheduleSize()).observe($('history-content'));
 })();

@@ -4,6 +4,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('limitsHistory', {
   platform: process.platform,
+  cardFrame: motionId => ipcRenderer.send('limitsHistory:cardFrame', { motionId }),
+  onCardMotion(callback) {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('limitsHistory:cardMotion', listener);
+    return () => ipcRenderer.removeListener('limitsHistory:cardMotion', listener);
+  },
   onNativeMaterial(callback) {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('appearance:nativeMaterial', listener);

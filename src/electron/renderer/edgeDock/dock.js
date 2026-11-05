@@ -1325,6 +1325,11 @@ function renderRail(payload) {
   }
 }
 
+const cardFrames = window.TokenMonitorCardMotion.createCardFrameLoop({ sendFrame: id => bridge.cardFrame(id) });
+bridge.onCardMotion?.(next => {
+  if (state.payload?.platform === 'win32') cardFrames.update(next);
+});
+
 let gesture = null;
 let nextGestureId = 0;
 
@@ -1341,31 +1346,6 @@ function startDragFrames() {
   };
   requestAnimationFrame(frame);
 }
-
-let cardMotionId = null;
-let cardFrameLoop = false;
-
-function pumpCardFrames() {
-  if (cardMotionId === null) {
-    cardFrameLoop = false;
-    return;
-  }
-  bridge.cardFrame(cardMotionId);
-  if (cardMotionId !== null) requestAnimationFrame(pumpCardFrames);
-}
-
-bridge.onCardMotion?.(({ motionId, active }) => {
-  if (state.payload?.platform !== 'win32') return;
-  if (!active) {
-    if (cardMotionId === motionId) cardMotionId = null;
-    return;
-  }
-  cardMotionId = motionId;
-  if (!cardFrameLoop) {
-    cardFrameLoop = true;
-    requestAnimationFrame(pumpCardFrames);
-  }
-});
 
 bridge.onDragEnded?.(({ gestureId }) => {
   if (gesture?.id !== gestureId) return;
@@ -2134,6 +2114,7 @@ const bubbleSizeObserver = surface === 'bubble' && window.ResizeObserver ? new R
 }) : null;
 bubbleSizeObserver?.observe(root);
 window.addEventListener('pagehide', () => {
+  cardFrames.cancel();
   bubbleLayout.cancel();
   clearCardSwitch();
   bubbleSizeObserver?.disconnect();

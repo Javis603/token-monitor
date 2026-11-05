@@ -3281,7 +3281,7 @@ function getLimitsHistoryController() {
     isOwner: win => win === mainWindow || win === dashboardWindow,
     read: limitsHistoryPayload,
     getOpenMode: () => settings.limitsHistoryOpenMode,
-    getMaterialOptions: () => ({ ...nativeMaterialOptions(), radius: 14 })
+    getMaterialOptions: () => ({ ...nativeMaterialOptions(), windowsBackdrop: settings.windowsBackdrop, radius: 14 })
   });
   return limitsHistoryController;
 }

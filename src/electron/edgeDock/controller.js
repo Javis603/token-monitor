@@ -3,6 +3,7 @@
 const os = require('node:os');
 const path = require('node:path');
 const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
+const { createCardMotionDriver } = require('../cardMotion');
 const { CARD_FADE_IN_MS: FADE_IN_MS, CARD_FADE_OUT_MS: FADE_OUT_MS, CARD_FRAME_MS: FADE_STEP_MS, parkedCardBounds, createCardWindowVisibility } = require('../cardWindow');
 const {
   EDGE_DOCK_METRICS,
@@ -44,7 +45,6 @@ const REFRESH_RESULT_HOLD_MS = 900;
 const REFRESH_FADE_OUT_MS = 200;
 const WAKE_TOPMOST_RETRY_MS = 500;
 const RAIL_MORPH_MS = 160;
-const CARD_FRAME_STALE_MS = 64;
 
 function edgeDockSupported(platform = process.platform) {
   return platform === 'darwin' || platform === 'win32';
@@ -162,9 +162,6 @@ function createEdgeDockController(deps) {
   let bubbleFrame = null;
   let bubblePointerMode = null;
   let bubbleMotion = null;
-  let bubbleMotionTimer = null;
-  let lastCardFrameAt = null;
-  let nextBubbleMotionId = 0;
   let railMotion = null;
   let railMotionTimer = null;
   let railHitPolygons = [];
@@ -1132,13 +1129,11 @@ function createEdgeDockController(deps) {
     setVisible('bubble', false, FADE_OUT_MS);
   }
 
-  function cancelBubbleMotion({ preserveFrameClock = false } = {}) {
-    const motion = bubbleMotion;
-    clearInterval(bubbleMotionTimer);
-    bubbleMotionTimer = null;
+  const cardFrameDriver = createCardMotionDriver({ platform, advance: advanceBubbleMotion,
+    notify: payload => send('bubble', 'edgeDock:cardMotion', payload) });
+  function cancelBubbleMotion(options) {
+    cardFrameDriver.cancel(options);
     bubbleMotion = null;
-    if (motion) send('bubble', 'edgeDock:cardMotion', { motionId: motion.id, active: false });
-    if (!preserveFrameClock) lastCardFrameAt = null;
   }
 
   function paintBubble(frame, workArea, target = frame) {
@@ -1178,23 +1173,10 @@ function createEdgeDockController(deps) {
     // stale-frame grace period beyond the last frame that actually arrived.
     cancelBubbleMotion({ preserveFrameClock: bubbleMotion !== null });
     if (moving) {
-      const motion = { id: ++nextBubbleMotionId, keys, from, to: target, frame: from, initialVelocity: velocity, velocity: {},
+      const motion = { keys, from, to: target, frame: from, initialVelocity: velocity, velocity: {},
         startedAt: Date.now(), workArea: current.workArea };
       bubbleMotion = motion;
-      // Windows rounds a nominal 16ms main-process timeout up to two system
-      // ticks. Let the visible renderer drive paint frames; the main timer
-      // remains a fallback if frame delivery stops.
-      if (platform === 'win32') {
-        send('bubble', 'edgeDock:cardMotion', { motionId: motion.id, active: true });
-      }
-      advanceBubbleMotion(motion);
-      if (bubbleMotion === motion) {
-        bubbleMotionTimer = setInterval(() => {
-          if (platform === 'win32' && lastCardFrameAt !== null
-            && Date.now() - lastCardFrameAt < CARD_FRAME_STALE_MS) return;
-          advanceBubbleMotion(motion);
-        }, FADE_STEP_MS);
-      }
+      cardFrameDriver.start(motion);
     } else {
       paintBubble(target, current.workArea);
     }
@@ -1447,10 +1429,7 @@ function createEdgeDockController(deps) {
       tickDrag(screen.getCursorScreenPoint(), layout());
     });
     ipcMain.on('edgeDock:cardFrame', (event, payload) => {
-      if (platform !== 'win32' || surfaceFor(event.sender) !== 'bubble'
-        || !bubbleMotion || bubbleMotion.id !== payload?.motionId) return;
-      lastCardFrameAt = Date.now();
-      advanceBubbleMotion(bubbleMotion);
+      if (surfaceFor(event.sender) === 'bubble') cardFrameDriver.frame(payload?.motionId);
     });
     ipcMain.on('edgeDock:dragEnd', (event) => {
       if (surfaceFor(event.sender) !== 'rail') return;

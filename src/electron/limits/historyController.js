@@ -3,6 +3,8 @@
 const path = require('node:path');
 const os = require('node:os');
 const { applyWindowsChrome } = require('../windowsChrome');
+const { syncWindowsBackdrop } = require('../windowsBackdrop');
+const { createCardMotionDriver } = require('../cardMotion');
 const { parkedCardBounds, createCardWindowVisibility } = require('../cardWindow');
 const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
 const motionPreference = require('../motionPreference');
@@ -22,7 +24,7 @@ function historyBounds(owner, rect, workArea, zoom = 1) {
   };
 }
 
-function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner, read, logger = console.log, setTimer = setTimeout, clearTimer = clearTimeout, getOpenMode = () => 'hover', getMaterialOptions = () => ({ enabled: false }), now = Date.now, setFrameTimer = setInterval, clearFrameTimer = clearInterval, setFadeTimer = setInterval, clearFadeTimer = clearInterval, platform = process.platform, osRelease = os.release() }) {
+function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner, read, logger = console.log, setTimer = setTimeout, clearTimer = clearTimeout, getOpenMode = () => 'hover', getMaterialOptions = () => ({ enabled: false }), now = Date.now, setFrameTimer = setInterval, clearFrameTimer = clearInterval, setFadeTimer = setInterval, clearFadeTimer = clearInterval, platform = process.platform, osRelease = os.release(), syncWindowsMaterial = syncWindowsBackdrop }) {
   let win = null;
   let owner = null;
   let key = '';
@@ -42,9 +44,12 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   let placement = null;
   let animatePlacement = false;
   let frameMotion = null;
-  let frameTimer = null;
   let rendererReducedMotion = false;
 
+  const frameDriver = createCardMotionDriver({ platform, now, setTimer: setFrameTimer, clearTimer: clearFrameTimer,
+    advance: advanceFrame, notify: payload => {
+      if (win && !win.isDestroyed()) win.webContents.send('limitsHistory:cardMotion', payload);
+    } });
   const cardVisibility = createCardWindowVisibility({ reducedMotion, setTimer: setFadeTimer, clearTimer: clearFadeTimer });
   function park() {
     if (platform !== 'darwin' || Number.parseInt(osRelease, 10) >= 25 || visible || !win || win.isDestroyed()) return;
@@ -67,9 +72,8 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   function reducedMotion() {
     return rendererReducedMotion || motionPreference.shouldReduceMotion(currentPayload?.appearance?.reduceMotion, currentPayload?.appearance?.systemReducedMotion === true);
   }
-  function cancelFrameMotion() {
-    clearFrameTimer(frameTimer);
-    frameTimer = null;
+  function cancelFrameMotion(options) {
+    frameDriver.cancel(options);
     frameMotion = null;
   }
   function advanceFrame() {
@@ -87,14 +91,17 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     const velocity = frameMotion?.velocity || {};
     const moving = win.isVisible() && (animate || frameMotion) && !reducedMotion()
       && Object.keys(target).some(key => from[key] !== target[key]);
-    cancelFrameMotion();
+    cancelFrameMotion({ preserveFrameClock: Boolean(moving && frameMotion) });
     if (!moving) { win.setBounds(target); return; }
     frameMotion = { keys: Object.keys(target), from, to: target, velocity: { ...velocity }, initialVelocity: velocity,
       startedAt: now(), workArea: placement.workArea };
-    advanceFrame();
-    if (frameMotion) frameTimer = setFrameTimer(advanceFrame, 16);
+    frameDriver.start(frameMotion);
   }
-  function syncMaterial() { syncNativeMaterialVisibility(win, getMaterialOptions()); }
+  function syncMaterial() {
+    const options = getMaterialOptions();
+    syncNativeMaterialVisibility(win, options);
+    syncWindowsMaterial(win, { enabled: options.enabled, mode: options.windowsBackdrop }, { platform });
+  }
   function send(payload, opening = false) {
     currentPayload = payload;
     expectedRender = ++renderSequence;
@@ -122,7 +129,10 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     if (owner && !owner.isDestroyed?.()) owner.webContents.send('limitsHistory:state', false);
     if (win && !win.isDestroyed() && win.isVisible()) {
       win.setIgnoreMouseEvents(true);
-      cardVisibility.setVisible(win, false, instant ? 0 : undefined, { afterFade: park });
+      if (platform === 'linux') {
+        cardVisibility.cancel(win);
+        win.hide();
+      } else cardVisibility.setVisible(win, false, instant ? 0 : undefined, { afterFade: park });
     }
     ownerListeners.forEach(([event, listener]) => owner?.removeListener(event, listener));
     ownerListeners = [];
@@ -157,10 +167,9 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     win = new BrowserWindow({
       width: 310, height: 420, show: false, frame: false, focusable: false,
       resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
-      skipTaskbar: true, alwaysOnTop: true, transparent: !(platform === 'win32' && getMaterialOptions().enabled), backgroundColor: '#00000000',
+      skipTaskbar: true, alwaysOnTop: true, transparent: true, backgroundColor: '#00000000',
       hasShadow: true,
       ...(platform === 'darwin' ? { type: 'panel', acceptFirstMouse: true, vibrancy: 'hud', visualEffectState: 'active' } : {}),
-      ...(platform === 'win32' && getMaterialOptions().enabled ? { backgroundMaterial: 'acrylic' } : {}),
       webPreferences: { preload: path.join(__dirname, 'historyPreload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
     });
     applyWindowsChrome(win, { round: true });
@@ -268,6 +277,9 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
       if (event.sender === win?.webContents || event.sender === owner?.webContents || event.sender === pendingOpen?.parent.webContents) {
         hide();
       }
+    });
+    ipcMain.on('limitsHistory:cardFrame', (event, payload) => {
+      if (event.sender === win?.webContents) frameDriver.frame(payload?.motionId);
     });
     ipcMain.on('limitsHistory:resize', (event, height, renderToken, animate, reduce) => {
       if (event.sender !== win?.webContents || !visible || !Number.isFinite(height) || renderToken !== expectedRender) return;

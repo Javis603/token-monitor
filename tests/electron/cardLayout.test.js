@@ -28,5 +28,7 @@ test('both card renderers load the shared layout before their renderer script', 
     const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer', html), 'utf8');
     const shared = source.indexOf('<script src="../cardLayout.js">');
     assert.ok(shared >= 0 && shared < source.indexOf(`<script src="${script}">`), html);
+    const motion = source.indexOf('<script src="../cardMotion.js">');
+    assert.ok(motion >= 0 && motion < source.indexOf(`<script src="${script}">`), html);
   }
 });

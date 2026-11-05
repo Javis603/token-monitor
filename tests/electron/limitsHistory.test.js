@@ -723,6 +723,8 @@ test('read-only history rejects date navigation, discards stale reads and closes
     static fromWebContents(sender) { return sender === owner.webContents ? owner : null; }
     isMinimized() { return false; }
     setVibrancy() {}
+    setBackgroundMaterial() {}
+    setBackgroundColor() {}
     getOpacity() { return this.opacity ?? 1; }
     setOpacity(value) { this.opacity = value; }
     setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
@@ -794,8 +796,8 @@ test('read-only history rejects date navigation, discards stale reads and closes
   controller.dispose();
 });
 
-function previewFixture(t) {
-  const f = { pointer: { x: 1500, y: 800 }, focused: false, ownerFocused: false, mode: 'hover', timer: null, reads: [] };
+function previewFixture(t, { platform = 'win32' } = {}) {
+  const f = { pointer: { x: 1500, y: 800 }, focused: false, ownerFocused: false, mode: 'hover', timer: null, reads: [], motions: [], materials: [] };
   const owner = new EventEmitter();
   owner.webContents = { getZoomFactor: () => 1, send() {} };
   owner.getBounds = () => ({ x: 100, y: 100, width: 300, height: 700 });
@@ -809,6 +811,8 @@ function previewFixture(t) {
       this.webContents = new EventEmitter();
       Object.assign(this.webContents, { focus: () => { throw new Error('preview must not take keyboard focus'); }, isDestroyed: () => false,
         setWindowOpenHandler() {}, setZoomFactor() {}, getZoomFactor: () => 1, send(channel, payload) {
+          if (f.destroyed) throw new Error('renderer already destroyed');
+          if (channel === 'limitsHistory:cardMotion') f.motions.push(payload);
           if (channel !== 'limitsHistory:render') return;
           f.lastPayload = payload;
           if (f.autoMeasure !== false) handlers.get('limitsHistory:resize')({ sender: f.window.webContents }, f.contentHeight || 420, payload.renderToken, false, false);
@@ -817,10 +821,12 @@ function previewFixture(t) {
     static fromWebContents(sender) { return sender === owner.webContents ? owner : null; }
     isMinimized() { return false; }
     setVibrancy() {}
-    getOpacity() { return this.opacity ?? 1; }
-    setOpacity(value) { this.opacity = value; }
+    setBackgroundMaterial() {}
+    setBackgroundColor() {}
+    getOpacity() { return platform === 'linux' ? 1 : this.opacity ?? 1; }
+    setOpacity(value) { if (platform !== 'linux') this.opacity = value; }
     setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
-    isDestroyed() { return false; }
+    isDestroyed() { return f.destroyed === true; }
     loadFile() { return Promise.resolve(); }
     setBounds(bounds) { this.bounds = bounds; }
     getBounds() { return this.bounds; }
@@ -829,13 +835,15 @@ function previewFixture(t) {
     hide() { this.visible = false; f.focused = false; }
     show() { throw new Error('preview must use showInactive'); }
     showInactive() { this.visible = true; }
-    destroy() { this.emit('closed'); }
+    destroy() { f.destroyed = true; this.emit('closed'); }
   }
   const handlers = new Map();
   f.controller = createLimitsHistoryController({ BrowserWindow: Preview,
     screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1600, height: 900 } }), getCursorScreenPoint: () => f.pointer },
     ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => handlers.set(name, fn) },
-    setFadeTimer: () => 1, clearFadeTimer() {}, platform: 'win32',
+    setFadeTimer: () => 1, clearFadeTimer() {}, platform,
+    getMaterialOptions: () => f.material || { enabled: false },
+    syncWindowsMaterial: (_win, options) => f.materials.push(options),
     getOpenMode: () => f.mode, now: () => f.clock || 0, setFrameTimer: fn => { f.frame = fn; return 1; }, clearFrameTimer: () => { f.frame = null; }, setTimer: fn => { f.timer = fn; return 1; }, clearTimer: () => { f.timer = null; },
     isOwner: win => win === owner, read: (key, range) => { f.reads.push({ key, range }); return f.pending || { source: 'a' }; } });
   f.shown = () => f.window.visible && !f.window.ignoreMouse;
@@ -1400,6 +1408,72 @@ test('closing with reduced motion immediately clears the retained window', async
   assert.equal(f.window.opacity, 0);
   assert.equal(f.window.visible, true);
   assert.equal(f.window.ignoreMouse, true);
+});
+
+test('Linux closes the native preview when window opacity is unsupported and can reopen', async t => {
+  const f = previewFixture(t, { platform: 'linux' });
+  await f.open();
+  assert.equal(f.window.visible, true);
+  f.fromPanel('close');
+  assert.equal(f.window.visible, false, 'Linux must hide rather than rely on native opacity');
+  await f.open();
+  assert.equal(f.shown(), true);
+  assert.equal(f.lastPayload.opening, true);
+});
+
+test('history uses the main window backdrop mode and follows changes to that setting', async t => {
+  const f = previewFixture(t);
+  f.material = { enabled: true, windowsBackdrop: 'accent' };
+  await f.open();
+  assert.equal(f.options.transparent, true, 'the host supports the same transparent material path as main');
+  assert.deepEqual(f.materials.at(-1), { enabled: true, mode: 'accent' });
+  f.material = { enabled: true, windowsBackdrop: 'acrylic' };
+  f.controller.syncMaterial();
+  assert.deepEqual(f.materials.at(-1), { enabled: true, mode: 'acrylic' });
+  f.material = { enabled: false, windowsBackdrop: 'accent' };
+  f.controller.syncMaterial();
+  assert.deepEqual(f.materials.at(-1), { enabled: false, mode: 'accent' });
+});
+
+test('Windows history switches follow renderer frames with stale-frame rejection and a timer fallback', async t => {
+  const f = previewFixture(t);
+  await f.open();
+  await f.open('b', false, { x: 0, y: 350, width: 300, height: 100 });
+  const first = f.motions.at(-1);
+  assert.equal(first?.active, true);
+  const start = { ...f.window.bounds };
+  const frame = (sender, motionId) => f.handlers.get('limitsHistory:cardFrame')({ sender }, { motionId });
+  f.clock = 16;
+  frame(f.owner.webContents, first.motionId);
+  frame(f.window.webContents, first.motionId - 1);
+  assert.deepEqual(f.window.bounds, start);
+  frame(f.window.webContents, first.motionId);
+  const painted = { ...f.window.bounds };
+  assert.notDeepEqual(painted, start);
+  f.clock = 48; f.frame();
+  assert.deepEqual(f.window.bounds, painted, 'the timer cannot double-paint while renderer frames arrive');
+  await f.open('c', false, { x: 0, y: 150, width: 300, height: 100 });
+  const second = f.motions.at(-1);
+  assert.notEqual(second.motionId, first.motionId);
+  const retargeted = { ...f.window.bounds };
+  f.clock = 64; f.frame();
+  assert.deepEqual(f.window.bounds, retargeted, 'retargeting preserves the last valid frame clock');
+  f.clock = 81; f.frame();
+  assert.notDeepEqual(f.window.bounds, retargeted, 'the fallback resumes after renderer delivery stops');
+  f.clock = 800; f.frame();
+  const settled = { ...f.window.bounds };
+  frame(f.window.webContents, second.motionId);
+  assert.deepEqual(f.window.bounds, settled);
+  assert.equal(f.motions.at(-1).active, false);
+});
+
+test('destroying a moving preview cancels its driver without sending to the destroyed renderer', async t => {
+  const f = previewFixture(t);
+  await f.open();
+  await f.open('b', false, { x: 0, y: 350, width: 300, height: 100 });
+  assert.ok(f.frame);
+  assert.doesNotThrow(() => f.window.destroy());
+  assert.equal(f.frame, null);
 });
 
 test('account changes use the sidebar frame spring and retarget from the current frame', async t => {

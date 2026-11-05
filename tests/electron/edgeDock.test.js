@@ -88,6 +88,7 @@ test('the detail total follows the main app compact toggle and unit threshold', 
 });
 
 const cardLayoutApi = require('../../src/electron/renderer/cardLayout');
+const cardMotionApi = require('../../src/electron/renderer/cardMotion');
 
 test('a long detail total shrinks beside its compact reading instead of wrapping', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
@@ -3224,13 +3225,13 @@ for (const platform of ['win32', 'darwin']) {
 for (const platform of ['win32', 'darwin']) {
   test(`${platform} card transitions request renderer frames only on Windows`, () => {
     const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-    const source = dock.slice(dock.indexOf('let cardMotionId = null;'), dock.indexOf('bridge.onDragEnded'));
+    const source = dock.slice(dock.indexOf('const cardFrames ='), dock.indexOf('let gesture = null;'));
     const frames = [], callbacks = [];
     let motion;
-    Function('bridge', 'state', 'requestAnimationFrame', `${source};`)(
+    Function('bridge', 'state', 'window', `${source};`)(
       { cardFrame: id => frames.push(id), onCardMotion: fn => { motion = fn; } },
       { payload: { platform } },
-      fn => callbacks.push(fn)
+      { TokenMonitorCardMotion: { createCardFrameLoop: options => cardMotionApi.createCardFrameLoop({ ...options, requestFrame: fn => callbacks.push(fn) }) } }
     );
     motion({ motionId: 42, active: true });
     assert.equal(callbacks.length, platform === 'win32' ? 1 : 0, 'only Windows starts a paint loop');
