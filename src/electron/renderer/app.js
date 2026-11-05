@@ -6808,16 +6808,26 @@ function renderHomeToolModule(period) {
     if (creditsView && String(row.key).toLowerCase() === 'workbuddy') item.append(creditsBadgeElement(creditsView));
     body.append(item);
   }
-  // A tool that publishes credits but no tokens can never earn a row in a token
-  // ranking — it would have no share and sink to the bottom. Name it underneath,
-  // in its own unit, so the absence reads as "credits only" rather than "not
-  // tracked".
+  // A tool that publishes credits but no tokens cannot join a token ranking, but
+  // it still deserves a real row: same mark, same name column, its own unit in
+  // the value column and no invented percentage.
   for (const note of creditOnlyToolNotes(rows)) {
-    const line = document.createElement('div');
-    line.className = 'home-tool-note';
-    line.textContent = `${note.name} · ${t('home.creditsToday', { value: formatCredits(note.spend) })}`;
-    line.title = t('home.creditsSource');
-    body.append(line);
+    const item = document.createElement('div');
+    item.className = 'home-list-row home-tool-row';
+    const mark = document.createElement('span');
+    applyHomeListMark(mark, iconKindFor({ key: note.id }, 'tool'), clientColors[note.id] || '');
+    const name = document.createElement('span');
+    name.className = 'home-list-name';
+    name.textContent = note.name;
+    const value = document.createElement('span');
+    value.className = 'home-list-value';
+    value.textContent = formatCredits(note.spend);
+    const unit = document.createElement('span');
+    unit.className = 'home-list-aux';
+    unit.textContent = 'credits';
+    item.append(mark, name, value, unit);
+    item.title = t('home.creditsSource');
+    body.append(item);
   }
   return module;
 }

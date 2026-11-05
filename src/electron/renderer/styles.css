@@ -3762,17 +3762,6 @@ html.is-windows .settings-panel select option {
 /* TokenLedger: a credits-only tool sits under the token rows, in the token
    module, precisely because there is no token figure to rank it by. Muted so it
    never reads as a row of the ranking. */
-.home-tool-note {
-  margin-top: 2px;
-  padding-left: 18px;
-  color: var(--readable-muted);
-  font-size: 0.625rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.5;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .home-limit-spend-note {
   margin: 1px 0 2px 18px;
   color: var(--readable-muted);
