@@ -3219,9 +3219,38 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     updateRow(row, { ...rowData, barValue: rowData.barValue ?? rowData.value, max });
     rowRenderFingerprints.set(row, fingerprint);
   }
+  if (state.breakdown === 'tool') renderCreditsOnlyBreakdownRows(visibleRows);
   renderToolDetailFooter();
   renderProjectBreakdownFooter();
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
+}
+
+// The Tools breakdown ranks tokens, so a credits-only provider has no row to
+// join. It gets one anyway — same template, its own unit in the metrics column,
+// no bar — because "this tool is tracked, just not in tokens" is the answer a
+// reader is looking for when they notice it missing.
+function renderCreditsOnlyBreakdownRows(tokenRows) {
+  for (const stale of Array.from(els.breakdown.querySelectorAll('[data-credits-only]'))) stale.remove();
+  const notes = creditOnlyToolNotes(tokenRows || [], { anyPeriod: true });
+  for (const note of notes) {
+    const row = rowTemplate({ key: `credits:${note.id}`, name: note.name });
+    row.dataset.creditsOnly = '1';
+    // rowTemplate leaves the mark empty; the icon is applied by updateRow, which
+    // this row deliberately bypasses (it has no metrics to update).
+    const mark = row.querySelector('.row-mark');
+    const iconKind = iconKindFor({ key: note.id }, 'tool');
+    if (iconKind.kind === 'icon') {
+      mark.className = `row-mark row-icon ${iconKind.iconClass}`;
+    } else {
+      mark.className = 'row-mark dot';
+      mark.style.background = clientColors[note.id] || '';
+    }
+    row.querySelector('.row-value').textContent = formatCredits(note.spend);
+    row.querySelector('.row-cost').textContent = 'credits';
+    // No share of the token total exists, so there is nothing to fill a bar with.
+    row.querySelector('.row-body').classList.add('hidden');
+    els.breakdown.append(row);
+  }
 }
 
 function deviceColor(stale) {
@@ -6991,8 +7020,8 @@ function renderHomeToolModule(period) {
 
 // Derived from the limit providers rather than a hardcoded id, so any future
 // credits-only vendor shows up here without new code.
-function creditOnlyToolNotes(rows) {
-  if (state.period !== 'today') return [];
+function creditOnlyToolNotes(rows, { anyPeriod = false } = {}) {
+  if (!anyPeriod && state.period !== 'today') return [];
   const known = new Set((rows || []).map((row) => String(row.key).toLowerCase()));
   const labels = new Map(LIMIT_PROVIDERS.map((entry) => [entry.id, entry.label]));
   const notes = [];
