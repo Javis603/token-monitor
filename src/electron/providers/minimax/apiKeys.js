@@ -25,7 +25,7 @@ function createMinimaxApiKeys({ getSettings, saveSettings, probeDeps, changed, e
   const commands = createCredentialCommands({
     getSettings, env: {},
     probeDeps: () => ({ ...probeDeps(), probe: true, providerRuntimeState: new Map() }),
-    commitCredential: ({ candidate, values }) => {
+    commitCredential: ({ candidate }) => {
       const next = profiles();
       const key = candidate.minimaxApiKey;
       const id = Object.keys(next).find(id => next[id].apiKey === key) || randomUUID();
