@@ -55,6 +55,7 @@
     { id: 'kiro', label: 'Kiro' },
     { id: 'workbuddy', label: 'WorkBuddy' },
     { id: 'qoder', label: 'Qoder' },
+    { id: 'qwenwork', label: 'QwenWork' },
     { id: 'deepseek', label: 'DeepSeek' },
     { id: 'devin', label: 'Devin' },
     { id: 'minimax', label: 'Minimax' },

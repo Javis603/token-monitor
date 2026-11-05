@@ -77,6 +77,7 @@
     { id: 'openrouter', label: 'OpenRouter', color: '#6566F1' },
     { id: 'gemini', color: '#4285f4' },
     { id: 'qoder', label: 'Qoder', color: '#2ADB5C' },
+    { id: 'qwenwork', label: 'QwenWork', color: '#7771F4' },
     { id: 'deepseek', label: 'DeepSeek', color: '#4d6bfe' },
     { id: 'xai', label: 'xAI', color: '#000000', mask: 'grok', widgetInk: true },
     { id: 'meta', label: 'Meta', color: '#1d65c1', widgetColor: '#4385DB' },

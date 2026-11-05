@@ -1959,6 +1959,45 @@ test('main settings migration preserves explicit AI limit provider selections', 
   );
 });
 
+test('a pre-QwenWork provider selection gains QwenWork once, without re-enabling it after a disable', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const parseLimitProviders = (value) => {
+    const known = new Set(['claude', 'codex', 'cursor', 'zai', 'qoder', 'qwenwork', 'deepseek']);
+    return String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter((item, index, list) => (
+      known.has(item) && list.indexOf(item) === index
+    ));
+  };
+  const settings = {
+    limitProviders: 'claude,codex,cursor,zai,qoder',
+    limitProviderOrder: 'codex,zai,qoder,deepseek'
+  };
+  assert.equal(runMainFunction(main, 'migrateQwenworkLimitProvider', 'migrateLimitProviderOrder',
+    'migrateQwenworkLimitProvider(settings)', { parseLimitProviders, settings }), true);
+  assert.equal(settings.limitProviders, 'claude,codex,cursor,zai,qoder,qwenwork');
+  assert.equal(settings.limitProviderOrder, 'codex,zai,qoder,qwenwork,deepseek');
+
+  const disabled = { limitProviders: 'claude,codex', limitProviderOrder: 'claude,codex,qwenwork' };
+  assert.equal(runMainFunction(main, 'migrateQwenworkLimitProvider', 'migrateLimitProviderOrder',
+    'migrateQwenworkLimitProvider(disabled)', { parseLimitProviders, disabled }), false);
+  assert.equal(disabled.limitProviders, 'claude,codex');
+
+  const afterLogin = { limitProviders: 'claude,codex', limitProviderOrder: 'claude,codex,qwenwork' };
+  assert.equal(runMainFunction(main, 'ensureQwenworkLimitProviderEnabled', 'migrateQwenworkLimitProvider',
+    'ensureQwenworkLimitProviderEnabled(afterLogin)', { parseLimitProviders, afterLogin }), true);
+  assert.equal(afterLogin.limitProviders, 'claude,codex,qwenwork');
+
+  const home = { limitProviders: 'claude,qwenwork', homeLimitProviderOrder: 'claude,zai', hiddenHomeLimitProviders: '' };
+  assert.equal(runMainFunction(main, 'migrateQwenworkHomeLimitProvider', 'migrateLimitProviderOrder',
+    'migrateQwenworkHomeLimitProvider(home)', { parseLimitProviders, home }), true);
+  assert.equal(home.homeLimitProviderOrder, 'claude,zai,qwenwork');
+  assert.equal(home.qwenworkHomeLimitProviderSeeded, true);
+
+  home.homeLimitProviderOrder = 'claude,zai';
+  assert.equal(runMainFunction(main, 'migrateQwenworkHomeLimitProvider', 'migrateLimitProviderOrder',
+    'migrateQwenworkHomeLimitProvider(home)', { parseLimitProviders, home }), false);
+  assert.equal(home.homeLimitProviderOrder, 'claude,zai');
+});
+
 test('active Codex account labels are always shown for multi-account limits rows', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const app = readRendererFile('app.js');

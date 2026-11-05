@@ -111,6 +111,7 @@ const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
   registerProvider(require('../providers/kiro/account'), () => require('../providers/kiro/limits')),
   registerProvider(require('../providers/workbuddy/account'), () => require('../providers/workbuddy/limits')),
   registerProvider(require('../providers/qoder/account'), () => require('../providers/qoder/limits')),
+  registerProvider(require('../providers/qwenwork/account'), () => require('../providers/qwenwork/limits')),
   registerProvider(require('../providers/deepseek/account'), () => require('../providers/deepseek/limits')),
   registerProvider(require('../providers/devin/account'), () => require('../providers/devin/limits')),
   registerProvider(require('../providers/minimax/account'), () => require('../providers/minimax/limits')),

@@ -650,6 +650,9 @@ function providerCollapseKey(provider) {
       || provider.provider === 'notion'
       // OpenDesign workspace IDs are portable across devices.
       || provider.provider === 'opendesign'
+      // QwenWork keys hash the gateway user id, which is the same on every
+      // device; two keys therefore mean two accounts, not one account twice.
+      || provider.provider === 'qwenwork'
       // Manus keys hash the account's user id from its session, so the same
       // account hashes identically on every device.
       || provider.provider === 'manus'
@@ -981,7 +984,9 @@ function betterProvider(current, candidate) {
 // Muse's two products refresh independently; a fresh CLI observation cannot
 // retire the Web product's last-good quota, or vice versa.
 function providerFreshnessKey(provider) {
-  if (provider.provider === 'opendesign' && provider.accountKey) return `opendesign:${provider.accountKey}`;
+  if ((provider.provider === 'opendesign' || provider.provider === 'qwenwork') && provider.accountKey) {
+    return `${provider.provider}:${provider.accountKey}`;
+  }
   return provider.provider === 'muse' ? `muse:${provider.source}` : provider.provider;
 }
 

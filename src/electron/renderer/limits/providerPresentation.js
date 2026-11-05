@@ -84,6 +84,7 @@
     kiro: ['Auto', 'CLI'],
     workbuddy: ['Auto', 'Desktop app', 'Web'],
     qoder: ['Manual login', 'Web'],
+    qwenwork: ['Auto', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
     minimax: ['Token Plan', 'Pay-as-you-go', 'API key'],
