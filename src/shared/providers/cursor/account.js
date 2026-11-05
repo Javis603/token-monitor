@@ -9,15 +9,15 @@ function normalizeCursorAccountIds(value) {
     .filter((id) => id && id.length <= 256))];
 }
 
-// Digests of removed desktop sign-ins (see auth.cursorTokenFingerprint). Only
-// the newest few matter: each one blocks a single desktop token.
-const CURSOR_DISMISSED_TOKEN_LIMIT = 20;
-function normalizeCursorDismissedTokenFingerprints(value) {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value
-    .map((entry) => String(entry || '').trim().toLowerCase())
-    .filter((entry) => /^[0-9a-f]{64}$/.test(entry)))]
-    .slice(-CURSOR_DISMISSED_TOKEN_LIMIT);
+// A desktop-detected account follows the Cursor desktop sign-in. It leaves the
+// account list once Cursor rejects its token, the desktop is signed out, or the
+// desktop is signed in as a different user. An unknown desktop state or a
+// temporary probe failure keeps it listed. Its stored usage history is untouched.
+function isCursorDetectedAccountCurrent({ desktop, userId = '', unauthorized = false } = {}) {
+  if (unauthorized) return false;
+  if (desktop?.state === 'signed-out') return false;
+  if (desktop?.state === 'signed-in' && userId && desktop.userId && desktop.userId !== userId) return false;
+  return true;
 }
 
 module.exports = {
@@ -32,8 +32,8 @@ module.exports = {
       initial: []
     }
   ],
+  isCursorDetectedAccountCurrent,
   normalizeCursorAccountIds,
-  normalizeCursorDismissedTokenFingerprints,
   urlPolicy: [
     { hosts: ['cursor.com', 'www.cursor.com'], pathPrefixes: ['/settings'], exactPaths: ['/', '/dashboard'] }
   ]

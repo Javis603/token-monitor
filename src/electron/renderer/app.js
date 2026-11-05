@@ -18432,7 +18432,6 @@ function renderCursorStatus() {
         remove.className = 'managed-account-remove';
         remove.textContent = '✕';
         remove.setAttribute('aria-label', t('settings.cursor.remove'));
-        if (account.detected === true) remove.setAttribute('aria-description', t('settings.cursor.removeExpiredDetected'));
         let confirmingRemove = false;
         remove.addEventListener('click', async () => {
           if (!confirmingRemove) {

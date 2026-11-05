@@ -337,12 +337,20 @@ async function runCursorLogin(token, {
   });
 }
 
-// One-way digest of a stored session token. Settings keep only this digest to
-// remember a desktop sign-in the user removed, never the token itself.
-function cursorTokenFingerprint(token) {
-  const normalized = normalizeCursorSessionToken(token);
-  if (!normalized) return '';
-  return crypto.createHash('sha256').update(normalized).digest('hex');
+// The Cursor desktop sign-in, for deciding which desktop-detected accounts are
+// current. 'unknown' when Cursor desktop has no state file here or it cannot be
+// read, so callers keep their accounts instead of hiding them.
+function readCursorDesktopSignIn(options = {}) {
+  const fsApi = options.fs || fs;
+  const hasState = cursorDesktopStateCandidates(options).some((candidate) => {
+    try { return fsApi.statSync(candidate).isFile(); } catch (_) { return false; }
+  });
+  if (!hasState) return { state: 'unknown' };
+  let accessToken;
+  try { accessToken = readCursorDesktopAccessToken(options); } catch (_) { return { state: 'unknown' }; }
+  if (!accessToken) return { state: 'signed-out' };
+  const userId = canonicalCursorUserId(extractUserId(normalizeCursorSessionToken(accessToken) || ''));
+  return userId ? { state: 'signed-in', userId } : { state: 'unknown' };
 }
 
 async function runCursorDiscover(options = {}) {
@@ -353,12 +361,6 @@ async function runCursorDiscover(options = {}) {
     const error = new Error('Cursor desktop access token has an invalid account identity');
     error.code = 'CURSOR_DESKTOP_TOKEN_INVALID';
     throw error;
-  }
-  // A desktop sign-in the user removed stays removed until Cursor desktop
-  // holds a different token (a new sign-in or a refreshed session).
-  const dismissed = options.dismissedTokenFingerprints;
-  if (dismissed && dismissed.includes(cursorTokenFingerprint(sessionToken))) {
-    return { discovered: false, reason: 'dismissed' };
   }
   const accountId = await (options.runLogin || runCursorLogin)(sessionToken, {
     home: options.home,
@@ -424,11 +426,11 @@ module.exports = {
   canonicalCursorUserId,
   credentialsPath,
   cursorDesktopStateCandidates,
-  cursorTokenFingerprint,
   listAccounts,
   normalizeCursorSessionToken,
   readActiveAccount,
   readCursorDesktopAccessToken,
+  readCursorDesktopSignIn,
   runCursorDiscover,
   runCursorLogin,
   runCursorLogout,
