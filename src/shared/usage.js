@@ -1795,15 +1795,26 @@ function aggregateHistory(devices, options = {}) {
   let reportedToday = '';
   for (const record of devices) {
     const normalized = normalizeRecordHistoryFields(record);
+    const allTime = record.allTime || record.periods?.allTime;
+    const totalTokens = allTime?.totalTokens ?? allTime?.total_tokens;
     if (!hasOwn(normalized, 'history') || normalized.history === null) {
       // A legacy/history-disabled device with all-time usage may own active
       // dates absent from the histories we can merge. Include an incomplete
       // sentinel so mixed-version hubs never advertise an exact lifetime count.
-      if (normalizeDeviceRecord(record).periods.allTime.totalTokens > 0) {
+      if (Math.round(asNumber(totalTokens)) > 0) {
         histories.push({ daily: [], monthly: [], summary: { activeDaysComplete: false } });
       }
       continue;
     }
+    // A confirmed zero-usage legacy record cannot own any missing active dates.
+    // Missing counters or any retained history evidence still fail closed.
+    const history = normalized.history;
+    if (history.summary.activeDaysComplete !== true
+      && totalTokens != null && Number(totalTokens) === 0
+      && history.daily.length === 0 && history.monthly.length === 0
+      && !history.dailyTotals?.length && !history.dailyTotalsOmitted
+      && asNumber(history.summary.activeDays) === 0
+      && asNumber(history.summary.totalTokens) === 0) continue;
     histories.push(normalized.history);
     if (!normalized.history.daily.length) continue;
     const reported = calendarDayKey(normalized.periodWindows?.today?.key);
