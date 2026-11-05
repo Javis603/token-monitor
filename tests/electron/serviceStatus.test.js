@@ -448,6 +448,20 @@ test('summarizeGoogleFeedProvider falls back to unknown severity and plain-prose
   assert.equal(result.incidentTitle, 'Gemini errors in Workspace');
 });
 
+test('summarizeGoogleFeedProvider reads inline titles after the marker', () => {
+  // Both inline spacings appear in the live feed ("**Title** : text",
+  // "**Title**: text"); the marker itself must never reach the panel.
+  for (const [desc, headline] of [
+    ['**Title** : Some customers may have seen errors.', 'Some customers may have seen errors.'],
+    ['**Title**: Some customers may have seen errors.', 'Some customers may have seen errors.'],
+    ['**Summary:**\nElevated error rates in Workspace.', 'Elevated error rates in Workspace.']
+  ]) {
+    const payload = [googleIncident({ external_desc: desc })];
+    const result = summarizeGoogleFeedProvider(googleProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
+    assert.equal(result.incidentTitle, headline, desc);
+  }
+});
+
 test('summarizeGoogleFeedProvider keeps outage products ahead of degraded ones', () => {
   const payload = [
     googleIncident({ severity: 'medium', affected_products: [{ title: 'Gemini' }, { title: 'Shared' }] }),

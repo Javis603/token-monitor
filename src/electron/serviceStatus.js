@@ -349,13 +349,18 @@ function summarizeInstatusProvider(provider, payload, options = {}) {
 // medium / high. Unknown severities degrade to minor rather than reading green.
 const GOOGLE_SEVERITY_TO_INDICATOR = new Map([['low', 'minor'], ['medium', 'major'], ['high', 'critical']]);
 
-// Feed entries lead with a "**Summary:**" / "**Title**" marker line and the
-// short headline the official dashboard shows follows it; older entries start
-// with plain prose, so the first line is the fallback.
+// Feed entries lead with a "**Summary:**" / "**Title**" marker and the short
+// headline the official dashboard shows either follows on the next line or is
+// inline after the marker ("**Title** : ..."); older entries start with plain
+// prose, so the first line is the fallback.
 function googleHeadline(externalDesc) {
   const lines = String(externalDesc || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   for (let index = 0; index < lines.length; index += 1) {
-    if (/^\*\*(summary|title):?\*\*:?\s*$/i.test(lines[index])) return lines[index + 1] || '';
+    const marker = lines[index].match(/^\*\*(summary|title):?\*\*\s*(.*)$/i);
+    if (!marker) continue;
+    const inline = marker[2].replace(/^:\s*/, '');
+    if (inline) return inline;
+    return lines[index + 1] || '';
   }
   return lines[0] || '';
 }
