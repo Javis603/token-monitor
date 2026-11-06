@@ -7,6 +7,10 @@ read_when:
 
 # Mistral Vibe
 
+## Identity and ids
+
+The tracked client id is `mistral`, shared with the model vendor and reserved for future Mistral limits integration. The displayed client name is Mistral Vibe. Subprocess and custom-root scans map `mistral` to Tokscale's `vibe`; live usage, history and archives normalize `vibe` back to `mistral`. Watches target that same canonical partition. The existing Mistral artwork and `#FA520F` colour are reused.
+
 ## Data sources
 
 Tokscale parses `$VIBE_HOME/logs/session/`, defaulting to `~/.vibe/logs/session/` on every platform. The watcher and source health check follow that same override; WSL discovery uses the Linux home-relative default.
@@ -15,7 +19,7 @@ Vibe 2.x records cumulative session statistics in `meta.json`; legacy flat JSON 
 
 ## Invariants and known gaps
 
-`session_prompt_tokens` already includes `session_cached_tokens`. Tokscale splits cached tokens out of input, and Token Monitor uses its normal additive input/output/cache accounting. Do not add cached prompt tokens to the original prompt total again. The tracked client id is `mistral`, shared with the model vendor and reserved for future Mistral limits integration. The displayed client name is Mistral Vibe. Subprocess and custom-root scans map `mistral` to Tokscale's `vibe`; live usage, history and archives normalize `vibe` back to `mistral`. Watches target that same canonical partition. The existing Mistral artwork and `#FA520F` colour are reused.
+`session_prompt_tokens` already includes `session_cached_tokens`. Tokscale splits cached tokens out of input, and Token Monitor uses its normal additive input/output/cache accounting. Do not add cached prompt tokens to the original prompt total again.
 
 ## Verification
 
