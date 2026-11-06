@@ -660,7 +660,16 @@ async function fetchMinimaxCodeRows(options, deps, context) {
   if (scope?.provider === 'minimax' && scope.accountKey) {
     const target = currents.find(row => row.status === 'ok' && row.accountKey === scope.accountKey);
     if (target) return target;
-    const current = currents.find(row => row.status !== 'ok' || !row.accountKey) || currents[0];
+    const previous = (options.previousLimits?.providers || []).find(row =>
+      row.provider === 'minimax' && row.source === 'oauth' && row.accountKey === scope.accountKey);
+    // A regional failure can only speak for accounts from that same region.
+    const current = currents.find(row => row.accountKey === scope.accountKey)
+      || (previous?.region ? currents.find(row => row.region === previous.region) : null)
+      || currents.find(row => !row.region && row.status !== 'ok');
+    if (!current) return normalizeLimitProvider({
+      provider: 'minimax', source: 'oauth', accountKey: scope.accountKey,
+      status: 'unavailable', updatedAt: context.updatedAt, region: previous?.region || '', windows: []
+    });
     // A scoped attempt keeps its target identity; unidentified or different
     // logins cannot replace that account's last-good data.
     if (current.status !== 'ok' || !current.accountKey) {
@@ -775,7 +784,7 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
         ...account,
         status: windows.length ? 'ok' : 'unavailable',
         windows,
-        ...(Object.keys(spend).length ? { balance: {
+        ...(attempt.kind === 'balance' && windows.length ? { balance: {
           amount: windows[0].remaining, currency: windows[0].currency, ...spend
         } } : {}),
         region: attempt.region

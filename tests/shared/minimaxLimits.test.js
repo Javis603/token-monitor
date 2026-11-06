@@ -738,7 +738,8 @@ test('MiniMax Spend refreshes over an expired cache use only the fresh snapshot'
     const partial = await fetchMinimaxLimits(options, deps);
     assert.equal(partial.status, 'ok');
     assert.equal(partial.balance?.allTimeSpend ?? null, null, 'a failed period is not filled from the old snapshot');
-    if (partial.balance) assert.equal(partial.balance.todaySpend, 2);
+    assert.equal(partial.balance.amount, 14.97);
+    assert.equal(partial.balance.todaySpend, failing('dated') ? null : 2);
     fail = false;
     clock.spend = 3;
     clock.now += 60_000;
@@ -1542,4 +1543,80 @@ test('MiniMax links same-region pay-as-you-go keys and rejects cross-region or w
   assert.equal(cnKey.find(row => row.source === 'oauth').region, 'en');
   assert.equal(cnKey.find(row => row.source === 'api').region, 'cn');
   assert.equal(cnKey.find(row => row.source === 'api').relatedAccountKey, undefined);
+});
+
+test('MiniMax scoped Code outages retain the target region quota instead of another region auth failure', async (t) => {
+  const fixture = writeCodeAuthFixture();
+  const en = path.join(fixture.base, 'auth', 'prod', 'en', 'mcode-public');
+  fs.mkdirSync(en, { recursive: true, mode: 0o700 });
+  const account = createHash('sha256').update(`${path.join(fixture.base, 'auth')}\0mcode-public`).digest('base64url');
+  const record = codeDesktopRecord();
+  fs.writeFileSync(path.join(en, 'auth.json'), JSON.stringify({ schemaVersion: 1,
+    records: { [`com.minimax.mcode.oauth.prod.en\0${account}`]: record } }), { mode: 0o600 });
+  fs.writeFileSync(path.join(en, 'auth-state.json'), JSON.stringify(codeDesktopState(record, { region: 'en' })));
+  let failing = false;
+  let now = CODE_NOW;
+  let rotations = 0;
+  const deps = codeDeps(fixture, async url => {
+    if (failing) return url.includes('agent.minimax.cn') ? unauthorized() : { ok: false, status: 503 };
+    return okResponse(membershipBody({ has_token_plan: false }));
+  }, {
+    now: () => now, env: { MINIMAX_DATA_DIR: fixture.base, PATH: CODE_CLI_DIR },
+    existsSync: command => command === CODE_CLI_COMMAND,
+    execFile: (_command, _args, _options, done) => {
+      rotations++;
+      writeCodeLease(fixture, codeDesktopRecord({ accessToken: `${ACCESS_ROTATED}-${rotations}`, generation: 7 + rotations }));
+      done(null, '{}');
+      return {};
+    }
+  });
+  const runtime = createLimitsRuntime({ limitProviders: ['minimax'] }, {
+    ...deps, autoStart: false, autoRetry: false
+  });
+  t.after(() => runtime.stop());
+  await runtime.refresh({ provider: 'minimax' }, 'manual');
+  const before = runtime.getSnapshot().providers;
+  const international = before.find(row => row.region === 'en');
+  const china = before.find(row => row.region === 'cn');
+  failing = true;
+  now += 60_000;
+  await runtime.refresh({ provider: 'minimax', accountKey: international.accountKey }, 'manual');
+  const after = runtime.getSnapshot().providers;
+  const retained = after.find(row => row.accountKey === international.accountKey);
+  assert.equal(retained.status, 'unavailable');
+  assert.equal(retained.region, 'en');
+  assert.deepEqual(retained.windows, international.windows);
+  assert.deepEqual(after.find(row => row.accountKey === china.accountKey), china);
+  now += 60_000;
+  await runtime.refresh({ provider: 'minimax', accountKey: china.accountKey }, 'manual');
+  const rejected = runtime.getSnapshot().providers.find(row => row.accountKey === china.accountKey);
+  assert.equal(rejected.status, 'unauthorized');
+  assert.deepEqual(rejected.windows, []);
+});
+
+test('MiniMax wallet-only refresh prevents Node and Worker aggregation from restoring old Spend', async () => {
+  const options = { minimaxApiKey: 'wallet-sync-test', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' };
+  const now = Date.parse('2026-11-06T10:00:00Z');
+  const fresh = await fetchMinimaxLimits(options, { now: () => now, fetch: async url =>
+    url.includes('/account/query_balance')
+      ? okResponse({ available_amount: '20', base_resp: { status_code: 0 } })
+      : { ok: false, status: 503 } });
+  const old = { ...fresh, updatedAt: new Date(now - 60_000).toISOString(),
+    windows: [{ ...fresh.windows[0], remaining: 100 }],
+    balance: { amount: 100, currency: 'CNY', todaySpend: 42, monthSpend: 90 } };
+  for (const aggregate of [require('../../src/shared/limits/core').aggregateLimits,
+    require('../../worker/src/shared/limits/core').aggregateLimits]) {
+    for (const rows of [[old, fresh], [fresh, old]]) {
+      const devices = rows.map((row, index) => ({ deviceId: String(index),
+        limits: { refreshMs: 60_000, providers: [row] } }));
+      const actual = aggregate(devices, 0, now).providers[0];
+      assert.equal(actual.status, 'ok');
+      assert.equal(actual.updatedAt, fresh.updatedAt);
+      assert.equal(actual.windows[0].remaining, 20);
+      assert.equal(actual.balance.amount, 20);
+      assert.equal(actual.balance.currency, 'CNY');
+      assert.equal(actual.balance.todaySpend, null);
+      assert.equal(actual.balance.monthSpend, null);
+    }
+  }
 });

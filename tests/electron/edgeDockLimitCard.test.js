@@ -459,7 +459,9 @@ test('MiniMax API balances reach the shared Limits and dock renderer in both cur
       });
       assert.equal(provider.status, 'ok');
       assert.equal(provider.windows[0].currency, currency);
-      assert.equal(provider.balance, null, 'the collector only supplies a credits window');
+      assert.equal(provider.balance.amount, amount);
+      assert.equal(provider.balance.currency, currency);
+      assert.equal(provider.balance.todaySpend, null, 'failed optional Spend remains unknown');
       const before = JSON.stringify(provider);
       for (const showLimitUsed of [false, true]) {
         const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#888888');
