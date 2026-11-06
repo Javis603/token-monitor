@@ -2,6 +2,9 @@
 
 (() => {
   const bridge = window.limitsHistory;
+  document.documentElement.classList.toggle('is-windows', bridge.platform === 'win32');
+  const cardFrames = window.TokenMonitorCardMotion.createCardFrameLoop({ sendFrame: id => bridge.cardFrame(id) });
+  bridge.onCardMotion(next => { if (bridge.platform === 'win32') cardFrames.update(next); });
   const model = window.TokenMonitorLimitsHistoryModel;
   const i18n = window.TokenMonitorI18n;
   const $ = id => document.getElementById(id);
@@ -25,7 +28,6 @@
   let hoveredBucket = '';
   let restoreReading = () => {};
   let contentAnimation = null;
-  let measureFrame = null;
   let animateMeasurement = false;
   const reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -188,9 +190,6 @@
     $('error').textContent = t('persistenceError');
     drawDistribution(entry);
     drawTrend();
-    // A reused window may reopen at its default bounds with identical content.
-    // ResizeObserver alone cannot report an unchanged content size again.
-    scheduleSize();
   }
 
   function reduceMotion() {
@@ -203,8 +202,10 @@
     animateMeasurement = animate && !opening && !reduceMotion();
     // No outgoing snapshot: the latest account is visible before the frame moves.
     render();
-    if (!animate || reduceMotion()) return;
-    contentAnimation = $('history-content').animate([{ opacity: opening ? 0 : .8 }, { opacity: 1 }],
+    // Reopening unchanged content must also release the native show.
+    scheduleSize(opening);
+    if (opening || !animate || reduceMotion()) return;
+    contentAnimation = $('history-content').animate([{ opacity: .8 }, { opacity: 1 }],
       { duration: 150, easing: 'ease-out' });
     contentAnimation.finished.catch(() => {});
   }
@@ -241,19 +242,21 @@
   });
   bridge.onNativeMaterial(next => { material = glass.normalizeNativeMaterialState(next); appearance(); });
   new ResizeObserver(drawTrend).observe($('trend'));
-  function reportSize() {
-    measureFrame = null;
+  const cardLayout = window.TokenMonitorCardLayout.createCardLayout({
+    measure() {
+      const style = getComputedStyle($('history'));
+      const inset = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((sum, key) => sum + parseFloat(style[key]), 0);
+      return Math.ceil($('history-content').getBoundingClientRect().height + inset);
+    },
+    report(height, content) {
+      bridge.resize(height, content.renderToken, content.animate, content.reduce);
+      animateMeasurement = false;
+    }
+  });
+  function scheduleSize(opening = false) {
     if (!payload) return;
-    const style = getComputedStyle($('history'));
-    const inset = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'].reduce((sum, key) => sum + parseFloat(style[key]), 0);
-    const height = Math.ceil($('history-content').getBoundingClientRect().height + inset);
-    bridge.resize(height, payload.renderToken, animateMeasurement, reduceMotion());
-    animateMeasurement = false;
+    cardLayout.prepare({ renderToken: payload.renderToken, animate: animateMeasurement, reduce: reduceMotion() }, { opening, afterPaint: true });
   }
-  function scheduleSize() {
-    if (measureFrame !== null) return;
-    // Let the new content paint before moving the native frame onto its anchor.
-    measureFrame = requestAnimationFrame(() => { measureFrame = requestAnimationFrame(reportSize); });
-  }
-  new ResizeObserver(scheduleSize).observe($('history-content'));
+  window.addEventListener('pagehide', () => { cardFrames.cancel(); cardLayout.cancel(); }, { once: true });
+  new ResizeObserver(() => scheduleSize()).observe($('history-content'));
 })();

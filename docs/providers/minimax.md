@@ -61,6 +61,10 @@ For API-key sources, Auto first tries the last region that returned quota window
 
 A healthy Code or API reading keeps the provider summary live; API key status never inherits Code's health. Both Code points and the API wallet use `metric: 'credits'` with their own units. Code points use the shared display-only balance meter; API cash Spend never supplies its denominator, and display estimates never enter the wire as quota percentages.
 
+## Service status
+
+The Status panel lists MiniMax (China) and MiniMax (International) separately because their official status pages publish different incidents. Each region can be hidden independently. These public checks cover both regions regardless of the local API-region setting, including when viewing usage from multiple devices. The existing `minimax` status preference remains the China entry; `minimax-intl` controls the international entry.
+
 ## Credentials and transport
 
 Add each API key with its billing type and region; Auto is the default and no user-defined account name is needed. Readding the same key updates its entry instead of collecting it twice. Removing a saved key never signs out Code. Environment credentials remain supported as a fallback, including for headless/agent runs, and are not shown in settings. Legacy and saved API keys take precedence over the environment key. Disabled saved entries still suppress environment fallback; removing the last saved entry restores it. Different credentials may observe the same wallet; never sum their balances or allowances.

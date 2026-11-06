@@ -301,11 +301,22 @@ const VIEW_ICON_CLASSES = {
   limits: 'view-icon-limits',
   trends: 'view-icon-trends'
 };
+// Mirrors SERVICE_STATUS_PROVIDERS in src/electron/serviceStatus.js — same ids,
+// labels and order — so the rows and the settings list render before the first
+// fetch. The two lists must stay in sync.
 const SERVICE_STATUS_PLACEHOLDERS = [
   { id: 'claude', label: 'Claude', pageUrl: 'https://status.claude.com' },
   { id: 'openai', label: 'OpenAI', pageUrl: 'https://status.openai.com' },
+  { id: 'opencode', label: 'OpenCode', pageUrl: 'https://status.opencode.ai' },
   { id: 'cursor', label: 'Cursor', pageUrl: 'https://status.cursor.com' },
-  { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' }
+  { id: 'factory', label: 'Factory Droid', pageUrl: 'https://status.factory.ai' },
+  { id: 'kimi', label: 'Kimi', pageUrl: 'https://status.moonshot.cn' },
+  { id: 'github', label: 'Copilot', pageUrl: 'https://www.githubstatus.com' },
+  { id: 'zed', label: 'Zed', pageUrl: 'https://status.zed.dev' },
+  { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' },
+  { id: 'devin', label: 'Devin', pageUrl: 'https://www.devinstatus.com' },
+  { id: 'minimax', label: 'MiniMax (China)', pageUrl: 'https://status.minimaxi.com' },
+  { id: 'minimax-intl', label: 'MiniMax (International)', pageUrl: 'https://status.minimax.io' }
 ];
 const SERVICE_PROVIDER_OPTIONS = SERVICE_STATUS_PLACEHOLDERS.map((entry) => ({ id: entry.id, label: entry.label }));
 const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/token-monitor';
@@ -5106,25 +5117,28 @@ function visibleServiceProviderIds() {
 function serviceStatusRows() {
   const order = visibleServiceProviderIds();
   const rank = new Map(order.map((id, index) => [id, index]));
-  const base = (state.serviceStatus?.providers?.length)
-    ? state.serviceStatus.providers
-    : SERVICE_STATUS_PLACEHOLDERS.map((provider) => ({
-        ...provider,
-        status: 'unknown',
-        description: state.serviceStatusBusy ? t('serviceStatus.loading') : t('serviceStatus.notChecked'),
-        checkedAt: '',
-        updatedAt: '',
-        componentIssues: [],
-        incidentCount: 0,
-        maintenanceCount: 0
-      }));
+  const checked = new Map((state.serviceStatus?.providers || []).map((provider) => [provider.id, provider]));
+  const base = SERVICE_STATUS_PLACEHOLDERS.map((provider) => checked.get(provider.id) || ({
+    ...provider,
+    status: 'unknown',
+    description: state.serviceStatusBusy ? t('serviceStatus.loading') : t('serviceStatus.notChecked'),
+    checkedAt: '',
+    updatedAt: '',
+    componentIssues: [],
+    incidentCount: 0,
+    maintenanceCount: 0
+  }));
   return base
     .filter((provider) => rank.has(provider.id))
     .sort((a, b) => rank.get(a.id) - rank.get(b.id));
 }
 
+// Status ids whose vendor mark lives under a different name; every other id
+// has a `.row-icon-<id>` mask installed from the vendor table.
+const SERVICE_STATUS_ICON_ALIASES = new Map([['openai', 'codex'], ['github', 'copilot'], ['minimax-intl', 'minimax']]);
+
 function serviceStatusIconId(id) {
-  return id === 'openai' ? 'codex' : id; // claude/cursor/deepseek map 1:1
+  return SERVICE_STATUS_ICON_ALIASES.get(id) || id;
 }
 
 function renderServiceStatus() {
@@ -5188,15 +5202,16 @@ function renderServiceStatus() {
 
 async function refreshServiceStatus(options = {}) {
   if (!window.tokenMonitor.getServiceStatus || state.serviceStatusBusy) return;
+  const providerIds = visibleServiceProviderIds();
   state.serviceStatusBusy = true;
   renderServiceStatus();
   try {
-    state.serviceStatus = await window.tokenMonitor.getServiceStatus({ force: options.force === true, providerIds: visibleServiceProviderIds() });
+    state.serviceStatus = await window.tokenMonitor.getServiceStatus({ force: options.force === true, providerIds });
   } catch (error) {
     const checkedAt = new Date().toISOString();
     state.serviceStatus = {
       checkedAt,
-      providers: SERVICE_STATUS_PLACEHOLDERS.map((provider) => ({
+      providers: SERVICE_STATUS_PLACEHOLDERS.filter((provider) => providerIds.includes(provider.id)).map((provider) => ({
         ...provider,
         status: 'unknown',
         indicator: 'unknown',
@@ -5212,6 +5227,9 @@ async function refreshServiceStatus(options = {}) {
   } finally {
     state.serviceStatusBusy = false;
     renderServiceStatus();
+    if (visibleServiceProviderIds().some((id) => !providerIds.includes(id))) {
+      await refreshServiceStatus({ force: true });
+    }
   }
 }
 
@@ -13049,9 +13067,11 @@ function hiddenServiceProviderSet() {
 
 async function onServiceProviderVisibilityToggle(providerId) {
   const hidden = hiddenServiceProviderSet();
-  if (hidden.has(providerId)) hidden.delete(providerId);
+  const showing = hidden.has(providerId);
+  if (showing) hidden.delete(providerId);
   else hidden.add(providerId);
   await saveSettings({ hiddenServiceProviders: Array.from(hidden).join(',') });
+  if (showing) await refreshServiceStatus({ force: true });
 }
 
 async function onServiceProviderMove(providerId, direction) {
@@ -13103,7 +13123,9 @@ async function resetServiceProviderOrder() {
 }
 
 async function showAllServiceProviders() {
+  const showing = hiddenServiceProviderSet().size > 0;
   await saveSettings({ hiddenServiceProviders: '' });
+  if (showing) await refreshServiceStatus({ force: true });
 }
 
 async function onPreferenceReorder(kind, id, targetIndex) {
