@@ -4592,27 +4592,38 @@ function desktopLimitRecords() {
 }
 function pluginLimitAccountOptions(module) {
   const box = document.createElement('div');
-  box.className = 'settings-actions';
+  box.className = 'settings-actions plugin-limit-account';
   const status = document.createElement('span');
   box.append(status);
   if (!module.connection) return box;
+  let revision = 0;
+  box.refreshConnectionStatus = async (operation = 'status') => {
+    const current = ++revision;
+    try {
+      const result = await pluginBridge.connection(module.pluginId, module.moduleId, operation);
+      if (current !== revision) return;
+      const connectionState = result.state === 'error' && result.error === 'reconnect-required' ? 'reconnectRequired' : result.state;
+      status.textContent = t(`plugins.connection.state.${connectionState}`);
+    }
+    catch { if (current === revision) status.textContent = t('settings.limits.status.error'); }
+  };
   for (const operation of ['connect', 'status', 'disconnect']) {
     const button = document.createElement('button');
     button.type = 'button'; button.className = 'settings-button';
     button.textContent = t(`plugins.connection.${operation}`);
     button.addEventListener('click', async () => {
       button.disabled = true;
-      try {
-        const result = await pluginBridge.connection(module.pluginId, module.moduleId, operation);
-        const connectionState = result.state === 'error' && result.error === 'reconnect-required' ? 'reconnectRequired' : result.state;
-        status.textContent = t(`plugins.connection.state.${connectionState}`);
-      }
-      catch { status.textContent = t('settings.limits.status.error'); }
+      try { await box.refreshConnectionStatus(operation); }
       finally { button.disabled = false; }
     });
     box.append(button);
   }
+  void box.refreshConnectionStatus();
   return box;
+}
+function refreshPluginLimitAccountStatuses() {
+  if (!isSettingsSurfaceVisible()) return;
+  for (const box of els.limitProviderCheckboxes.querySelectorAll('.plugin-limit-account')) void box.refreshConnectionStatus?.();
 }
 function configuredLimitProviderOrder() {
   const enabled = enabledLimitProviderSet();
@@ -13452,6 +13463,7 @@ function applyPluginCatalog(list) {
     renderNotchPageChoices();
     if (isSettingsSurfaceVisible()) preserveSettingsPanelScroll(renderViewPreferences);
   }
+  refreshPluginLimitAccountStatuses();
   return list;
 }
 

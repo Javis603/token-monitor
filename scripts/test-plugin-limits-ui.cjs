@@ -7,6 +7,7 @@ const path = require('node:path');
 const os = require('node:os');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const { createPluginRuntime, registerPluginScheme } = require('../src/electron/plugins/runtime');
 const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-credit-limits-'));
@@ -40,6 +41,34 @@ app.commandLine.appendSwitch('host-resolver-rules','MAP * ~NOTFOUND, EXCLUDE loc
 registerPluginScheme(protocol);
 app.on('window-all-closed',()=>{});
 let runtime,win;
+let loginSession, loginWindow;
+// Synthetic account capture exercises the real main/preload/renderer path.
+// It never opens a website or invokes the OS credential backend.
+function FixtureWindow(options) {
+  if (!options.webPreferences?.session?.fixtureLogin) return new BrowserWindow(options);
+  loginWindow = new EventEmitter();
+  loginWindow.webContents = new EventEmitter();
+  loginWindow.webContents.id = 900001;
+  loginWindow.webContents.setWindowOpenHandler = () => {};
+  loginWindow.isDestroyed = () => loginWindow.dead === true;
+  loginWindow.destroy = () => { loginWindow.dead = true; loginWindow.emit('closed'); };
+  loginWindow.loadURL = async () => {};
+  return loginWindow;
+}
+FixtureWindow.fromWebContents = BrowserWindow.fromWebContents;
+const fixtureSessions = { get defaultSession() { return session.defaultSession; }, fromPartition: (partition, ...args) => {
+  if (!partition.startsWith('plugin-web-login-')) return session.fromPartition(partition, ...args);
+  loginSession = { fixtureLogin: true, setPermissionRequestHandler() {}, clearStorageData: async () => {}, webRequest: {
+    onBeforeSendHeaders: (...values) => { loginSession.before = values.at(-1); },
+    onCompleted: (...values) => { loginSession.completed = values.at(-1); }
+  } };
+  return loginSession;
+} };
+const fixtureCrypt = value => Buffer.from([...value].map(byte => byte ^ 113));
+const fixtureSafeStorage = { isAsyncEncryptionAvailable: async () => true,
+  getSelectedStorageBackend: () => 'gnome_libsecret',
+  encryptStringAsync: async value => fixtureCrypt(Buffer.from(value)),
+  decryptStringAsync: async value => ({ result: fixtureCrypt(value).toString(), shouldReEncrypt: false }) };
 const errors=[];
 const deadline=setTimeout(()=>{console.error('UI deadline',errors);app.exit(1);},45000);
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -91,7 +120,7 @@ app.whenReady().then(async () => {
     ipcMain.removeHandler(channel); ipcMain.handle(channel, handler);
   }
   const patch=value=>{settings={...settings,...value};win.webContents.send('settings:push',settings);};
-  runtime=createPluginRuntime({electron:{BrowserWindow,ipcMain,session,utilityProcess,
+  runtime=createPluginRuntime({electron:{BrowserWindow:FixtureWindow,ipcMain,session:fixtureSessions,utilityProcess,safeStorage:fixtureSafeStorage,
    dialog:{showMessageBox:async()=>({response:1}),showOpenDialog:async()=>({canceled:false,filePaths:[fixtureDir]})}},
    userDataDir:scratch,getSettings:()=>settings,getAppSettings:()=>settings,getContext:()=>({source:'fixture'}),getLocale:()=>settings.language,
    isMainSender:event=>event.sender===win.webContents,persistPluginStates:pluginStates=>patch({pluginStates}),
@@ -120,6 +149,19 @@ app.whenReady().then(async () => {
   assert.equal(await js("window.quotaViewEvents?.filter(event=>event.type==='mount').length||0"),0,'collapsed quota views do not execute');
   await js("document.getElementById('limitProviderDisclosure-plugin:synthetic-limits:one').click()");
   await waitFor("document.querySelector('[data-limit-module=\"plugin:synthetic-limits:one\"] [data-quota-draft]')",'author settings view');
+  const accountBox = `document.getElementById('limitProviderOptions-plugin:synthetic-limits:one').querySelector('.plugin-limit-account')`;
+  await js(`${accountBox}.querySelector('button').click()`);
+  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connecting')`,'synthetic login starts');
+  assert.ok(loginSession && loginWindow);
+  await js("state.limitProviderRenderSignature='';renderLimitProviderCheckboxes()");
+  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connecting')`,'rebuilt row reads current connection');
+  const request = {id:10,url:'https://api.openai.com/v1/dashboard/billing/credit_grants',method:'GET',webContentsId:loginWindow.webContents.id,
+    requestHeaders:{Authorization:'Bearer synthetic-ui-account', 'OpenAI-Organization':'org-synthetic'}};
+  loginSession.before(request, () => {});
+  await loginSession.completed({...request,statusCode:200});
+  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connected')`,'login completion updates rebuilt row without Status click');
+  assert.equal(await js("state.pluginCatalog.limits.modules.every(module=>!module.sampling)"),true,'connection notification does not start quota demand');
+  await capture('settings-connected.png');
   await js(`(()=>{window.quotaDraftNode=document.querySelector('[data-limit-module="plugin:synthetic-limits:one"] [data-quota-draft]');quotaDraftNode.value='unsaved fixture';quotaDraftNode.focus();state.limitProviderRenderSignature='';renderLimitProviderCheckboxes();})()`);
   assert.equal(await js("quotaDraftNode===document.querySelector('[data-limit-module=\"plugin:synthetic-limits:one\"] [data-quota-draft]')&&quotaDraftNode.value==='unsaved fixture'&&document.activeElement===quotaDraftNode"),true,'row refresh retains controls, draft and focus');
   await js("setLimitProviderSettingsExpanded('')");
