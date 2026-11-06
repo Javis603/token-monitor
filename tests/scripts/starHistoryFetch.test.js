@@ -100,6 +100,50 @@ test('normalizes a Saturday UTC week boundary to Sunday', async () => {
   assert.deepEqual(stars, [{ starredAt: '2026-08-02T00:00:00.000Z' }]);
 });
 
+test('accepts creation just after the API week boundary', async () => {
+  const weekBoundary = Date.parse('2026-08-01T23:00:00Z') / 1000;
+  const fetchImpl = async (url) => {
+    const target = String(url);
+    if (target.endsWith('/repos/Javis603/token-monitor')) {
+      return response({
+        stargazers_count: 1,
+        created_at: '2026-08-01T23:30:00.000Z',
+      });
+    }
+    return response([{ week: weekBoundary, total: 1, days: [1, 0, 0, 0, 0, 0, 0] }]);
+  };
+
+  const stars = await fetchSanitizedStargazers({
+    repository: 'Javis603/token-monitor',
+    token: 'secret-token',
+    fetchImpl,
+  });
+
+  assert.deepEqual(stars, [{ starredAt: '2026-08-02T00:00:00.000Z' }]);
+});
+
+test('accepts creation just before the API week boundary', async () => {
+  const previousWeekBoundary = Date.parse('2026-07-25T23:00:00Z') / 1000;
+  const fetchImpl = async (url) => {
+    const target = String(url);
+    if (target.endsWith('/repos/Javis603/token-monitor')) {
+      return response({
+        stargazers_count: 1,
+        created_at: '2026-08-01T22:30:00.000Z',
+      });
+    }
+    return response([{ week: previousWeekBoundary, total: 1, days: [1, 0, 0, 0, 0, 0, 0] }]);
+  };
+
+  const stars = await fetchSanitizedStargazers({
+    repository: 'Javis603/token-monitor',
+    token: 'secret-token',
+    fetchImpl,
+  });
+
+  assert.deepEqual(stars, [{ starredAt: '2026-07-26T00:00:00.000Z' }]);
+});
+
 test('follows star history pagination', async () => {
   const requests = [];
   const olderWeek = WEEK - 7 * DAY;

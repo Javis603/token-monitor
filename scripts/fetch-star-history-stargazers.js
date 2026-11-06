@@ -7,6 +7,7 @@ const PAGE_SIZE = 30;
 const MAX_PAGES = 100;
 const REQUEST_TIMEOUT_MS = 30_000;
 const SECONDS_PER_DAY = 86_400;
+const WEEK_SECONDS = 7 * SECONDS_PER_DAY;
 const GITHUB_API_VERSION = '2026-03-10';
 
 const fail = (message) => {
@@ -76,10 +77,9 @@ const normalizeWeekStart = (week) => {
   return Math.floor(sunday / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 };
 
-const weekStartForTimestamp = (timestampSeconds) => {
-  const day = new Date(timestampSeconds * 1000).getUTCDay();
-  return Math.floor((timestampSeconds - day * SECONDS_PER_DAY) / SECONDS_PER_DAY) * SECONDS_PER_DAY;
-};
+const apiWeekForTimestamp = (timestampSeconds, anchorWeek) => (
+  anchorWeek + Math.floor((timestampSeconds - anchorWeek) / WEEK_SECONDS) * WEEK_SECONDS
+);
 
 const normalizeHistoryPage = (entries, offset) => {
   if (!Array.isArray(entries)) fail('GitHub star history response was not an array');
@@ -97,7 +97,7 @@ const normalizeHistoryPage = (entries, offset) => {
     if (!Number.isInteger(total) || total < 0 || total !== counted) {
       fail(`star history entry ${offset + index + 1} has inconsistent totals`);
     }
-    return { week: normalizeWeekStart(week), total, days };
+    return { week: normalizeWeekStart(week), sourceWeek: week, total, days };
   });
 };
 
@@ -194,7 +194,11 @@ const fetchSanitizedStargazers = async ({
   // Contiguous weeks plus the creation-week check above prove the history is
   // complete. Any remaining count difference is a live star change during the
   // fetch, so keep the fetched total instead of failing the scheduled run.
-  const creationWeek = weekStartForTimestamp(Math.floor(createdAt / 1000));
+  // Reuse the history's own week boundary: API weeks can start on Saturday in
+  // UTC, so a UTC Sunday calculation would disagree with valid history.
+  const creationWeek = normalizeWeekStart(
+    apiWeekForTimestamp(Math.floor(createdAt / 1000), weeks[0].sourceWeek),
+  );
   if (weeks[0].week > creationWeek) {
     fail(`star history starts at week ${weeks[0].week}, after repository creation week ${creationWeek}`);
   }
