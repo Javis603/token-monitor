@@ -3,14 +3,15 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorFixedPeriodRanges = api;
 })(typeof window !== 'undefined' ? window : null, function createFixedPeriodRangesApi() {
-  const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30']);
+  const MONTH_MODES = Object.freeze(['month', 'week', 'last7', 'last30', 'custom']);
   const LABELS = Object.freeze({
     today: 'DAY',
     month: 'MONTH',
     allTime: 'TOTAL',
     week: 'WEEK',
     last7: '7D',
-    last30: '30D'
+    last30: '30D',
+    custom: 'CUSTOM'
   });
 
   function finiteNumber(value) {
@@ -40,7 +41,7 @@
     if (!normalized) return '';
     const date = new Date(`${normalized}T00:00:00Z`);
     date.setUTCDate(date.getUTCDate() + Number(delta || 0));
-    return date.toISOString().slice(0, 10);
+    return normalizeDateKey(date.toISOString().slice(0, 10));
   }
 
   function localDayKey(value = new Date()) {
@@ -86,14 +87,24 @@
   }
 
   function isDerived(value) {
-    return value === 'week' || value === 'last7' || value === 'last30';
+    return value === 'week' || value === 'last7' || value === 'last30' || value === 'custom';
   }
 
   function slotForSelection(value) {
     return isDerived(value) || value === 'month' ? 'month' : value;
   }
 
-  function displayLabel(value) {
+  function formatRangeLabel(range) {
+    const start = normalizeDateKey(range?.start);
+    const end = normalizeDateKey(range?.end);
+    if (!start || !end) return 'CUSTOM';
+    return `${start.slice(5, 7)}/${start.slice(8, 10)}\u2013${end.slice(5, 7)}/${end.slice(8, 10)}`;
+  }
+
+  function displayLabel(value, options = {}) {
+    if (value === 'custom') {
+      return formatRangeLabel(options?.range) || LABELS.custom;
+    }
     return LABELS[value] || LABELS.today;
   }
 
@@ -107,6 +118,17 @@
     }
     if (selection === 'last7') return { start: dayKeyAddDays(todayKey, -6), end: todayKey };
     if (selection === 'last30') return { start: dayKeyAddDays(todayKey, -29), end: todayKey };
+    if (selection === 'custom') {
+      const custom = options.customRange || {};
+      let start = normalizeDateKey(custom.start || options.customPeriodStart) || todayKey;
+      let end = normalizeDateKey(custom.end || options.customPeriodEnd) || todayKey;
+      if (start > end) {
+        const temp = start;
+        start = end;
+        end = temp;
+      }
+      return { start, end };
+    }
     return null;
   }
 
@@ -261,7 +283,15 @@
     return rows.sort((left, right) => String(left?.date || '').localeCompare(String(right?.date || '')));
   }
 
-  function dailyForRange(daily, range, options = {}) {
+  // A user-picked range can span millennia, so cap the generated series.
+  const MAX_RANGE_DAYS = 3660;
+
+  // Every stored day that falls inside the range, without the per-day zero fill
+  // and without the presentation cap: totals must cover the whole range.
+  function matchedDailyForRange(daily, range, options = {}) {
+    const start = normalizeDateKey(range?.start);
+    const end = normalizeDateKey(range?.end);
+    if (!start || !end || start > end) return [];
     const byDate = new Map();
     for (const row of dailyWithLiveToday(
       daily,
@@ -269,10 +299,28 @@
       options.todayPeriod
     )) {
       const date = normalizeDateKey(row?.date);
-      if (date && date >= range.start && date <= range.end) byDate.set(date, row);
+      if (date && date >= start && date <= end) byDate.set(date, row);
+    }
+    return Array.from(byDate.values()).sort((left, right) => (
+      String(left?.date || '').localeCompare(String(right?.date || ''))
+    ));
+  }
+
+  function dailyForRange(daily, range, options = {}) {
+    const start = normalizeDateKey(range?.start);
+    const end = normalizeDateKey(range?.end);
+    if (!start || !end || start > end) return [];
+    const spanDays = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000) + 1;
+    const loopStart = spanDays > MAX_RANGE_DAYS
+      ? (dayKeyAddDays(end, -(MAX_RANGE_DAYS - 1)) || start)
+      : start;
+    const byDate = new Map();
+    for (const row of matchedDailyForRange(daily, range, options)) {
+      const date = normalizeDateKey(row?.date);
+      if (date && date >= loopStart) byDate.set(date, row);
     }
     const rows = [];
-    for (let date = range.start; date <= range.end; date = dayKeyAddDays(date, 1)) {
+    for (let date = loopStart; date && date <= end && rows.length < MAX_RANGE_DAYS;) {
       rows.push(byDate.get(date) || {
         date, tokens: 0, cost: 0,
         cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0,
@@ -280,22 +328,29 @@
         tokenComponentsAvailable: true,
         perClient: {}, perModel: {}
       });
+      if (date >= end) break;
+      const next = dayKeyAddDays(date, 1);
+      if (!next || next <= date) break; // dayKeyAddDays cannot advance past year 9999
+      date = next;
     }
     return rows;
   }
 
-  function summaryForDaily(rows) {
+  // `rows` is the presented series: it is zero filled and capped for the
+  // display. `fullRows` holds every stored day of the range, so the totals
+  // cover the whole range while the streak still walks the filled tail.
+  function summaryForDaily(rows, fullRows = rows) {
     const daily = Array.isArray(rows) ? rows : [];
-    const active = daily.filter((row) => finiteNumber(row?.tokens) > 0);
+    const matched = Array.isArray(fullRows) ? fullRows : daily;
     let currentStreak = 0;
     for (let index = daily.length - 1; index >= 0 && finiteNumber(daily[index]?.tokens) > 0; index -= 1) {
       currentStreak += 1;
     }
-    const peakDayTokens = Math.max(0, ...daily.map((row) => finiteNumber(row?.tokens)));
+    const peakDayTokens = Math.max(0, ...matched.map((row) => finiteNumber(row?.tokens)));
     return {
-      activeDays: active.length,
+      activeDays: matched.filter((row) => finiteNumber(row?.tokens) > 0).length,
       currentStreak,
-      activeTimeMs: daily.reduce((sum, row) => sum + finiteNumber(row?.activeTimeMs), 0),
+      activeTimeMs: matched.reduce((sum, row) => sum + finiteNumber(row?.activeTimeMs), 0),
       peakDayTokens
     };
   }
@@ -433,8 +488,15 @@
     return currentKey ? { currentKey, snapshotKey: key } : null;
   }
 
-  function readySnapshotForSelection(snapshot, selection) {
-    return snapshot?.status === 'ready' && snapshot.selection === selection ? snapshot : null;
+  function readySnapshotForSelection(snapshot, selection, options = {}) {
+    if (snapshot?.status !== 'ready' || snapshot.selection !== selection) return null;
+    if (selection === 'custom' && (options.customRange || options.customPeriodStart || options.customPeriodEnd)) {
+      const expected = rangeForSelection('custom', options);
+      if (!expected || snapshot.range?.start !== expected.start || snapshot.range?.end !== expected.end) {
+        return null;
+      }
+    }
+    return snapshot;
   }
 
   function devicesForReadySnapshot(snapshot, selection) {
@@ -555,6 +617,8 @@
     }
 
     const daily = mergeSelectedDaily(snapshots);
+    // The presented series is capped, so totals come from the uncapped rows.
+    const fullDaily = mergeSelectedDaily(snapshots.map((snapshot) => ({ daily: snapshot.fullDaily || [] })));
     const range = {
       start: snapshots.reduce((value, snapshot) => !value || snapshot.range.start < value ? snapshot.range.start : value, ''),
       end: snapshots.reduce((value, snapshot) => !value || snapshot.range.end > value ? snapshot.range.end : value, '')
@@ -565,8 +629,8 @@
       reason: '',
       range,
       daily,
-      summary: summaryForDaily(daily),
-      period: derivePeriod(daily, range),
+      summary: summaryForDaily(daily, fullDaily),
+      period: derivePeriod(fullDaily, range, options),
       devices: snapshots.map((snapshot) => ({
         ...snapshot,
         period: snapshot.period,
@@ -601,7 +665,7 @@
       capabilities: { tokenComponents: false, attribution: true, clientModels: false },
       derivedFixedRange: true
     };
-    const rows = dailyForRange(daily, range, options);
+    const rows = matchedDailyForRange(daily, range, options);
     period.capabilities.tokenComponents = rows.every((row) => row?.tokenComponentsAvailable === true);
     for (const row of rows) {
       period.totalTokens += finiteNumber(row?.tokens);
@@ -673,14 +737,16 @@
     const range = rangeForSelection(selection, options);
     if (!range) return { status: 'unavailable', selection, reason: 'historyUnavailable', period: null, range: null };
     const daily = dailyForRange(options.daily, range, options);
+    const fullDaily = matchedDailyForRange(options.daily, range, options);
     return {
       status: 'ready',
       selection,
       reason: '',
       range,
       daily,
-      summary: summaryForDaily(daily),
-      period: derivePeriod(daily, range)
+      fullDaily,
+      summary: summaryForDaily(daily, fullDaily),
+      period: derivePeriod(options.daily, range, options)
     };
   }
 
@@ -707,10 +773,12 @@
     fixedPeriodDeviceSnapshots,
     fixedPeriodSnapshot,
     fixedPeriodSnapshotFromDevices,
+    formatRangeLabel,
     isDerived,
     joinDeviceHistorySources,
     localDayKey,
     handlePeriodMenuNavigation,
+    normalizeDateKey,
     normalizeMonthMode,
     periodMenuTargetIndex,
     readySnapshotForSelection,

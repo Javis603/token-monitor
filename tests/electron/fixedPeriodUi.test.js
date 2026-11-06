@@ -17,11 +17,11 @@ test('fixed periods reuse the existing three-slot control', () => {
   assert.doesNotMatch(html, /id="monthPeriodTab"[^>]*>[^<]*(?:▼|▾|⌄)/);
 });
 
-test('the middle-slot menu and Settings expose the same four fixed choices', () => {
+test('the middle-slot menu and Settings expose the same five fixed choices', () => {
   const html = read('index.html');
   const menu = html.slice(html.indexOf('id="monthPeriodMenu"'), html.indexOf('class="actions-hotspot"'));
   const setting = html.slice(html.indexOf('id="periodMonthModeInput"'), html.indexOf('</select>', html.indexOf('id="periodMonthModeInput"')));
-  const expected = ['month', 'week', 'last7', 'last30'];
+  const expected = ['month', 'week', 'last7', 'last30', 'custom'];
   assert.deepEqual([...menu.matchAll(/data-fixed-period="([^"]+)"/g)].map((match) => match[1]), expected);
   assert.deepEqual([...setting.matchAll(/option value="([^"]+)"/g)].map((match) => match[1]), expected);
 });
@@ -34,7 +34,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   const boot = read('floatingBubbleBoot.js');
   assert.ok(html.indexOf('src="fixedPeriodRanges.js"') < html.indexOf('src="app.js"'));
   assert.match(html, /id="monthPeriodMenu" class="view-switcher-menu period-menu hidden"/);
-  assert.equal((html.match(/class="view-switcher-menu-item"/g) || []).length, 4);
+  assert.equal((html.match(/class="view-switcher-menu-item"/g) || []).length, 5);
   assert.match(css, /\.view-switcher-menu-item\s*\{[^}]*font-size:\s*0\.6875rem;[^}]*text-align:\s*left;/s);
   assert.ok(css.lastIndexOf('.period-menu {') > css.indexOf('.view-switcher-menu {'));
   assert.match(css, /\.titlebar\.period-menu-open\s*\{\s*z-index:\s*13;/);
@@ -65,7 +65,7 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /force: forceFixedPeriodHistory,[\s\S]*?retryFailed: forceFixedPeriodHistory/);
   assert.match(app, /isDerived\(next\) && state\.fixedPeriodHistoryFailed[\s\S]*?warmFixedPeriodHistory\(\{ retryFailed: true, renderOnComplete: true \}\)/);
   assert.match(app, /fixedPeriodHistorySignature !== signature[\s\S]*?\|\| state\.fixedPeriodHistoryBusy\) \{[\s\S]*?void loadFixedPeriodHistory\(\);/);
-  assert.match(boot, /\['today', 'month', 'week', 'last7', 'last30', 'allTime'\]\.includes\(period\)/);
+  assert.match(boot, /\['today', 'month', 'week', 'last7', 'last30', 'custom', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);
   assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period\)/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\)/);
@@ -98,6 +98,29 @@ test('the Settings default uses the standard title-control-description row', () 
   assert.doesNotMatch(html, /Middle period button/);
   assert.match(i18n, /'periodRange\.settingsTitle': '預設統計範圍'/);
   assert.match(i18n, /'periodRange\.settingsNote': '選擇主畫面預設顯示的統計範圍。也可在主畫面再次點擊上方目前選取的時段，開啟選單快速切換。'/);
+});
+
+test('the widget custom range only trusts a custom snapshot and rolls back a failed save', () => {
+  const app = read('app.js');
+  assert.match(app, /const customSnapshotRange = state\.fixedPeriodSnapshot\?\.selection === 'custom'\s*\?\s*state\.fixedPeriodSnapshot\.range\s*:\s*null;/);
+  const customChange = app.slice(
+    app.indexOf('async function onCustomPeriodDateChange'),
+    app.indexOf("els.customPeriodStartDate?.addEventListener('change'")
+  );
+  assert.match(customChange, /catch \(_\) \{\s*state\.customPeriodRange = null;/);
+  assert.match(customChange, /els\.customPeriodStartDate\.value = state\.settings\?\.customPeriodStart \|\| today;/);
+  assert.match(customChange, /els\.customPeriodEndDate\.value = state\.settings\?\.customPeriodEnd \|\| today;/);
+});
+
+test('the dashboard custom range reads the live inputs and translates their accessible names', () => {
+  const dash = read('dashboard.js');
+  assert.match(dash, /querySelectorAll\('\[data-i18n-aria-label\]'\)\.forEach\(\(node\) => \{\s*node\.setAttribute\('aria-label', t\(node\.getAttribute\('data-i18n-aria-label'\)\)\);/);
+  const effectiveRange = dash.slice(dash.indexOf('function getEffectiveRange'), dash.indexOf('function getFilteredDaily'));
+  assert.match(effectiveRange, /normalizeDashDateKey\(els\.dashCustomStart\?\.value\) \|\| normalizeDashDateKey\(state\.customStart\)/);
+  assert.match(effectiveRange, /normalizeDashDateKey\(els\.dashCustomEnd\?\.value\) \|\| normalizeDashDateKey\(state\.customEnd\)/);
+  const dashChange = dash.slice(dash.indexOf('function onDashCustomDateChange'), dash.indexOf('let dashCustomInputsWired'));
+  assert.match(dashChange, /normalizeDashDateKey\(els\.dashCustomStart\?\.value\) \|\| normalizeDashDateKey\(state\.customStart\)/);
+  assert.match(dashChange, /normalizeDashDateKey\(els\.dashCustomEnd\?\.value\) \|\| normalizeDashDateKey\(state\.customEnd\)/);
 });
 
 test('cold-start boot restores every fixed middle-slot selection', () => {
