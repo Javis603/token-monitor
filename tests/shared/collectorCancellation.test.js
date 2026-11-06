@@ -393,6 +393,7 @@ test('unconfirmed forced termination releases the replacement barrier with a dia
       commandTimeoutMs: 1,
       subprocessTerminationOptions: referencedTerminationOptions({ graceMs: 1, closeGraceMs: 1 }),
       deviceId: 'unconfirmed-close-barrier-test',
+      pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} },
       agentVersion: 'test',
       historyEnabled: false,
       dailyHistoryArchiveEnabled: false,
