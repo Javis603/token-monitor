@@ -18,7 +18,8 @@ const TOKSCALE_CLIENT_ALIASES = new Map([
   ['micode-desktop', 'mimo'],
   ['kilocode', 'kilo'],
   ['devin-cli', 'devin'],
-  ['devin-desktop', 'devin']
+  ['devin-desktop', 'devin'],
+  ['vibe', 'mistral']
 ]);
 
 // Canonical Token Monitor identity for client ids emitted by Tokscale. Keep

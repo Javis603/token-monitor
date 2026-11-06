@@ -394,6 +394,9 @@
                       <option value="tokens" data-i18n="settings.tray.tokensToday">Tokens Today</option>
                       <option value="cost" data-i18n="settings.tray.costToday">Cost Today ($1.23)</option>
                       <option value="both" data-i18n="settings.tray.bothToday">Tokens + Cost Today</option>
+                      <option value="tokensMonth" data-i18n="settings.tray.tokensMonth">Tokens This Month</option>
+                      <option value="costMonth" data-i18n="settings.tray.costMonth">Cost This Month ($1.23)</option>
+                      <option value="bothMonth" data-i18n="settings.tray.bothMonth">Tokens + Cost This Month</option>
                       <option value="tokensAll" data-i18n="settings.tray.tokensTotal">Tokens Total</option>
                       <option value="costAll" data-i18n="settings.tray.costTotal">Cost Total ($8.28)</option>
                       <option value="bothAll" data-i18n="settings.tray.bothTotal">Tokens + Cost Total</option>
@@ -417,6 +420,9 @@
                       <option value="tokens" data-i18n="settings.tray.tokensToday">Tokens Today</option>
                       <option value="cost" data-i18n="settings.tray.costToday">Cost Today ($1.23)</option>
                       <option value="both" data-i18n="settings.tray.bothToday">Tokens + Cost Today</option>
+                      <option value="tokensMonth" data-i18n="settings.tray.tokensMonth">Tokens This Month</option>
+                      <option value="costMonth" data-i18n="settings.tray.costMonth">Cost This Month ($1.23)</option>
+                      <option value="bothMonth" data-i18n="settings.tray.bothMonth">Tokens + Cost This Month</option>
                       <option value="tokensAll" data-i18n="settings.tray.tokensTotal">Tokens Total</option>
                       <option value="costAll" data-i18n="settings.tray.costTotal">Cost Total ($8.28)</option>
                       <option value="bothAll" data-i18n="settings.tray.bothTotal">Tokens + Cost Total</option>
@@ -1155,6 +1161,47 @@
                 </div>
                 <div id="workbuddyLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
                 <div id="workbuddyAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
+            <div id="minimaxAccountGroup" class="settings-group cursor-account-group">
+              <button id="minimaxSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="minimaxSettingsDetails">
+                <span data-i18n="settings.minimax.title">MiniMax Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="minimaxStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="minimaxSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="minimaxOpenBrowser" data-i18n="settings.minimax.openBrowser">Open MiniMax billing page</button>
+                  <button id="minimaxRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="minimaxKeyList" class="managed-account-list"></div>
+                <div class="opencode-credential-fields">
+                  <label>
+                    <span data-i18n="settings.minimax.billingMode">Billing type</span>
+                    <select id="minimaxBillingModeInput" class="credential-input">
+                      <option value="token-plan" data-i18n="settings.minimax.billingTokenPlan">Token Plan</option>
+                      <option value="api" data-i18n="settings.minimax.billingApi">API billing</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span data-i18n="settings.minimax.apiRegion">API region</span>
+                    <select id="minimaxApiRegionInput" class="credential-input">
+                      <option value="auto" data-i18n="settings.minimax.regionAuto">Auto</option>
+                      <option value="cn" data-i18n="settings.minimax.regionCn">China (api.minimaxi.com)</option>
+                      <option value="intl" data-i18n="settings.minimax.regionIntl">International (api.minimax.io)</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span data-i18n="settings.limits.capability.apiKey">API key</span>
+                    <input id="minimaxApiKeyInput" class="credential-input" type="password" autocomplete="off" spellcheck="false" placeholder="API key" data-i18n-placeholder="settings.minimax.apiKeyPlaceholder" />
+                  </label>
+                  <div class="settings-actions">
+                    <button id="minimaxKeySubmit" data-i18n="settings.minimax.saveApiKey">Save API key</button>
+                  </div>
+                </div>
+                <div id="minimaxErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="openrouterAccountGroup" class="settings-group cursor-account-group">

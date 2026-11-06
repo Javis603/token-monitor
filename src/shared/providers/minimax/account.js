@@ -1,10 +1,12 @@
 'use strict';
 
-// Minimax limits account wiring. Leaf module: no requires.
+// Account declarations must remain require-free for renderer-safe projection.
 module.exports = {
   id: 'minimax',
   fetch: 'fetchMinimaxLimits',
   fields: [
+    { key: 'minimaxApiProfiles', kind: 'profiles',
+      storePath: ['providers', 'minimax', 'profiles'], configDefault: {}, persist: 'never' },
     {
       key: 'minimaxApiKey',
       kind: 'credential',
@@ -18,8 +20,7 @@ module.exports = {
       normalize: { fn: 'normalizeMinimaxRegionSetting', style: 'value' },
       envFallback: ['TOKEN_MONITOR_MINIMAX_API_REGION', 'MINIMAX_API_REGION', 'MINIMAX_API_HOST'],
       configDefault: 'auto',
-      // Resolve an implicit choice at use time. Saving another setting must not
-      // turn the default or env value into a permanent region override.
+      // An unrelated save must not turn an implicit region into a stored pin.
       initial: '',
       persist: 'renormalize',
       persistFallback: '',
@@ -42,61 +43,20 @@ module.exports = {
     sourceKey: 'minimaxApiKeySource',
     pendingKey: 'minimaxPendingCheckSince'
   },
+  accountStatus({ settings, env, limits }) {
+    const accounts = limits.configuredMinimaxAccounts(settings, { env });
+    return {
+      minimaxApiKeyConfigured: accounts.length > 0,
+      minimaxApiKeySource: accounts.some(account => account.name !== 'environment') ? 'settings' : accounts.length ? 'env' : ''
+    };
+  },
   form: {
-    titleKey: 'settings.minimax.title',
-    openKey: 'settings.minimax.openBrowser',
-    clearKey: 'settings.minimax.clearApiKey',
-    saveKey: 'settings.minimax.saveApiKey',
-    emptyKey: 'settings.minimax.statusNotSet',
-    failedKey: 'settings.minimax.saveFailed',
+    kind: 'custom',
     fields: [
-      {
-        key: 'minimaxBillingMode',
-        input: 'select',
-        labelKey: 'settings.minimax.billingMode',
-        options: [
-          { value: 'token-plan', labelKey: 'settings.minimax.billingTokenPlan' },
-          { value: 'api', labelKey: 'settings.minimax.billingApi' }
-        ],
-        saveOnChange: true,
-        submitWithCredential: false
-      },
-      {
-        key: 'minimaxApiRegion',
-        input: 'select',
-        labelKey: 'settings.minimax.apiRegion',
-        options: [
-          { value: 'auto', labelKey: 'settings.minimax.regionAuto' },
-          { value: 'cn', labelKey: 'settings.minimax.regionCn' },
-          { value: 'intl', labelKey: 'settings.minimax.regionIntl' }
-        ],
-        saveOnChange: true,
-        submitWithCredential: false
-      },
-      { key: 'minimaxApiKey', input: 'password', placeholderKey: 'settings.minimax.apiKeyPlaceholder', required: true }
-    ],
-    // Both selections stay reachable after linking, without exposing the key.
-    top: [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }],
-    manual: [{ note: 'settings.minimax.note' }, { field: 'minimaxApiKey' }],
-    // Explicit choices follow the select even before the first probe. Auto
-    // follows the last successful probe, with the historical CN fallback.
-    openUrl: {
-      byField: 'minimaxApiRegion',
-      urls: {
-        cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
-        intl: 'https://platform.minimax.io/user-center/payment/token-plan'
-      },
-      byStatus: 'region',
-      statusUrls: {
-        cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
-        en: 'https://platform.minimax.io/user-center/payment/token-plan'
-      },
-      default: 'https://platform.minimaxi.com/user-center/payment/token-plan',
-      pathByField: {
-        byField: 'minimaxBillingMode',
-        values: { 'token-plan': '/user-center/payment/token-plan', api: '/user-center/payment/balance' }
-      }
-    }
+      { key: 'minimaxApiKey' },
+      { key: 'minimaxBillingMode', secret: false, submitWithCredential: false },
+      { key: 'minimaxApiRegion', secret: false, submitWithCredential: false }
+    ]
   },
   urlPolicy: [
     { hosts: ['platform.minimaxi.com'] },

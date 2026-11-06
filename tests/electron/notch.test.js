@@ -434,6 +434,30 @@ test('custom top layout is independent of tray layout and carries raw animation 
   assert.equal(summaryLayout({ trayContent: 'icon' }).items.length, 1);
 });
 
+test('monthly tray presets resolve notch icons and numeric items from month stats', () => {
+  const input = { periods: {
+    today: { totalTokens: 10000, costUsd: 1, clients: { claude: 9000, codex: 1000 }, clientCosts: { claude: 0.8, codex: 0.2 } },
+    month: { totalTokens: 80000, costUsd: 16, clients: { claude: 20000, codex: 54000, hermes: 6000 }, clientCosts: { claude: 2, codex: 3, hermes: 11 } },
+    allTime: { totalTokens: 900000, costUsd: 123, clients: { claude: 100000, codex: 200000, hermes: 600000 }, clientCosts: { claude: 100, codex: 20, hermes: 3 } }
+  } };
+  const tokenItem = { metric: 'tokens', value: 80000, text: '80.0K' };
+  const costItem = { metric: 'cost', value: 16, text: '$16.00' };
+  for (const [trayContent, provider, expected] of [
+    ['tokensMonth', 'codex', [tokenItem]],
+    ['costMonth', 'hermes', [costItem]],
+    ['bothMonth', 'codex', [tokenItem, costItem]]
+  ]) {
+    const { items } = buildNotchData(input, [], { notchSummaryMode: 'tray', trayContent }).summary;
+    assert.equal(items[0].type, 'icon', trayContent);
+    assert.equal(items[0].provider, provider, trayContent);
+    assert.deepEqual(items.map(item => item.period), Array(expected.length + 1).fill('month'), trayContent);
+    assert.deepEqual(items.slice(1).map(item => ({
+      metric: item.measure?.metric, value: item.measure?.value, text: item.text
+    })), expected, trayContent);
+    assert.ok(items.every(item => item.available), trayContent);
+  }
+});
+
 // The endpoints must have equal command topology for interrupted/reversed motion.
 test('resting curves and expanded EdgeDock curves interpolate linearly without a shape swap', () => {
   for (const notched of [true, false]) {
