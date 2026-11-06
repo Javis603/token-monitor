@@ -27,7 +27,7 @@ function fixture(t) {
       const sess = { partition, clearStorageData: async () => {}, webRequest: { onBeforeSendHeaders: (...args) => { sess.before = args.at(-1); }, onCompleted: (...args) => { sess.completed = args.at(-1); } }, setPermissionRequestHandler: fn => { sess.permission = fn; }, fetch: async (...args) => { calls.push(args); return fetch(...args); } }; sessions.push(sess); return sess;
     } }
   };
-  const create = (extra = {}) => createPluginWebSessions({ electron, directory, active: () => enabled, ...extra });
+  const create = (extra = {}) => createPluginWebSessions({ electron, fetchImpl: (...args) => electron.session.fromPartition('fixture-transport').fetch(...args), directory, active: () => enabled, ...extra });
   const service = create(); t.after(() => service.dispose());
   async function capture(statusCode = 200, changes = {}) {
     const sess = sessions.findLast(s => s.partition.startsWith('plugin-web-login-')), win = windows.at(-1);
@@ -173,4 +173,18 @@ test('forget clears an in-memory failure even when credential directory has disa
   fs.rmSync(f.directory, { recursive: true, force: true });
   f.service.forget('credit-test');
   assert.deepEqual(await f.service.status('credit-test', 'platform'), { state: 'notConnected' });
+});
+test('authenticated requests use the injected transport and never fall back around proxy failures', async t => {
+  const f = fixture(t); await f.service.connect('credit-test', config); await f.capture();
+  const injected = []; let rejectRoute = false;
+  const service = f.create({ fetchImpl: async (...args) => {
+    injected.push(args);
+    if (rejectRoute) throw Error('synthetic proxy unavailable');
+    return { ok: true, status: 200, body: Readable.from([Buffer.from('{"total_available":42}')]) };
+  } }); t.after(() => service.dispose());
+  assert.equal((await service.request('credit-test', 'platform')).body.total_available, 42);
+  assert.equal(injected[0][0], config.requestUrl); assert.equal(injected[0][1].credentials, 'omit');
+  assert.equal(injected[0][1].redirect, 'error'); assert.equal(f.calls.length, 0);
+  rejectRoute = true; await assert.rejects(service.request('credit-test', 'platform'), /request-failed/);
+  assert.equal(injected.length, 2); assert.equal(f.calls.length, 0);
 });

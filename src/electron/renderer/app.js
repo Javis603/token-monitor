@@ -12797,7 +12797,7 @@ function limitProviderSettingsRenderSignature() {
     settings: [
       settings.limitsEnabled !== false,
       [...enabledLimitProviderSet()].sort(),
-      limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, settings.limitProviderOrder).map(({ id }) => id),
+      limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), settings.limitProviderOrder).map(({ id }) => id),
       settings.deviceId || '',
       settingValues,
       state.limitProviderSettingsExpanded
