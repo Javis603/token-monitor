@@ -835,7 +835,27 @@
   // Limit providers that currently report something, in the user's limits order.
   function connectedLimitProviders(stats, options = {}) {
     if (options.limitsEnabled === false) return [];
-    return providerOrder(groupedProviders(stats).providers, options);
+    const connected = providerOrder(groupedProviders(stats).providers, options);
+    if (stats) return connected;
+    // Before the first stats push nothing "reports data" yet, but a placement
+    // edit can land in that window (a plugin import right after launch) and
+    // materialise the automatic dock list from this emptiness, wiping the
+    // quota cells. The enabled-provider setting is stats-independent, so it
+    // stands in; once stats arrive the reportable-data gate is authoritative.
+    const enabled = options.limitProviders === undefined || options.limitProviders === null
+      ? null
+      : new Set(csv(options.limitProviders));
+    const ordered = [];
+    const placed = new Set();
+    // The saved order comes first, then the enabled list itself: a partial
+    // saved order must not permanently omit an enabled provider, the same
+    // append rule providerOrder() applies to currently-reported providers.
+    for (const id of [...csv(options.limitProviderOrder), ...csv(options.limitProviders)]) {
+      if (placed.has(id) || (enabled && !enabled.has(id))) continue;
+      placed.add(id);
+      ordered.push(id);
+    }
+    return ordered;
   }
 
   function buildEdgeDockCells(stats, options = {}) {

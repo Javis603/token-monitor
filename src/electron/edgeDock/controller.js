@@ -223,8 +223,11 @@ function createEdgeDockController(deps) {
   }
 
   function cellKinds() {
-    // Plugin cells take a stat-sized slot: a label over one compact reading.
-    return cells.map((cell) => (cell.kind === 'stat' || cell.kind === 'plugin' ? 'stat' : 'provider'));
+    // Usage stats keep their short readout slot. Plugin views render like the
+    // provider cells — the compact ring (or reading) plus its value, ~60px of
+    // content — so they take the full 70px provider slot; the stat-sized slot
+    // they once assumed clips a ring cell by 2px top and bottom.
+    return cells.map((cell) => (cell.kind === 'stat' ? 'stat' : 'provider'));
   }
 
   function placement() {

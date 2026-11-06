@@ -1,0 +1,71 @@
+{
+  "tmApi": 1,
+  "id": "system-vitals",
+  "name": {
+    "en": "System vitals",
+    "zh-TW": "系統負載",
+    "zh-CN": "系统负载"
+  },
+  "description": {
+    "en": "CPU and memory as edge dock rings, with a recent-load curve in the hover card.",
+    "zh-TW": "在邊緣停靠欄以圓環顯示 CPU 與記憶體，懸浮卡片附最近負載曲線。",
+    "zh-CN": "在边缘停靠栏以圆环显示 CPU 与内存，悬浮卡片附最近负载曲线。"
+  },
+  "version": "1.0.0",
+  "author": "swingmonkey (https://github.com/swingmonkey)",
+  "homepage": "https://github.com/swingmonkey/token-monitor-plugin-system-vitals",
+  "ui": "ui.mjs",
+  "backend": "backend.cjs",
+  "background": true,
+  "css": [
+    "panel.css"
+  ],
+  "files": [
+    "ui.mjs",
+    "backend.cjs",
+    "panel.css",
+    "README.md",
+    "LICENSE"
+  ],
+  "views": [
+    {
+      "id": "cpu",
+      "title": {
+        "en": "CPU ring",
+        "zh-TW": "CPU 圓環",
+        "zh-CN": "CPU 圆环"
+      },
+      "surfaces": [
+        "edgeDock"
+      ],
+      "defaultSurfaces": [
+        "edgeDock"
+      ]
+    },
+    {
+      "id": "mem",
+      "title": {
+        "en": "Memory ring",
+        "zh-TW": "記憶體圓環",
+        "zh-CN": "内存圆环"
+      },
+      "surfaces": [
+        "edgeDock"
+      ],
+      "defaultSurfaces": [
+        "edgeDock"
+      ]
+    }
+  ],
+  "backgroundDescription": {
+    "en": "Samples CPU and memory every two seconds so the dock rings and load curve stay current. Token Monitor must remain running.",
+    "zh-TW": "每兩秒採樣一次 CPU 與記憶體，讓停靠欄圓環與負載曲線保持最新。Token Monitor 必須保持運行。",
+    "zh-CN": "每两秒采样一次 CPU 与内存，让停靠栏圆环与负载曲线保持最新。Token Monitor 必须保持运行。"
+  },
+  "defaults": {
+    "background": true
+  },
+  "engines": {
+    "tokenMonitor": ">=0.82.0"
+  }
+}
