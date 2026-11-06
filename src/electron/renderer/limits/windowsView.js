@@ -1745,22 +1745,28 @@
       // that only expose a single window shouldn't leave a half-empty bar next to
       // the real one. Credits windows carry money rather than quota percentages;
       // their display meter is derived without changing the provider reading.
-      const session = windowForKind(provider, 'session');
-      if (session) {
-        const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
-        if (provider.provider === 'minimax' && !session.resetsAt && !session.resetDescription) node.classList.add('limit-window-no-reset');
-        windows.append(node);
-      }
-      if (provider.provider === 'minimax') {
-        for (const weekly of windowsForKind(provider, 'weekly')) {
-          const detail = providerWindowText(provider, weekly).detail;
-          const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68, null, detail);
-          if (!weekly.resetsAt && !weekly.resetDescription && !detail) node.classList.add('limit-window-no-reset');
-          windows.append(node);
+      if (provider.provider?.startsWith('plugin:')) {
+        for (const window of (provider.windows || []).filter(window => !isCreditsWindow(window))) {
+          windows.append(limitWindowNode(providerWindowLabel(provider, window), window, color, window.kind === 'session' ? 0.95 : 0.68));
         }
       } else {
-        const weekly = windowForKind(provider, 'weekly');
-        if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+        const session = windowForKind(provider, 'session');
+        if (session) {
+          const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
+          if (provider.provider === 'minimax' && !session.resetsAt && !session.resetDescription) node.classList.add('limit-window-no-reset');
+          windows.append(node);
+        }
+        if (provider.provider === 'minimax') {
+          for (const weekly of windowsForKind(provider, 'weekly')) {
+            const detail = providerWindowText(provider, weekly).detail;
+            const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68, null, detail);
+            if (!weekly.resetsAt && !weekly.resetDescription && !detail) node.classList.add('limit-window-no-reset');
+            windows.append(node);
+          }
+        } else {
+          const weekly = windowForKind(provider, 'weekly');
+          if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+        }
       }
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
         // Muse supplies the token balance as display text; keep it ahead of the

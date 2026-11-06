@@ -78,3 +78,28 @@ test('forgetting host connections clears their retained quota but preserves unco
   service.forgetConnections('sample-plugin');
   assert.deepEqual(service.records().map(row => row.provider), ['plugin:sample-plugin:two']);
 });
+test('visibility resume preserves last-good windows while pending and after transient failure', async t => {
+  const id = 'plugin:sample-plugin:one';
+  let finish;
+  const settings = { limitProviders: id };
+  const manager = { list: () => ({ plugins: [{ id: manifest.id, status: 'active', revision: 'a', limits: [manifest.limits[0]] }] }),
+    call: async () => ({ status: 'ok', windows: [{ kind: 'daily', usedPercent: 20, remainingPercent: 80 }] }) };
+  const service = createPluginLimits({ manager, getSettings: () => settings, changed() {} });
+  t.after(() => service.dispose()); service.demand(true);
+  for (let n = 0; n < 20 && !service.records().length; n++) await new Promise(setImmediate);
+  const windows = service.records()[0].windows;
+  assert.equal(windows.length, 1);
+  service.demand(false);
+  manager.call = () => new Promise(resolve => { finish = resolve; });
+  service.demand(true);
+  assert.deepEqual(service.records()[0]?.windows, windows, 'returning to Limits keeps readings before the probe settles');
+  for (let n = 0; n < 20 && !finish; n++) await new Promise(setImmediate);
+  finish({ status: 'error', windows: [] });
+  for (let n = 0; n < 20 && service.records()[0]?.status !== 'error'; n++) await new Promise(setImmediate);
+  assert.equal(service.records()[0].status, 'error');
+  assert.deepEqual(service.records()[0].windows, windows);
+  service.demand(false); service.demand(true);
+  assert.deepEqual(service.records()[0]?.windows, windows, 'a repeated reveal also seeds the transient reading');
+  service.demand(false); settings.limitProviders = ''; service.reconcile(); service.demand(true);
+  assert.deepEqual(service.records(), [], 'deselection does not revive retained readings');
+});
