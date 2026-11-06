@@ -128,3 +128,17 @@ test('edgeScrollDelta clamps to maxSpeed past the panel edges', () => {
   assert.equal(edgeScrollDelta({ pointerY: 50, top: 100, bottom: 600 }), -12);
   assert.equal(edgeScrollDelta({ pointerY: 700, top: 100, bottom: 600 }), 12);
 });
+
+
+test('wrapped variable-width items reorder across rows and repack like flex layout', () => {
+  const { createWrappedDragSnapshot, resolveWrappedDrag } = require('../../src/electron/renderer/verticalDragSort');
+  const items = [{ id: 'a', left: 0, top: 0, width: 80, height: 28 }, { id: 'b', left: 86, top: 0, width: 70, height: 28 },
+    { id: 'c', left: 0, top: 34, width: 60, height: 28 }, { id: 'd', left: 66, top: 34, width: 90, height: 28 }];
+  const snapshot = createWrappedDragSnapshot(items, 'd', { x: 45, y: 14 }, { width: 170, columnGap: 6, rowGap: 6 });
+  assert.deepEqual(resolveWrappedDrag(snapshot, {}).order, ['a', 'b', 'c', 'd']);
+  assert.deepEqual(resolveWrappedDrag(snapshot, {}).shifts, items.map(() => ({ x: 0, y: 0 })));
+  const moved = resolveWrappedDrag(snapshot, { x: -71, y: -34 });
+  assert.deepEqual(moved.order, ['d', 'a', 'b', 'c']);
+  assert.deepEqual(moved.shifts, [{ x: 0, y: 34 }, { x: 0, y: 34 }, { x: 0, y: 34 }, { x: -66, y: -34 }]);
+  assert.deepEqual(resolveWrappedDrag(createWrappedDragSnapshot(items, 'missing'), {}), { targetIndex: -1, order: [], shifts: [] });
+});

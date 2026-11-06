@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "fields": [
+    {
+      "id": "lowQuota",
+      "type": "boolean",
+      "label": {
+        "en": "Low-quota alerts",
+        "zh-TW": "配額不足提醒",
+        "zh-CN": "配额不足提醒",
+        "ja": "クォータ不足の通知",
+        "ko": "할당량 부족 알림",
+        "pt-BR": "Alertas de cota baixa"
+      },
+      "default": false
+    },
+    {
+      "id": "threshold",
+      "type": "number",
+      "label": {
+        "en": "Alert below remaining (%)",
+        "zh-TW": "剩餘配額低於此百分比時提醒",
+        "zh-CN": "剩余配额低于此百分比时提醒",
+        "ja": "残量がこの割合（%）を下回ると通知",
+        "ko": "남은 할당량이 이 비율(%) 미만일 때 알림",
+        "pt-BR": "Alertar quando o restante for menor que (%)"
+      },
+      "default": 10,
+      "min": 1,
+      "max": 99,
+      "integer": true
+    },
+    {
+      "id": "recovery",
+      "type": "boolean",
+      "label": {
+        "en": "Quota recovery / full alerts",
+        "zh-TW": "配額恢復／回滿提醒",
+        "zh-CN": "配额恢复／回满提醒",
+        "ja": "クォータ回復・全回復の通知",
+        "ko": "할당량 회복 / 100% 알림",
+        "pt-BR": "Alertas de recuperação / cota completa"
+      },
+      "default": false
+    }
+  ]
+}

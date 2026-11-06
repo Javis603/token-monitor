@@ -56,6 +56,85 @@ test('before-quit hands over without taking the quit away from the OS', () => {
   // a synchronous performQuit gives it nothing to buy.
   assert.doesNotMatch(handler, /preventDefault/);
   // electron-updater owns the restart, so that one route has to opt out.
-  assert.match(handler, /if \(skipForcedQuit\) return;/);
+  assert.match(handler, /if \(skipForcedQuit\) \{ disposePluginRuntime\(\); return; \}/);
   assert.match(main, /skipForcedQuit = true;/);
+});
+
+
+test('tray and signal quit flush plugin and quota history state before immediate exit', () => {
+  const vm = require('node:vm');
+  const events = [];
+  const context = { console, quitRequested: false, quitInProgress: false,
+    pluginRuntime: { dispose() { events.push('flush'); } },
+    stopPersistBoundsTimer() {}, stopLocalCollector() {}, stopStatsStream() {}, stopHostStats() {},
+    stopSyncCollector() {}, stopIcloudRuntime() {}, terminateUsageHostSubprocesses() {},
+    syncStatsPublication: { cancel() {} }, macWidgetSnapshotController: null, macWidgetDemand: null,
+    stopEmbeddedHub() {}, stopDiscordRpc() {}, sessionUsageArchiveStore: { close() {} }, tray: null,
+    limitsHistoryController: null, limitsHistoryStore: { closeSync() { events.push('quota-close'); } },
+    app: { exit() { events.push('exit'); } } };
+  vm.runInNewContext(main.slice(main.indexOf('function stopAll()'), main.indexOf('\nlet quitRequested')) + '\n'
+    + main.slice(main.indexOf('function performQuit()'), main.indexOf('// Write the export file set')), context);
+  context.requestAppQuit();
+  assert.deepEqual(events, ['flush', 'quota-close', 'exit']);
+});
+
+test('a failing plugin teardown cannot skip the host shutdown that follows it', () => {
+  const stopAll = functionSource('function stopAll()');
+  assert.match(stopAll, /^function stopAll\(\) \{\s*disposePluginRuntime\(\);/);
+  assert.equal((main.match(/pluginRuntime\?\.dispose\(\)/g) || []).length, 1, 'every dispose goes through the guard');
+  const warnings = [];
+  const dispose = new Function('pluginRuntime', 'console', `${main.match(/function disposePluginRuntime\(\) \{[\s\S]*?\n\}/)[0]}; return disposePluginRuntime;`)(
+    { dispose() { throw new Error('boom'); } }, { warn: message => warnings.push(message) });
+  assert.doesNotThrow(dispose);
+  assert.deepEqual(warnings, ['[plugins] dispose failed: boom']);
+});
+
+test('an aborted updater handoff can reopen quota history after draining the prior worker', async t => {
+  const vm = require('node:vm');
+  const os = require('node:os');
+  const { createLimitsHistoryStore } = require('../../src/electron/limits/historyStore');
+  const { createUpdateInstallQuitGuard } = require('../../src/electron/updateInstallQuit');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-update-recovery-'));
+  let beforeQuit;
+  const events = [];
+  const clock = new Date(2026, 10, 3, 12).getTime();
+  const context = {
+    path, createLimitsHistoryStore: (file, options) => createLimitsHistoryStore(file, { ...options, now: () => clock }), limitsHistoryStore: null,
+    limitsHistoryController: { dispose() { events.push('preview-close'); }, refresh() {} },
+    app: { getPath: () => directory, on: (_event, callback) => { beforeQuit = callback; } },
+    console, quitRequested: false, skipForcedQuit: false,
+    antigravityOAuthLoginController: null, workbuddyManagedAccountService: null,
+    resetMacWidgetReloadThrottle() {}, rateRefreshTimer: null, appUpdateBackgroundTimer: null,
+    clearInterval() {}, stopTaskbarZOrderKeeper() {}, unregisterWindowToggleShortcut() {},
+    edgeDockController: null, notchController: null, clearTimeout() {}, notchRateTimer: null,
+    electronWorkbuddyLocalAuth: { dispose() {} }, disposePluginRuntime() {},
+    performQuit() { throw new Error('the installer owns this quit'); }
+  };
+  t.after(async () => { await context.limitsHistoryStore?.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const getter = main.slice(main.indexOf('function getLimitsHistoryStore()'), main.indexOf('async function limitsHistoryPayload('));
+  const start = main.indexOf("app.on('before-quit'");
+  const handler = main.slice(start, main.indexOf('\n});', start) + 4);
+  vm.runInNewContext(getter + handler, context);
+  const now = clock;
+  const row = (offset, used) => ({ provider: 'codex', accountKey: 'update-test', status: 'ok', updatedAt: new Date(now + offset).toISOString(),
+    windows: [{ kind: 'weekly', usedPercent: used }] });
+  const previous = context.getLimitsHistoryStore();
+  await previous.record('local', { providers: [row(-300_000, 20)] });
+  const drain = previous.closeSync;
+  previous.closeSync = () => { events.push('history-drain'); drain(); };
+  const guard = createUpdateInstallQuitGuard({
+    graceMs: 1000, setTimeoutFn: () => ({ unref() {} }), clearTimeoutFn() {},
+    claim() { context.quitRequested = true; context.skipForcedQuit = true; },
+    release() { context.quitRequested = false; context.skipForcedQuit = false; }
+  });
+  assert.equal(guard.request(), true);
+  beforeQuit();
+  assert.deepEqual(events, ['preview-close', 'history-drain']);
+  assert.equal(guard.abort(), true);
+  const recovered = context.getLimitsHistoryStore();
+  assert.notEqual(recovered, previous, 'an aborted update cannot retain the permanently closed store');
+  await recovered.record('local', { providers: [row(0, 25)] });
+  const history = (await recovered.query('local', row(0, 25))).windows[0];
+  assert.deepEqual(history.points.map(point => point.value), [20, 25]);
+  assert.equal(history.distribution.buckets.at(-1).value, 5);
 });

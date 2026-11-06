@@ -4,25 +4,26 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Claude Web accounts:** Manage multiple Web accounts alongside the automatically detected Claude Code account, with per-account login renewal, enable switches and removal. (#1220)
-- **Muse Code quota:** Supports session and weekly subscription limits from Muse Code 1.4.13+ after signing in with `muse login`. Existing installs can enable it under Settings → AI Tool Limits. (#1209)
-- **Ollama API keys:** Supports API-key authentication as an alternative to Cookie credentials. (#1188)
-- **Ollama credits:** Supports monthly included credits and purchased credit balances through API-key or Cookie credentials. (#1205)
+- **OpenDesign quota:** Supports five-hour and weekly subscription quotas for the current workspace, with manual Cookie setup. (#1366)
+- **Service status:** Adds OpenCode, Factory Droid, Kimi, Copilot, Zed, Devin, and separate MiniMax China and International status pages. (#1370)
 
 ### Improved
-- **Notch Panel session summary:** In “Session activity only” mode, groups client icons and shows separate counts for running and waiting sessions. (#1217)
-- **Notch Panel spacing:** Reduces the gap beside the camera housing for a more compact collapsed summary. (#1218)
+- **Multi-device sync:** Reduces repeated uploads of unchanged usage. Update both the sending device and Hub for delta uploads. (#1374)
+- **Quota history placement:** Opens cards toward the display interior when space permits. (#1368)
 
 ### Fixed
-- **Notch Panel hover:** Prevents transparent corners and unfinished hover animations from triggering expansion or capturing input outside the visible outline. (#1215)
+- **Windows quota history:** Fixes cards failing to open when hovering over or clicking an account. (#1368)
+- **Windows history appearance:** Follows the main window’s Acrylic/Accent Blur and Glass Backdrop settings. (#1368)
+- **Codex usage in Dots:** Avoids restoring idle historical threads merely to collect usage. (#1377)
+- **Service status refresh:** Re-enabling a provider checks its status immediately, including in Manual mode. (#1379)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.87.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.87.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-Setup-0.87.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.87.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -58,26 +59,27 @@ Tokscale is bundled with this app and updated through Token Monitor releases. Se
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **Claude Web 账号：** 支持管理多个 Web 账号，与自动检测的 Claude Code 账号同时显示，并可分别更新登录、启用、停用或移除。 （#1220）
-- **Muse Code 额度：** 支持读取 Muse Code 1.4.13+ 的会话及每周订阅额度，需先通过 `muse login` 登录；已有安装可在“设置 → AI 工具额度”中启用。 （#1209）
-- **Ollama API 密钥：** 支持使用 API 密钥作为 Cookie 之外的认证方式。 （#1188）
-- **Ollama 点数：** 支持通过 API 密钥或 Cookie 显示每月包含点数及购买点数余额。 （#1205）
+- **OpenDesign 额度：** 支持当前工作区的五小时和每周订阅额度，需手动配置 Cookie。 （#1366）
+- **服务状态：** 新增 OpenCode、Factory Droid、Kimi、Copilot、Zed、Devin，以及 MiniMax 国内和国际站的独立状态页面。 （#1370）
 
 ### 改进
-- **刘海面板会话摘要：** 在“仅会话活动”模式下合并显示工具图标，并分别显示运行中及等待中的会话数量。 （#1217）
-- **刘海面板间距：** 缩小摄像头两侧的留白，让收起摘要更紧凑。 （#1218）
+- **多设备同步：** 减少未变化用量的重复上传。增量上传需同时更新发送设备与 Hub。 （#1374）
+- **额度历史位置：** 空间允许时，卡片朝屏幕内侧展开。 （#1368）
 
 ### 修复
-- **刘海面板悬停：** 修复透明圆角和未完成的悬停动画导致面板提前展开或在可见轮廓外拦截输入的问题。 （#1215）
+- **Windows 额度历史：** 修复悬停或点击账户时卡片可能无法打开的问题。 （#1368）
+- **Windows 历史卡片外观：** 跟随主窗口的 Acrylic/Accent Blur 和“玻璃背景”设置。 （#1368）
+- **Dots 中的 Codex 用量：** 不再仅为采集用量而恢复空闲的历史线程。 （#1377）
+- **服务状态刷新：** 重新启用服务商后立即检查状态，手动刷新模式下也会生效。 （#1379）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.87.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.87.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-Setup-0.87.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.87.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -108,7 +110,7 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.79.0...v0.80.0">v0.79.0...v0.80.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.86.0...v0.87.0">v0.86.0...v0.87.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -126,26 +128,27 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **Claude Web 帳號：** 支援管理多個 Web 帳號，與自動偵測的 Claude Code 帳號同時顯示，並可分別更新登入、啟用、停用或移除。 （#1220）
-- **Muse Code 額度：** 支援讀取 Muse Code 1.4.13+ 的會話及每週訂閱額度，需先透過 `muse login` 登入；既有安裝可在「設定 → AI 工具額度」中啟用。 （#1209）
-- **Ollama API 金鑰：** 支援使用 API 金鑰作為 Cookie 以外的驗證方式。 （#1188）
-- **Ollama 點數：** 支援透過 API 金鑰或 Cookie 顯示每月內含點數及購買點數餘額。 （#1205）
+- **OpenDesign 額度：** 支援目前工作區的五小時及每週訂閱額度，需手動設定 Cookie。 （#1366）
+- **服務狀態：** 新增 OpenCode、Factory Droid、Kimi、Copilot、Zed、Devin，以及 MiniMax 中國站與國際站的獨立狀態頁面。 （#1370）
 
 ### 改進
-- **瀏海面板會話摘要：** 在「僅會話活動」模式下合併顯示工具圖示，並分別顯示進行中及等待中的會話數量。 （#1217）
-- **瀏海面板間距：** 縮小相機兩側的留白，讓收合摘要更緊湊。 （#1218）
+- **多裝置同步：** 減少未變動用量的重複上傳。增量上傳需同時更新傳送裝置與 Hub。 （#1374）
+- **額度歷史位置：** 空間允許時，卡片朝螢幕內側展開。 （#1368）
 
 ### 修復
-- **瀏海面板懸停：** 修復透明圓角和未完成的懸停動畫導致面板提早展開或在可見輪廓外攔截輸入的問題。 （#1215）
+- **Windows 額度歷史：** 修復將游標停留在帳戶上或點擊帳戶時，卡片可能無法開啟的問題。 （#1368）
+- **Windows 歷史卡片外觀：** 跟隨主視窗的 Acrylic/Accent Blur 與「玻璃背景」設定。 （#1368）
+- **Dots 中的 Codex 用量：** 不再僅為收集用量而恢復閒置的歷史執行緒。 （#1377）
+- **服務狀態更新：** 重新啟用服務商後立即檢查狀態，手動更新模式下亦會生效。 （#1379）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.87.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.87.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-Setup-0.87.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.87.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.AppImage)
 
 </details>
 
@@ -158,26 +161,27 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **Claude Web 계정:** 자동으로 감지한 Claude Code 계정과 함께 여러 Web 계정을 관리할 수 있습니다. 계정별로 로그인을 갱신하거나 사용 여부를 바꾸고 삭제할 수 있습니다. (#1220)
-- **Muse Code 한도:** Muse Code 1.4.13+에서 `muse login`으로 로그인하면 세션 및 주간 구독 한도를 확인할 수 있습니다. 기존 설치에서는 '설정 → AI 도구 한도'에서 켤 수 있습니다. (#1209)
-- **Ollama API 키:** 쿠키 대신 API 키로 인증할 수 있습니다. (#1188)
-- **Ollama 크레딧:** API 키 또는 쿠키로 월간 포함 크레딧과 구매한 크레딧 잔액을 확인할 수 있습니다. (#1205)
+- **OpenDesign 할당량:** Cookie를 직접 설정하면 현재 워크스페이스의 5시간 및 주간 구독 할당량을 확인할 수 있습니다. (#1366)
+- **서비스 상태:** OpenCode, Factory Droid, Kimi, Copilot, Zed, Devin과 MiniMax 중국·국제 서비스의 개별 상태 페이지를 지원합니다. (#1370)
 
 ### 개선
-- **노치 패널 세션 요약:** '세션 활동만' 모드에서 도구 아이콘을 모아 표시하고, 실행 중인 세션과 입력을 기다리는 세션 수를 구분해 보여 줍니다. (#1217)
-- **노치 패널 간격:** 카메라 양옆의 여백을 줄여 접힌 요약이 차지하는 공간을 줄였습니다. (#1218)
+- **다중 기기 동기화:** 변경되지 않은 사용량의 반복 업로드를 줄였습니다. 변경분만 업로드하려면 전송 기기와 Hub를 모두 업데이트해야 합니다. (#1374)
+- **할당량 기록 위치:** 공간이 있으면 카드가 화면 안쪽으로 열립니다. (#1368)
 
 ### 수정
-- **노치 패널 마우스 오버:** 투명한 모서리나 진행 중인 확대 애니메이션 때문에 패널이 미리 열리거나 보이는 윤곽 밖에서 입력을 가로채는 문제를 해결했습니다. (#1215)
+- **Windows 할당량 기록:** 계정에 마우스를 올리거나 클릭해도 카드가 열리지 않던 문제를 수정했습니다. (#1368)
+- **Windows 기록 카드 외관:** 기본 창의 Acrylic/Accent Blur 및 글래스 배경 설정을 따릅니다. (#1368)
+- **Dots의 Codex 사용량:** 사용량 수집만을 위해 대기 중인 과거 스레드를 복원하지 않습니다. (#1377)
+- **서비스 상태 새로고침:** 제공업체를 다시 표시하면 수동 모드에서도 즉시 상태를 확인합니다. (#1379)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.87.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.87.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-Setup-0.87.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.87.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.AppImage)
 
 </details>
 
@@ -190,26 +194,27 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Claude Web アカウント:** 自動検出した Claude Code アカウントと併せて、複数の Web アカウントを管理できます。アカウントごとにログインの更新、有効・無効の切り替え、削除ができます。 (#1220)
-- **Muse Code のクォータ:** Muse Code 1.4.13+ で `muse login` を使ってログインすると、セッションと週間のサブスクリプション上限を確認できます。既存のインストールでは「設定 → AIツール制限」で有効にできます。 (#1209)
-- **Ollama API キー:** Cookie に加え、API キーでの認証に対応しました。 (#1188)
-- **Ollama クレジット:** API キーまたは Cookie を使って、月間の付与クレジットと購入済みクレジットの残高を確認できます。 (#1205)
+- **OpenDesignの使用量上限:** Cookieを手動で設定すると、現在のワークスペースの5時間枠と週間のサブスクリプション上限を確認できます。 (#1366)
+- **サービス状態:** OpenCode、Factory Droid、Kimi、Copilot、Zed、Devinに加え、MiniMaxの中国向け・国際向けサービスを個別に確認できます。 (#1370)
 
 ### 改善
-- **ノッチパネルのセッション概要:** 「セッション活動のみ」モードでツールのアイコンをまとめ、実行中と入力待ちのセッション数を分けて表示します。 (#1217)
-- **ノッチパネルの余白:** カメラの両側の余白を減らし、折りたたんだ概要をコンパクトにしました。 (#1218)
+- **複数デバイスの同期:** 変更のない使用量の重複アップロードを削減しました。差分アップロードには送信側のデバイスとHubの両方の更新が必要です。 (#1374)
+- **割り当て履歴の位置:** スペースがある場合、カードが画面の内側に向かって開きます。 (#1368)
 
 ### 修正
-- **ノッチパネルのホバー:** 透明な角や拡大途中のアニメーションによって、見える輪郭の外側でパネルが開いたり入力を奪ったりする問題を修正しました。 (#1215)
+- **Windowsの割り当て履歴:** アカウントにカーソルを合わせたりクリックしたりしてもカードが開かない問題を修正しました。 (#1368)
+- **Windowsの履歴カードの外観:** メインウィンドウのAcrylic/Accent Blurと「ガラス背景」の設定を反映します。 (#1368)
+- **DotsのCodex使用量:** 使用量の収集だけを目的に、待機中の過去のスレッドを復元しなくなりました。 (#1377)
+- **サービス状態の更新:** 非表示のサービスを再表示すると、手動モードでもすぐに状態を確認します。 (#1379)
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.80.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.80.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-Setup-0.80.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.80.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.80.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.80.0/Token-Monitor-0.80.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.87.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.87.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-Setup-0.87.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.87.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.87.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.87.0/Token-Monitor-0.87.0.AppImage)
 
 </details>
 

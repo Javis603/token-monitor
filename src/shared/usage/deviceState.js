@@ -33,7 +33,7 @@ function cloneValue(value, seen = new Map()) {
   }
   const copy = Object.create(Object.getPrototypeOf(value) === null ? null : Object.prototype);
   seen.set(value, copy);
-  for (const [key, entry] of Object.entries(value)) copy[key] = cloneValue(entry, seen);
+  for (const key of Object.keys(value)) copy[key] = cloneValue(value[key], seen);
   return copy;
 }
 

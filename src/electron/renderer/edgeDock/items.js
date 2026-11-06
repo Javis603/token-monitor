@@ -7,19 +7,22 @@
 // `edgeDockItems` is either null — the automatic default, which follows the
 // connected limit providers — or an ordered list the user composed:
 //   { type: 'limit', provider, hiddenAccounts: [accountKey], showUsage,
-//     accountMode: 'active' | 'lowest', windowKey: '' | limitWindowKey(window) }
+//     accountMode: 'active' | 'lowest' | 'specific', accountKey?, windowKey: '' | limitWindowKey(window) }
 //   { type: 'stat', metric }   metric: a usage period, 'liveRate', or 'sessions'
 //                              ('sessions' additionally carries runningOnly
 //                              and groupBy; see normalizeItem)
+//   { type: 'plugin', ref }    a plugin view (`<pluginId>/<viewId>`); kept when
+//                              the plugin is missing so reinstalling restores it
 (function exposeEdgeDockItems(root, factory) {
   const node = typeof module === 'object' && module.exports;
   const api = factory(
     node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
-    node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems
+    node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems,
+    node ? require('../../../shared/plugins/placements') : root?.TokenMonitorPluginPlacements
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockItems = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders, usageItems) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders, usageItems, pluginPlacements) {
   // Usage readouts follow the widget's own period choices; each shows tokens
   // with its cost beneath, so tokens and cost are no longer separate items.
   const USAGE_PERIODS = Object.freeze(['today', 'week', 'last7', 'last30', 'month', 'allTime']);
@@ -70,6 +73,7 @@
   function itemId(item) {
     if (item?.type === 'limit') return `limit:${item.provider}`;
     if (item?.type === 'stat') return `stat:${item.metric}`;
+    if (item?.type === 'plugin') return `plugin:${item.ref}`;
     return '';
   }
 
@@ -81,6 +85,10 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
 
   function normalizeItem(raw) {
     if (!raw || typeof raw !== 'object') return null;
+    if (raw.type === 'plugin') {
+      const ref = String(raw.ref || '').trim().toLowerCase();
+      return pluginPlacements?.isRef(ref) ? { type: 'plugin', ref } : null;
+    }
     if (raw.type === 'limit') {
       const provider = normalizedId(raw.provider);
       if (!provider || (PROVIDER_IDS.size && !PROVIDER_IDS.has(provider))) return null;
@@ -98,7 +106,11 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
         // Codex has a meaningful local "current account", so its glance value
         // follows that account unless the user explicitly asks for the tightest
         // visible account. Other providers have no local-login identity.
-        accountMode: provider === 'codex' && raw.accountMode !== 'lowest' ? 'active' : 'lowest'
+        accountMode: provider === 'thirdparty' && raw.accountMode === 'specific'
+          ? 'specific'
+          : provider === 'codex' && raw.accountMode !== 'lowest' ? 'active' : 'lowest',
+        ...(provider === 'thirdparty' ? { accountKey: typeof raw.accountKey === 'string'
+          ? raw.accountKey.trim().slice(0, 200) : '' } : {})
       };
     }
     if (raw.type === 'stat') {
@@ -169,6 +181,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
   }
 
   return {
+    MAX_ITEMS,
     DEFAULT_LIMIT_COUNT,
     DERIVED_PERIODS,
     SESSIONS_METRIC,

@@ -11,7 +11,7 @@ function executorIdsFromProcesses(text) {
   // Desktop versions can put global config overrides before the subcommand.
   // Admit only assignment-valued -c/--config options, not arbitrary argv which
   // could contain an exec-server command as another subcommand's argument.
-  const assignment = `(?:[A-Za-z0-9_.-]+=(?:[^\\s"']|"[^"]*"|'[^']*')+|"[A-Za-z0-9_.-]+=[^"]*"|'[A-Za-z0-9_.-]+=[^']*')`;
+  const assignment = String.raw`(?:[A-Za-z0-9_.-]+=(?:\\"|[^\s"']|"(?:[^"\\]|\\.)*"|'[^']*')+|"[A-Za-z0-9_.-]+=(?:[^"\\]|\\.)*"|'[A-Za-z0-9_.-]+=[^']*')`;
   const executor = new RegExp(`^\\s*(?:"(?:[^"]*[\\\\/])?codex(?:\\.exe)?"|(?:[^\\s"]*[\\\\/])?codex(?:\\.exe)?)(?:\\s+(?:-c|--config)\\s+${assignment})*\\s+exec-server\\s`);
   for (const line of String(text || '').split(/\r?\n/)) {
     const command = line.match(executor);
@@ -48,7 +48,8 @@ function localExecutorIds(options = {}) {
     };
     const termination = createSubprocessTermination(child, { onUnconfirmed: () => finish() });
     const abort = () => { failed = true; termination.request(); };
-    const timer = setTimeout(abort, 2000);
+    // Windows PowerShell cold start was measured above five seconds.
+    const timer = setTimeout(abort, platform === 'win32' ? 15000 : 2000);
     options.signal?.addEventListener('abort', abort, { once: true });
     child.stdout.on('data', (bytes) => {
       if (failed || finished) return;

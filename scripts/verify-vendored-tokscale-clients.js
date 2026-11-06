@@ -51,10 +51,12 @@ function supportedClients(binPath, spawn = spawnSync) {
 // A binary without the fork's client module rejects these ids with clap's
 // exit 2. The scan runs against an empty --home so it proves only that the
 // ids are accepted, never what the CI machine happens to have on disk.
+// Even an empty JSON report initializes pricing. Keep this capability probe
+// offline so pricing requests/retries cannot exhaust the scan deadline.
 function forkOnlyClientsAccepted(binPath, clients, spawn = spawnSync) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-tokscale-fork-clients-'));
   try {
-    const result = spawn(binPath, ['--json', '--client', clients.join(','), '--today', '--home', home], {
+    const result = spawn(binPath, ['--json', '--client', clients.join(','), '--today', '--home', home, '--offline'], {
       encoding: 'utf8',
       timeout: 30_000
     });

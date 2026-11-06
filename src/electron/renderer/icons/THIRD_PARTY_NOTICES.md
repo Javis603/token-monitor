@@ -9,23 +9,32 @@ Sources:
   - actions/download.svg: download
   - actions/rotate-cw.svg: rotate-cw
   - actions/external-link.svg: external-link
+  - actions/ellipsis.svg: ellipsis
+  - actions/shield-check.svg: shield-check
   - actions/check.svg: check (stroke widened to 3 for legibility as a small badge)
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left
   - settings/collection.svg: database
   - settings/sync.svg: cloud-sync
   - settings/appearance.svg: palette
+  - settings/plugins.svg: puzzle
   - views/home.svg: house
   - views/session.svg: messages-square
   - views/trends.svg: chart-no-axes-combined
   - views/model.svg: atom
   - views/tool.svg: bot
   - views/status.svg: activity
+  - devices/laptop.svg: laptop
+  - devices/server.svg: server
+  - devices/cloud.svg: cloud
 - Basil Icons by Craftwork: https://www.figma.com/community/file/931906394678748246
   - actions/zap.svg: lightning-alt-outline
     (modified with a subtle outline for small-size legibility)
 - Tabler Icons: https://github.com/tabler/tabler-icons
   - settings/window.svg: app-window
+- T3 Code: https://github.com/pingdotgg/t3code
+  - devices/mini.svg: custom Mini PC glyph
+  - devices/workstation.svg: custom Workstation glyph
 
 Lucide Icons license:
 
@@ -84,6 +93,30 @@ Tabler Icons license:
 MIT License
 
 Copyright (c) 2020-2026 Paweł Kuna
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+T3 Code icons license:
+
+MIT License
+
+Copyright (c) 2026 T3 Tools Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

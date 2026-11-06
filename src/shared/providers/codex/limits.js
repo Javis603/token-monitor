@@ -54,16 +54,18 @@ function codexAuthPath(env = process.env) {
 function codexPlanLabelFromParts(...parts) {
   const text = parts.map((part) => String(part || '').trim()).find(Boolean) || '';
   if (!text || text.includes('@')) return '';
+  // Codex's status view names the three Pro tiers by their monthly price
+  // (codex-rs/tui/src/subscription.rs), not by a usage multiplier.
   const exact = {
-    pro: 'Pro More',
-    prolite: 'Pro',
-    pro_lite: 'Pro',
-    'pro-lite': 'Pro',
-    'pro lite': 'Pro',
-    promax: 'Pro Max',
-    pro_max: 'Pro Max',
-    'pro-max': 'Pro Max',
-    'pro max': 'Pro Max'
+    pro: 'Pro 200',
+    prolite: 'Pro 100',
+    pro_lite: 'Pro 100',
+    'pro-lite': 'Pro 100',
+    'pro lite': 'Pro 100',
+    promax: 'Pro 500',
+    pro_max: 'Pro 500',
+    'pro-max': 'Pro 500',
+    'pro max': 'Pro 500'
   };
   const raw = text.toLowerCase();
   if (exact[raw]) return exact[raw];

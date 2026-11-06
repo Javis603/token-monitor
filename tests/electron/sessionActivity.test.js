@@ -26,18 +26,19 @@ test('host and iCloud activity snapshots retain the captured local history for T
       nativeSessions: { today: {}, month: {}, allTime: {} } };
     const context = {
       settings: {}, latestStats: previous, localStats: previous, lastCollectedDevice: local, localDevice: local,
-      ownsUsageRuntime: () => true, ...syncDisplay, ...projection,
+      ownsUsageRuntime: () => true, ...syncDisplay, ...projection, ...require('../../src/electron/sessionDeviceSources'),
       snapshotLocalDevices: snapshots, rendererSnapshots: publisher.createRendererSnapshots({ source: () => mode }),
       presentationCache: publisher.createStatsPresentationCache(), allTimeSessionsCache: publisher.createStatsPresentationCache(),
       mergedLocalAllTimeSessions, projectModelAliasSessions: (_stats, sessions) => sessions,
       electronPresentationStats: stats => stats, updateEdgeDockCells: () => {}, sendPush: () => {},
-      withoutSessionTitles: titles.withoutSessionTitles
+      withoutSessionTitles: titles.withoutSessionTitles, pluginRuntime: null
     };
     vm.runInNewContext(source.slice(publishStart, publishEnd) + '\n' + source.slice(pullStart, pullEnd), context);
     context.publishLocalSessionActivity(patch);
     const pulled = context.rendererAllTimeSessions(context.latestStats);
     assert.equal(pulled['claude:past']?.totalTokens, 500, mode);
     assert.equal(pulled['claude:past']?.liveActivity?.state, 'waiting', mode);
+    assert.equal(pulled['claude:past']?.sourceDevice?.deviceId, 'local', mode);
     assert.equal(local.allTime.sessions['claude:past'].liveActivity, undefined, 'original accounting snapshot is immutable');
   }
 });
@@ -70,7 +71,8 @@ test('a late TOTAL load reapplies title policy after restoring a previously visi
   assert.equal(state.stats.periods.allTime.sessions.old.totalTokens, 500);
 });
 
-test('renderer activity survives late detail loads on the same accounting snapshot and respects title policy and source changes', () => {
+test('renderer activity survives late detail loads on the same accounting snapshot and respects title policy and source changes', (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-10-09T00:01:00Z'));
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const start = source.indexOf('let localSessionActivity = null;');
   const end = source.indexOf('\nfunction setRendererSettings(', start);
@@ -125,7 +127,8 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     fetch: async () => ({ ok: true, json: async () => aggregate() }),
     modeQueue: Promise.resolve(), setLatestHubStatsCache() {},
     getSyncContentRuntime: () => ({ notifyStats() {} }), electronPresentationStats: stats => stats,
-    migrateCodexAdditionalLimits() {}, scheduleMacWidgetSnapshot() {}, updateEdgeDockCells() {},
+    getLimitsHistoryStore: () => ({ record() {} }), limitsHistoryController: null,
+    migrateCodexAdditionalLimits() {}, scheduleMacWidgetSnapshot() {}, updateEdgeDockCells() {}, pluginRuntime: null,
     syncCodexPresentationActiveAccount() {}, updateTrayDisplay() {}, statsHistoryRevision: () => '',
     maybeAdoptSharedSubscriptionRevision() {}, withoutSessionTitles: titles.withoutSessionTitles,
     mainWindow: { isDestroyed: () => false, webContents: { send: (_topic, payload) => pushes.push(payload) } },

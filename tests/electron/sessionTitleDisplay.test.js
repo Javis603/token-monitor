@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const { withoutSessionTitles, withoutSessionTitleStats } = require('../../src/electron/sessionTitleDisplay');
 const { createStatsPresentationCache } = require('../../src/electron/statsPublisher');
 const modelAliases = require('../../src/electron/modelAliasPresentation');
+const deviceSources = require('../../src/electron/sessionDeviceSources');
 const { classifySettingsChange, usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
 const { createUsageTransform } = require('../../src/shared/usage/usageTransform');
 
@@ -40,7 +41,7 @@ test('hiding titles copies display paths and leaves stored sessions and other me
 test('main presentation caches restore titles from the same snapshot when re-enabled', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const context = {
-    settings: {}, ...modelAliases, withoutSessionTitles, withoutSessionTitleStats,
+    settings: {}, ...modelAliases, ...deviceSources, withoutSessionTitles, withoutSessionTitleStats,
     presentationCache: createStatsPresentationCache(), allTimeSessionsCache: createStatsPresentationCache(),
     snapshotLocalDevices: new WeakMap(), syncProvenanceActive: () => false,
     projectLimitStatsForDisplay: (value) => value, completeLocalSyncStats: (value) => value
@@ -79,10 +80,10 @@ test('saving the title preference immediately republishes Today and Home data fr
   const original = { periods: { today: { sessions: { 'codex:s': session() } }, month: { sessions: {} } } };
   const context = {
     settings: { sessionTitlesEnabled: false }, previousSettingsState: { sessionTitlesEnabled: true },
-    latestStats: original, mode: 'local', ...modelAliases, withoutSessionTitleStats,
+    latestStats: original, mode: 'local', ...modelAliases, ...deviceSources, withoutSessionTitleStats,
     presentationCache: createStatsPresentationCache(), syncProvenanceActive: () => false,
     projectLimitStatsForDisplay: value => value,
-    migrateCodexAdditionalLimits: noop, scheduleMacWidgetSnapshot: noop, captureMacWidgetProducerOwner: noop,
+    migrateCodexAdditionalLimits: noop, scheduleMacWidgetSnapshot: noop, captureMacWidgetProducerOwner: noop, pluginRuntime: null,
     repaintDockSurfaces: noop, updateTrayDisplay: noop,
     rendererSnapshots: { stamp: (_raw, value) => value }, rendererStats: value => value,
     pushSettingsToRenderer() { events.push('settings'); },

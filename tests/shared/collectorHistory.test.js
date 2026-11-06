@@ -712,6 +712,7 @@ test('collectUsageOnce omits history entirely on a non-history tick', async () =
 test('collectUsageOnce requests Proma history from tokscale graph', async () => {
   const graphClients = [];
   const summary = await collectUsageOnce({
+    now: new Date('2026-06-07T12:00:00Z'),
     clients: 'proma', allTimeSince: '2026-01-01', deviceId: 'proma-only',
     includeHistory: true, limitsEnabled: false, projectsEnabled: false,
     runTokscale: async () => ({ entries: [] }),

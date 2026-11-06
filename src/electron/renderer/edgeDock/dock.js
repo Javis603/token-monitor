@@ -71,7 +71,7 @@ const surface = query.get('surface') || 'rail';
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const tokenNumberAnimationApi = window.TokenMonitorTokenNumberAnimation;
 const railNumberRollApi = window.TokenMonitorEdgeDockRailNumberRoll;
-const railNumberRoll = railNumberRollApi.create({ animation: tokenNumberAnimationApi });
+const railNumberRoll = railNumberRollApi.create({ animation: tokenNumberAnimationApi, selector: '[data-roll-key]:not([data-plugin-roll])', mode: () => tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation) });
 const markRoll = railNumberRollApi.mark;
 
 const state = {
@@ -97,6 +97,91 @@ root.append(shapeLayer, contentLayer);
 
 function t(key, params) {
   return i18n.translate(state.locale, key, params);
+}
+
+// Plugin views drawn on this surface. Each dock window keeps its own copy of
+// the resolved views it shows and reports which are on screen; main pushes
+// updates on a channel separate from cell renders, so a plugin's live value
+// repaints only its own node.
+const pluginSurface = surface === 'notch' ? 'notch' : 'edgeDock';
+const pluginViewsApi = window.TokenMonitorPluginViews;
+const pluginHost = pluginViewsApi && bridge.onPluginViews ? pluginViewsApi.createPluginViewHost({
+  document,
+  window,
+  t,
+  services: { app: bridge, native: { get quota() { return limitWindowsView; } } },
+  getContext: () => ({ nativeData: state.payload, surfaceVariant: surface }),
+  onLoaded: () => { if (surface === 'notch') notchRenderer?.paintSummaryPlugins(); },
+  isSurfaceActive: (_surface, container) => !container.closest('.notch-page')?.inert,
+  onDemand: (_surface, refs) => bridge.setPluginDemand(refs),
+  motionAllowed: () => !prefersReducedMotion(),
+  motionMode: () => tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation)
+}) : null;
+let contentSelections = {};
+const pluginContent = pluginHost ? window.TokenMonitorPluginContent.create({ document,
+  host: { mount: (container, view, context) => pluginHost.mount(container, view.ref, pluginSurface, context), unmount: container => pluginHost.unmount(container) },
+  getViews: () => pluginHost.descriptors(pluginSurface), selection: target => contentSelections[target]
+}) : null;
+// Settings previews have no preload/plugin host; keep native ready/render wiring
+// independent of trusted plugin APIs.
+if (pluginHost) void window.tokenMonitorTrustedPlugins.contentSelections().then(value => { contentSelections = value; if (state.payload) render(state.payload); });
+let pluginContentsKey = '';
+function updatePluginViews(payload) {
+  if (payload?.surface !== pluginSurface) return;
+  pluginHost?.update(payload);
+  if (surface === 'notch') notchRenderer?.paintSummaryPlugins();
+  if (surface === 'rail') refreshPluginCellLabels(railNode);
+  const key = JSON.stringify(Object.values(payload.views || {}).map(view => [view.ref, view.revision, view.targets, view.mode, view.selector, view.contentOrder]));
+  void window.tokenMonitorTrustedPlugins.contentSelections().then(value => {
+    const next = key + JSON.stringify(value);
+    if (pluginContentsKey === next) return;
+    pluginContentsKey = next; contentSelections = value;
+    if (surface === 'notch') notchRenderer?.pluginViewsChanged();
+    else if (state.payload) render(state.payload);
+  });
+}
+if (pluginHost) {
+  bridge.onPluginViews(updatePluginViews);
+  void window.tokenMonitorTrustedPlugins.views(pluginSurface).then(updatePluginViews);
+}
+
+function pluginCellLabel(ref) {
+  const view = pluginHost?.state('edgeDock', ref);
+  return view?.title || ref;
+}
+
+// Plugin values repaint in place between rail renders; keep the spoken label
+// in step with the painted value.
+function refreshPluginCellLabels(rail) {
+  for (const node of rail?.querySelectorAll('.edge-dock-cell-plugin[data-plugin-ref]') || []) {
+    node.setAttribute('aria-label', pluginCellLabel(node.dataset.pluginRef));
+  }
+}
+
+function pluginCellNode(cell, retained) {
+  const node = retained || el('div', 'edge-dock-cell edge-dock-cell-plugin');
+  node.dataset.pluginRef = cell.ref;
+  const mount = retained?.firstElementChild || el('div', 'edge-dock-plugin-cell');
+  if (!retained) node.append(mount);
+  pluginHost?.mount(mount, cell.ref, 'edgeDock', { variant: 'compact' });
+  node.setAttribute('aria-label', pluginCellLabel(cell.ref));
+  return node;
+}
+
+function pluginCard(cell) {
+  const card = el('section', 'edge-dock-card edge-dock-card-plugin');
+  card.dataset.pluginRef = cell.ref;
+  const head = el('header', 'edge-dock-card-head');
+  const view = pluginHost?.state('edgeDock', cell.ref);
+  const identity = el('div', 'edge-dock-plugin-identity');
+  identity.append(el('span', 'edge-dock-stat-caption', view?.title || cell.ref));
+  if (view?.pluginName && view.pluginName !== view.title) identity.append(el('span', 'edge-dock-plugin-owner', view.pluginName));
+  const headerActions = el('div', 'edge-dock-plugin-header-actions');
+  head.append(identity, headerActions);
+  const body = el('div', 'edge-dock-plugin-card');
+  card.append(head, body);
+  pluginHost?.mount(body, cell.ref, 'edgeDock', { variant: 'full', headerActions });
+  return card;
 }
 
 const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
@@ -163,6 +248,7 @@ function applyAppearance(payload) {
   const reduceMotion = motionPreferenceApi.shouldReduceMotion(appearance.reduceMotion, reducedMotionMedia?.matches);
   docEl.classList.toggle('edge-dock-reduced-motion', reduceMotion);
   if (reduceMotion) settleDockMotions();
+  pluginHost?.refreshMotion();
 
   state.locale = i18n.resolveLocale(appearance.language, navigator.languages);
   docEl.lang = state.locale;
@@ -371,6 +457,7 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
     document,
     t,
     settings: appearance,
+    tooltipTop: () => surface === 'bubble' ? (state.payload?.shape?.contentBounds?.y ?? 0) / (state.payload?.zoom || 1) : 0,
     currentLocale: () => state.locale,
     presentation: limitPresentationApi,
     // Which device a row's reading came from — "· imac-m1" beside the provider's
@@ -466,6 +553,26 @@ function updateShape(payload) {
   if (shapeLayer.dataset.key === key) return;
   shapeLayer.dataset.key = key;
   shapeLayer.replaceChildren();
+  if (surface === 'bubble') {
+    // The whole reading travels with the painted frame. The clip is offset
+    // into the same local space, so content cannot vanish between distant cells.
+    contentLayer.style.transform = shape?.contentBounds ? `translateY(${shape.contentBounds.y / (payload.zoom || 1)}px)` : '';
+    contentLayer.style.height = '';
+    contentLayer.style.overflow = '';
+    contentLayer.style.clipPath = shape?.contentBounds ? 'url(#edge-dock-card-clip)' : '';
+    if (shape?.contentBounds) {
+      const defs = document.createElementNS(SVG_NS, 'defs');
+      const clip = document.createElementNS(SVG_NS, 'clipPath');
+      clip.setAttribute('id', 'edge-dock-card-clip');
+      clip.setAttribute('clipPathUnits', 'userSpaceOnUse');
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', shape.d);
+      path.setAttribute('transform', `translate(0 ${-shape.contentBounds.y / (payload.zoom || 1)}) scale(${1 / (payload.zoom || 1)})`);
+      clip.append(path);
+      defs.append(clip);
+      shapeLayer.append(defs);
+    }
+  }
   if (!shape?.d) return;
   shapeLayer.setAttribute('viewBox', `0 0 ${shape.width} ${shape.height}`);
   shapeLayer.setAttribute('preserveAspectRatio', 'none');
@@ -580,13 +687,13 @@ if (surface === 'peek') root.addEventListener('click', () => {
   if (state.payload?.peekMode !== 'refresh') bridge.click(null);
 });
 
-// On macOS the handle's window passes the pointer through with its moves still
+// On macOS the handle and floating rail pass the pointer through with moves still
 // forwarded here, so reporting them lets the main process take the pointer as
 // it reaches the handle rather than at its next cursor poll. The report carries
 // no position: the main process reads the cursor itself.
-if (surface === 'peek') {
+if (surface === 'peek' || surface === 'rail' || surface === 'bubble') {
   const reportPointer = () => {
-    if (state.payload?.peekMode !== 'refresh') bridge.pointer();
+    if (surface !== 'peek' ? state.payload?.platform === 'darwin' : state.payload?.peekMode !== 'refresh') bridge.pointer();
   };
   document.addEventListener('mousemove', reportPointer);
   document.documentElement.addEventListener('mouseleave', reportPointer);
@@ -715,7 +822,8 @@ function providerCellNode(cell) {
   // headline that swapped to another account or pool is never animated as one.
   // The figure's roll keys on the same identity for the same reason.
   node.dataset.ringMotionKey = `${cell.id}\0${cell.headlineAccount || ''}\0${cell.headlineWindowKey || ''}`;
-  markRoll(value, `${node.dataset.ringMotionKey}:value`, hasCreditsAmount ? Number(cell.credits.amount) : shown);
+  markRoll(value, `${node.dataset.ringMotionKey}:value`, hasCreditsAmount ? Number(cell.credits.amount) : shown, reading => hasCreditsAmount
+    ? balanceDisplay.formatCompactMoney(reading, cell.credits.currency, appearance().compactTokenUnits, state.locale) : `${Math.round(reading)}%`);
   node.dataset.ringRemaining = cell.remainingPercent === null || cell.remainingPercent === undefined
     ? ''
     : String(cell.remainingPercent);
@@ -725,7 +833,14 @@ function providerCellNode(cell) {
   // answers "what does the primary window say" (0% when a quota is spent).
   // Splitting the two lets a tight secondary window warn without turning the
   // headline into whichever window is lowest this minute.
-  value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
+  // A cell printing a balance has no quota percentage behind it, and `unknown`
+  // would grey the figure out as if nothing had answered. The money is the answer,
+  // so it keeps the normal ink; a balance that does carry a reading — OpenRouter's
+  // derived percentage — is still coloured by how tight that reading is.
+  const severitySource = cell.severityPercent ?? cell.remainingPercent;
+  value.dataset.severity = hasCreditsAmount && (severitySource === null || severitySource === undefined)
+    ? 'ok'
+    : displaySeverity(severitySource);
   node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider), waitingRingStart(cell.id, waiting > 0)), value);
   // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
@@ -788,7 +903,7 @@ function cellRateNode(cell) {
   // item's readout, which really does toggle rate mode on click while this cell
   // opens its card. A tooltip nobody can read is not worth five translations.
   node.append(
-    markRoll(el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)), `${cell.id}:rate`, cell.rate),
+    markRoll(el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)), `${cell.id}:rate`, cell.rate, formatRate),
     el('span', 'edge-dock-cell-rate-unit', t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'))
   );
   return node;
@@ -833,7 +948,7 @@ function statCellNode(cell) {
     node.classList.toggle('is-idle', cell.idle === true);
     node.setAttribute('aria-description', t('edgeDock.rate.switch'));
     node.append(markRoll(el('span', 'edge-dock-stat-value', cell.rate === null || cell.rate === undefined ? '—' : formatRate(cell.rate)),
-      `${cell.id}:value`, cell.rate));
+      `${cell.id}:value`, cell.rate, formatRate));
   } else if (cell.metric === presentation.SESSIONS_METRIC) {
     // Nothing running is a real reading, not a missing one, so the zero is
     // shown - muted, exactly as the live-rate cell mutes its own idle state.
@@ -841,7 +956,7 @@ function statCellNode(cell) {
     // running session the moment that session crosses the ten-minute window.
     const running = runningSessionSummary(cell.sessions).count;
     node.classList.toggle('is-idle', running === 0);
-    node.append(markRoll(el('span', 'edge-dock-stat-value', String(running)), `${cell.id}:value`, running));
+    node.append(markRoll(el('span', 'edge-dock-stat-value', String(running)), `${cell.id}:value`, running, value => String(Math.round(value))));
     // The third line is the item's own choice: the tools with work in flight, or
     // the live token rate. Rate mode keeps its line even with nothing running, so
     // the cell does not change height as work starts and stops.
@@ -856,8 +971,8 @@ function statCellNode(cell) {
     node.append(el('span', 'edge-dock-stat-value', '—'));
   } else {
     node.append(
-      markRoll(el('span', 'edge-dock-stat-value', formatTokens(cell.totalTokens)), `${cell.id}:value`, cell.totalTokens),
-      markRoll(el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd, cell.unpricedTokens)), `${cell.id}:cost`, cell.costUsd)
+      markRoll(el('span', 'edge-dock-stat-value', formatTokens(cell.totalTokens)), `${cell.id}:value`, cell.totalTokens, formatTokens),
+      markRoll(el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd, cell.unpricedTokens)), `${cell.id}:cost`, cell.costUsd, value => formatRailCost(value, cell.unpricedTokens))
     );
   }
   // The tool marks are decorative: the count beside them already says how many
@@ -1093,6 +1208,7 @@ function animateRingResets(snapshot, scope = railNode) {
 // the same settle the widget's limits panel gets, for both the rail's own
 // motions and the card animator's.
 function settleDockMotions() {
+  clearCardSwitch();
   for (const animation of root.getAnimations({ subtree: true })) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -1158,9 +1274,11 @@ function renderRail(payload) {
   }
   const layout = payload.cellLayout || null;
   railNode.classList.toggle('is-compact', layout?.compact === true);
+  const retainedPlugins = new Map([...railNode.children].filter(node => node.dataset.pluginRef).map(node => [node.dataset.cellId, node]));
   const nodes = [];
   (payload.cells || []).forEach((cell, index) => {
-    const node = cell.kind === 'stat' ? statCellNode(cell) : providerCellNode(cell);
+    const node = cell.kind === 'stat' ? statCellNode(cell) : cell.kind === 'plugin' ? pluginCellNode(cell, retainedPlugins.get(cell.id)?.dataset.pluginRef === cell.ref ? retainedPlugins.get(cell.id) : null) : providerCellNode(cell);
+    node.dataset.cellId = cell.id;
     node.dataset.index = String(index);
     // Cells are placed on the main process's layout so hover hit-testing and
     // what is painted can never drift apart.
@@ -1171,44 +1289,99 @@ function renderRail(payload) {
     node.classList.toggle('is-focused', payload.focusCellId === cell.id);
     nodes.push(node);
   });
-  const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind !== 'stat').map((cell) => cell.id));
+  const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind === 'provider').map((cell) => cell.id));
   for (const id of waitingRingStarts.keys()) {
     if (!providerIds.has(id)) waitingRingStarts.delete(id);
   }
   const ringSnapshot = captureRingResetMotion();
   const rollSnapshot = railNumberRoll.capture(railNode);
-  railNode.replaceChildren(...nodes);
+  // Keep surviving author controls connected: re-inserting an unchanged node
+  // clears browser focus even when its input object and draft survive.
+  const keep = new Set(nodes);
+  for (const node of [...railNode.children]) if (!keep.has(node)) node.remove();
+  let cursor = railNode.firstChild;
+  for (const node of nodes) {
+    if (node !== cursor) railNode.insertBefore(node, cursor);
+    cursor = node.nextSibling;
+  }
+  const targets = [];
+  (payload.cells || []).forEach((cell, index) => {
+    if (cell.kind === 'plugin') return;
+    const target = `edgeDock.rail.${cell.kind}.content`;
+    targets.push(target);
+    if (!pluginContent?.hasTarget(target)) return;
+    const node = nodes[index], native = el('div', 'plugin-native-content');
+    native.append(...node.childNodes); node.append(native);
+    pluginContent.render(target, native, { surface: 'edgeDock', surfaceVariant: 'rail', targetInstance: cell.id, cell, nativeData: payload });
+  });
+  pluginContent?.retain(targets);
+  pluginHost?.refreshDemand();
   const refilling = animateRingResets(ringSnapshot);
   // A retracted rail is not repainted, so a reveal shows the latest readings at
   // once rather than rolling from ones left on screen minutes ago. A refill's
   // count-up owns its figure.
-  if (!revealing && !prefersReducedMotion()
-    && tokenNumberAnimationApi.normalize(appearance().tokenNumberAnimation) === 'roll') {
+  if (!revealing && !prefersReducedMotion()) {
     railNumberRoll.play(railNode, rollSnapshot, { skip: (node) => refilling.has(node) });
   }
 }
 
+const cardFrames = window.TokenMonitorCardMotion.createCardFrameLoop({ sendFrame: id => bridge.cardFrame(id) });
+bridge.onCardMotion?.(next => {
+  if (state.payload?.platform === 'win32') cardFrames.update(next);
+});
+
 let gesture = null;
+let nextGestureId = 0;
+
+function startDragFrames() {
+  if (state.payload?.platform !== 'win32') return;
+  // Windows can round a main-process 16ms timeout up to two system ticks
+  // (~31ms). Follow the display's paint clock while dragging instead; the
+  // main process still reads the native cursor and owns release/cancellation.
+  const id = gesture.id;
+  const frame = () => {
+    if (gesture?.id !== id || !gesture.dragging) return;
+    bridge.dragFrame(id);
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+bridge.onDragEnded?.(({ gestureId }) => {
+  if (gesture?.id !== gestureId) return;
+  gesture = null;
+  railNode?.classList.remove('is-dragging');
+});
 
 function bindRailGestures(rail) {
   rail.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || gesture) return;
     gesture = {
+      id: ++nextGestureId,
       pointerId: event.pointerId,
       startX: event.screenX,
       startY: event.screenY,
       grabOffsetY: event.clientY,
+      grabOffsetX: event.clientX,
       cellIndex: indexFromTarget(event.target),
       dragging: false
     };
     rail.setPointerCapture(event.pointerId);
   });
   rail.addEventListener('pointermove', (event) => {
-    if (!gesture || gesture.pointerId !== event.pointerId || gesture.dragging) return;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    // A later move can prove release even if capture was lost and the native
+    // button reader is unavailable. Capture loss alone still proves nothing.
+    if (event.buttons === 0) {
+      finish(event);
+      return;
+    }
+    if (gesture.dragging) return;
     if (Math.hypot(event.screenX - gesture.startX, event.screenY - gesture.startY) < DRAG_THRESHOLD_PX) return;
     gesture.dragging = true;
     rail.classList.add('is-dragging');
-    bridge.dragStart(gesture.grabOffsetY);
+    bridge.dragStart(gesture.grabOffsetY, gesture.grabOffsetX, gesture.id);
+    startDragFrames();
   });
   const finish = (event) => {
     if (!gesture || gesture.pointerId !== event.pointerId) return;
@@ -1219,8 +1392,15 @@ function bindRailGestures(rail) {
     else if (event.type === 'pointerup') bridge.click(ended.cellIndex);
   };
   rail.addEventListener('pointerup', finish);
-  rail.addEventListener('pointercancel', finish);
-  rail.addEventListener('lostpointercapture', finish);
+  // Cancellation and capture loss do not prove physical release. Main continues
+  // while native tracking works, or restores saved placement when it cannot.
+  const captureLost = (event) => {
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (gesture.dragging) bridge.dragCaptureLost?.(gesture.id);
+    else finish(event);
+  };
+  rail.addEventListener('pointercancel', captureLost);
+  rail.addEventListener('lostpointercapture', captureLost);
 }
 
 function indexFromTarget(target) {
@@ -1722,9 +1902,9 @@ function sessionsCard(cell, card, head) {
 }
 
 // Cards are built in a hidden staging layer and measured there. The visible
-// card is only replaced once the main process reports that the window has been
-// sized and shaped for exactly that card, so a new card never paints into a
-// window still at the previous card's size (which read as a flash).
+// card is only replaced once the main process has accepted its measured size.
+// While switching, the content layer follows the painted frame inside the
+// fixed native canvas; text remains unscaled under the moving clip.
 //
 // Both scroll containers, because which one scrolls depends on the card. Provider,
 // grouped Sessions, and period-breakdown cards scroll `.edge-dock-accounts`; the
@@ -1733,9 +1913,72 @@ function sessionsCard(cell, card, head) {
 // scroll on every clock tick - yanking the reader back to the top while they read it.
 const CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list';
 
+let observedPluginCard = null;
 const stagingLayer = document.createElement('div');
 stagingLayer.className = 'edge-dock-staging';
 if (surface === 'bubble') root.append(stagingLayer);
+
+let cardSwitchMotion = null;
+
+function clearCardSwitch() {
+  const motion = cardSwitchMotion;
+  cardSwitchMotion = null;
+  if (!motion) return;
+  motion.incoming.cancel();
+  motion.outgoing.cancel();
+  motion.ghost.remove();
+}
+
+function captureCardSwitch(previous, sameCard) {
+  if (surface !== 'bubble' || !previous || prefersReducedMotion() || document.visibilityState === 'hidden') {
+    clearCardSwitch();
+    return null;
+  }
+  if (sameCard) {
+    if (!cardSwitchMotion) return null;
+    // A live reading can rebuild this card halfway through the switch. Carry
+    // the existing timeline onto its replacement instead of snapping/restarting.
+    cardSwitchMotion.elapsed = cardSwitchMotion.incoming.currentTime;
+    cardSwitchMotion.incoming.cancel();
+    return cardSwitchMotion;
+  }
+  if (cardSwitchMotion) {
+    // A rapid selection takes over immediately. Restarting from the partially
+    // transparent incoming card would discard the still-visible outgoing one.
+    clearCardSwitch();
+    return null;
+  }
+  const ghost = previous.cloneNode(true);
+  const opacity = getComputedStyle(previous).opacity;
+  const scrollTops = [...previous.querySelectorAll(CARD_SCROLL_SELECTOR)].map(list => list.scrollTop);
+  clearCardSwitch();
+  ghost.inert = true;
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.removeAttribute('id');
+  for (const node of ghost.querySelectorAll('[id]')) node.removeAttribute('id');
+  Object.assign(ghost.style, { position: 'absolute', top: '0', left: '0', pointerEvents: 'none' });
+  return { ghost, opacity, scrollTops, elapsed: 0 };
+}
+
+function animateCardSwitch(card, motion) {
+  if (!motion) return;
+  // Both readings travel together with the painted frame.
+  // Crossfade the content without scaling its text.
+  contentLayer.append(motion.ghost);
+  [...motion.ghost.querySelectorAll(CARD_SCROLL_SELECTOR)].forEach((list, index) => {
+    list.scrollTop = motion.scrollTops[index];
+  });
+  const timing = { duration: 160, easing: 'ease-in-out', fill: 'both' };
+  motion.incoming = card.animate([{ opacity: 0 }, { opacity: 1 }], timing);
+  motion.incoming.currentTime = motion.elapsed;
+  if (!motion.outgoing) {
+    motion.outgoing = motion.ghost.animate([{ opacity: motion.opacity }, { opacity: 0 }], timing);
+    motion.outgoing.finished.then(() => {
+      if (cardSwitchMotion === motion) clearCardSwitch();
+    }, () => {});
+  }
+  cardSwitchMotion = motion;
+}
 
 function commitCard(card, cellId) {
   const previous = contentLayer.querySelector('.edge-dock-card');
@@ -1745,7 +1988,8 @@ function commitCard(card, cellId) {
     .filter(list => !list.closest('.edge-dock-session-family'));
   const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
   const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
-  const resetSnapshot = cardResetAnimator.capture(contentLayer);
+  const switchMotion = captureCardSwitch(previous, sameCard);
+  const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
   contentLayer.replaceChildren(card);
   overflowText.refresh();
   if (focusedGroup) {
@@ -1757,6 +2001,7 @@ function commitCard(card, cellId) {
   // Measure reading targets only after mounting and restoring their scroll position.
   if (sameCard) overflowText.preserveReading(previous, card);
   cardResetAnimator.animate(card, resetSnapshot);
+  animateCardSwitch(card, switchMotion);
 }
 
 // The period card is a summary even when the period contains dozens of tools or
@@ -1779,8 +2024,9 @@ function clampBreakdownList(card) {
 // an unreadable strip. Measure its natural height before flex shrink, reserving
 // at most half the card so multiple accounts still leave room for sessions.
 function reserveAccountHeight(card, maxHeight) {
-  const accounts = card.querySelector(':scope > .edge-dock-accounts');
-  if (!accounts || !card.querySelector(':scope > .edge-dock-sessions') || !(maxHeight > 0)) return;
+  const native = card.querySelector(':scope > .plugin-native-content') || card;
+  const accounts = native.querySelector(':scope > .edge-dock-accounts');
+  if (!accounts || !native.querySelector(':scope > .edge-dock-sessions') || !(maxHeight > 0)) return;
   const shrink = accounts.style.flexShrink;
   accounts.style.flexShrink = '0';
   const naturalHeight = Math.ceil(accounts.getBoundingClientRect().height);
@@ -1801,28 +2047,78 @@ function fitCardTotal(card, scale = 1) {
   if (base > 0) number.style.fontSize = `${Math.max(12, Math.floor(base * (available - 1) / natural))}px`;
 }
 
+const bubbleLayout = window.TokenMonitorCardLayout.createCardLayout({
+  measure: ({ card, payload }) => Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity),
+  report(height, { card, payload, commit = false }) {
+    if (!(height > 0)) return;
+    const cellId = payload.cell.id;
+    if (commit && payload.placed?.cellId === cellId && payload.placed.height === height) commitCard(card, cellId);
+    else if (payload.placed?.cellId !== cellId || payload.placed.height !== height) bridge.reportBubbleSize(cellId, height);
+  }
+});
+
 function renderBubble(payload) {
+  const contentTransform = '';
   root.dataset.side = payload.side;
+  root.style.setProperty('--edge-dock-card-width', `${payload.cardWidth || 280}px`);
   const cell = payload.cell;
   if (!cell) {
+    clearCardSwitch();
+    bubbleLayout.cancel();
+    if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
+    observedPluginCard = null;
+    for (const body of root.querySelectorAll('.edge-dock-plugin-card')) pluginHost?.unmount(body);
+    pluginContent?.retain([]);
+    contentLayer.replaceChildren();
     stagingLayer.replaceChildren();
     return;
   }
-  const card = cell.kind === 'stat' ? statCard(cell) : providerCard(cell);
+  const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin:not([aria-hidden="true"])');
+  if (retained && retained.dataset.pluginRef === cell.ref && retained.dataset.cellId === cell.id) {
+    retained.style.transform = contentTransform;
+    const view = pluginHost?.state('edgeDock', cell.ref);
+    const caption = retained.querySelector('.edge-dock-stat-caption'); if (caption) caption.textContent = view?.title || cell.ref;
+    retained.style.maxHeight = payload.maxCardHeight ? `${payload.maxCardHeight}px` : '';
+    bubbleLayout.prepare({ card: retained, payload });
+    return;
+  }
+  const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
+  card.style.transform = contentTransform;
+  pluginContent?.retain(cell.kind === 'plugin' ? [] : [`edgeDock.${cell.kind}.content`]);
+  if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {
+    const native = document.createElement('div'); native.className = 'plugin-native-content';
+    native.append(...card.childNodes); card.append(native);
+    const target = `edgeDock.${cell.kind}.content`;
+    pluginContent.retain([target]);
+    pluginContent.render(target, native, { surface: 'edgeDock', cell, nativeData: payload });
+  }
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
+  if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
+  observedPluginCard = cell.kind === 'plugin' ? card : null;
   stagingLayer.replaceChildren(card);
   fitCardTotal(card);
   clampBreakdownList(card);
-  if (cell.kind !== 'stat') reserveAccountHeight(card, payload.maxCardHeight);
-  const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
-  if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
-    commitCard(card, cell.id);
-  } else {
-    bridge.reportBubbleSize(cell.id, height);
-  }
+  if (observedPluginCard) bubbleSizeObserver?.observe(observedPluginCard);
+  if (cell.kind === 'provider') reserveAccountHeight(card, payload.maxCardHeight);
+  bubbleLayout.prepare({ card, payload, commit: true });
 }
 
+
+const bubbleSizeObserver = surface === 'bubble' && window.ResizeObserver ? new ResizeObserver(() => {
+  const card = observedPluginCard?.isConnected ? observedPluginCard : contentLayer.querySelector('.edge-dock-card') || stagingLayer.querySelector('.edge-dock-card');
+  const payload = state.payload;
+  if (card && payload?.cell?.id === card.dataset.cellId) {
+    bubbleLayout.prepare({ card, payload });
+  }
+}) : null;
+bubbleSizeObserver?.observe(root);
+window.addEventListener('pagehide', () => {
+  cardFrames.cancel();
+  bubbleLayout.cancel();
+  clearCardSwitch();
+  bubbleSizeObserver?.disconnect();
+}, { once: true });
 
 const notchRenderer = surface === 'notch'
   ? window.TokenMonitorNotchRenderer.createNotchRenderer({
@@ -1831,7 +2127,7 @@ const notchRenderer = surface === 'notch'
       el, t, appearance, prefersReducedMotion, readableColor, providerLabel, limitProviderColor,
       markNode, hasMask, providerCellNode, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate, overflowText, limitWindowsView,
       limitAccountTitle: (...args) => limitWindowsView.limitAccountTitle(...args),
-      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit
+      captureRingResetMotion, animateRingResets, updateShape, ensureRefreshButton, paintRefreshButton, resetRefreshVisit, pluginHost, pluginContent
     }
   }) : null;
 
@@ -1863,6 +2159,16 @@ function deferBubbleRender() {
 }
 
 bridge.onRender(render);
+bridge.onShapeFrame?.(({ shape, side }) => {
+  if ((surface !== 'rail' && surface !== 'bubble') || !state.payload) return;
+  // Geometry can arrive before the next reading. A timer repaint in between
+  // must keep the current reading's destination until its full payload arrives.
+  const nextShape = surface === 'bubble'
+    ? { ...shape, contentTarget: state.payload.shape?.contentTarget } : shape;
+  state.payload = { ...state.payload, shape: nextShape, side };
+  root.dataset.side = side;
+  updateShape(state.payload);
+});
 // A repaint that no push triggers, because two readings here move on a clock
 // rather than on data: a session stops being running when its window expires
 // (sessionLive.RUNNING_WINDOW_MS) even with no new stats at all, and reset

@@ -82,6 +82,22 @@ test('supported CLI print usage wins without a PTY and keeps launch restrictions
   });
 });
 
+test('weekly-only printed quota succeeds without a session or legacy fallback', async t => {
+  for (const platform of ['darwin', 'linux', 'win32']) await t.test(platform, async t => {
+    const { deps } = fixture(t, platform);
+    const calls = simulatedCli(deps, {
+      output: 'Current week (all models)\n65% left\nResets Oct 29, 6pm\nPlan: Ultra'
+    });
+    const result = await fetchClaudeLimits({}, deps);
+    assert.equal(result.source, 'cli');
+    assert.equal(result.accountLabel, 'Ultra');
+    assert.deepEqual(result.windows.map(w => w.kind), ['weekly']);
+    assert.equal(result.windows[0].remainingPercent, 65);
+    assert.equal(result.windows[0].resetDescription, 'Resets Oct 29, 6pm');
+    assert.deepEqual(calls.map(c => c.kind), ['version', 'print']);
+  });
+});
+
 test('version gate uses print only at the conservative release boundary', async t => {
   for (const [version, usePrint] of [
     ['2.1.177 (Claude Code)', false], ['2.1.178 (Claude Code)', true],

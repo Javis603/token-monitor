@@ -20,6 +20,7 @@
       getStats,
       save,
       providerLabel,
+      pluginLabel = (ref) => ref,
       providerColor,
       windowLabel,
       hasProviderMark,
@@ -106,6 +107,7 @@
         if (item.metric === itemsApi.SESSIONS_METRIC) return t('edgeDock.sessions');
         return t(`edgeDock.period.${item.metric}`);
       }
+      if (item.type === 'plugin') return pluginLabel(item.ref) || item.ref;
       return providerLabel(item.provider);
     }
 
@@ -122,6 +124,10 @@
           : item.metric === itemsApi.SESSIONS_METRIC
             ? t('edgeDock.statGlyph.sessions')
             : t(`edgeDock.periodShort.${item.metric}`);
+        return mark;
+      }
+      if (item.type === 'plugin') {
+        mark.classList.add('is-fallback');
         return mark;
       }
       if (hasProviderMark(item.provider)) mark.classList.add(`row-icon-${item.provider}`);
@@ -229,6 +235,45 @@
       return row;
     }
 
+    function headlineAccountChoices(item) {
+      const hidden = new Set(item.hiddenAccounts || []);
+      return accountsFor(item.provider).filter((account) => !hidden.has(account.accountKey));
+    }
+
+    function refreshAccountPicker(select, item) {
+      const accounts = headlineAccountChoices(item);
+      const options = accounts.map((account) => {
+        const option = document.createElement('option');
+        option.value = account.accountKey;
+        option.textContent = account.accountName || maskEmail(account.accountEmail)
+          || account.planLabel || providerLabel(item.provider);
+        return option;
+      });
+      if (!accounts.some((account) => account.accountKey === item.accountKey)) {
+        const missing = document.createElement('option');
+        missing.value = item.accountKey || '';
+        missing.textContent = t('trayComposer.account.none');
+        missing.disabled = true;
+        options.unshift(missing);
+      }
+      select.replaceChildren(...options);
+      select.value = item.accountKey || '';
+    }
+
+    function accountRow(item, id) {
+      const row = el('label', 'settings-item edge-dock-composer-window');
+      row.append(el('span', 'settings-item-title', t('trayComposer.account.specificLabel')));
+      const select = document.createElement('select');
+      refreshAccountPicker(select, item);
+      select.addEventListener('change', () => { void updateItem(id, { accountKey: select.value }); });
+      select.addEventListener('blur', () => {
+        const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+        if (currentItem && root.contains(select)) refreshAccountPicker(select, currentItem);
+      });
+      row.append(select);
+      return row;
+    }
+
     function windowChoices(item) {
       const hidden = new Set(item.hiddenAccounts || []);
       const choices = new Map();
@@ -312,6 +357,10 @@
       head.append(remove);
       pane.append(head);
 
+      if (item.type === 'plugin') {
+        pane.append(el('p', 'edge-dock-composer-hint', item.ref));
+        return pane;
+      }
       if (item.type === 'action') {
         pane.append(el('p', 'edge-dock-composer-hint', t(itemsKey === 'notchItems' ? 'settings.notch.refreshNote' : 'settings.edgeDock.refreshNote')));
         return pane;
@@ -361,6 +410,20 @@
         ], (accountMode) => {
           void updateItem(id, { accountMode });
         }));
+      }
+      if (!limitsOnly && item.provider === 'thirdparty') {
+        pane.append(choiceRow('settings.edgeDock.limitValue', item.accountMode, [
+          { value: 'lowest', labelKey: 'trayComposer.account.lowest' },
+          { value: 'specific', labelKey: 'trayComposer.account.specific' }
+        ], (accountMode) => {
+          const change = { accountMode };
+          if (accountMode === 'specific') {
+            const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+            change.accountKey = currentItem.accountKey || headlineAccountChoices(currentItem)[0]?.accountKey || '';
+          }
+          void updateItem(id, change);
+        }));
+        if (item.accountMode === 'specific') pane.append(accountRow(item, id));
       }
       const accounts = accountsFor(item.provider);
       if (accounts.length > 1) {

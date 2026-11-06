@@ -92,7 +92,7 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   h.state.stats = { limits: { providers: [] }, devices: [] };
   for (const name of ['renderConnectionStatus', 'render', 'renderCodexAccounts', 'renderMimoStatus',
     'renderSettingsSummaries', 'renderLimitProviderCheckboxes', 'renderToolPreferences', 'renderWslPanel',
-    'updateOpenRouterProfilesStatus', 'updateThirdPartyProfilesStatus', 'renderExternalProviderStatus',
+    'updateOpenRouterProfilesStatus', 'updateMinimaxApiKeysStatus', 'updateThirdPartyProfilesStatus', 'renderExternalProviderStatus',
     'renderCopilotStatus', 'signalContentReady']) h.context[name] = () => {};
   let settingsVisible = true, hidden = false;
   h.context.visibleStatsSurface = () => hidden ? null : 'main';
@@ -139,7 +139,7 @@ test('WorkBuddy preload exposes dedicated IPC and rejects membership through gen
   vm.runInNewContext(fs.readFileSync(path.join(renderer, '../preload.js'), 'utf8'), {
     require: (name) => {
       assert.equal(name, 'electron');
-      return { ipcRenderer, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } } };
+      return { ipcRenderer, contextBridge: { exposeInMainWorld: (name, value) => { if (name === 'tokenMonitor') bridge = value; } } };
     }
   });
   await bridge.workbuddy.accounts();

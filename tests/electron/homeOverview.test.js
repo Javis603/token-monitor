@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { normalizeLimitProvider } = require('../../src/shared/limits/core');
 const vm = require('node:vm');
 
 const {
@@ -154,7 +155,7 @@ test('Home activity tooltip survives Home rerenders and is dismissed when the vi
   assert.match(renderHome[1], /hideHomeActivityTooltip\(\{\s*preserveHover:\s*true\s*\}\)/);
   assert.match(
     renderHome[1],
-    /replaceChildren\(\.\.\.nodes\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
+    /els\.homePanel\.insertBefore\(node, current \|\| null\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
   );
   const trendsModule = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(trendsModule, 'renderHomeTrendsModule exists');
@@ -436,6 +437,43 @@ for (const { name, settings, expected } of [
   });
 }
 
+test('Home keeps both MiniMax readings named and in their own units', () => {
+  const presentation = require('../../src/electron/renderer/limits/providerPresentation');
+  const settings = { homeLimitAccountCount: 12 };
+  const view = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({
+    presentation,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => settings
+  });
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const apiKey = `sha256:${'b'.repeat(64)}`;
+  const providers = [
+    { provider: 'minimax', source: 'oauth', status: 'ok', region: 'cn', accountKey: codeKey, accountLabel: 'MiniMax Code',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS' }] },
+    { provider: 'minimax', source: 'api', status: 'ok', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey, accountLabel: 'Pay-as-you-go',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
+  ].map(normalizeLimitProvider);
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('function homeLimitRows(');
+  const fn = source.slice(start, source.indexOf('\n}\n', start) + 2);
+  for (const showHomeLimitProviderNames of [false, true]) {
+    settings.showHomeLimitProviderNames = showHomeLimitProviderNames;
+    const rows = vm.runInNewContext(`${fn}\nhomeLimitRows();`, {
+      state: { settings, stats: { limits: { providers } } },
+      LIMIT_PROVIDERS: [{ id: 'minimax', label: 'Minimax' }],
+      clientColors: {}, enabledLimitProviderSet: () => new Set(['minimax']), hiddenHomeLimitProviderSet: () => new Set(),
+      limitProviderOrderApi, limitWindowsView: view, limitProviderPresentationApi: presentation,
+      limitUsageItemsApi: require('../../src/shared/limits/usageItems'),
+      limitAccountTitle: (...args) => view.limitAccountTitle(...args),
+      homeOverviewApi: { homeLimitAccountsForProviders }
+    });
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map(row => row.name), ['Minimax', 'Minimax']);
+    assert.deepEqual(new Set(Array.from(rows, row => `${row.windows[0].remaining}:${row.windows[0].currency}`)),
+      new Set(['4624:CREDITS', '14.97:CNY']));
+  }
+});
+
 test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance', () => {
   const rows = homeLimitAccountsForProviders({
     providers: [
@@ -628,7 +666,7 @@ test('Home retains each account plan through quota sorting without borrowing ano
   const presentation = require('../../src/electron/renderer/limits/providerPresentation');
   const rows = homeLimitAccountsForProviders({
     providers: [
-      { provider: 'codex', accountEmail: 'pro@example.com', planLabel: 'Pro More', windows: [{ kind: 'weekly', remainingPercent: 93 }] },
+      { provider: 'codex', accountEmail: 'pro@example.com', planLabel: 'Pro 200', windows: [{ kind: 'weekly', remainingPercent: 93 }] },
       { provider: 'codex', accountEmail: 'plus@example.com', planLabel: 'Plus', windows: [{ kind: 'weekly', remainingPercent: 30 }] },
       { provider: 'zed', planLabel: 'Zed Student', windows: [{ kind: 'monthly', remainingPercent: 60 }] },
       { provider: 'claude', windows: [{ kind: 'session', remainingPercent: 70 }] }
@@ -640,7 +678,7 @@ test('Home retains each account plan through quota sorting without borrowing ano
     accountPlan: (provider) => presentation.limitProviderPlanDisplayLabel(provider, provider.planLabel)
   });
   assert.deepEqual(rows.map((row) => [row.name, row.plan]), [
-    ['plus@example.com', 'Plus'], ['zed', 'Student'], ['claude', ''], ['pro@example.com', 'Pro More']
+    ['plus@example.com', 'Plus'], ['zed', 'Student'], ['claude', ''], ['pro@example.com', 'Pro 200']
   ]);
 });
 

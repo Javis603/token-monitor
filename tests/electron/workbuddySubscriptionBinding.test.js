@@ -13,6 +13,8 @@ const subscriptionApi = require('../../src/shared/subscriptionDisplay');
 const limitProviderPresentationApi = require('../../src/electron/renderer/limits/providerPresentation');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchClineLimits, CLINE_API_BASE, USAGE_LIMITS_PATH, USERS_ME_PATH } = require('../../src/shared/providers/cline/limits');
+test.beforeEach(t => t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-12T00:00:00Z') }));
+
 const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 
 function functionSource(name) {
@@ -37,7 +39,7 @@ function harness(live, saved, managed = []) {
   const state = { settings: { subscriptions: saved, workbuddyManagedAccounts: managed }, stats: { limits: { providers: [] } }, subscriptionFormBase: {} };
   let written;
   const context = vm.createContext({
-    accountIdentityApi, subscriptionApi, limitProviderPresentationApi, state, els,
+    Date, accountIdentityApi, subscriptionApi, limitProviderPresentationApi, state, els,
     currencyApi: { CURRENCY_CODES: ['USD'], normalizeCurrency: () => 'USD' }, localDeviceLimitsProviders: () => live,
     subscriptionText: { providerLabel: (id) => id }, document: { createElement: () => ({}) }, t: (key) => key,
     setSubscriptionFormKind() {}, setSubscriptionFormMode() {}, syncSubscriptionDateBounds() {}, positionSubscriptionEditor() {}, openSubscriptionEditor() {}, setSubscriptionError() {},
@@ -79,6 +81,19 @@ test('a healthy anonymous Cline reading remains selectable when its profile read
   h.els.subscriptionProviderInput.value = 'cline';
   h.run('renderSubscriptionPickers()');
   assert.equal(h.els.subscriptionAccountInput.options.length, 1);
+});
+
+test('MiniMax subscription choices stay distinct', () => {
+  const live = [
+    { provider: 'minimax', source: 'oauth', accountKey: `sha256:${'a'.repeat(64)}`, accountLabel: 'MiniMax Code', status: 'ok', windows: [] },
+    { provider: 'minimax', source: 'api', accountKey: `sha256:${'b'.repeat(64)}`, accountLabel: 'Pay-as-you-go', status: 'ok', windows: [] },
+    { provider: 'minimax', source: 'api', accountKey: `sha256:${'c'.repeat(64)}`, accountLabel: 'Pay-as-you-go', status: 'ok', windows: [] }
+  ];
+  const h = harness(live, []);
+  const choices = h.run('subscriptionAccountChoices().map((choice) => ({ provider: choice.provider.provider, label: choice.label, value: choice.value }))');
+  assert.equal(choices.length, 3);
+  assert.equal(new Set(choices.map(choice => choice.label)).size, 3);
+  assert.equal(new Set(choices.map(choice => choice.value)).size, 3);
 });
 
 test('editing and saving a saved-only binding retains its exact account while siblings are live', async () => {

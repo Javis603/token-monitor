@@ -127,6 +127,22 @@
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
+/* Docs entry in the actions cluster: .nav-menu hides on phones, this stays. */
+.nav-docs-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 0.7rem;
+  border-radius: 12px;
+  color: var(--nav-muted);
+  font-size: 0.88rem;
+  font-weight: 750;
+  text-decoration: none;
+  transition: color .15s ease, background .15s ease;
+}
+.nav-docs-link:hover,
+.nav-docs-link[aria-current="page"] { color: var(--nav-text); background: var(--nav-control-hover); }
+.nav-docs-link:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 3px; }
 .site-header .brand { color: var(--nav-text); }
 .site-header .nav-menu a:hover { color: var(--nav-text); }
 

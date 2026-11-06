@@ -276,7 +276,7 @@ test('incoming digits keep a small final movement after becoming legible', () =>
 test('sparse envelopes stay close to the original spring, crossfade and blur at intermediate times', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/tokenNumberAnimation.js'), 'utf8');
   const context = { module: { exports: {} } };
-  vm.runInNewContext(source.replace('return { normalize, beginRoll, capture, duration, layoutDuration };',
+  vm.runInNewContext(source.replace('return { normalize, beginRoll, beginCount, currentCountValue, capture, duration, layoutDuration };',
     'return { glyphFrames };'), context);
   const spring = (seconds, damping, period) => {
     const frequency = 2 * Math.PI / period;
@@ -756,6 +756,8 @@ test('a pushed animation preference settles the current headline before the next
   const row = element();
   context.els = { totalTokens: el };
   context.state.currentTotal = 2000;
+  let pluginRefreshes = 0;
+  context.pluginViewHost = { refreshMotion: () => { pluginRefreshes++; } };
   api.animateTotalNumber(el, 1000, 2000, 1000);
   api.animateRowNumber(row, 100, 200, 600);
   const start = source.indexOf('function setRendererSettings(');
@@ -764,6 +766,7 @@ test('a pushed animation preference settles the current headline before the next
   context.setSettings({ tokenNumberAnimation: 'roll' });
   assert.ok(api.headlineNumberIsAnimatingTo(2000), 'matching settings leave the roll running');
   context.setSettings({ tokenNumberAnimation: 'count' });
+  assert.equal(pluginRefreshes, 1, 'preference changes also settle plugin readouts');
   assert.equal(api.headlineNumberIsAnimatingTo(2000), false);
   assert.equal(el.textContent, '2,000');
   assert.equal(el.children.length, 0);
@@ -834,4 +837,21 @@ test('every bundled locale labels both token number animation options', () => {
       assert.ok(messages[`settings.appearance.tokenNumberAnimation${suffix}`], locale);
     }
   }
+});
+
+
+test('shared Count keeps semantic values, retargets and cancels stale frames', () => {
+  const el = element(); let now = 0, nextId = 0; const frames = new Map();
+  Object.assign(el.ownerDocument.defaultView, { performance: { now: () => now },
+    requestAnimationFrame: fn => { frames.set(++nextId, fn); return nextId; }, cancelAnimationFrame: id => frames.delete(id) });
+  const tick = time => { now = time; const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn(time)); };
+  const first = animationApi.beginCount(el, 100, 200, value => `${Math.round(value)}%`);
+  assert.equal(el.textContent, '100%'); tick(100);
+  const visible = animationApi.currentCountValue(el);
+  assert.ok(visible > 100 && visible < 200); assert.equal(el.children.length, 0);
+  const second = animationApi.beginCount(el, visible, 50, value => `${Math.round(value)}%`);
+  first(); tick(200);
+  assert.ok(animationApi.currentCountValue(el) < visible && animationApi.currentCountValue(el) > 50);
+  second(); assert.equal(el.textContent, '50%'); assert.equal(frames.size, 0);
+  tick(2000); assert.equal(el.textContent, '50%'); assert.equal(animationApi.currentCountValue(el), undefined);
 });

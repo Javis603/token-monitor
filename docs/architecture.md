@@ -20,9 +20,23 @@ Device collection, transforms and archives live in `src/shared/usage/`. The neig
 
 Cloudflare deployment isolates `worker/` into its own repository. Its portable closure, `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`, must not import Node built-ins or anything above `worker/`. Edit the originals in `src/shared/`, then run `npm run sync:worker`; the mirrored `worker/src/shared/` files are generated and CI rejects drift.
 
+## Desktop plugins
+
+`electron/plugins/runtime.js` owns plugin management, host data routing and native demand; `manager.js` owns revision trust and the shared backend lifecycle. Author UI runs in the existing renderer with context isolation and no Node integration; the optional Node utility process has OS-user authority. Host DTO filtering is not a security boundary against trusted local code. Same-page author JS cannot be independently terminated while preserving its renderer. Native controllers retain rendering, window shells and input geometry; plugins extend content through host outlets. See [execution and UI contracts](plugins/README.md) and [content composition](plugins/author-ui-options.md).
+
+Native visibility and page activity cap each owner's demand without discarding retained controls or drafts; other visible owners remain independent. All surfaces of a plugin share its backend. Last demand stops it unless explicitly enabled background work or a pending call remains. When no plugins are active, the host starts no plugin process, sampler or recurring projection. This does not guarantee byte-identical baseline memory or control arbitrary author timers.
+
+Business data reads reuse selected-source snapshots and existing history resolution, never launch provider probes or duplicate collectors, and remain independent of native session rendering. Active ownership, explicit query filters and host privacy preferences apply; there are no per-resource grants or plugin-specific account/device scopes. Ordinary updates preserve admitted immutable cursors; source/privacy changes revoke them. Work and memory limits protect host reads, not unrestricted backend work.
+
+The plugin `liveRate` resource reuses native matched-counter tracking over captured Today snapshots. The business-data service owns subscription lifetimes and supplies active device scopes to the rate reader. See the [live-rate contract](plugins/author-data-resources.md#live-token-rate).
+
+Package transactions release only their target plugin, after content-conflict and unsaved-work confirmations complete and the preview is revalidated. Cancellation before cleanup must preserve existing UI instances, drafts and backends. Recheck affected content selections after asynchronous lifecycle waits so an older confirmation cannot overwrite a newer choice. Content-source changes inspect only the departing replacement refs and targets; they must not release the provider's other mounts. Unrelated mounts, drafts and backends stay live, including during rollback. Preserve existing App data and credential contracts. Renderer-independent safe mode must remain available for recovery; it cannot undo arbitrary plugin filesystem effects. See [management and recovery](plugins/distribution-design.md).
+
+Official and community remote plugin sources are separate host-owned definitions. Remote official provenance comes only from `electron/plugins/officialSources.js`; catalog titles, authors and user-added source metadata cannot grant it. See [official catalog releases](plugins/distribution-design.md#official-catalog-releases) for distribution.
+
 ## Generated and registered state
 
-Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Never edit generated Worker metadata directly.
+Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the portable core and separate Node/Worker adapters, rather than the product version. A desktop-only release must not require Hub redeployment. This is a registered build identity, not attestation; divergent metadata is unrecognized, not proof that every fork is detectable. Run `npm run update:hub-build` after the final Hub/shared change, including limits-provider registry changes. Each PR adds at most one revision per changed component, pointing to its final build; regenerate from the base branch's registry after further changes. Never edit generated Worker metadata directly.
 
 Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, lint, test and verify never download the binary. `scripts/vendor/tokscale.json` pins its provenance. Its `override`/`upstream` mode does not bypass either verification gate, and its presentation describes the declared bundle, not verification of the selected executable.
 
@@ -35,6 +49,7 @@ Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, 
 - **Rate timing.** Use the familiar generation-speed label and explain its estimated timing basis in auxiliary copy. Use scanner-supplied matched timed-output buckets when present, with a compatibility estimate for older binaries; never apportion output by total-token coverage. Request performance timing and session/active-time spans have separate purposes. A parser timing change must preserve that distinction and invalidate its source cache; a new binary revision also requires fresh collector anchors. See the [throughput wire contract](API.md#post-apiingest).
 - **Pricing authority.** Tokscale applies overrides before aggregation. Managed model edits preserve manually authored provider-scoped rules and other top-level pricing metadata. Incomplete rate coverage preserves the original row cost except for explicit free-model overrides. Pricing content and binary revisions invalidate anchors and require full usage/history refreshes; mixed-revision scans must not publish. Fresh prices, including zero, replace archived live costs only for matching source usage; archive-only records keep their costs.
 - **Session retention.** Normal scanner rows replace the whole archived observation for the same canonical client/session and period, including lower counts and explicit zero; missing identities stay retained. Only completed three-period scans may clear Today/month for IDs still present in allTime. On watch ticks, zero-only broader-period rows require the same canonical identity in Today. Released aliases contribute one latest whole-period observation. Retention trusts scanner output and does not reconstruct corrected historical daily usage.
+- **Archive replay.** Restore explicit saved input without reclassifying it as unknown. Native session identities win over matching client snapshots; identity-free legacy remainder stays retained. Equal aggregate amounts do not prove overlap. See [archive replay](archive-replay.md).
 - **Metadata fallback.** Workspace-aware grouping falls back per binary identity when unsupported. Local resolvers remain enabled and skip only sessions already attributed. Only a decoded path becomes a `projectIdentity()` hash; opaque workspace keys must not create a second project identity. `usage.js` accepts nested tokscale JSON rather than assuming one layout.
 - **Separate retention.** [Codex Dots usage](providers/codex.md#dots-local-execution) merges after native/WSL scans, outside native delta anchors and scan partitions. Its ledger owns retention; generic archives must not duplicate it. Visibility changes refresh the projection without restarting observation.
 - **Shared metadata reads.** Context, turn state, prompt-cache and waiting observations reuse provider-owned session indexes rather than independent transcript readers. Preserve accounting identity across append scans so repeated records do not restart cache estimates. In anchored propagation, omitted `promptCache` preserves the observation and explicit `null` clears it. Provider rules live in [Claude](providers/claude.md#usage-and-session-metadata) and [Codex](providers/codex.md#session-metadata-and-context).
@@ -70,6 +85,8 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 
 `src/shared/usage/usageHost.js` moves collection, transforms and session-archive writes off Electron's main thread. Its summaries are already transformed (`{ transformed: true }`); `DeviceRuntime` must not transform or archive them again.
 
+Archive projection can share canonical live session rows read-only while copying mutable period and session maps. Replay must replace rows rather than mutate them; `DeviceState` detaches the published record. The default archive APIs still return complete JSON copies for callers outside this internal projection path.
+
 - Replacement and archive clearing wait for worker exit, preventing overlapping collectors, descriptor sets and archive writers.
 - After a transformed worker delivery, Electron releases its cold-anchor archive and SQLite connection without deleting persisted rows. In-process fallback must fully reload the archive and revision before capturing.
 - Widget previews read snapshots from their own store without capture, migration or pruning. Archive read/write failures reject normal widget and headless publication; external-agent reads use the same strict rule, and genuinely empty archives remain valid. Failed cold-anchor reads skip publication. Headless `--dry-run` uses best-effort reads, which may fall back to an empty archive, and writes neither the archive nor Hub data. Remove the private scan-completion hint before publication.
@@ -79,6 +96,8 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 - Quit cannot wait for a responsive worker. All worker subprocesses must use `createSubprocessTermination()` so the shared live-process table lets main's `stopAll()` signal them synchronously.
 
 ## Limits collector
+
+The desktop records successful displayed quota observations in its own bounded history store; it never adds history to the wire record or probes on hover. The [quota history guide](limits-history.md) describes sampling gaps, reset boundaries and time-bucket semantics.
 
 `src/shared/usage/deviceRuntime.js` separates usage from limits. `LimitsRuntime` owns scheduling, bounded concurrency, per-provider latest-wins lanes, deadlines, backoff and last-good/last-attempt retention. Credential changes refresh only the affected lane, without restarting usage; provider exceptions are documented in their notes.
 
@@ -92,13 +111,15 @@ Failed usage reconfiguration restores the last-known-good runtime and retries th
 
 ### Outbound transport
 
-`src/electron/limits/fetch.js` injects the same transport into collection and credential probes: env-proxy-aware `outboundFetch.js` when configured, otherwise Electron `net.fetch` for OS proxy support. Providers must preserve an injected fetch; custom transports do not inherit these guarantees and must be documented in the provider note.
+`src/electron/limits/fetch.js` injects the same transport into collection and credential probes, with app settings taking precedence over environment proxies, then OS routing. `src/electron/networkProxy.js` owns the app proxy policy: while set, it replaces environment proxy and bypass settings with consistent Node/Chromium routes, preserving native local-host bypasses and supported app bypass entries. Empty settings preserve existing env/OS routing. Providers must preserve the injected transport; custom transports must document their exceptions in the provider note.
+
+Routes are read per request, including MiMo exchange hops. Protected Chromium requests wait for proxy changes and connection cleanup; failed applies block those requests and remain retryable, and waits must support cancellation. Invalid persisted proxy URLs block traffic except for the retained bypasses. This setting does not cover external browser/CLI sign-ins, usage collection, Hub sync or GitHub release checks.
 
 Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies cannot shadow provider-managed cookies, and expect cross-origin `Referer` paths to be cancelled without a suitable `referrerPolicy`.
 
 ### Balance quotas
 
-`windows[].metric === 'credits'` identifies a money quota with `remaining` and `currency`. `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. Callers may explicitly disable balance inference for wallets without a quota denominator; `showMeter: false` alone does not change existing display-layer estimates such as Sub2API's.
+`windows[].metric === 'credits'` identifies a monetary or points balance with `remaining` and `currency` (`CREDITS` for points). `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. Callers may explicitly disable balance inference for wallets without a quota denominator; `showMeter: false` alone does not change existing display-layer estimates such as Sub2API's.
 
 ## Session relationships
 
@@ -114,9 +135,21 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 
 `sessionTitlesEnabled` defaults on and affects Electron presentation only. `src/electron/sessionTitleDisplay.js` hides titles from snapshots, all-time pulls and detail headings without changing collection, metadata caches or local archives. Sync consent is independent, defaults off, and requires the [shared sync protocol](#shared-sync-content).
 
+## Windows document windows
+
+Windows document windows are created transparent, including when system glass is enabled. `windowsBackdrop.js` changes Acrylic, Accent and Transparent on the same native host; it clears Accent's native policy when leaving that mode and restores the transparent background after removing a system material. `setBackgroundMaterial('none')` alone does not make an opaque host transparent. The Dashboard uses `BrowserWindow`; the main widget uses `BaseWindow` with a retained `WebContentsView` (`electron/retainedWindow.js`) because floating-bubble frame changes still require a new native host. The page, drafts and renderer subscriptions survive those frame changes. Other platforms retain `BrowserWindow`.
+
+The view's current host owns its cleanup. Closing an obsolete host must not close or resize a view already transferred to its replacement. Resolve IPC senders through their current owner, count native windows with `BaseWindow.getAllWindows()`, and register page listeners once per page rather than once per host.
+
+Native reparenting can scroll a previously focused input into view. Capture focus and scroll positions inside the retained page before moving it, including scrollable containers at zero offsets, and restore before the next visible paint. Keep the expanded snapshot while a floating bubble is collapsed or awaiting its hidden host's first show; release its DOM references after the visible viewport is restored. Host replacements are serialized and superseded requests are discarded before transfer, including when an in-place expansion cancels a pending collapse. A new capture must not overwrite a viewport still awaiting restoration. If animation frames pause, an immediate page restore completes before the queue advances and cancels the old frame callback. Visibility changes during transfer must not redundantly refill settings forms and discard drafts. Ordinary hidden windows remain suspended.
+
 ## Windows Edge Dock material
 
 Windows 11 Edge Dock uses a single helper with HostBackdrop clipped to the renderer's curves; HWND-wide Acrylic/Accent cannot preserve the concave outline. Electron owns input. Native underlays stay disabled, nonactivating and directly below their content windows.
+
+Changing the Windows dock material attaches or disposes only the native underlays. Content windows and any open detail card stay alive; a callback from a disposed underlay cannot update its replacement's material state.
+
+Windows rail dragging and detail-card transitions follow renderer animation frames: a nominal 16 ms main-process timeout can round up to about 31 ms on Windows. Main still owns native cursor coordinates, placement, geometry and button-state checks; its timers and cursor polling remain fallbacks if frame delivery stops.
 
 Share renderer curves at physical display scale and position against `GetWindowRect`, not rounded Electron DIP bounds. Unchanged hover updates must not re-show underlays. Lower the tinted fallback only after native attachment succeeds; a failed generation retries only after all its surfaces are disposed. EOF, parent exit and content-window closure must remove native windows.
 
@@ -154,6 +187,8 @@ Manual device removal requires a known remote device marked stale in main's late
 
 **Snapshot identity.** Published records are immutable because presentation and normalization caches key on object identity. Replace objects, never mutate in place. Main composes all-time detail on demand from the requested snapshot's captured inputs: per-publish summaries omit it *before* normalization. `rendererStats()` strips device sessions/projects and all-time sessions from IPC; `stats:allTimeSessions` resolves the requested snapshot ID, retaining its source generation. Completion must never combine newer `latestStats`/`lastCollectedDevice` accounting rows with older totals or cross generations. The renderer's `allTimeSessions.attach()` reuses its previously pulled session map on newer stats from the same source until a fresh pull arrives; neither attachment nor late pull results may cross source generations. Do not widen every push for a new detail reader. Bounded local identity projections, such as Grok Bot membership, must not force all-time completion or expand the wire record. Apply title hiding after activity joins.
 
+Session device labels are a desktop presentation projection resolved from the captured device session maps before IPC strips them. All-time labels use the same captured inputs as their lazy session list; they do not add provenance to the accounting wire record or force full-history completion on every publish.
+
 ## Settings and credentials
 
 - **Configuration.** `loadDotEnv()` never overrides existing process variables. Node entry points load the root `.env`, Electron only when unpackaged, and Worker uses deployment bindings. Agent/Hub precedence is CLI flag → env → default where a flag exists; there is no JSON configuration file. [`.env.example`](../.env.example) is the operator contract.
@@ -170,9 +205,13 @@ Manual device removal requires a known remote device marked stale in main's late
 
 `collectUsageOnce()` supplies usage. `DeviceState` combines it with the runtime envelope and limits; limits-only updates retain the usage `updatedAt`, and cold previews wait for a complete baseline. Hubs normalize device records with `normalizeDeviceRecord()` and aggregate on read with `aggregateDevices()`. Neither Hub needs provider credentials. The [API reference](API.md) defines the common Node/Worker wire contract.
 
+Widget and headless HTTP producers negotiate revisioned upload deltas on full ingest, independently of SSE. `uploadDelta.js` owns bounded ephemeral wire baselines; the client keeps only its last acknowledged payload and opaque token. Reconstruct and ingest inside the existing mutation lane, then acknowledge. Never patch normalized storage directly: normalization, retained limits/history and title-policy checks still belong to the normal ingest boundary. Full/legacy writes, deletion and privacy revocation invalidate affected baselines; restart/eviction or a lost ACK recovers through a current full snapshot. A delta is used only when its envelope is smaller than the full payload.
+
+Legacy Hubs retain the History omission optimization: omit only acknowledged unchanged wire content, with complete History on startup, destination/credential/device changes, stream reconnection, failed uploads and periodic reconciliation at the next publication. Changed History and explicit clears are sent immediately. Live Today remains a separate period; renderer overlays never update uploaded History.
+
 Settings keys, env vars, CLI flags, endpoints and wire fields have external users: treat incompatible changes as breaking and plan migration. Stale devices intentionally remain in stats with `stale: true`; they are not silently deleted.
 
-SSE broadcasts serialize each required frame once per fan-out; the Worker also encodes each frame once. Timestamp-only ingest updates send `freshness` to capable clients and full `stats` to legacy clients. Explicit mutation broadcasts force full stats even when the content key is unchanged. Initial snapshots remain per connection.
+SSE broadcasts serialize each required frame once per fan-out; the Worker encodes only frames selected by subscribers, sharing each encoded chunk across peers. Stream-v4 peers receive revisioned JSON Patch deltas against one immutable shared broadcast baseline, with a full-frame fallback when a patch is no smaller. v3 retains timestamp-only `freshness`; older peers receive complete stats. Initial snapshots and slow-connection recovery remain per connection, followed by a full revision bootstrap before deltas resume. Client transport baselines stay independent of REST reads and local presentation overlays. Invalid/missing revisions reconnect for a complete snapshot. Both adapters bound slow-client writes and skip blocked heartbeats; a dirty connection recovers the latest full state rather than queued obsolete frames. Worker async broadcast reads keep one active read and one coalesced pending batch, preserving revision order without accumulating obsolete reads. A pending explicit mutation retains its full-snapshot requirement when later ingests join the batch. Explicit mutations always force full stats, including privacy revocation. See the [stream protocol](API.md#get-apistatsstream) for wire and recovery rules.
 
 ## Shared subscriptions
 

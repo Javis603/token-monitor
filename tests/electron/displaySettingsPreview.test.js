@@ -53,3 +53,23 @@ test('display preference changes invalidate sample preview cache', () => {
   h.settings.secret = 'never-project'; h.preview.show('notch', stage, 'open');
   assert.equal(h.calls.length, before);
 });
+
+test('preview skips plugin startup while native surfaces still subscribe and fetch views', async () => {
+  const source = fs.readFileSync(path.join(renderer, 'edgeDock/dock.js'), 'utf8');
+  const startup = source.slice(source.indexOf('const pluginSurface ='), source.indexOf('function pluginCellLabel('));
+  for (const native of [false, true]) {
+    const calls = [];
+    const bridge = native ? { onPluginViews() { calls.push('subscribe'); } } : { isSettingsPreview: true };
+    const window = {
+      TokenMonitorPluginViews: { createPluginViewHost() { calls.push('host'); return {}; } },
+      TokenMonitorPluginContent: { create() { calls.push('content'); return {}; } }
+    };
+    if (native) window.tokenMonitorTrustedPlugins = {
+      contentSelections: async () => { calls.push('selection'); return {}; },
+      views: () => { calls.push('views'); return new Promise(() => {}); }
+    };
+    vm.runInNewContext(startup, { window, bridge, surface: 'notch', document: {}, state: {}, t: key => key });
+    await Promise.resolve();
+    assert.deepEqual(calls, native ? ['host', 'content', 'selection', 'subscribe', 'views'] : []);
+  }
+});

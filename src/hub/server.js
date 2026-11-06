@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('node:http');
+const { UPLOAD_HEADER, UPLOAD_VERSION, createUploadBaselines } = require('../shared/uploadDelta');
 const path = require('node:path');
 const { URL } = require('node:url');
 const {
@@ -29,6 +30,7 @@ const {
   sseFrameForClient,
   hubStatsContentKey,
   wantsFreshnessEvents,
+  wantsDeltaEvents,
   wantsMinimalResponse
 } = require('../shared/hubProtocol');
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
@@ -73,6 +75,7 @@ function createHub({
   store.syncTitlePolicies = Object.assign(Object.create(null), store.syncTitlePolicies || {});
   store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
   const bindHost = resolveBindHost(host, secret);
+  const uploadBaselines = createUploadBaselines();
   let persistTimer = null;
   let persistPending = false;
   let stopping = false;
@@ -144,6 +147,8 @@ function createHub({
   const statsListeners = new Set();
   let broadcastTimer = null;
   let lastSseContentKey = '';
+  let lastSseStats = null;
+  let streamRevision = 0;
 
   function writeSseFrame(client, frame) {
     if (!frame) return false;
@@ -164,7 +169,9 @@ function createHub({
   }
 
   function fanoutSseFrames(frames) {
-    for (const client of sseClients) writeSseFrame(client, sseFrameForClient(frames, client));
+    for (const client of sseClients) {
+      if (writeSseFrame(client, sseFrameForClient(frames, client)) && client.deltaEvents) client.streamRevision = frames.revision;
+    }
   }
 
   function notifyStatsListeners(reason, stats = getStats(), at = new Date().toISOString()) {
@@ -187,13 +194,18 @@ function createHub({
         stats,
         at,
         lastContentKey: lastSseContentKey,
+        previousStats: lastSseStats,
+        revision: ++streamRevision,
         ...sseClientKinds(sseClients),
         allowFreshness: false
       });
       lastSseContentKey = frames.contentKey;
+      lastSseStats = stats;
       fanoutSseFrames(frames);
     }
-    notifyStatsListeners(reason, stats, at);
+    // Embedded widgets add local presentation metadata to their snapshot. Do
+    // not expose the immutable SSE delta baseline to those observers.
+    notifyStatsListeners(reason, sseClients.size > 0 && statsListeners.size > 0 ? getStats() : stats, at);
   }
 
   function flushQueuedStatsBroadcast() {
@@ -206,9 +218,12 @@ function createHub({
       stats,
       at,
       lastContentKey: lastSseContentKey,
+      previousStats: lastSseStats,
+      revision: ++streamRevision,
       ...sseClientKinds(sseClients)
     });
     lastSseContentKey = frames.contentKey;
+    lastSseStats = stats;
     fanoutSseFrames(frames);
   }
 
@@ -229,6 +244,7 @@ function createHub({
       throw new Error('deviceId_required');
     }
     const deviceId = String(payload.deviceId || payload.id);
+    uploadBaselines.forget(deviceId);
     const record = mergeSyncDeviceRecord(store.devices[deviceId], { ...payload, receivedAt: new Date().toISOString() }, {
       preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[deviceId], payload.sessionTitleSyncGeneration)
     });
@@ -240,6 +256,7 @@ function createHub({
   }
 
   function deleteDevice(deviceId) {
+    uploadBaselines.forget(deviceId);
     // Commit deletion and revocation together, keeping a generation tombstone.
     const previousPolicy = store.syncTitlePolicies[deviceId];
     const previousDevice = store.devices[deviceId];
@@ -293,6 +310,7 @@ function createHub({
     const previous = store.syncTitlePolicies[deviceId];
     const next = nextTitlePolicy(previous, enabled);
     if (enabled && normalizeTitlePolicy(previous).enabled) return next;
+    uploadBaselines.forget(deviceId);
     const previousDevice = store.devices[deviceId];
     const previousSavedAt = store.savedAt;
     store.syncTitlePolicies[deviceId] = next;
@@ -432,7 +450,7 @@ function createHub({
         'connection': 'keep-alive',
         'x-accel-buffering': 'no'
       });
-      const client = { res, freshnessEvents: wantsFreshnessEvents(req), blocked: false, needsSnapshot: false };
+      const client = { res, freshnessEvents: wantsFreshnessEvents(req), deltaEvents: wantsDeltaEvents(req), streamRevision: null, blocked: false, needsSnapshot: false };
       let heartbeat = null;
       client.cleanup = () => {
         clearInterval(heartbeat);
@@ -440,6 +458,7 @@ function createHub({
         sseClients.delete(client);
         if (sseClients.size === 0) {
           lastSseContentKey = '';
+          lastSseStats = null;
           if (broadcastTimer) clearTimeout(broadcastTimer);
           broadcastTimer = null;
         }
@@ -448,7 +467,8 @@ function createHub({
         client.blocked = false;
         if (!client.needsSnapshot) return;
         client.needsSnapshot = false;
-        // A skipped full frame makes later freshness events insufficient.
+        // A skipped frame invalidates both freshness and delta baselines.
+        client.streamRevision = null;
         try {
           writeSseFrame(client, encodeSseEvent('stats', {
             type: 'stats', reason: 'snapshot', stats: getStats(), at: new Date().toISOString()
@@ -457,22 +477,34 @@ function createHub({
       };
       res.on('close', client.cleanup);
       res.on('error', client.cleanup);
-      if (sseClients.size === 0) lastSseContentKey = hubStatsContentKey(stats);
+      if (sseClients.size === 0) {
+        lastSseContentKey = hubStatsContentKey(stats);
+        lastSseStats = stats;
+        if (client.deltaEvents) client.streamRevision = streamRevision;
+      }
       sseClients.add(client);
       heartbeat = setInterval(() => {
         if (!client.blocked) writeSseFrame(client, ': hb\n\n');
       }, 30000);
-      writeSseFrame(client, encodeSseEvent('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
+      writeSseFrame(client, encodeSseEvent('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
+        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {}) }));
       return;
     }
 
-    if (req.method === 'POST' && url.pathname === '/api/ingest') {
+    if (req.method === 'POST' && ['/api/ingest', '/api/ingest/delta'].includes(url.pathname)) {
       try {
-        const payload = await readJsonBody(req);
+        const incoming = await readJsonBody(req);
+        const delta = url.pathname === '/api/ingest/delta';
+        const payload = delta ? uploadBaselines.prepare(incoming) : incoming;
         const record = ingestRecord(payload);
-        const response = { ok: true, deviceId: record.deviceId };
+        const upload = delta || req.headers[UPLOAD_HEADER] === UPLOAD_VERSION
+          ? uploadBaselines.commit(record.deviceId, stripSessionTextFromDeviceRecord(payload, {
+              preserveSessionTitles: acceptsSessionTitles(serverTitlesEnabled, store.syncTitlePolicies[record.deviceId], payload.sessionTitleSyncGeneration)
+            })) : undefined;
+        const response = { ok: true, deviceId: record.deviceId, ...(upload ? { upload } : {}) };
         return sendJson(res, 200, wantsMinimalResponse(req) ? response : { ...response, stats: getStats() });
       } catch (error) {
+        if (error.status) return sendJson(res, error.status, { error: error.code });
         if (error.message === 'deviceId_required') return sendJson(res, 400, { error: 'deviceId_required' });
         if (error.code === 'payload_too_large') {
           res.shouldKeepAlive = false;

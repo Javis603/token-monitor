@@ -6,6 +6,7 @@ const balance = require('../../shared/limits/balanceDisplay');
 const { limitProviderForClient } = require('../../shared/limits/providers');
 const presentation = require('../renderer/edgeDock/presentation');
 const { notchWeek } = require('./panel');
+const { normalizeNotchPluginPages, normalizeNotchBuiltinPages, normalizeNotchPageOrder } = require('../../shared/plugins/placements');
 
 const NOTCH_SUMMARY_MODES = Object.freeze(['auto', 'sessions', 'tray', 'custom']);
 
@@ -33,13 +34,13 @@ function summaryLayout(settings, stats, picks = trayQuotaPicks(stats, settings))
   if (mode === 'custom') return trayLayout.normalizeTrayLayout(settings.trayCustomLayout);
   const make = (style, id) => trayLayout.createTrayLayoutItem(style, { idFactory: () => id });
   const icon = make(['icon', 'liveTokenRate'].includes(mode) ? 'appIcon' : 'providerIcon', 'notch-icon');
-  icon.autoMode = ['tokens', 'tokensAll', 'both', 'bothAll'].includes(mode) ? 'tokens'
-    : ['cost', 'costAll'].includes(mode) ? 'cost' : 'lowestLimit';
-  icon.period = mode.endsWith('All') ? 'allTime' : 'today';
+  icon.autoMode = ['tokens', 'tokensMonth', 'tokensAll', 'both', 'bothMonth', 'bothAll'].includes(mode) ? 'tokens'
+    : ['cost', 'costMonth', 'costAll'].includes(mode) ? 'cost' : 'lowestLimit';
+  icon.period = mode.endsWith('All') ? 'allTime' : mode.endsWith('Month') ? 'month' : 'today';
   const items = [icon];
-  const period = mode.endsWith('All') ? 'allTime' : 'today';
-  if (['tokens', 'tokensAll', 'both', 'bothAll'].includes(mode)) items.push({ ...make('tokens', 'notch-tokens'), period });
-  if (['cost', 'costAll', 'both', 'bothAll'].includes(mode)) items.push({ ...make('cost', 'notch-cost'), period, costFormat: 'full', costDecimals: 'auto' });
+  const period = mode.endsWith('All') ? 'allTime' : mode.endsWith('Month') ? 'month' : 'today';
+  if (['tokens', 'tokensMonth', 'tokensAll', 'both', 'bothMonth', 'bothAll'].includes(mode)) items.push({ ...make('tokens', 'notch-tokens'), period });
+  if (['cost', 'costMonth', 'costAll', 'both', 'bothMonth', 'bothAll'].includes(mode)) items.push({ ...make('cost', 'notch-cost'), period, costFormat: 'full', costDecimals: 'auto' });
   if (mode === 'liveTokenRate') items.push(make('liveTokenRate', 'notch-rate'));
   if (picks) {
     if (picks.length) icon.source.provider = picks[0].provider;
@@ -166,7 +167,13 @@ function automaticIdleLayout() {
 }
 
 function buildNotchData(stats, cells, settings, options = {}) {
-  const panel = { week: notchWeek(stats, new Date(options.nowMs ?? Date.now()), settings.historyEnabled === false ? null : stats?.historyPreview) };
+  const panel = {
+    week: notchWeek(stats, new Date(options.nowMs ?? Date.now()), settings.historyEnabled === false ? null : stats?.historyPreview),
+    // Content arrives on the plugin channel; visibility and mixed order travel here.
+    pageOrder: normalizeNotchPageOrder(settings.notchPageOrder),
+    builtinPages: normalizeNotchBuiltinPages(settings.notchBuiltinPages),
+    pluginPages: settings.pluginsEnabled === false ? [] : normalizeNotchPluginPages(settings.notchPluginPages)
+  };
   if (settings.notchSummaryEnabled === false) return { cells, summary: null, panel };
   const mode = notchSummaryMode(settings);
   if (mode === 'sessions') return { cells, summary: activitySummary(cells, options, true), panel };
