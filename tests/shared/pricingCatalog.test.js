@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { createPricingCatalogRefresher } = require('../../src/shared/pricingCatalog');
+const { catalogRevision, createPricingCatalogRefresher } = require('../../src/shared/pricingCatalog');
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-price-refresh-'));
@@ -96,4 +96,26 @@ test('stopping an active refresh prevents publication and future retries', async
   await refresher.whenIdle();
   assert.equal(updates, 0);
   assert.equal(f.pending(), null);
+});
+
+test('Windows catalog freshness and revisions follow the native roaming folder despite APPDATA', async t => {
+  const f = fixture(t);
+  const roaming = f.env.TOKSCALE_CONFIG_DIR;
+  for (const name of ['litellm', 'openrouter', 'models-dev']) f.write(name);
+  fs.mkdirSync(path.join(roaming, 'tokscale'));
+  fs.renameSync(path.join(roaming, 'cache'), path.join(roaming, 'tokscale', 'cache'));
+  let downloads = 0;
+  const options = {
+    platform: 'win32', env: { APPDATA: path.join(roaming, 'wrong') },
+    windowsFolders: { roaming },
+    refresh: async () => { downloads++; }, onUpdate() {}
+  };
+  const revision = catalogRevision(options);
+  assert.ok(revision.every(([file, size]) => file.startsWith(path.join(roaming, 'tokscale', 'cache')) && typeof size === 'number'));
+  const refresher = createPricingCatalogRefresher(options, f.timers);
+  t.after(() => refresher.stop());
+  refresher.start();
+  f.fire();
+  await refresher.whenIdle();
+  assert.equal(downloads, 0, 'fresh native catalogs must not trigger a download from a mismatched APPDATA path');
 });
