@@ -4,8 +4,8 @@ const semver = require('semver');
 
 // electron-builder writes the marketing version into LSMinimumSystemVersion,
 // while electron-updater compares update metadata against Darwin's os.release().
-const MAC_APP_MIN_VERSION = '12.0';
-const MAC_APP_MIN_DARWIN_VERSION = '21.0.0';
+const MAC_APP_MIN_VERSION = '13.0';
+const MAC_APP_MIN_DARWIN_VERSION = '22.0.0';
 const MAC_WIDGET_MIN_VERSION = '14.0';
 const MAC_WIDGET_MIN_DARWIN_VERSION = '23.0.0';
 

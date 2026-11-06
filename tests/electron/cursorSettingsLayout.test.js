@@ -211,8 +211,11 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.match(details, /<div id="cursorManualPanel" class="opencode-add-form">/);
   assert.match(details, /<div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
   assert.match(details, /data-i18n="settings\.cursor\.addManual">Add account<\/span>/);
-  assert.match(details, /using the button above, then sign in/);
-  assert.match(details, /cursor\.com\/dashboard/);
+  assert.match(details, /using “Open Cursor dashboard”, then sign in/);
+  assert.match(details, /<code>cursor\.com<\/code>/);
+  assert.doesNotMatch(details, /cursorCookiePageButton/);
+  assert.match(details, /data-i18n="settings\.cursor\.cookiePage"[^>]*>[^<]*grok\.com\/dashboard/);
+  assert.match(details, /data-i18n="settings\.cursor\.cookieMissing"/);
   assert.doesNotMatch(details, /cursor\.com\/dashboard\/settings/);
   assert.doesNotMatch(details, /Tokscale|Add an account manually/);
   assert.doesNotMatch(details, /<details|<summary|cursorDetectButton|cursorManualLabel|accountLabel/);
@@ -231,7 +234,16 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.doesNotMatch(body, /cursor-account-row|radio|selectedAccountId|selectAccount/);
 
   const setup = readRendererFile('app.js');
-  assert.match(setup, /openExternal\('https:\/\/cursor\.com\/dashboard'\)/);
+  const navigationStart = setup.indexOf("  document.getElementById('cursorLoginButton').addEventListener");
+  const navigationEnd = setup.indexOf('  const cursorManualSubmit =', navigationStart);
+  const handlers = new Map();
+  const openedUrls = [];
+  vm.runInNewContext(setup.slice(navigationStart, navigationEnd), {
+    document: { getElementById: (id) => ({ addEventListener: (_event, handler) => handlers.set(id, handler) }) },
+    window: { tokenMonitor: { openExternal: (url) => openedUrls.push(url) } }
+  });
+  handlers.get('cursorLoginButton')();
+  assert.deepEqual(openedUrls, ['https://cursor.com']);
   assert.doesNotMatch(setup, /openExternal\('https:\/\/cursor\.com\/dashboard\/settings'\)/);
   assert.match(setup, /cursorAddAccountButton\?\.addEventListener\('click'/);
   assert.match(setup, /cursorManualDetails\?\.classList\.toggle\('hidden', !next\)/);
@@ -257,11 +269,16 @@ test('Cursor removal is available only for accounts added manually in Token Moni
 
 test('Cursor account discovery runs automatically without a separate refresh action', () => {
   const main = readRendererFile('../main.js');
-  const statusBody = functionBody(main, 'cursorStatusValue', 'rebuildWindow');
+  const statusBody = functionBodyBeforeMarker(main, 'cursorStatusValue', '// Plugin hosts load');
   assert.match(statusBody, /if \(discover && !managementBlocked\) \{/);
   assert.match(statusBody, /await cursorAuth\.runCursorDiscover\(\)/);
   assert.doesNotMatch(statusBody, /runCursorSync/);
   assert.match(statusBody, /managementBlocked/);
+  // Desktop-detected accounts follow the desktop sign-in; manual accounts are never hidden.
+  assert.match(statusBody, /const desktop = cursorAuth\.readCursorDesktopSignIn\(\)/);
+  assert.match(statusBody, /if \(!manual\.has\(account\.id\) && !isCursorDetectedAccountCurrent\(\{/);
+  assert.match(statusBody, /unauthorized: expired/);
+  assert.match(statusBody, /listedAccounts\.filter\(Boolean\)/);
   assert.match(main, /options\?\.discover !== true/);
   assert.doesNotMatch(main, /ipcMain\.handle\('cursor:refresh'/);
 
@@ -746,16 +763,15 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.doesNotMatch(renderLimits, /codexSwitchPopoverRenderPending/);
 });
 
-test('DeepSeek and MiniMax API key panels come from the generic account form', () => {
+test('DeepSeek uses the generic form and MiniMax keys use the shared account shell', () => {
   const html = readRendererFile('index.html');
   const css = readRendererFile('styles.css');
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const forms = limitAccountFormsForRenderer();
   const expectedFields = {
-    deepseek: [['deepseekApiKey', 'password']],
-    minimax: [['minimaxBillingMode', 'select'], ['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
+    deepseek: [['deepseekApiKey', 'password']]
   };
-  for (const id of ['deepseek', 'minimax']) {
+  for (const id of ['deepseek']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
     assert.doesNotMatch(css, new RegExp(`#${id}ManualPanel`), id);
     const form = forms.find((candidate) => candidate.id === id);
@@ -778,38 +794,8 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   }
   assert.deepEqual(forms.find(({ id }) => id === 'deepseek').openUrl, { url: 'https://platform.deepseek.com/api_keys' });
 
-  // MiniMax follows the selection, with successful-probe status for Auto;
-  // the form declares that, so the renderer has no MiniMax branch of its own.
   const app = readRendererFile('app.js');
-  assert.deepEqual(forms.find(({ id }) => id === 'minimax').openUrl, {
-    byField: 'minimaxApiRegion',
-    urls: {
-      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
-      intl: 'https://platform.minimax.io/user-center/payment/token-plan'
-    },
-    byStatus: 'region',
-    statusUrls: {
-      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
-      en: 'https://platform.minimax.io/user-center/payment/token-plan'
-    },
-    default: 'https://platform.minimaxi.com/user-center/payment/token-plan',
-    pathByField: {
-      byField: 'minimaxBillingMode',
-      values: { 'token-plan': '/user-center/payment/token-plan', api: '/user-center/payment/balance' }
-    }
-  });
-
-  // The region is a plain setting beside the credential, so Clear leaves it
-  // alone and it stays reachable once a key is saved — a user whose auto-probe
-  // keeps flapping needs the switch after linking, not before.
-  const minimax = forms.find(({ id }) => id === 'minimax');
-  const region = minimax.fields.find(({ key }) => key === 'minimaxApiRegion');
-  assert.equal(region.saveOnChange, true);
-  assert.deepEqual(region.options.map(({ value }) => value), ['auto', 'cn', 'intl']);
-  for (const { labelKey } of region.options) {
-    assert.match(labelKey, /^settings\.minimax\./, labelKey);
-  }
-  assert.deepEqual(minimax.top, [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }]);
+  assert.equal(forms.some(({ id }) => id === 'minimax'), false);
 
   // The region never becomes a credential: no store path, so it stays in
   // settings.json only after a selection; an implicit default stays empty.
@@ -977,16 +963,19 @@ test('Z.ai, Qoder, Trae and Ollama panels are generated from their declared form
   assert.deepEqual(forms.qoder.openUrl.urls, { global: 'https://qoder.com/account/usage', cn: 'https://qoder.com.cn/account/usage' });
   assert.doesNotMatch(JSON.stringify(forms.qoder), /settings\.qoder\.note/);
 
-  // Trae: the optional device ID comes after the token, then its note.
-  assert.deepEqual(forms.trae.manual.slice(1), [
-    { field: 'traeAccessToken' }, { field: 'traeDeviceId' }, { note: 'settings.trae.deviceIdNote' }
+  // Trae defaults to the browser Cookie lane; legacy token/device inputs stay available.
+  assert.deepEqual(forms.trae.credentialChoice.fields, ['traeCookie', 'traeAccessToken']);
+  assert.equal(forms.trae.fields[0].input, 'textarea');
+  assert.equal(forms.trae.fields[1].placeholder, 'Cloud-IDE-Token');
+  assert.equal(forms.trae.fields[2].required, false);
+  assert.deepEqual(forms.trae.manual[0].steps, ['settings.trae.step1', 'settings.trae.cookieStep2', 'settings.trae.cookieStep3', 'settings.trae.step4']);
+  assert.deepEqual(forms.trae.manual.slice(-3), [
+    { field: 'traeAccessToken', whenCredential: 'traeAccessToken' },
+    { field: 'traeDeviceId', whenCredential: 'traeAccessToken' },
+    { note: 'settings.trae.deviceIdNote', whenCredential: 'traeAccessToken' }
   ]);
-  assert.equal(forms.trae.fields[0].placeholder, 'Cloud-IDE-Token');
-  assert.equal(forms.trae.fields[1].required, false);
-  assert.deepEqual(forms.trae.manual[0].steps[2], ['settings.trae.step3Before', { code: 'Cloud-IDE-Token' }, 'settings.trae.step3After']);
   assert.equal(forms.trae.messages.required, 'settings.trae.missingAuthorization');
-  assert.doesNotMatch(JSON.stringify(forms.trae), /settings\.trae\.note/);
-  assert.match(readRendererFile('i18n.js'), /'settings\.trae\.deviceIdNote': '[^']*ide_user_ent_usage[^']*X-Device-Id/);
+
 
   // Ollama chooses one draft lane; API key is the fresh-install default.
   assert.deepEqual(forms.ollama.credentialChoice.fields, ['ollamaApiKey', 'ollamaCookie']);
@@ -1235,14 +1224,12 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.equal(limitProviderUrlAllowed('claude.ai', '/'), false);
 });
 
-test('DeepSeek and MiniMax key changes invalidate stale provider status before re-checking', () => {
+test('DeepSeek key changes invalidate stale provider status before re-checking', () => {
   const app = readRendererFile('app.js');
-  // Their pills and groups are generated from the form id, so the hand-kept id
-  // maps no longer name them.
+  // Its pills and groups are generated from the form id, so the hand-kept id
+  // map no longer names it.
   assert.doesNotMatch(app, /deepseek: 'deepseek(AccountGroup|ApiKeyStatus)'/);
-  assert.doesNotMatch(app, /minimax: 'minimax(AccountGroup|ApiKeyStatus)'/);
   assert.match(app, /deepseekPendingCheckSince: 0/);
-  assert.match(app, /minimaxPendingCheckSince: 0/);
 
   const saveBody = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
   assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\);/);
@@ -2841,7 +2828,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
     frameBody,
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
-  assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(frameBody, /count \? limitGroupCountText\(providerId, count\) : ''/);
   assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
 

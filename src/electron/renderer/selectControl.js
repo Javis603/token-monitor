@@ -164,6 +164,14 @@
       row.setAttribute('aria-disabled', String(option.disabled));
       text.append(title, description);
       row.append(icon, text);
+      if (option.annotation) {
+        const annotation = document.createElement('span');
+        annotation.className = 'select-control-annotation';
+        annotation.id = `${row.id}-annotation`;
+        annotation.textContent = option.annotation;
+        row.append(annotation);
+        row.setAttribute('aria-describedby', [option.description ? description.id : '', annotation.id].filter(Boolean).join(' '));
+      }
       listen(row, 'pointermove', (event) => {
         if (event.pointerType === 'touch' || option.disabled) return;
         hovered = index;
@@ -193,6 +201,7 @@
           label: option.textContent.trim(),
           disabled: Boolean(option.disabled || option.parentElement?.tagName === 'OPTGROUP' && option.parentElement.disabled),
           description: String(meta.description || ''),
+          annotation: String(meta.annotation || ''),
           icon: typeof meta.icon === 'function' ? meta.icon : null
         };
       });
@@ -210,8 +219,9 @@
       trigger.tabIndex = original.tabIndex === null ? 0 : Number(original.tabIndex);
       const selected = options.find(option => option.value === select.value);
       valueLabel.textContent = selected?.label || '';
-      if (selectedIcon !== (selected?.icon || null)) {
-        selectedIcon = selected?.icon || null;
+      const nextIcon = selected?.icon || null;
+      if (selectedIcon !== nextIcon) {
+        selectedIcon = nextIcon;
         setIcon(valueIcon, selectedIcon);
       }
       if (!selectedIcon) valueIcon.hidden = true;
@@ -277,7 +287,7 @@
     }
 
     function schedulePosition(event) {
-      if (event && listbox.contains(event.target)) return;
+      if (event && event.target !== window && listbox.contains(event.target)) return;
       if (frame !== null) return;
       frame = window.requestAnimationFrame(() => { frame = null; position(); });
     }

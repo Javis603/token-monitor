@@ -22,11 +22,12 @@ function sourceBetween(first, next) {
 
 // Run the actual main-process show/hide/toggle/blur callbacks and tray handlers
 // together, without starting the collector or loading personal settings.
-function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}) {
+function fixture({ visible = true, focused = visible, platform = 'darwin', historyPreview = false } = {}) {
   let point = { x: 110, y: 10 };
   let now = 1000;
-  const changes = [], pointerActivations = [];
+  const changes = [], summons = [], cancellations = [];
   const timers = [];
+  let historyHides = 0;
   const win = {
     isDestroyed: () => false,
     isVisible: () => visible,
@@ -50,7 +51,8 @@ function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}
   const screen = { getCursorScreenPoint: () => point };
   const context = vm.createContext({
     mainWindow: win, win, tray: null, recentPopoverBlur: null,
-    sendMainWindowEvent: channel => pointerActivations.push(channel),
+    limitsHistoryController: historyPreview ? { hide() { historyHides += 1; } } : null,
+    sendMainWindowEvent: channel => { if (channel === 'window:summonCancelled') cancellations.push(channel); else summons.push(channel); },
     pluginWindowActions: createWindowVisibilityActions(hidden => assert.equal(hidden, win)),
     settings: { trayMode: true, showTrayIcon: true },
     process: { platform }, performance: { now: () => now }, screen,
@@ -81,7 +83,8 @@ function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}
   function emit(name) { tray.handlers[name]?.({}, {}, {}); }
   return {
     get visible() { return visible; },
-    get focused() { return focused; }, changes, pointerActivations,
+    get historyHides() { return historyHides; },
+    get focused() { return focused; }, changes, summons, cancellations,
     advance(ms) { now += ms; },
     enter() { point = { x: 110, y: 10 }; emit('mouse-enter'); },
     leave() { point = { x: 150, y: 50 }; emit('mouse-leave'); },
@@ -96,6 +99,14 @@ function fixture({ visible = true, focused = visible, platform = 'darwin' } = {}
     voiceOver() { emit('click'); emit('mouse-down'); }
   };
 }
+
+test('a real owner blur dismisses both the tray and its non-activating quota preview', () => {
+  const f = fixture({ historyPreview: true });
+  f.blur();
+  assert.equal(f.visible, false);
+  assert.equal(f.historyHides, 1);
+  assert.deepEqual(f.cancellations, ['window:summonCancelled']);
+});
 
 for (const order of ['before-down', 'after-down']) {
   test(`a physical tray click stays closed when blur is ${order}`, () => {
@@ -245,15 +256,34 @@ test('only a completed physical tray press opening the window requests neutral p
   const f = fixture({ visible: false });
   f.enter(); f.down(); f.up(); f.click();
   assert.equal(f.visible, true);
-  assert.deepEqual(f.pointerActivations, ['window:pointerActivation']);
+  assert.deepEqual(f.summons, ['window:summoned']);
   f.finishShow(); f.down(); f.up(); f.click();
   assert.equal(f.visible, false);
-  assert.equal(f.pointerActivations.length, 1, 'closing does not reset focus');
+  assert.equal(f.summons.length, 1, 'closing does not reset focus');
 });
 
-test('shortcut and VoiceOver opens never request a pointer focus reset', () => {
+test('shortcut summons request neutral focus while VoiceOver preserves accessibility focus', () => {
   for (const open of ['shortcut', 'voiceOver']) {
     const f = fixture({ visible: false }); f[open]();
-    assert.equal(f.visible, true); assert.deepEqual(f.pointerActivations, []);
+    assert.equal(f.visible, true); assert.deepEqual(f.summons, open === 'shortcut' ? ['window:summoned'] : []);
   }
+});
+
+
+test('native blur cancels focus reset except during the existing popover activation grace', () => {
+  const f = fixture({ visible: false });
+  f.shortcut(); f.blur();
+  assert.deepEqual(f.cancellations, [], 'menu-bar activation blur does not cancel');
+  f.finishShow(); f.blur();
+  assert.deepEqual(f.cancellations, ['window:summonCancelled'], 'real departure cancels');
+});
+
+
+test('leaving the tray before an outside blur still dismisses a read-only quota preview', () => {
+  const f = fixture({ historyPreview: true });
+  f.leave();
+  f.blur();
+  assert.equal(f.visible, false);
+  assert.equal(f.historyHides, 1);
+  assert.deepEqual(f.cancellations, ['window:summonCancelled']);
 });

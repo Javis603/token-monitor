@@ -49,6 +49,12 @@ function traeDeviceId(env = process.env, options = {}) {
   ]);
 }
 
+function traeCookie(env = process.env, options = {}) {
+  return firstSetting(options, env, 'traeCookie', [
+    'TOKEN_MONITOR_TRAE_COOKIE', 'TRAE_COOKIE'
+  ]).replace(/^cookie\s*:\s*/i, '').trim();
+}
+
 function traeEntUsageUrl() {
   return `${TRAE_API_ORIGIN}${TRAE_ENT_USAGE_PATH}`;
 }
@@ -131,11 +137,56 @@ function fetchJsonWithDeadline(url, init, deps = {}) {
   );
 }
 
+async function fetchTraeWebCredits(cookie, deps) {
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    Cookie: cookie,
+    Origin: 'https://www.trae.cn',
+    Referer: 'https://www.trae.cn/',
+    'User-Agent': BROWSER_USER_AGENT
+  };
+  async function post(path, body, extraHeaders = {}) {
+    const result = await fetchJsonWithDeadline(`${TRAE_API_ORIGIN}${path}`, {
+      method: 'POST', headers: { ...headers, ...extraHeaders },
+      body: JSON.stringify(body), redirect: 'error', credentials: 'omit'
+    }, deps);
+    if (!result.response.ok || result.body?.code === 1001) {
+      const error = new Error('Trae web credits request failed');
+      error.status = [401, 403].includes(result.response.status) || result.body?.code === 1001
+        ? 'unauthorized' : result.response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+      throw error;
+    }
+    return result.body;
+  }
+  // Exchange on every refresh; never persist or share JWTs between accounts.
+  const tokenPayload = await post('/cloudide/api/v3/common/GetUserToken', {});
+  const token = cleanSecret(tokenPayload?.Result?.Token);
+  if (!token) throw new Error('Trae token exchange returned no usable token');
+  const payload = await post('/trae/api/v2/pay/user_current_entitlement_list', {
+    require_usage: true, full_data: true
+  }, { Authorization: `Cloud-IDE-JWT ${token}` });
+  const limit = payload?.usage_summary?.total_amount;
+  const used = payload?.usage_summary?.consumed_amount;
+  if (payload?.is_credits_billing !== true || !Number.isFinite(limit) || limit < 0
+    || !Number.isFinite(used) || used < 0) {
+    throw new Error('Trae credits response has no usable usage summary');
+  }
+  const usedPercent = limit > 0 ? Math.min(100, used / limit * 100) : null;
+  return {
+    kind: 'billing', label: 'Credits', metric: 'credits', currency: 'CREDITS',
+    used, limit, remaining: Math.max(0, limit - used), usedPercent,
+    remainingPercent: usedPercent === null ? null : 100 - usedPercent,
+    resetsAt: null, showMeter: limit > 0
+  };
+}
+
 async function fetchTraeLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const accessToken = traeAccessToken(env, options);
-  if (!accessToken) {
+  const cookie = traeCookie(env, options);
+  if (!accessToken && !cookie) {
     return normalizeLimitProvider({
       provider: 'trae',
       source: 'api',
@@ -148,31 +199,36 @@ async function fetchTraeLimits(options = {}, deps = {}) {
 
   const deviceId = traeDeviceId(env, options);
   try {
-    const { response, body } = await fetchJsonWithDeadline(traeEntUsageUrl(), {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Cloud-IDE-JWT ${accessToken}`,
-        'X-User-Region': 'CN',
-        'User-Agent': BROWSER_USER_AGENT,
-        ...(deviceId ? { 'X-Device-Id': deviceId } : {})
-      },
-      body: '{}',
-      redirect: 'error',
-      credentials: 'omit'
-    }, deps);
-    if (!response.ok) {
-      const error = new Error(`Trae credits request returned ${response.status}`);
-      error.status = response.status === 401 || response.status === 403
-        ? 'unauthorized'
-        : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
-      throw error;
+    let window;
+    if (cookie) {
+      window = await fetchTraeWebCredits(cookie, deps);
+    } else {
+      const { response, body } = await fetchJsonWithDeadline(traeEntUsageUrl(), {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Cloud-IDE-JWT ${accessToken}`,
+          'X-User-Region': 'CN',
+          'User-Agent': BROWSER_USER_AGENT,
+          ...(deviceId ? { 'X-Device-Id': deviceId } : {})
+        },
+        body: '{}',
+        redirect: 'error',
+        credentials: 'omit'
+      }, deps);
+      if (!response.ok) {
+        const error = new Error(`Trae credits request returned ${response.status}`);
+        error.status = response.status === 401 || response.status === 403
+          ? 'unauthorized'
+          : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
+        throw error;
+      }
+      ({ window } = parseTraeEntUsage(body));
     }
-    const { window } = parseTraeEntUsage(body);
     return normalizeLimitProvider({
       provider: 'trae',
-      accountKey: hashKey('trae', accessToken),
+      accountKey: hashKey('trae', cookie || accessToken),
       source: 'api',
       status: 'ok',
       updatedAt,
@@ -202,5 +258,6 @@ module.exports = {
   parseTraeEntUsage,
   traeAccessToken,
   traeDeviceId,
+  traeCookie,
   traeEntUsageUrl
 };

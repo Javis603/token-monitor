@@ -34,16 +34,15 @@
 
   function filterReasonixSyntheticSessions(sessions) {
     if (!sessions || typeof sessions !== 'object') return sessions;
-    let removed = false;
+    const keys = Object.keys(sessions);
+    if (!keys.some(key => isReasonixSyntheticSession(sessions[key], key))) return sessions;
     const filtered = {};
-    for (const [key, session] of Object.entries(sessions)) {
-      if (isReasonixSyntheticSession(session, key)) {
-        removed = true;
-        continue;
-      }
+    for (const key of keys) {
+      const session = sessions[key];
+      if (isReasonixSyntheticSession(session, key)) continue;
       filtered[key] = session;
     }
-    return removed ? filtered : sessions;
+    return filtered;
   }
 
   return {

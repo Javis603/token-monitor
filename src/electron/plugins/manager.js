@@ -100,7 +100,11 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
   function descriptor(plugin, view) {
     const base = `tm-plugin://${plugin.id}/${plugin.revision}/`;
     return { ...view, identityIcon: plugin.manifest.identityIcon, title: localize(view.title, getLocale()), pluginId: plugin.id, ref: `${plugin.id}/${view.id}`,
-      contentOrder: Object.fromEntries((view.targets || []).map(target => { const index = (getSettings().pluginContentOrder?.[target] || []).indexOf(`${plugin.id}/${view.id}`); return [target, index < 0 ? Number.MAX_SAFE_INTEGER : index]; })),
+      contentOrder: Object.fromEntries((view.targets || []).map(target => {
+        const orders = getSettings().pluginContentOrder || {};
+        const index = (Object.hasOwn(orders, target) ? orders[target] : []).indexOf(`${plugin.id}/${view.id}`);
+        return [target, index < 0 ? Number.MAX_SAFE_INTEGER : index];
+      })),
       revision: plugin.revision, entry: plugin.manifest.ui ? base + plugin.manifest.ui : null,
       css: plugin.manifest.css.map(name => base + name), data: plugin.data, status: status(plugin) };
   }
@@ -116,9 +120,9 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
     return { ...base, name: localize(m.name, getLocale()), version: m.version, description: localize(m.description, getLocale()),
       author: m.author, homepage: m.homepage, identityIcon: m.identityIcon, types: pluginTypes(m), trustedCode: true, trusted: state?.trustedRevision === plugin.revision,
       hasCode: Boolean(m.ui || m.backend), hasBackend: Boolean(m.backend), settings: m.settings, settingsIdentity: plugin.revision,
-      revision: plugin.revision, views: m.views.map(view => descriptor(plugin, view)),
+      revision: plugin.revision, defaults: m.defaults, views: m.views.map(view => descriptor(plugin, view)),
       skins: m.skins.map(skin => ({ ...skin, ref: `${plugin.id}/${skin.id}`, name: localize(skin.name, getLocale()) })),
-      background: { supported: Boolean(m.backend && m.background), enabled: state?.background === true },
+      background: { supported: Boolean(m.backend && m.background), enabled: state?.background === true, description: localize(m.backgroundDescription, getLocale()) },
       runtime: m.backend ? { state: plugin.failure ? 'error' : backends.has(plugin.id) ? 'running' : 'idle', mode: selected(plugin) ? 'visible' : 'background',
         cpuPercent: null, memoryMB: null, lastError: plugin.failure } : null, logs: plugin.logs.slice(-20) };
   }

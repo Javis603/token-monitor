@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { EventEmitter } = require('node:events');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...p) => fs.readFileSync(path.join(rootDir, ...p), 'utf8');
@@ -17,6 +18,80 @@ function dashboardFunction(name, endMarker, context) {
   const body = source.slice(start, source.indexOf(endMarker));
   return new vm.Script(`${body}\n${name};`).runInNewContext(context);
 }
+
+function dashboardWindowFixture() {
+  const windows = [];
+  const handlers = new Map();
+  class Window extends EventEmitter {
+    constructor() {
+      super();
+      this.calls = [];
+      this.webContents = new EventEmitter();
+      this.webContents.setWindowOpenHandler = () => {};
+      this.webContents.reload = () => this.calls.push('reload');
+      this.webContents.draft = { tab: 'activity', range: 'month' };
+      windows.push(this);
+    }
+    isDestroyed() { return this.destroyed === true; }
+    isVisible() { return this.visible === true; }
+    isMinimized() { return this.minimized === true; }
+    hide() { this.visible = false; this.calls.push('hide'); }
+    show() { this.visible = true; this.calls.push('show'); }
+    focus() { this.calls.push('focus'); }
+    restore() { this.minimized = false; this.calls.push('restore'); }
+    loadFile() { this.calls.push('load'); return Promise.resolve(); }
+    destroy() { this.destroyed = true; this.emit('closed'); }
+    static fromWebContents(sender) { return windows.find(win => win.webContents === sender); }
+  }
+  const context = vm.createContext({
+    dashboardWindow: null, dashboardWindowReady: false,
+    BrowserWindow: Window, process: { platform: 'win32' }, path, __dirname: rootDir,
+    appWindowIcon: () => ({}), applyWindowsChrome() {}, syncWindowsBackdrop() {},
+    nativeBlurEnabled: () => false, attachNativeMaterialVisibility() {},
+    syncNativeMaterialVisibility() {}, nativeMaterialOptions: () => ({}), settings: {},
+    isAllowedExternalUrl: () => false, console: { log() {} },
+    ipcMain: { on: (name, handler) => handlers.set(name, handler) }
+  });
+  const main = read('src', 'electron', 'main.js');
+  vm.runInContext(main.slice(main.indexOf('function discardFailedDashboardWindow('), main.indexOf('async function getDashboardHistory(')), context);
+  vm.runInContext(main.slice(main.indexOf("ipcMain.on('dashboard:ready'"), main.indexOf("ipcMain.on('dashboard:minimize'")), context);
+  return { windows, open: () => context.createDashboardWindow(), ready: win => handlers.get('dashboard:ready')({ sender: win.webContents }) };
+}
+
+test('repeated Dashboard opens wait for initial data without hiding or reloading the page', () => {
+  const f = dashboardWindowFixture();
+  const win = f.open();
+  assert.equal(f.open(), win);
+  assert.equal(f.windows.length, 1);
+  assert.deepEqual(win.calls, ['load']);
+  f.ready({ webContents: {} });
+  assert.deepEqual(win.calls, ['load'], 'unrelated senders cannot reveal an unprepared Dashboard');
+  f.ready(win);
+  assert.deepEqual(win.calls, ['load', 'show', 'focus']);
+});
+
+test('opening a prepared Dashboard restores the same page and closed windows start unprepared', () => {
+  const f = dashboardWindowFixture();
+  const win = f.open();
+  f.ready(win);
+  const page = win.webContents;
+  const draft = page.draft;
+  win.minimized = true;
+  win.calls.length = 0;
+  assert.equal(f.open(), win);
+  assert.equal(win.webContents, page);
+  assert.equal(page.draft, draft);
+  assert.deepEqual(win.calls, ['restore', 'show', 'focus']);
+  win.destroy();
+  const next = f.open();
+  assert.notEqual(next, win);
+  assert.deepEqual(next.calls, ['load']);
+  assert.equal(f.open(), next);
+  f.ready(win);
+  assert.deepEqual(next.calls, ['load'], 'a late ready event from the old page must not reveal its replacement');
+  f.ready(next);
+  assert.deepEqual(next.calls, ['load', 'show', 'focus']);
+});
 
 test('preload exposes the dashboard IPC surface', () => {
   const preload = read('src', 'electron', 'preload.js');

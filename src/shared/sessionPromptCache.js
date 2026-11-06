@@ -1,14 +1,11 @@
 'use strict';
 
-// A product estimate for every Codex route, not a model or provider TTL claim.
-const CODEX_ESTIMATE_TTL_SECONDS = 30 * 60;
-
 function count(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function createPromptCacheState() {
-  return { model: '', observation: undefined, previousUsage: '', previousMessage: '' };
+  return { observation: undefined, previousMessage: '' };
 }
 
 // Fold an already decoded record; provider indexes own IO and retain this state.
@@ -48,30 +45,6 @@ function applyPromptCacheEntry(state, entry, client) {
     // through a billing/configuration change that this record cannot prove.
     const ttlSeconds = short > 0 ? 300 : long > 0 ? 3600 : 0;
     state.observation = ttlSeconds ? { observedAt: new Date(at).toISOString(), ttlSeconds } : null;
-  } else if (client === 'codex') {
-    const payload = entry.payload;
-    if (!payload || typeof payload !== 'object') return;
-    if (entry.type === 'turn_context') {
-      if (state.model !== payload.model) state.observation = null;
-      state.model = String(payload.model || '');
-    }
-    if (payload.type === 'context_compacted' || entry.type === 'compacted') {
-      state.observation = null;
-      state.previousUsage = '';
-    }
-    if (payload.type !== 'token_count' || !payload.info) return;
-    const info = payload.info;
-    const usage = info.last_token_usage;
-    if (!usage || typeof usage !== 'object') return;
-    // Quota-only token_count events repeat unchanged accounting; they are
-    // not a new inference request and must not extend the estimate.
-    const identity = JSON.stringify([info.total_token_usage, usage]);
-    if (identity === state.previousUsage) return;
-    state.previousUsage = identity;
-    const read = count(usage.cached_input_tokens);
-    const write = count(usage.cache_write_input_tokens ?? 0);
-    state.observation = read !== null && write !== null && read + write > 0
-      ? { observedAt: new Date(at).toISOString(), ttlSeconds: CODEX_ESTIMATE_TTL_SECONDS } : null;
   }
 }
 

@@ -500,7 +500,6 @@ test('capability tags explain how each provider is collected in settings', () =>
   assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
   assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
   assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
-  assert.deepEqual(limitProviderCapabilityTags('minimax'), ['Token Plan', 'Pay-as-you-go', 'API key']);
   assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
   assert.deepEqual(limitProviderCapabilityTags('copilot'), ['Manual login', 'API']);
   assert.deepEqual(limitProviderCapabilityTags('unknown'), []);
@@ -508,13 +507,20 @@ test('capability tags explain how each provider is collected in settings', () =>
 
 test('Minimax capability tags are localized in settings', () => {
   const app = readRendererFile('app.js');
-  const i18n = readRendererFile('i18n.js');
-
-  assert.match(app, /'Token Plan': 'settings\.limits\.capability\.tokenPlan'/);
-  assert.match(i18n, /'settings\.limits\.capability\.tokenPlan': 'Token Plan'/);
-  assert.match(i18n, /'settings\.limits\.capability\.apiKey': 'API key'/);
-  assert.match(i18n, /'settings\.limits\.capability\.apiKey': 'API 金鑰'/);
-  assert.match(i18n, /'settings\.limits\.capability\.apiKey': 'API 密钥'/);
+  const i18n = require('../../src/electron/renderer/i18n');
+  const start = app.indexOf('const LIMIT_CAPABILITY_TAG_KEYS = {');
+  const keys = app.slice(start, app.indexOf('\n};', start) + 3);
+  const translate = functionBody(app, 'translatedLimitCapabilityTag', 'translatedLimitProviderTag');
+  for (const locale of Object.keys(i18n.MESSAGES)) {
+    const tags = vm.runInNewContext(`${keys}\n${translate}\ntags.map(label => ({ key: LIMIT_CAPABILITY_TAG_KEYS[label], text: translatedLimitCapabilityTag(label) }));`, {
+      tags: limitProviderCapabilityTags('minimax'),
+      t: key => i18n.translate(locale, key)
+    });
+    for (const tag of tags) {
+      assert.ok(tag.key, `${locale}: an actual MiniMax tag must use the shared vocabulary`);
+      assert.ok(tag.text && tag.text !== tag.key, `${locale}: ${tag.key}`);
+    }
+  }
 });
 
 test('Coding Plan capability tags are localized in settings', () => {
@@ -618,6 +624,22 @@ test('undetected settings tags include status and supported collection hints', (
 });
 
 test('detected settings tags show only current source after status', () => {
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'muse', status: 'ok', source: 'cli' }).map((tag) => tag.label),
+    ['Live', 'CLI']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'muse', status: 'ok', source: 'web' }).map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'manus', status: 'ok', source: 'local', sourceDetail: 'app' }).map((tag) => tag.label),
+    ['Live', 'Local']
+  );
+  assert.deepEqual(
+    limitProviderSettingsTags({ provider: 'manus', status: 'ok', source: 'web' }).map((tag) => tag.label),
+    ['Linked', 'Web']
+  );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'claude', status: 'ok', source: 'web' })
       .map((tag) => tag.label),
@@ -901,10 +923,10 @@ test('every multi-account Limits group uses its provider-localized account count
   // key itself.
   assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
   assert.match(view, /return text === key \? '' : text;/);
-  assert.match(view, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(view, /count \? limitGroupCountText\(providerId, count\) : ''/);
   assert.match(view, /providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
-  for (const provider of ['claude', 'codex', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
+  for (const provider of ['claude', 'codex', 'minimax', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
     assert.match(i18n, new RegExp(`'settings\\.${provider}\\.nAccounts'`));
   }
 });
@@ -1957,24 +1979,18 @@ test('account validation reads the local device raw limits, not the collapsed ag
   const app = readRendererFile('app.js');
   const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');
   const helper = functionBody(app, 'localProviderStatus', 'renderAntigravityStatus');
-  // Sync-mode aggregateLimits() collapses a local `unauthorized` row out in favor
-  // of a remote `ok` (providerCollapseKey for deepseek/minimax/grok is just the
-  // provider name; pickBetterProvider keeps the higher statusRank). So the account
-  // card must read the LOCAL device's RAW limits from state.stats.devices, where
-  // the local unauthorized row still lives — not state.stats.limits.providers,
-  // where it has already been dropped. Searching the aggregate would miss the
-  // local row and fall back to the remote `ok`, falsely reporting an invalid
-  // local key as Linked.
+  // A healthy remote reading cannot validate the local credential.
   assert.match(rawHelper, /accountIdentityApi\.localDeviceLimitsProviders/);
   assert.match(rawHelper, /state\.stats/);
   assert.match(rawHelper, /state\.settings\?\.deviceId/);
   assert.match(helper, /localDeviceLimitsProviders\(\)/);
   assert.match(helper, /localProviders !== null/);
-  // Falls back to the aggregate only for legacy/non-aggregated stats that do
-  // not expose raw device rows at all.
+  // Legacy stats without raw device rows retain aggregate fallback.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
-  // DeepSeek and MiniMax reach it through the shared account-form lane.
-  assert.match(functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked'), /const provider = localProviderStatus\(providerName\);/);
+  // The default account form reads the local row. Muse follows its web session.
+  const externalAccount = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
+  assert.match(externalAccount, /localProviderStatus\(providerName\);/);
+  assert.match(externalAccount, /source === 'web'/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {
@@ -2645,14 +2661,38 @@ test('settings pushes sync once while repainting the background main view', () =
   assert.equal([...settingsPush.matchAll(/syncSettingsForm/g)].length, 1);
 });
 
-test('main limits rerenders coalesce identical visible provider data', () => {
-  const app = readRendererFile('app.js');
-  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-
-  assert.match(renderLimits, /const renderSignature = JSON\.stringify\(\{/);
-  assert.match(renderLimits, /state\.limitPanelRenderSignature === renderSignature/);
-  assert.match(renderLimits, /els\.limitsPanel\.children\.length === orderedProviders\.length/);
-  assert.match(renderLimits, /state\.limitPanelRenderSignature = renderSignature;/);
+test('main limits cache reuses unchanged data and repaints when token units change', () => {
+  const source = functionBody(readRendererFile('app.js'), 'renderLimits', 'serviceStatusLabel');
+  let paints = 0;
+  const state = { settings: { compactTokenUnits: 'western' }, stats: { limits: { providers: [{ provider: 'muse', source: 'web', status: 'ok' }] } } };
+  const context = vm.createContext({
+    state,
+    Date: class extends Date { static now() { return 1793512800000; } },
+    els: { limitsPanel: { children: [], replaceChildren(...nodes) { this.children = nodes; paints++; } } },
+    currentLocale: () => 'zh-TW',
+    limitDetailTooltipShouldHoldRender: () => false,
+    codexAccountControl: { deferRender: () => false, stateSignature: () => [] },
+    enabledLimitProviderSet: () => new Set(['muse']),
+    providersByLimitProviderId: records => new Map([['muse', records]]),
+    LIMIT_PROVIDERS: [{ id: 'muse', label: 'Muse' }],
+    limitProviderOrderApi,
+    captureLimitResetMotion: () => null,
+    animateCachedLimitBarsFromZero() {},
+    animateLimitResets() {},
+    limitProviderColor: () => '#0866FF',
+    renderLimitProviderSolo: () => ({})
+  });
+  vm.runInContext(source, context);
+  const render = () => vm.runInContext('renderLimits()', context);
+  render();
+  render();
+  assert.equal(paints, 1, 'unchanged readings reuse the existing row');
+  state.settings.compactTokenUnits = 'localized';
+  render();
+  assert.equal(paints, 2, 'a unit change repaints immediately without a new reading');
+  state.settings.compactTokenUnits = 'western';
+  render();
+  assert.equal(paints, 3, 'switching back also repaints');
 });
 
 test('successful providers use a green dot while preserving source and account labels', () => {
@@ -2919,7 +2959,9 @@ test('third-party API uses credential setup copy and relay capability tags', () 
   );
 });
 
-test('minimax status copy uses the same API key wording as CodexBar', () => {
+test('MiniMax limit-row statuses keep Code sign-in separate from API-key setup', () => {
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'minimax', source: 'oauth' }), 'OAuth');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'minimax', source: 'api' }), 'API');
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
@@ -2928,6 +2970,14 @@ test('minimax status copy uses the same API key wording as CodexBar', () => {
     presentation.limitProviderStatusLabel({ provider: 'minimax', status: 'unauthorized' }),
     { label: 'Update API key', tone: 'setup' }
   );
+  for (const [status, expected] of [
+    ['notConfigured', { label: 'Sign in', tone: 'setup' }],
+    ['unauthorized', { label: 'Sign in again', tone: 'setup' }],
+    ['unavailable', { label: 'Unavailable', tone: 'warn' }],
+    ['ok', { label: 'Live', tone: 'ok' }]
+  ]) {
+    assert.deepEqual(presentation.limitProviderStatusLabel({ provider: 'minimax', status, source: 'oauth' }), expected, `oauth ${status}`);
+  }
 });
 
 test('MiMo uses shared Limits statuses while keeping errors distinct from rejected sessions', () => {
@@ -2945,19 +2995,17 @@ test('MiMo uses shared Limits statuses while keeping errors distinct from reject
   );
 });
 
-test('MiMo settings stays connected while one independent product is live', () => {
-  const live = { provider: 'mimo', status: 'ok', accountKey: 'console', accountLabel: 'Console' };
-  const expired = { provider: 'mimo', status: 'unauthorized', accountKey: 'membership', accountLabel: 'Desktop Membership' };
-  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'mimo'), live);
-  assert.equal(presentation.limitProviderSettingsRecord([expired, live], 'mimo'), live);
-  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'codex'), undefined);
-  // Neither live: the console product is the row the account is named by.
-  assert.equal(
-    presentation.limitProviderSettingsRecord([expired, { ...live, status: 'unauthorized' }], 'mimo').accountKey,
-    'console'
-  );
-  assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
-});
+for (const id of ['mimo', 'minimax']) {
+  test(`${id} settings stays connected while one independent product is live`, () => {
+    const live = { provider: id, accountKey: 'console', accountLabel: 'Console', status: 'ok', source: 'api' };
+    const expired = { provider: id, accountKey: 'membership', accountLabel: 'Desktop Membership', status: 'unauthorized', source: id === 'mimo' ? 'local' : 'oauth', sourceDetail: 'app' };
+    assert.equal(presentation.limitProviderSettingsRecord([live, expired], id), live);
+    assert.equal(presentation.limitProviderSettingsRecord([expired, live], id), live);
+    assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'codex'), undefined);
+    assert.equal(presentation.limitProviderSettingsRecord([expired, { ...live, status: 'unauthorized' }], id).accountKey, 'console');
+    assert.equal(presentation.limitProviderSettingsRecord([expired], id), expired);
+  });
+}
 
 test('OpenRouter grouped plan policy separates profile identities, explicit plans, and recovery status', () => {
   const view = createLimitWindowsView({ presentation, t: (key, params) => translate('en', key, params) });

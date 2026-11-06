@@ -49,6 +49,10 @@ class FakeNode {
       this.children.push(child);
     }
   }
+  prepend(...children) {
+    for (const child of children) child.parentNode = this;
+    this.children.unshift(...children);
+  }
 
   replaceChildren(...children) {
     this.children = [];
@@ -107,6 +111,7 @@ function createHarness() {
   const document = {
     createElement: (tagName) => {
       const node = new FakeNode(tagName);
+      node.ownerDocument = document;
       createdNodes.push(node);
       return node;
     },
@@ -131,6 +136,7 @@ function createHarness() {
     state: { mode: 'sync', settings: { showToolIcons: false, hubMode: 'client' } },
     els: { syncPanelCount: {}, syncPanelOpenDevices: {} },
     syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
+    deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
     currentLocale: () => 'en',
     availableBreakdownIds: () => ['device'],
     osIconFor: () => '',

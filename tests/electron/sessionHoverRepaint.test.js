@@ -112,7 +112,7 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
     removeAttribute(name) { delete this[name]; }
   };
   const document = {
-    querySelector: selector => selector.split(', ').some(part => part === '.home-session-row .is-hover-reading')
+    querySelector: selector => selector.split(', ').some(part => part === '.home-panel:not(.hidden) .home-session-row .is-hover-reading')
       && classes.has('is-hover-reading') ? title : null,
     querySelectorAll: () => [title],
     createElement: () => ({
@@ -127,7 +127,7 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
   const state = { breakdown: 'home', stats: { revision: 1 } };
   const context = {
     homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
-    state, prefersReducedMotion: () => false, visibleStatsSurface: () => 'main',
+    state, pluginContent: null, prefersReducedMotion: () => false, visibleStatsSurface: () => 'main',
     requestAnimationFrame: callback => frames.push(callback),
     document,
     window: {

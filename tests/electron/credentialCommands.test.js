@@ -218,8 +218,10 @@ test('a stale probe that was rejected still reports superseded, not invalid', as
 
 test('clearing removes the form credential through the same settings write', async () => {
   const { api, patches } = commands();
-  assert.deepEqual(await api.clearCredential('minimax'), { cleared: true, settings: { projected: true } });
-  assert.deepEqual(patches, [{ minimaxApiKey: '' }]);
+  assert.deepEqual(await api.clearCredential('minimax'), { cleared: false, errorCode: 'customForm' });
+  assert.deepEqual(patches, []);
+  assert.equal((await api.clearCredential('kimi')).cleared, true);
+  assert.equal(patches.length, 1);
   assert.deepEqual(await api.clearCredential('codex'), { cleared: false });
 });
 
@@ -582,4 +584,55 @@ test('MiniMax saves a pay-as-you-go key against balance instead of Token Plan qu
   assert.deepEqual(urls, ['https://api.minimaxi.com/account/query_balance']);
   assert.equal(patches[0].minimaxApiKey, 'sk-api-test');
   assert.equal(Object.hasOwn(patches[0], 'minimaxBillingMode'), false);
+});
+
+test('Trae Cookie save probes the two-hop web route, replaces the legacy token, and rejects an expired session', async () => {
+  const calls = [];
+  const { api, patches } = commands({ settings: { traeAccessToken: 'old-token' }, answer: (url, init) => {
+    calls.push({ url, init });
+    return url.endsWith('/GetUserToken')
+      ? response(200, { Result: { Token: 'exchanged-jwt' } })
+      : response(200, { is_credits_billing: true, usage_summary: { total_amount: 100, consumed_amount: 20 } });
+  } });
+  const result = await api.saveCredential('trae', { traeCookie: 'Cookie: sessionid=fixture' });
+  assert.equal(result.verdict, 'valid');
+  assert.equal(result.saved, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].init.headers.Cookie, 'sessionid=fixture');
+  assert.equal(patches[0].traeAccessToken, '');
+  assert.equal(patches[0].traeCookie, 'sessionid=fixture');
+  const expired = commands({ answer: () => response(401), settings: { traeAccessToken: 'old-token' } });
+  assert.equal((await expired.api.saveCredential('trae', { traeCookie: 'sessionid=expired' })).saved, false);
+  assert.deepEqual(expired.patches, []);
+});
+
+test('OpenDesign cookie saves probe the workspace and quota, reject expired sessions and clear through the shared path', async () => {
+  const calls = [];
+  const { api, patches } = commands({ answer: (url, init) => {
+    calls.push({ url, init });
+    return response(200, url.endsWith('/current') ? { workspaceId: 'workspace-test' } : {
+      workspaceId: 'workspace-test', eligible: true,
+      windows: [{ durationSeconds: 18000, usedCredits: 0, limitCredits: 100 }]
+    });
+  } });
+  const result = await api.saveCredential('opendesign', { opendesignCookie: 'Cookie: session=test-only' });
+  assert.equal(result.saved, true);
+  assert.equal(result.verdict, 'valid');
+  assert.equal(patches[0].opendesignCookie, 'session=test-only');
+  assert.ok(patches[0].limitProviders.split(',').includes('opendesign'));
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(({ init }) => init.headers.Cookie === 'session=test-only'));
+  assert.ok(!JSON.stringify(result).includes('test-only'));
+  assert.equal((await api.clearCredential('opendesign')).cleared, true);
+  assert.equal(patches[1].opendesignCookie, '');
+
+  for (const [code, saved, verdict] of [[401, false, 'invalid'], [403, true, 'indeterminate'], [429, true, 'indeterminate']]) {
+    const c = commands({ answer: () => response(code) });
+    const reply = await c.api.saveCredential('opendesign', { opendesignCookie: 'session=test-only' });
+    assert.equal(reply.saved, saved);
+    assert.equal(reply.verdict, verdict);
+  }
+  const c = commands({ answer: () => { throw new Error('malformed draft must not probe'); } });
+  assert.equal((await c.api.saveCredential('opendesign', { opendesignCookie: 'bare-token' })).saved, false);
+  assert.deepEqual(c.patches, []);
 });

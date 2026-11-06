@@ -84,10 +84,15 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     ipcRenderer.on('window:visibility', listener);
     return () => ipcRenderer.removeListener('window:visibility', listener);
   },
-  onWindowPointerActivation: (callback) => {
+  onWindowSummoned: (callback) => {
     const listener = () => { try { callback(); } catch (_) {} };
-    ipcRenderer.on('window:pointerActivation', listener);
-    return () => ipcRenderer.removeListener('window:pointerActivation', listener);
+    ipcRenderer.on('window:summoned', listener);
+    return () => ipcRenderer.removeListener('window:summoned', listener);
+  },
+  onWindowSummonCancelled: (callback) => {
+    const listener = () => { try { callback(); } catch (_) {} };
+    ipcRenderer.on('window:summonCancelled', listener);
+    return () => ipcRenderer.removeListener('window:summonCancelled', listener);
   },
   onSettingsPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
@@ -200,6 +205,15 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('claude:setAccountEnabled', id, enabled)
   },
   limits: {
+    openHistory: (key, rect, interactive = false) => ipcRenderer.invoke('limitsHistory:open', { key, rect, interactive }),
+    enterHistory: key => ipcRenderer.send('limitsHistory:enter', key),
+    leaveHistory: key => ipcRenderer.send('limitsHistory:leave', key),
+    closeHistory: () => ipcRenderer.send('limitsHistory:close'),
+    onHistoryState: callback => {
+      const listener = (_event, open, key) => callback(open, key);
+      ipcRenderer.on('limitsHistory:state', listener);
+      return () => ipcRenderer.removeListener('limitsHistory:state', listener);
+    },
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
     listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
     clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId),
@@ -217,6 +231,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     moveCredential: (name, kind, targetName, options) => ipcRenderer.invoke('opencode:moveCredential', name, kind, targetName, options),
     setProfileEnabled: (name, enabled) => ipcRenderer.invoke('opencode:setProfileEnabled', name, enabled),
     setAmbientEnabled: (enabled) => ipcRenderer.invoke('opencode:setAmbientEnabled', enabled)
+  },
+  minimax: {
+    getKeys: () => ipcRenderer.invoke('minimax:getKeys'),
+    addKey: (key) => ipcRenderer.invoke('minimax:addKey', key),
+    removeKey: (id) => ipcRenderer.invoke('minimax:removeKey', id)
   },
   openrouter: {
     getProfiles: () => ipcRenderer.invoke('openrouter:getProfiles'),
@@ -267,7 +286,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     getSettings: id => pluginSettingsResult(ipcRenderer.invoke('plugins:getSettings', id)),
     updateSettings: (id, input) => pluginSettingsResult(ipcRenderer.invoke('plugins:updateSettings', id, input)),
     list: () => ipcRenderer.invoke('plugins:list'),
-    setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled }),
+    setEnabled: (id, enabled, initialSetup) => ipcRenderer.invoke('plugins:setEnabled', { id, enabled, initialSetup }),
     setBackground: (id, enabled) => ipcRenderer.invoke('plugins:setBackground', { id, enabled }),
     restart: (id) => ipcRenderer.invoke('plugins:restart', { id }),
     reload: () => ipcRenderer.invoke('plugins:reload'),

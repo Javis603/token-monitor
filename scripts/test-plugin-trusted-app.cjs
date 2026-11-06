@@ -11,6 +11,7 @@ const { createPluginRuntime, registerPluginScheme } = require('../src/electron/p
 const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trusted-app-'));
 const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
+if (process.env.TM_WINDOW_FOCUS_ONLY === '1') app.setPath('userData', scratch);
 const pageKeys = ['home', 'tool', 'device', 'model', 'project', 'session', 'status', 'limits', 'trends'];
 const fixtureDir = path.join(scratch, 'author-source');
 fs.cpSync(path.join(root, 'tests/fixtures/trusted-plugin'), fixtureDir, { recursive: true });
@@ -23,6 +24,16 @@ manifest.views.push(
   { id: 'navigation-second', targets: ['main.navigation.content'], selector: '.view-switcher-label' }
 );
 if (process.env.TM_DEFAULT_PLACEMENTS === '1') manifest.views.find(view => view.id === 'panel').defaultSurfaces = ['page','notch'];
+if (process.env.TM_UPDATE_CONSENT === '1') {
+  manifest.views = manifest.views.filter(view => view.id !== 'content');
+  manifest.background = true;
+}
+if (process.env.TM_FIRST_USE_CHOICES === '1') {
+  manifest.views.find(view => view.id === 'panel').defaultSurfaces = ['page', 'notch'];
+  manifest.background = true;
+  manifest.skins = [{ id: 'blue', name: 'Blue', colors: { accent: '#abcdef' } }];
+  manifest.defaults = { background: true, skin: 'blue' };
+}
 fs.renameSync(path.join(fixtureDir, 'ui.mjs'), path.join(fixtureDir, 'basic.mjs'));
 manifest.files.push('basic.mjs');
 manifest.files.push('fixture.png');
@@ -118,7 +129,7 @@ app.whenReady().then(async () => {
   let settings = { ...defaults(), language: 'zh-TW', systemGlass: false, reduceMotion: 'on', tokenNumberAnimation: 'off', refreshMs: 3600000 };
   const period = { totalTokens: 125000, costUsd: 4.25, inputTokens: 100000, outputTokens: 25000, cachedInputTokens: 0, sessions: [], models: { 'gpt-5': 100000, 'claude-sonnet': 25000 }, modelCosts: { 'gpt-5': 3.25, 'claude-sonnet': 1 }, clients: { codex: 125000 }, clientCosts: { codex: 4.25 }, devices: [], projects: { fixture: { label: 'Synthetic project', tokens: 125000, costUsd: 4.25, clients: { codex: 125000 } } } };
   const stats = { updatedAt: new Date().toISOString(), periods: { today: period, month: { ...period, totalTokens: 750000 }, allTime: period }, devices: [], limits: { providers: [] } };
-  win = new BrowserWindow({ show: true, width: 400, height: 820, backgroundColor: '#17181a', webPreferences: { preload: path.join(root, 'src/electron/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  win = new BrowserWindow({ show: true, width: 400, height: 820, backgroundColor: '#17181a', webPreferences: { preload: path.join(root, 'src/electron/preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, ...(process.env.TM_UPDATE_CONSENT === '1' ? { backgroundThrottling: false, offscreen: true } : {}) } });
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) { errors.push(message); console.log('RENDERER', message); } });
   win.webContents.on('render-process-gone', (_event, details) => { console.error(details); app.exit(1); });
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }));
@@ -246,12 +257,12 @@ app.whenReady().then(async () => {
     await pause(200);
     fs.writeFileSync(path.join(evidence,'initial-locations-consent.png'),(await capture()).toPNG());
     if (process.env.TM_EXPECT_BASELINE === '1') {
-      assert.equal(await js("!!document.querySelector('.plugin-default-placements')"),false);
+      assert.equal(await js("!!document.querySelector('.plugin-initial-setup')"),false);
     } else {
-      assert.equal(await js("document.querySelector('.plugin-default-placements input[data-surface=page]').checked"),true);
-      assert.equal(await js("document.querySelector('.plugin-default-placements input[data-surface=notch]').checked"),true);
-      assert.equal(await js("document.querySelector('.plugin-default-placements input[data-surface=edgeDock]').checked"),false);
-      await js("document.querySelector('.plugin-default-placements input[data-surface=notch]').click()");
+      assert.equal(await js("document.querySelector('[data-control-key=\"initial/placement:trusted-fixture/panel:page\"]').checked"),true);
+      assert.equal(await js("document.querySelector('[data-control-key=\"initial/placement:trusted-fixture/panel:notch\"]').checked"),true);
+      assert.equal(await js("document.querySelector('[data-control-key=\"initial/placement:trusted-fixture/panel:edgeDock\"]').checked"),false);
+      await js("document.querySelector('[data-control-key=\"initial/placement:trusted-fixture/panel:notch\"]').click()");
       await js("document.querySelector('.plugin-package-preview .plugin-allow').click()");
       await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'",'installed with choices');
       assert.deepEqual(settings.pluginMainPages,['trusted-fixture/panel']);
@@ -263,12 +274,253 @@ app.whenReady().then(async () => {
       await js("openViewFromTray('plugin:trusted-fixture/panel')");
       await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')",'default page author UI');
       fs.writeFileSync(path.join(evidence,'initial-locations-installed.png'),(await capture()).toPNG());
-      assert.equal(settings.pluginPlacementDefaults['trusted-fixture'].applied,true);
+      assert.ok(settings.pluginInitialSetup['trusted-fixture'].applied.includes('placement:trusted-fixture/panel:page'));
     }
     assertConsoleClean();console.log('PASS actual renderer initial placement consent and selected page after reload');
     await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
   }
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
+  if (process.env.TM_FIRST_USE_CHOICES === '1') {
+    const accent = settings.themeColors.accent;
+    await js("openSettingsPanel();for(const section of SETTINGS_SECTION_IDS)setSettingsSectionExpanded(section,section==='plugins');pluginSettingsPanel.refresh()");
+    await waitFor("document.querySelector('.plugin-enable')", 'installed plugin toggle');
+    await js("document.querySelector('.plugin-enable').click()");
+    await waitFor("document.querySelector('.plugin-consent .plugin-allow')", 'first-use consent');
+    const reviewed = await js(`(() => {
+      const inputs = [...document.querySelectorAll('.plugin-initial-setup input')];
+      const defaults = inputs.map(input => ({ key: input.dataset.controlKey, checked: input.checked }));
+      for (const item of defaults) if (item.checked) document.querySelector('[data-control-key="' + item.key + '"]').click();
+      return defaults;
+    })()`);
+    for (const key of ['initial/placement:trusted-fixture/panel:page', 'initial/placement:trusted-fixture/panel:notch', 'initial/content:main.home.content', 'initial/background', 'initial/skin']) {
+      assert.equal(reviewed.find(input => input.key === key)?.checked, true, `author default ${key}`);
+    }
+    await js("document.querySelector('.plugin-consent .plugin-allow').click()");
+    await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'", 'enabled with reviewed choices');
+    assert.deepEqual(settings.pluginMainPages, []);
+    assert.deepEqual(settings.notchPluginPages, []);
+    assert.deepEqual(settings.pluginContentSelections, {});
+    assert.equal(settings.pluginStates['trusted-fixture'].background, false);
+    assert.equal(settings.themeColors.accent, accent);
+    assert.equal(settings.pluginAuthorSkin, null);
+    const ready = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    win.webContents.reload(); await ready;
+    await waitFor("state.pluginCatalog?.plugins?.[0]?.status==='active'", 'reviewed choices after reload');
+    await js("(async()=>{await pluginApi.setEnabled('trusted-fixture',false);await pluginApi.setEnabled('trusted-fixture',true)})()");
+    assert.deepEqual(settings.pluginMainPages, []);
+    assert.deepEqual(settings.notchPluginPages, []);
+    assert.deepEqual(settings.pluginContentSelections, {});
+    assert.equal(settings.pluginStates['trusted-fixture'].background, false);
+    assert.equal(settings.pluginAuthorSkin, null);
+    assertConsoleClean(); console.log('PASS actual App first-use choices: placements, native content, background and skin survive adapter, IPC, reload and re-enable');
+    await runtime.dispose(); runtime = null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
+  }
+  if (process.env.TM_UPDATE_CONSENT === '1') {
+    await js("pluginApi.setEnabled('trusted-fixture',true)");
+    // Keep backend lifetime independent of offscreen window visibility.
+    await js("pluginApi.setBackground('trusted-fixture',true)");
+    await js("pluginApi.place('trusted-fixture/panel','page',true)");
+    await js("openViewFromTray('plugin:trusted-fixture/panel')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'original plugin page');
+    await js("globalThis.originalUpdateInput=document.querySelector('[aria-label=\"Fixture draft\"]');originalUpdateInput.value='UNSAVED UPDATE DRAFT'");
+    const otherDir = path.join(scratch, 'other-source');
+    fs.cpSync(fixtureDir, otherDir, { recursive: true });
+    const contentView = { id: 'content', mode: 'replace', targets: ['main.home.content', 'constructor', 'toString'] };
+    fs.writeFileSync(path.join(otherDir, 'manifest.json'), JSON.stringify({ ...manifest, id: 'other-fixture', name: 'Other fixture', views: [...manifest.views, contentView] }));
+    selectedDirectory = otherDir;
+    const other = await js("pluginApi.importPackage('directory')");
+    await js(`pluginApi.install(${JSON.stringify(other.token)},{trustInstall:true})`);
+    fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({ ...manifest, version: '2.0.0', views: [...manifest.views, contentView] }));
+    selectedDirectory = fixtureDir;
+    const update = await js("pluginApi.importPackage('directory')");
+    await pause(100);
+    const pid = (await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','before')")).pid;
+    const install = `pluginApi.install(${JSON.stringify(update.token)},{trustUpdate:true,initialSetup:{'content:main.home.content':'trusted-fixture/content'}})`;
+    for (const responses of [[0], [1, 0]]) {
+      toggleResponses.push(...responses);
+      assert.match(await js(`${install}.then(()=>'',error=>error.message)`), /cancelled/);
+      assert.deepEqual(await js("({same:document.querySelector('[aria-label=\"Fixture draft\"]')===originalUpdateInput,draft:document.querySelector('[aria-label=\"Fixture draft\"]')?.value})"), { same: true, draft: 'UNSAVED UPDATE DRAFT' });
+      assert.equal((await js("tokenMonitorTrustedPlugins.call('trusted-fixture','echo','after')")).pid, pid);
+      assert.equal(runtime.manager.list().plugins.find(plugin => plugin.id === 'trusted-fixture').version, '1.0.0');
+      assert.equal(settings.pluginContentSelections['main.home.content'], 'other-fixture/content');
+    }
+    await js("tokenMonitor.updateSettings({pluginsEnabled:false})");
+    assert.equal(runtime.manager.active('trusted-fixture'), false);
+    assert.equal(runtime.manager.backendCount(), 0);
+    toggleResponses.push(1);
+    await js(install);
+    await waitFor("state.pluginCatalog?.plugins?.find(plugin=>plugin.id==='trusted-fixture')?.version==='2.0.0'", 'same preview update succeeds after both cancellations');
+    assert.equal(settings.pluginContentSelections['main.home.content'], 'trusted-fixture/content');
+    assert.equal(runtime.manager.active('trusted-fixture'), false);
+    assert.equal(runtime.manager.backendCount(), 0);
+    assert.equal(await js("state.pluginCatalog.plugins.find(plugin=>plugin.id==='trusted-fixture').initialSetup.fields.length"), 0);
+    await js("tokenMonitor.updateSettings({pluginsEnabled:true})");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]') && document.querySelector('[aria-label=\"Fixture draft\"]')!==originalUpdateInput", 'updated plugin UI remount');
+    await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    assert.equal(settings.pluginContentSelections['main.home.content'], 'trusted-fixture/content');
+    assert.equal(runtime.manager.active('other-fixture'), true);
+    assertConsoleClean(); console.log('PASS actual App update consent: cancellations retain drafts and backend; paused retry applies reviewed settings without execution; master resume uses the chosen source');
+    await runtime.dispose(); runtime = null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
+  }
+  if (process.env.TM_CONTENT_SAFETY === '1') {
+    await js("pluginApi.setEnabled('trusted-fixture',true)");
+    const draft = '.plugin-content[data-plugin-target="main.home.content"] [aria-label="Fixture draft"]';
+    await waitFor(`document.querySelector(${JSON.stringify(draft)})`, 'selected Home replacement');
+    await js(`globalThis.savedContentInput=document.querySelector(${JSON.stringify(draft)});savedContentInput.value='UNSAVED HOME'`);
+    selectedDirectory = path.join(scratch, 'other-source');
+    fs.cpSync(fixtureDir, selectedDirectory, { recursive: true });
+    fs.writeFileSync(path.join(selectedDirectory, 'manifest.json'), JSON.stringify({ ...manifest, id: 'other-fixture', name: 'Other fixture' }));
+    const other = await js("tokenMonitor.plugins.importPackage('directory')");
+    const install = `pluginApi.install(${JSON.stringify(other.token)},{trustInstall:true})`;
+    toggleResponses.push(1, 0);
+    assert.match(await js(`${install}.then(()=>'',error=>error.message)`), /cancelled/);
+    assert.equal(settings.pluginContentSelections['main.home.content'], 'trusted-fixture/content');
+    assert.equal(fs.existsSync(path.join(scratch, 'plugins/other-fixture')), false);
+    assert.deepEqual(await js(`({same:document.querySelector(${JSON.stringify(draft)})===savedContentInput,value:savedContentInput.value})`), { same: true, value: 'UNSAVED HOME' });
+    assert.match(toggleDialogs.at(-1).message, /未儲存/);
+    toggleResponses.push(1, 1);
+    await js(install);
+    await waitFor(`document.querySelector(${JSON.stringify(draft)}) && document.querySelector(${JSON.stringify(draft)})!==savedContentInput`, 'replacement after retry');
+    assert.equal(settings.pluginContentSelections['main.home.content'], 'other-fixture/content');
+    assert.equal(runtime.manager.active('trusted-fixture'), true);
+    assert.equal(runtime.manager.active('other-fixture'), true);
+    await js(`globalThis.savedContentInput=document.querySelector(${JSON.stringify(draft)});savedContentInput.value='SECOND DRAFT'`);
+    toggleResponses.push(0);
+    assert.match(await js("pluginApi.selectContent('main.home.content',null).then(()=>'',error=>error.message)"), /cancelled/);
+    assert.deepEqual(await js(`({same:document.querySelector(${JSON.stringify(draft)})===savedContentInput,value:savedContentInput.value})`), { same: true, value: 'SECOND DRAFT' });
+    toggleResponses.push(1);
+    await js("pluginApi.selectContent('main.home.content',null)");
+    await waitFor(`!document.querySelector(${JSON.stringify(draft)})`, 'native content after consent');
+    assert.equal(settings.pluginContentSelections['main.home.content'], undefined);
+    assert.equal(runtime.manager.active('other-fixture'), true);
+    assertConsoleClean(); console.log('PASS actual App draft warnings: cancel preserves DOM and input, same preview retries, accepted switch and native restore keep plugins enabled');
+    await runtime.dispose(); runtime = null; win.destroy(); clearTimeout(deadline); app.exit(0); return;
+  }
+  if (process.env.TM_WINDOW_FOCUS_ONLY === '1') {
+    await js("pluginApi.setEnabled('trusted-fixture',true)");
+    await js("pluginApi.place('trusted-fixture/panel','page',true).then(applyPluginCatalog)");
+    await js("openViewFromTray('plugin:trusted-fixture/panel')");
+    await waitFor("document.querySelector('.plugin-header-actions') && document.querySelector('[aria-label=\"Fixture draft\"]')", 'focus fixture page');
+    // Synthetic author action in the production header slot, with an observable
+    // Enter action. The real App renderer/preload and native window stay in use.
+    await js(`globalThis.focusClicks=0;globalThis.focusButton=document.createElement('button');
+      focusButton.textContent='Privacy';focusButton.className='plugin-main-detach';
+      focusButton.onclick=()=>focusClicks++;document.querySelector('.plugin-header-actions').append(focusButton)`);
+    const source = fs.readFileSync(process.env.TM_FOCUS_MAIN_SOURCE || path.join(root,'src/electron/main.js'),'utf8');
+    const handler = source.slice(source.indexOf('function handleWindowToggleShortcut('),source.indexOf('function handleTrayToggle('));
+    const context = vm.createContext({ mainWindow:win,settings:{trayMode:false},floatingBubbleState:{collapsed:false},
+      windowToggleShortcutAction:require('../src/electron/windowShortcut').windowToggleShortcutAction,
+      pluginWindowActions:{hide:target=>target.hide()},focusExistingWindow:()=>win.show(),
+      sendMainWindowEvent:channel=>win.webContents.send(channel) });
+    vm.runInContext(handler,context);
+    const reopen = async () => {
+      context.handleWindowToggleShortcut(); await pause(60);
+      context.handleWindowToggleShortcut(); win.focus(); await pause(120); await capture();
+    };
+    const baseline = Boolean(process.env.TM_FOCUS_MAIN_SOURCE);
+    await js('focusButton.focus()'); await reopen();
+    const parked = await js('document.activeElement===els.shell');
+    assert.equal(parked,!baseline,'shortcut parks accidental header focus');
+    if (baseline) {
+      assert.equal(await js('document.activeElement===focusButton'),true);
+      fs.writeFileSync(path.join(evidence,'focus-baseline.png'),(await capture()).toPNG());
+    } else {
+      // This is an injected renderer activation sequence, not a claim that the
+      // OS menu-bar race has been reproduced. The real Chromium focus is used.
+      const reviewSource = fs.readFileSync(process.env.TM_FOCUS_CONTROLLER_SOURCE || path.join(root,'src/electron/renderer/windowActivationFocus.js'),'utf8');
+      await js(reviewSource);
+      await js(`globalThis.reviewFocus=TokenMonitorWindowActivationFocus.create({document,shell:els.shell,header:document.querySelector('.titlebar')});
+        focusButton.focus();reviewFocus.summon();window.dispatchEvent(new Event('blur'));
+        document.body.tabIndex=-1;document.body.focus()`);
+      await capture();
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===els.shell'),true,'transient blur must retain pending summon');
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===focusButton'),true,'completed summon permits programmatic focus');
+      // A second native window supplies a genuine departure. Cancellation uses
+      // the production main blur callback, not the renderer blur event.
+      context.win=win;context.suppressNextBlurHide=false;context.quitRequested=false;
+      context.nudgeTaskbarZOrder=()=>{};context.scheduleFloatingBubbleAutoCollapse=()=>{};
+      vm.runInContext(source.slice(source.indexOf("  win.on('blur', () => {"),source.indexOf("  win.on('resized',",source.indexOf("  win.on('blur', () => {"))),context);
+      const other = new BrowserWindow({show:false,width:240,height:140,webPreferences:{sandbox:true}});
+      try {
+        await other.loadURL('data:text/html,<p>Isolated focus departure</p>');
+        await js('document.body.focus();windowActivationFocus.summon()');
+        other.show();other.focus();await pause(70);
+        assert.equal(await js('document.hasFocus()'),false,'other native window owns focus');
+        await js('focusButton.focus()');await pause(40);
+        assert.equal(await js('document.activeElement===focusButton'),true,'no DOM focus move while away');
+        other.hide();win.show();win.focus();await pause(60);await capture();
+        assert.equal(await js('document.activeElement===focusButton'),true,'native departure cancelled stale summon');
+      } finally { other.destroy(); }
+      await js('document.body.focus();reviewFocus.summon()');await pause(300);
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===focusButton'),true,'body-only summon expires');
+      await js('document.body.focus();windowActivationFocus.summon()');
+      win.webContents.send('window:visibility',false);await pause(40);
+      win.webContents.send('window:visibility',true);await pause(40);
+      await js('focusButton.focus()');await capture();
+      assert.equal(await js('document.activeElement===focusButton'),true,'native hidden notification cancels summon');
+      await reopen();
+      fs.writeFileSync(path.join(evidence,'focus-plugin-neutral.png'),(await capture()).toPNG());
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Return'});
+      win.webContents.sendInputEvent({type:'char',keyCode:'Return'});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:'Return'});
+      await pause(50);assert.equal(await js('focusClicks'),0,'summoning must not arm the privacy action');
+      // Hold only the controller's scheduled frames so trusted Chromium input
+      // deterministically reaches it before the first focus check.
+      app.focus({steal:true});win.focus();win.webContents.focus();await pause(60);
+      for (const keyCode of ['Return','Space']) {
+        await js(`globalThis.earlyKeyRaf=window.requestAnimationFrame;globalThis.earlyKeyFrames=[];
+          window.requestAnimationFrame=fn=>{earlyKeyFrames.push(fn);return 0};
+          focusButton.focus();reviewFocus.summon()`);
+        win.webContents.sendInputEvent({type:'keyDown',keyCode});
+        win.webContents.sendInputEvent({type:'char',keyCode});
+        win.webContents.sendInputEvent({type:'keyUp',keyCode});
+        await js('window.requestAnimationFrame=earlyKeyRaf;for(const fn of earlyKeyFrames.splice(0))fn(performance.now())');
+        await capture();
+        assert.equal(await js('focusClicks'),0,`${keyCode} before first frame must not activate incidental header`);
+        assert.equal(await js('document.activeElement===els.shell'),true);
+      }
+      // Tab is delivered through Chromium, not dispatched as a synthetic DOM event.
+      app.focus({steal:true});win.show();win.focus();win.webContents.focus();await pause(100);
+      await js('focusButton.focus()');
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab',modifiers:['shift']});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab',modifiers:['shift']});
+      await pause(60);
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Tab'});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:'Tab'});
+      await pause(80);
+      assert.equal(await js('document.activeElement===focusButton'),true,'Tab reaches the author action');
+      assert.equal(await js("focusButton.matches(':focus-visible')"),true);
+      fs.writeFileSync(path.join(evidence,'focus-plugin-keyboard.png'),(await capture()).toPNG());
+      await reopen();await waitFor('document.activeElement===focusButton','restored keyboard focus');
+      win.webContents.sendInputEvent({type:'keyDown',keyCode:'Return'});
+      win.webContents.sendInputEvent({type:'char',keyCode:'Return'});
+      win.webContents.sendInputEvent({type:'keyUp',keyCode:'Return'});
+      await pause(50);assert.equal(await js('focusClicks'),1);
+      // Deliberately selected keyboard targets still activate during pending.
+      for (const keyCode of ['Return','Space']) {
+        await js('windowActivationFocus.summon()');
+        win.webContents.sendInputEvent({type:'keyDown',keyCode});
+        win.webContents.sendInputEvent({type:'char',keyCode});
+        win.webContents.sendInputEvent({type:'keyUp',keyCode});
+        await pause(50);
+      }
+      assert.equal(await js('focusClicks'),3,'pending summon preserves intentional Enter/Space activation');
+      await js("document.querySelector('[aria-label=\"Fixture draft\"]').focus()");
+      await win.webContents.insertText('Unsubmitted draft'); await reopen();
+      assert.equal(await js("document.activeElement.getAttribute('aria-label')"),'Fixture draft');
+      assert.equal(await js('document.activeElement.value'),'Unsubmitted draft');
+      await js("openViewFromTray('model');document.querySelector('.tab').focus()");
+      await reopen();assert.equal(await js('document.activeElement===els.shell'),true,'native header uses the same policy');
+      fs.writeFileSync(path.join(evidence,'focus-native.png'),(await capture()).toPNG());
+    }
+    fs.writeFileSync(path.join(evidence,'window-focus-results.json'),JSON.stringify({baseline,parked,electron:process.versions.electron,
+      scope:'production renderer/preload/plugin runtime and main shortcut callback; native hide/show and Chromium Tab/Enter; OS global shortcut registration not driven'},null,2));
+    assertConsoleClean();console.log(baseline?'PASS baseline reproduces retained header focus':'PASS shortcut focus, injected transient blur, one-shot completion, native departure, expiry, keyboard navigation/Enter, native parity and retained draft');
+    await runtime.dispose();runtime=null;win.destroy();clearTimeout(deadline);app.exit(0);return;
+  }
   if (process.env.TM_PACKAGE_RECOVERY_ONLY === '1') {
     let loads = 0; win.webContents.on('did-finish-load', () => loads++);
     await js("pluginApi.setEnabled('trusted-fixture',true)");

@@ -33,6 +33,10 @@ const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../
 const { aggregateLimits, normalizeLimitProvider } = require('../../src/shared/limits/core');
 const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/providers/workbuddy/limits');
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
+const minimaxTestHome = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'minimax-renderer-home-'));
+test.after(() => fs.rmSync(minimaxTestHome, { recursive: true, force: true }));
+const { parseManusCredits } = require('../../src/shared/providers/manus/limits');
+const manusCreditsFixture = require('../fixtures/manusAvailableCredits.json');
 const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
 
 const root = path.join(__dirname, '../..');
@@ -398,11 +402,14 @@ test('saved-only WorkBuddy subscription card does not appear on the sole live si
 });
 
 test('Notion rolling and monthly allowances render in both display modes and hide independently', () => {
+  // Reset text is omitted once resetsAt is past the grace window, so these
+  // instants stay ahead of the render clock instead of a calendar date.
+  const now = Date.now();
   const provider = normalizeLimitProvider({
     provider: 'notion', status: 'ok', source: 'web',
     windows: [
-      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: '2026-11-01T00:00:00Z' },
-      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: '2026-12-01T00:00:00Z' }
+      { kind: 'session', label: 'Rolling', used: 21, limit: 50, usedPercent: 42, resetsAt: new Date(now + 6 * 60 * 60 * 1000).toISOString() },
+      { kind: 'billing', label: 'Monthly', used: 18, limit: 100, usedPercent: 18, resetsAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString() }
     ]
   });
   const before = JSON.stringify(provider);
@@ -428,15 +435,66 @@ test('Notion rolling and monthly allowances render in both display modes and hid
   assert.equal(JSON.stringify(provider), before);
 });
 
+test('Manus daily refresh credits and credits balance render in both display modes and hide independently', () => {
+  const nextRefreshTime = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+  const { windows } = parseManusCredits({ ...manusCreditsFixture, nextRefreshTime });
+  const provider = normalizeLimitProvider({ provider: 'manus', status: 'ok', source: 'api', windows, balance: { amount: 1180, currency: 'CREDITS' } });
+  const before = JSON.stringify(provider);
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#429DFA');
+    assert.equal(card.children.length, 2);
+    const [daily, balance] = card.children;
+    assert.equal(daily.children[0].children[0].textContent, 'Daily');
+    assert.ok(daily.classList.contains('limit-window-wide'));
+    assert.match(card.text, showLimitUsed ? /40% used/ : /60% left/);
+    assert.ok(daily.find('limit-reset').text, 'the refresh allowance shows when it resets');
+    assert.equal(balance.dataset.usageItem, 'credits');
+    assert.match(balance.text, /1,?180/);
+    assert.equal(card.text.includes('$'), false, 'Manus credits are not money');
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 2);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { manus: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#429DFA').children.length, 1);
+    }
+  }
+  assert.equal(JSON.stringify(provider), before);
+});
+
+test('Manus refresh and monthly quotas share a row before balance and hide independently', () => {
+  const { windows } = parseManusCredits({ ...manusCreditsFixture, refreshInterval: 'weekly', proMonthlyCredits: 1000, periodicCredits: 650 });
+  const provider = normalizeLimitProvider({ provider: 'manus', status: 'ok', windows });
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#429DFA');
+    assert.equal(card.children.length, 3);
+    assert.equal(card.children[0].children[0].children[0].textContent, 'Refresh');
+    assert.equal(card.children[1].children[0].children[0].textContent, 'Monthly');
+    assert.match(card.children[1].text, showLimitUsed ? /35% used/ : /65% left/);
+    assert.equal(Boolean(card.children[1].find('limit-reset')?.text), false);
+    assert.equal(card.children[0].classList.contains('limit-window-wide'), false);
+    assert.equal(card.children[1].classList.contains('limit-window-wide'), false);
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 3);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { manus: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#429DFA').children.length, 2);
+    }
+  }
+});
+
 test('MiniMax API balances reach the shared Limits and dock renderer in both currencies', async () => {
   for (const [region, currency, symbol] of [['cn', 'CNY', '¥'], ['intl', 'USD', '$']]) {
     for (const amount of [98.25, 0, -1.5]) {
       const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: region }, {
-        env: {}, fetchJson: async () => ({ available_amount: String(amount), base_resp: { status_code: 0 } })
+        env: {}, homeDir: minimaxTestHome, fetchJson: async () => ({ available_amount: String(amount), base_resp: { status_code: 0 } })
       });
       assert.equal(provider.status, 'ok');
       assert.equal(provider.windows[0].currency, currency);
-      assert.equal(provider.balance, null, 'the collector only supplies a credits window');
+      assert.equal(provider.balance.amount, amount);
+      assert.equal(provider.balance.currency, currency);
+      assert.equal(provider.balance.todaySpend, null, 'failed optional Spend remains unknown');
       const before = JSON.stringify(provider);
       for (const showLimitUsed of [false, true]) {
         const card = dockView({ showLimitUsed }).renderProviderWindows(provider, '#888888');
@@ -455,6 +513,88 @@ test('MiniMax API balances reach the shared Limits and dock renderer in both cur
   }
 });
 
+test('a confirmed MiniMax account stays one heading, and a saved cost stays reachable without a plan name', () => {
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const apiKey = `sha256:${'b'.repeat(64)}`;
+  const code = normalizeLimitProvider({
+    provider: 'minimax', status: 'ok', source: 'oauth', region: 'cn', accountKey: codeKey,
+    accountLabel: 'MiniMax Code', planLabel: '', updatedAt: '2026-10-14T04:00:00Z',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS' }]
+  });
+  const api = normalizeLimitProvider({
+    provider: 'minimax', status: 'ok', source: 'api', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey,
+    accountLabel: 'Pay-as-you-go', updatedAt: '2026-10-14T04:00:00Z',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }]
+  });
+  const view = dockView();
+  const card = (rows, appearance) => (appearance ? dockView(appearance) : view)
+    .renderLimitProviderGroup('minimax', 'Minimax', rows, '#000000');
+  const paired = card([code, api]);
+  assert.match(paired.text, /Minimax/);
+  assert.match(paired.text, /Credits/);
+  assert.match(paired.text, /Balance/);
+  assert.doesNotMatch(paired.text, /Pay-as-you-go|Token Plan/);
+  assert.doesNotMatch(paired.text, /Account 1|2 accounts|Subscriptions/);
+  assert.match(card([{ ...code, planLabel: 'Starter' }, api]).text, /Starter/);
+  const reversed = card([api, { ...code, planLabel: 'Starter' }]);
+  assert.equal(reversed.find('limit-plan').textContent, 'Starter');
+  const other = { ...api, accountKey: `sha256:${'c'.repeat(64)}`, relatedAccountKey: undefined };
+  const mixed = card([code, api, other]);
+  assert.match(mixed.text, /2 accounts/);
+  assert.match(mixed.text, /Account 1/);
+  assert.match(mixed.text, /Account 2/);
+  assert.doesNotMatch(mixed.text, /Account 3|3 accounts/);
+  const secondLinked = { ...other, accountKey: `sha256:${'d'.repeat(64)}`, relatedAccountKey: codeKey };
+  const shared = card([code, api, secondLinked]);
+  assert.doesNotMatch(shared.text, /Account 2|3 accounts/);
+  assert.equal((shared.text.match(/Balance/g) || []).length, 2);
+  const unlinked = card([code, { ...api, relatedAccountKey: undefined }]);
+  assert.match(unlinked.text, /Account 1/);
+  assert.match(unlinked.text, /Account 2/);
+  const refused = card([code, { ...api, status: 'unauthorized', windows: [] }]);
+  assert.match(refused.text, /Sign in again/);
+  assert.doesNotMatch(refused.text, /Account 1|2 accounts/);
+  const saved = {
+    id: 'code-cost', provider: 'minimax', kind: 'subscription', planName: 'Build', amountMinor: 2000,
+    currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-08-01', autoRenew: true,
+    topUps: [], binding: { accountKey: codeKey }
+  };
+  const recorded = card([code, api], { subscriptions: [saved], accounts: [code, api] });
+  assert.match(recorded.text, /Subscriptions/);
+  assert.match(recorded.text, /20\.00/);
+  const down = card([{ ...code, status: 'unavailable', stale: true }, api], { subscriptions: [saved], accounts: [code, api] });
+  assert.match(down.text, /Subscriptions/);
+  assert.doesNotMatch(down.text, /2 accounts|Account 1/);
+});
+
+test('MiniMax Code follows the shared quota, count and credits rows', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'minimax',
+    status: 'ok',
+    windows: [
+      { kind: 'session', label: '5h', usedPercent: 30 },
+      { kind: 'weekly', label: 'Weekly', usedPercent: 10 },
+      { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17 },
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS' }
+    ]
+  });
+  const card = dockView().renderProviderWindows(provider, '#888888');
+  const rows = new Map(card.children.map(row => [row.children[0].children[0].textContent, row]));
+  assert.deepEqual(new Set(rows.keys()), new Set(['5h', 'Weekly', 'Video', 'Credits']));
+  assert.equal(rows.get('Video').find('limit-detail').textContent, '17/20');
+  const points = rows.get('Credits');
+  assert.match(points.text, /4624\.00/);
+  assert.equal(points.text.includes('¥'), false);
+  const items = dockView().limitProviderUsageItems([provider]);
+  assert.equal(items.filter((item) => item.id === 'credits').length, 1);
+  assert.equal(items.length, 4);
+  const hidden = dockView({ limitProviderHiddenItems: { minimax: ['credits'] } });
+  assert.deepEqual(
+    new Set(hidden.renderProviderWindows(provider, '#888888').children.map(row => row.children[0].children[0].textContent)),
+    new Set(['5h', 'Weekly', 'Video'])
+  );
+});
+
 test('MiniMax Balance is listed and can be hidden without disappearing from its checklist', () => {
   const provider = normalizeLimitProvider({
     provider: 'minimax', status: 'ok',
@@ -469,7 +609,7 @@ test('MiniMax Balance is listed and can be hidden without disappearing from its 
 
 test('MiniMax Token Plan retains its quota pair and missing API balances do not invent a row', async () => {
   const plan = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-fixture', minimaxApiRegion: 'cn' }, {
-    env: {}, fetchJson: async () => ({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 75, current_weekly_remaining_percent: 50 }] } })
+    env: {}, homeDir: minimaxTestHome, fetchJson: async () => ({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 75, current_weekly_remaining_percent: 50 }] } })
   });
   const card = dockView().renderProviderWindows(plan, '#888888');
   assert.equal(plan.status, 'ok');
@@ -477,7 +617,7 @@ test('MiniMax Token Plan retains its quota pair and missing API balances do not 
   assert.equal(card.text.includes('Balance'), false);
   for (const available_amount of [undefined, 'invalid']) {
     const provider = await fetchMinimaxLimits({ minimaxApiKey: 'sk-api-fixture', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' }, {
-      env: {}, fetchJson: async () => ({ available_amount, base_resp: { status_code: 0 } })
+      env: {}, homeDir: minimaxTestHome, fetchJson: async () => ({ available_amount, base_resp: { status_code: 0 } })
     });
     assert.equal(provider.status, 'unavailable');
     assert.equal(dockView().renderProviderWindows(provider, '#888888').children.length, 0);
@@ -487,6 +627,12 @@ test('MiniMax Token Plan retains its quota pair and missing API balances do not 
 test('default provider balance rendering follows the credits marker without a provider whitelist', () => {
   const provider = { provider: 'future-provider', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD' }] };
   assert.match(dockView().renderProviderWindows(provider, '#888888').text, /\$5\.00/);
+  provider.windows.unshift({ kind: 'weekly', label: 'Weekly', remainingPercent: 50 },
+    { kind: 'weekly', label: 'Video', remainingPercent: 25 });
+  provider.balance = { todaySpend: 1, monthSpend: 5, currency: 'USD' };
+  const card = dockView().renderProviderWindows(provider, '#888888');
+  assert.deepEqual(card.children.map(row => row.children[0].children[0].textContent), ['Weekly', 'Balance'],
+    'MiniMax extra pools and Spend do not change the default provider policy');
 });
 
 test('Home text and bars use the plan text rendered by Limits account rows', () => {
@@ -642,18 +788,32 @@ test('every preference the shared view reads reaches the dock through the appear
   assert.match(controller, /const base = \{ surface, side, platform, osRelease: os\.release\(\), appearance,/);
 });
 
-test('a DeepSeek card shows the spend row the projection used to drop', () => {
-  const card = dockView().renderProviderWindows({
-    provider: 'deepseek',
-    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
-    balance: { amount: 4.2, currency: 'USD', todaySpend: 0.12, weekSpend: 0.5, monthSpend: 1.4 }
-  }, '#4D6BFE');
-
-  assert.ok(card.find('limit-spend'), 'the card should carry the spend row');
-  assert.match(card.text, /Today/);
-  assert.match(card.text, /Month/);
-  assert.match(card.text, /\$4\.20/);
-  assert.match(card.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), /Month: \$1\.40/);
+test('cash-balance cards share the Spend tooltip and its hide/show identity', () => {
+  for (const id of ['deepseek', 'minimax']) {
+    for (const spend of [
+      { todaySpend: 0, weekSpend: 2, monthSpend: 1.4, allTimeSpend: 8.9 },
+      { todaySpend: 0.12, weekSpend: 0.5, monthSpend: 1.4 }
+    ]) {
+      const provider = {
+        provider: id,
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
+        balance: { amount: 4.2, currency: 'USD', ...spend }
+      };
+      const view = dockView();
+      const card = view.renderProviderWindows(provider, '#4D6BFE');
+      assert.ok(card.find('limit-spend'), 'the card should carry the shared spend row');
+      assert.ok(card.text.includes(`Spend Today $${spend.todaySpend.toFixed(2)} · Month $1.40`));
+      assert.match(card.text, /Week/);
+      assert.equal(card.text.includes('All time'), spend.allTimeSpend !== undefined);
+      if (spend.allTimeSpend !== undefined) assert.match(card.text, /\$8\.90/);
+      assert.match(card.text, /\$4\.20/);
+      assert.match(card.find('limit-detail-tooltip-trigger').getAttribute('aria-label'), /Month: \$1\.40/);
+      assert.ok(view.limitProviderUsageItems([provider]).some(item => item.id === 'spend'));
+      const hidden = dockView({ limitProviderHiddenItems: { [id]: ['spend'] } }).renderProviderWindows(provider, '#4D6BFE');
+      assert.equal(hidden.find('limit-spend'), null);
+      assert.match(hidden.text, /\$4\.20/);
+    }
+  }
 });
 
 test('a TypeSafe card shows the next credit expiry without calling it a reset', () => {
@@ -812,6 +972,7 @@ function renderHomeLimitFixture(rows) {
   }).join('\n');
   const context = {
     document: { createElement: (tag) => new FakeElement(tag) }, homeLimitRows: () => rows,
+    els: { homePanel: { children: [] } }, pluginContent: null,
     state: { settings: { homeLimitDisplayMode: 'bars' } }, VIEW_ICON_CLASSES: {}, renderBreakdownChange() {},
     t: (key) => i18n.translate('en', key), applyHomeListMark() {}, iconKindFor: () => '',
     limitWindowsView: dockView(), limitProviderPresentationApi: limitPresentationApi,
@@ -1411,29 +1572,31 @@ test('a single-account row carries the page head: mark, title, meta and plan', (
   assert.equal(row.find('limit-plan').textContent, 'Plus');
 });
 
-test('a grouped provider heads with the account count the page shows', () => {
-  const account = (email) => ({
-    provider: 'codex',
-    status: 'ok',
-    accountEmail: email,
-    updatedAt: new Date().toISOString(),
-    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+for (const id of ['codex', 'minimax']) {
+  test(`${id} group heads with the account count the page shows`, () => {
+    const account = (email) => ({
+      provider: id,
+      status: 'ok',
+      accountEmail: email,
+      updatedAt: new Date().toISOString(),
+      windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+    });
+    const group = dockView().renderLimitProviderGroup(
+      id,
+      id,
+      ['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com'].map(account),
+      '#10A37F'
+    );
+
+    assert.equal(group.find('limit-plan').textContent, '4 accounts');
+    assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-account-row')).length, 4);
+
+    // A provider with no count phrase of its own prints nothing rather than the
+    // untranslated key.
+    const untranslated = dockView().renderLimitProviderGroup('deepseek', 'DeepSeek', [account('a@x'), account('b@x')], '#4D6BFE');
+    assert.equal(untranslated.find('limit-plan').textContent, '');
   });
-  const group = dockView().renderLimitProviderGroup(
-    'codex',
-    'Codex',
-    ['a@example.com', 'b@example.com', 'c@example.com', 'd@example.com'].map(account),
-    '#10A37F'
-  );
-
-  assert.equal(group.find('limit-plan').textContent, '4 accounts');
-  assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-account-row')).length, 4);
-
-  // A provider with no count phrase of its own prints nothing rather than the
-  // untranslated key.
-  const untranslated = dockView().renderLimitProviderGroup('deepseek', 'DeepSeek', [account('a@x'), account('b@x')], '#4D6BFE');
-  assert.equal(untranslated.find('limit-plan').textContent, '');
-});
+}
 
 // The switch control reads "Use {account} as this device's Codex account", and
 // the name in that sentence was read off the object switchTarget() resolved —
@@ -1505,6 +1668,8 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
     provider,
     status: 'ok',
     accountKey: key,
+    accountName: `Name ${key}`,
+    accountLabel: 'Test plan',
     updatedAt: new Date().toISOString(),
     windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
   });
@@ -1513,16 +1678,21 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   for (const [id, label, color] of [
     ['workbuddy', 'WorkBuddy', '#10B981'],
     ['claude', 'Claude', '#D97757'],
+    ['minimax', 'Minimax', '#F43F5E'],
+    ['cursor', 'Cursor', '#FFFFFF'],
+    ['mimo', 'Xiaomi MiMo', '#000000'],
     ['openrouter', 'OpenRouter', '#6566F1'],
     ['antigravity', 'Antigravity', '#4285F4']
   ]) {
     const solo = view.renderLimitProviderSolo(id, label, account(id, 'k1'), color);
     assert.ok(solo.find('limit-icon'), `${id}: a solo row wears the provider mark`);
+    assert.equal(solo.find('limit-name-title').textContent, label);
 
     const group = view.renderLimitProviderGroup(id, label, [account(id, 'k1'), account(id, 'k2')], color);
     assert.ok(group.find('limit-icon'), `${id}: the group header wears it instead`);
     const list = group.find('limit-account-list');
     assert.equal(list.children.length, 2);
+    assert.deepEqual(list.children.map((row) => row.find('limit-name-title').textContent), ['Name k1', 'Name k2']);
     for (const row of list.children) {
       assert.equal(row.find('limit-icon'), null, `${id}: an account row is named by its own title`);
     }
@@ -1692,6 +1862,8 @@ test('MiMo account headings do not duplicate the provider subscription card or a
   const wraps = [...built.walk()].filter((node) => node.classNames.has('subscription-plan-wrap'));
   assert.deepEqual(wraps.map((node) => node.find('subscription-plan-trigger').textContent), ['2 accounts', 'Pay-as-you-go']);
   assert.equal(wraps.every((node) => node.tabIndex === 0), true, 'the visible triggers remain keyboard accessible');
+  assert.equal(view.renderLimitProviderHead('mimo', 'Account A', { ...rows[0], planLabel: '' }, '#000000')
+    .find('subscription-plan-wrap'), null, 'MiniMax empty-plan fallback does not alter MiMo');
   assert.equal(view.renderLimitProviderHead('mimo', 'Account A', rows[0], '#000000', {
     accountRow: true, planText: ''
   }).find('subscription-plan-wrap'), null, 'an empty plan has no hover or keyboard trigger');
@@ -2787,4 +2959,345 @@ test('summary allocation and width fitting need only ordered items and measured 
   const hidden = context.fitNotchSummaryItems(widths, { budget: 0, gap: 6, overflowWidth: 8, optional: true });
   assert.deepEqual(Array.from(hidden.visible), []);
   assert.equal(hidden.overflow, false, 'unknown or occupied clearance admits no optional overflow');
+});
+
+test('Meta Muse renders weekly allowance and a single additional token balance row', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { paid } = require('../fixtures/museWeb');
+  const provider = normalizeLimitProvider({ provider: 'muse', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const rendered = dockView({}, { formatCompact: value => require('../../src/shared/compactTokens').formatCompactTokens(value) }).renderProviderWindows(provider, '#0866FF');
+  assert.match(rendered.text, /97%/);
+  assert.doesNotMatch(rendered.text, /\$60\.00/);
+  const additional = rendered.children[1];
+  assert.match(additional.text, /Additional tokens/);
+  assert.equal(additional.find('limit-spend-summary').textContent, '1.5B');
+  assert.equal(additional.find('limit-reset'), null, 'the balance has no second line');
+  assert.doesNotMatch(additional.text, /left/);
+  assert.equal(dockView().limitProviderUsageItems([provider])[1].id, 'credits');
+  const hidden = dockView({ limitProviderHiddenItems: { muse: ['credits'] } }).renderProviderWindows(provider, '#0866FF');
+  assert.equal(hidden.children.length, 1, 'the existing usage item still hides the token balance');
+});
+
+test('Muse additional tokens follow the existing compact-unit setting without changing the reading', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { formatCompactTokens } = require('../../src/shared/compactTokens');
+  const { paid } = require('../fixtures/museWeb');
+  const provider = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const before = JSON.stringify(provider);
+  let units = 'western';
+  const view = dockView({}, { formatCompact: value => formatCompactTokens(value, units, 'zh-TW') });
+  for (const [setting, expected] of [['western', '1.5B'], ['localized', '15億'], ['western', '1.5B']]) {
+    units = setting;
+    const row = view.renderProviderWindows(provider, '#0866FF').children[1];
+    assert.equal(row.find('limit-spend-summary').textContent, expected);
+  }
+  units = 'localized';
+  for (const [websiteText, expected] of [['12K', '1.2萬'], ['2M', '200萬'], ['800', '800']]) {
+    const reading = normalizeLimitProvider({ ...provider, windows: provider.windows.map(window => window.metric === 'credits'
+      ? { ...window, resetDescription: `${websiteText} tokens left` } : window) });
+    assert.equal(view.renderProviderWindows(reading, '#0866FF').children[1].find('limit-spend-summary').textContent, expected);
+  }
+  const unrecognized = normalizeLimitProvider({ ...provider, windows: provider.windows.map(window => window.metric === 'credits'
+    ? { ...window, resetDescription: 'about 1.5B tokens left' } : window) });
+  assert.equal(view.renderProviderWindows(unrecognized, '#0866FF').children[1].find('limit-spend-summary').textContent, 'about 1.5B');
+  assert.equal(JSON.stringify(provider), before, 'unit changes never overwrite the website text or numeric balance');
+});
+
+test('Muse additional balance keeps the money fallback only when the website omits token text', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { paid, free } = require('../fixtures/museWeb');
+  const withSummary = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const before = JSON.stringify(withSummary);
+  const fallback = normalizeLimitProvider({ ...withSummary, windows: withSummary.windows.map(window => ({ ...window, resetDescription: '' })) });
+  const row = dockView().renderProviderWindows(fallback, '#0866FF').children[1];
+  assert.match(row.text, /Additional balance/);
+  assert.match(row.text, /\$60\.00/);
+  assert.doesNotMatch(row.text, /Additional tokens/);
+  dockView().renderProviderWindows(withSummary, '#0866FF');
+  assert.equal(JSON.stringify(withSummary), before, 'presentation does not change the synced reading');
+  const noTopup = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(free) });
+  assert.equal(dockView().renderProviderWindows(noTopup, '#0866FF').children.length, 1);
+});
+
+test('Muse names its product sources without numbered accounts or repeated row icons', () => {
+  const providers = ['cli', 'web'].map((source) => normalizeLimitProvider({
+    provider: 'muse', source, status: 'ok',
+    windows: [{ kind: 'weekly', usedPercent: 20 }]
+  }));
+  const view = dockView();
+  const group = view.renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF');
+  const rows = group.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), ['Muse Code', 'Muse']);
+  assert.equal([...group.walk()].filter((node) => node.classNames.has('limit-icon')).length, 1);
+  assert.ok(rows.every((row) => row.find('limit-icon') === null));
+  assert.equal(group.find('limit-plan').textContent, '');
+  for (const provider of providers) {
+    const solo = view.renderLimitProviderSolo('muse', 'Muse', provider, '#0866FF');
+    assert.ok(solo.find('limit-icon'));
+    assert.equal(solo.find('limit-name-title').textContent, provider.source === 'cli' ? 'Muse Code' : 'Muse');
+    assert.equal(provider.accountKey, '');
+  }
+});
+
+test('Muse duplicate product rows identify their devices with source display off', () => {
+  const providers = ['cli', 'web'].flatMap((source) => ['a', 'b'].map((sourceDeviceId) => ({
+    provider: 'muse', source, sourceDeviceId, status: 'ok', windows: []
+  })));
+  const view = dockView({ showLimitSource: false, provenanceContext: {
+    syncActive: true, localDeviceId: 'a',
+    devices: [{ deviceId: 'a' }, { deviceId: 'b' }]
+  } });
+  const built = view.renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF');
+  const rows = built.find('limit-account-list').children;
+  assert.deepEqual(rows.map((row) => row.find('limit-name-title').textContent), [
+    'Muse Code · a', 'Muse Code · b', 'Muse · a', 'Muse · b'
+  ]);
+  const mixed = view.renderLimitProviderGroup('muse', 'Muse', [providers[0], providers[2], providers[3]], '#0866FF');
+  assert.equal(mixed.find('limit-account-list').children[0].find('limit-name-title').textContent, 'Muse Code');
+  const fallback = view.limitAccountTitle('muse', { provider: 'muse', accountName: 'Legacy source' }, 0);
+  assert.equal(fallback, 'Legacy source');
+});
+
+test('Muse source-less placeholders keep the catalog provider title', () => {
+  const view = dockView();
+  for (const status of ['notConfigured', 'unavailable', 'noSyncedData']) {
+    const row = view.renderLimitProviderSolo('muse', 'Muse', { provider: 'muse', status, windows: [] }, '#0866FF');
+    assert.equal(row.find('limit-name-title').textContent, 'Muse', status);
+    assert.ok(row.find('limit-icon'));
+  }
+});
+
+test('Muse group subscriptions retain a visible keyboard trigger without counting sources as accounts', () => {
+  const providers = ['cli', 'web'].map((source) => ({ provider: 'muse', source, status: 'ok', windows: [] }));
+  const subscription = {
+    id: 'muse-sub', provider: 'muse', kind: 'subscription', planName: 'Maximum', amountMinor: 2000,
+    currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-08-01', autoRenew: true, topUps: []
+  };
+  const view = dockView({ subscriptions: [subscription], accounts: providers });
+  const built = view.renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF');
+  const trigger = built.find('subscription-plan-wrap');
+  assert.ok(trigger);
+  assert.equal(trigger.tabIndex, 0);
+  assert.equal(trigger.find('subscription-plan-trigger').textContent, 'Subscriptions');
+  assert.match(trigger.find('subscription-tooltip').text, /\$20\.00/);
+  assert.doesNotMatch(built.text, /\d+ accounts/);
+  assert.equal(dockView().renderLimitProviderGroup('muse', 'Muse', providers, '#0866FF').find('limit-plan').textContent, '');
+});
+
+test('Muse web weekly quota spans the row above its full-width balance', () => {
+  const { parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+  const { paid } = require('../fixtures/museWeb');
+  const provider = normalizeLimitProvider({ provider: 'muse', source: 'web', status: 'ok', ...parseMuseWebSubscription(paid) });
+  const rows = dockView().renderProviderWindows(provider, '#0866FF').children;
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every((row) => row.classNames.has('limit-window-wide')));
+  const cli = dockView().renderProviderWindows({ provider: 'muse', source: 'cli', windows: [
+    { kind: 'session', remainingPercent: 75 }, { kind: 'weekly', remainingPercent: 35 }
+  ] }, '#0866FF');
+  assert.ok(cli.children.every((row) => !row.classNames.has('limit-window-wide')));
+});
+
+test('history hover is automatic by default and optional without adding a separate icon or text button', async () => {
+  const pending = new Map();
+  const nativeSetTimeout = global.setTimeout, nativeClearTimeout = global.clearTimeout;
+  global.setTimeout = fn => { const key = {}; pending.set(key, fn); return key; };
+  global.clearTimeout = key => pending.delete(key);
+  try {
+    for (const mode of ['hover', 'click']) {
+      const opened = [], entered = [], left = [];
+      const history = { key: () => 'account', open: async (...args) => opened.push(args), enter: key => entered.push(key), leave: key => left.push(key) };
+      const row = dockView({ limitsHistoryOpenMode: mode }, { history }).renderLimitProviderRow('codex', 'Codex', {
+        provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 20, remainingPercent: 80 }]
+      }, '#123456');
+      row.isConnected = true;
+      row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+      row.listeners.pointerenter();
+      assert.deepEqual(entered, ['account']);
+      assert.equal(pending.size, mode === 'hover' ? 1 : 0);
+      for (const fn of pending.values()) fn();
+      pending.clear();
+      assert.equal(opened.length, mode === 'hover' ? 1 : 0);
+      row.listeners.pointerleave();
+      assert.deepEqual(left, ['account']);
+      row.listeners.click({ target: { closest: () => null } });
+      assert.equal(opened.at(-1)[2], true);
+      const before = opened.length;
+      row.listeners.click({ target: { closest: () => ({}) } });
+      assert.equal(opened.length, before, 'existing account controls keep their own action');
+      row.listeners.keydown({ target: row, key: 'Enter', preventDefault() {} });
+      assert.equal(opened.length, before + 1);
+      let preventedRepeats = 0;
+      for (const key of ['Enter', ' ']) row.listeners.keydown({ target: row, key, repeat: true, preventDefault() { preventedRepeats++; } });
+      assert.equal(opened.length, before + 1, 'holding an activation key cannot repeatedly toggle the preview');
+      assert.equal(preventedRepeats, 2, 'repeated Space cannot scroll the page');
+      assert.equal(row.querySelectorAll('.limit-history-open').length, 0);
+    }
+  } finally { global.setTimeout = nativeSetTimeout; global.clearTimeout = nativeClearTimeout; }
+});
+
+test('a spend-only account can open history without inventing a percentage or adding an icon', () => {
+  const opened = [];
+  const history = { key: () => 'spend-account', open: async (...args) => opened.push(args), enter() {}, leave() {} };
+  const row = dockView({}, { history }).renderLimitProviderRow('mimo', 'MiMo', {
+    provider: 'mimo', status: 'ok', windows: [{ kind: 'billing', metric: 'spend', label: 'Usage credits', used: 5, currency: 'USD' }]
+  }, '#123456');
+  row.isConnected = true;
+  row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+  assert.equal(row.dataset.limitHistory, 'spend-account');
+  row.listeners.click({ target: { closest: () => null } });
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0][2], true);
+});
+
+test('rebuilding account rows preserves the active quota preview on its source account only', () => {
+  const history = { key: provider => provider.accountKey, activeKey: () => 'selected', open: async () => {}, enter() {}, leave() {} };
+  for (const accountKey of ['selected', 'other']) {
+    const row = dockView({}, { history }).renderLimitProviderRow('codex', 'Codex', {
+      provider: 'codex', accountKey, status: 'ok', windows: [{ kind: 'weekly', usedPercent: 20 }]
+    }, '#123456');
+    assert.equal(row.classNames.has('is-history-active'), accountKey === 'selected');
+  }
+});
+
+test('off mode keeps quota cards without popup mouse or keyboard affordances', () => {
+  const history = { key() { throw Error('disabled preview must not create a key'); } };
+  const row = dockView({ limitsHistoryOpenMode: 'off' }, { history }).renderLimitProviderRow('codex', 'Codex', {
+    provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 20, remainingPercent: 80 }]
+  }, '#123456');
+  assert.equal(row.dataset.limitHistory, undefined);
+  assert.equal(row.tabIndex, undefined);
+  assert.equal(row.listeners?.pointerenter, undefined);
+  assert.equal(row.listeners?.click, undefined);
+  assert.equal(row.listeners?.keydown, undefined);
+  assert.ok(row.find('limit-window'), 'current quotas remain visible');
+});
+
+test('hovering a different account while a preview is open switches immediately without the initial delay', () => {
+  const nativeSetTimeout = global.setTimeout;
+  global.setTimeout = () => { throw Error('an open preview should not wait on another hover timer'); };
+  try {
+    const opened = [];
+    const history = { key: () => 'next', activeKey: () => 'previous', open: async (...args) => opened.push(args), enter() {}, leave() {} };
+    const row = dockView({}, { history }).renderLimitProviderRow('codex', 'Codex', {
+      provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 20 }]
+    }, '#123456');
+    row.isConnected = true;
+    row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+    row.listeners.pointerenter();
+    assert.equal(opened.length, 1);
+    assert.equal(opened[0][0], 'next');
+  } finally { global.setTimeout = nativeSetTimeout; }
+});
+
+for (const [id, hiddenWindow, hiddenItem, appearance] of [
+  ['commandcode', { kind: 'billing', metric: 'credits', remaining: 10, currency: 'USD' }, 'credits', {}],
+  ['mimo', { kind: 'billing', metric: 'spend', used: 5, currency: 'USD' }, 'spend', {}],
+  ['codex', { kind: 'weekly', usedPercent: 20 }, JSON.stringify(['weekly', '', '', false]), {}],
+  ['codex', { kind: 'weekly', additional: true, limitId: 'extra-pool', usedPercent: 20 }, null, { showCodexAdditionalLimits: false }]
+]) {
+  test(`history has no activation affordance when the only ${id} usage item is hidden (${hiddenItem || 'additional'})`, () => {
+    const history = { key: () => 'account', open: async () => {}, enter() {}, leave() {} };
+    const settings = { ...appearance, limitProviderHiddenItems: hiddenItem ? { [id]: [hiddenItem] } : {} };
+    const provider = { provider: id, status: 'ok', windows: [hiddenWindow] };
+    const row = dockView(settings, { history }).renderLimitProviderRow(id, id, provider, '#123456');
+    assert.equal(row.dataset.limitHistory, undefined);
+    assert.equal(row.tabIndex, undefined);
+    assert.equal(row.listeners?.pointerenter, undefined);
+    assert.equal(row.listeners?.click, undefined);
+    assert.equal(row.listeners?.keydown, undefined);
+    const visible = { kind: 'session', usedPercent: 10, remainingPercent: 90 };
+    const mixed = dockView(settings, { history }).renderLimitProviderRow(id, id, { ...provider, windows: [hiddenWindow, visible] }, '#123456');
+    assert.equal(mixed.dataset.limitHistory, 'account', 'another visible quota keeps history available');
+    assert.equal(mixed.tabIndex, 0);
+  });
+}
+
+test('nested MiniMax API history click does not open its parent Code history', () => {
+  const opened = [];
+  const history = { key: provider => provider.accountKey, open: async key => opened.push(key),
+    enter() {}, leave() {} };
+  const code = { provider: 'minimax', status: 'ok', source: 'oauth', accountKey: 'code-history',
+    region: 'cn', windows: [{ kind: 'weekly', usedPercent: 20 }] };
+  const api = { provider: 'minimax', status: 'ok', source: 'api', accountKey: 'api-history',
+    relatedAccountKey: 'code-history', region: 'cn',
+    windows: [{ kind: 'billing', metric: 'credits', remaining: 10, currency: 'CNY' }] };
+  const parent = dockView({ limitsHistoryOpenMode: 'click' }, { history })
+    .renderLimitProviderGroup('minimax', 'MiniMax', [api, code], '#123456');
+  const child = [...parent.walk()].find(node => node.dataset.limitHistory === 'api-history');
+  assert.ok(child?.listeners?.click, 'the linked API row has its own history action');
+  for (const row of [parent, child]) {
+    row.isConnected = true;
+    row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+  }
+  const childTarget = { closest: selector => selector === '.limit-row' ? child : null };
+  child.listeners.click({ target: childTarget });
+  parent.listeners.click({ target: childTarget });
+  assert.deepEqual(opened, ['api-history'], 'an API click does not bubble into Code history');
+  parent.listeners.click({ target: { closest: selector => selector === '.limit-row' ? parent : null } });
+  assert.deepEqual(opened, ['api-history', 'code-history']);
+});
+
+test('grouped MiniMax Code quota opens its own history but non-history subrows do not', () => {
+  const opened = [];
+  const history = { key: provider => provider.accountKey, open: async key => opened.push(key),
+    enter() {}, leave() {} };
+  const code = { provider: 'minimax', status: 'ok', source: 'oauth', accountKey: 'code-history',
+    region: 'cn', windows: [{ kind: 'weekly', usedPercent: 20 }] };
+  const noHistoryApi = { provider: 'minimax', status: 'unavailable', source: 'api',
+    accountKey: 'no-history-api', relatedAccountKey: 'code-history', region: 'cn', windows: [] };
+  const parent = dockView({ limitsHistoryOpenMode: 'click' }, { history })
+    .renderLimitProviderGroup('minimax', 'MiniMax', [noHistoryApi, code], '#123456');
+  const leadLane = [...parent.walk()].find(node => node.dataset.limitLead !== undefined);
+  const silentLane = [...parent.walk()].find(node =>
+    node !== parent && node !== leadLane && node.classList.contains('limit-row'));
+  assert.ok(leadLane?.find('limit-windows'), 'Code quota is moved into the marked lead lane');
+  assert.ok(silentLane, 'the linked API lane remains rendered');
+  assert.equal(silentLane.dataset.limitHistory, undefined, 'unavailable API has no history action');
+  parent.isConnected = true;
+  parent.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+
+  // Walk the rendered parent chain as a DOM click would bubble, using a real
+  // nearest-row lookup instead of a hardcoded target in the handler.
+  const clickFrom = origin => {
+    const target = { closest(selector) {
+      if (selector !== '.limit-row') return null;
+      for (let node = origin; node; node = node.parent) {
+        if (node.classList?.contains('limit-row')) return node;
+      }
+      return null;
+    } };
+    for (let node = origin; node; node = node.parent) node.listeners?.click?.({ target });
+  };
+  clickFrom(leadLane.find('limit-windows'));
+  assert.deepEqual(opened, ['code-history'], 'clicking the Code quota opens Code history');
+  clickFrom(silentLane);
+  assert.deepEqual(opened, ['code-history'], 'clicking a lane without history cannot open Code history');
+});
+
+
+test('Mistral renders both monthly allowances and an unmetered wallet, with independent visibility', () => {
+  const provider = normalizeLimitProvider({ provider: 'mistral', status: 'ok', source: 'web', windows: [
+    { kind: 'billing', label: 'Included API', usedPercent: 25, used: 5, limit: 20, currency: 'EUR' },
+    { kind: 'billing', label: 'Included Vibe Code', usedPercent: 50, used: 20, limit: 40, currency: 'EUR' },
+    { kind: 'billing', label: 'Balance', metric: 'credits', remaining: 13, currency: 'EUR' }
+  ] });
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#FA520F');
+    assert.equal(card.children.length, 3);
+    assert.match(card.text, /Included API/);
+    assert.match(card.text, /Included Vibe Code/);
+    assert.ok(card.children.slice(0, 2).every((row) => row.classNames.has('limit-window-wide')));
+    assert.equal(card.children[0].find('limit-detail').text, showLimitUsed ? 'EUR 5.00 / EUR 20.00' : 'EUR 15.00 / EUR 20.00');
+    assert.equal(card.children[1].find('limit-detail').text, 'EUR 20.00 / EUR 40.00');
+    assert.match(card.text, showLimitUsed ? /25% used/ : /75% left/);
+    assert.match(card.text, /13/);
+    assert.equal(card.children[2].find('limit-meter'), null, 'wallet has no invented meter');
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 3);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { mistral: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#FA520F').children.length, 2);
+    }
+  }
 });

@@ -12,22 +12,8 @@
   }
   function create({ document, container, headingContainer, actionsContainer, host, t, openWindow, formatError = error => t('settings.plugins.actionFailed', { error: error.message || String(error) }) }) {
     const retained = new Map(), errors = new WeakMap();
-    let selection = null, generation = 0, inputEpoch = 0;
-    if (document.defaultView) {
-      const interacted = () => { inputEpoch++; };
-      document.addEventListener('pointerdown', interacted, true);
-      document.addEventListener('keydown', interacted, true);
-    }
+    let selection = null, generation = 0;
     return {
-      pointerActivate() {
-        const opened = generation, input = inputEpoch;
-        document.defaultView.requestAnimationFrame(() => {
-          if (opened !== generation || input !== inputEpoch) return;
-          const record = [...retained.values()].find(({node}) => !node.classList.contains('hidden'));
-          const active = document.activeElement;
-          if (record && active?.tagName === 'BUTTON' && record.actions.contains(active)) record.node.focus({ preventScroll: true });
-        });
-      },
       render(pages, selected) {
         if (selected !== selection) {
           selection = selected; generation++;

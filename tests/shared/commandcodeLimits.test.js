@@ -218,6 +218,7 @@ test('parseCommandcodeSubscription separates the free tier from a failed envelop
   const parsed = parseCommandcodeSubscription(SUBSCRIPTION_BODY);
   assert.equal(parsed.planId, 'individual-go');
   assert.equal(parsed.status, 'active');
+  assert.equal(parsed.currentPeriodStart, '2026-05-06T07:28:50.000Z');
   assert.equal(parsed.currentPeriodEnd, '2026-06-06T07:28:50.000Z');
 
   // Only an explicit success+null says "no subscription".
@@ -265,6 +266,7 @@ test('fetchCommandcodeLimits maps the plan allowance onto the monthly credits wi
   assert.equal(billing[0].remaining, 8.7784);
   assert.equal(Number(billing[0].used.toFixed(4)), 1.2216);
   assert.equal(billing[0].resetsAt, '2026-06-06T07:28:50.000Z');
+  assert.equal(billing[0].windowMinutes, 31 * 1440);
   assert.equal(billing[0].showMeter, true);
 
   assert.deepEqual(new Set(calls.map((call) => call.url)), new Set([
@@ -657,3 +659,27 @@ test('an exhausted credits probe reports unavailable rather than hanging', async
   assert.equal(provider.status, 'unavailable');
   assert.deepEqual(provider.windows, []);
 });
+
+for (const [start, end, days] of [
+  ['2026-02-01T08:00:00Z', '2026-03-01T08:00:00Z', 28],
+  ['2028-02-01T08:00:00Z', '2028-03-01T08:00:00Z', 29],
+  ['2026-04-19T08:00:00Z', '2026-05-19T08:00:00Z', 30],
+  ['2026-10-19T08:00:00Z', '2026-11-19T08:00:00Z', 31],
+  [undefined, '2026-11-19T08:00:00Z', null],
+  ['invalid', '2026-11-19T08:00:00Z', null],
+  ['2026-12-19T08:00:00Z', '2026-11-19T08:00:00Z', null]
+]) {
+  test(`Command Code monthly duration uses the actual billing boundaries: ${start} to ${end}`, async () => {
+    const provider = await fetchCommandcodeLimits({ commandcodeCookie: SESSION_COOKIE }, {
+      env: {},
+      fetch: stubFetch({
+        [COMMANDCODE_CREDITS_URL]: CREDITS_BODY,
+        [COMMANDCODE_SUBSCRIPTIONS_URL]: { ...SUBSCRIPTION_BODY, data: {
+          ...SUBSCRIPTION_BODY.data, currentPeriodStart: start, currentPeriodEnd: end
+        } }
+      })
+    });
+    const monthly = provider.windows.find(window => window.label === 'Monthly');
+    assert.equal(monthly.windowMinutes, days === null ? null : days * 1440);
+  });
+}

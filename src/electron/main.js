@@ -5,7 +5,8 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
+const { createRetainedWindow, captureRetainedWindowState, restoreRetainedWindowState } = require('./retainedWindow');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
@@ -38,11 +39,28 @@ const {
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limits/fetch');
+const { createLimitsHistoryStore } = require('./limits/historyStore');
+const { historyRowKey } = require('./limits/historyIdentity');
+const { createLimitsHistoryController } = require('./limits/historyController');
+const { LIMIT_PROVIDER_CATALOG: historyProviderCatalog } = require('../shared/limits/providers');
+const { isLimitWindowHidden: historyWindowHidden } = require('../shared/limits/usageItems');
+const { maskEmailAddress: historyMaskEmail } = require('./renderer/accountIdentity');
+const { vendorColors: historyVendorColors } = require('../shared/vendorPresentation');
+const {
+  createSessionProxyApplier,
+  createProxyReadyFetch,
+  networkProxySource,
+  normalizeNoProxy,
+  noProxyError,
+  normalizeProxyUrl,
+  outboundRouteForSettings,
+  proxyUrlError,
+  sessionProxyConfig
+} = require('./networkProxy');
 const {
   expandedBoundsForCollapse,
   normalWindowBounds,
   persistWindowState,
-  rebuildWindowBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
   setWindowMaximizable,
@@ -55,7 +73,7 @@ const {
 // a closed parent pipe turns the next log call into an unhandled 'error'
 // event and Electron pops a "JavaScript error in the main process" dialog.
 installSafeStdout();
-const electronClaudeWebFetch = createClaudeWebFetch(net);
+const electronClaudeWebFetch = createProxyReadyFetch(createClaudeWebFetch(net), () => sessionProxy.ensureReady());
 const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
   fetch: electronLimitsFetch()
 });
@@ -67,23 +85,47 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
 // exchange on the mimoExchangeFetch below, which keeps undici for the per-hop
 // request it needs but still asks Chromium which proxy to use.
 function electronLimitsFetch() {
-  return createElectronLimitsFetch({ net, env: process.env });
+  return createElectronLimitsFetch({
+    net: { fetch: createProxyReadyFetch(net.fetch.bind(net), () => sessionProxy.ensureReady()) },
+    getRoute: networkProxyRoute
+  });
 }
+
+// Read per request: the app proxy setting can change after a caller captured
+// its fetch, and `settings` is still null while this module loads.
+function networkProxyRoute() {
+  return outboundRouteForSettings(settings || {}, process.env);
+}
+
+// The Chromium half of the app proxy setting, so net.fetch/net.request callers
+// and MiMo's resolveProxy route the same way as the Node-side transport.
+// Untouched until a proxy is configured, so an install without one keeps
+// Electron's own default; clearing it restores that default.
+const sessionProxy = createSessionProxyApplier({
+  getSession: () => session.defaultSession,
+  getConfig: () => sessionProxyConfig(settings || {}),
+  log: (message) => console.log(message)
+});
 
 // Lazy because `session.defaultSession` only exists once the app is ready, and
 // process-wide because the transport caches one proxy agent per proxy URL.
 let mimoExchangeFetch = null;
 function ensureMimoExchangeFetch() {
-  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({ session: session.defaultSession });
+  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({
+    session: { resolveProxy: createProxyReadyFetch((url) => session.defaultSession.resolveProxy(url), () => sessionProxy.ensureReady()) },
+    getRoute: networkProxyRoute
+  });
   return mimoExchangeFetch;
 }
 
+// Muse's web action also needs Node headers and manual redirects. Reuse the
+// exchange transport so its requests inherit the same app/env/system proxy route.
 // Settings-side provider probes take the same transport as the collector's.
 // Most of them are what an account save is gated on, so leaving one on the
 // global fetch refuses to save an account on exactly the machines this
 // transport exists for.
 function electronProviderDeps(deps = {}) {
-  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch() };
+  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch(), museWebFetch: ensureMimoExchangeFetch() };
 }
 const {
   DEFAULT_CLIENTS,
@@ -153,6 +195,7 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
@@ -280,7 +323,8 @@ const {
   HUB_STREAM_VERSION,
   createStatsStreamReceiver
 } = require('../shared/hubProtocol');
-const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
+const { createSyncPayloadUploader, syncPayload } = require('../shared/syncPayload');
+const postSyncPayload = createSyncPayloadUploader();
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
   MIMO_PLATFORM_CONSOLE_URL,
@@ -366,6 +410,7 @@ const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const { createIcloudSyncStore } = require('./icloudSync');
 const { createIcloudSyncRuntime } = require('./icloudSyncRuntime');
+const { isCursorDetectedAccountCurrent } = require('../shared/providers/cursor/account');
 const {
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
@@ -433,6 +478,7 @@ const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
 const {
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockFloatingX,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
@@ -441,6 +487,7 @@ const {
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const edgeDockPresentationApi = require('./renderer/edgeDock/presentation');
 const { createPluginRuntime, registerPluginScheme, normalizePluginAuthorSkin } = require('./plugins/runtime');
+const { prepareSkinSettings } = require('./plugins/skinSettings');
 const { normalizePluginStates } = require('./plugins/manager');
 const pluginPlacements = require('../shared/plugins/placements');
 // Created after 'ready' by startPluginRuntime(); null in safe paths and tests.
@@ -461,11 +508,10 @@ const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
 const { preventAppActivation, setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
-  WINDOWS_BACKDROP_ACCENT,
   normalizeWindowsBackdropMode,
   normalizeWindowsDockBackdropMode
 } = require('./windowsBackdropMode');
-const { applyWindowsAccentBlur } = require('./windowsBackdrop');
+const { syncWindowsBackdrop, windowsBackdropFallback } = require('./windowsBackdrop');
 const {
   isLiquidGlassBackdrop,
   liquidGlassStyle,
@@ -507,7 +553,7 @@ function appWindowIcon() {
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
-const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
+const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensMonth', 'costMonth', 'bothMonth', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
@@ -527,6 +573,7 @@ const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'tre
 
 let mainWindow = null;
 let dashboardWindow = null;
+let dashboardWindowReady = false;
 let settingsPath = null;
 let settings = null;
 let initialLimitProvidersPending = false;
@@ -541,7 +588,10 @@ let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
 const sessionUsageArchiveStore = createSessionUsageArchiveStore({ cursorUsageEvents: createCursorUsageEventIndex() });
 let rendererViewState = normalizeInitialRendererViewState();
-const serviceStatusClient = createServiceStatusClient();
+// Cursor's status page now redirects to status.x.ai, which is unreachable from
+// mainland China without a proxy — on the global fetch that card would read
+// "Unable to check status" on exactly the networks this transport exists for.
+const serviceStatusClient = createServiceStatusClient({ fetchImpl: electronLimitsFetch() });
 const codexResetForecastClient = createCodexResetForecastClient({
   fetchImpl: electronLimitsFetch()
 });
@@ -660,12 +710,13 @@ function defaultSettings() {
     edgeDockSize: 'medium',
     edgeDockCustomScale: 1,
     edgeDockSide: 'right',
+    edgeDockFloatingX: null,
     edgeDockOffset: null,
     edgeDockDisplayId: null,
     edgeDockItems: null,
     pluginsEnabled: true,
     pluginStates: {},
-    pluginPlacementDefaults: {},
+    pluginInitialSetup: {},
     pluginAuthorSkin: null,
     notchPluginPages: [],
     notchPageOrder: [],
@@ -676,6 +727,7 @@ function defaultSettings() {
     lastViewState: { period: 'today', breakdown: 'home' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
+    deviceIconOverrides: {},
     icloudWriterId: '',
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
@@ -728,7 +780,9 @@ function defaultSettings() {
     cursorManualAccountIds: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
+    limitsHistoryOpenMode: 'hover',
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
+    claudeCliFallbackEnabled: true,
     // The key OpenCode stores for itself needs no setup, so tracking it is the
     // default. This turns that off for a machine that is signed in to an account
     // the user does not want reported.
@@ -764,6 +818,8 @@ function defaultSettings() {
     currencyRates: {},
     startAtLogin: false,
     automaticAppUpdates: false,
+    proxyUrl: '',
+    noProxy: '',
     language: 'auto',
     ...initialAccountSettings(process.env),
     appUpdate: {
@@ -996,6 +1052,7 @@ function electronLimitsDeps() {
   return {
     fetch: electronLimitsFetch(),
     mimoExchangeFetch: ensureMimoExchangeFetch(),
+    museWebFetch: ensureMimoExchangeFetch(),
     claudeWebFetch: electronClaudeWebFetch,
     workbuddyFetch: async (url, init = {}, expectedSession = null) => {
       const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
@@ -2211,6 +2268,8 @@ let persistBoundsTimer = null;
 let floatingBubbleAutoCollapseTimer = null;
 const floatingBubbleState = { collapsed: false, side: null, collapsedBounds: null, expandedBounds: null, suppressNextCollapse: false, contentSize: null };
 let mainWindowChrome = { collapsedFloatingBubble: false };
+let mainWindowReplacementEpoch = 0;
+let mainWindowReplacementTask = Promise.resolve();
 
 function stopPersistBoundsTimer() {
   if (persistBoundsTimer) clearTimeout(persistBoundsTimer);
@@ -2363,7 +2422,6 @@ function collapseFloatingBubble(plan) {
       focus: false,
       waitForContent: settings.floatingBubbleContent !== 'icon'
     });
-    sendFloatingBubbleState();
     return true;
   }
   applyCollapsedFloatingBubbleLimits(collapsedBounds);
@@ -2419,7 +2477,6 @@ function expandFloatingBubble(options = {}) {
         inactive: options.focus === false
       });
       setTimeout(() => { floatingBubbleState.suppressNextCollapse = false; }, 300);
-      sendFloatingBubbleState();
       return true;
     }
     // Unlock, re-limit and resize in one helper rather than inline: the order
@@ -2693,8 +2750,10 @@ function readSettings() {
     merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
     merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.claudeCliFallbackEnabled = parseBoolean(merged.claudeCliFallbackEnabled, true);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
+    merged.limitsHistoryOpenMode = ['hover', 'click', 'off'].includes(merged.limitsHistoryOpenMode) ? merged.limitsHistoryOpenMode : 'hover';
     merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
     merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
     delete merged.workbuddyLocalAppEnabled;
@@ -2808,6 +2867,7 @@ function readSettings() {
     merged.edgeDockRefreshEnabled = parseBoolean(merged.edgeDockRefreshEnabled, false);
     merged.edgeDockRunningIndicatorEnabled = parseBoolean(merged.edgeDockRunningIndicatorEnabled, true);
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
+    merged.edgeDockFloatingX = normalizeEdgeDockFloatingX(merged.edgeDockFloatingX);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
     merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
@@ -2819,8 +2879,9 @@ function readSettings() {
     merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
+    merged.deviceIconOverrides = require('./renderer/deviceIcons').normalizeDeviceIconOverrides(merged.deviceIconOverrides);
     merged.pluginStates = normalizePluginStates(merged.pluginStates);
-    merged.pluginPlacementDefaults = require('./plugins/placementSettings').normalizePlacementDefaults(merged.pluginPlacementDefaults);
+    merged.pluginInitialSetup = require('./plugins/initialSetup').normalizeInitialSetup(merged.pluginInitialSetup);
     merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
     merged.pluginContentSelections = pluginPlacements.normalizeContentSelections(merged.pluginContentSelections);
     merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
@@ -3118,8 +3179,9 @@ function nativeMaterialOptions(source = settings, dashboard = false) {
 function applyNativeMaterial(source = settings) {
   syncNativeMaterialVisibility(mainWindow, nativeMaterialOptions(source));
   syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
-  // Windows' material is still construction-time; its existing rebuild path
-  // handles setting changes. The macOS manager avoids recreating stable views.
+  syncWindowsBackdrop(mainWindow, { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop });
+  syncWindowsBackdrop(dashboardWindow, { enabled: nativeBlurEnabled(source) });
+  limitsHistoryController?.syncMaterial();
 }
 
 function withHistoryPreview(stats, devices) {
@@ -3164,6 +3226,69 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+let limitsHistoryStore = null;
+let limitsHistoryController = null;
+
+function getLimitsHistoryStore() {
+  if (!limitsHistoryStore) limitsHistoryStore = createLimitsHistoryStore(path.join(app.getPath('userData'), 'limits-history.sqlite'), {
+    onError: error => console.log(`[limits-history] ${error.message}`),
+    onChange: () => limitsHistoryController?.refresh()
+  });
+  return limitsHistoryStore;
+}
+
+async function limitsHistoryPayload(key) {
+  if (statsPushSource && (statsPushSource.generation !== hubModeGeneration
+    || statsPushSource.identity !== currentHubStatsIdentity())) return null;
+  const publication = latestStats;
+  const stats = electronPresentationStats(publication);
+  const provider = stats?.limits?.providers?.find(row => historyRowKey(row) === key);
+  if (!provider) return null;
+  const scope = currentHubStatsIdentity();
+  const history = await getLimitsHistoryStore().query(scope, provider);
+  // Activity-only publications retain the quota snapshot and do not invalidate this read.
+  if (scope !== currentHubStatsIdentity()) return null;
+  // A newer quota publication will trigger its own history refresh. Keep the
+  // current card visible while discarding this superseded query.
+  if (publication?.limits !== latestStats?.limits) {
+    const stillPresent = electronPresentationStats(latestStats)?.limits?.providers?.some(row => historyRowKey(row) === key);
+    return stillPresent ? undefined : null;
+  }
+  history.windows = history.windows.filter(entry => !historyWindowHidden(settings?.limitProviderHiddenItems, provider.provider, entry.window)
+    && !(provider.provider === 'codex' && settings?.showCodexAdditionalLimits === false && entry.window.additional === true));
+  if (!history.windows.length) return null;
+  const email = provider.accountEmail || '';
+  const account = settings?.maskLimitAccountEmails === true
+    ? historyMaskEmail(email) : email;
+  const colorId = provider.provider === 'factory' ? 'droid' : provider.provider;
+  const palette = { ...historyVendorColors(), ...settings?.vendorColors };
+  return {
+    ...history, key,
+    source: crypto.createHash('sha256').update(scope).digest('hex'),
+    provider: provider.provider,
+    label: historyProviderCatalog.find(entry => entry.id === provider.provider)?.label || provider.provider,
+    account: account || provider.accountName || provider.accountLabel || '',
+    updatedAt: provider.updatedAt,
+    locale: trayMenuLocale(), colors: settings?.themeColors, textScale: fontSettingsApi.textScaleForSize(settings?.textSize),
+    color: palette[colorId] || palette.default,
+    interfaceFont: fontSettingsApi.resolveEffectiveFontSettings(settings).interfaceFont,
+    appearance: {
+      glassOpacity: settings.glassOpacity, glassBlur: settings.glassBlur, systemGlass: settings.systemGlass, reduceMotion: settings.reduceMotion,
+      systemReducedMotion: systemPreferences.getAnimationSettings?.().prefersReducedMotion === true,
+    }
+  };
+}
+
+function getLimitsHistoryController() {
+  if (!limitsHistoryController) limitsHistoryController = createLimitsHistoryController({
+    BrowserWindow, screen, ipcMain,
+    isOwner: win => win === mainWindow || win === dashboardWindow,
+    read: limitsHistoryPayload,
+    getOpenMode: () => settings.limitsHistoryOpenMode,
+    getMaterialOptions: () => ({ ...nativeMaterialOptions(), windowsBackdrop: settings.windowsBackdrop, radius: 14 })
+  });
+  return limitsHistoryController;
+}
 let statsPushSource = null;
 let statsPushRevision = 0;
 let macWidgetSnapshotController = null;
@@ -3182,6 +3307,7 @@ function syncProvenanceActive() {
 }
 
 const presentationCache = createStatsPresentationCache();
+const { projectSessionDeviceSessions, projectSessionDeviceStats } = require('./sessionDeviceSources');
 
 // Every input besides `stats` belongs in the cache key, or a settings change
 // would keep serving the projection it replaced.
@@ -3194,11 +3320,14 @@ function electronPresentationStats(stats) {
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
   const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
-  return presentationCache.get(stats, key, () => projectModelAliasStats(
-    projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
-    aliases,
-    { grouping }
-  ));
+  return presentationCache.get(stats, key, () => {
+    const sourced = projectSessionDeviceStats(stats, settings?.deviceId);
+    return projectModelAliasStats(
+      projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(sourced) : sourced, limitOptions),
+      aliases,
+      { grouping }
+    );
+  });
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
@@ -3223,7 +3352,11 @@ function rendererAllTimeSessions(stats) {
     const sessions = hubSnapshot
       ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
       : complete.periods?.allTime?.sessions || {};
-    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
+    const devices = hubSnapshot?.localDevice
+      ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
+      : complete.devices;
+    const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
+    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
   });
 }
 
@@ -3385,17 +3518,26 @@ function limitInvalidationKey(scope) {
     || scope?.accountLabel
     || ''
   ).trim();
-  return account ? `${provider}:${account}` : `${provider}:*`;
+  if (account) return `${provider}:${account}`;
+  return provider === 'minimax' && scope?.source === 'api' ? `${provider}:source:api` : `${provider}:*`;
 }
 
 function rememberPendingLimitInvalidation(scope, reason, options = {}) {
-  const clear = options.clear === true;
   const refresh = options.refresh !== false;
   const normalized = { ...scope, provider: String(scope?.provider || '').trim().toLowerCase() };
   const key = limitInvalidationKey(normalized);
+  const broad = pendingLimitInvalidations.get(`${normalized.provider}:*`);
+  if (normalized.provider === 'minimax' && normalized.source === 'api' && broad?.clear) {
+    broad.refresh ||= refresh;
+    return;
+  }
+  let clear = options.clear === true || pendingLimitInvalidations.get(key)?.clear === true;
   if (key.endsWith(':*')) {
     for (const pendingKey of pendingLimitInvalidations.keys()) {
-      if (pendingKey.startsWith(`${normalized.provider}:`)) pendingLimitInvalidations.delete(pendingKey);
+      if (pendingKey.startsWith(`${normalized.provider}:`)) {
+        clear = clear || pendingLimitInvalidations.get(pendingKey).clear;
+        pendingLimitInvalidations.delete(pendingKey);
+      }
     }
   }
   pendingLimitInvalidations.set(key, { scope: normalized, reason, clear, refresh });
@@ -5005,6 +5147,8 @@ function sendPush(payload, options = {}) {
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
+    getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
+    limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
     rendererPayload = {
       ...payload,
@@ -5289,6 +5433,9 @@ function stopStatsStream() {
 
 async function startStatsStream(options = {}) {
   stopStatsStream();
+  // Legacy History needs reconciliation after reconnect. Negotiated uploads
+  // keep their independent baseline and recover through 409 if the Hub lost it.
+  postSyncPayload.resetHistory({ preserveDelta: !options.resetSnapshot });
   const generation = hubModeGeneration;
   const widgetProducerOwner = captureMacWidgetProducerOwner();
   if (settings?.hubMode !== 'client') return;
@@ -5518,13 +5665,7 @@ function preparePluginSkinSettings(patch, current, runtime) {
   if (!skin) throw new Error('plugin skin is unavailable');
   const authorSkin = normalizePluginAuthorSkin({ ref: skin.ref, appearance: skin.appearance || {} });
   if (!authorSkin) throw new Error('invalid author skin');
-  return {
-    authorSkin,
-    patch: {
-      themeColors: { ...current.themeColors, ...skin.colors },
-      vendorColors: { ...current.vendorColors, ...skin.vendorColors }
-    }
-  };
+  return prepareSkinSettings(current, { ...skin, appearance: authorSkin.appearance });
 }
 
 function assertPluginSkinRequest(event, patch) {
@@ -5551,8 +5692,10 @@ function settingsForRenderer() {
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
+    windowsBackdropFallback: windowsBackdropFallback(mainWindow),
     syncContentStatus: getSyncContentRuntime().status(),
     locale: trayMenuLocale(),
+    deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
     // last-known cache behind it.
@@ -5576,7 +5719,8 @@ function settingsForRenderer() {
     limitAccountForms: limitAccountFormsForRenderer(),
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
-    windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
+    windowToggleShortcutStatus: currentWindowToggleShortcutStatus(),
+    networkProxySource: networkProxySource(settings, process.env)
   };
 }
 
@@ -5651,6 +5795,7 @@ async function pushSystemUiThemeAfterChange() {
 
 function pushSettingsToRenderer() {
   const payload = settingsForRenderer();
+  limitsHistoryController?.refresh();
   syncDockSurfaces(payload);
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
@@ -5845,6 +5990,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     // list, so its Remaining/Used preference has to reach this renderer too.
     sessionContextMetric: source.sessionContextMetric,
     maskLimitAccountEmails: source.maskLimitAccountEmails,
+    limitsHistoryOpenMode: source.limitsHistoryOpenMode,
     edgeDockWarnColors: source.edgeDockWarnColors === true,
     edgeDockRunningIndicatorEnabled: source.edgeDockRunningIndicatorEnabled !== false,
     // The user's own subscription records, so the card's plan cell can decorate
@@ -6203,8 +6349,9 @@ function ensureEdgeDockController() {
     },
     // The same setting the widget's rate readout toggles, so both stay in step.
     onToggleRateMode: toggleDockRateMode,
-    onPlacementChange: ({ side, offset, displayId }) => {
+    onPlacementChange: ({ side, offset, displayId, floatingX }) => {
       settings.edgeDockSide = normalizeEdgeDockSide(side);
+      settings.edgeDockFloatingX = normalizeEdgeDockFloatingX(floatingX);
       settings.edgeDockOffset = normalizeEdgeDockOffset(offset);
       settings.edgeDockDisplayId = normalizeEdgeDockDisplayId(displayId);
       saveSettings();
@@ -6290,15 +6437,16 @@ function handleWindowToggleShortcut() {
   else if (action === 'expandFloatingBubble') expandFloatingBubble();
   else if (action === 'hideWindow') pluginWindowActions.hide(mainWindow);
   else focusExistingWindow();
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
 }
 
 function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false, pointerActivation = false) {
   const action = trayToggleAction(settings);
   if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
   else if (action === 'focusWindow') focusExistingWindow();
-  // A paired native press/release is evidence of pointer activation. OS app
-  // switching and accessibility tray clicks must not reset keyboard focus.
-  if (pointerActivation && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:pointerActivation');
+  // Explicit summons share one focus policy. OS app switching and accessibility
+  // activation preserve their existing focus without requesting a reset.
+  if (pointerActivation && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
 }
 
 function trayMenuLocale() {
@@ -6350,7 +6498,10 @@ function setTrayContentFromMenu(value) {
 function setEdgeDockFromMenu(patch = {}) {
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
   if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
-  if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
+  if (patch.edgeDockSide !== undefined) {
+    settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
+    settings.edgeDockFloatingX = null;
+  }
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
   pushSettingsToRenderer();
@@ -6775,6 +6926,8 @@ function stopAll() {
   try { sessionUsageArchiveStore.close(); } catch (error) {
     console.log(`[session-archive] close failed: ${error?.message || error}`);
   }
+  limitsHistoryController?.dispose();
+  limitsHistoryStore?.closeSync();
   if (tray && !tray.isDestroyed()) tray.destroy();
   tray = null;
 }
@@ -7050,6 +7203,13 @@ function configureNativeAppUpdater() {
   appUpdateNativeConfigured = true;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  if (process.platform === 'win32' && appUpdateInstallSupport({
+    isPackaged: app.isPackaged, platform: process.platform, env: process.env
+  }).supported) {
+    // Keep NSIS updates in the running installation even if its registry records
+    // are missing. NsisUpdater forwards this through the installer's /D= option.
+    autoUpdater.installDirectory = path.dirname(process.execPath);
+  }
   // Notes for every release between this version and the latest, not only the
   // latest's, so the update card covers everything the user is about to receive.
   autoUpdater.fullChangelog = true;
@@ -7505,7 +7665,7 @@ function loadWindowFile(target, options = {}) {
     reveal();
   });
   const filePath = path.join(__dirname, 'renderer', 'index.html');
-  const load = options.query ? target.loadFile(filePath, { query: options.query }) : target.loadFile(filePath);
+  const load = options.query ? target.webContents.loadFile(filePath, { query: options.query }) : target.webContents.loadFile(filePath);
   load.catch((error) => {
     console.log(`[window] renderer load failed: ${error.message}`);
     reveal();
@@ -7515,9 +7675,6 @@ function loadWindowFile(target, options = {}) {
 function createWindow(boundsOverride, options = {}) {
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
-  const glass = nativeBlurEnabled();
-  const windowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
-  const windowsAccent = process.platform === 'win32' && glass && windowsBackdrop === WINDOWS_BACKDROP_ACCENT;
   const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
   const collapsedSizeLimits = {
     minWidth: bounds.width,
@@ -7525,13 +7682,13 @@ function createWindow(boundsOverride, options = {}) {
     maxWidth: bounds.width,
     maxHeight: bounds.height
   };
-  const win = new BrowserWindow({
+  const windowOptions = {
     width: bounds.width,
     height: bounds.height,
     ...(typeof bounds.x === 'number' ? { x: bounds.x, y: bounds.y } : {}),
     ...(collapsedFloatingBubble ? collapsedSizeLimits : WINDOW_LIMITS),
     frame: false,
-    transparent: !(process.platform === 'win32' && glass),
+    transparent: true,
     resizable: !collapsedFloatingBubble,
     show: false,
     backgroundColor: '#00000000',
@@ -7544,26 +7701,19 @@ function createWindow(boundsOverride, options = {}) {
     // Seed the legacy fallback's construction-only active state. The material
     // manager immediately replaces HUD with Liquid Glass when supported.
     ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
-    ...(process.platform === 'win32' && glass && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
-  });
+  };
+  const win = process.platform === 'win32'
+    ? createRetainedWindow({ BaseWindow, WebContentsView }, windowOptions, options.previousWindow)
+    : new BrowserWindow(windowOptions);
   mainWindow = win;
   mainWindowChrome = { collapsedFloatingBubble };
   applyMacSpaceBehavior();
   applyWindowsChrome(win, { round: true });
-  let windowsAccentFallback = false;
-  if (windowsAccent && !applyWindowsAccentBlur(win)) {
-    // The Accent API is undocumented and can disappear or reject a window on
-    // a future Windows build. This window is still non-transparent, so the
-    // documented Electron Acrylic material is a safe in-place fallback.
-    windowsAccentFallback = true;
-    console.warn('[window] AccentBlurBehind unavailable; falling back to Acrylic');
-    try { win.setBackgroundMaterial('acrylic'); } catch (_) {}
-  }
   win.on('maximize', () => {
     if (!shouldTrackWindowMaximized(settings, floatingBubbleState)) {
       // A tray popover is sized from getBounds() on every open, so a maximized
@@ -7580,11 +7730,11 @@ function createWindow(boundsOverride, options = {}) {
     persistWindowState(settings, saveSettings, normalWindowBounds(win), false);
     persistBoundsSoon();
   });
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  if (!options.previousWindow) win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  win.webContents.on('will-navigate', (event, url) => {
+  if (!options.previousWindow) win.webContents.on('will-navigate', (event, url) => {
     event.preventDefault();
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
@@ -7595,15 +7745,16 @@ function createWindow(boundsOverride, options = {}) {
     stopFloatingBubbleAutoCollapseTimer();
   });
   win.on('blur', () => {
+    limitsHistoryController?.hide();
     nudgeTaskbarZOrder();
+    if (!suppressNextBlurHide) sendMainWindowEvent('window:summonCancelled');
     if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) {
       const wasVisible = win.isVisible();
       const point = wasVisible && process.platform === 'darwin' ? screen.getCursorScreenPoint() : null;
       if (wasVisible) {
         hidePopover();
         // Cocoa can send this blur before Tray.mouse-down for the same click.
-        // The cursor point lets that later click identify its own blur without
-        // mistaking a quick click on another app followed by a tray click.
+        // Retain its cursor point for that later tray press.
         if (point && tray?.isPointerOverIcon?.(point)) recentPopoverBlur = { at: performance.now(), point };
       }
     }
@@ -7627,18 +7778,18 @@ function createWindow(boundsOverride, options = {}) {
       applyMacActivationPolicy({ mainWindowVisible: false });
     }
   });
-  win.webContents.on('before-input-event', handleZoomShortcut);
+  if (!options.previousWindow) win.webContents.on('before-input-event', handleZoomShortcut);
   // The dock's own windows would otherwise keep the process alive after the
   // last real window closes, which window-all-closed relies on for quitting.
   win.on('closed', () => {
     if (quitRequested || process.platform === 'darwin') return;
-    if (BrowserWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other)))) app.quit();
+    if (BaseWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other)))) app.quit();
   });
   win.on('show', () => syncPluginWindowVisibility(win));
   win.on('hide', () => syncPluginWindowVisibility(win));
   win.on('minimize', () => syncPluginWindowVisibility(win));
   win.on('restore', () => syncPluginWindowVisibility(win));
-  win.webContents.on('did-finish-load', () => {
+  if (!options.previousWindow) win.webContents.on('did-finish-load', () => {
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
     // reveal reports isVisible() === false, and loadWindowFile({ waitForContent })
@@ -7649,8 +7800,9 @@ function createWindow(boundsOverride, options = {}) {
     // hidden state through the windowHidden query flag. Keep this listener for
     // later loads too: Cmd+Shift+R retains that query flag, so a visible tray
     // window needs its native visibility resynced after every renderer reload.
-    if (win.isVisible()) sendMainWindowVisibility(win);
+    if (mainWindow?.isVisible()) sendMainWindowVisibility(mainWindow);
   });
+  if (options.previousWindow) return win;
   loadWindowFile(win, {
     waitForContent: options.waitForContent === true,
     inactive: options.inactive === true,
@@ -7663,8 +7815,7 @@ function createWindow(boundsOverride, options = {}) {
         viewState: rendererViewState
       }),
       ...(settings?.trayMode ? { windowHidden: '1' } : {}),
-      ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {}),
-      ...(windowsAccentFallback ? { windowsBackdropFallback: '1' } : {})
+      ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {})
     }
   });
 }
@@ -7684,21 +7835,60 @@ function handleZoomShortcut(event, input) {
 }
 
 function replaceMainWindow(bounds, options = {}) {
-  const old = mainWindow;
-  const wasFocused = old && !old.isDestroyed() ? old.isFocused() : false;
-  if (old && !old.isDestroyed()) old.removeAllListeners('close');
-  // Build the new window first so total window count never drops to 0
-  // (otherwise window-all-closed fires and quits the app on Windows).
-  createWindow(bounds, {
-    collapsedFloatingBubble: options.collapsedFloatingBubble === true,
-    suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
-    waitForContent: options.waitForContent === true,
-    inactive: options.inactive === true
+  const epoch = ++mainWindowReplacementEpoch;
+  mainWindowReplacementTask = mainWindowReplacementTask.then(async () => {
+    if (epoch !== mainWindowReplacementEpoch) return;
+    const old = mainWindow;
+    if (process.platform === 'win32') {
+      if (!mainWindowChrome.collapsedFloatingBubble) {
+        await captureRetainedWindowState(old)
+          .catch(error => console.warn(`[window] view capture failed: ${error.message}`));
+      }
+      if (epoch !== mainWindowReplacementEpoch || old !== mainWindow || old.isDestroyed()
+        || (options.collapsedFloatingBubble === true) !== floatingBubbleState.collapsed) {
+        // An in-place expansion can supersede a collapse while capture is in
+        // flight without requesting another native host. Release its snapshot.
+        if (old === mainWindow && !old.isDestroyed() && !mainWindowChrome.collapsedFloatingBubble) {
+          await restoreRetainedWindowState(old);
+        }
+        return;
+      }
+    }
+    const wasFocused = old && !old.isDestroyed() ? old.isFocused() : false;
+    if (old && !old.isDestroyed()) old.removeAllListeners('close');
+    if (old && !old.isDestroyed()) old.removeAllListeners('blur');
+    // Build the new window first so total window count never drops to 0
+    // (otherwise window-all-closed fires and quits the app on Windows).
+    createWindow(bounds, {
+      previousWindow: process.platform === 'win32' ? old : undefined,
+      collapsedFloatingBubble: options.collapsedFloatingBubble === true,
+      suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
+      waitForContent: options.waitForContent === true,
+      inactive: options.inactive === true
+    });
+    const next = mainWindow;
+    if (process.platform === 'win32') {
+      if (windowsBackdropFallback(old) !== windowsBackdropFallback(next)) pushSettingsToRenderer();
+      sendFloatingBubbleState();
+      if (old?.isMinimized()) next.minimize();
+      else if (old?.isVisible()) {
+        restoreWindowMaximized(next, settings, { collapsedFloatingBubble: options.collapsedFloatingBubble === true });
+        revealWindow(next, { inactive: options.focus === false || !wasFocused });
+      }
+      if (!next.isVisible() || next.isMinimized()) {
+        old?.destroy();
+        await restoreRetainedWindowState(next, !options.collapsedFloatingBubble);
+        return;
+      }
+    }
+    handoffWindow(old, next, {
+      focus: options.focus === true || (options.focus !== false && wasFocused)
+    });
+    if (process.platform === 'win32') await restoreRetainedWindowState(next, !options.collapsedFloatingBubble);
+  }).catch(error => {
+    console.warn(`[window] host replacement failed: ${error.message}`);
   });
-  const next = mainWindow;
-  handoffWindow(old, next, {
-    focus: options.focus === true || (options.focus !== false && wasFocused)
-  });
+  return mainWindowReplacementTask;
 }
 
 function discardFailedDashboardWindow(win, reason) {
@@ -7707,36 +7897,42 @@ function discardFailedDashboardWindow(win, reason) {
   win.destroy();
 }
 
+function showDashboardWindow(win) {
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
 function createDashboardWindow() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-    // Reload so a reopened window always picks up the latest renderer + fresh history,
-    // instead of showing whatever was loaded when it first opened.
-    dashboardWindow.hide();
-    dashboardWindow.webContents.reload();
+    // Focus/visibility already refresh history in place. Preserve the selected
+    // view, and let the initial ready event reveal a still-loading Dashboard.
+    if (dashboardWindowReady) showDashboardWindow(dashboardWindow);
     return dashboardWindow;
   }
-  const glass = nativeBlurEnabled();
-  const win = new BrowserWindow({
+  const windowOptions = {
     width: 920,
     height: 620,
     minWidth: 560,
     minHeight: 420,
     frame: false,
-    transparent: !(process.platform === 'win32' && glass),
+    transparent: true,
     show: false,
     backgroundColor: '#00000000',
     ...appWindowIcon(),
     skipTaskbar: false,
     ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
-    ...(process.platform === 'win32' && glass ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
-  });
+  };
+  const win = new BrowserWindow(windowOptions);
   dashboardWindow = win;
+  dashboardWindowReady = false;
   applyWindowsChrome(win, { round: true });
+  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled() });
   attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
   syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -7747,7 +7943,7 @@ function createDashboardWindow() {
     event.preventDefault();
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
-  // Only dashboard:ready may reveal a healthy window. Slow hub history must not
+  // Only dashboard:ready may first reveal a healthy window. Slow hub history must not
   // race a wall-clock fallback and expose the unprepared heatmap. Actual load or
   // renderer failures discard the hidden window so the next open starts cleanly.
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
@@ -7761,7 +7957,10 @@ function createDashboardWindow() {
     if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
   });
   win.on('closed', () => {
-    dashboardWindow = null;
+    if (dashboardWindow === win) {
+      dashboardWindow = null;
+      dashboardWindowReady = false;
+    }
   });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
@@ -7802,8 +8001,17 @@ async function cursorStatusValue({ discover = false } = {}) {
   }
   const disabled = new Set(normalizeCursorDisabledAccountIds(settings?.cursorDisabledAccountIds));
   const manual = new Set(normalizeCursorAccountIds(settings?.cursorManualAccountIds));
-  const safeAccounts = await Promise.all(accounts.map(async (account) => {
+  const desktop = cursorAuth.readCursorDesktopSignIn();
+  const listedAccounts = await Promise.all(accounts.map(async (account) => {
     const probeResult = await cursorProbe.probe(account.sessionToken);
+    const expired = !probeResult.ok && probeResult.error?.kind === 'unauthorized';
+    // Desktop-detected accounts follow the desktop sign-in; manual ones stay
+    // until removed. Hidden accounts keep their credentials and usage history.
+    if (!manual.has(account.id) && !isCursorDetectedAccountCurrent({
+      desktop,
+      userId: cursorAuth.canonicalCursorUserId(account.userId || account.id),
+      unauthorized: expired
+    })) return null;
     return {
       id: account.id,
       enabled: !disabled.has(account.id),
@@ -7811,37 +8019,17 @@ async function cursorStatusValue({ discover = false } = {}) {
       email: probeResult.ok ? probeResult.user?.email || '' : '',
       label: account.label || '',
       membershipType: probeResult.ok ? probeResult.usage.membershipType || '' : '',
-      expired: !probeResult.ok && probeResult.error?.kind === 'unauthorized',
+      expired,
       error: probeResult.ok ? '' : probeResult.error?.message || ''
     };
   }));
+  const safeAccounts = listedAccounts.filter(Boolean);
   return {
     loggedIn: safeAccounts.length > 0,
     accounts: safeAccounts,
     linkedCount: safeAccounts.filter((account) => account.enabled && !account.expired && !account.error).length,
     managementBlocked
   };
-}
-
-function rebuildWindow() {
-  if (!mainWindow) return;
-  const bounds = rebuildWindowBounds(mainWindow, floatingBubbleState);
-  const wasFocused = mainWindow.isFocused();
-  const old = mainWindow;
-  floatingBubbleState.collapsed = false;
-  floatingBubbleState.side = null;
-  floatingBubbleState.collapsedBounds = null;
-  floatingBubbleState.expandedBounds = null;
-  floatingBubbleState.suppressNextCollapse = false;
-  stopFloatingBubbleAutoCollapseTimer();
-  old.removeAllListeners('close');
-  // Build the new window first so total window count never drops to 0
-  // (otherwise window-all-closed fires and quits the app on Windows).
-  createWindow(bounds);
-  mainWindow.once('show', () => {
-    if (!old.isDestroyed()) old.destroy();
-    if (wasFocused && !mainWindow.isDestroyed()) mainWindow.focus();
-  });
 }
 
 // Plugin hosts load from their own privileged scheme, which Chromium only
@@ -7853,6 +8041,7 @@ app.whenReady().then(() => {
   ensureSettingsLoaded();
   powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
   powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
@@ -8060,10 +8249,9 @@ app.whenReady().then(() => {
     patch = skinSelection.patch;
     const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
+    minimaxApiKeys.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
-    const previousNativeMaterial = nativeBlurEnabled();
-    const previousWindowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
     const previousClients = settings.clients;
     const previousDiscordRpcEnabled = settings.discordRpcEnabled;
     const previousShowTrayIcon = settings.showTrayIcon;
@@ -8080,6 +8268,7 @@ app.whenReady().then(() => {
     const previousStartAtLogin = settings.startAtLogin;
     const previousAutomaticAppUpdates = settings.automaticAppUpdates;
     const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
+    const previousProxyKey = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.windowMaximized;
@@ -8090,7 +8279,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.syncContentStatus;
     delete normalizedPatch.syncContentBase;
     delete normalizedPatch.pluginStates;
-    delete normalizedPatch.pluginPlacementDefaults;
+    delete normalizedPatch.pluginInitialSetup;
     delete normalizedPatch.pluginContentSelections;
     delete normalizedPatch.pluginContentOrder;
     // Account fields declared persist:'never' (managed account lists, profile
@@ -8117,7 +8306,16 @@ app.whenReady().then(() => {
       if (limitError) throw new Error(limitError);
       normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
     }
+    if (patch.proxyUrl !== undefined) {
+      const proxyError = proxyUrlError(patch.proxyUrl);
+      if (proxyError) throw new Error(proxyError);
+    }
+    if (patch.noProxy !== undefined) {
+      const bypassError = noProxyError(patch.noProxy);
+      if (bypassError) throw new Error(bypassError);
+    }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
+    if (patch.deviceIconOverrides !== undefined) normalizedPatch.deviceIconOverrides = require('./renderer/deviceIcons').normalizeDeviceIconOverrides(patch.deviceIconOverrides);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
@@ -8200,6 +8398,7 @@ app.whenReady().then(() => {
       edgeDockRefreshEnabled: parseBoolean(patch.edgeDockRefreshEnabled ?? settings.edgeDockRefreshEnabled, false),
       edgeDockRunningIndicatorEnabled: parseBoolean(patch.edgeDockRunningIndicatorEnabled ?? settings.edgeDockRunningIndicatorEnabled, true),
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
+      edgeDockFloatingX: patch.edgeDockSide !== undefined ? null : normalizeEdgeDockFloatingX(settings.edgeDockFloatingX),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
       edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
@@ -8268,7 +8467,9 @@ app.whenReady().then(() => {
       limitsRefreshMs: normalizeLimitsRefreshMs(patch.limitsRefreshMs ?? settings.limitsRefreshMs),
       showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
+      limitsHistoryOpenMode: ['hover', 'click', 'off'].includes(patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) ? (patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) : 'hover',
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
+      claudeCliFallbackEnabled: parseBoolean(patch.claudeCliFallbackEnabled ?? settings.claudeCliFallbackEnabled, true),
       codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
       workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),
       showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),
@@ -8294,6 +8495,10 @@ app.whenReady().then(() => {
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
+      // A hand-edited settings.json value the form would refuse is kept as-is
+      // so the transport fails closed on it rather than silently going direct.
+      proxyUrl: patch.proxyUrl !== undefined ? normalizeProxyUrl(patch.proxyUrl) : String(settings.proxyUrl || ''),
+      noProxy: patch.noProxy !== undefined ? normalizeNoProxy(patch.noProxy) : String(settings.noProxy || ''),
       ...finalAccountSettings(patch, settings),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
@@ -8335,6 +8540,15 @@ app.whenReady().then(() => {
       settings.startAtLogin = applyLoginItem(settings.startAtLogin);
       saveSettings({ throwOnError: true });
     }
+    // Every save re-applies, so re-saving the same proxy retries a session
+    // apply that failed earlier. Every provider answer so far came over the
+    // previous route; ask again over the new one instead of waiting out each
+    // provider's interval.
+    const proxySettingChanged = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']) !== previousProxyKey;
+    void sessionProxy.apply().then((sessionChanged) => {
+      if (proxySettingChanged || sessionChanged) return queueLimitInvalidation({ all: true }, 'settings-change');
+      return null;
+    }).catch((error) => console.log(`[limits-runtime] proxy refresh failed: ${error.message}`));
     if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) {
       runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
     }
@@ -8352,15 +8566,7 @@ app.whenReady().then(() => {
     applyWindowSettings();
     syncFloatingBubbleAvailability();
     syncDockSurfaces();
-    const nextNativeMaterial = nativeBlurEnabled();
-    const nextWindowsBackdrop = normalizeWindowsBackdropMode(settings?.windowsBackdrop);
-    const windowsBackdropChanged = previousWindowsBackdrop !== nextWindowsBackdrop
-      && (previousNativeMaterial || nextNativeMaterial);
-    if (process.platform === 'win32' && (previousNativeMaterial !== nextNativeMaterial || windowsBackdropChanged)) {
-      rebuildWindow();
-    } else {
-      applyNativeMaterial();
-    }
+    applyNativeMaterial();
     const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
     const widgetHistorySourceChanged = previousRuntimeSettings.historyEnabled !== settings.historyEnabled;
     if (widgetHistorySourceChanged && !runtimeChange.modeStructural) {
@@ -8734,8 +8940,8 @@ app.whenReady().then(() => {
   ipcMain.handle('usage:revealClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.revealClientSyncLock(clientId));
   ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
   ipcMain.handle('usage:repairClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.repairClientSyncLock(clientId));
-  ipcMain.handle('clipboard:write', (_event, text) => {
-    clipboard.writeText(String(text || ''));
+  ipcMain.handle('clipboard:write', async (_event, text) => {
+    await clipboard.writeText(String(text || ''));
     return true;
   });
   ipcMain.handle('app:openExternal', (_event, url) => {
@@ -8803,6 +9009,7 @@ app.whenReady().then(() => {
   ipcMain.handle('claude:removeWebAccount', (_event, id) => claudeAccountService().removeAccount(String(id || '')));
   ipcMain.handle('claude:setAccountEnabled', (_event, id, enabled) => claudeAccountService().setAccountEnabled(String(id || ''), enabled));
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
+  getLimitsHistoryController().register();
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   // Explicit panel refreshes collect only their provider. Save and clear reuse
@@ -9311,6 +9518,23 @@ app.whenReady().then(() => {
     void queueLimitInvalidation({ provider: 'opencode' }, 'ambient-toggle', { clear: true });
     return { ok: true };
   });
+  const minimaxApiKeys = createMinimaxApiKeys({
+    getSettings: () => settings, saveSettings,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
+    changed: (accountKey, refresh, reason) => {
+      credentialCommands.noteSettingsPatch({ minimaxApiKey: '' });
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      void queueLimitInvalidation({ provider: 'minimax', source: 'api', accountKey }, reason, { clear: true, refresh });
+      pushSettingsToRenderer();
+    }
+  });
+  ipcMain.handle('minimax:getKeys', () => minimaxApiKeys.getKeys());
+  for (const method of ['addKey', 'removeKey']) {
+    ipcMain.handle(`minimax:${method}`, async (_event, ...args) => {
+      try { return await minimaxApiKeys[method](...args); }
+      catch (error) { return { ok: false, error: error?.message || 'Could not save MiniMax API key' }; }
+    });
+  }
   ipcMain.handle('openrouter:getProfiles', async () => {
     return {
       profiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles || {}),
@@ -9702,16 +9926,15 @@ app.whenReady().then(() => {
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== dashboardWindow || win.isDestroyed()) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
+    dashboardWindowReady = true;
+    showDashboardWindow(win);
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => {
     const action = activateWindowAction({
       mainWindow,
-      windows: BrowserWindow.getAllWindows(),
+      windows: BaseWindow.getAllWindows(),
       isDockOwned: (win) => Boolean(edgeDockController?.owns(win) || notchController?.owns(win))
     });
     if (action === 'focusWindow') focusExistingWindow();
@@ -9729,7 +9952,7 @@ app.whenReady().then(() => {
     try {
       pluginRuntime = createPluginRuntime({
         getAppSettings: settingsForRenderer,
-        electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, session, shell, dialog },
+        electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, nativeImage, session, shell, dialog },
         userDataDir: app.getPath('userData'),
         getSettings: () => settings,
         applySettingsPatch,
@@ -9740,7 +9963,7 @@ app.whenReady().then(() => {
         },
         persistManagementSettings: (patch) => {
           // Main-owned transaction state only; never exposed as generic renderer settings.
-          const allowed = ['pluginStates', 'pluginPlacementDefaults', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
+          const allowed = ['pluginStates', 'pluginInitialSetup', 'themeColors', 'vendorColors', 'pluginAuthorSkin', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
           settings = { ...settings, ...Object.fromEntries(allowed.filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]])) };
           settings.pluginStates = normalizePluginStates(settings.pluginStates);
           saveSettings({ throwOnError: true });
@@ -9754,6 +9977,7 @@ app.whenReady().then(() => {
         businessAdapters: {
           sourceId: () => `${hubModeGeneration}:${mode}:${settings.hubMode}`,
           extras: stats => ({
+            liveRateContext: { hubMode: settings.hubMode, deviceId: settings.deviceId, clients: settings.clients },
             historyRevision: JSON.stringify([settings.historyEnabled !== false, stats?.deviceHistoryRevision || statsHistoryRevision(stats)]),
             subscriptions: effectiveSubscriptions(),
             subscriptionContext: { date: subscriptionDisplay.todayString(), rates: { ...(effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {})) } },
@@ -9809,11 +10033,15 @@ app.whenReady().then(() => {
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
-// performQuit is synchronous through to the exit, so there is nothing to wait
-// for and deliberately no preventDefault: taking the quit over would cancel an
-// OS-initiated logout or restart on macOS.
+// Drain queued quota-history writes with a bounded synchronous worker barrier,
+// then keep performQuit synchronous through to the exit. No preventDefault:
+// taking the quit over would cancel an OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  limitsHistoryController?.dispose();
+  limitsHistoryStore?.closeSync();
+  // An updater can abort this quit; subsequent reads need an open store.
+  limitsHistoryStore = null;
   antigravityOAuthLoginController?.abort();
   workbuddyManagedAccountService?.cancelLogin();
   resetMacWidgetReloadThrottle();

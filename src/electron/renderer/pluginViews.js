@@ -86,7 +86,12 @@
     function paint(mount) {
       applyAppearance(mount.container, appearance);
       const value = state(mount.surface, mount.ref) || (!latest.has(mount.surface) ? mount.options.descriptor : null);
-      if (value?.entry) void ui.mount(mount.container, value, { ...getContext(mount.surface), surface: mount.surface, ...mount.options });
+      if (value?.entry) {
+        const context = { ...mount.options, ...getContext(mount.surface), surface: mount.surface };
+        // A slot can refine the surface's generic variant (e.g. Notch summary).
+        if (Object.hasOwn(mount.options, 'surfaceVariant')) context.surfaceVariant = mount.options.surfaceVariant;
+        void ui.mount(mount.container, value, context);
+      }
       else { mount.options.onMountStatus?.(false); ui.unmount(mount.container); mount.container.textContent = value ? t?.('settings.plugins.status.' + value.status) || value.status : ''; }
     }
     function computeDemand() {
@@ -136,7 +141,9 @@
         for (const ref of refs) { const descriptor = state(surface, ref); if (descriptor?.entry) void ui.load(descriptor).catch(error => console.error(error)); }
         refreshDemand();
       },
-      refreshContext() { for (const mount of mounts.values()) paint(mount); },
+      refreshContext({ includeContent = true } = {}) {
+        for (const mount of mounts.values()) if (includeContent || !mount.options.target) paint(mount);
+      },
       refreshDemand, refreshMotion: refreshDemand,
       hasUnsavedChanges: ui.hasUnsavedChanges,
       dispose() { disposed = true; observer?.disconnect(); if (frame !== null) window.cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', refreshDemand); return ui.dispose(); }

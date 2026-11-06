@@ -23,7 +23,7 @@ function extract(source, name) {
   assert.ok(found, `production function ${name}`); return found;
 }
 function helpers(extra = {}) {
-  const ctx = { normalizeAppearance, ...extra }; vm.createContext(ctx);
+  const ctx = { normalizeAppearance, prepareSkinSettings: require('../../src/electron/plugins/skinSettings').prepareSkinSettings, ...extra }; vm.createContext(ctx);
   vm.runInContext(extract(runtimeSource, 'normalizePluginAuthorSkin') + '\n' + extract(main, 'preparePluginSkinSettings') + '\n' + extract(main, 'assertPluginSkinRequest'), ctx);
   return ctx;
 }

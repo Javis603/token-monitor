@@ -8,7 +8,7 @@ const outputRoot = new URL("../_site/", import.meta.url);
 
 const cssFiles = ["styles/tokens.css", "styles/base.css", "styles/components.css", "styles/edgedock.css", "styles/sections.css"];
 const jsFiles = ["scripts/i18n.js", "scripts/main.js"];
-const assetVersion = "20261023-docs";
+const assetVersion = "20261031-plugin-resources";
 // Icons are the site's own copies under site/assets/icons/ (the app's assets/icons/ stay
 // mask-only currentColor and must not be mutated to serve the web). Marks the app only
 // draws as ink — the brands whose art renders black — are copied verbatim and flattened
