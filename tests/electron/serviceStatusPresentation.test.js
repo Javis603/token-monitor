@@ -106,3 +106,15 @@ test('agoBucket buckets into seconds, minutes, and hours', () => {
   assert.deepEqual(agoBucket(3_600_000), { unit: 'hours', value: 1 });
   assert.deepEqual(agoBucket(7_500_000), { unit: 'hours', value: 2 });
 });
+
+test('OpenCode affected services use readable names below the headline without changing other providers', () => {
+  const { affectedServicesLabel } = require('../../src/electron/renderer/serviceStatusPresentation');
+  const i18n = require('../../src/electron/renderer/i18n');
+  const provider = { id: 'opencode', componentIssues: [{ name: 'Go' }] };
+  assert.equal(affectedServicesLabel(provider, (key, values) => i18n.translate('zh-TW', key, values)), '受影響服務：Go');
+  assert.equal(affectedServicesLabel(provider, (key, values) => i18n.translate('en', key, values)), 'Affected services: Go');
+  assert.equal(affectedServicesLabel({ ...provider, id: 'claude' }, () => { throw new Error('not OpenCode'); }), '');
+  assert.equal(affectedServicesLabel({ ...provider, componentIssues: [] }, () => { throw new Error('no issues'); }), '');
+  const many = { ...provider, componentIssues: ['Go', 'Pay-as-you-go', 'Free inference'].map((name) => ({ name })) };
+  assert.equal(affectedServicesLabel(many, (key, values) => i18n.translate('en', key, values)), 'Affected services: Go, Pay-as-you-go +1');
+});
