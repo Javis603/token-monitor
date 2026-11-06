@@ -58,6 +58,7 @@
     { id: 'deepseek', label: 'DeepSeek' },
     { id: 'devin', label: 'Devin' },
     { id: 'minimax', label: 'Minimax' },
+    { id: 'mistral', label: 'Mistral' },
     { id: 'typesafe', label: 'TypeSafe' },
     { id: 'openrouter', label: 'OpenRouter' },
     { id: 'volcengine', label: 'Volcengine' },
