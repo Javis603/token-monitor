@@ -11,6 +11,8 @@ const {
   SERVICE_STATUS_PROVIDERS,
   createServiceStatusClient,
   summarizeAtomFeedProvider,
+  summarizeInstatusProvider,
+  summarizeOpenCodeProvider,
   summarizeStatuspageProvider
 } = require('../../src/electron/serviceStatus');
 
@@ -116,19 +118,27 @@ test('summarizeStatuspageProvider counts under_maintenance as maintenance, not d
   assert.equal(result.maintenanceCount, 1);
 });
 
-test('default providers cover claude, openai, cursor, and deepseek with summary endpoints', () => {
-  // Order mirrors the other settings lists (Claude → Codex/OpenAI → Cursor → …).
+test('default providers cover the tracked tools with per-format summary endpoints', () => {
+  // Order mirrors the renderer placeholder list in app.js; the two lists must
+  // stay in sync. Ids are unique — they are the hidden/display-order keys.
   const ids = SERVICE_STATUS_PROVIDERS.map((entry) => entry.id);
-  assert.deepEqual(ids, ['claude', 'openai', 'cursor', 'deepseek']);
+  assert.deepEqual(ids, [
+    'claude', 'openai', 'opencode', 'cursor', 'factory', 'kimi', 'github',
+    'zed', 'deepseek', 'devin', 'minimax', 'minimax-intl'
+  ]);
+  assert.equal(new Set(ids).size, ids.length);
   for (const entry of SERVICE_STATUS_PROVIDERS) {
     assert.ok(entry.pageUrl.startsWith('https://'), `${entry.id} pageUrl should be https`);
   }
+  const byId = new Map(SERVICE_STATUS_PROVIDERS.map((entry) => [entry.id, entry]));
   // DeepSeek left Atlassian Statuspage; its events are summarized from the
   // official page's Atom feed instead of the stale statuspage.io mirror.
-  const deepseek = SERVICE_STATUS_PROVIDERS.find((entry) => entry.id === 'deepseek');
-  assert.equal(deepseek.summaryUrl, 'https://status.deepseek.com/feed.atom');
-  assert.equal(deepseek.summaryFormat, 'atom-feed');
-  for (const entry of SERVICE_STATUS_PROVIDERS.filter((item) => item.id !== 'deepseek')) {
+  assert.equal(byId.get('deepseek').summaryUrl, 'https://status.deepseek.com/feed.atom');
+  assert.equal(byId.get('deepseek').summaryFormat, 'atom-feed');
+  // OpenCode and Zed publish non-Statuspage feeds with their own shape.
+  assert.equal(byId.get('opencode').summaryFormat, 'opencode-json');
+  assert.equal(byId.get('zed').summaryFormat, 'instatus');
+  for (const entry of SERVICE_STATUS_PROVIDERS.filter((item) => !item.summaryFormat)) {
     assert.match(entry.summaryUrl, /\/api\/v2\/summary\.json$/);
   }
 });
@@ -287,6 +297,204 @@ test('summarizeAtomFeedProvider rejects a feed truncated after a resolved entry'
   const result = summarizeAtomFeedProvider(feedProvider, truncated);
   assert.equal(result.status, 'unknown');
   assert.match(result.error, /Unexpected feed content/);
+});
+
+const instatusProvider = {
+  id: 'zed',
+  label: 'Zed',
+  pageUrl: 'https://status.zed.dev',
+  summaryUrl: 'https://status.zed.dev/v3/summary.json',
+  summaryFormat: 'instatus'
+};
+
+test('summarizeInstatusProvider reports an UP page as operational', () => {
+  // Healthy Instatus pages omit the incident arrays entirely.
+  const result = summarizeInstatusProvider(instatusProvider, { page: { status: 'UP' } }, {
+    checkedAt: '2026-11-05T10:00:00Z'
+  });
+
+  assert.deepEqual(result, {
+    id: 'zed',
+    label: 'Zed',
+    pageUrl: 'https://status.zed.dev',
+    status: 'ok',
+    indicator: 'none',
+    description: 'All Systems Operational',
+    checkedAt: '2026-11-05T10:00:00Z',
+    updatedAt: '',
+    componentIssues: [],
+    incidentTitle: '',
+    incidentCount: 0,
+    maintenanceCount: 0
+  });
+});
+
+test('summarizeInstatusProvider ranks active incidents by impact', () => {
+  const payload = {
+    page: { status: 'HASISSUES' },
+    activeIncidents: [
+      { name: 'Degraded editing', impact: 'DEGRADEDPERFORMANCE', updatedAt: '2026-11-05T09:00:00Z' },
+      { name: 'Collaboration outage', impact: 'MAJOROUTAGE', updatedAt: '2026-11-05T09:30:00Z' },
+      { name: 'Partial outage', impact: 'PARTIALOUTAGE', updatedAt: '2026-11-05T09:15:00Z' }
+    ],
+    activeMaintenances: [{ name: 'DB upgrade' }]
+  };
+
+  const result = summarizeInstatusProvider(instatusProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
+
+  assert.equal(result.status, 'outage');
+  assert.equal(result.indicator, 'critical');
+  assert.equal(result.description, 'Major Outage');
+  assert.equal(result.incidentTitle, 'Collaboration outage');
+  assert.equal(result.incidentCount, 3);
+  assert.equal(result.maintenanceCount, 1);
+  assert.equal(result.updatedAt, '2026-11-05T09:30:00Z');
+});
+
+test('summarizeInstatusProvider degrades HASISSUES without readable incident detail', () => {
+  const result = summarizeInstatusProvider(instatusProvider, { page: { status: 'HASISSUES' } }, {
+    checkedAt: '2026-11-05T10:00:00Z'
+  });
+
+  assert.equal(result.indicator, 'minor');
+  assert.equal(result.status, 'degraded');
+  assert.equal(result.incidentTitle, '');
+});
+
+test('summarizeInstatusProvider maps granular v3 page statuses and preserves incidents', () => {
+  for (const prefix of ['ALL', 'SOME', 'ONE']) {
+    for (const [suffix, indicator] of [
+      ['UNDERMAINTENANCE', 'none'], ['DEGRADEDPERFORMANCE', 'minor'],
+      ['PARTIALOUTAGE', 'major'], ['MINOROUTAGE', 'minor'], ['MAJOROUTAGE', 'critical']
+    ]) {
+      const page = { status: prefix + suffix };
+      const result = summarizeInstatusProvider(instatusProvider, { page });
+      assert.equal(result.indicator, indicator, page.status);
+      const concurrent = summarizeInstatusProvider(instatusProvider, {
+        page, activeIncidents: [{ name: 'Outage', impact: 'MAJOROUTAGE' }],
+        activeMaintenances: [{ name: 'Maintenance' }]
+      });
+      assert.equal(concurrent.indicator, 'critical', page.status);
+      assert.equal(concurrent.incidentTitle, 'Outage');
+      assert.equal(concurrent.incidentCount, 1);
+      assert.equal(concurrent.maintenanceCount, 1);
+    }
+  }
+});
+
+test('summarizeInstatusProvider reports unknown on malformed payloads', () => {
+  for (const payload of [null, 'nope', [], { page: {} }, { page: { status: 'WEIRD' } }, { page: { status: 'UP' }, activeIncidents: 'nope' }]) {
+    const result = summarizeInstatusProvider(instatusProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
+    assert.equal(result.status, 'unknown', JSON.stringify(payload));
+    assert.ok(result.error);
+  }
+});
+
+const openCodeProvider = {
+  id: 'opencode',
+  label: 'OpenCode',
+  pageUrl: 'https://status.opencode.ai',
+  summaryUrl: 'https://status.opencode.ai/api/status',
+  summaryFormat: 'opencode-json'
+};
+
+test('summarizeOpenCodeProvider reports an operational payload as healthy', () => {
+  const payload = {
+    updatedAt: 1793836106718,
+    status: 'operational',
+    components: [
+      { service: 'console', status: 'operational' },
+      { service: 'inference', status: 'operational' }
+    ]
+  };
+
+  const result = summarizeOpenCodeProvider(openCodeProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
+
+  assert.deepEqual(result, {
+    id: 'opencode',
+    label: 'OpenCode',
+    pageUrl: 'https://status.opencode.ai',
+    status: 'ok',
+    indicator: 'none',
+    description: 'All Systems Operational',
+    checkedAt: '2026-11-05T10:00:00Z',
+    updatedAt: new Date(1793836106718).toISOString(),
+    componentIssues: [],
+    incidentTitle: '',
+    incidentCount: 0,
+    maintenanceCount: 0
+  });
+});
+
+test('summarizeOpenCodeProvider takes the worst of the top-level and component statuses', () => {
+  const payload = {
+    updatedAt: 1793836106718,
+    status: 'operational',
+    components: [
+      { service: 'console', status: 'operational' },
+      { service: 'go', status: 'degraded' },
+      { service: 'payg', status: 'partial_outage' }
+    ]
+  };
+
+  const result = summarizeOpenCodeProvider(openCodeProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
+
+  assert.equal(result.status, 'outage');
+  assert.equal(result.indicator, 'major');
+  // The affected service names stand in for the missing incident headline.
+  assert.equal(result.description, 'go; payg');
+  assert.deepEqual(result.componentIssues, [
+    { name: 'go', status: 'degraded_performance' },
+    { name: 'payg', status: 'partial_outage' }
+  ]);
+});
+
+test('summarizeOpenCodeProvider degrades unknown statuses instead of reading green', () => {
+  const payload = { status: 'operational', components: [{ service: 'inference', status: 'wat' }] };
+
+  const result = summarizeOpenCodeProvider(openCodeProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
+
+  assert.equal(result.indicator, 'minor');
+  assert.deepEqual(result.componentIssues, [{ name: 'inference', status: 'degraded_performance' }]);
+});
+
+test('summarizeOpenCodeProvider reports unknown on malformed payloads', () => {
+  const cases = [
+    null,
+    'nope',
+    [],
+    { components: [] },
+    { status: 'operational', components: 'nope' },
+    { status: 'operational', components: [{ status: 'operational' }] },
+    { status: 'operational', components: [null] }
+  ];
+  for (const payload of cases) {
+    const result = summarizeOpenCodeProvider(openCodeProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
+    assert.equal(result.status, 'unknown', JSON.stringify(payload));
+    assert.ok(result.error);
+  }
+});
+
+test('service status client dispatches each summaryFormat to its summarizer', async () => {
+  const instatusPayload = { page: { status: 'HASISSUES' }, activeIncidents: [{ name: 'Editing degraded', impact: 'DEGRADEDPERFORMANCE', updatedAt: '2026-11-05T09:00:00Z' }] };
+  const openCodePayload = { updatedAt: 1793836106718, status: 'operational', components: [] };
+  const client = createServiceStatusClient({
+    providers: [instatusProvider, openCodeProvider],
+    now: () => 0,
+    fetchImpl: async (url) => ({
+      ok: true,
+      json: async () => {
+        if (url === instatusProvider.summaryUrl) return instatusPayload;
+        return openCodePayload;
+      }
+    })
+  });
+
+  const result = await client.getServiceStatus();
+  const byId = new Map(result.providers.map((entry) => [entry.id, entry]));
+
+  assert.equal(byId.get('zed').indicator, 'minor');
+  assert.equal(byId.get('opencode').indicator, 'none');
 });
 
 test('service status client summarizes atom feeds through response text', async () => {

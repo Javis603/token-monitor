@@ -17,6 +17,10 @@ An explicit `minimaxApiRegion` choice wins over the legacy probe option `minimax
 
 Within each region, the Token Plan endpoint falls back to the legacy Coding Plan endpoint on the existing migration/error signals. A transport failure skips the remaining endpoint on the unreachable host. Runtime cancellation stops the probe without retrying another region; a per-request timeout remains eligible for fallback. HTTP failures such as 5xx or 429 and JSON parse failures do not trigger a cross-region retry.
 
+## Service status
+
+The Status panel lists MiniMax (China) and MiniMax (International) separately because their official status pages publish different incidents. Each region can be hidden independently. These public checks cover both regions regardless of the local API-region setting, including when viewing usage from multiple devices. The existing `minimax` status preference remains the China entry; `minimax-intl` controls the international entry.
+
 ## Credentials and transport
 
 The API key stays in the main-process credential store. Region or billing-type changes retain the key, clear the old quota, and immediately refresh only MiniMax through the normal settings invalidation path. Calls use the injected transport and fixed MiniMax API URLs.

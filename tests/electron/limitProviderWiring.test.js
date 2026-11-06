@@ -337,7 +337,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
       isAllowedVerificationUrl,
       isAllowedCodexLoginUrl,
       limitProviderUrlAllowed,
-      STATUS_PAGE_HOSTS: new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname))
+      STATUS_PAGE_HOSTS: evalTopLevel(mainSource, 'const STATUS_PAGE_HOSTS = ', '\nconst diagnosticJournal', { URL, SERVICE_STATUS_PROVIDERS })
     }
   );
   const allowed = [
@@ -382,6 +382,14 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://status.openai.com/',
     'https://status.cursor.com/',
     'https://status.deepseek.com/',
+    'https://www.githubstatus.com/',
+    'https://status.moonshot.cn/',
+    'https://status.minimaxi.com/',
+    'https://status.minimax.io/',
+    'https://status.opencode.ai/',
+    'https://status.zed.dev/',
+    'https://www.devinstatus.com/',
+    'https://status.factory.ai/',
     'https://github.com/junhoyeo/tokscale',
     'https://github.com/Javis603/token-monitor/releases',
     'https://www.npmjs.com/package/@tokscale/cli',
@@ -426,6 +434,8 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://bailian.console.aliyun.com/',
     'https://bailian.console.aliyun.com/us-west-1',
     'https://status.claude.com/incidents',
+    'https://www.google.com/appsstatus/dashboard',
+    'https://www.google.com/appsstatus/dashboard/other',
     'https://codex-resets.com/path',
     'https://github.com/junhoyeo',
     'https://github.com/Javis603/other-repo',
