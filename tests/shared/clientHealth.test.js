@@ -407,7 +407,7 @@ test('the default Cursor cache stays home-relative while Antigravity follows the
   const homeDir = 'C:\\Users\\alice';
   const appData = 'C:\\Users\\alice\\AppData\\Roaming';
   const configAppData = process.platform === 'win32'
-    ? require('../../src/shared/windowsKnownFolders').nativeWindowsFolders().roaming
+    ? (require('../../src/shared/windowsKnownFolders').nativeWindowsFolders().roaming || appData)
     : appData;
   const env = { APPDATA: appData };
   const roots = clientSourceRoots('cursor,antigravity', { homeDir, platform: 'win32', env });
