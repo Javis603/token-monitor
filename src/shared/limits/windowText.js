@@ -152,6 +152,12 @@
       return result(null, moneyOfRemaining(window, showUsed), window.showMeter !== false);
     }
 
+    if (id === 'mistral') {
+      if (!billing || metric === 'credits') return EMPTY;
+      // Match the grant detail's used/remaining mode without a text prefix.
+      return result(null, moneyOfUsed(window, showUsed));
+    }
+
     if (id === 'kiro') {
       if (!billing) return EMPTY;
       // Overage has no meter and no denominator: one compact line, no bar.

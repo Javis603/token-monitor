@@ -98,6 +98,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
     copilotApiToken: ['providers', 'copilot', 'apiToken'],
     zedCookie: ['providers', 'zed', 'cookie'],
+    mistralCookie: ['providers', 'mistral', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
     stepfunToken: ['providers', 'stepfun', 'token'],
     notionCookie: ['providers', 'notion', 'cookie'],
@@ -168,6 +169,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     qoder: ['qoderCookie', 'qoderSite'],
     deepseek: ['deepseekApiKey'],
     devin: ['devinBearerToken', 'devinOrganization'],
+    mistral: ['mistralCookie'],
     typesafe: ['typesafeCookie'],
     stepfun: ['stepfunToken'],
     notion: ['notionCookie', 'notionWorkspaceId'],
@@ -290,7 +292,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie', 'opendesignCookie',
+    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie', 'opendesignCookie',
     'openaiAdminKey', 'openaiPlan', 'openaiRenewalDate'
   ].sort());
   for (const key of normalizedKeys) {

@@ -1682,6 +1682,26 @@
           ariaParts: [balanceValue]
         }), 'credits', label));
       }
+    } else if (provider.provider === 'mistral') {
+      // Keep API and Vibe allowances on separate full-width rows. The wallet
+      // has no quota denominator and must not become a percentage meter.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => !isCreditsWindow(window))
+        .map((window) => {
+          const node = limitWindowNode(
+            providerWindowLabel(provider, window), window, color, 0.78,
+            null, providerWindowText(provider, window).detail
+          );
+          node.classList.add('limit-window-wide');
+          return node;
+        });
+      windows.append(...quotaNodes);
+      for (const wallet of (provider.windows || []).filter(isCreditsWindow)) {
+        const value = creditsBalanceValue(provider, wallet);
+        if (!value) continue;
+        const label = providerWindowLabel(provider, wallet, 'Balance');
+        windows.append(tagUsageItem(limitNoteRowNode({ label, summary: value, ariaParts: [value] }), 'credits', label));
+      }
     } else if (provider.provider === 'notion') {
       // Both included allowances are percentage quotas. Monthly is a billing
       // window, which the default session/weekly branch would omit.

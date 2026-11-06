@@ -717,3 +717,13 @@ test('OpenDesign save failures retain the underlying error in every locale', () 
     assert.ok(text.includes('fixture disk failure'), locale);
   }
 });
+
+
+test('Mistral setup renders both the allowance note and cookie-copy steps', () => {
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'mistral');
+  const { group } = renderPanel(form);
+  assert.match(group.text, /Included API/);
+  assert.match(group.text, /DevTools/);
+  assert.match(group.text, /ory_session_/);
+  assert.ok(group.byId('mistralCookieInput'));
+});
