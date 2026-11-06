@@ -106,3 +106,12 @@ test('a mask url escapes quotes and backslashes in the base', () => {
   const slashed = rowIconMaskRules(String.raw`file:///tmp/a\b/assets/icons/`).split('\n')[0];
   assert.ok(slashed.includes(String.raw`a\\b`), slashed);
 });
+
+
+test('Mistral Vibe uses the existing Mistral mark and brand colour', () => {
+  const mistral = VENDOR_PRESENTATION.filter(({ id }) => id === 'mistral');
+  assert.equal(mistral.length, 1);
+  assert.equal(mistral[0].color.toLowerCase(), '#fa520f');
+  assert.equal(ROW_ICON_MASKS.mistral, 'mistral');
+  assert.equal(trayIconFile('mistral'), 'mistral');
+});

@@ -237,6 +237,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const gooseFiles = enabled.has('goose')
     ? gooseSessionFiles({ homeDir: home, platform, env, windowsFolders: options.windowsFolders }) : [];
   add('goose', ...gooseFiles.map((file) => ['goose-db', path.dirname(file), file]));
+  add('mistral', ['mistral-sessions', path.join(nonBlankEnvPath('VIBE_HOME', path.join(tokscaleHome, '.vibe'), env), 'logs', 'session')]);
   add('opencode', ['opencode-data', path.join(xdgHome, 'opencode')]);
   add('openclaw', ['openclaw-agents', path.join(home, '.openclaw', 'agents')]);
   // The sync cache is config-derived; legacy local threads stay XDG-data
