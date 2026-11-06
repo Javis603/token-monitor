@@ -104,6 +104,22 @@
     return null;
   }
 
+  // Two money-only accounts still leave one cell, so one of them has to win.
+  // The app's own account rule is "the lowest", and for a balance the lowest
+  // reading is the least money left, so the account closest to empty takes the
+  // rail. Balances in different units (a USD top-up beside a Credits pool) share
+  // no scale and no rate reaches this projection, so those keep the collector's
+  // order -- the same order the Limits view lists them in.
+  function closestToEmpty(pick, account) {
+    if (!pick) return account;
+    const left = balanceDisplay.creditsAmount(pick.record, pick.summary.headlineWindow);
+    const next = balanceDisplay.creditsAmount(account.record, account.summary.headlineWindow);
+    if (left === null || next === null) return pick;
+    if (balanceDisplay.creditsCurrency(pick.record, pick.summary.headlineWindow)
+      !== balanceDisplay.creditsCurrency(account.record, account.summary.headlineWindow)) return pick;
+    return next < left ? account : pick;
+  }
+
   function accountSummary(provider, options = {}) {
     const windowKey = options.windowKey || '';
     const selection = trayText.compactLimitSelection(provider);
@@ -574,7 +590,7 @@
     let moneyOnly = null;
     for (const account of projected) {
       if (account.summary.headlineRemaining === null) {
-        if (!moneyOnly && account.summary.headlineIsMoney) moneyOnly = account;
+        if (account.summary.headlineIsMoney) moneyOnly = closestToEmpty(moneyOnly, account);
         continue;
       }
       if (!tightest || account.summary.headlineRemaining < tightest.summary.headlineRemaining) tightest = account;
