@@ -75,6 +75,7 @@
     { id: 'devin', color: '#000000', widgetInk: true },
     { id: 'fx', color: '#000000', widgetInk: true },
     { id: 'mcode', color: '#f23f5d', icon: 'minimax' },
+    { id: 'mistral', color: '#fa520f' },
     // Not tracked clients: model vendors and limits providers. A vendor shares
     // the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
     { id: 'openrouter', label: 'OpenRouter', color: '#6566F1' },
@@ -83,7 +84,6 @@
     { id: 'deepseek', label: 'DeepSeek', color: '#4d6bfe' },
     { id: 'xai', label: 'xAI', color: '#000000', mask: 'grok', widgetInk: true },
     { id: 'meta', label: 'Meta', color: '#1d65c1', widgetColor: '#4385DB' },
-    { id: 'mistral', label: 'Mistral', color: '#fa520f' },
     { id: 'moonshot', label: 'Moonshot', color: '#16191e', widgetInk: true },
     { id: 'zai', label: 'GLM', color: '#000000', widgetInk: true },
     { id: 'zaiteam', label: 'GLM Team', color: '#000000', icon: 'zai', widgetInk: true },
@@ -101,6 +101,7 @@
     { id: 'typesafe', label: 'TypeSafe', color: '#000000', widgetInk: true },
     { id: 'notion', label: 'Notion AI', color: '#FFFFFF' },
     { id: 'manus', label: 'Manus', color: '#FFFFFF' },
+    { id: 'opendesign', label: 'OpenDesign', color: '#FFFFFF' },
     { id: 'thirdparty', label: 'Third-party APIs', color: '#8090A6' },
     // Marks without a colour of their own. Factory is the limits provider for
     // the Droid client and borrows its mark; the relays only ever appear as a

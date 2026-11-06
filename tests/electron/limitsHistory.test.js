@@ -335,6 +335,23 @@ test('contradictory devices cannot fabricate resets or jumps during a healthy so
   assert.deepEqual(f.query({ grain: 'hour', day: dayKey(f.clock) }).windows[0].distribution, before);
 });
 
+test('a compatible takeover after device disagreement keeps its conflict boundary', t => {
+  const f = databaseFixture(t);
+  f.record([action(at(2, 10), 78, { source: 'a' }), action(at(2, 10, 5), 80, { source: 'a' }),
+    action(at(2, 10, 10), 0, { source: 'b' }), action(at(2, 10, 15), 81, { source: 'a' })]);
+  f.reopen();
+  f.record([action(at(2, 10, 35), 85, { source: 'b' }), action(at(2, 10, 40), 86, { source: 'b' })]);
+  f.reopen();
+  for (const grain of ['day', 'hour']) {
+    const entry = f.query({ grain, day: dayKey(f.clock) }).windows[0];
+    const bucket = entry.distribution.buckets.find(b => grain === 'day' ? b.key === dayKey(f.clock) : new Date(b.at).getHours() === 10);
+    assert.equal(bucket.value, 3, 'a guarded takeover is not measured consumption');
+    assert.equal(entry.distribution.unallocated, 5);
+    assert.equal(entry.distribution.resets, 0);
+    assert.deepEqual(segments(entry.points).map(s => s.map(p => p.value)), [[78, 80], [81], [85, 86]]);
+  }
+});
+
 test('inactive device failures do not interrupt an active observer; active failures permit uncertain takeover', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 20, { source: 'a' }), { account: accountA, source: 'b', failed: true },
@@ -348,9 +365,9 @@ test('inactive device failures do not interrupt an active observer; active failu
   for (const grain of ['day', 'hour']) {
     const data = f.query({ grain, day: dayKey(f.clock) }).windows[0].distribution;
     const bucket = grain === 'day' ? data.buckets.at(-1) : data.buckets.find(b => new Date(b.at).getHours() === 10);
-    assert.equal(bucket.value, 4);
+    assert.equal(bucket.value, 7);
     assert.equal(bucket.uncertain, true);
-    assert.equal(data.unallocated, 3);
+    assert.equal(data.unallocated, 0);
     assert.equal(data.resets, 0);
   }
   assert.deepEqual(f.query().windows[0].points.map(p => p.value), [20, 22, 25, 26, 27]);
@@ -479,13 +496,13 @@ test('180-day cleanup retains daily observations for two years without fabricati
   assert.deepEqual(fixture.query(range).windows[0].distribution, archived.distribution);
 });
 
-test('late or future readings never overwrite newer data, and long gaps retain unallocated consumption', t => {
+test('late or future readings never overwrite newer data, and only cross-day changes stay unallocated', t => {
   const fixture = databaseFixture(t);
   fixture.record([action(at(1, 23, 55), 20), action(at(2, 0, 5), 25), action(at(2, 10), 30)]);
   fixture.record([action(at(2, 0), 90), action(fixture.clock + 120_000, 95)]);
   const result = fixture.query().windows[0].distribution;
-  assert.equal(result.unallocated, 10);
-  assert.equal(result.buckets.at(-1).value, null);
+  assert.equal(result.unallocated, 5);
+  assert.equal(result.buckets.at(-1).value, 5);
   assert.equal(result.buckets.at(-1).observations, 2);
   assert.equal(result.buckets.at(-1).uncertain, true);
   assert.equal(fixture.sql('SELECT MAX(until) AS last FROM runs')[0].last, at(2, 10));
@@ -624,7 +641,7 @@ test('shutdown drains queued worker writes without taking over the native quit f
   finally { db.close(); }
 });
 
-test('hourly deltas do not smear changes across hour boundaries or offline gaps', () => {
+test('hourly deltas do not smear changes across hour boundaries', () => {
   const points = [point(at(2, 9, 50), 10), point(at(2, 9, 55), 12), point(at(2, 10), 15), point(at(2, 10, 5), 16), point(at(2, 11, 5), 21)];
   const hourly = distribution(points, { grain: 'hour', day: '2026-11-02', now: at(2, 12) });
   const hour9 = hourly.buckets.find(b => new Date(b.at).getHours() === 9);
@@ -636,8 +653,8 @@ test('hourly deltas do not smear changes across hour boundaries or offline gaps'
   assert.equal(hour8.value, null);
   assert.equal(hourly.unallocated, 8);
   const daily = distribution(points, { now: at(2, 12) });
-  assert.equal(daily.buckets.at(-1).value, 6);
-  assert.equal(daily.unallocated, 5);
+  assert.equal(daily.buckets.at(-1).value, 11);
+  assert.equal(daily.unallocated, 0);
 });
 
 test('resets, refills, and changing rolling deadlines break curves and consumption intervals', () => {
@@ -677,7 +694,27 @@ test('hourly history keeps both occurrences of a repeated daylight-saving hour',
   }
 });
 
-test('the side window flips left and clamps onto the selected display', () => {
+test('history opens toward the display interior even when both sides fit', () => {
+  const work = { x: 0, y: 0, width: 1600, height: 900 };
+  const rect = { y: 50 };
+  const leftOwner = { x: 400, y: 100, width: 300, height: 700 };
+  const rightOwner = { ...leftOwner, x: 900 };
+  assert.equal(historyBounds(leftOwner, rect, work).x, 708);
+  assert.equal(historyBounds(rightOwner, rect, work).x, 582);
+  assert.equal(historyBounds(rightOwner, rect, work).y, 128);
+  assert.equal(historyBounds({ ...leftOwner, x: 650 }, rect, work).x, 332);
+});
+
+test('history uses the selected display centre with zoom and negative coordinates', () => {
+  const work = { x: -1920, y: -200, width: 1920, height: 1080 };
+  const owner = { x: -800, y: -100, width: 400, height: 700 };
+  const bounds = historyBounds(owner, { y: 50 }, work, 1.5);
+  assert.equal(bounds.x, -1273);
+  assert.equal(bounds.y, -47);
+  assert.equal(bounds.width, 465);
+});
+
+test('the side window opens inward and clamps onto the selected display', () => {
   const work = { x: -1600, y: 0, width: 1600, height: 900 };
   const owner = { x: -350, y: 700, width: 300, height: 180 };
   const bounds = historyBounds(owner, { y: 50 }, work);
@@ -699,12 +736,18 @@ test('read-only history rejects date navigation, discards stale reads and closes
   owner.focus = () => { ownerFocused = true; };
   const handlers = new Map();
   let window;
+  const shown = () => window.visible && !window.ignoreMouse;
   let renderToken;
   class FakeWindow extends EventEmitter {
     constructor() { super(); window = this; this.destroyed = false; this.visible = false; this.webContents = new EventEmitter(); this.webContents.focus = () => {}; this.webContents.isDestroyed = () => false; this.webContents.setWindowOpenHandler = () => {}; this.webContents.setZoomFactor = () => {}; this.webContents.getZoomFactor = () => 1; this.webContents.send = (channel, payload) => { if (channel === 'limitsHistory:render') { renderToken = payload.renderToken; handlers.get('limitsHistory:resize')({ sender: this.webContents }, 420, renderToken, false, false); } }; }
     static fromWebContents(sender) { return sender === owner.webContents ? owner : null; }
     isMinimized() { return false; }
     setVibrancy() {}
+    setBackgroundMaterial() {}
+    setBackgroundColor() {}
+    getOpacity() { return this.opacity ?? 1; }
+    setOpacity(value) { this.opacity = value; }
+    setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
     isDestroyed() { return this.destroyed; }
     loadFile() { return Promise.resolve(); }
     setBounds(bounds) { this.bounds = bounds; }
@@ -722,6 +765,7 @@ test('read-only history rejects date navigation, discards stale reads and closes
   const reads = [];
   const controller = createLimitsHistoryController({ BrowserWindow: FakeWindow, screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1600, height: 900 } }), getCursorScreenPoint: () => ({ x: 1500, y: 800 }) },
     ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => handlers.set(name, fn) },
+    setFadeTimer: () => 1, clearFadeTimer() {}, platform: 'win32',
     setTimer: fn => { timer = fn; return 1; }, clearTimer: () => { timer = null; },
     isOwner: win => win === owner, read: (_key, range) => { reads.push(range); return pendingRead || { source }; } });
   controller.register();
@@ -730,12 +774,12 @@ test('read-only history rejects date navigation, discards stale reads and closes
   assert.equal(await open({ sender: {} }, request), false);
   assert.equal(await open({ sender: owner.webContents }, request), true);
   window.webContents.emit('did-finish-load');
-  assert.equal(window.visible, true);
+  assert.equal(shown(), true);
   assert.equal(controller.containsPoint({ x: 420, y: 150 }), true);
   handlers.get('limitsHistory:resize')({ sender: window.webContents }, 1000, renderToken, false, false);
   assert.equal(window.bounds.height, 884);
   owner.emit('blur');
-  assert.equal(window.visible, false, 'real owner blur dismisses the non-activating preview');
+  assert.equal(shown(), false, 'real owner blur dismisses the non-activating preview');
   await open({ sender: owner.webContents }, request);
   handlers.get('limitsHistory:close')({ sender: window.webContents });
   assert.equal(ownerFocused, false, 'closing a read-only preview never forces focus');
@@ -744,7 +788,7 @@ test('read-only history rejects date navigation, discards stale reads and closes
   handlers.get('limitsHistory:leave')({ sender: window.webContents });
   timer();
   assert.equal(ownerFocused, false, 'an untouched hover preview does not steal or restore focus');
-  assert.equal(window.visible, false);
+  assert.equal(shown(), false);
   await open({ sender: owner.webContents }, request);
   assert.equal(handlers.has('limitsHistory:range'), false, 'preview IPC cannot request historical dates');
   assert.equal(reads.at(-1), undefined);
@@ -755,25 +799,25 @@ test('read-only history rejects date navigation, discards stale reads and closes
   await controller.refresh();
   resolveRead({ source: 'obsolete-source' });
   await staleRefresh;
-  assert.equal(window.visible, true, 'an obsolete read cannot hide the current account');
+  assert.equal(shown(), true, 'an obsolete read cannot hide the current account');
   controller.hide();
   pendingRead = new Promise(resolve => { resolveRead = resolve; });
   const opening = open({ sender: owner.webContents }, request);
   handlers.get('limitsHistory:leave')({ sender: owner.webContents }, request.key);
   resolveRead({ source });
   assert.equal(await opening, false, 'leaving the row cancels an in-flight hover preview');
-  assert.equal(window.visible, false);
+  assert.equal(shown(), false);
   pendingRead = null;
   await open({ sender: owner.webContents }, request);
   source = 'b';
   await controller.refresh();
-  assert.equal(window.visible, false);
+  assert.equal(shown(), false);
   assert.equal(owner.listenerCount('hide'), 0);
   controller.dispose();
 });
 
-function previewFixture(t) {
-  const f = { pointer: { x: 1500, y: 800 }, focused: false, ownerFocused: false, mode: 'hover', timer: null, reads: [] };
+function previewFixture(t, { platform = 'win32' } = {}) {
+  const f = { pointer: { x: 1500, y: 800 }, focused: false, ownerFocused: false, mode: 'hover', timer: null, reads: [], motions: [], materials: [] };
   const owner = new EventEmitter();
   owner.webContents = { getZoomFactor: () => 1, send() {} };
   owner.getBounds = () => ({ x: 100, y: 100, width: 300, height: 700 });
@@ -787,6 +831,8 @@ function previewFixture(t) {
       this.webContents = new EventEmitter();
       Object.assign(this.webContents, { focus: () => { throw new Error('preview must not take keyboard focus'); }, isDestroyed: () => false,
         setWindowOpenHandler() {}, setZoomFactor() {}, getZoomFactor: () => 1, send(channel, payload) {
+          if (f.destroyed) throw new Error('renderer already destroyed');
+          if (channel === 'limitsHistory:cardMotion') f.motions.push(payload);
           if (channel !== 'limitsHistory:render') return;
           f.lastPayload = payload;
           if (f.autoMeasure !== false) handlers.get('limitsHistory:resize')({ sender: f.window.webContents }, f.contentHeight || 420, payload.renderToken, false, false);
@@ -795,7 +841,12 @@ function previewFixture(t) {
     static fromWebContents(sender) { return sender === owner.webContents ? owner : null; }
     isMinimized() { return false; }
     setVibrancy() {}
-    isDestroyed() { return false; }
+    setBackgroundMaterial() {}
+    setBackgroundColor() {}
+    getOpacity() { return platform === 'linux' ? 1 : this.opacity ?? 1; }
+    setOpacity(value) { if (platform !== 'linux') this.opacity = value; }
+    setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
+    isDestroyed() { return f.destroyed === true; }
     loadFile() { return Promise.resolve(); }
     setBounds(bounds) { this.bounds = bounds; }
     getBounds() { return this.bounds; }
@@ -804,14 +855,18 @@ function previewFixture(t) {
     hide() { this.visible = false; f.focused = false; }
     show() { throw new Error('preview must use showInactive'); }
     showInactive() { this.visible = true; }
-    destroy() { this.emit('closed'); }
+    destroy() { f.destroyed = true; this.emit('closed'); }
   }
   const handlers = new Map();
   f.controller = createLimitsHistoryController({ BrowserWindow: Preview,
     screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1600, height: 900 } }), getCursorScreenPoint: () => f.pointer },
     ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => handlers.set(name, fn) },
+    setFadeTimer: () => 1, clearFadeTimer() {}, platform,
+    getMaterialOptions: () => f.material || { enabled: false },
+    syncWindowsMaterial: (_win, options) => f.materials.push(options),
     getOpenMode: () => f.mode, now: () => f.clock || 0, setFrameTimer: fn => { f.frame = fn; return 1; }, clearFrameTimer: () => { f.frame = null; }, setTimer: fn => { f.timer = fn; return 1; }, clearTimer: () => { f.timer = null; },
     isOwner: win => win === owner, read: (key, range) => { f.reads.push({ key, range }); return f.pending || { source: 'a' }; } });
+  f.shown = () => f.window.visible && !f.window.ignoreMouse;
   f.controller.register();
   f.handlers = handlers;
   f.owner = owner;
@@ -836,7 +891,7 @@ test('read-only previews never request focus, even for explicit opens and close'
   assert.equal(f.timer, null, 'explicit visibility is independent of keyboard focus');
   f.fromPanel('close');
   assert.equal(f.ownerFocused, false);
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
 });
 
 test('late leave messages cannot close a read-only preview while the pointer is inside', async t => {
@@ -846,11 +901,11 @@ test('late leave messages cannot close a read-only preview while the pointer is 
   f.fromOwner('leave');
   f.pointer = { x: 420, y: 180 };
   f.fire();
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
   f.fromPanel('leave');
   f.pointer = { x: 1500, y: 800 };
   f.fire();
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
 });
 
 test('crossing the gap and returning to the source preserve the read-only preview without historical range IPC', async t => {
@@ -860,11 +915,11 @@ test('crossing the gap and returning to the source preserve the read-only previe
   f.fromOwner('leave');
   f.pointer = { x: 404, y: 200 };
   f.fire();
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
   assert.ok(f.timer, 'the gap is checked again if the pointer stops there');
   f.pointer = { x: 200, y: 180 };
   f.fire();
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
   const reads = f.reads.length;
   await f.open();
   assert.equal(f.reads.length, reads, 'returning to this account does not reset its selected quota');
@@ -882,7 +937,7 @@ test('an explicit preview blocks automatic replacements without focus and closes
   assert.equal(f.reads.at(-1).key, 'a');
   f.pointer = { x: 420, y: 180 };
   f.owner.emit('blur');
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
   assert.equal(f.ownerFocused, false);
 });
 
@@ -895,13 +950,13 @@ test('leaving a pending replacement or entering the active preview cancels only 
   f.fromOwner('leave', 'b');
   resolve({ source: 'a' });
   assert.equal(await opening, false);
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
   f.pending = new Promise(done => { resolve = done; });
   opening = f.open('b');
   f.fromPanel('enter');
   resolve({ source: 'a' });
   assert.equal(await opening, false);
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
 });
 
 test('click-only mode disables automatic opens, while explicit click, toggle and Escape remain available', async t => {
@@ -916,10 +971,10 @@ test('click-only mode disables automatic opens, while explicit click, toggle and
   f.focused = false;
   f.pointer = { x: 1500, y: 800 };
   assert.equal(await f.open('a', true), true);
-  assert.equal(f.window.visible, false, 'clicking the activated account again closes it');
+  assert.equal(f.shown(), false, 'clicking the activated account again closes it');
   await f.open('b', true);
   f.fromPanel('close');
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
 });
 
 test('switching to click-only mode also cancels an automatic open already waiting on history', async t => {
@@ -930,7 +985,7 @@ test('switching to click-only mode also cancels an automatic open already waitin
   f.mode = 'click';
   resolve({ source: 'a' });
   assert.equal(await opening, false);
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
 });
 
 for (const exitCode of [0, 1]) test(`worker exit ${exitCode} during close distinguishes expected shutdown from failure`, async () => {
@@ -1208,7 +1263,7 @@ test('owner focus loss while a preview read is pending prevents a late non-activ
   f.owner.emit('blur');
   resolve({ source: 'a' });
   assert.equal(await opening, false);
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
   assert.equal(f.owner.listenerCount('blur'), 0);
 });
 
@@ -1255,13 +1310,13 @@ test('cold preview loads alongside its read and reuses that payload without a se
   f.pending = new Promise(done => { resolve = done; });
   const opening = f.open();
   assert.ok(f.window, 'renderer is being prepared while SQLite is still pending');
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
   f.loaded = true;
   f.window.webContents.emit('did-finish-load');
-  assert.equal(f.window.visible, false, 'an empty page never opens before the payload');
+  assert.equal(f.shown(), false, 'an empty page never opens before the payload');
   resolve({ source: 'a' });
   assert.equal(await opening, true);
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
   assert.equal(f.reads.length, 1);
 });
 
@@ -1269,9 +1324,9 @@ test('cold preview keeps its successful read until the renderer is loaded', asyn
   const f = previewFixture(t);
   const request = { key: 'a', rect: { x: 0, y: 50, width: 300, height: 100 } };
   await f.handlers.get('limitsHistory:open')({ sender: f.owner.webContents }, request);
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
   f.window.webContents.emit('did-finish-load');
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
   assert.equal(f.reads.length, 1, 'load completion must not repeat the initial query');
 });
 
@@ -1292,7 +1347,7 @@ for (const interactive of [false, true]) test(`off mode cancels an in-flight ${i
   f.mode = 'off';
   resolve({ source: 'a' });
   assert.equal(await opening, false);
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
 });
 
 test('turning previews off dismisses the current card without another history query', async t => {
@@ -1301,11 +1356,11 @@ test('turning previews off dismisses the current card without another history qu
   const reads = f.reads.length;
   f.mode = 'off';
   await f.controller.refresh();
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
   assert.equal(f.reads.length, reads);
   f.mode = 'hover';
   assert.equal(await f.open(), true);
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
 });
 
 test('preview render messages distinguish opening, account switches and background updates', async t => {
@@ -1326,10 +1381,119 @@ test('a preview waits for a current rendered size before its first native reveal
   const f = previewFixture(t);
   f.autoMeasure = false;
   await f.open();
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
   f.fromPanel('resize', 360);
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
   assert.equal(f.window.bounds.height, 360);
+});
+
+test('refreshing before the first size acknowledgement keeps hidden renders opening', async t => {
+  const f = previewFixture(t);
+  f.autoMeasure = false;
+  await f.open();
+  const firstToken = f.lastPayload.renderToken;
+  await f.controller.refresh();
+  assert.equal(f.shown(), false);
+  assert.equal(f.lastPayload.opening, true, 'a hidden refresh must not wait for animation frames');
+  assert.notEqual(f.lastPayload.renderToken, firstToken);
+  f.handlers.get('limitsHistory:resize')({ sender: f.window.webContents }, 360, firstToken, false, false);
+  assert.equal(f.shown(), false, 'the superseded opening cannot reveal stale content');
+  f.fromPanel('resize', 420);
+  assert.equal(f.shown(), true);
+  await f.controller.refresh();
+  assert.equal(f.lastPayload.opening, false, 'visible refreshes retain their paint handoff');
+});
+
+test('closing retains a transparent click-through window and reopening waits for its current measurement', async t => {
+  const f = previewFixture(t);
+  await f.open();
+  f.fromPanel('close');
+  assert.equal(f.window.visible, true, 'the native compositor surface is retained');
+  assert.equal(f.window.ignoreMouse, true, 'a closed card cannot intercept other apps');
+  f.autoMeasure = false;
+  await f.open('b');
+  assert.equal(f.lastPayload.opening, true);
+  assert.equal(f.shown(), false);
+  f.fromPanel('resize', 380);
+  assert.equal(f.shown(), true);
+  assert.equal(f.window.bounds.height, 380);
+});
+
+test('closing with reduced motion immediately clears the retained window', async t => {
+  const f = previewFixture(t);
+  f.pending = { source: 'a', appearance: { reduceMotion: 'on' } };
+  await f.open();
+  assert.equal(f.window.opacity, 1);
+  f.fromPanel('close');
+  assert.equal(f.window.opacity, 0);
+  assert.equal(f.window.visible, true);
+  assert.equal(f.window.ignoreMouse, true);
+});
+
+test('Linux closes the native preview when window opacity is unsupported and can reopen', async t => {
+  const f = previewFixture(t, { platform: 'linux' });
+  await f.open();
+  assert.equal(f.window.visible, true);
+  f.fromPanel('close');
+  assert.equal(f.window.visible, false, 'Linux must hide rather than rely on native opacity');
+  await f.open();
+  assert.equal(f.shown(), true);
+  assert.equal(f.lastPayload.opening, true);
+});
+
+test('history uses the main window backdrop mode and follows changes to that setting', async t => {
+  const f = previewFixture(t);
+  f.material = { enabled: true, windowsBackdrop: 'accent' };
+  await f.open();
+  assert.equal(f.options.transparent, true, 'the host supports the same transparent material path as main');
+  assert.deepEqual(f.materials.at(-1), { enabled: true, mode: 'accent' });
+  f.material = { enabled: true, windowsBackdrop: 'acrylic' };
+  f.controller.syncMaterial();
+  assert.deepEqual(f.materials.at(-1), { enabled: true, mode: 'acrylic' });
+  f.material = { enabled: false, windowsBackdrop: 'accent' };
+  f.controller.syncMaterial();
+  assert.deepEqual(f.materials.at(-1), { enabled: false, mode: 'accent' });
+});
+
+test('Windows history switches follow renderer frames with stale-frame rejection and a timer fallback', async t => {
+  const f = previewFixture(t);
+  await f.open();
+  await f.open('b', false, { x: 0, y: 350, width: 300, height: 100 });
+  const first = f.motions.at(-1);
+  assert.equal(first?.active, true);
+  const start = { ...f.window.bounds };
+  const frame = (sender, motionId) => f.handlers.get('limitsHistory:cardFrame')({ sender }, { motionId });
+  f.clock = 16;
+  frame(f.owner.webContents, first.motionId);
+  frame(f.window.webContents, first.motionId - 1);
+  assert.deepEqual(f.window.bounds, start);
+  frame(f.window.webContents, first.motionId);
+  const painted = { ...f.window.bounds };
+  assert.notDeepEqual(painted, start);
+  f.clock = 48; f.frame();
+  assert.deepEqual(f.window.bounds, painted, 'the timer cannot double-paint while renderer frames arrive');
+  await f.open('c', false, { x: 0, y: 150, width: 300, height: 100 });
+  const second = f.motions.at(-1);
+  assert.notEqual(second.motionId, first.motionId);
+  const retargeted = { ...f.window.bounds };
+  f.clock = 64; f.frame();
+  assert.deepEqual(f.window.bounds, retargeted, 'retargeting preserves the last valid frame clock');
+  f.clock = 81; f.frame();
+  assert.notDeepEqual(f.window.bounds, retargeted, 'the fallback resumes after renderer delivery stops');
+  f.clock = 800; f.frame();
+  const settled = { ...f.window.bounds };
+  frame(f.window.webContents, second.motionId);
+  assert.deepEqual(f.window.bounds, settled);
+  assert.equal(f.motions.at(-1).active, false);
+});
+
+test('destroying a moving preview cancels its driver without sending to the destroyed renderer', async t => {
+  const f = previewFixture(t);
+  await f.open();
+  await f.open('b', false, { x: 0, y: 350, width: 300, height: 100 });
+  assert.ok(f.frame);
+  assert.doesNotThrow(() => f.window.destroy());
+  assert.equal(f.frame, null);
 });
 
 test('account changes use the sidebar frame spring and retarget from the current frame', async t => {
@@ -1378,7 +1542,7 @@ test('enabling reduced motion or closing cancels native frame playback', async t
   const bounds = { ...f.window.bounds };
   f.clock = 1000; tick();
   assert.deepEqual(f.window.bounds, bounds);
-  assert.equal(f.window.visible, false);
+  assert.equal(f.shown(), false);
 });
 
 for (const sourceChange of [false, true]) test(`raw-only observations interrupt an existing percent stream across restart (source change: ${sourceChange})`, async t => {
@@ -1686,7 +1850,7 @@ for (const missing of ['empty snapshot', 'unreadable window', 'failure']) {
 }
 
 for (const flat of [false, true]) for (const switched of [false, true]) {
-  test(`compatible trend endpoints connect across a sampling gap without changing accounting (flat: ${flat}, switched: ${switched})`, t => {
+  test(`compatible same-bucket endpoints count their net change across a sampling gap (flat: ${flat}, switched: ${switched})`, t => {
     const f = databaseFixture(t);
     const value = n => flat ? 0 : n;
     f.record([action(at(2, 10), value(20), { source: 'a' }), action(at(2, 10, 5), value(22), { source: 'a' })]);
@@ -1698,9 +1862,9 @@ for (const flat of [false, true]) for (const switched of [false, true]) {
       const entry = f.query({ grain, day: dayKey(f.clock) }).windows[0];
       assert.equal(segments(entry.points).length, 1, 'elapsed time or a compatible observer handoff alone cannot cut the visible line');
       const bucket = entry.distribution.buckets.find(b => grain === 'day' ? b.key === dayKey(f.clock) : new Date(b.at).getHours() === 10);
-      assert.equal(bucket.value, flat ? 0 : 4, 'only fully observed increments count');
+      assert.equal(bucket.value, flat ? 0 : 7, 'same-bucket compatible endpoints establish the net change');
       assert.equal(bucket.uncertain, true);
-      assert.equal(entry.distribution.unallocated, flat ? 0 : 3, 'the gap delta remains unallocated');
+      assert.equal(entry.distribution.unallocated, 0, 'the same-bucket gap delta is attributed');
       assert.equal(entry.distribution.resets, 0);
     }
   });
@@ -1712,12 +1876,12 @@ test('connecting observed trend endpoints does not extrapolate before or after t
   assert.equal(segments(points)[0][0].at, at(2, 10));
   assert.equal(segments(points)[0].at(-1).at, at(2, 10, 45));
   const result = distribution(points, { now: at(2, 12) });
-  assert.equal(result.buckets.at(-1).value, null);
-  assert.equal(result.unallocated, 5);
+  assert.equal(result.buckets.at(-1).value, 5);
+  assert.equal(result.unallocated, 0);
 });
 
 for (const unit of ['percent', 'balance', 'spend']) {
-  test(`every provider reconnects compatible ${unit} readings after a failed refresh without changing usage accounting`, async t => {
+  test(`every provider attributes compatible same-day ${unit} changes after a failed refresh`, async t => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-recovered-curve-'));
     const file = path.join(directory, 'history.sqlite');
     const options = { now: () => at(2, 12) };
@@ -1742,18 +1906,18 @@ for (const unit of ['percent', 'balance', 'spend']) {
     for (const row of returned) {
       const entry = (await store.query('local', row)).windows[0];
       assert.equal(segments(entry.points).length, 1, row.provider);
-      assert.equal(entry.distribution.buckets.at(-1).value, row.provider === 'codex' ? 0 : 2, row.provider);
-      assert.equal(entry.distribution.unallocated, row.provider === 'codex' ? 0 : 3, row.provider);
+      assert.equal(entry.distribution.buckets.at(-1).value, row.provider === 'codex' ? 0 : 5, row.provider);
+      assert.equal(entry.distribution.unallocated, 0, row.provider);
       assert.equal(entry.distribution.buckets.at(-1).uncertain, true, row.provider);
     }
   });
 }
 
 for (const jitter of [-1001, -1000, 1000, 1001]) {
-  test(`trend-only reset timestamp tolerance handles ${jitter} milliseconds without relaxing accounting`, () => {
+  test(`trend and accounting share the reset timestamp tolerance for ${jitter} milliseconds`, () => {
     const points = [point(at(2, 10), 100, at(8, 0)), point(at(2, 10, 5), 100, at(8, 0) + jitter)];
     assert.equal(segments(points).length, Math.abs(jitter) <= 1000 ? 1 : 2);
-    assert.equal(require('../../src/electron/renderer/limits/historyModel').sameCycle(...points), false, 'accounting keeps its existing strict boundary');
+    assert.equal(require('../../src/electron/renderer/limits/historyModel').sameCycle(...points), Math.abs(jitter) <= 1000, 'accounting shares the same rounding boundary');
   });
 }
 
@@ -1772,7 +1936,7 @@ test('a superseded quota refresh keeps the visible history card and its frame un
   const bounds = f.window.getBounds();
   f.pending = Promise.resolve(undefined);
   await f.controller.refresh();
-  assert.equal(f.window.visible, true);
+  assert.equal(f.shown(), true);
   assert.equal(f.lastPayload, payload);
   assert.deepEqual(f.window.getBounds(), bounds);
   f.pending = Promise.resolve({ source: 'a', updatedAt: 'new' });
@@ -1780,5 +1944,76 @@ test('a superseded quota refresh keeps the visible history card and its frame un
   assert.equal(f.lastPayload.updatedAt, 'new');
   f.pending = Promise.resolve(null);
   await f.controller.refresh();
-  assert.equal(f.window.visible, false, 'a genuinely removed account still closes its history');
+  assert.equal(f.shown(), false, 'a genuinely removed account still closes its history');
+});
+
+for (const failed of [false, true]) test(`same-day compatible net changes belong to today despite a sampling interruption (failed: ${failed})`, t => {
+  const f = databaseFixture(t);
+  f.record([action(at(2, 10), 20), action(at(2, 10, 5), 29)]);
+  if (failed) {
+    f.record([{ account: accountA, source: '', failed: true }]);
+    assert.equal(f.sql('SELECT break_after FROM runs ORDER BY until DESC LIMIT 1')[0].break_after, 1, 'the failed refresh interrupts the recorded stream');
+  }
+  f.record([action(at(2, 10, 50), 30)]);
+  f.reopen();
+  const entry = f.query().windows[0];
+  assert.equal(entry.distribution.buckets.at(-1).value, 10);
+  assert.equal(entry.distribution.unallocated, 0);
+  assert.equal(entry.distribution.buckets.at(-1).uncertain, true);
+  assert.equal(segments(entry.points).length, 1);
+});
+
+test('same-day net changes stay in the stored daily summary after detailed retention expires', t => {
+  const f = databaseFixture(t);
+  f.record([action(at(2, 10), 20), action(at(2, 10, 5), 29), action(at(2, 10, 50), 30)]);
+  const originalDay = dayKey(f.clock);
+  assert.equal(f.sql('SELECT value, unallocated FROM daily').at(-1).value, 10);
+  f.clock += 181 * 86400_000;
+  f.reopen();
+  const result = f.query({ grain: 'day', day: originalDay }).windows[0];
+  assert.equal(result.summaryOnly, true);
+  assert.equal(result.distribution.buckets.at(-1).value, 10);
+  assert.equal(result.distribution.unallocated, 0);
+});
+
+for (const drift of [-1000, 1000]) for (const source of ['a', 'b']) test(`reset rounding retains daily/hourly consumption (drift: ${drift}, source: ${source})`, t => {
+  const f = databaseFixture(t);
+  const reset = at(8, 10);
+  f.record([action(at(2, 10), 20, { source: 'a', reset }), action(at(2, 10, 5), 21, { source, reset: reset + drift })]);
+  f.reopen();
+  for (const grain of ['day', 'hour']) {
+    const result = f.query({ grain, day: dayKey(f.clock) }).windows[0].distribution;
+    const bucket = grain === 'day' ? result.buckets.at(-1) : result.buckets.find(b => new Date(b.at).getHours() === 10);
+    assert.equal(bucket.value, 1);
+    assert.equal(result.unallocated, 0);
+    assert.equal(result.resets, 0);
+  }
+});
+
+for (const drift of [-1000, 1000]) test(`rounding cannot count through either crossed reset deadline (drift: ${drift})`, t => {
+  const f = databaseFixture(t);
+  const first = at(2, 10), second = at(2, 10, 5);
+  const reset = second + (drift < 0 ? 1000 : 0);
+  f.record([action(first, 20, { reset }), action(second, 21, { reset: reset + drift })]);
+  assert.equal(f.query().windows[0].distribution.buckets.at(-1).value, null);
+  assert.equal(f.query().windows[0].distribution.resets, 1);
+});
+
+test('daily summaries keep the collection date when the device changes timezone', t => {
+  const previousTimezone = process.env.TZ;
+  try {
+    process.env.TZ = 'Asia/Hong_Kong';
+    const start = Date.parse('2026-11-02T00:10:00+08:00');
+    const f = databaseFixture(t, start + 3600_000);
+    f.record([action(start, 20), action(start + 300000, 25)]);
+    process.env.TZ = 'America/Los_Angeles';
+    f.reopen();
+    f.clock = Date.parse('2026-11-02T12:00:00-08:00');
+    const result = f.query({ grain: 'day', day: '2026-11-02' }).windows[0].distribution;
+    assert.equal(result.buckets.find(b => b.key === '2026-11-02').value, 5);
+    assert.equal(result.buckets.find(b => b.key === '2026-11-01').value, null);
+  } finally {
+    if (previousTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  }
 });

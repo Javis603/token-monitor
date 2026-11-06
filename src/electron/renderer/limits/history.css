@@ -1,9 +1,10 @@
 .quota-history-body { margin: 0; height: 100vh; overflow: hidden; background: transparent; color: var(--text); -webkit-app-region: no-drag; }
-#history { min-height: 0; height: 100vh; overflow: auto; scrollbar-width: none; gap: 0; padding: 12px; border: 1px solid var(--line); border-radius: 14px; font-size: .6875rem; }
+#history { min-height: 0; height: 100vh; overflow: auto; scrollbar-width: none; gap: 0; padding: 12px; border: 1px solid var(--line); font-size: .6875rem; }
 #history .quota-history-content { flex: none; display: flex; flex-direction: column; gap: 0; }
-#history h1 { font-size: .8125rem; font-weight: 600; margin: 0 0 3px; }
+#history header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 3px; }
+#history h1 { flex: 0 0 auto; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8125rem; font-weight: 600; margin: 0; }
 #history h2 { font-size: .6875rem; font-weight: 500; margin: 0; }
-#history .quota-history-account { color: var(--muted); font-size: .625rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#history .quota-history-account { flex: 1 1 0; min-width: 0; text-align: right; color: var(--muted); font-size: .625rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #history button { -webkit-app-region: no-drag; font: inherit; color: inherit; cursor: pointer; }
 #history .quota-history-windows { display: flex; flex-wrap: wrap; gap: 3px; margin: 7px 0; padding: 2px; border-radius: 7px; background: rgba(var(--overlay-rgb), .06); }
 #history .quota-history-windows button { flex: 1 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; border-radius: 5px; padding: 4px 6px; font-size: .625rem; background: transparent; color: var(--muted); }

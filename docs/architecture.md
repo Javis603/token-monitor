@@ -119,7 +119,7 @@ Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies 
 
 ### Balance quotas
 
-`windows[].metric === 'credits'` identifies a money quota with `remaining` and `currency`. `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. Callers may explicitly disable balance inference for wallets without a quota denominator; `showMeter: false` alone does not change existing display-layer estimates such as Sub2API's.
+`windows[].metric === 'credits'` identifies a monetary or points balance with `remaining` and `currency` (`CREDITS` for points). `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. Callers may explicitly disable balance inference for wallets without a quota denominator; `showMeter: false` alone does not change existing display-layer estimates such as Sub2API's.
 
 ## Session relationships
 
@@ -204,6 +204,10 @@ Session device labels are a desktop presentation projection resolved from the ca
 **Node Hub shutdown.** `stop()` closes HTTP/direct-ingest admission before ending response-owned SSE streams, flushes before draining admitted HTTP bodies, and flushes again afterward. Force-close lingering connections after the drain timer; event-loop load can delay timers, so they are not hard bounds. Concurrent stops share completion; final-save failures reject without discarding pending data. Clear batch timers on stop and re-arm retained data on successful restart. Standalone signal handlers use this lifecycle and report failures. The [API reference](API.md) defines client-visible shutdown behavior.
 
 `collectUsageOnce()` supplies usage. `DeviceState` combines it with the runtime envelope and limits; limits-only updates retain the usage `updatedAt`, and cold previews wait for a complete baseline. Hubs normalize device records with `normalizeDeviceRecord()` and aggregate on read with `aggregateDevices()`. Neither Hub needs provider credentials. The [API reference](API.md) defines the common Node/Worker wire contract.
+
+Widget and headless HTTP producers negotiate revisioned upload deltas on full ingest, independently of SSE. `uploadDelta.js` owns bounded ephemeral wire baselines; the client keeps only its last acknowledged payload and opaque token. Reconstruct and ingest inside the existing mutation lane, then acknowledge. Never patch normalized storage directly: normalization, retained limits/history and title-policy checks still belong to the normal ingest boundary. Full/legacy writes, deletion and privacy revocation invalidate affected baselines; restart/eviction or a lost ACK recovers through a current full snapshot. A delta is used only when its envelope is smaller than the full payload.
+
+Legacy Hubs retain the History omission optimization: omit only acknowledged unchanged wire content, with complete History on startup, destination/credential/device changes, stream reconnection, failed uploads and periodic reconciliation at the next publication. Changed History and explicit clears are sent immediately. Live Today remains a separate period; renderer overlays never update uploaded History.
 
 Settings keys, env vars, CLI flags, endpoints and wire fields have external users: treat incompatible changes as breaking and plan migration. Stale devices intentionally remain in stats with `stale: true`; they are not silently deleted.
 

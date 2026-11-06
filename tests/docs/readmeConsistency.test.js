@@ -91,6 +91,7 @@ const supportedToolOrder = [
   'Devin CLI / Devin Desktop',
   'fx',
   'MiniMax / MiniMax Code',
+  'Mistral Vibe',
   'TypeSafe',
   'OpenRouter',
   'Volcengine',
@@ -100,6 +101,7 @@ const supportedToolOrder = [
   'StepFun',
   'Notion AI',
   'Manus',
+  'OpenDesign',
   'Third-party APIs'
 ];
 
@@ -143,6 +145,7 @@ const supportedToolIdOrder = [
   'devin',
   'fx',
   'minimax',
+  'mistral',
   'typesafe',
   'openrouter',
   'volcengine',
@@ -152,6 +155,7 @@ const supportedToolIdOrder = [
   'stepfun',
   'notion',
   'manus',
+  'opendesign',
   'thirdparty'
 ];
 

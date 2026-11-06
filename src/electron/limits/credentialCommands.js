@@ -46,10 +46,10 @@ function invalid(status, errorCode = '') {
 // main clears its siblings even when the renderer only submits one field.
 // Independently saved settings are excluded so a rendered default
 // cannot become a stored override just because a credential is submitted.
-function draftFor(entry, values) {
+function draftFor(entry, values, includeIndependentSettings = false) {
   const candidate = {};
   for (const field of formFields(entry)) {
-    if (field.submitWithCredential === false || !Object.hasOwn(values, field.key)) continue;
+    if ((field.submitWithCredential === false && !includeIndependentSettings) || !Object.hasOwn(values, field.key)) continue;
     const raw = String(values[field.key] ?? '');
     try {
       candidate[field.key] = normalizeAccountField(field.key, raw);
@@ -108,13 +108,14 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     }
   }
 
-  async function saveCredential(providerId, values) {
+  // Managed profile saves include settings that the legacy form saves independently.
+  async function saveCredential(providerId, values, { includeIndependentSettings = false } = {}) {
     const entry = formEntry(providerId);
     if (!entry || !values || typeof values !== 'object') return invalid('notConfigured');
     // Cookie providers may reuse the validation row for the first runtime poll.
     const checkedSince = Date.now();
     const revision = nextRevision(entry.id);
-    const { candidate, rejected } = draftFor(entry, values);
+    const { candidate, rejected } = draftFor(entry, values, includeIndependentSettings);
     if (rejected) return rejected;
     const discover = accountForm(entry).discover;
     const submittedCredential = discover && candidate[discover.credential];
@@ -219,6 +220,8 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
   async function clearCredential(providerId) {
     const entry = formEntry(providerId);
     if (!entry) return { cleared: false };
+    // MiniMax's multi-key panel owns a profile store this command cannot write.
+    if (entry.id === 'minimax') return { cleared: false, errorCode: 'customForm' };
     pendingRenewals.delete(entry.id);
     const settings = await applySettingsPatch(Object.fromEntries(
       formFields(entry).filter((field) => field.secret || entry.fields.find((item) => item.key === field.key)?.clearWithCredential).map(({ key }) => [key, ''])

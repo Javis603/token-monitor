@@ -195,6 +195,7 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
@@ -322,7 +323,8 @@ const {
   HUB_STREAM_VERSION,
   createStatsStreamReceiver
 } = require('../shared/hubProtocol');
-const { postSyncPayload, syncPayload } = require('../shared/syncPayload');
+const { createSyncPayloadUploader, syncPayload } = require('../shared/syncPayload');
+const postSyncPayload = createSyncPayloadUploader();
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
   MIMO_PLATFORM_CONSOLE_URL,
@@ -550,7 +552,7 @@ function appWindowIcon() {
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
-const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
+const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensMonth', 'costMonth', 'bothMonth', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
@@ -585,7 +587,10 @@ let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
 const sessionUsageArchiveStore = createSessionUsageArchiveStore({ cursorUsageEvents: createCursorUsageEventIndex() });
 let rendererViewState = normalizeInitialRendererViewState();
-const serviceStatusClient = createServiceStatusClient();
+// Cursor's status page now redirects to status.x.ai, which is unreachable from
+// mainland China without a proxy — on the global fetch that card would read
+// "Unable to check status" on exactly the networks this transport exists for.
+const serviceStatusClient = createServiceStatusClient({ fetchImpl: electronLimitsFetch() });
 const codexResetForecastClient = createCodexResetForecastClient({
   fetchImpl: electronLimitsFetch()
 });
@@ -777,6 +782,7 @@ function defaultSettings() {
     maskLimitAccountEmails: false,
     limitsHistoryOpenMode: 'hover',
     claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
+    claudeCliFallbackEnabled: true,
     // Carve Claude Desktop sessions out of the Claude Code usage row (default on).
     // Off restores upstream behaviour: Desktop transcripts stay under `claude`.
     claudeDesktopSplitEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_DESKTOP_SPLIT, true),
@@ -2757,6 +2763,7 @@ function readSettings() {
     merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
     merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.claudeCliFallbackEnabled = parseBoolean(merged.claudeCliFallbackEnabled, true);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
     merged.limitsHistoryOpenMode = ['hover', 'click', 'off'].includes(merged.limitsHistoryOpenMode) ? merged.limitsHistoryOpenMode : 'hover';
@@ -3299,7 +3306,7 @@ function getLimitsHistoryController() {
     isOwner: win => win === mainWindow || win === dashboardWindow,
     read: limitsHistoryPayload,
     getOpenMode: () => settings.limitsHistoryOpenMode,
-    getMaterialOptions: () => ({ ...nativeMaterialOptions(), radius: 14 })
+    getMaterialOptions: () => ({ ...nativeMaterialOptions(), windowsBackdrop: settings.windowsBackdrop, radius: 14 })
   });
   return limitsHistoryController;
 }
@@ -3532,17 +3539,26 @@ function limitInvalidationKey(scope) {
     || scope?.accountLabel
     || ''
   ).trim();
-  return account ? `${provider}:${account}` : `${provider}:*`;
+  if (account) return `${provider}:${account}`;
+  return provider === 'minimax' && scope?.source === 'api' ? `${provider}:source:api` : `${provider}:*`;
 }
 
 function rememberPendingLimitInvalidation(scope, reason, options = {}) {
-  const clear = options.clear === true;
   const refresh = options.refresh !== false;
   const normalized = { ...scope, provider: String(scope?.provider || '').trim().toLowerCase() };
   const key = limitInvalidationKey(normalized);
+  const broad = pendingLimitInvalidations.get(`${normalized.provider}:*`);
+  if (normalized.provider === 'minimax' && normalized.source === 'api' && broad?.clear) {
+    broad.refresh ||= refresh;
+    return;
+  }
+  let clear = options.clear === true || pendingLimitInvalidations.get(key)?.clear === true;
   if (key.endsWith(':*')) {
     for (const pendingKey of pendingLimitInvalidations.keys()) {
-      if (pendingKey.startsWith(`${normalized.provider}:`)) pendingLimitInvalidations.delete(pendingKey);
+      if (pendingKey.startsWith(`${normalized.provider}:`)) {
+        clear = clear || pendingLimitInvalidations.get(pendingKey).clear;
+        pendingLimitInvalidations.delete(pendingKey);
+      }
     }
   }
   pendingLimitInvalidations.set(key, { scope: normalized, reason, clear, refresh });
@@ -5438,6 +5454,9 @@ function stopStatsStream() {
 
 async function startStatsStream(options = {}) {
   stopStatsStream();
+  // Legacy History needs reconciliation after reconnect. Negotiated uploads
+  // keep their independent baseline and recover through 409 if the Hub lost it.
+  postSyncPayload.resetHistory({ preserveDelta: !options.resetSnapshot });
   const generation = hubModeGeneration;
   const widgetProducerOwner = captureMacWidgetProducerOwner();
   if (settings?.hubMode !== 'client') return;
@@ -8241,6 +8260,7 @@ app.whenReady().then(() => {
     patch = skinSelection.patch;
     const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
+    minimaxApiKeys.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousClients = settings.clients;
@@ -8461,6 +8481,7 @@ app.whenReady().then(() => {
       maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
       limitsHistoryOpenMode: ['hover', 'click', 'off'].includes(patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) ? (patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) : 'hover',
       claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
+      claudeCliFallbackEnabled: parseBoolean(patch.claudeCliFallbackEnabled ?? settings.claudeCliFallbackEnabled, true),
       claudeDesktopSplitEnabled: parseBoolean(patch.claudeDesktopSplitEnabled ?? settings.claudeDesktopSplitEnabled, true),
       // Persist explicitly (not only via account persist:spread) so an unrelated
       // settings:update cannot drop the flag, and so limitsConfigFromSettings
@@ -9514,6 +9535,23 @@ app.whenReady().then(() => {
     void queueLimitInvalidation({ provider: 'opencode' }, 'ambient-toggle', { clear: true });
     return { ok: true };
   });
+  const minimaxApiKeys = createMinimaxApiKeys({
+    getSettings: () => settings, saveSettings,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
+    changed: (accountKey, refresh, reason) => {
+      credentialCommands.noteSettingsPatch({ minimaxApiKey: '' });
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      void queueLimitInvalidation({ provider: 'minimax', source: 'api', accountKey }, reason, { clear: true, refresh });
+      pushSettingsToRenderer();
+    }
+  });
+  ipcMain.handle('minimax:getKeys', () => minimaxApiKeys.getKeys());
+  for (const method of ['addKey', 'removeKey']) {
+    ipcMain.handle(`minimax:${method}`, async (_event, ...args) => {
+      try { return await minimaxApiKeys[method](...args); }
+      catch (error) { return { ok: false, error: error?.message || 'Could not save MiniMax API key' }; }
+    });
+  }
   ipcMain.handle('openrouter:getProfiles', async () => {
     return {
       profiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles || {}),

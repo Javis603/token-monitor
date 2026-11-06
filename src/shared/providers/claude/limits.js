@@ -1393,22 +1393,25 @@ async function resolveClaudeOauthIdentity(credentials, deps = {}) {
   }
 }
 
-async function delegatedClaudeRefresh(currentCredentials, deps = {}) {
+async function delegatedClaudeRefresh(currentCredentials, deps = {}, options = {}) {
   // Spawn `claude /status` in a PTY and let Claude Code itself refresh the token.
   // Matches CodexBar's strategy — Claude Code is a native Anthropic application,
   // so OAuth credential use stays within sanctioned channels. Best-effort: if the
   // probe fails we still re-read in case Claude Code touched the credentials.
-  await touchClaudeAuthPath(deps).catch(() => null);
+  if (options.claudeCliFallbackEnabled !== false) await touchClaudeAuthPath(deps).catch(() => null);
   const fresh = await readClaudeCredentials(deps);
   if (!fresh.accessToken || fresh.accessToken === currentCredentials.accessToken) {
+    if (options.claudeCliFallbackEnabled === false) {
+      throw errorWithStatus('unavailable', 'Claude CLI credential refresh is disabled');
+    }
     throw errorWithStatus('unauthorized', 'Claude Code did not refresh the OAuth token');
   }
   return fresh;
 }
 
-async function refreshClaudeCredentials(currentCredentials, deps = {}) {
+async function refreshClaudeCredentials(currentCredentials, deps = {}, options = {}) {
   const platform = deps.platform || process.platform;
-  if (platform === 'darwin') return delegatedClaudeRefresh(currentCredentials, deps);
+  if (platform === 'darwin') return delegatedClaudeRefresh(currentCredentials, deps, options);
   if (!currentCredentials.refreshToken) {
     throw errorWithStatus('unauthorized', 'No refresh token available');
   }
@@ -1565,7 +1568,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
       && credentials.expiresAt - nowMs < CLAUDE_REFRESH_LEEWAY_MS) {
       try {
         const previousCredentials = credentials;
-        credentials = await refreshClaudeCredentials(credentials, deps);
+        credentials = await refreshClaudeCredentials(credentials, deps, options);
         carryClaudeCachedIdentity(previousCredentials, credentials, deps);
       } catch (_) { /* fall through; reactive retry below may still succeed */ }
     }
@@ -1576,7 +1579,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     } catch (error) {
       if (error?.status !== 'unauthorized') throw error;
       const previousCredentials = credentials;
-      credentials = await refreshClaudeCredentials(credentials, deps);
+      credentials = await refreshClaudeCredentials(credentials, deps, options);
       carryClaudeCachedIdentity(previousCredentials, credentials, deps);
       usage = await callClaudeUsage(credentials.accessToken, deps);
     }
@@ -1586,7 +1589,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     } catch (error) {
       if (error?.cause?.status !== 'unauthorized') throw error;
       const previousCredentials = credentials;
-      credentials = await refreshClaudeCredentials(credentials, deps);
+      credentials = await refreshClaudeCredentials(credentials, deps, options);
       carryClaudeCachedIdentity(previousCredentials, credentials, deps);
       oauthIdentity = await resolveClaudeOauthIdentity(credentials, deps);
     }
@@ -1603,7 +1606,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     // create a new row keyed by credential storage location or a different
     // fallback source. Let LimitsRuntime retain the previous account row.
     if (error?.code === 'CLAUDE_IDENTITY_UNAVAILABLE') throw error;
-    if (!shouldTryClaudeCliFallback(error)) throw error;
+    if (options.claudeCliFallbackEnabled === false || !shouldTryClaudeCliFallback(error)) throw error;
     try {
       if (!await isClaudeCliAuthenticated(deps)) throw error;
       const text = await runClaudeUsageCli(deps);

@@ -55,6 +55,7 @@ module.exports = {
       initial: null
     }
   ],
+  extraSettingKeys: ['claudeCliFallbackEnabled'],
   status: {
     credential: 'claudeWebCookie',
     configuredKey: 'claudeWebCookieConfigured',

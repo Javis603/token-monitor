@@ -15,7 +15,8 @@ const {
   parseBoolean,
   parseLimitProviders
 } = require('../shared/limits/collector');
-const { postSyncPayload } = require('../shared/syncPayload');
+const { createSyncPayloadUploader } = require('../shared/syncPayload');
+const postSyncPayload = createSyncPayloadUploader();
 const { createAgentTitleSync } = require('./titleSync');
 const { HUB_RESPONSE_HEADER, HUB_RESPONSE_MINIMAL } = require('../shared/hubProtocol');
 const { applyProjectRollups } = require('../shared/usage');

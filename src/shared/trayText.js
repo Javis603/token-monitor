@@ -442,10 +442,14 @@
       if (pickWorstLimit(stats)) return '';
     }
     const today = stats?.periods?.today || {};
+    const month = stats?.periods?.month || {};
     const allTime = stats?.periods?.allTime || {};
     if (contentMode === 'cost') return formatCurrencyFromUsd(today.costUsd, currencyCode);
+    if (contentMode === 'costMonth') return formatCurrencyFromUsd(month.costUsd, currencyCode);
     if (contentMode === 'costAll') return formatCurrencyFromUsd(allTime.costUsd, currencyCode);
+    if (contentMode === 'tokensMonth') return formatCompactNumber(month.totalTokens, options);
     if (contentMode === 'tokensAll') return formatCompactNumber(allTime.totalTokens, options);
+    if (contentMode === 'bothMonth') return `${formatCompactNumber(month.totalTokens, options)} · ${formatCurrencyFromUsd(month.costUsd, currencyCode)}`;
     if (contentMode === 'bothAll') return `${formatCompactNumber(allTime.totalTokens, options)} · ${formatCurrencyFromUsd(allTime.costUsd, currencyCode)}`;
     if (contentMode === 'both') return `${formatCompactNumber(today.totalTokens, options)} · ${formatCurrencyFromUsd(today.costUsd, currencyCode)}`;
     return formatCompactNumber(today.totalTokens, options);
