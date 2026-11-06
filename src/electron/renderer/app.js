@@ -14376,7 +14376,9 @@ function createDockItemsComposer(root, itemsKey) {
       t,
       itemsApi: window.TokenMonitorEdgeDockItems,
       presentationApi: window.TokenMonitorEdgeDockPresentation,
-      getSettings: () => state.settings,
+      // Compose rapid edits against the latest submitted settings, even before
+      // settings:update has replied or broadcast its normalized snapshot.
+      getSettings: () => Object.assign({}, state.settings, ...pendingSettingsPatches),
       getStats: () => state.stats,
       pluginLabel: (ref) => (state.pluginCatalog?.plugins || [])
         .flatMap((plugin) => plugin.views || []).find((view) => view.ref === ref)?.title || ref,
