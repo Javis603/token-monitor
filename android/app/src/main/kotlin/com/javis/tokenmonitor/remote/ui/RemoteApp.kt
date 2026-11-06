@@ -32,6 +32,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -130,8 +132,18 @@ import java.time.temporal.WeekFields
 import java.util.Locale
 
 @Composable
-fun RemoteApp(model: RemoteViewModel) {
+fun RemoteApp(
+    model: RemoteViewModel,
+    pairIntent: String? = null,
+    onPairIntentConsumed: () -> Unit = {}
+) {
     val state by model.state.collectAsStateWithLifecycle()
+    LaunchedEffect(pairIntent) {
+        if (pairIntent != null) {
+            model.pairWithLink(pairIntent)
+            onPairIntentConsumed()
+        }
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, model) {
         val observer = LifecycleEventObserver { _, event ->
@@ -159,11 +171,7 @@ fun RemoteApp(model: RemoteViewModel) {
                 label = "gate"
             ) { mode ->
                 when (mode) {
-                    "setup" -> SetupScreen(
-                        busy = state.busy,
-                        error = connectMessage(state.connectResult),
-                        onConnect = model::connect
-                    )
+                    "setup" -> SetupScreen(state, model)
                     "home" -> Home(state, model)
                     else -> Column(Modifier.fillMaxSize()) {}
                 }
@@ -328,16 +336,20 @@ private fun Home(state: UiState, model: RemoteViewModel) {
         exit = fadeOut(coverFade) + slideOutVertically(coverShift) { cover }
     ) {
         SettingsScreen(
-            url = state.hubUrl,
-            busy = state.busy,
-            error = connectMessage(state.connectResult),
-            islandEnabled = state.islandEnabled,
+            state = state,
             onIsland = model::setIsland,
             onDismiss = {
                 settingsOpen = false
                 model.clearConnectResult()
+                model.clearPairingResult()
             },
-            onSave = model::connect
+            onSave = model::connect,
+            onSelectHub = model::selectHub,
+            onPairCode = model::pairWithCode,
+            onPairLink = model::pairWithLink,
+            onForgetLink = model::forgetLink,
+            onStartPairing = model::startPairing,
+            onStopPairing = model::stopPairing
         )
     }
 }
@@ -412,7 +424,7 @@ private fun RowScope.NavItem(selected: Boolean, label: Int, icon: Int, onClick: 
 }
 
 @Composable
-private fun GlassField(
+internal fun GlassField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
@@ -452,7 +464,7 @@ private fun GlassField(
 }
 
 @Composable
-private fun CapsuleButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+internal fun CapsuleButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -467,7 +479,7 @@ private fun CapsuleButton(label: String, enabled: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-private fun QuietAction(label: String, onClick: () -> Unit, enabled: Boolean = true, emphasis: Boolean = false) {
+internal fun QuietAction(label: String, onClick: () -> Unit, enabled: Boolean = true, emphasis: Boolean = false) {
     Text(
         label,
         color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.38f),
@@ -518,41 +530,60 @@ private fun GlassSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
 }
 
 @Composable
-private fun SetupScreen(busy: Boolean, error: String?, onConnect: (String, String) -> Unit) {
+private fun SetupScreen(state: UiState, model: RemoteViewModel) {
     var url by remember { mutableStateOf("") }
     var secret by remember { mutableStateOf("") }
     Column(
-        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(24.dp),
-        verticalArrangement = Arrangement.Center
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(stringResource(R.string.setup_title), style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(8.dp))
         Text(stringResource(R.string.setup_body), style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(24.dp))
-        GlassField(url, { url = it }, stringResource(R.string.hub_url))
-        Spacer(Modifier.height(12.dp))
-        GlassField(secret, { secret = it }, stringResource(R.string.hub_secret), secret = true)
-        if (error != null) {
-            Spacer(Modifier.height(12.dp))
-            Text(error, color = MaterialTheme.colorScheme.error)
-        }
-        Spacer(Modifier.height(20.dp))
-        CapsuleButton(stringResource(R.string.connect), enabled = !busy) { onConnect(url, secret) }
+        PairingPanel(
+            nearby = state.nearby,
+            discovering = state.discovering,
+            selectedHubId = state.selectedHubId,
+            busy = state.pairingBusy,
+            result = state.pairingResult,
+            onSelectHub = model::selectHub,
+            onPairCode = model::pairWithCode,
+            onPairLink = model::pairWithLink,
+            onStartPairing = model::startPairing,
+            onStopPairing = model::stopPairing
+        )
+        ManualSetupPanel(
+            url = url,
+            secret = secret,
+            busy = state.busy,
+            error = connectMessage(state.connectResult),
+            actionLabel = stringResource(R.string.connect),
+            onUrlChange = { url = it },
+            onSecretChange = { secret = it },
+            onSubmit = { model.connect(url, secret) }
+        )
     }
 }
 
 @Composable
 private fun SettingsScreen(
-    url: String,
-    busy: Boolean,
-    error: String?,
-    islandEnabled: Boolean,
+    state: UiState,
     onIsland: (Boolean) -> Unit,
     onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit
+    onSave: (String, String) -> Unit,
+    onSelectHub: (String) -> Unit,
+    onPairCode: (String) -> Unit,
+    onPairLink: (String) -> Unit,
+    onForgetLink: () -> Unit,
+    onStartPairing: () -> Unit,
+    onStopPairing: () -> Unit
 ) {
-    var draftUrl by remember(url) { mutableStateOf(url) }
+    var draftUrl by remember(state.hubUrl) { mutableStateOf(state.hubUrl) }
     var secret by remember { mutableStateOf("") }
+    val error = connectMessage(state.connectResult)
     AppBackdrop(fade = false) {
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -563,22 +594,37 @@ private fun SettingsScreen(
                 PageHeader(stringResource(R.string.settings), {}, onBack = onDismiss)
             }
             item {
-                GraphitePanel {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        GlassField(draftUrl, { draftUrl = it }, stringResource(R.string.hub_url))
-                        GlassField(
-                            secret,
-                            { secret = it },
-                            stringResource(R.string.hub_secret),
-                            secret = true,
-                            placeholder = stringResource(R.string.secret_keep)
-                        )
-                        if (error != null) Text(error, color = MaterialTheme.colorScheme.error)
-                        CapsuleButton(stringResource(R.string.save), enabled = !busy) { onSave(draftUrl, secret) }
-                    }
+                val binding = state.linkBinding
+                if (binding != null) {
+                    LinkedPanel(binding, state.pairingBusy, onForgetLink)
+                } else {
+                    PairingPanel(
+                        nearby = state.nearby,
+                        discovering = state.discovering,
+                        selectedHubId = state.selectedHubId,
+                        busy = state.pairingBusy,
+                        result = state.pairingResult,
+                        onSelectHub = onSelectHub,
+                        onPairCode = onPairCode,
+                        onPairLink = onPairLink,
+                        onStartPairing = onStartPairing,
+                        onStopPairing = onStopPairing
+                    )
                 }
             }
-            item { IslandSwitch(islandEnabled, onIsland) }
+            item {
+                ManualSetupPanel(
+                    url = draftUrl,
+                    secret = secret,
+                    busy = state.busy,
+                    error = error,
+                    actionLabel = stringResource(R.string.save),
+                    onUrlChange = { draftUrl = it },
+                    onSecretChange = { secret = it },
+                    onSubmit = { onSave(draftUrl, secret) }
+                )
+            }
+            item { IslandSwitch(state.islandEnabled, onIsland) }
             item { PinWidgets() }
         }
     }
@@ -645,7 +691,7 @@ internal fun GlassIconButton(icon: Int, description: String, onClick: () -> Unit
 }
 
 @Composable
-private fun GraphitePanel(
+internal fun GraphitePanel(
     modifier: Modifier = Modifier.fillMaxWidth(),
     blur: Boolean = false,
     content: @Composable () -> Unit

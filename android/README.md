@@ -11,14 +11,22 @@ cd android
 
 ## Connect
 
-On first launch, paste the hub address and the shared secret from the desktop app at Settings → Multi-device Sync.
+**Pair with a desktop on the same network (recommended for a Node hub).** In the desktop app open Settings → Multi-device Sync → **Pair a phone**; it shows a 6-digit code and a copyable `tokenmonitor://pair` link. On the phone open Settings, pick the desktop under **Nearby devices**, then enter the code — or paste/open the link. The phone stores a read-only device token, never the hub's shared secret, and appears under the desktop's **Linked devices** where it can be revoked.
+
+After pairing, the phone finds the hub by its stable hub ID over mDNS (`_tokenmonitor._tcp`), so moving to another Wi-Fi network or receiving a new DHCP address reconnects without re-entering the hub address. Discovery is IPv4 and same-LAN only; when no advertisement is available the app falls back to the last working address and the stored candidates.
+
+**Manual connection.** On first launch you can still paste the hub address and the shared secret from the desktop app at Settings → Multi-device Sync. This is the option for a Cloudflare Worker and for hubs that cannot use LAN discovery.
 
 - Worker: `https://<name>.workers.dev`
 - Node hub on the LAN: `http://<host>:17321`
 
-The secret is stored with EncryptedSharedPreferences. Cleartext HTTP is allowed so a Node hub without TLS can be reached. Use HTTPS for a Worker.
+The secret (or paired device token) is stored with EncryptedSharedPreferences. Cleartext HTTP is allowed so a Node hub without TLS can be reached. Use HTTPS for a Worker.
 
 The app keeps the last good snapshot when a request fails. It surfaces an unreachable hub, HTTP 401, `secret_required`, and `hub_stopping` separately.
+
+## Builds and updates
+
+Debug APKs are signed with the standard Android debug keystore at `~/.android/debug.keystore`. Android only updates an installed app when the new APK uses the same signing key; otherwise the installer reports a signature mismatch (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, error -7). Build with the default user home (Android Studio does). If a build overrides `ANDROID_USER_HOME`/`ANDROID_SDK_HOME`, Gradle generates a new debug key, and installing over the old app needs one uninstall first.
 
 ## Home-screen widgets
 
@@ -54,8 +62,16 @@ Xiaomi authorizes the package name and signing certificate. Without an App Id, a
 
 ## 中文
 
-用 Android Studio 打开 `android/` 目录。首次启动填入桌面端「设置 → 多设备同步」里的 Hub 地址和共享密钥。密钥只放在 `Authorization: Bearer` 里。局域网 Node Hub 一般是 `http://<主机>:17321`，所以应用允许明文 HTTP；Cloudflare Worker 请用 HTTPS。
+用 Android Studio 打开 `android/` 目录。
+
+**在同一局域网内配对桌面端（Node Hub 推荐）。** 在桌面端打开「设置 → 多设备同步 → 配对手机」，会显示 6 位配对码和可复制的 `tokenmonitor://pair` 链接。手机端打开设置，在「附近设备」里选中桌面端并输入配对码，或直接粘贴/打开链接。手机只保存只读设备令牌，不会拿到 Hub 的共享密钥；配对后可在桌面端的「已绑定设备」里逐个撤销。
+
+配对完成后，手机会通过 mDNS（`_tokenmonitor._tcp`）按 Hub 的稳定 ID 自动发现并重连：换 Wi-Fi、路由器重新分配 IP 都不需要再填 Hub 地址。发现仅限局域网 IPv4；没有广播时应用会退回上次成功的地址和已保存的候选地址。
+
+**手动连接。** 首次启动仍可填入桌面端「设置 → 多设备同步」里的 Hub 地址和共享密钥；Cloudflare Worker 或无法使用局域网发现的 Hub 只能用这种方式。密钥只放在 `Authorization: Bearer` 里。局域网 Node Hub 一般是 `http://<主机>:17321`，所以应用允许明文 HTTP；Cloudflare Worker 请用 HTTPS。
 
 桌面有四种尺寸，宽在前：1×2 竖条、2×1 横条、2×2 今日加近 7 日、4×3 今日和本月，再加上用量最高的模型和工具。数字在格子里放得下时用完整的千分位，放不下才缩成 K/M/B。超级岛开关和添加到桌面都在设置里。在小米上从「安卓小部件」里添加。标成小米小部件中心的条目后，没过审的应用会从两个列表里一起消失。卡片仍按小米视觉规范：不透明的浅色和深色底、圆角、内容内边距，标题 40% 透明度，数字是主信息。WorkManager 大约每 15 分钟向 Hub 拉一次。
+
+**构建与更新签名。** Debug APK 使用 `~/.android/debug.keystore` 签名。Android 只允许用同一签名密钥的 APK 覆盖安装，否则安装器会报「与已安装应用签名不同」（`INSTALL_FAILED_UPDATE_INCOMPATIBLE`，-7）。请用默认用户目录构建（Android Studio 默认如此）。如果构建时覆盖了 `ANDROID_USER_HOME`/`ANDROID_SDK_HOME`，Gradle 会生成新的 debug 密钥，这种情况覆盖安装前需要先卸载旧版本。
 
 「小米超级岛」开关默认关闭。打开后，澎湃 OS 3 显示超级岛，澎湃 OS 2 显示状态栏焦点通知，其他手机显示一条常驻通知。没有小米开发者平台的 App Id、测试机白名单和场景审核时，小米手机上也只会看到这条普通通知。把 App Id 配成 Gradle 属性 `XIAOMI_APP_ID`。

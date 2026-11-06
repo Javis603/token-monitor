@@ -12,6 +12,8 @@ Prefer a header (first-party clients already do this):
 Authorization: Bearer <secret>
 ```
 
+A Node Hub can additionally issue **read-only device tokens** through [pairing](#lan-link-node-hub-only). A device token is also sent as `Authorization: Bearer tmk_…` but grants only `GET /api/stats`, `GET /api/history`, `GET /api/stats/stream` and `GET /api/link`; every other route answers `403 {"error":"read_only"}`. Revoking or re-pairing the link invalidates the token (`401`). The Cloudflare Worker accepts only the shared secret.
+
 or:
 
 ```http
@@ -518,3 +520,112 @@ Authenticated shared groups are exactly `modelAliases` and `customPricing`. An u
 Only these whitelisted group fields are stored: settings files, raw credentials and session messages are never accepted. Accepted writes broadcast authenticated stats with `reason: "sync-settings"` and the new `syncSettingsRevisions` marker. Neither group contents nor their revision markers are included in public Worker stats.
 
 Optional `unpricedTokens` on periods, sessions and project rollups counts usage with unavailable catalog pricing; `costUsd` is the known subtotal. Period `clientUnpricedTokens`, `modelUnpricedTokens` and `clientModelUnpricedTokens` attribute those counts. Absent fields preserve legacy behavior and must not be inferred from zero cost. These additive counters survive Hub/Worker normalization and merging. History daily/monthly rows, their perClient/perModel buckets, previews and the lifetime summary also carry optional unpricedTokens; cost/totalCost remain known subtotals. Fixed-range projections preserve those counts from history and live-today overlays, including per-device aggregation. Legacy rows without the field retain their existing semantics; zero cost alone never implies a missing price.
+
+## LAN link (Node Hub only)
+
+The Node Hub can advertise itself on the local network and pair devices without the user typing a URL
+and secret. This is additive: devices that already hold the shared secret, and Cloudflare Worker
+hubs, keep working exactly as before. Discovery data and pairing endpoints do not exist on the
+Worker.
+
+### mDNS advertisement
+
+A Node Hub started with discovery enabled (`createHub({ discovery: true })`; the standalone CLI
+defaults it on) advertises while it has a secret and is bound to a non-loopback address:
+
+- Service type `_tokenmonitor._tcp`
+- Instance `tm-<hubId>`
+- SRV target `tm-<hubId>.local`, port = the HTTP port
+- TXT `id=<hubId>`, `name=<percent-encoded display name>`, `v=1`, `addrs=<ip:port>,…`
+  (IPv4 addresses, best effort)
+- TTL 120 s
+
+A browser matches by `id`: a client that paired with a hub keeps reconnecting to whichever address
+the same `hubId` currently resolves to, which is what makes a new Wi-Fi network or a DHCP change work
+without re-entering the URL. Discovery is limited to the same LAN; cross-network access still needs
+a Worker URL or a VPN/tunnel address configured manually. IPv4 only.
+
+### Pairing
+
+An authenticated client starts a pairing window and shows the 6-digit code and link. The new device
+posts the code and receives a read-only token. Only one pairing session exists at a time; starting a
+new one replaces the old. Codes are single-use, expire after 5 minutes and allow 8 wrong attempts
+before the session is invalidated.
+
+#### `POST /api/pair/start`
+
+Admin-authenticated. Returns:
+
+```json
+{
+  "ok": true,
+  "pairing": {
+    "code": "123456",
+    "expiresAt": "2026-11-06T13:30:00.000Z",
+    "ttlMs": 300000,
+    "link": "tokenmonitor://pair?v=1&id=0123456789abcdef&name=Studio%20Mac&code=123456&port=17321&host=192.168.1.5&addrs=192.168.1.5%3A17321"
+  },
+  "hub": { "id": "0123456789abcdef", "name": "Studio Mac", "port": 17321, "addresses": ["192.168.1.5"] }
+}
+```
+
+#### `GET /api/pair/status`
+
+Admin-authenticated. `{"ok":true,"pairing":{"active":false}}` or
+`{"ok":true,"pairing":{"active":true,"code":"123456","expiresAt":"…"}}`.
+
+#### `POST /api/pair/cancel`
+
+Admin-authenticated. Cancels the active session and returns `{"ok":true,"cancelled":<boolean>}`.
+
+#### `POST /api/pair`
+
+Unauthenticated; this is how a device that has never seen the hub obtains a token.
+
+```json
+{ "code": "123456", "deviceId": "android-3f2a…", "deviceName": "Pixel 9", "platform": "android" }
+```
+
+A successful response is:
+
+```json
+{
+  "ok": true,
+  "token": "tmk_…",
+  "hub": { "id": "0123456789abcdef", "name": "Studio Mac", "port": 17321, "addresses": ["192.168.1.5"] },
+  "device": { "id": "android-3f2a…", "name": "Pixel 9" }
+}
+```
+
+Errors: `400 bad_request` (invalid field; the response names it in `field`), `404 pairing_inactive`,
+`410 pairing_expired`, `401 {"error":"invalid_code","attemptsRemaining":N}`, `429
+{"error":"pairing_locked"}` after the attempt cap, `413 payload_too_large`. Pairing again with the
+same `deviceId` replaces that link and invalidates the previous token. Codes and tokens are never
+written to logs; only a SHA-256 hash of each token is persisted.
+
+#### `GET /api/link`
+
+Admin or device authenticated. `role` is `"admin"` or `"device"`. Returns the current identity so a
+client can refresh the addresses and port it should try next:
+
+```json
+{
+  "ok": true,
+  "hub": { "id": "0123456789abcdef", "name": "Studio Mac", "port": 17321, "addresses": ["192.168.1.5"] },
+  "role": "device",
+  "link": { "id": "android-3f2a…", "name": "Pixel 9", "platform": "android", "createdAt": "…" }
+}
+```
+
+`link` is `null` for the admin role. A hub that predates this section answers `404`, which clients
+treat as "manual URL only" rather than as an error.
+
+#### `GET /api/links` and `DELETE /api/links/:deviceId`
+
+Admin-authenticated. `GET` returns `{"ok":true,"links":[…]}` without token hashes. `DELETE` revokes
+one link, closes any stats stream that token authorized and returns `{"ok":true,"id":"…"}`;
+an unknown id answers `404 {"error":"unknown_link"}`.
+
+Revocation removes access through this hub only. It cannot recall data the device already downloaded
+or cached. Device tokens are independent of the hub's shared secret, so rotating the secret does not
+invalidate them — revoke each linked device (or delete the hub data file) instead.
