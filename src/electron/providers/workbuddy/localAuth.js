@@ -13,6 +13,9 @@ const {
   workbuddyBillingPaths,
   workbuddyDomainMatchesRealm
 } = require('../../../shared/providers/workbuddy/limits');
+// The Spend ledger is allowlisted by its own path: it is not one of the quota
+// actions `workbuddyBillingPaths` enumerates.
+const { WORKBUDDY_USAGE_PATH } = require('../../../shared/providers/workbuddy/usageRecords');
 
 const WORKBUDDY_AUTH_FILE_NAME = 'workbuddy-desktop.info';
 const WORKBUDDY_AI_AUTH_FILE_NAME = 'workbuddy-desktop-ai.info';
@@ -75,7 +78,7 @@ function isAllowedWorkbuddyApiUrl(value, method = 'GET', realm = 'cn') {
       && url.protocol === 'https:'
       && ['cn', 'ai'].includes(realm)
       && url.hostname === (realm === 'ai' ? 'www.workbuddy.ai' : 'copilot.tencent.com')
-      && [...workbuddyBillingPaths(realm), ...workbuddyBillingPaths(realm, true)].includes(url.pathname)
+      && [...workbuddyBillingPaths(realm), ...workbuddyBillingPaths(realm, true), WORKBUDDY_USAGE_PATH].includes(url.pathname)
       && !url.username
       && !url.password
       && !url.port

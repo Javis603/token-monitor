@@ -1,16 +1,36 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
+const workbuddyLimits = require('../../src/shared/providers/workbuddy/limits');
 const {
   WORKBUDDY_DEFAULT_ENDPOINT,
-  fetchWorkbuddyLimits,
   parseEnterpriseUsage,
   parsePersonalUsage,
   workbuddyAccountKey
-} = require('../../src/shared/providers/workbuddy/limits');
+} = workbuddyLimits;
 const { collectLimitsOnce } = require('../../src/shared/limits/collector');
+
+// The usage ledger defaults to the app's own data directory, which a test must
+// never write: the same isolation the archive tests make with this variable,
+// applied for the whole file (node runs each test file in its own process).
+// Tests that assert on the ledger still inject their own store.
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workbuddy-limits-tests-'));
+test.after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
+
+// The provider reads no local ledger: Today/Week/Month are summed from the
+// billing API's own timestamped rows, so tests only inject the transport.
+function fetchWorkbuddyLimits(options, deps = {}) {
+  const env = { TOKEN_MONITOR_SHARED_DIR: testDataDir, ...(deps.env || {}) };
+  return workbuddyLimits.fetchWorkbuddyLimits(options, { ...deps, env });
+}
+
+// The ledger read is served unversioned; a `/v2` form answers 404.
+const SPEND_PATH = '/billing/meter/get-user-request-usage';
 
 const NOW = Date.parse('2026-08-09T10:00:00Z');
 const PERSONAL_REQUEST_NOW = new Date(2026, 7, 9, 10, 11, 12).getTime();
@@ -165,6 +185,7 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
       now: () => PERSONAL_REQUEST_NOW,
       fetch: async (url, init) => {
         requests.push({ url: String(url), init });
+        if (String(url).endsWith(SPEND_PATH)) return response({ data: { data: [], total: 0 } });
         return response({
           data: {
             Response: {
@@ -182,7 +203,7 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
     }
   );
 
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, 2);
   assert.equal(requests[0].url, `${WORKBUDDY_DEFAULT_ENDPOINT}/v2/billing/meter/get-user-resource`);
   assert.equal(requests[0].init.method, 'POST');
   assert.equal(requests[0].init.redirect, 'error');
@@ -204,9 +225,11 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
   assert.equal(provider.windows[0].currency, 'CREDITS');
   assert.equal(provider.balance.amount, 76);
   assert.equal(provider.balance.currency, 'CREDITS');
-  assert.equal(provider.balance.todaySpend, null);
-  assert.equal(provider.balance.weekSpend, null);
-  assert.equal(provider.balance.monthSpend, null);
+  // The Spend periods come from the ledger read, not from a locally diffed
+  // total, so an empty ledger publishes zeroes with no tracking marker.
+  assert.equal(provider.balance.todaySpend, 0);
+  assert.equal(provider.balance.weekSpend, 0);
+  assert.equal(provider.balance.monthSpend, 0);
   assert.equal(provider.balance.allTimeSpend, null);
   assert.equal(provider.balance.trackingSince, null);
   assert.equal(provider.balance.monthSinceTracking, false);
@@ -214,6 +237,98 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
     JSON.stringify(provider),
     /fixture-access-token|user-123|enterprise-456|Engineering|copilot\.tencent\.com/
   );
+});
+
+test('fetchWorkbuddyLimits sums Credits spend from the per-request billing ledger', async () => {
+  const requests = [];
+  const now = PERSONAL_REQUEST_NOW;
+  const day = 24 * 60 * 60 * 1000;
+  const options = {
+    workbuddyAccessToken: 'fixture-access-token',
+    workbuddyUserId: 'user-123',
+    workbuddyDomain: 'copilot.tencent.com'
+  };
+  const provider = await fetchWorkbuddyLimits(options, {
+    env: {},
+    now: () => now,
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init });
+      if (String(url).endsWith(SPEND_PATH)) {
+        return response({
+          data: {
+            total: 3,
+            data: [
+              { requestTime: now - 60_000, credit: 115.17 },
+              { requestTime: now - 2 * day, credit: 1.2 },
+              { requestTime: now - 3 * day, credit: 0.8 }
+            ]
+          }
+        });
+      }
+      return response({
+        data: {
+          Response: {
+            Data: {
+              Accounts: [{ CycleCapacitySizePrecise: 100, CycleCapacityRemainPrecise: 76 }]
+            }
+          }
+        }
+      });
+    }
+  });
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].url, `${WORKBUDDY_DEFAULT_ENDPOINT}${SPEND_PATH}`);
+  // The ledger read carries the same credential and identity as the balance read.
+  assert.equal(requests[1].init.headers.Authorization, 'Bearer fixture-access-token');
+  assert.equal(requests[1].init.headers['X-User-Id'], 'user-123');
+  const spendBody = JSON.parse(requests[1].init.body);
+  assert.equal(spendBody.pageSize, 100);
+  assert.equal(spendBody.pageNum, 1);
+  assert.match(spendBody.startTime, /^\d{4}-\d{2}-\d{2} 00:00:00$/);
+  assert.equal(provider.balance.todaySpend, 115.17);
+  assert.equal(provider.balance.weekSpend, 117.17);
+  // No All-time: the ledger window is capped at 31 days by the API.
+  assert.equal(provider.balance.allTimeSpend, null);
+});
+
+test('fetchWorkbuddyLimits probe checks a credential without reading the spend ledger', async () => {
+  const requests = [];
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyAccessToken: 'fixture-access-token',
+      workbuddyUserId: 'user-123',
+      workbuddyDomain: 'copilot.tencent.com'
+    },
+    {
+      env: {},
+      probe: true,
+      now: () => PERSONAL_REQUEST_NOW,
+      fetch: async (url) => {
+        requests.push(String(url));
+        return response({
+          data: {
+            Response: {
+              Data: {
+                Accounts: [{
+                  CycleCapacitySizePrecise: 100,
+                  CycleCapacityRemainPrecise: 76,
+                  DeductionEndTime: '2026-09-01T00:00:00Z'
+                }]
+              }
+            }
+          }
+        });
+      }
+    }
+  );
+
+  // The save-time probe answers the balance alone: it is the user checking a
+  // credential, not a Spend observation.
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 76);
+  assert.equal(provider.balance.todaySpend, null);
+  assert.deepEqual(requests, [`${WORKBUDDY_DEFAULT_ENDPOINT}/v2/billing/meter/get-user-resource`]);
 });
 
 test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users for a token', async () => {
@@ -226,6 +341,9 @@ test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users f
       fetch: async () => { throw new Error('the local app fetch should be used'); },
       workbuddyFetch: async (url, init) => {
         requests.push({ url: String(url), init });
+        if (String(url).endsWith(SPEND_PATH)) {
+          return response({ data: { total: 1, data: [{ requestTime: PERSONAL_REQUEST_NOW - 1_000, credit: 2.5 }] } });
+        }
         return response({
           data: {
             Response: {
@@ -244,7 +362,10 @@ test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users f
     }
   );
 
-  assert.equal(requests.length, 1);
+  // The app-session lane reads the ledger through the same transport, so the
+  // Spend row is available without a pasted token.
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].url, `${WORKBUDDY_DEFAULT_ENDPOINT}${SPEND_PATH}`);
   assert.equal(requests[0].url, 'https://copilot.tencent.com/v2/billing/meter/get-user-resource');
   assert.equal(requests[0].init.redirect, 'error');
   assert.equal(requests[0].init.headers.Authorization, undefined);
@@ -272,6 +393,7 @@ test('fetchWorkbuddyLimits reads explicit environment credentials and supports e
     now: () => NOW,
     fetch: async (url, init) => {
       requests.push({ url: String(url), init });
+      if (String(url).endsWith(SPEND_PATH)) return response({ data: { data: [], total: 0 } });
       return response({ data: { data: { limitNum: 100, credit: 37, cycleResetTime: '2026-09-01T00:00:00Z' } } });
     }
   });
@@ -558,6 +680,11 @@ function quotaResponse() {
     CycleCapacitySizePrecise: 100, CycleCapacityRemainPrecise: 70 }] } });
 }
 
+// An empty per-request ledger: the Spend periods all read zero.
+function spendResponse() {
+  return response({ code: 0, data: { data: [], total: 0 } });
+}
+
 test('managed WorkBuddy identities match OAuth keys and preserve existing CN hashes', () => {
   const oauth = require('../../src/shared/providers/workbuddy/oauth');
   for (const realm of ['cn', 'ai']) {
@@ -648,19 +775,21 @@ test('WorkBuddy combines distinct local/managed realms and retains encrypted loc
   const rows = await fetchWorkbuddyLimits({ workbuddyManagedAccounts: [managed], workbuddyDesktopSessionEnabled: true,
     workbuddyLocalSessions: [localAi, localCn] }, { env: {},
     resolveWorkbuddyManagedCredential: async () => ({ accessToken: 'managed-token' }),
-    fetch: async (url, init) => { requests.push({ url, init }); return quotaResponse(); },
+    fetch: async (url, init) => { requests.push({ url, init }); return String(url).includes('get-user-request-usage') ? spendResponse() : quotaResponse(); },
     workbuddyFetch: async (url, init, expected) => {
       assert.equal(expected.realm, 'ai');
       assert.equal(expected.accountKey, localAi.accountKey);
       assert.equal(init.headers.Authorization, undefined);
-      requests.push({ url, init }); return quotaResponse();
+      requests.push({ url, init }); return String(url).includes('get-user-request-usage') ? spendResponse() : quotaResponse();
     } });
   assert.equal(rows.length, 3);
   assert.deepEqual(rows.map((row) => row.status), ['ok', 'ok', 'notConfigured']);
   assert.equal(rows[2].actionRequired, 'appSessionEncrypted');
   assert.equal(rows[2].accountKey, localCn.accountKey);
   assert.deepEqual(requests.map((request) => request.url).sort(), [
+    'https://copilot.tencent.com/billing/meter/get-user-request-usage',
     'https://copilot.tencent.com/v2/billing/meter/get-user-resource',
+    'https://www.workbuddy.ai/billing/meter/get-user-request-usage',
     'https://www.workbuddy.ai/billing/meter/get-user-resource'
   ]);
 });
@@ -675,13 +804,14 @@ test('WorkBuddy managed 401 refresh awaits persisted rotation and retries with t
         events.push(forceRefresh ? 'refresh' : 'resolve');
         if (forceRefresh) { await Promise.resolve(); persisted = true; events.push('persist'); }
         return { accessToken: forceRefresh ? 'rotated-token' : 'old-token', refreshToken: 'rotated-refresh' };
-      }, fetch: async (_, init) => {
-        events.push(init.headers.Authorization);
+      }, fetch: async (url, init) => {
+        const spend = String(url).includes('get-user-request-usage');
+        if (!spend) events.push(init.headers.Authorization);
         if (init.headers.Authorization === 'Bearer old-token') {
           return application401 ? response({ code: 401 }) : response({}, 401);
         }
         assert.equal(persisted, true);
-        return quotaResponse();
+        return spend ? spendResponse() : quotaResponse();
       } });
     assert.equal(rows[0].status, 'ok');
     assert.deepEqual(events, ['resolve', 'Bearer old-token', 'refresh', 'persist', 'Bearer rotated-token']);
@@ -726,12 +856,17 @@ test('WorkBuddy AI billing falls back only on HTTP 404 and never crosses realms'
         assert.equal(init.headers.Authorization, 'Bearer ai-token');
         assert.equal(init.headers.Host, undefined);
         assert.equal(init.headers.Referer, undefined);
-        return requests.length === 1 ? response({}, status) : quotaResponse();
+        // The 404 falls back to the `/v2` form; any other status is terminal, so
+        // only a successful quota read proceeds to the Spend ledger.
+        if (!String(url).includes('/v2/')) return response({}, status);
+        return String(url).includes('get-user-request-usage') ? spendResponse() : quotaResponse();
       } });
     assert.ok(requests.every((url) => url.startsWith('https://www.workbuddy.ai/')));
     if (status === 404) {
+      // Only the quota action has a `/v2` fallback; the ledger is unversioned.
       assert.deepEqual(requests, ['https://www.workbuddy.ai/billing/meter/get-user-resource',
-        'https://www.workbuddy.ai/v2/billing/meter/get-user-resource']);
+        'https://www.workbuddy.ai/v2/billing/meter/get-user-resource',
+        'https://www.workbuddy.ai/billing/meter/get-user-request-usage']);
       assert.equal(rows[0].status, 'ok');
     } else assert.ok(requests.every((url) => url === 'https://www.workbuddy.ai/billing/meter/get-user-resource'));
   }
@@ -854,12 +989,17 @@ test('managed enterprise billing with a Chinese department dispatches Fetch-comp
       const request = new Request(url, init);
       assert.equal(request.headers.get('X-User-Id'), identity.userId);
       assert.equal(request.headers.get('X-Enterprise-Id'), identity.enterpriseId);
+      // A non-ASCII department name is never emitted as a header; the identity
+      // headers above still bind both the quota and the ledger request.
       assert.equal(request.headers.get('X-Department-Info'), null);
       dispatched++;
-      return response({ data: { limitNum: 100, credit: 20 } });
+      return String(url).includes('get-user-request-usage')
+        ? response({ data: { data: [], total: 0 } })
+        : response({ data: { limitNum: 100, credit: 20 } });
     }
   });
-  assert.equal(dispatched, 1);
+  // One quota read plus one ledger read, both carrying the bound identity.
+  assert.equal(dispatched, 2);
   assert.equal(result[0].accountKey, workbuddyAccountKey(identity));
   assert.equal(result[0].status, 'ok');
 });
