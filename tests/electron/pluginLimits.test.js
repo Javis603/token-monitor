@@ -25,6 +25,21 @@ test('normalization projects fields and rejects bad windows', () => {
   const value = normalizeReading({ status: 'ok', windows: [], authorization: 'synthetic' }, 'plugin:sample-plugin:one');
   assert.equal(value.authorization, undefined);
 });
+test('documented plan reaches the native label through repeated runtime normalization', async t => {
+  const id = 'plugin:sample-plugin:one';
+  const reading = { status: 'ok', windows: [], plan: 'Synthetic Team' };
+  const normalized = normalizeReading(reading, id);
+  assert.equal(normalized.planLabel, reading.plan);
+  assert.deepEqual(normalizeReading(normalized, id), normalized);
+  assert.equal(normalizeReading({ status: 'ok', windows: [] }, id).planLabel, '');
+  const manager = { list: () => ({ plugins: [{ id: manifest.id, status: 'active', revision: 'a', limits: [manifest.limits[0]] }] }), call: async () => reading };
+  const service = createPluginLimits({ manager, getSettings: () => ({ limitProviders: id }), changed() {} });
+  t.after(() => service.dispose()); service.demand(true);
+  for (let n = 0; n < 20 && !service.records().length; n++) await new Promise(setImmediate);
+  assert.equal(service.records()[0].planLabel, reading.plan);
+  service.demand(false);
+  assert.equal(service.records()[0].planLabel, reading.plan);
+});
 test('native demand samples two modules, drops late data on disable, resumes after revision update', async t => {
   let active = true, revision = 'a', calls = 0;
   const settings = { limitProviders: 'plugin:sample-plugin:one,plugin:sample-plugin:two', limitsEnabled: true };

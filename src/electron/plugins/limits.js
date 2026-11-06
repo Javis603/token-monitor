@@ -16,7 +16,8 @@ function normalizeReading(input, provider) {
     || !Array.isArray(input.windows) || input.windows.length > 16) throw Error('Invalid plugin limits reading');
   const windows = input.windows.map(normalizeLimitWindow);
   if (windows.some(window => !window)) throw Error('Invalid plugin limits window');
-  return { provider, status: input.status, windows, plan: typeof input.plan === 'string' ? input.plan.slice(0, 80) : '', updatedAt: Number.isFinite(Date.parse(input.updatedAt)) ? new Date(input.updatedAt).toISOString() : new Date().toISOString() };
+  const plan = typeof input.plan === 'string' ? input.plan.slice(0, 80) : '';
+  return { provider, status: input.status, windows, plan, planLabel: plan, updatedAt: Number.isFinite(Date.parse(input.updatedAt)) ? new Date(input.updatedAt).toISOString() : new Date().toISOString() };
 }
 function createPluginLimits({ manager, getSettings, changed }) {
   let runtime = null, disposed = false;
