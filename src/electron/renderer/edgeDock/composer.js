@@ -416,8 +416,12 @@
           { value: 'lowest', labelKey: 'trayComposer.account.lowest' },
           { value: 'specific', labelKey: 'trayComposer.account.specific' }
         ], (accountMode) => {
-          const accountKey = item.accountKey || headlineAccountChoices(item)[0]?.accountKey || '';
-          void updateItem(id, { accountMode, accountKey });
+          const change = { accountMode };
+          if (accountMode === 'specific') {
+            const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+            change.accountKey = currentItem.accountKey || headlineAccountChoices(currentItem)[0]?.accountKey || '';
+          }
+          void updateItem(id, change);
         }));
         if (item.accountMode === 'specific') pane.append(accountRow(item, id));
       }

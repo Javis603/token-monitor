@@ -435,8 +435,11 @@ test('third-party headline controls persist a specific account independently of 
     assert.equal(settings.edgeDockItems[0].accountKey, 'a');
     assert.deepEqual(accountPicker().children.map((option) => option.value), ['a', 'b']);
     let select = accountPicker();
+    global.document.activeElement = select;
     select.value = 'b';
     select.listeners.change();
+    global.document.activeElement = null;
+    select.listeners.blur();
     assert.equal(settings.edgeDockItems[0].accountKey, 'b');
     assert.deepEqual(settings.edgeDockItems[0].hiddenAccounts, ['c']);
     assert.equal(all(root).filter((node) => node.className === 'edge-dock-composer-account-name').length, 3);
