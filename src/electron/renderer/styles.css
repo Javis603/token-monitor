@@ -1337,6 +1337,12 @@ span.settings-note.settings-item-desc {
 .managed-account-row.disabled .managed-account-info {
   color: var(--muted);
 }
+#minimaxKeyList .managed-account-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+#minimaxSettingsDetails .credential-input {
+  height: 30px;
+}
 .managed-account-checkbox {
   justify-self: center;
   width: 15px;
@@ -5951,6 +5957,7 @@ html.is-windows .limit-live-badge {
   font-size: 0.625rem;
   white-space: normal;
 }
+.limit-window-no-reset { align-content: start; }
 .limit-window-no-reset .limit-reset {
   display: none;
   min-height: 0;

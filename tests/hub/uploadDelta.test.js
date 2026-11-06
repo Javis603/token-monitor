@@ -185,3 +185,58 @@ test('Worker bounds chunked delta input before JSON parsing and cancels an overs
   const accepted = await hub.send('https://hub.invalid/api/ingest/delta', { method: 'POST', headers: hub.headers, body: valid, duplex: 'half' });
   assert.equal(accepted.status, 200);
 });
+
+test('Worker bounds chunked full ingest before JSON parsing and cancels an oversized body', async t => {
+  const hub = await backend('Worker', t);
+  let cancelled = false;
+  let chunks = 0;
+  const body = new ReadableStream({
+    pull(controller) {
+      if (chunks++ < 3) controller.enqueue(new Uint8Array(600000));
+      else controller.close();
+    },
+    cancel() { cancelled = true; }
+  });
+  const response = await hub.send('https://hub.invalid/api/ingest', {
+    method: 'POST', headers: hub.headers, body, duplex: 'half'
+  });
+  assert.equal(response.status, 413, 'unparseable oversized input is rejected before JSON.parse');
+  assert.equal(cancelled, true);
+  assert.equal(await hub.device(), undefined);
+
+  const encoded = new TextEncoder().encode(JSON.stringify(summaryForUpload()));
+  const valid = new ReadableStream({ start(controller) {
+    controller.enqueue(encoded.slice(0, 17)); controller.enqueue(encoded.slice(17)); controller.close();
+  } });
+  const accepted = await hub.send('https://hub.invalid/api/ingest', {
+    method: 'POST', headers: { ...hub.headers, 'x-token-monitor-upload': '1' }, body: valid, duplex: 'half'
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).upload.version, 1);
+  assert.equal((await hub.device()).history.daily.length, 151);
+});
+
+test('Worker full ingest accepts exactly 1 MiB of UTF-8 and rejects one extra byte without invalidating its baseline', async t => {
+  const hub = await backend('Worker', t);
+  const limit = 1024 * 1024;
+  const payload = { ...summaryForUpload(), padding: '' };
+  const paddingBytes = limit - Buffer.byteLength(JSON.stringify(payload));
+  payload.padding = '字'.repeat(Math.floor(paddingBytes / 3)) + 'x'.repeat(paddingBytes % 3);
+  const body = JSON.stringify(payload);
+  assert.equal(Buffer.byteLength(body), limit);
+  const send = value => hub.send('https://hub.invalid/api/ingest', {
+    method: 'POST', headers: { ...hub.headers, 'x-token-monitor-upload': '1' }, body: value
+  });
+  const first = await send(body);
+  assert.equal(first.status, 200);
+  const { upload } = await first.json();
+  const before = await hub.device();
+  const rejected = await send(`${body} `);
+  assert.equal(rejected.status, 413);
+  assert.equal((await rejected.json()).error, 'payload_too_large');
+  assert.deepEqual(await hub.device(), before);
+  const delta = await hub.request('/api/ingest/delta', {
+    deviceId: payload.deviceId, baseRevision: upload.revision, patch: []
+  });
+  assert.equal(delta.status, 200);
+});
