@@ -177,7 +177,7 @@ function createPluginWebSessions({ electron, directory, active, timeoutMs = 1800
     identity(id, 'default'); cancelPlugin(id);
     let files;
     try { files = fs.readdirSync(directory); } catch (error) { if (error.code === 'ENOENT') return; throw Error('web-session-storage-unavailable'); }
-    for (const name of files) if (name.startsWith(`${id}--`) && name.endsWith('.json')) fs.unlinkSync(path.join(directory, name));
+    for (const name of files) if (new RegExp(`^${id}--[a-f0-9]{64}\\.json$`).test(name)) fs.unlinkSync(path.join(directory, name));
     for (const ref of failures.keys()) if (ref.startsWith(`${id}/`)) failures.delete(ref);
   }
   return { status, connect, request, disconnect, cancelPlugin, forget,

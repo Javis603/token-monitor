@@ -2386,7 +2386,7 @@ test('provider toggles converge through the limits push without a forced refresh
   const statsRenderStart = app.indexOf('function renderStatsUpdate()');
   const statsRenderEnd = app.indexOf('const statsRenderScheduler =', statsRenderStart);
 
-  assert.match(body, /const patch = \{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \};/);
+  assert.match(body, /const patch = \{ limitProviders: \[\.\.\.checked, \.\.\.absent\]\.join\(','\), limitsEnabled: checked\.length > 0 \|\| absent\.length > 0 \};/);
   assert.match(body, /state\.pendingLimitProviderSelection = \{ revision, \.\.\.patch \};/);
   assert.match(body, /saveSettings\(patch\)/);
   assert.match(body, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
