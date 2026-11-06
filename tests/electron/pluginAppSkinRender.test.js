@@ -15,9 +15,9 @@ function extract(name) {
 }
 function catalogHarness() {
   const calls = [];
-  const context = { state: {}, pluginPageDesigns: {}, isSettingsSurfaceVisible: () => true,
+  const context = { state: {}, pluginLimitSettings: null, pluginPageDesigns: {}, isSettingsSurfaceVisible: () => true,
     preserveSettingsPanelScroll: fn => fn() };
-  for (const name of ['render', 'renderViewSwitcher', 'renderThemePresetChips', 'renderNotchPageChoices', 'renderViewPreferences']) context[name] = () => calls.push(name);
+  for (const name of ['renderLimitProviderCheckboxes', 'render', 'renderViewSwitcher', 'renderThemePresetChips', 'renderNotchPageChoices', 'renderViewPreferences']) context[name] = () => calls.push(name);
   vm.createContext(context);
   vm.runInContext(`let pluginCatalogKey = ''; ${extract('applyPluginCatalog')}`, context);
   return { calls, context, apply: context.applyPluginCatalog };

@@ -87,7 +87,9 @@
       applyAppearance(mount.container, appearance);
       const value = state(mount.surface, mount.ref) || (!latest.has(mount.surface) ? mount.options.descriptor : null);
       if (value?.entry) {
-        const context = { ...mount.options, ...getContext(mount.surface), surface: mount.surface };
+        const { isVisible, ...options } = mount.options;
+        const context = { ...options, ...getContext(mount.surface), surface: mount.surface };
+        if (isVisible) context.visible = isVisible();
         // A slot can refine the surface's generic variant (e.g. Notch summary).
         if (Object.hasOwn(mount.options, 'surfaceVariant')) context.surfaceVariant = mount.options.surfaceVariant;
         void ui.mount(mount.container, value, context);
@@ -100,7 +102,7 @@
       for (const [container, mount] of mounts) {
         if (!container.isConnected) { mounts.delete(container); observer?.unobserve(container); intersections.delete(container); continue; }
         if (!bySurface.has(mount.surface)) bySurface.set(mount.surface, new Set());
-        const visible = document.visibilityState !== 'hidden' && isSurfaceActive(mount.surface, container) && container.getClientRects().length > 0 && intersections.get(container) !== false;
+        const visible = mount.options.isVisible?.() !== false && document.visibilityState !== 'hidden' && isSurfaceActive(mount.surface, container) && container.getClientRects().length > 0 && intersections.get(container) !== false;
         ui.setVisibility(container, visible);
         if (visible) bySurface.get(mount.surface).add(mount.ref);
       }

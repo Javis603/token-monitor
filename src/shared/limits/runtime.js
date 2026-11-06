@@ -6,11 +6,11 @@ const {
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   parseBoolean,
-  parseLimitProviders,
+  parseLimitProviders: builtinParseProviders,
   probeLimitProvider,
   providerPhysicalBoundMs
 } = require('./collector');
-const { normalizeLimitProvider, normalizeLimitsSummary } = require('./core');
+const { normalizeLimitProvider: builtinNormalizeProvider, normalizeLimitsSummary: builtinNormalizeSummary } = require('./core');
 const {
   nextLimitsResetBoundary,
   pruneAttemptedResetBoundaries
@@ -155,6 +155,11 @@ function bypassesProviderCooldown(reason) {
 }
 
 function createLimitsRuntime(initialOptions = {}, deps = {}) {
+  // Desktop extensions supply their own closed registry and DTO normalization.
+  // Default collectors retain the built-in, wire-compatible provider allowlist.
+  const parseLimitProviders = deps.parseProviders || builtinParseProviders;
+  const normalizeLimitProvider = deps.normalizeProvider || builtinNormalizeProvider;
+  const normalizeLimitsSummary = deps.normalizeSummary || builtinNormalizeSummary;
   const now = deps.now || Date.now;
   const setTimer = deps.setTimeout || setTimeout;
   const clearTimer = deps.clearTimeout || clearTimeout;
