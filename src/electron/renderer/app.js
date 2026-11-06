@@ -6954,8 +6954,40 @@ function localCreditsView() {
     total: Number(credits?.totals?.credits) || 0,
     requests: Number(credits?.totals?.requests) || 0,
     byModel: credits?.totals?.byModel || null,
+    events: credits.recentEvents || [],
     calibration: credits.calibration || null
   };
+}
+
+// Credits are recorded per request, so a day's spend is a sum over the event
+// window rather than a stored total. Only days that actually appear are listed:
+// a gap in that window is not proof of a zero day.
+function creditsDailyRows(events, now = Date.now()) {
+  const byDay = new Map();
+  for (const event of Array.isArray(events) ? events : []) {
+    const at = Number(event?.updatedAt);
+    const amount = Number(event?.credits);
+    if (!Number.isFinite(at) || !Number.isFinite(amount) || amount <= 0) continue;
+    const day = new Date(at);
+    day.setHours(0, 0, 0, 0);
+    byDay.set(day.getTime(), (byDay.get(day.getTime()) || 0) + amount);
+  }
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const rows = [];
+  for (let back = 0; back < 7; back += 1) {
+    const day = new Date(today);
+    day.setDate(day.getDate() - back);
+    const sum = byDay.get(day.getTime());
+    if (!sum) continue;
+    const label = back === 0 ? 'Today' : back === 1 ? 'Yesterday' : dayLabelText(day);
+    rows.push([label, `\u2212${formatCredits(sum)}`]);
+  }
+  return rows;
+}
+
+function dayLabelText(day) {
+  return `${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
 }
 
 // The credits ledger is a local read of WorkBuddy's database, not a quota the
@@ -6964,14 +6996,26 @@ function localCreditsView() {
 // ⓘ that opens the per-model split behind the single total.
 function workbuddyCreditsAccount(view) {
   if (!view || !(view.total > 0)) return null;
-  const rows = Object.entries(view.byModel || {})
+  const models = Object.entries(view.byModel || {})
     .filter(([, credits]) => Number(credits) > 0)
     .sort(([, a], [, b]) => Number(b) - Number(a))
-    .slice(0, 6)
+    .slice(0, 4)
     .map(([model, credits]) => [model, formatCredits(Number(credits))]);
-  // The card's own value is the lifetime total, so the tooltip only needs to
-  // explain the split behind it.
-  const detailEntries = rows.length > 0 ? rows : undefined;
+  // Daily spend first — that is the question the card cannot answer on its own —
+  // then the model split, then the lifetime figure the card already shows.
+  const daily = creditsDailyRows(view.events);
+  const detailEntries = [
+    ...daily,
+    ...(models.length > 0
+      ? [{ full: 'By model', caption: true, separated: daily.length > 0 }, ...models]
+      : []),
+    ...(view.total > 0
+      ? [{ full: 'Total spent', caption: true, separated: daily.length > 0 || models.length > 0 },
+        ['Credits', formatCredits(view.total)],
+        ...(view.requests > 0 ? [['Requests', String(view.requests)]] : [])]
+      : [])
+  ];
+  const hasDetail = detailEntries.filter((entry) => Array.isArray(entry)).length > 0;
   return {
     key: 'workbuddy:credits',
     providerId: 'workbuddy',
@@ -6992,7 +7036,7 @@ function workbuddyCreditsAccount(view) {
       remainingPercent: null,
       resetsAt: null,
       showMeter: false,
-      ...(detailEntries ? { detailEntries } : {})
+      ...(hasDetail ? { detailEntries } : {})
     }]
   };
 }
