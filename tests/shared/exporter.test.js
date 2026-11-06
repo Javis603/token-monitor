@@ -346,3 +346,18 @@ test('exportFileSet names are always a subset of EXPORT_FILENAMES (writer cleanu
     for (const f of set) assert.ok(known.has(f.name), `${f.name} must be in EXPORT_FILENAMES`);
   }
 });
+
+
+test('snapshot CSV retains cost-only tools and models beside measured usage', () => {
+  const periods = { today: {
+    clients: { claude: 100 }, clientCosts: { claude: 1, qodercn: 0.25 },
+    models: { sonnet: 100 }, modelCosts: { sonnet: 1, 'qwen3.8-flash': 0.25 }
+  } };
+  const rows = buildSnapshotRows(periods);
+  assert.deepEqual(rows.filter(row => row.tokens === 0), [
+    { period: 'today', dimension: 'tool', name: 'qodercn', tokens: 0, cost_usd: 0.25 },
+    { period: 'today', dimension: 'model', name: 'qwen3.8-flash', tokens: 0, cost_usd: 0.25 }
+  ]);
+  assert.equal(rows.find(row => row.name === 'sonnet').tokens, 100);
+  assert.match(renderSnapshotCsv(periods), /today,model,qwen3.8-flash,0,0.25/);
+});

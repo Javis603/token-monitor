@@ -1813,3 +1813,111 @@ test('aggregateDevices folds a pre-rename micode device into the mimo row', () =
   assert.equal(aggregate.periods.today.clients.micode, undefined);
   assert.equal(aggregate.periods.today.clientCosts.mimo, 2);
 });
+
+test('extractUsageFromTokscale maps Qoder CN internal model codes to display names only for Qoder CN', () => {
+  // Upstream tokscale 4.20.0 maps most Qoder CN codes but not `qfmodel`, the
+  // auto router's code. The app-side table must fill that in, case-insensitively,
+  // without renaming the same string on another client or unknown codes.
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      { client: 'qodercn', sessionId: 'q-1', model: 'qfmodel', provider: 'unpriced:qodercn', input: 4, output: 6, cost: 0.1 },
+      { client: 'qodercn', sessionId: 'q-1', model: 'QFMODEL', provider: 'unpriced:qodercn', input: 1, output: 1, cost: 0 },
+      { client: 'qodercn', sessionId: 'q-2', model: 'Qwen3.8-Flash', provider: 'unpriced:qodercn', input: 3, output: 0, cost: 0 },
+      { client: 'qodercn', sessionId: 'q-2', model: 'my-custom-model', provider: 'unpriced:qodercn', input: 2, output: 0, cost: 0 },
+      { client: 'claude', sessionId: 'c-1', model: 'qfmodel', provider: 'anthropic', input: 5, output: 0, cost: 0 }
+    ]
+  });
+
+  assert.equal(period.sessions['qodercn:q-1'].models['qwen3.8-flash'], 12);
+  assert.equal(period.sessions['qodercn:q-1'].models.qfmodel, undefined);
+  assert.equal(period.sessions['qodercn:q-2'].models['qwen3.8-flash'], 3);
+  assert.equal(period.sessions['qodercn:q-2'].models['my-custom-model'], 2);
+  assert.equal(period.sessions['claude:c-1'].models.qfmodel, 5);
+  assert.equal(period.models['qwen3.8-flash'], 15);
+  assert.equal(period.models.qfmodel, 5);
+  assert.equal(period.clientModels.qodercn['qwen3.8-flash'], 15);
+  assert.equal(period.clientModels.qodercn.qfmodel, undefined);
+});
+
+test('normalizePeriod reconciles stored Qoder CN qfmodel global models using client attribution', () => {
+  const old = {
+    totalTokens: 10,
+    clients: { qodercn: 10 },
+    models: { qfmodel: 10 },
+    modelCosts: { qfmodel: 0.5 },
+    modelCacheReads: { qfmodel: 4 },
+    modelOutputs: { qfmodel: 6 },
+    clientModels: { qodercn: { qfmodel: 10 } },
+    clientModelCosts: { qodercn: { qfmodel: 0.5 } }
+  };
+  const period = normalizePeriod(old);
+  assert.deepEqual({ ...period.models }, { 'qwen3.8-flash': 10 });
+  assert.equal(period.modelCosts['qwen3.8-flash'], 0.5);
+  assert.equal(period.modelCosts.qfmodel, undefined);
+  assert.equal(period.modelCacheReads['qwen3.8-flash'], 4);
+  assert.equal(period.modelOutputs['qwen3.8-flash'], 6);
+  assert.deepEqual({ ...period.clientModels.qodercn }, { 'qwen3.8-flash': 10 });
+  assert.deepEqual(normalizePeriod(period), period);
+});
+
+
+test('stored Qoder model renames preserve exclusive throughput and discard ambiguous attribution', () => {
+  const old = {
+    totalTokens: 150, clients: { qodercn: 150 }, models: { qfmodel: 150 },
+    clientModels: { qodercn: { qfmodel: 150 } },
+    outputTokens: 18, modelOutputs: { qfmodel: 18 },
+    timedTokens: 150, timedOutputTokens: 18, timedDurationMs: 1000,
+    modelThroughput: { qfmodel: { timedTokens: 150, timedOutputTokens: 18, timedDurationMs: 1000 } },
+    unpricedTokens: 100, modelUnpricedTokens: { qfmodel: 100 }
+  };
+  const exclusive = normalizePeriod(old);
+  assert.deepEqual({ ...exclusive.modelThroughput }, { 'qwen3.8-flash': old.modelThroughput.qfmodel });
+  assert.equal(exclusive.modelUnpricedTokens['qwen3.8-flash'], 100);
+  assert.deepEqual(normalizePeriod(exclusive), exclusive);
+  const shared = normalizePeriod({ ...old,
+    clients: { qodercn: 100, other: 50 },
+    clientModels: { qodercn: { qfmodel: 100 }, other: { qfmodel: 50 } }
+  });
+  assert.equal(shared.models.qfmodel, 50);
+  assert.equal(shared.modelThroughput, undefined);
+  assert.equal(shared.modelUnpricedTokens?.qfmodel, undefined);
+  assert.equal(shared.unpricedTokens, 100);
+  assert.deepEqual(normalizePeriod(shared), shared);
+});
+
+test('ambiguous Qoder model renames keep throughput for unrelated models', () => {
+  const sonnet = { timedTokens: 40, timedOutputTokens: 4, timedDurationMs: 500 };
+  const shared = normalizePeriod({
+    totalTokens: 190, clients: { qodercn: 100, other: 90 }, models: { qfmodel: 150, sonnet: 40 },
+    clientModels: { qodercn: { qfmodel: 100 }, other: { qfmodel: 50, sonnet: 40 } },
+    outputTokens: 22, modelOutputs: { qfmodel: 18, sonnet: 4 },
+    timedTokens: 190, timedOutputTokens: 22, timedDurationMs: 1500,
+    modelThroughput: {
+      qfmodel: { timedTokens: 150, timedOutputTokens: 18, timedDurationMs: 1000 },
+      sonnet
+    }
+  });
+  assert.deepEqual({ ...shared.modelThroughput }, { sonnet });
+  assert.deepEqual(normalizePeriod(shared), shared);
+});
+
+
+test('Qoder zero-cost request identity survives extraction and wire normalization', () => {
+  const row = { client: 'qodercn', sessionId: 'qodercn:jsonl:session:zero', model: 'qfmodel',
+    input: 0, output: 0, cost: 0, messageCount: 1 };
+  const bundle = extractUsageBundleFromTokscale({ entries: [row] });
+  for (const period of [bundle.period, bundle.byClient.qodercn, normalizePeriod(JSON.parse(JSON.stringify(bundle.period)))]) {
+    assert.equal(period.totalTokens, 0);
+    assert.equal(period.costUsd, 0);
+    assert.deepEqual(period.models, {});
+    assert.deepEqual(Object.values(period.sessions)[0].modelCosts, { 'qwen3.8-flash': 0 });
+    assert.equal(Object.values(period.sessions)[0].messageCount, 1);
+  }
+  for (const unproven of [
+    { ...row, client: 'claude' }, { ...row, cost: undefined },
+    { ...row, messageCount: 0 }, { ...row, sessionId: '' }, { ...row, model: '' }
+  ]) {
+    assert.deepEqual(extractUsageFromTokscale({ entries: [unproven] }).sessions, {});
+  }
+});

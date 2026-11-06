@@ -614,3 +614,30 @@ test('historyPreview defaults to the compact 30-day daily window', () => {
   assert.equal(preview.daily.length, 30);
   assert.equal(preview.daily[0].date, '2026-07-02');
 });
+
+test('Qoder CN graph rows fold internal model codes onto display names without renaming other clients', () => {
+  const rows = [
+    { client: 'qodercn', modelId: 'qfmodel', tokens: { input: 3 }, cost: 0.01 },
+    { client: 'qodercn', modelId: 'Qwen3.8-Flash', tokens: { input: 7 }, cost: 0.02 },
+    { client: 'qodercn', modelId: 'kmodel', tokens: { input: 2 }, cost: 0 },
+    { client: 'qodercn', modelId: 'unknown-code', tokens: { input: 1 }, cost: 0 },
+    { client: 'claude', modelId: 'qfmodel', tokens: { input: 11 }, cost: 0.03 }
+  ];
+  const graph = { contributions: [{ date: '2026-09-27', clients: rows }] };
+  const day = normalizeHistory(parseGraphResult(graph), { todayKey: '2026-09-28' }).daily[0];
+
+  assert.equal(day.perModel['Qwen3.8-Flash'].tokens, 10);
+  assert.equal(day.perModel['Kimi-K2.7-Code'].tokens, 2);
+  assert.equal(day.perModel['unknown-code'].tokens, 1);
+  assert.equal(day.perModel.qfmodel.tokens, 11);
+  assert.equal(day.tokens, 24);
+});
+
+test('Qoder CN model table mirrors the tokscale fork, including qfmodel', () => {
+  const { QODER_CN_MODEL_DISPLAY_NAMES, normalizeTokscaleModelNameForClient } = require('../../src/shared/history');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.get('qfmodel'), 'Qwen3.8-Flash');
+  assert.equal(QODER_CN_MODEL_DISPLAY_NAMES.size, 21);
+  assert.equal(normalizeTokscaleModelNameForClient(' qfmodel ', 'qodercn'), 'Qwen3.8-Flash');
+  assert.equal(normalizeTokscaleModelNameForClient('qfmodel', 'cursor'), 'qfmodel');
+  assert.equal(normalizeTokscaleModelNameForClient('openai/gpt-5', 'qodercn'), 'openai/gpt-5');
+});

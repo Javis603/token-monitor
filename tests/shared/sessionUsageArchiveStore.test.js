@@ -9,6 +9,7 @@ const { DatabaseSync } = require('node:sqlite');
 const { readJson } = require('../../src/shared/config');
 
 const {
+  applySessionUsageArchive,
   captureSessionUsageArchive,
   writeSessionUsageArchive
 } = require('../../src/shared/usage/sessionUsageArchive');
@@ -1205,4 +1206,36 @@ test('a failed full reload preserves the prior archive and stays pending for ret
   assert.equal(recovered.error, null);
   assert.equal(recovered.archive.sessions['codex:one'].periods.allTime.totalTokens, 100);
   assert.equal(recovered.archive.sessions['codex:two'].periods.allTime.totalTokens, 225);
+});
+
+
+test('SQLite Qoder source aliases replay one latest logical-session snapshot', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qoder-archive-alias-'));
+  const options = { databasePath: path.join(tmp, 'sessions.sqlite'), path: path.join(tmp, 'legacy.json') };
+  const store = createSessionUsageArchiveStore(options);
+  try {
+    store.capture(summary(), new Date('2026-10-15T10:00:00Z'));
+    store.close();
+    const db = new DatabaseSync(options.databasePath);
+    try {
+      db.exec('DELETE FROM sessions');
+      for (const [source, costUsd, at] of [
+        ['aaaaaaaaaaaa', 0.25, '2026-10-15T10:00:00Z'],
+        ['bbbbbbbbbbbb', 0, '2026-10-15T10:01:00Z']
+      ]) {
+        const sessionId = `qodercn:jsonl:${source}:s-1`;
+        const session = { client: 'qodercn', sessionId, totalTokens: 150, costUsd };
+        const entry = { client: 'qodercn', sessionId, capturedAt: at,
+          periods: { allTime: session }, periodWindows: { allTime: { capturedAt: at } } };
+        db.prepare('INSERT INTO sessions (session_key, entry_json, revision) VALUES (?, ?, ?)')
+          .run(`qodercn:${sessionId}`, JSON.stringify(entry), 1);
+      }
+    } finally { db.close(); }
+    const archive = readSessionUsageArchiveSnapshot(options);
+    const result = applySessionUsageArchive({ allTime: { sessions: {} } }, archive,
+      { now: new Date('2026-10-15T10:02:00Z'), canonical: true });
+    assert.equal(result.allTime.costUsd, 0);
+    assert.equal(result.allTime.totalTokens, 150);
+    assert.equal(Object.keys(result.allTime.sessions).length, 1);
+  } finally { store.close(); fs.rmSync(tmp, { recursive: true, force: true }); }
 });
