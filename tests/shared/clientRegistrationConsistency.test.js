@@ -91,7 +91,7 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.local/share/devin/cli/sessions.db', 'AppData/Roaming/devin/cli/sessions.db',
     '.config/Devin/User/acp-events', '.config/devin/User/acp-events',
     'AppData/Roaming/Devin/User/acp-events', 'Library/Application Support/Devin/User/acp-events',
-    '.fx/sessions', '.minimax/v2/sessions', '.mavis/v2/sessions',
+    '.fx/sessions', '.minimax/v2/sessions', '.mavis/v2/sessions', '.vibe/logs/session',
     'Library/Application Support/Claude/local-agent-mode-sessions',
     'Library/Application Support/Claude/claude-code-sessions',
     'Library/Application Support/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb',
