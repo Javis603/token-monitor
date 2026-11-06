@@ -5,6 +5,9 @@ const path = require('node:path');
 
 const PAGE_SIZE = 30;
 const MAX_PAGES = 100;
+// The live star count can move between the metadata read and the history
+// fetch; a larger gap indicates truncated or inconsistent history.
+const MAX_COUNT_DRIFT = 10;
 const REQUEST_TIMEOUT_MS = 30_000;
 const SECONDS_PER_DAY = 86_400;
 const GITHUB_API_VERSION = '2026-03-10';
@@ -68,6 +71,14 @@ const parseNextPage = (linkHeader) => {
   return Number(page);
 };
 
+// GitHub does not guarantee that calendar weeks align with UTC. A Sunday in a
+// positive-offset timezone can arrive as Saturday in UTC, so move those weeks
+// forward and normalize every week to midnight on its Sunday UTC date.
+const normalizeWeekStart = (week) => {
+  const sunday = new Date(week * 1000).getUTCDay() === 6 ? week + SECONDS_PER_DAY : week;
+  return Math.floor(sunday / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+};
+
 const normalizeHistoryPage = (entries, offset) => {
   if (!Array.isArray(entries)) fail('GitHub star history response was not an array');
   return entries.map((entry, index) => {
@@ -84,7 +95,7 @@ const normalizeHistoryPage = (entries, offset) => {
     if (!Number.isInteger(total) || total < 0 || total !== counted) {
       fail(`star history entry ${offset + index + 1} has inconsistent totals`);
     }
-    return { week, total, days };
+    return { week: normalizeWeekStart(week), total, days };
   });
 };
 
@@ -163,8 +174,15 @@ const fetchSanitizedStargazers = async ({
 
   const weeks = await fetchHistoryWeeks({ repository, token, apiUrl, fetchImpl });
   const stars = expandHistoryWeeks(weeks);
-  if (stars.length !== stargazersCount) {
+  if (stars.length === 0) {
+    fail('GitHub returned no star history for a repository with stargazers');
+  }
+  const drift = Math.abs(stars.length - stargazersCount);
+  if (drift > MAX_COUNT_DRIFT) {
     fail(`fetched ${stars.length} timestamps but repository metadata reports ${stargazersCount}`);
+  }
+  if (drift > 0) {
+    console.warn(`Star History stargazer count changed by ${drift} during fetch; using the fetched history total.`);
   }
   return stars;
 };

@@ -71,6 +71,25 @@ test('returns no timestamps for a repository with no stargazers', async () => {
   assert.equal(requests.length, 1);
 });
 
+test('normalizes a Saturday UTC week boundary to Sunday', async () => {
+  const saturdayWeek = Date.parse('2026-08-01T23:00:00Z') / 1000;
+  const fetchImpl = async (url) => {
+    const target = String(url);
+    if (target.endsWith('/repos/Javis603/token-monitor')) {
+      return response({ stargazers_count: 1 });
+    }
+    return response([{ week: saturdayWeek, total: 1, days: [1, 0, 0, 0, 0, 0, 0] }]);
+  };
+
+  const stars = await fetchSanitizedStargazers({
+    repository: 'Javis603/token-monitor',
+    token: 'secret-token',
+    fetchImpl,
+  });
+
+  assert.deepEqual(stars, [{ starredAt: '2026-08-02T00:00:00.000Z' }]);
+});
+
 test('follows star history pagination', async () => {
   const requests = [];
   const olderWeek = WEEK - 7 * DAY;
@@ -109,11 +128,56 @@ test('follows star history pagination', async () => {
   assert.equal(requests.length, 3);
 });
 
+test('tolerates a small live star count drift', async () => {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  const fetchImpl = async (url) => {
+    const target = String(url);
+    if (target.endsWith('/repos/Javis603/token-monitor')) {
+      return response({ stargazers_count: 3 });
+    }
+    return response([{ week: WEEK, total: 2, days: [2, 0, 0, 0, 0, 0, 0] }]);
+  };
+
+  try {
+    const stars = await fetchSanitizedStargazers({
+      repository: 'Javis603/token-monitor',
+      token: 'secret-token',
+      fetchImpl,
+    });
+
+    assert.equal(stars.length, 2);
+    assert.match(warnings[0], /count changed by 1/);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('rejects empty history for a repository with stargazers', async () => {
+  const fetchImpl = async (url) => {
+    const target = String(url);
+    if (target.endsWith('/repos/Javis603/token-monitor')) {
+      return response({ stargazers_count: 1 });
+    }
+    return response([]);
+  };
+
+  await assert.rejects(
+    fetchSanitizedStargazers({
+      repository: 'Javis603/token-monitor',
+      token: 'secret-token',
+      fetchImpl,
+    }),
+    /no star history/,
+  );
+});
+
 test('rejects incomplete history instead of publishing a partial chart', async () => {
   const fetchImpl = async (url) => {
     const target = String(url);
     if (target.endsWith('/repos/Javis603/token-monitor')) {
-      return response({ stargazers_count: 2 });
+      return response({ stargazers_count: 20 });
     }
     return response([{ week: WEEK, total: 1, days: [1, 0, 0, 0, 0, 0, 0] }]);
   };
@@ -124,7 +188,7 @@ test('rejects incomplete history instead of publishing a partial chart', async (
       token: 'secret-token',
       fetchImpl,
     }),
-    /fetched 1 timestamps.*reports 2/,
+    /fetched 1 timestamps.*reports 20/,
   );
 });
 
