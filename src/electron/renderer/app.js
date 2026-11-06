@@ -5079,12 +5079,10 @@ function serviceStatusMeta(provider) {
   // the variable-length part that overflowed the line, while the count keeps the
   // real scope visible — an incident title (line 2) often understates it, e.g.
   // "errors on Haiku" while claude.ai/API/Code are all degraded. Full names stay
-  // in the row tooltip (set in renderServiceStatus). OpenCode has no incident
-  // headline naming the service, so it shows a bounded service list here.
+  // in the row tooltip (set in renderServiceStatus).
   const parts = [];
   const affectedCount = serviceStatusPresentationApi.affectedComponentNames(provider.componentIssues).all.length;
-  if (affectedCount > 0) parts.push(serviceStatusPresentationApi.affectedServicesLabel(provider, t)
-    || t('serviceStatus.components', { count: affectedCount }));
+  if (affectedCount > 0) parts.push(t('serviceStatus.components', { count: affectedCount }));
   if (Number(provider.incidentCount || 0) > 0) parts.push(t('serviceStatus.incidents', { count: provider.incidentCount }));
   if (Number(provider.maintenanceCount || 0) > 0) parts.push(t('serviceStatus.maintenance', { count: provider.maintenanceCount }));
   if (parts.length) return parts.join(' · ');

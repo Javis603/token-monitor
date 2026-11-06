@@ -415,11 +415,6 @@ function openCodeStatusToIndicator(status) {
   return OPENCODE_STATUS_TO_INDICATOR.get(normalizeStatus(status)) || 'minor';
 }
 
-const OPENCODE_SERVICE_NAMES = new Map([
-  ['console', 'Console API'], ['logs', 'Request logs'], ['inference', 'Inference API'],
-  ['go', 'Go'], ['payg', 'Pay-as-you-go'], ['free', 'Free inference']
-]);
-
 function summarizeOpenCodeProvider(provider, payload, options = {}) {
   const checkedAt = options.checkedAt || new Date().toISOString();
   try {
@@ -438,8 +433,7 @@ function summarizeOpenCodeProvider(provider, payload, options = {}) {
       const indicator = openCodeStatusToIndicator(component.status);
       worst = worstIndicator(worst, indicator);
       if (indicator !== 'none') {
-        const service = component.service.trim();
-        componentIssues.push({ name: OPENCODE_SERVICE_NAMES.get(service) || service, status: indicatorToComponentStatus(indicator) });
+        componentIssues.push({ name: component.service.trim(), status: indicatorToComponentStatus(indicator) });
         issueReasons.add(normalizeStatus(component.reason));
       }
     }

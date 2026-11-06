@@ -57,14 +57,6 @@
     };
   }
 
-  function affectedServicesLabel(provider, translate) {
-    if (provider.id !== 'opencode') return '';
-    const names = affectedComponentNames(provider.componentIssues);
-    if (!names.all.length) return '';
-    const visible = names.visible.join(translate('serviceStatus.listSeparator'));
-    return translate('serviceStatus.services', { names: visible + (names.overflow ? ` +${names.overflow}` : '') });
-  }
-
   // The card's second line leads with the active incident's name when there is
   // one — it's far more useful (and what the official page headlines) than the
   // generic "Partially Degraded Service", which the status pill already conveys.
@@ -82,5 +74,5 @@
     return { unit: 'hours', value: Math.floor(total / 3600) };
   }
 
-  return { affectedComponentNames, affectedServicesLabel, agoBucket, statusHeadline, localizeProvider };
+  return { affectedComponentNames, agoBucket, statusHeadline, localizeProvider };
 });

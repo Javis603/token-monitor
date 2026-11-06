@@ -441,11 +441,11 @@ test('summarizeOpenCodeProvider takes the worst of the top-level and component s
 
   assert.equal(result.status, 'outage');
   assert.equal(result.indicator, 'major');
-  // The headline describes severity; readable service names remain supporting detail.
+  // The headline describes the overall problem rather than raw component IDs.
   assert.equal(result.description, 'Partial Service Outage');
   assert.deepEqual(result.componentIssues, [
-    { name: 'Go', status: 'degraded_performance' },
-    { name: 'Pay-as-you-go', status: 'partial_outage' }
+    { name: 'go', status: 'degraded_performance' },
+    { name: 'payg', status: 'partial_outage' }
   ]);
 });
 
@@ -455,7 +455,7 @@ test('summarizeOpenCodeProvider degrades unknown statuses instead of reading gre
   const result = summarizeOpenCodeProvider(openCodeProvider, payload, { checkedAt: '2026-11-05T10:00:00Z' });
 
   assert.equal(result.indicator, 'minor');
-  assert.deepEqual(result.componentIssues, [{ name: 'Inference API', status: 'degraded_performance' }]);
+  assert.deepEqual(result.componentIssues, [{ name: 'inference', status: 'degraded_performance' }]);
 });
 
 test('summarizeOpenCodeProvider reports unknown on malformed payloads', () => {
@@ -637,11 +637,12 @@ test('the status probe takes the runtime transport', () => {
   assert.match(main, /createServiceStatusClient\(\{\s*fetchImpl: electronLimitsFetch\(\)\s*\}\)/);
 });
 
-test('OpenCode describes the problem separately from readable affected service names', () => {
+
+test('OpenCode headlines describe upstream issues and fall back for unknown or mixed reasons', () => {
   const summarize = (components) => summarizeOpenCodeProvider(openCodeProvider, { status: 'degraded', components });
   const result = summarize([{ service: 'go', status: 'degraded', reason: 'upstream' }]);
   assert.equal(result.description, 'Upstream provider issues');
-  assert.deepEqual(result.componentIssues, [{ name: 'Go', status: 'degraded_performance' }]);
+  assert.deepEqual(result.componentIssues, [{ name: 'go', status: 'degraded_performance' }]);
   for (const reason of [undefined, 'new-reason']) {
     assert.equal(summarize([{ service: 'go', status: 'degraded', reason }]).description, 'Degraded Performance');
   }
@@ -649,5 +650,4 @@ test('OpenCode describes the problem separately from readable affected service n
     { service: 'go', status: 'degraded', reason: 'upstream' },
     { service: 'payg', status: 'partial_outage', reason: 'errors' }
   ]).description, 'Partial Service Outage');
-  assert.equal(summarize([{ service: 'new-service', status: 'degraded' }]).componentIssues[0].name, 'new-service');
 });
