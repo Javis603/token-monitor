@@ -65,6 +65,46 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
   {
+    client: 'prime-agent',
+    expectedRow: { model: 'claude-sonnet-4-5', input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1650, clientTokens: 1650, clientOutputTokens: 400 },
+    expectedSession: { id: 'prime-contract', totalTokens: 1650, outputTokens: 400, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.prime', 'agent', 'sessions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'root.jsonl'), [
+        { type: 'session', version: 3, id: 'prime-contract', timestamp: '2026-10-10T08:00:00Z', cwd: '/tmp/prime-contract' },
+        { type: 'message', id: 'reply', timestamp: '2026-10-10T08:01:00Z', message: {
+          role: 'assistant', provider: 'anthropic', model: 'claude-sonnet-4-5',
+          usage: { input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, totalTokens: 1650 }
+        } }
+      ].map((row) => JSON.stringify(row)).join('\n') + '\n');
+    }
+  },
+  {
+    client: 'jcode',
+    expectedRow: { model: 'claude-sonnet-4-5', input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, reasoning: 150 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1800, clientTokens: 1800, clientOutputTokens: 550 },
+    expectedSession: { id: 'jcode-contract', totalTokens: 1800, outputTokens: 550, reasoningTokens: 150 },
+    writeFixture(home) {
+      const dir = path.join(home, '.jcode', 'sessions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'session_contract.json'), JSON.stringify({
+        id: 'jcode-contract', provider_key: 'anthropic', model: 'claude-sonnet-4-5', working_dir: '/tmp/jcode-contract',
+        messages: [{ id: 'reply', role: 'assistant', timestamp: '2026-10-10T08:01:00Z', token_usage: {
+          input_tokens: 600, output_tokens: 200, cache_read_input_tokens: 100, cache_creation_input_tokens: 20, reasoning_output_tokens: 100
+        } }]
+      }));
+      fs.writeFileSync(path.join(dir, 'session_contract.journal.jsonl'), JSON.stringify({
+        append_messages: [{ id: 'journal-reply', role: 'assistant', timestamp: '2026-10-10T08:02:00Z', token_usage: {
+          input_tokens: 400, output_tokens: 200, cache_read_input_tokens: 100, cache_creation_input_tokens: 30, reasoning_output_tokens: 50
+        } }]
+      }) + '\n');
+    }
+  },
+  {
     client: 'mistral',
     scanClient: 'vibe',
     // Cached prompt tokens are already included in session_prompt_tokens.
@@ -540,6 +580,7 @@ function hermeticEnv(home) {
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'CODEX_HOME', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
     'VIBE_HOME', 'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
+    'JCODE_HOME', 'PRIME_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_DIR',
     'SENPI_CODING_AGENT_DIR', 'SENPI_CODING_AGENT_SESSION_DIR'
   ]) {
     delete env[key];
