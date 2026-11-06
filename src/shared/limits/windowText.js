@@ -165,7 +165,7 @@
       return result(null, rawCount(window, showUsed));
     }
 
-    if (id === 'qoder') return billing ? result(null, rawCount(window, showUsed)) : EMPTY;
+    if (id === 'qoder' || id === 'qwenwork') return billing ? result(null, rawCount(window, showUsed)) : EMPTY;
 
     if (id === 'notion' && billing && ['Standard', 'Select'].includes(window.label)) {
       return result(null, rawCount(window, showUsed));
