@@ -136,6 +136,23 @@ function summarizeSpend(history, { now = Date.now() } = {}) {
   };
 }
 
+// Newest first, one row per observed day. Only days that actually moved are
+// returned: a day with no observation is not a day with no spend, and printing
+// a zero would claim a measurement this data cannot make.
+function dailyRows(history, { now = Date.now(), limit = 7 } = {}) {
+  const normalized = normalizeHistory(history);
+  const today = dayKey(now);
+  const rows = [];
+  for (const [key, day] of Object.entries(normalized.days).sort(([a], [b]) => (a < b ? 1 : a > b ? -1 : 0))) {
+    if (rows.length >= limit) break;
+    if (key > today) continue;
+    const spend = daySpend(day);
+    if (spend <= 0) continue;
+    rows.push({ day: key, spend: Math.round(spend * 100) / 100 });
+  }
+  return rows;
+}
+
 // Read → fold → write in one call, returning the summary to publish. Any I/O
 // failure still yields a usable summary for this poll.
 function trackSpend({ used, at = Date.now(), options = {} } = {}) {
@@ -157,5 +174,6 @@ module.exports = {
   writeHistory,
   recordObservation,
   summarizeSpend,
+  dailyRows,
   trackSpend
 };

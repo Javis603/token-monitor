@@ -57,6 +57,27 @@ test('a counter that goes backwards is a top-up, never a negative spend', () => 
   assert.ok(summary.todaySpend >= 0);
 });
 
+test('daily rows are newest first, skip untouched days and stop at the limit', () => {
+  let history = spend.emptyHistory();
+  const days = [
+    ['2026-11-01', 100, 105],
+    ['2026-11-02', 105, 105],
+    ['2026-11-04', 105, 118],
+    ['2026-11-05', 118, 130]
+  ];
+  for (const [date, first, last] of days) {
+    history = spend.recordObservation(history, { used: first, at: at(`${date}T09:00:00`) });
+    history = spend.recordObservation(history, { used: last, at: at(`${date}T18:00:00`) });
+  }
+  const rows = spend.dailyRows(history, { now: at('2026-11-05T20:00:00') });
+  assert.deepEqual(rows, [
+    { day: '2026-11-05', spend: 12 },
+    { day: '2026-11-04', spend: 13 },
+    { day: '2026-11-01', spend: 5 }
+  ], '11-02 did not move, so it is not a measured zero');
+  assert.equal(spend.dailyRows(history, { now: at('2026-11-05T20:00:00'), limit: 2 }).length, 2);
+});
+
 test('the store keeps only the newest bounded window of days', () => {
   let history = spend.emptyHistory();
   for (let i = 0; i < spend.MAX_DAYS + 10; i += 1) {

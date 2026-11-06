@@ -290,6 +290,32 @@ async function fetchTraeLimits(options = {}, deps = {}) {
         }
       })
       : null;
+    // The card can only show one number; the ⓘ carries the rest: this week's
+    // daily spend (poll-derived, see spendHistory) above the grant breakdown
+    // that explains where the balance came from.
+    if (deps.spendHistoryPath) {
+      const days = spendHistory.dailyRows(spendHistory.readHistory({
+        spendHistoryPath: deps.spendHistoryPath,
+        env: deps.env,
+        platform: deps.platform,
+        homeDir: deps.homeDir
+      }), { now: (deps.now || Date.now)() });
+      const today = spendHistory.dayKey((deps.now || Date.now)());
+      const rows = [];
+      if (days.length > 0) {
+        rows.push({ full: 'Daily spend', caption: true });
+        for (const entry of days) {
+          const label = entry.day === today ? 'Today' : entry.day.slice(5);
+          rows.push([label, `\u2212${entry.spend.toLocaleString('en-US', { maximumFractionDigits: 2 })}`]);
+        }
+      }
+      const grants = Array.isArray(window?.detailEntries) ? window.detailEntries : [];
+      if (grants.length > 0) {
+        rows.push({ full: 'Grants', caption: true, separated: rows.length > 0 });
+        rows.push(...grants);
+      }
+      if (rows.length > 0) window = { ...window, detailEntries: rows };
+    }
     return normalizeLimitProvider({
       provider: 'trae',
       accountKey: hashKey('trae', cookie || accessToken),

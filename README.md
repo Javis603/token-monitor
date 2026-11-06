@@ -1,6 +1,13 @@
 <p align="right">
    <strong>EN</strong> | <a href="./README.zh-CN.md">简</a> | <a href="./README.zh-TW.md">繁</a> | <a href="./README.ko.md">KO</a> | <a href="./README.ja.md">JA</a> | <a href="./README.pt-BR.md">PT</a>
 </p>
+
+> **This is a personal fork of [Javis603/token-monitor](https://github.com/Javis603/token-monitor)**, tracking upstream releases (currently **v0.86.0**).
+> Everything below is upstream's; this fork adds a **credits plane** next to the token plane — a local
+> WorkBuddy credit ledger with per-model calibration, and first-class rows for providers that publish
+> credits but no tokens (Trae CN). The exact delta, its data sources and its limits are documented in
+> [`docs/tokenledger/FORK.md`](docs/tokenledger/FORK.md).
+
 <div align="center">
     <img src=".github/assets/app.png" alt="Token Monitor logo" width="120">
     <h1>Token Monitor</h1>

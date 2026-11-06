@@ -173,7 +173,7 @@ function percentFromWindow(input, used, limit) {
 // several priced buckets (or several grants of the same kind) have no other way
 // to show what the single remaining number is made of. Bounded because it rides
 // the device payload to the hub.
-const MAX_WINDOW_DETAIL_ROWS = 8;
+const MAX_WINDOW_DETAIL_ROWS = 16;
 
 function normalizeWindowDetailEntries(input) {
   if (!Array.isArray(input)) return undefined;
