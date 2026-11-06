@@ -215,7 +215,7 @@ test('Spanish limit rows translate periods, percentages, reset times and account
   const view = dockView({}, { t, currentLocale: () => 'es' });
   const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
   for (const [label, expected] of [['Session', 'Sesión'], ['Weekly', 'Semanal'], ['5-hour', '5 horas']]) {
-    const row = view.limitWindowNode(label, { label, remainingPercent: 85, resetsAt }, '#fff');
+    const row = view.limitWindowNode(label, { remainingPercent: 85, resetsAt }, '#fff');
     assert.equal(row.find('limit-window-text').children[0].textContent, expected);
     assert.ok(row.text.includes('85% restante'), row.text);
     assert.match(row.find('limit-reset').textContent, /^Se restablece en /);
@@ -235,12 +235,52 @@ test('Spanish limit rows translate periods, percentages, reset times and account
 
   // Localized names must not change the keys used by saved visibility choices.
   const { limitUsageItemId } = require('../../src/shared/limits/usageItems');
-  const quota = Object.freeze({ kind: 'weekly', label: 'Weekly', remainingPercent: 85 });
+  const quota = Object.freeze({ kind: 'weekly', remainingPercent: 85 });
   const provider = { provider: 'codex', windows: [quota] };
   const itemId = limitUsageItemId(quota, 'codex');
   assert.deepEqual(view.limitProviderUsageItems([provider]), [{ id: itemId, label: 'Semanal' }]);
   const hiddenView = dockView({ limitProviderHiddenItems: { codex: [itemId] } }, { t });
   assert.equal(hiddenView.renderProviderWindows(provider, '#fff').textOf('limit-window-text').length, 0);
+});
+
+test('provider window names are opaque in limit rows and visibility checklists', () => {
+  const t = (key, params) => i18n.translate('es', key, params);
+  const view = dockView({}, { t, currentLocale: () => 'es' });
+  const { limitUsageItemId } = require('../../src/shared/limits/usageItems');
+  for (const kind of ['daily', 'billing']) {
+    const window = Object.freeze({ kind, label: 'Bonus', remainingPercent: 60 });
+    const provider = { provider: 'zai', status: 'ok', windows: [window] };
+    const card = view.renderProviderWindows(provider, '#fff');
+    assert.equal(card.find('limit-window-text').children[0].textContent, 'Bonus');
+    assert.deepEqual(view.limitProviderUsageItems([provider]), [
+      { id: limitUsageItemId(window, 'zai'), label: 'Bonus' }
+    ]);
+    assert.equal(window.label, 'Bonus');
+  }
+  for (const provider of [
+    { provider: 'kimi', windows: [{ kind: 'billing', label: 'Bonus', remainingPercent: 60 }] },
+    { provider: 'codex', windows: [{ kind: 'session', label: 'Bonus', additional: true, remainingPercent: 60 }] },
+    { provider: 'thirdparty', balance: { amount: 5, currency: 'USD' },
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Bonus', remaining: 5, currency: 'USD' }] },
+    { provider: 'mistral', windows: [{ kind: 'billing', metric: 'credits', label: 'Bonus', remaining: 5, currency: 'USD' }] }
+  ]) {
+    const card = view.renderProviderWindows(provider, '#fff');
+    assert.ok(card.text.includes('Bonus'), card.text);
+    assert.ok(view.limitProviderUsageItems([provider]).some(item => item.label === 'Bonus'));
+  }
+  const synthesized = view.limitWindowNode('Bonus', { remainingPercent: 60 }, '#fff');
+  assert.equal(synthesized.find('limit-window-text').children[0].textContent, 'Bonificación');
+});
+
+test('Japanese Typesafe token rows and visibility checklists use the existing token translation', () => {
+  const t = (key, params) => i18n.translate('ja', key, params);
+  const view = dockView({}, { t, currentLocale: () => 'ja' });
+  const provider = { provider: 'typesafe', status: 'ok', windows: [], balance: { amount: 5, currency: 'USD' },
+    usageSummary: { period: 'month', totalTokens: 2500, todayTokens: 500,
+      inputTokens: null, outputTokens: null, requests: null } };
+  const card = view.renderProviderWindows(provider, '#fff');
+  assert.equal(card.find('limit-spend-line').children[0].textContent, 'トークン');
+  assert.ok(view.limitProviderUsageItems([provider]).some(item => item.label === 'トークン'));
 });
 
 function limitsSubscriptionPool(localProviders, aggregateProviders) {

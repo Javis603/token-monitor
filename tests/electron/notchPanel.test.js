@@ -1250,6 +1250,17 @@ test('Spanish Notch limits share translated labels and boundaries without changi
   assert.equal(f.find('notch-limit-label').textContent, 'Claude/GPT 5 horas');
 });
 
+test('Spanish Notch preserves provider window names that match generic UI labels', t => {
+  const f = panelFixture(t);
+  f.state.locale = 'es';
+  const record = { provider: 'zai', status: 'ok', windows: [
+    { kind: 'daily', label: 'Bonus', remainingPercent: 60 }
+  ] };
+  const cells = buildEdgeDockCells({ limits: { providers: [record] } }, { items: [{ type: 'limit', provider: 'zai' }] });
+  f.panel.render({ ...payload(), cells }); f.panel.selectPage('limits');
+  assert.equal(f.find('notch-limit-label').textContent, 'Bonus');
+});
+
 test('money quotas and unlimited readings keep their values without fabricated percentages', t => {
   const f = panelFixture(t), record = { provider: 'cline', status: 'ok', windows: [
     { kind: 'billing', metric: 'credits', remaining: 12, currency: 'USD', showMeter: false },

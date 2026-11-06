@@ -1718,6 +1718,19 @@ test('Claude reset grants wrap their label and clears as full-width lines', () =
   assert.match(styles, /\.limit-detail-tooltip-full\.is-caption\s*\{[^}]*font-size: 0\.5rem;/s);
 });
 
+test('Home preserves explicit provider window names and translates unnamed windows', () => {
+  const source = functionBody(readRendererFile('app.js'), 'homeLimitWindowLabel', 'renderHomeLimitModule');
+  const context = {
+    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
+    t: (key, params) => translate('es', key, params)
+  };
+  vm.runInNewContext(source, context);
+  for (const kind of ['daily', 'billing', 'weekly']) {
+    assert.equal(context.homeLimitWindowLabel({ kind, label: 'Bonus' }, 'zai'), 'Bonus');
+  }
+  assert.equal(context.homeLimitWindowLabel({ kind: 'weekly' }, 'codex'), 'Semanal');
+});
+
 test('Home uses explicit billing labels so Copilot Premium and Chat stay distinct', () => {
   const app = readRendererFile('app.js');
   const i18n = readRendererFile('i18n.js');
@@ -1726,11 +1739,10 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   const homeModule = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
   const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'providersByLimitProviderId');
 
-  assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows, t\)/);
   assert.match(homeRows, /limitProviderCompactWindows\(\s*provider,\s*\(provider\.windows \|\| \[\]\)\.filter\(/);
   assert.match(homeLabel, /const label = String\(window\?\.label \|\| ''\)\.trim\(\);/);
-  assert.match(homeLabel, /if \(label\) return limitProviderPresentationApi\.limitDisplayLabel\(label, t\);/);
+  assert.match(homeLabel, /if \(label\) return limitProviderPresentationApi\.limitDisplayLabel\(label, t, \{ explicit: true \}\);/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);
   // Balance windows arrive as real `billing` windows carrying their own label
   // ('Balance' / 'Token quota'), so the label branch above already covers them
@@ -1861,9 +1873,9 @@ test('TypeSafe row mirrors the Spend row with token totals and keeps the month b
 test('Balance and token quota values omit the redundant left suffix', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');
 
-  assert.match(renderProviderWindows, /'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \},\s*color,\s*0\.95,\s*formatMoney\(balanceAmount, currency\)/);
+  assert.match(renderProviderWindows, /'Balance',\s*\{ \.\.\.balanceWindow, label: '' \},\s*color,\s*0\.95,\s*formatMoney\(balanceAmount, currency\)/);
   assert.match(renderProviderWindows, /const meterPercent = creditsMeterPercent\(provider, quotaWindow\);/);
-  assert.match(renderProviderWindows, /\{\s*\.\.\.\(quotaWindow \|\| \{ showMeter: false \}\),\s*label: balanceLabel,/);
+  assert.match(renderProviderWindows, /\{\s*\.\.\.\(quotaWindow \|\| \{ showMeter: false \}\),\s*label: quotaWindow\?\.label \|\| '',/);
   assert.match(renderProviderWindows, /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
   assert.match(renderProviderWindows, /\},\s*color,\s*0\.95,\s*balanceValue/);
   assert.doesNotMatch(renderProviderWindows, /`\$\{formatMoney\(balanceAmount, currency\)\} left`/);
@@ -2129,7 +2141,7 @@ test('Cline exposes its API key through the settings and credential-store patter
   assert.match(windowsView, /const clineCredits = clineBilling\.find\(\(window\) => isCreditsWindow\(window\)\)/);
   assert.match(windowsView, /const clineSpend = clineBilling\.find\(\(window\) => window\.metric === 'spend'\)/);
   assert.match(windowsView, /clineCredits[\s\S]{0,200}clineCreditsNode\(provider, clineCredits, clineSpend\)/);
-  assert.match(windowsView, /function clineCreditsNode[\s\S]{0,500}\[\[t\('limits.monthSpent'\), spendValue\]\]/);
+  assert.match(viewBody('clineCreditsNode'), /\[\[t\('limits.monthSpent'\), spendValue\]\]/);
   assert.match(windowsView, /clineMonthly[\s\S]{0,200}limit-window-wide/);
 });
 

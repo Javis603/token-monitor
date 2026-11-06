@@ -6725,10 +6725,8 @@ function homeLimitRows() {
 function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   const compactLabel = limitProviderPresentationApi.limitProviderCompactWindowLabel(providerId, window, visibleWindows, t);
   if (compactLabel) return compactLabel;
-  if (window?.kind === 'billing') {
-    const label = String(window?.label || '').trim();
-    if (label) return limitProviderPresentationApi.limitDisplayLabel(label, t);
-  }
+  const label = String(window?.label || '').trim();
+  if (label) return limitProviderPresentationApi.limitDisplayLabel(label, t, { explicit: true });
   const key = {
     session: 'home.limit.session',
     daily: 'home.limit.daily',
@@ -12858,7 +12856,8 @@ function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
       ));
     }
     const text = document.createElement('span');
-    const label = limitProviderPresentationApi.limitDisplayLabel(entry.label, t);
+    // The shared view already resolved display wording and preserved payload names.
+    const label = entry.label;
     text.textContent = entry.available ? label : t('settings.limits.usageItemUnavailable', { item: label });
     item.setAttribute('aria-label', text.textContent);
     item.append(input, text);

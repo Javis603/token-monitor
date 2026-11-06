@@ -922,7 +922,7 @@
         const quota = entry.provider === 'antigravity' ? limitPresentation.antigravityQuotaWindow(reading.window) : null;
         const windowLabel = quota
           ? `${quota.groupLabel} ${limitPresentation.limitDisplayLabel(quota.windowLabel, t)}`
-          : limitPresentation.limitDisplayLabel(windowLabels.limitWindowLabel(entry.provider, reading.window, t('notch.quota')), t);
+          : limitPresentation.limitDisplayLabel(windowLabels.limitWindowLabel(entry.provider, reading.window, t('notch.quota')), t, { explicit: Boolean(reading.window.label) });
         const label = text('notch-limit-label', windowLabel);
         label.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'window', windowPage, readings.indexOf(reading)]);
         overflowText.bind(label);

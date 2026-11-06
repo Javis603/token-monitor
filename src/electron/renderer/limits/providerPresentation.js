@@ -31,6 +31,7 @@
     ['Included credits', 'limits.label.includedCredits'], ['Credit balance', 'limits.label.creditBalance'],
     ['Token quota', 'limits.label.tokenQuota'], ['Resets', 'limits.label.resets'],
     ['Requests', 'settings.thirdparty.requests'],
+    ['Tokens', 'settings.typesafe.tokens'],
     ['Included usage', 'limits.label.includedUsage'],
     ['Prepaid balance', 'limits.label.prepaidBalance'],
     ['On-demand spend', 'limits.label.onDemandSpend'],
@@ -45,7 +46,10 @@
     ['Top-up', 'limits.label.topUp']
   ]);
 
-  function limitDisplayLabel(label, t) {
+  // Payload labels are opaque names, even when they match a generic UI word.
+  // Callers mark those explicitly; synthesized headings use the vocabulary.
+  function limitDisplayLabel(label, t, { explicit = false } = {}) {
+    if (explicit) return label;
     const key = LIMIT_DISPLAY_LABEL_KEYS.get(label);
     return key ? t(key) : label;
   }
