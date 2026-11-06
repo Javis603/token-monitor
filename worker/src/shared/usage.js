@@ -330,6 +330,7 @@ function normalizeClientName(value) {
   if (raw.includes('dsh')) return 'dsh';
   if (raw.includes('devin')) return 'devin';
   if (raw === 'fx') return 'fx';
+  if (raw === 'mistral' || /^mistral[\s_-]*vibe$/.test(raw)) return 'mistral';
   // Tokscale's id for MiniMax Code. The bare vendor name stays a model vendor
   // and limits provider, so only the product spellings map here.
   if (raw === 'mcode' || /^minimax[\s_-]*code$/.test(raw)) return 'mcode';

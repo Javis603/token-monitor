@@ -94,6 +94,7 @@ const SOURCE_MARKERS = [
   { marker: '.fx/sessions', client: 'fx', hostCheckId: 'fx-sessions' },
   { marker: '.minimax/v2/sessions', client: 'mcode' },
   { marker: '.mavis/v2/sessions', client: 'mcode' },
+  { marker: '.vibe/logs/session', client: 'mistral' },
   ...CLAUDE_DESKTOP_SOURCES
 ];
 

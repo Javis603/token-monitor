@@ -65,6 +65,26 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
   {
+    client: 'mistral',
+    scanClient: 'vibe',
+    // Cached prompt tokens are already included in session_prompt_tokens.
+    expectedRow: { model: 'codestral-latest', input: 10000, output: 1200, cacheRead: 5000, cacheWrite: 0, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 16200, clientTokens: 16200, clientOutputTokens: 1200 },
+    expectedSession: { id: 'vibe-contract', totalTokens: 16200, outputTokens: 1200, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.vibe', 'logs', 'session', 'session_20261010_080000_contract');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+        session_id: 'vibe-contract',
+        start_time: '2026-10-10T08:00:00Z',
+        end_time: '2026-10-10T08:05:00Z',
+        config: { active_model: 'codestral-latest' },
+        stats: { steps: 3, session_prompt_tokens: 15000, session_completion_tokens: 1200, session_cached_tokens: 5000 }
+      }));
+    }
+  },
+  {
     client: 'goose',
     // The total gap is inferred reasoning, not measured additive output.
     // Preserve input + output; do not inflate usage with that heuristic.
@@ -519,7 +539,7 @@ function hermeticEnv(home) {
   for (const key of [
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'CODEX_HOME', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
-    'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
+    'VIBE_HOME', 'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
     'SENPI_CODING_AGENT_DIR', 'SENPI_CODING_AGENT_SESSION_DIR'
   ]) {
     delete env[key];
@@ -566,7 +586,7 @@ function assertExpected(parsed, expected = EXPECTED) {
 function assertTokenContract(parsed, contract) {
   const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
   const entry = entries[0];
-  const expectedRow = { client: contract.client, ...contract.expectedRow };
+  const expectedRow = { client: contract.scanClient || contract.client, ...contract.expectedRow };
   const mismatches = Object.entries(expectedRow).filter(([key, value]) => entry?.[key] !== value);
   const explicitTotalKeys = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
   const hasExplicitTotal = entry && explicitTotalKeys.some((key) => Object.hasOwn(entry, key));
@@ -841,7 +861,7 @@ function main() {
       assertSessionMetadata(runAgainstFixture(binPath, home, SESSION_GROUP_BY));
     }
     for (const contract of applicableTokenContracts()) {
-      assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.client), contract);
+      assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.scanClient || contract.client), contract);
     }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
