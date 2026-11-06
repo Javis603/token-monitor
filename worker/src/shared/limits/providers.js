@@ -69,6 +69,7 @@
     { id: 'notion', label: 'Notion AI' },
     { id: 'manus', label: 'Manus' },
     { id: 'opendesign', label: 'OpenDesign' },
+    { id: 'openai', label: 'OpenAI' },
     { id: 'thirdparty', label: 'Third-party APIs' }
   ].map((provider) => Object.freeze({ ...provider })));
 

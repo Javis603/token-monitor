@@ -168,6 +168,9 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     else input.type = field.input;
     input.autocomplete = 'off';
     input.spellcheck = false;
+    if (field.saveOnChange) {
+      input.addEventListener('change', () => onFieldChange?.(form, field, input.value));
+    }
     if (field.placeholderKey) {
       input.dataset.i18nPlaceholder = field.placeholderKey;
       input.placeholder = translate(field.placeholderKey);

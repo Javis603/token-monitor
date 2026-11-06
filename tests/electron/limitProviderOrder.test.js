@@ -62,6 +62,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'notion',
     'manus',
     'opendesign',
+    'openai',
     'thirdparty'
   ]);
 });

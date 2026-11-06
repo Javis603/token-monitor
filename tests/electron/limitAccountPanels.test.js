@@ -331,6 +331,18 @@ for (const form of limitAccountFormsForRenderer()) {
   });
 }
 
+test('a plain-text saveOnChange field reports its value when it changes', async () => {
+  const form = limitAccountFormsForRenderer().find((candidate) => candidate.id === 'openai');
+  const changes = [];
+  const { group } = renderPanel(form, { onFieldChange: (_, field, value) => changes.push([field.key, value]) });
+  await group.byId('openaiRenewalDateInput').change('2026-11-15');
+  await group.byId('openaiPlanInput').change('pro20x');
+  assert.deepEqual(changes, [
+    ['openaiRenewalDate', '2026-11-15'],
+    ['openaiPlan', 'pro20x']
+  ]);
+});
+
 test('selects drive their dependent hints, notes and landing page before they are saved', async () => {
   const forms = Object.fromEntries(limitAccountFormsForRenderer().map((form) => [form.id, form]));
   const { resolveOpenUrl, syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');

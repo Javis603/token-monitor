@@ -104,6 +104,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     notionCookie: ['providers', 'notion', 'cookie'],
     opendesignCookie: ['providers', 'opendesign', 'cookie'],
     manusSessionToken: ['providers', 'manus', 'sessionToken'],
+    openaiAdminKey: ['providers', 'openai', 'apiKey'],
     museWebCookie: ['providers', 'muse', 'webCookie'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
     zaiApiKey: ['providers', 'zai', 'apiKey'],
@@ -174,6 +175,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     notion: ['notionCookie', 'notionWorkspaceId'],
     opendesign: ['opendesignCookie'],
     manus: ['manusSessionToken'],
+    openai: ['openaiAdminKey', 'openaiPlan', 'openaiRenewalDate'],
     muse: ['museWebCookie'],
     openrouter: ['openrouterProfiles'],
     minimax: ['minimaxApiProfiles', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
@@ -290,11 +292,15 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie', 'opendesignCookie'
+    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie', 'opendesignCookie',
+    'openaiAdminKey', 'openaiPlan', 'openaiRenewalDate'
   ].sort());
   for (const key of normalizedKeys) {
     const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
-      : key === 'notionWorkspaceId' ? ' 11111111222233334444555555555555 ' : ' example ';
+      : key === 'notionWorkspaceId' ? ' 11111111222233334444555555555555 '
+        : key === 'openaiPlan' ? ' pro-5x '
+          : key === 'openaiRenewalDate' ? ' 2026-11-15 '
+            : ' example ';
     const patch = { [key]: value };
     const normalized = { ...patch };
     normalizeAccountPatch(patch, normalized);

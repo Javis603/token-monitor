@@ -99,6 +99,7 @@
     { id: 'notion', label: 'Notion AI', color: '#FFFFFF' },
     { id: 'manus', label: 'Manus', color: '#FFFFFF' },
     { id: 'opendesign', label: 'OpenDesign', color: '#FFFFFF' },
+    { id: 'openai', label: 'OpenAI', color: '#10A37F' },
     { id: 'thirdparty', label: 'Third-party APIs', color: '#8090A6' },
     // Marks without a colour of their own. Factory is the limits provider for
     // the Droid client and borrows its mark; the relays only ever appear as a

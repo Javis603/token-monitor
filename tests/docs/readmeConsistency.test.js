@@ -101,6 +101,7 @@ const supportedToolOrder = [
   'Notion AI',
   'Manus',
   'OpenDesign',
+  'OpenAI',
   'Third-party APIs'
 ];
 
@@ -154,6 +155,7 @@ const supportedToolIdOrder = [
   'notion',
   'manus',
   'opendesign',
+  'openai',
   'thirdparty'
 ];
 
