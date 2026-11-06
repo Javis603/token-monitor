@@ -4604,7 +4604,8 @@ function pluginLimitAccountOptions(module) {
       button.disabled = true;
       try {
         const result = await pluginBridge.connection(module.pluginId, module.moduleId, operation);
-        status.textContent = t(`plugins.connection.state.${result.state}`);
+        const connectionState = result.state === 'error' && result.error === 'reconnect-required' ? 'reconnectRequired' : result.state;
+        status.textContent = t(`plugins.connection.state.${connectionState}`);
       }
       catch { status.textContent = t('settings.limits.status.error'); }
       finally { button.disabled = false; }
@@ -6016,7 +6017,7 @@ function isRendererWindowHidden() {
 
 function syncPluginLimitsDemand() {
   void pluginBridge?.limitsDemand?.(state.breakdown === 'limits'
-    && visibleStatsSurface() === 'main' && !isSettingsPanelOpen());
+    && visibleStatsSurface() === 'main' && !isSettingsPanelOpen())?.catch(error => console.warn('[plugins] Limits demand failed:', error));
 }
 
 function visibleStatsSurface() {

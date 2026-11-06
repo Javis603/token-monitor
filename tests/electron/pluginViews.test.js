@@ -575,3 +575,20 @@ for (const initiallyHidden of [true, false]) {
     content.dispose();
   });
 }
+test('offscreen author quota views stay invisible through context repaint', async () => {
+  const { createPluginViewHost } = require('../../src/electron/renderer/pluginViews');
+  const document = dom(); document.addEventListener = document.removeEventListener = () => {};
+  let intersection, frame; const paints = [];
+  const window = { requestAnimationFrame: fn => { frame = fn; return 1; }, cancelAnimationFrame() {},
+    IntersectionObserver: class { constructor(callback) { intersection = callback; } observe() {} disconnect() {} },
+    TokenMonitorPluginUi: { createHost: () => ({ mount(_node, _value, context) { paints.push(context.visible); }, unmount() {}, sweep() {}, setVisibility() {}, dispose() {} }) } };
+  const host = createPluginViewHost({ document, window });
+  host.update({ surface: 'settings', views: { [descriptor.ref]: descriptor } });
+  const node = document.createElement('div'); node.style.removeProperty = () => {}; node.getClientRects = () => [{}]; document.body.append(node);
+  host.mount(node, descriptor.ref, 'settings', { isVisible: () => true });
+  intersection([{ target: node, isIntersecting: false }]); frame();
+  host.refreshContext(); assert.equal(paints.at(-1), false);
+  intersection([{ target: node, isIntersecting: true }]); frame();
+  host.refreshContext(); assert.equal(paints.at(-1), true);
+  await host.dispose();
+});
