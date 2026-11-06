@@ -23,6 +23,35 @@ test('missing demand handler is caught instead of becoming an unhandled rejectio
   vm.runInContext(extract('syncPluginLimitsDemand'), context); context.syncPluginLimitsDemand(); await new Promise(setImmediate);
   assert.equal(errors.length, 1);
 });
+test('login completion refreshes the current rebuilt row and fences older status replies', async () => {
+  let result = 'notConnected', delayed;
+  const container = new Element();
+  const context = vm.createContext({ document: { createElement: tag => new Element(tag) }, t: key => key,
+    els: { limitProviderCheckboxes: container }, isSettingsSurfaceVisible: () => true,
+    pluginBridge: { connection: async (_id, _key, operation) => {
+      if (operation === 'connect') { result = 'connecting'; return { state: result }; }
+      return { state: result };
+    } } });
+  vm.runInContext(extract('pluginLimitAccountOptions') + '\n' + extract('refreshPluginLimitAccountStatuses'), context);
+  const module = { connection: 'openai', pluginId: 'fixture', moduleId: 'quota' };
+  const first = context.pluginLimitAccountOptions(module); container.append(first);
+  await new Promise(setImmediate);
+  assert.equal(first.children[0].textContent, 'plugins.connection.state.notConnected');
+  await first.children[1].listeners.click[0]();
+  assert.equal(first.children[0].textContent, 'plugins.connection.state.connecting');
+  const rebuilt = context.pluginLimitAccountOptions(module); container.replaceChildren(rebuilt);
+  await new Promise(setImmediate);
+  context.pluginBridge.connection = () => new Promise(resolve => { delayed = resolve; });
+  context.refreshPluginLimitAccountStatuses();
+  context.pluginBridge.connection = async () => ({ state: 'connected' });
+  context.refreshPluginLimitAccountStatuses();
+  await new Promise(setImmediate);
+  delayed({ state: 'connecting' }); await new Promise(setImmediate);
+  assert.equal(rebuilt.children[0].textContent, 'plugins.connection.state.connected');
+  const reopened = context.pluginLimitAccountOptions(module); container.replaceChildren(reopened);
+  await new Promise(setImmediate);
+  assert.equal(reopened.children[0].textContent, 'plugins.connection.state.connected');
+});
 test('connection and filter labels are translated in Korean, Japanese and Brazilian Portuguese', () => {
   const expected = { ko: ['연결','플러그인 유형'], ja: ['接続','プラグインの種類'], 'pt-BR': ['Conectar','Tipo de plugin'] };
   for (const [locale, values] of Object.entries(expected)) {

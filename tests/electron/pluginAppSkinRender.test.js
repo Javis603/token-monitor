@@ -14,13 +14,13 @@ function extract(name) {
   return match[0];
 }
 function catalogHarness() {
-  const calls = [];
+  const calls = [], connectionRefreshes = [];
   const context = { state: {}, pluginLimitSettings: null, pluginPageDesigns: {}, isSettingsSurfaceVisible: () => true,
-    preserveSettingsPanelScroll: fn => fn() };
+    preserveSettingsPanelScroll: fn => fn(), refreshPluginLimitAccountStatuses: () => connectionRefreshes.push(context.state.pluginCatalog) };
   for (const name of ['renderLimitProviderCheckboxes', 'render', 'renderViewSwitcher', 'renderThemePresetChips', 'renderNotchPageChoices', 'renderViewPreferences']) context[name] = () => calls.push(name);
   vm.createContext(context);
   vm.runInContext(`let pluginCatalogKey = ''; ${extract('applyPluginCatalog')}`, context);
-  return { calls, context, apply: context.applyPluginCatalog };
+  return { calls, connectionRefreshes, context, apply: context.applyPluginCatalog };
 }
 const catalog = () => ({ enabled: true, plugins: [{ id: 'test', name: 'Design', status: 'active', revision: 1,
   views: [{ ref: 'test/card', title: 'Card', surfaces: ['home', 'page'], placements: { page: true } }],
@@ -34,6 +34,8 @@ test('identical and metric-only catalogs update state without any app redraw', (
   h.apply(next);
   assert.equal(h.context.state.pluginCatalog, next);
   assert.deepEqual(h.calls, []);
+  assert.equal(h.connectionRefreshes.length, 3, 'connection completion can refresh status without changing the catalog key');
+  assert.equal(h.connectionRefreshes.at(-1), next);
 });
 for (const [label, mutate] of [
   ['code revision', p => p.revision++],
