@@ -199,3 +199,21 @@ test('Mistral cookie save validates the submitted credential before selecting th
   const account = accountStatusProjection(settings, {}, {});
   assert.equal(account.mistralCookieConfigured, true);
 });
+
+test('an empty wallet cannot override available allowances in compact quota selection', async () => {
+  const { compactLimitSelection } = require('../../src/shared/trayText');
+  const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
+  const provider = await fetchMistralLimits({ mistralCookie: 'ory_session_example=fixture' }, { env: {}, fetch: async (url) => response(
+    url.endsWith('/subscription') ? page() : { wallet_amount: 0, currency: 'EUR' }
+  ) });
+  const wallet = provider.windows.find(({ metric }) => metric === 'credits');
+  assert.equal(wallet.remaining, 0, 'retain the wallet value for the card');
+  const selection = compactLimitSelection(provider);
+  assert.equal(selection.primaryWindow.label, 'Included Vibe Code');
+  assert.equal(selection.primaryPercent, 50);
+  const cells = (record) => buildEdgeDockCells({ limits: { providers: [record] } }, { items: [{ type: 'limit', provider: 'mistral' }] });
+  assert.equal(cells(provider)[0].remainingPercent, 50);
+  const walletOnly = { ...provider, windows: [wallet] };
+  assert.equal(compactLimitSelection(walletOnly), null, 'a wallet alone has no measured percentage');
+  assert.equal(cells(walletOnly)[0].remainingPercent, null);
+});

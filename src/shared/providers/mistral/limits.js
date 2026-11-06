@@ -113,7 +113,7 @@ function parseMistralCredits(data) {
     || typeof data.currency !== 'string' || !/^[a-z]{3}$/iu.test(data.currency.trim())) throw errorWithStatus('unavailable', 'Invalid Mistral credits');
   const remaining = data.wallet_amount + (data.credit_notes_amount ?? 0) - (data.ongoing_usage_balance ?? 0);
   if (!Number.isFinite(remaining)) throw errorWithStatus('unavailable', 'Invalid Mistral credit total');
-  return { kind: 'billing', metric: 'credits', label: 'Balance', remaining, currency: data.currency.trim().toUpperCase() };
+  return { kind: 'billing', metric: 'credits', label: 'Balance', remaining, currency: data.currency.trim().toUpperCase(), showMeter: false };
 }
 
 async function fetchMistralLimits(options = {}, deps = {}) {
