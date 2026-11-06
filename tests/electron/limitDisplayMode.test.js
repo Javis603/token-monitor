@@ -39,4 +39,8 @@ test('non-finite inputs fall back to 0 in both modes', () => {
 test('suffix flips with the mode', () => {
   assert.equal(limitModeSuffix(false), 'left');
   assert.equal(limitModeSuffix(true), 'used');
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const t = (key) => translate('es', key);
+  assert.equal(limitModeSuffix(false, t), 'restante');
+  assert.equal(limitModeSuffix(true, t), 'usado');
 });

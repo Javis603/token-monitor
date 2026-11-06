@@ -38,6 +38,74 @@ test('normalizeLanguage keeps supported choices and falls back to auto', () => {
   assert.equal(normalizeLanguage(''), 'auto');
 });
 
+test('Spanish regional variants resolve to the shared Spanish dictionary', () => {
+  for (const tag of ['es', 'es-ES', 'es-MX', 'es-AR', 'es-419', 'ES_es']) {
+    assert.equal(normalizeLanguage(tag), 'es', tag);
+    assert.equal(resolveLocale('auto', [tag, 'en-US']), 'es', tag);
+    assert.equal(resolveLocale(tag, ['en-US']), 'es', tag);
+  }
+  assert.equal(resolveLocale('auto', ['fr-FR', 'es-ES']), 'es');
+  assert.equal(resolveLocale('en', ['es-ES']), 'en');
+  assert.equal(resolveRegionalLocale(['es-MX', 'es-ES']), 'es-MX');
+  assert.equal(resolveRegionalLocale(['es_ES']), 'es-ES');
+});
+
+test('main-process language settings preserve Spanish and its regional variants', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = main.indexOf('function normalizeLanguageSetting(');
+  const end = main.indexOf('\nfunction normalizeHubPort(', start);
+  assert.ok(start >= 0 && end > start);
+  const context = { LANGUAGE_VALUES: new Set(LANGUAGE_OPTIONS.map(option => option.value)) };
+  vm.runInNewContext(main.slice(start, end), context);
+  for (const tag of ['es', 'es-ES', 'es-MX', 'es-419', 'ES_es']) {
+    assert.equal(context.normalizeLanguageSetting(tag), 'es', tag);
+  }
+  assert.equal(context.normalizeLanguageSetting('unsupported', 'es'), 'es');
+});
+
+test('Spanish has exact English key and interpolation-placeholder parity', () => {
+  assert.deepEqual(Object.keys(MESSAGES.es).sort(), Object.keys(MESSAGES.en).sort());
+  const placeholders = value => [...value.matchAll(/\{([a-zA-Z0-9_]+)\}/g)]
+    .map(match => match[1]).sort();
+  for (const [key, source] of Object.entries(MESSAGES.en)) {
+    assert.ok(MESSAGES.es[key].trim(), `${key} must not be empty`);
+    assert.deepEqual(placeholders(MESSAGES.es[key]), placeholders(source), key);
+  }
+});
+
+test('Spanish is selectable and updates text, accessible names and placeholders', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
+  assert.ok(LANGUAGE_OPTIONS.some(option => option.value === 'es' && option.labelKey === 'settings.language.spanish'));
+  assert.match(html, /<option value="es" data-i18n="settings\.language\.spanish">Español<\/option>/);
+  for (const locale of Object.keys(MESSAGES)) {
+    assert.equal(MESSAGES[locale]['settings.language.spanish'], 'Español', locale);
+  }
+  const label = fakeElement({ i18n: 'settings.common.save' });
+  const accessible = fakeElement({ i18nAriaLabel: 'refreshButton.label' });
+  const input = fakeElement({ i18nPlaceholder: 'settings.sync.secretPlaceholder' });
+  const attributes = {};
+  const root = {
+    documentElement: { setAttribute: (name, value) => { attributes[name] = value; } },
+    querySelectorAll: selector => ({
+      '[data-i18n]': [label],
+      '[data-i18n-aria-label]': [accessible],
+      '[data-i18n-placeholder]': [input]
+    })[selector] || []
+  };
+  assert.equal(applyTranslations(root, 'es-ES'), 'es');
+  assert.equal(attributes.lang, 'es');
+  assert.equal(label.textContent, 'Guardar');
+  assert.equal(accessible.attributes['aria-label'], 'Actualizar estadísticas');
+  assert.equal(input.placeholder, 'Secreto compartido opcional');
+  assert.equal(translate('es', 'settings.sync.portInUse', { port: 17321 }), 'El puerto 17321 ya está en uso');
+  assert.equal(translate('es', 'sessions.backToWithTitle', { title: 'Proyecto', destination: 'Inicio' }), 'Proyecto — Volver a Inicio');
+});
+
 test('WSL SQLite recovery guidance is localized without English fallback', () => {
   for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
     assert.ok(MESSAGES[locale]['settings.collection.wslPanel.sqliteHelp'], locale);
