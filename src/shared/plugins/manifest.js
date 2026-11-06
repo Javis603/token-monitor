@@ -107,7 +107,7 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
   if (raw.limits !== undefined && (!Array.isArray(raw.limits) || raw.limits.length > 16)) fail('limits must contain at most 16 modules');
   for (const entry of Array.isArray(raw.limits) ? raw.limits : []) {
     const title = normalizeLocalized(entry?.name, 48);
-    if (!backend || !entry || !/^[a-z][a-z0-9-]{0,31}$/.test(entry.id) || limitIds.has(entry.id) || !title
+    if (!backend || !entry || typeof entry.id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(entry.id) || limitIds.has(entry.id) || !title
       || (entry.connection !== undefined && entry.connection !== 'openai')) { fail('invalid limits module'); continue; }
     const settingsView = entry.settingsView ?? null;
     if (settingsView !== null && (typeof settingsView !== 'string' || !views.some(view => view.id === settingsView && view.surfaces.includes('settings')))) { fail('limits settingsView must reference a declared settings view'); continue; }

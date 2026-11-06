@@ -37,7 +37,9 @@ test('native demand samples two modules, drops late data on disable, resumes aft
   active = false; service.reconcile(); assert.deepEqual(service.records(), []);
   active = true; revision = 'b'; service.reconcile();
   for (let n = 0; n < 20 && service.records().length < 2; n++) await new Promise(setImmediate);
-  assert.equal(calls, 4); service.demand(false); assert.deepEqual(service.records(), []);
+  assert.equal(calls, 4); service.demand(false); assert.equal(service.records().length, 2, 'paused settings retain captured readings without sampling');
+  assert.ok(service.catalog().every(module => !module.sampling));
+  revision = 'c'; service.reconcile(); assert.deepEqual(service.records(), [], 'paused records do not cross a code revision');
 });
 test('editing visible preferences while a plugin is disabled retains its selection and mixed-order slots', () => {
   const providers = [{ id: 'claude' }, { id: 'codex' }];
@@ -49,4 +51,13 @@ test('editing visible preferences while a plugin is disabled retains its selecti
   const moved = order.preserveAbsentPluginOrder(saved, ['codex', 'claude'], providers);
   assert.deepEqual(moved, [one, 'codex', two, 'claude']);
   assert.deepEqual(order.orderedLimitProviders([...providers, { id: one }, { id: two }], moved).map(row => row.id), moved);
+});
+test('forgetting host connections clears their retained quota but preserves unconnected modules', async t => {
+  const modules = [{ id: 'one', name: 'One', connection: 'openai' }, { id: 'two', name: 'Two' }];
+  const manager = { list: () => ({ plugins: [{ id: 'sample-plugin', status: 'active', revision: 'a', limits: modules }] }), call: async () => ({ status: 'ok', windows: [] }) };
+  const service = createPluginLimits({ manager, getSettings: () => ({ limitProviders: 'plugin:sample-plugin:one,plugin:sample-plugin:two' }), changed() {} });
+  t.after(() => service.dispose()); service.demand(true);
+  for (let n = 0; n < 20 && service.records().length < 2; n++) await new Promise(setImmediate);
+  service.demand(false); service.forgetConnections('sample-plugin');
+  assert.deepEqual(service.records().map(row => row.provider), ['plugin:sample-plugin:two']);
 });

@@ -543,7 +543,7 @@ function createPluginRuntime({
     handle('plugins:limitsDemand', (event, value) => { requireMain(event); limits.demand(value); });
     handle('plugins:connection', async (event, id, key, operation) => {
       requireMain(event);
-      if (operation === 'forget') { connections.forget(id); return { state: 'notConnected' }; }
+      if (operation === 'forget') { connections.forget(id); limits.forgetConnections(id); return { state: 'notConnected' }; }
       if (!['connect', 'status', 'disconnect'].includes(operation)) throw new Error('Invalid account operation');
       const result = await hostCall(id, `webSession.${operation}`, { key });
       return result;

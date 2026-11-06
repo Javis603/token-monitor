@@ -8832,6 +8832,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-types { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; }
 .plugin-types:empty { display: none; }
 /* Feature labels use text-only hues; color-scheme follows the App theme. */
+.plugin-type-limits { color: light-dark(#34627f, #94bdd8); }
 .plugin-type-widget { color: light-dark(#34627f, #94bdd8); }
 .plugin-type-page { color: light-dark(#735687, #bca5d8); }
 .plugin-type-appearance { color: light-dark(#85601f, #d6b77d); }

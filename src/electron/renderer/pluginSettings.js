@@ -1399,7 +1399,8 @@
       }
       if (list.safeMode) nodes.push(el(document, 'p', 'plugin-banner', t('settings.plugins.safeMode')));
       const actions = el(document, 'div', 'plugin-toolbar');
-      const countText = t('plugins.ui.count', { count: list.plugins.length });
+      const visiblePlugins = list.plugins.filter(plugin => !typeFilter || plugin.types?.includes(typeFilter));
+      const countText = t('plugins.ui.count', { count: visiblePlugins.length });
       const count = el(document, 'span', 'plugin-toolbar-count', countText);
       count.setAttribute('role', 'status'); count.setAttribute('aria-atomic', 'true');
       if (!list.enabled) {
@@ -1418,8 +1419,8 @@
       else navigation.append(actions);
       if (packagePreview) nodes.push(packagePanel());
       nodes.push(typeSelector(render));
-      if (!list.plugins.length) nodes.push(el(document, 'p', 'settings-note', t('settings.plugins.empty')));
-      for (const plugin of [...list.plugins].filter(plugin => !typeFilter || plugin.types?.includes(typeFilter)).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
+      if (!visiblePlugins.length) nodes.push(el(document, 'p', 'settings-note', t(list.plugins.length ? 'plugins.catalog.noResults' : 'settings.plugins.empty')));
+      for (const plugin of [...visiblePlugins].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
         nodes.push(pluginCard(plugin));
       }
       replaceContent(nodes, saved);
