@@ -97,6 +97,8 @@ Archive projection can share canonical live session rows read-only while copying
 
 ## Limits collector
 
+The desktop records successful displayed quota observations in its own bounded history store; it never adds history to the wire record or probes on hover. The [quota history guide](limits-history.md) describes sampling gaps, reset boundaries and time-bucket semantics.
+
 `src/shared/usage/deviceRuntime.js` separates usage from limits. `LimitsRuntime` owns scheduling, bounded concurrency, per-provider latest-wins lanes, deadlines, backoff and last-good/last-attempt retention. Credential changes refresh only the affected lane, without restarting usage; provider exceptions are documented in their notes.
 
 - Fixed/adaptive mode is separate from the interval value. Local token usage never triggers a limits refresh, and `burn-rate` never bypasses cooldowns. Manual refresh waits for usage while limits run in the background; successful button feedback is not proof that every provider succeeded.
@@ -117,7 +119,7 @@ Under Chromium, never set `Host`, keep `credentials: 'omit'` so browser cookies 
 
 ### Balance quotas
 
-`windows[].metric === 'credits'` identifies a money quota with `remaining` and `currency`. `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. Callers may explicitly disable balance inference for wallets without a quota denominator; `showMeter: false` alone does not change existing display-layer estimates such as Sub2API's.
+`windows[].metric === 'credits'` identifies a monetary or points balance with `remaining` and `currency` (`CREDITS` for points). `src/shared/limits/balanceDisplay.js` owns display across Home, tray and limits views; use the marker, never a provider whitelist. Derived top-up percentages remain display-only, outside the wire shape. Callers may explicitly disable balance inference for wallets without a quota denominator; `showMeter: false` alone does not change existing display-layer estimates such as Sub2API's.
 
 ## Session relationships
 
@@ -133,9 +135,19 @@ Sessions, Home and Edge Dock group the complete member set before applying displ
 
 `sessionTitlesEnabled` defaults on and affects Electron presentation only. `src/electron/sessionTitleDisplay.js` hides titles from snapshots, all-time pulls and detail headings without changing collection, metadata caches or local archives. Sync consent is independent, defaults off, and requires the [shared sync protocol](#shared-sync-content).
 
+## Windows document windows
+
+Windows document windows are created transparent, including when system glass is enabled. `windowsBackdrop.js` changes Acrylic, Accent and Transparent on the same native host; it clears Accent's native policy when leaving that mode and restores the transparent background after removing a system material. `setBackgroundMaterial('none')` alone does not make an opaque host transparent. The Dashboard uses `BrowserWindow`; the main widget uses `BaseWindow` with a retained `WebContentsView` (`electron/retainedWindow.js`) because floating-bubble frame changes still require a new native host. The page, drafts and renderer subscriptions survive those frame changes. Other platforms retain `BrowserWindow`.
+
+The view's current host owns its cleanup. Closing an obsolete host must not close or resize a view already transferred to its replacement. Resolve IPC senders through their current owner, count native windows with `BaseWindow.getAllWindows()`, and register page listeners once per page rather than once per host.
+
+Native reparenting can scroll a previously focused input into view. Capture focus and scroll positions inside the retained page before moving it, including scrollable containers at zero offsets, and restore before the next visible paint. Keep the expanded snapshot while a floating bubble is collapsed or awaiting its hidden host's first show; release its DOM references after the visible viewport is restored. Host replacements are serialized and superseded requests are discarded before transfer, including when an in-place expansion cancels a pending collapse. A new capture must not overwrite a viewport still awaiting restoration. If animation frames pause, an immediate page restore completes before the queue advances and cancels the old frame callback. Visibility changes during transfer must not redundantly refill settings forms and discard drafts. Ordinary hidden windows remain suspended.
+
 ## Windows Edge Dock material
 
 Windows 11 Edge Dock uses a single helper with HostBackdrop clipped to the renderer's curves; HWND-wide Acrylic/Accent cannot preserve the concave outline. Electron owns input. Native underlays stay disabled, nonactivating and directly below their content windows.
+
+Changing the Windows dock material attaches or disposes only the native underlays. Content windows and any open detail card stay alive; a callback from a disposed underlay cannot update its replacement's material state.
 
 Windows rail dragging and detail-card transitions follow renderer animation frames: a nominal 16 ms main-process timeout can round up to about 31 ms on Windows. Main still owns native cursor coordinates, placement, geometry and button-state checks; its timers and cursor polling remain fallbacks if frame delivery stops.
 
@@ -192,6 +204,10 @@ Session device labels are a desktop presentation projection resolved from the ca
 **Node Hub shutdown.** `stop()` closes HTTP/direct-ingest admission before ending response-owned SSE streams, flushes before draining admitted HTTP bodies, and flushes again afterward. Force-close lingering connections after the drain timer; event-loop load can delay timers, so they are not hard bounds. Concurrent stops share completion; final-save failures reject without discarding pending data. Clear batch timers on stop and re-arm retained data on successful restart. Standalone signal handlers use this lifecycle and report failures. The [API reference](API.md) defines client-visible shutdown behavior.
 
 `collectUsageOnce()` supplies usage. `DeviceState` combines it with the runtime envelope and limits; limits-only updates retain the usage `updatedAt`, and cold previews wait for a complete baseline. Hubs normalize device records with `normalizeDeviceRecord()` and aggregate on read with `aggregateDevices()`. Neither Hub needs provider credentials. The [API reference](API.md) defines the common Node/Worker wire contract.
+
+Widget and headless HTTP producers negotiate revisioned upload deltas on full ingest, independently of SSE. `uploadDelta.js` owns bounded ephemeral wire baselines; the client keeps only its last acknowledged payload and opaque token. Reconstruct and ingest inside the existing mutation lane, then acknowledge. Never patch normalized storage directly: normalization, retained limits/history and title-policy checks still belong to the normal ingest boundary. Full/legacy writes, deletion and privacy revocation invalidate affected baselines; restart/eviction or a lost ACK recovers through a current full snapshot. A delta is used only when its envelope is smaller than the full payload.
+
+Legacy Hubs retain the History omission optimization: omit only acknowledged unchanged wire content, with complete History on startup, destination/credential/device changes, stream reconnection, failed uploads and periodic reconciliation at the next publication. Changed History and explicit clears are sent immediately. Live Today remains a separate period; renderer overlays never update uploaded History.
 
 Settings keys, env vars, CLI flags, endpoints and wire fields have external users: treat incompatible changes as breaking and plan migration. Stale devices intentionally remain in stats with `stale: true`; they are not silently deleted.
 

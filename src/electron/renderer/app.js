@@ -101,11 +101,13 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   copilot: { group: 'copilotAccountGroup', status: 'copilotApiTokenStatus' },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
   workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
+  minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus' },
   openrouter: { group: 'openrouterAccountGroup', status: 'openrouterStatus' },
   volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
+  minimax: 'settings.minimax.codeNote',
   antigravity: 'settings.limits.connection.antigravity',
   cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
@@ -299,11 +301,22 @@ const VIEW_ICON_CLASSES = {
   limits: 'view-icon-limits',
   trends: 'view-icon-trends'
 };
+// Mirrors SERVICE_STATUS_PROVIDERS in src/electron/serviceStatus.js — same ids,
+// labels and order — so the rows and the settings list render before the first
+// fetch. The two lists must stay in sync.
 const SERVICE_STATUS_PLACEHOLDERS = [
   { id: 'claude', label: 'Claude', pageUrl: 'https://status.claude.com' },
   { id: 'openai', label: 'OpenAI', pageUrl: 'https://status.openai.com' },
+  { id: 'opencode', label: 'OpenCode', pageUrl: 'https://status.opencode.ai' },
   { id: 'cursor', label: 'Cursor', pageUrl: 'https://status.cursor.com' },
-  { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' }
+  { id: 'factory', label: 'Factory Droid', pageUrl: 'https://status.factory.ai' },
+  { id: 'kimi', label: 'Kimi', pageUrl: 'https://status.moonshot.cn' },
+  { id: 'github', label: 'Copilot', pageUrl: 'https://www.githubstatus.com' },
+  { id: 'zed', label: 'Zed', pageUrl: 'https://status.zed.dev' },
+  { id: 'deepseek', label: 'DeepSeek', pageUrl: 'https://status.deepseek.com' },
+  { id: 'devin', label: 'Devin', pageUrl: 'https://www.devinstatus.com' },
+  { id: 'minimax', label: 'MiniMax (China)', pageUrl: 'https://status.minimaxi.com' },
+  { id: 'minimax-intl', label: 'MiniMax (International)', pageUrl: 'https://status.minimax.io' }
 ];
 const SERVICE_PROVIDER_OPTIONS = SERVICE_STATUS_PLACEHOLDERS.map((entry) => ({ id: entry.id, label: entry.label }));
 const TOKEN_MONITOR_REPOSITORY_URL = 'https://github.com/Javis603/token-monitor';
@@ -325,7 +338,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -3598,14 +3611,27 @@ function subscriptionAccountChoices() {
     return saved.some((subscription) => subscription.provider === provider.provider && subscription.binding
       && !subscription.binding.accountKey && !subscription.binding.accountEmail && !subscription.binding.profileName);
   });
-  return visible.map((provider, index) => ({
-    provider,
-    value: subscriptionAccountValue(provider),
-    label: accountIdentityApi.accountTitleLabel(provider, visible, {
+  const choices = visible.map((provider, index) => {
+    const titled = accountIdentityApi.accountTitleLabel(provider, visible, {
       maskEmail: state.settings?.maskLimitAccountEmails === true,
       index
-    }) || subscriptionText.providerLabel(provider.provider)
-  }));
+    });
+    // MiniMax lane labels distinguish Code from API when no email or name does.
+    const lane = provider.provider === 'minimax' ? String(provider.accountLabel || '').trim() : '';
+    return {
+      provider,
+      value: subscriptionAccountValue(provider),
+      label: titled || lane || subscriptionText.providerLabel(provider.provider)
+    };
+  });
+  const seenLabels = new Map();
+  for (const choice of choices) {
+    if (choice.provider.provider !== 'minimax') continue;
+    const count = (seenLabels.get(choice.label) || 0) + 1;
+    seenLabels.set(choice.label, count);
+    if (count > 1) choice.label = `${choice.label} (${count})`;
+  }
+  return choices;
 }
 
 // A known key stays stable through renamed profiles, changed email metadata and
@@ -4640,8 +4666,33 @@ const { limitWindowText } = window.TokenMonitorLimitWindowText;
 // so its card is the same DOM rather than a second rendering of the same data.
 // Everything the builder needs from this page is handed over here; it reads no
 // globals of its own.
+let limitsHistoryOpen = false;
+let limitsHistoryActiveKey = '';
+document.addEventListener('pointerdown', event => {
+  if (limitsHistoryOpen && !event.target.closest('[data-limit-history]')) window.tokenMonitor.limits.closeHistory();
+}, true);
+window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
+  limitsHistoryOpen = open === true;
+  limitsHistoryActiveKey = limitsHistoryOpen ? key : '';
+  for (const row of document.querySelectorAll('[data-limit-history]')) {
+    row.classList.toggle('is-history-active', row.dataset.limitHistory === limitsHistoryActiveKey);
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || !limitsHistoryOpen) return;
+  event.preventDefault();
+  window.tokenMonitor.limits.closeHistory();
+}, true);
+
 const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
   document,
+  history: window.tokenMonitor?.limits?.openHistory ? {
+    key: window.TokenMonitorLimitsHistoryIdentity.historyRowKey,
+    activeKey: () => limitsHistoryActiveKey,
+    open: (key, rect, interactive) => window.tokenMonitor.limits.openHistory(key, rect, interactive),
+    enter: key => window.tokenMonitor.limits.enterHistory(key),
+    leave: key => window.tokenMonitor.limits.leaveHistory(key)
+  } : null,
   t,
   settings: () => state.settings,
   currentLocale,
@@ -4975,6 +5026,7 @@ function renderLimits() {
     settings: [
       state.settings?.showLimitSource === true,
       state.settings?.maskLimitAccountEmails === true,
+      state.settings?.limitsHistoryOpenMode,
       state.settings?.showLimitUsed === true,
       state.settings?.showToolIcons !== false,
       state.settings?.claudePrepaidBalanceEnabled !== false,
@@ -5065,31 +5117,35 @@ function visibleServiceProviderIds() {
 function serviceStatusRows() {
   const order = visibleServiceProviderIds();
   const rank = new Map(order.map((id, index) => [id, index]));
-  const base = (state.serviceStatus?.providers?.length)
-    ? state.serviceStatus.providers
-    : SERVICE_STATUS_PLACEHOLDERS.map((provider) => ({
-        ...provider,
-        status: 'unknown',
-        description: state.serviceStatusBusy ? t('serviceStatus.loading') : t('serviceStatus.notChecked'),
-        checkedAt: '',
-        updatedAt: '',
-        componentIssues: [],
-        incidentCount: 0,
-        maintenanceCount: 0
-      }));
+  const checked = new Map((state.serviceStatus?.providers || []).map((provider) => [provider.id, provider]));
+  const base = SERVICE_STATUS_PLACEHOLDERS.map((provider) => checked.get(provider.id) || ({
+    ...provider,
+    status: 'unknown',
+    description: state.serviceStatusBusy ? t('serviceStatus.loading') : t('serviceStatus.notChecked'),
+    checkedAt: '',
+    updatedAt: '',
+    componentIssues: [],
+    incidentCount: 0,
+    maintenanceCount: 0
+  }));
   return base
     .filter((provider) => rank.has(provider.id))
     .sort((a, b) => rank.get(a.id) - rank.get(b.id));
 }
 
+// Status ids whose vendor mark lives under a different name; every other id
+// has a `.row-icon-<id>` mask installed from the vendor table.
+const SERVICE_STATUS_ICON_ALIASES = new Map([['openai', 'codex'], ['github', 'copilot'], ['minimax-intl', 'minimax']]);
+
 function serviceStatusIconId(id) {
-  return id === 'openai' ? 'codex' : id; // claude/cursor/deepseek map 1:1
+  return SERVICE_STATUS_ICON_ALIASES.get(id) || id;
 }
 
 function renderServiceStatus() {
   if (!serviceStatusSurfaceVisible()) return;
   if (!els.serviceStatusPanel) return;
-  const rows = serviceStatusRows().map((provider) => {
+  const rows = serviceStatusRows().map((source) => {
+    const provider = serviceStatusPresentationApi.localizeProvider(source, currentLocale());
     const row = document.createElement('button');
     row.type = 'button';
     row.className = `service-status-row service-status-${provider.status || 'unknown'}`;
@@ -5146,15 +5202,16 @@ function renderServiceStatus() {
 
 async function refreshServiceStatus(options = {}) {
   if (!window.tokenMonitor.getServiceStatus || state.serviceStatusBusy) return;
+  const providerIds = visibleServiceProviderIds();
   state.serviceStatusBusy = true;
   renderServiceStatus();
   try {
-    state.serviceStatus = await window.tokenMonitor.getServiceStatus({ force: options.force === true, providerIds: visibleServiceProviderIds() });
+    state.serviceStatus = await window.tokenMonitor.getServiceStatus({ force: options.force === true, providerIds });
   } catch (error) {
     const checkedAt = new Date().toISOString();
     state.serviceStatus = {
       checkedAt,
-      providers: SERVICE_STATUS_PLACEHOLDERS.map((provider) => ({
+      providers: SERVICE_STATUS_PLACEHOLDERS.filter((provider) => providerIds.includes(provider.id)).map((provider) => ({
         ...provider,
         status: 'unknown',
         indicator: 'unknown',
@@ -5170,6 +5227,9 @@ async function refreshServiceStatus(options = {}) {
   } finally {
     state.serviceStatusBusy = false;
     renderServiceStatus();
+    if (visibleServiceProviderIds().some((id) => !providerIds.includes(id))) {
+      await refreshServiceStatus({ force: true });
+    }
   }
 }
 
@@ -5916,6 +5976,10 @@ function isSettingsPanelOpen() {
   return Boolean(els.settingsPanel && !els.settingsPanel.classList.contains('hidden'));
 }
 
+function isNativeWindowTransfer() {
+  return globalThis[Symbol.for('token-monitor.window-view-state')]?.transferring === true;
+}
+
 function isRendererWindowHidden() {
   return document.hidden || !state.windowVisible;
 }
@@ -6646,6 +6710,7 @@ function homeLimitRows() {
         : providerEntries.length;
       if (accountCount > 1) {
         const accountTitle = limitAccountTitle(id, provider, index, providerEntries);
+        if (id === 'minimax' && !accountTitle) return providerTitle;
         return showProviderTitle ? `${providerTitle} · ${accountTitle}` : accountTitle;
       }
       if (id === 'mimo') {
@@ -8145,7 +8210,7 @@ function applyAppearanceSettings(settings) {
   }
   if (els.windowsBackdropNote) {
     const accentFallback = windowsGlass.showAccentNote
-      && new URLSearchParams(window.location.search).get('windowsBackdropFallback') === '1';
+      && (settings?.windowsBackdropFallback ?? state.settings?.windowsBackdropFallback) === true;
     els.windowsBackdropNote.textContent = t(accentFallback
       ? 'settings.appearance.windowsBackdropFallback'
       : 'settings.appearance.windowsBackdropNote');
@@ -8698,7 +8763,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   }
   if (options.renderContent === false) return;
   if (wasCollapsed && !state.floatingBubble.collapsed) {
-    if (isSettingsPanelOpen()) syncSettingsForm();
+    if (isSettingsPanelOpen() && !isNativeWindowTransfer()) syncSettingsForm();
     renderStatsUpdate();
   } else {
     renderFloatingBubbleContent();
@@ -9994,6 +10059,7 @@ function syncSettingsForm() {
   renderSettingsSummaries();
   renderOpenCodeProfiles();
   renderOpenRouterProfiles();
+  renderMinimaxApiKeys();
   renderThirdPartyProfiles();
   buildAppearanceColorControls();
   renderTokscaleStatus();
@@ -10125,7 +10191,7 @@ function applyPreferenceOrder(kind, order) {
     if (!row) continue;
     list.appendChild(row);
     const companionId = kind === 'view'
-      ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
+      ? ({ home: 'homeSettingsContainer', limits: 'limitsViewSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
       : kind === 'homeModule'
         ? HOME_MODULE_SUBGROUPS[id]?.[1]
         : '';
@@ -10157,6 +10223,7 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
 }
 
 const VIEW_PREFERENCE_SUBGROUPS = {
+  limits: ['limitsViewSettingsExpanded', 'limitsViewSettingsContainer'],
   home: ['homeSettingsExpanded', 'homeSettingsContainer'],
   trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
   project: ['projectSettingsExpanded', 'projectSettingsContainer'],
@@ -10363,6 +10430,29 @@ function renderViewPreferences() {
     row.append(name, actions);
     row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
     els.viewDisplayList.appendChild(row);
+    if (id === 'limits') {
+      row.classList.add('has-subgroup');
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = `view-subgroup-toggle${state.limitsViewSettingsExpanded ? ' is-expanded' : ''}`;
+      toggle.setAttribute('aria-label', t('settings.views.configureLimits', { name: label }));
+      toggle.setAttribute('aria-expanded', String(Boolean(state.limitsViewSettingsExpanded)));
+      const toggleIcon = document.createElement('span');
+      toggleIcon.className = 'view-subgroup-icon';
+      toggleIcon.setAttribute('aria-hidden', 'true');
+      toggle.append(toggleIcon);
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
+      actions.insertBefore(toggle, visibility);
+
+      const listContainer = document.createElement('div');
+      listContainer.id = 'limitsViewSettingsContainer';
+      listContainer.className = `accordion-animated-container${state.limitsViewSettingsExpanded ? '' : ' hidden'}`;
+      const inner = document.createElement('div');
+      inner.className = 'accordion-animation-inner';
+      inner.appendChild(renderLimitsViewSettingsList());
+      listContainer.appendChild(inner);
+      els.viewDisplayList.appendChild(listContainer);
+    }
     if (id === 'home') {
       row.classList.add('has-subgroup');
       const toggle = document.createElement('button');
@@ -10815,6 +10905,35 @@ function renderHomeActivitySettings() {
   frag.append(daysRow);
 
   return frag;
+}
+
+function renderLimitsViewSettingsList() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const row = document.createElement('label');
+  row.className = 'settings-item';
+  const text = document.createElement('span');
+  text.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('limits.history.openMode');
+  text.appendChild(title);
+  const input = document.createElement('select');
+  input.id = 'limitsHistoryOpenModeInput';
+  for (const [value, key] of [['hover', 'openModeHover'], ['click', 'openModeClick'], ['off', 'openModeOff']]) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = t(`limits.history.${key}`);
+    input.appendChild(option);
+  }
+  input.value = state.settings?.limitsHistoryOpenMode || 'hover';
+  input.addEventListener('change', async () => {
+    await saveSettings({ limitsHistoryOpenMode: input.value });
+    renderLimits();
+  });
+  row.append(text, input);
+  wrap.appendChild(row);
+  return wrap;
 }
 
 function renderTrendSettingsList() {
@@ -12553,6 +12672,11 @@ const LIMIT_PROVIDER_SETTINGS = {
     descKey: 'settings.limits.prepaidBalanceDesc',
     requiresConfiguredKey: 'claudeWebCookieConfigured',
     defaultValue: true
+  }, {
+    key: 'claudeCliFallbackEnabled',
+    titleKey: 'settings.limits.claudeCliFallback',
+    descKey: 'settings.limits.claudeCliFallbackDesc',
+    defaultValue: true
   }],
   codex: [{
     key: 'codexResetForecastEnabled',
@@ -12943,9 +13067,11 @@ function hiddenServiceProviderSet() {
 
 async function onServiceProviderVisibilityToggle(providerId) {
   const hidden = hiddenServiceProviderSet();
-  if (hidden.has(providerId)) hidden.delete(providerId);
+  const showing = hidden.has(providerId);
+  if (showing) hidden.delete(providerId);
   else hidden.add(providerId);
   await saveSettings({ hiddenServiceProviders: Array.from(hidden).join(',') });
+  if (showing) await refreshServiceStatus({ force: true });
 }
 
 async function onServiceProviderMove(providerId, direction) {
@@ -12997,7 +13123,9 @@ async function resetServiceProviderOrder() {
 }
 
 async function showAllServiceProviders() {
+  const showing = hiddenServiceProviderSet().size > 0;
   await saveSettings({ hiddenServiceProviders: '' });
+  if (showing) await refreshServiceStatus({ force: true });
 }
 
 async function onPreferenceReorder(kind, id, targetIndex) {
@@ -14711,6 +14839,7 @@ function renderStatsUpdate() {
   renderToolPreferences();
   renderWslPanel();
   updateOpenRouterProfilesStatus();
+  updateMinimaxApiKeysStatus();
   updateThirdPartyProfilesStatus();
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('kimi');
@@ -14756,7 +14885,7 @@ function handleWindowVisibilityChange() {
     void refreshHubBuildStatus();
   }
   const settingsVisible = isSettingsSurfaceVisible();
-  if (settingsVisible || settingsDomSyncPending) syncSettingsForm();
+  if (settingsDomSyncPending || (settingsVisible && !isNativeWindowTransfer())) syncSettingsForm();
   statsRenderScheduler.flush();
   if (settingsVisible) {
     renderConnectionStatus();
@@ -16362,11 +16491,12 @@ async function refreshCodexAccounts() {
 // local device's RAW limits from state.stats.devices — NOT the collapsed
 // state.stats.limits.providers. In sync mode, aggregateLimits() collapses a
 // local `unauthorized` row out in favor of a remote `ok` (providerCollapseKey
-// for deepseek/minimax/grok is just the provider name; pickBetterProvider keeps
-// the higher statusRank). Searching the aggregate would miss the local row and
-// fall back to the remote `ok`, falsely reporting an invalid local key as
-// Linked. Only legacy/non-aggregated stats without a `devices` array may fall
-// back to the aggregate; once raw device rows are present they are authoritative.
+// for deepseek/grok and keyless minimax rows is just the provider name;
+// pickBetterProvider keeps the higher statusRank). Searching the aggregate
+// would miss the local row and fall back to the remote `ok`, falsely reporting
+// an invalid local key as Linked. Only legacy/non-aggregated stats without a
+// `devices` array may fall back to the aggregate; once raw device rows are
+// present they are authoritative.
 function localDeviceLimitsProviders() {
   return accountIdentityApi.localDeviceLimitsProviders(
     state.stats,
@@ -18046,6 +18176,43 @@ function updateNamedApiProfilesStatus({
   });
 }
 
+function updateMinimaxApiKeysStatus() {
+  const rows = localProviderStatuses('minimax');
+  const enabled = limitProviderEnabled('minimax');
+  const provider = enabled ? limitProviderPresentationApi.limitProviderSettingsRecord(rows, 'minimax') : null;
+  accountShellApi.render({
+    status: document.getElementById('minimaxStatus'),
+    statusText: !enabled
+      ? t('settings.limits.status.disabled')
+      : provider
+        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
+        : t('settings.common.checking')
+  });
+  for (const row of document.querySelectorAll('[data-minimax-key]')) {
+    const reading = rows.find(candidate => candidate.source === 'api' && candidate.accountKey === row.dataset.minimaxKey);
+    row.querySelector('.managed-account-info').textContent = apiKeyAccountStatusText('minimax', reading, true, 'settings',
+      enabled && row.dataset.credentialEnabled !== 'false');
+  }
+}
+
+function minimaxKeyErrorText(result) {
+  const key = result?.status === 'required' ? 'settings.common.credentialRequired'
+    : result?.status === 'invalidFormat' ? 'settings.common.credentialInvalidFormat'
+    : result?.status === 'notConfigured' ? 'settings.minimax.statusNotSet'
+    : result?.status === 'unauthorized' ? 'settings.minimax.statusInvalid'
+    : 'settings.common.unavailable';
+  return result?.error || t(key);
+}
+
+function minimaxBillingUrl(key) {
+  const rows = localProviderStatuses('minimax').filter(row => row.source === 'api');
+  const row = key.accountKey ? rows.find(row => row.accountKey === key.accountKey) : null;
+  const region = key.apiRegion || state.settings?.minimaxApiRegion || 'auto';
+  const intl = region === 'intl' || (region === 'auto' && row?.region !== 'cn');
+  const origin = intl ? 'https://platform.minimax.io' : 'https://platform.minimaxi.com';
+  return `${origin}/user-center/payment/${key.billingMode === 'api' ? 'balance' : 'token-plan'}`;
+}
+
 function updateOpenRouterProfilesStatus() {
   updateNamedApiProfilesStatus({
     providerId: 'openrouter',
@@ -18308,6 +18475,68 @@ function renderOpenRouterProfiles() {
     updateStatus: updateOpenRouterProfilesStatus,
     errorText: openrouterProfileErrorText
   });
+}
+
+async function renderMinimaxApiKeys() {
+  if (!isSettingsSurfaceVisible()) return;
+  const list = document.getElementById('minimaxKeyList');
+  const isCurrent = accountProfileRequests.begin('minimax');
+  try {
+    const keys = await window.tokenMonitor.minimax.getKeys();
+    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    list.replaceChildren();
+    let savedIndex = 0;
+    for (const key of keys) {
+      const row = document.createElement('div');
+      row.className = 'managed-account-row';
+      row.dataset.minimaxKey = key.accountKey;
+      row.dataset.credentialEnabled = String(key.enabled !== false);
+      const label = document.createElement('span');
+      label.className = 'managed-account-main managed-account-email';
+      const name = t('settings.minimax.accountFallback', { number: ++savedIndex });
+      label.textContent = `${name} · ${t(`settings.minimax.${key.billingMode === 'api' ? 'billingApi' : 'billingTokenPlan'}`)}`;
+      const actions = document.createElement('span');
+      actions.className = 'managed-account-right';
+      const info = document.createElement('span');
+      info.className = 'managed-account-info';
+      const open = document.createElement('button');
+      open.className = 'managed-account-remove';
+      open.textContent = '↗';
+      open.setAttribute('aria-label', t('settings.minimax.openBrowser'));
+      open.addEventListener('click', () => window.tokenMonitor.openExternal(minimaxBillingUrl(key)));
+      actions.append(info, open);
+      const remove = document.createElement('button');
+      remove.className = 'managed-account-remove';
+      remove.textContent = '✕';
+      remove.setAttribute('aria-label', t('settings.minimax.clearApiKey'));
+      let confirming = false;
+      remove.addEventListener('click', () => {
+        if (!confirming) {
+          confirming = true;
+          remove.textContent = '✓';
+          remove.classList.add('confirming');
+          remove.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name: label.textContent }));
+          return;
+        }
+        return accountProfileSaves.run('minimax', remove, async () => {
+          const result = await window.tokenMonitor.minimax.removeKey(key.id);
+          setAccountShellError('minimax', result?.ok ? '' : minimaxKeyErrorText(result));
+          if (result?.ok) { await renderMinimaxApiKeys(); await refreshStats(); }
+        });
+      });
+      actions.append(remove);
+      row.append(label, actions);
+      list.append(row);
+    }
+    updateMinimaxApiKeysStatus();
+    renderSettingsSummaries();
+  } catch (_) {
+    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    accountShellApi.render({
+      status: document.getElementById('minimaxStatus'),
+      statusText: t('settings.common.unavailable')
+    });
+  }
 }
 
 function renderThirdPartyProfiles() {
@@ -19076,6 +19305,39 @@ function setupCursorAccountUI() {
         setAccountShellError('opencode', opencodeSaveErrorText(result));
       };
       await submit(false);
+    }));
+  }
+
+  const minimaxToggle = document.getElementById('minimaxSettingsToggle');
+  if (minimaxToggle) {
+    minimaxToggle.addEventListener('click', () => {
+      const expanded = !state.minimaxAccountExpanded;
+      setExternalAccountExpanded('minimax', expanded);
+      if (expanded) renderMinimaxApiKeys();
+    });
+    document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
+      const billingMode = document.getElementById('minimaxBillingModeInput').value;
+      const apiRegion = document.getElementById('minimaxApiRegionInput').value;
+      window.tokenMonitor.openExternal(minimaxBillingUrl({ billingMode, apiRegion }));
+    });
+    document.getElementById('minimaxRefreshButton').addEventListener('click', () => refreshLimitProviderQuota('minimax'));
+    const submit = document.getElementById('minimaxKeySubmit');
+    submit.addEventListener('click', () => accountProfileSaves.run('minimax', submit, async () => {
+      setAccountShellError('minimax', '');
+      const input = document.getElementById('minimaxApiKeyInput');
+      const mode = document.getElementById('minimaxBillingModeInput');
+      const region = document.getElementById('minimaxApiRegionInput');
+      const draft = { apiKey: input.value, billingMode: mode.value, apiRegion: region.value };
+      const result = await window.tokenMonitor.minimax.addKey(draft);
+      const unchanged = input.value === draft.apiKey && mode.value === draft.billingMode
+        && region.value === draft.apiRegion;
+      if (!result?.ok) {
+        if (unchanged) setAccountShellError('minimax', minimaxKeyErrorText(result));
+        return;
+      }
+      if (unchanged) input.value = '';
+      await renderMinimaxApiKeys();
+      await refreshStats();
     }));
   }
 

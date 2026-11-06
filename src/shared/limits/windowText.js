@@ -180,6 +180,12 @@
     // as `detail` and is the only other provider that shows one.
     if (id === 'kimi') return billing ? result(null, window.detail || '') : EMPTY;
 
+    // MiniMax Video uses interval counts; its kind does not establish a weekly pool.
+    if (id === 'minimax') {
+      if (kind === 'weekly' && window.label === 'Video') return result(null, rawCount(window, showUsed));
+      return EMPTY;
+    }
+
     // Everything else has no second line. `detail` is deliberately NOT surfaced
     // by default: several providers carry one for a different purpose — Zed and
     // third-party presets read "unlimited" out of it, OpenRouter promotes it to
