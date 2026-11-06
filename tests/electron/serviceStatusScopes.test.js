@@ -272,3 +272,22 @@ test('unhiding checks status immediately and follows an in-flight request with t
   pending.shift()();
   await showAll;
 });
+
+test('a failed status request only marks providers included in that request', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('async function refreshServiceStatus(');
+  const refresh = source.slice(start, source.indexOf('\n}\n', start) + 3);
+  const state = { serviceStatusBusy: false };
+  const context = vm.createContext({
+    state, SERVICE_STATUS_PLACEHOLDERS: SERVICE_STATUS_PROVIDERS,
+    visibleServiceProviderIds: () => ['claude'], renderServiceStatus: () => {},
+    t: (key) => key,
+    window: { tokenMonitor: { getServiceStatus: async () => { throw new Error('IPC failed'); } } }
+  });
+  await vm.runInContext(`${refresh}\nrefreshServiceStatus()`, context);
+  assert.deepEqual(Array.from(state.serviceStatus.providers, (provider) => provider.id), ['claude']);
+  assert.equal(state.serviceStatus.providers[0].description, 'serviceStatus.checkFailed');
+  assert.equal(state.serviceStatus.providers[0].error, 'IPC failed');
+  assert.ok(state.serviceStatus.providers[0].checkedAt);
+  assert.equal(state.serviceStatusBusy, false);
+});
