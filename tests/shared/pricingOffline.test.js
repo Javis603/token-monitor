@@ -34,9 +34,19 @@ test('resident period/history scans and model lookups explicitly prohibit pricin
   });
   t.after(() => handle.stop());
   await handle.whenIdle();
+  const fullCalls = calls.slice();
+  const watchStart = calls.length;
   await handle.tick('watch:test', { todayOnly: true });
+  const watchCalls = calls.slice(watchStart);
+  const pricingStart = calls.length;
   await lookupModelPricing('gpt-5', 1500);
+  const pricingCalls = calls.slice(pricingStart);
   const reads = calls.filter(args => args.includes('--json') || args.includes('graph'));
   assert.ok(reads.length >= 6, 'three periods, history, watch and pricing were exercised');
   assert.ok(reads.every(args => args.includes('--offline')), JSON.stringify(reads));
+  for (const flag of ['--today', '--month', '--since', 'graph']) {
+    assert.ok(fullCalls.some(args => args.includes(flag)), `initial collection includes ${flag}`);
+  }
+  assert.ok(watchCalls.some(args => args.includes('--today')), 'watch tick scans today');
+  assert.ok(pricingCalls.some(args => args.includes('pricing')), 'model pricing lookup runs');
 });

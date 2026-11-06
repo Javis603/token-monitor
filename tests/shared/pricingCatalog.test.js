@@ -40,6 +40,7 @@ test('fresh catalogs avoid downloads; expired catalogs refresh once and notify r
   }, f.timers);
   t.after(() => refresher.stop());
   refresher.start();
+  refresher.start();
   f.fire();
   assert.equal(calls, 0);
   assert.equal(f.delays.at(-1), 60_000);
@@ -47,6 +48,7 @@ test('fresh catalogs avoid downloads; expired catalogs refresh once and notify r
   f.fire();
   refresher.start();
   await refresher.whenIdle();
+  assert.deepEqual(f.delays, [0, 60_000, 60_000], 'repeated starts never add timers');
   assert.equal(calls, 1, 'start cannot duplicate an active refresh');
   assert.equal(updates, 1);
 });
