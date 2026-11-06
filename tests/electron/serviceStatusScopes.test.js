@@ -175,3 +175,119 @@ test('status external links admit provider roots and reject unrelated Google URL
     'https://www.google.com/appsstatus/dashboard?q=test', 'https://www.google.com/appsstatus/dashboard#test'
   ]) assert.equal(allowed(url), false, url);
 });
+
+test('revealed status providers render immediately without bypassing manual refresh', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const names = ['visibleServiceProviderIds', 'serviceStatusRows', 'serviceStatusRefreshMs', 'lastServiceStatusCheckedAt', 'maybeFetchServiceStatus'];
+  const functions = names.map((name) => {
+    const start = app.indexOf(`function ${name}(`);
+    return app.slice(start, app.indexOf('\n}\n', start) + 3);
+  }).join('\n');
+  const claude = { id: 'claude', status: 'outage', description: 'API down', checkedAt: new Date().toISOString(), componentIssues: [] };
+  const state = {
+    settings: { serviceStatusRefreshMs: 0, hiddenServiceProviders: 'minimax-intl', serviceProviderDisplayOrder: 'minimax-intl,claude' },
+    serviceStatus: { checkedAt: claude.checkedAt, providers: [claude] },
+    serviceStatusBusy: false
+  };
+  let fetches = 0;
+  const context = vm.createContext({
+    state, SERVICE_STATUS_PLACEHOLDERS: SERVICE_STATUS_PROVIDERS,
+    SERVICE_PROVIDER_OPTIONS: SERVICE_STATUS_PROVIDERS,
+    serviceStatusProviderPreferencesApi: require('../../src/electron/renderer/serviceStatusProviderPreferences'),
+    t: (key) => key,
+    refreshServiceStatus: async () => { fetches += 1; }
+  });
+  vm.runInContext(functions, context);
+  assert.equal(vm.runInContext('serviceStatusRows().some(row => row.id === "minimax-intl")', context), false);
+  state.settings.hiddenServiceProviders = '';
+  const rows = vm.runInContext('serviceStatusRows()', context);
+  assert.equal(rows[0].id, 'minimax-intl');
+  assert.equal(rows[0].status, 'unknown');
+  assert.equal(rows[0].description, 'serviceStatus.notChecked');
+  assert.equal(rows[0].checkedAt, '');
+  assert.equal(rows[1], claude);
+  vm.runInContext('maybeFetchServiceStatus()', context);
+  assert.equal(fetches, 0);
+  assert.equal(state.serviceStatus.providers.length, 1);
+
+  state.serviceStatusBusy = true;
+  assert.equal(vm.runInContext('serviceStatusRows()[0].description', context), 'serviceStatus.loading');
+  const refreshed = { ...rows[0], status: 'ok', description: 'All Systems Operational', checkedAt: claude.checkedAt };
+  state.serviceStatus.providers.push(refreshed);
+  state.serviceStatusBusy = false;
+  assert.equal(vm.runInContext('serviceStatusRows()[0]', context), refreshed);
+});
+
+test('unhiding checks status immediately and follows an in-flight request with the new selection', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const names = ['refreshServiceStatus', 'onServiceProviderVisibilityToggle', 'showAllServiceProviders'];
+  const functions = names.map((name) => {
+    const start = source.indexOf(`async function ${name}(`);
+    return source.slice(start, source.indexOf('\n}\n', start) + 3);
+  }).join('\n');
+  const state = { settings: { hiddenServiceProviders: 'minimax-intl' }, serviceStatusBusy: false };
+  const calls = [];
+  const pending = [];
+  const context = vm.createContext({
+    state,
+    window: { tokenMonitor: { getServiceStatus: (options) => {
+      calls.push(options);
+      return new Promise((resolve) => pending.push(() => resolve({ providers: options.providerIds.map((id) => ({ id, status: 'ok' })) })));
+    } } },
+    hiddenServiceProviderSet: () => new Set(state.settings.hiddenServiceProviders.split(',').filter(Boolean)),
+    visibleServiceProviderIds: () => ['claude', 'minimax-intl'].filter((id) => !state.settings.hiddenServiceProviders.split(',').includes(id)),
+    saveSettings: async (patch) => Object.assign(state.settings, patch),
+    renderServiceStatus: () => {}
+  });
+  vm.runInContext(functions, context);
+  const toggle = vm.runInContext('onServiceProviderVisibilityToggle("minimax-intl")', context);
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].force, true);
+  assert.deepEqual(Array.from(calls[0].providerIds), ['claude', 'minimax-intl']);
+  pending.shift()();
+  await toggle;
+
+  await vm.runInContext('onServiceProviderVisibilityToggle("minimax-intl")', context);
+  assert.equal(calls.length, 1, 'hiding does not fetch');
+  const inFlight = vm.runInContext('refreshServiceStatus()', context);
+  await vm.runInContext('onServiceProviderVisibilityToggle("minimax-intl")', context);
+  assert.equal(calls.length, 2, 'no overlapping request');
+  pending.shift()();
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 3, 'new selection is checked after the active request');
+  assert.deepEqual(Array.from(calls[2].providerIds), ['claude', 'minimax-intl']);
+  assert.equal(calls[2].force, true);
+  pending.shift()();
+  await inFlight;
+  assert.equal(state.serviceStatusBusy, false);
+  assert.equal(state.serviceStatus.providers[1].status, 'ok');
+  await vm.runInContext('showAllServiceProviders()', context);
+  assert.equal(calls.length, 3, 'show all with nothing hidden does not fetch');
+  await vm.runInContext('onServiceProviderVisibilityToggle("minimax-intl")', context);
+  const showAll = vm.runInContext('showAllServiceProviders()', context);
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 4);
+  assert.equal(calls[3].force, true);
+  pending.shift()();
+  await showAll;
+});
+
+test('a failed status request only marks providers included in that request', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('async function refreshServiceStatus(');
+  const refresh = source.slice(start, source.indexOf('\n}\n', start) + 3);
+  const state = { serviceStatusBusy: false };
+  const context = vm.createContext({
+    state, SERVICE_STATUS_PLACEHOLDERS: SERVICE_STATUS_PROVIDERS,
+    visibleServiceProviderIds: () => ['claude'], renderServiceStatus: () => {},
+    t: (key) => key,
+    window: { tokenMonitor: { getServiceStatus: async () => { throw new Error('IPC failed'); } } }
+  });
+  await vm.runInContext(`${refresh}\nrefreshServiceStatus()`, context);
+  assert.deepEqual(Array.from(state.serviceStatus.providers, (provider) => provider.id), ['claude']);
+  assert.equal(state.serviceStatus.providers[0].description, 'serviceStatus.checkFailed');
+  assert.equal(state.serviceStatus.providers[0].error, 'IPC failed');
+  assert.ok(state.serviceStatus.providers[0].checkedAt);
+  assert.equal(state.serviceStatusBusy, false);
+});
