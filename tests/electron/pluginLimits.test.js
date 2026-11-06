@@ -39,3 +39,14 @@ test('native demand samples two modules, drops late data on disable, resumes aft
   for (let n = 0; n < 20 && service.records().length < 2; n++) await new Promise(setImmediate);
   assert.equal(calls, 4); service.demand(false); assert.deepEqual(service.records(), []);
 });
+test('editing visible preferences while a plugin is disabled retains its selection and mixed-order slots', () => {
+  const providers = [{ id: 'claude' }, { id: 'codex' }];
+  const one = 'plugin:sample-plugin:one', two = 'plugin:sample-plugin:two';
+  const saved = `${one},claude,${two},codex`;
+  assert.deepEqual(order.absentPluginProviders(saved, providers), [one, two]);
+  const selection = [...['codex'], ...order.absentPluginProviders(saved, providers)];
+  assert.deepEqual(new Set(selection), new Set(['codex', one, two]));
+  const moved = order.preserveAbsentPluginOrder(saved, ['codex', 'claude'], providers);
+  assert.deepEqual(moved, [one, 'codex', two, 'claude']);
+  assert.deepEqual(order.orderedLimitProviders([...providers, { id: one }, { id: two }], moved).map(row => row.id), moved);
+});

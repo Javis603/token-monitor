@@ -10401,10 +10401,14 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   setExpanded: setLimitProviderSettingsExpanded,
   applyOrder: (order) => applyPreferenceOrder('provider', order),
   preserveScroll: preserveSettingsPanelScroll,
-  mirrorOrder: (order) => { state.settings = { ...state.settings, limitProviderOrder: order.join(',') }; },
+  mirrorOrder: (order) => {
+    const value = limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, order, desktopLimitProviders()).join(',');
+    state.settings = { ...state.settings, limitProviderOrder: value };
+    return value;
+  },
   // Saved directly because the controller has already mirrored the order into
   // local state before a deferred repaint can run.
-  persistOrder: (order) => void saveSettings({ limitProviderOrder: order.join(',') }),
+  persistOrder: (_order, _id, value) => void saveSettings({ limitProviderOrder: value }),
   requestRender: () => renderLimitProviderCheckboxes()
 });
 
@@ -13003,7 +13007,9 @@ async function onLimitProviderToggle() {
   if (checked.length === 0 && state.breakdown === 'limits') {
     setBreakdown('tool');
   }
-  const patch = { limitProviders: checked.join(','), limitsEnabled: checked.length > 0 };
+  const absent = limitProviderOrderApi.absentPluginProviders(
+    state.pendingLimitProviderSelection?.limitProviders ?? state.settings?.limitProviders, desktopLimitProviders());
+  const patch = { limitProviders: [...checked, ...absent].join(','), limitsEnabled: checked.length > 0 || absent.length > 0 };
   // LimitsRuntime publishes its reconfigured snapshot synchronously before the
   // main process can send settings:push. Keep the renderer on the user's new
   // selection so that intervening stats frames cannot rebuild this checkbox
@@ -13028,14 +13034,14 @@ async function onLimitProviderToggle() {
 
 async function onLimitProviderMove(providerId, direction) {
   const next = limitProviderOrderApi.moveLimitProvider(state.settings?.limitProviderOrder, desktopLimitProviders(), providerId, direction);
-  await saveSettings({ limitProviderOrder: next });
+  await saveSettings({ limitProviderOrder: limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, next.split(','), desktopLimitProviders()).join(',') });
 }
 
 async function onLimitProviderReorder(providerId, targetIndex) {
   const current = limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, desktopLimitProviders()).join(',');
   const next = limitProviderOrderApi.reorderLimitProvider(state.settings?.limitProviderOrder, desktopLimitProviders(), providerId, targetIndex);
   if (next === current) return;
-  await saveSettings({ limitProviderOrder: next });
+  await saveSettings({ limitProviderOrder: limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, next.split(','), desktopLimitProviders()).join(',') });
 }
 
 async function onClientDisplayMove(clientId, direction) {

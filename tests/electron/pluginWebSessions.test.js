@@ -158,3 +158,12 @@ test('captured JWT expiry requires reconnect without sending expired authorizati
   assert.equal((await f.service.request('credit-test', 'platform')).status, 401);
   assert.equal(f.calls.length, 0);
 });
+test('forget matches exact plugin namespace even when another valid ID begins with its delimiter', async t => {
+  const f = fixture(t);
+  await f.service.connect('fixture', config); await f.capture();
+  await f.service.connect('fixture--other', config); await f.capture();
+  assert.equal(fs.readdirSync(f.directory).length, 2);
+  f.service.forget('fixture');
+  assert.equal(fs.readdirSync(f.directory).length, 1);
+  assert.equal((await f.service.status('fixture--other', 'platform')).state, 'connected');
+});

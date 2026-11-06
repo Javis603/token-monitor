@@ -179,6 +179,13 @@ app.whenReady().then(async () => {
   await js("tokenMonitor.plugins.setEnabled('synthetic-limits',false)");
   await waitFor("state.pluginCatalog?.limits?.modules?.length===0",'disable removes modules');
   await waitFor("quotaViewEvents.some(event=>event.id==='one'&&event.type==='dispose')",'disable disposes author view');
+  await js("openSettingsPanel();setSettingsSectionExpanded('limits',true);renderLimitProviderCheckboxes()");
+  const beforeDisabledOrder = await js("state.settings.limitProviderOrder.split(',').filter(id=>id.startsWith('plugin:'))");
+  await js("document.getElementById('limitProviderEnabled-codex').click()");
+  await waitFor("state.settings.limitProviders.split(',').includes('codex')",'edit builtin selection while plugin disabled');
+  assert.equal(await js("state.settings.limitProviders.split(',').includes('plugin:synthetic-limits:two')"),true,'disabled plugin selection retained');
+  await js("onLimitProviderMove('codex','up')");
+  assert.deepEqual(await js("state.settings.limitProviderOrder.split(',').filter(id=>id.startsWith('plugin:'))"),beforeDisabledOrder,'disabled plugin order retained');
   await js("tokenMonitor.plugins.setEnabled('synthetic-limits',true)");
   await waitFor("state.pluginCatalog?.limits?.modules?.length===2",'reenable restores modules');
   await js("tokenMonitor.plugins.reload()");
