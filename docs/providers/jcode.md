@@ -17,3 +17,9 @@ The parser normalizes split and inclusive cache accounting. Its JSON reasoning
 bucket is independent of output, so Jcode is in the shared disjoint-reasoning
 allowlist used by live totals and History. Keep the snapshot-plus-journal binary
 fixture in `verify-vendored-tokscale.js` when changing this contract.
+
+## Verification
+
+Run `node --test tests/shared/primeAgentJcode.test.js tests/docs/providerGuidance.test.js`
+and `node scripts/verify-vendored-tokscale.js` against the manifest-pinned binary.
+Native WSL discovery and live filesystem-event acceptance remain manual checks.

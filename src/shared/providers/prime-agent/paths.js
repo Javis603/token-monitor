@@ -6,7 +6,7 @@ const path = require('node:path');
 // Mirror the pinned scanner's Prime settings precedence, including null resets
 // and the empty sessionDir spelling for the current working directory.
 function primeAgentSessionRoots({ homeDir, env = process.env, cwd = process.cwd() }) {
-  const expand = (value) => value.startsWith('~/') ? path.join(homeDir, value.slice(2)) : value;
+  const expand = (value) => value === '~' ? homeDir : value.startsWith('~/') ? path.join(homeDir, value.slice(2)) : value;
   const withArtifacts = (sessions) => [sessions, path.join(path.dirname(sessions), 'session-artifacts')];
   const override = env.PRIME_AGENT_SESSION_DIR ?? env.PRIME_AGENT_CODING_AGENT_SESSION_DIR;
   if (override) return withArtifacts(expand(override));

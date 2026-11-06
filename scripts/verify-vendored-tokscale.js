@@ -66,9 +66,10 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 const TOKEN_CONTRACT_CASES = Object.freeze([
   {
     client: 'prime-agent',
-    expectedRow: { model: 'claude-sonnet-4-5', input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, reasoning: 0 },
+    expectedRow: { sessionId: 'prime-contract', model: 'claude-sonnet-4-5', input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, reasoning: 0 },
+    additionalRows: [{ sessionId: 'prime-child-contract', model: 'claude-sonnet-4-5', input: 40, output: 12, cacheRead: 8, cacheWrite: 0, reasoning: 0 }],
     hasExplicitTotal: false,
-    expectedPeriod: { totalTokens: 1650, clientTokens: 1650, clientOutputTokens: 400 },
+    expectedPeriod: { totalTokens: 1710, clientTokens: 1710, clientOutputTokens: 412 },
     expectedSession: { id: 'prime-contract', totalTokens: 1650, outputTokens: 400, reasoningTokens: 0 },
     writeFixture(home) {
       const dir = path.join(home, '.prime', 'agent', 'sessions');
@@ -78,6 +79,15 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
         { type: 'message', id: 'reply', timestamp: '2026-10-10T08:01:00Z', message: {
           role: 'assistant', provider: 'anthropic', model: 'claude-sonnet-4-5',
           usage: { input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, totalTokens: 1650 }
+        } }
+      ].map((row) => JSON.stringify(row)).join('\n') + '\n');
+      const childDir = path.join(home, '.prime', 'agent', 'session-artifacts', 'prime-contract', 'sub-deadbeef');
+      fs.mkdirSync(childDir, { recursive: true });
+      fs.writeFileSync(path.join(childDir, 'child.jsonl'), [
+        { type: 'session', version: 3, id: 'prime-child-contract', timestamp: '2026-10-10T08:00:00Z', cwd: '/tmp/prime-contract', parentSession: path.join(dir, 'root.jsonl'), rlmDepth: 1 },
+        { type: 'message', id: 'child-reply', timestamp: '2026-10-10T08:02:00Z', message: {
+          role: 'assistant', provider: 'anthropic', model: 'claude-sonnet-4-5',
+          usage: { input: 40, output: 12, cacheRead: 8, cacheWrite: 0, totalTokens: 60 }
         } }
       ].map((row) => JSON.stringify(row)).join('\n') + '\n');
     }
@@ -626,14 +636,14 @@ function assertExpected(parsed, expected = EXPECTED) {
 
 function assertTokenContract(parsed, contract) {
   const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
-  const entry = entries[0];
-  const expectedRow = { client: contract.scanClient || contract.client, ...contract.expectedRow };
-  const mismatches = Object.entries(expectedRow).filter(([key, value]) => entry?.[key] !== value);
+  const expectedRows = [contract.expectedRow, ...(contract.additionalRows || [])]
+    .map((row) => ({ client: contract.scanClient || contract.client, ...row }));
   const explicitTotalKeys = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
-  const hasExplicitTotal = entry && explicitTotalKeys.some((key) => Object.hasOwn(entry, key));
-  if (entries.length !== 1 || mismatches.length > 0 || hasExplicitTotal !== contract.hasExplicitTotal) {
+  if (entries.length !== expectedRows.length || expectedRows.some((expected) => !entries.some((entry) =>
+    Object.entries(expected).every(([key, value]) => entry[key] === value))) ||
+      entries.some((entry) => explicitTotalKeys.some((key) => Object.hasOwn(entry, key)) !== contract.hasExplicitTotal)) {
     throw new Error(
-      `${contract.client} fixture mismatch — expected one row with ${JSON.stringify(expectedRow)} and ` +
+      `${contract.client} fixture mismatch — expected ${JSON.stringify(expectedRows)} and ` +
       `hasExplicitTotal=${contract.hasExplicitTotal}, got ${JSON.stringify(entries)}. ` +
       'If Tokscale changes its JSON token contract, update Token Monitor normalization and this fixture together.'
     );

@@ -17,7 +17,7 @@ test('Prime Agent and Jcode sources match the scanner defaults and overrides', (
     assert.deepEqual(roots['prime-agent'].map(({ dir }) => dir), [path.join(homeDir, '.prime/agent/sessions'), path.join(homeDir, '.prime/agent/session-artifacts')]);
     assert.equal(roots.jcode[0].dir, path.join(homeDir, '.jcode/sessions'));
     const overridden = clientSourceRoots('prime-agent,jcode', { homeDir, env: { JCODE_HOME: '/custom/jcode', PRIME_AGENT_SESSION_DIR: '~/custom/sessions' } });
-    assert.equal(overridden.jcode[0].dir, '/custom/jcode/sessions');
+    assert.equal(overridden.jcode[0].dir, path.join('/custom/jcode', 'sessions'));
     assert.equal(overridden['prime-agent'][1].dir, path.join(homeDir, 'custom/session-artifacts'));
     assert.deepEqual(clientSourceRoots('claude', { homeDir, env: {} })['prime-agent'], undefined);
     for (const id of ['prime-agent', 'jcode']) assert.ok(SOURCE_MARKERS.some(({ client }) => client === id));
@@ -49,6 +49,8 @@ test('Prime Agent settings precedence mirrors null, empty and legacy env semanti
     // Empty primary override suppresses the legacy spelling; whitespace is a path.
     assert.equal(read({ ...env, PRIME_AGENT_SESSION_DIR: '', PRIME_AGENT_CODING_AGENT_SESSION_DIR: '/ignored' })[0], path.join(homeDir, 'global/sessions'));
     assert.equal(read({ ...env, PRIME_AGENT_SESSION_DIR: ' ' })[0], ' ');
+    assert.equal(read({ ...env, PRIME_AGENT_SESSION_DIR: '~' })[0], homeDir);
+    assert.equal(read({ PRIME_AGENT_CODING_AGENT_DIR: '~' })[0], path.join(homeDir, 'sessions'));
   } finally { fs.rmSync(homeDir, { recursive: true, force: true }); }
 });
 
