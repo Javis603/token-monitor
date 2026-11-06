@@ -20,7 +20,7 @@ function normalizeReading(input, provider) {
 }
 function createPluginLimits({ manager, getSettings, changed }) {
   let runtime = null, disposed = false;
-  let byId = new Map();
+  let byId = new Map(), retained = [];
   const demands = new Map();
   function catalog() {
     return manager.list().plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => (plugin.limits || []).map(module => ({
@@ -31,9 +31,13 @@ function createPluginLimits({ manager, getSettings, changed }) {
   function reconcile() {
     if (disposed) return;
     const settings = getSettings(), modules = catalog();
-    const selected = modules.filter(module => demands.size > 0 && settings.limitsEnabled !== false && String(settings.limitProviders || '').split(',').includes(module.id));
+    const enabled = modules.filter(module => settings.limitsEnabled !== false && String(settings.limitProviders || '').split(',').includes(module.id));
+    const current = runtime?.getSnapshot().providers || retained;
+    retained = current.filter(row => enabled.some(module => module.id === row.provider
+      && (!byId.has(module.id) || byId.get(module.id).revision === module.revision)));
+    const selected = demands.size > 0 ? enabled : [];
     const previous = byId;
-    byId = new Map(selected.map(module => [module.id, module]));
+    byId = new Map(enabled.map(module => [module.id, module]));
     if (!selected.length) { runtime?.stop(); runtime = null; return; }
     const options = { limitsEnabled: true, limitProviders: selected.map(module => module.id), limitsRefreshMs: settings.limitsRefreshMs, limitsRefreshMode: settings.limitsRefreshMode };
     if (runtime) {
@@ -62,13 +66,21 @@ function createPluginLimits({ manager, getSettings, changed }) {
     });
     runtime.subscribe(changed); runtime.start();
   }
-  return { catalog, records: () => runtime?.getSnapshot().providers || [], reconcile,
+  return { catalog, records: () => runtime?.getSnapshot().providers || retained, reconcile,
     demand(value, owner = 'main.limits') {
       if (demands.has(owner) === (value === true)) return;
       if (value === true) demands.set(owner, true); else demands.delete(owner);
       reconcile();
+      changed();
+    },
+    forgetConnections(pluginId) {
+      const modules = catalog().filter(module => module.pluginId === pluginId && module.connection);
+      for (const module of modules) runtime?.clear({ provider: module.id }, 'connection removed');
+      const ids = new Set(modules.map(module => module.id));
+      retained = retained.filter(row => !ids.has(row.provider));
+      changed();
     },
     refresh(id, reason = 'credential-change') { return runtime?.refresh(id ? { provider: id } : {}, reason) || Promise.resolve(); },
-    dispose() { disposed = true; runtime?.stop(); runtime = null; } };
+    dispose() { disposed = true; runtime?.stop(); runtime = null; retained = []; } };
 }
 module.exports = { MODULE_ID, identity, desktopProviderPreference, normalizeReading, createPluginLimits };

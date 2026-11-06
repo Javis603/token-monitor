@@ -4606,7 +4606,7 @@ function pluginLimitAccountOptions(module) {
         const result = await pluginBridge.connection(module.pluginId, module.moduleId, operation);
         status.textContent = t(`plugins.connection.state.${result.state}`);
       }
-      catch { status.textContent = t('limits.status.error'); }
+      catch { status.textContent = t('settings.limits.status.error'); }
       finally { button.disabled = false; }
     });
     box.append(button);
@@ -5036,7 +5036,7 @@ function renderLimits() {
   state.limitDetailTooltipRenderPending = false;
   const limitsEnabled = state.settings?.limitsEnabled !== false;
   const enabled = enabledLimitProviderSet();
-  void pluginBridge?.limitsDemand?.(state.breakdown === 'limits' && !document.hidden);
+  syncPluginLimitsDemand();
   const providers = providersByLimitProviderId(desktopLimitRecords());
   const orderedProviders = limitProviderOrderApi
     .orderedLimitProviders(desktopLimitProviders(), state.settings?.limitProviderOrder)
@@ -6014,6 +6014,11 @@ function isRendererWindowHidden() {
   return document.hidden || !state.windowVisible;
 }
 
+function syncPluginLimitsDemand() {
+  void pluginBridge?.limitsDemand?.(state.breakdown === 'limits'
+    && visibleStatsSurface() === 'main' && !isSettingsPanelOpen());
+}
+
 function visibleStatsSurface() {
   return statsRenderSchedulerApi.visibleStatsSurface(
     isRendererWindowHidden(),
@@ -6075,6 +6080,7 @@ function openSettingsPanel(section) {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
+  syncPluginLimitsDemand();
   syncSettingsForm();
   ensureServiceStatusTicker();
   if (section === 'notch') {
@@ -6094,6 +6100,7 @@ function openViewFromTray(viewId) {
   syncContentForm?.closeHelp();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
+  syncPluginLimitsDemand();
   state.openSession = null;
   // Navigating to the view already on screen changes no breakdown, so it never
   // repaints on its own — but the open session was just cleared above.
@@ -8114,7 +8121,7 @@ function setBreakdown(breakdown, options = {}) {
   }
   state.homeReturnVisible = options.fromHome === true && state.breakdown === 'home' && next !== 'home';
   state.breakdown = next;
-  void pluginBridge?.limitsDemand?.(next === 'limits' && !document.hidden);
+  syncPluginLimitsDemand();
   state.sessionPage = 0;
   state.rowSignature = '';
   publishViewState();
@@ -8780,6 +8787,7 @@ function applyFloatingBubbleState(payload = {}, options = {}) {
   const side = payload?.collapsed && ['left', 'right'].includes(payload.side) ? payload.side : null;
   state.floatingBubble = { collapsed: Boolean(side), side };
   syncPluginTrayDemand();
+  syncPluginLimitsDemand();
   if (isRendererWindowHidden()) {
     statsRenderScheduler.request();
     return;
@@ -12324,7 +12332,7 @@ function renderLimitProviderCheckboxesNow() {
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
     const usageItems = isEnabled ? limitProviderUsageItemRows(id) : [];
-    const hasOptions = Boolean(pluginModule || accountGroup || settings || connectionDetailKey || usageItems.length);
+    const hasOptions = Boolean(pluginModule?.connection || pluginModule?.settingsView || accountGroup || settings || connectionDetailKey || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
@@ -13422,7 +13430,7 @@ pluginMainPages = pluginViewHost ? window.TokenMonitorPluginMainPages.create({
   openWindow: ref => pluginBridge.openPage(ref),
   formatError: error => window.TokenMonitorPluginSettings.actionErrorMessage(error, t)
 }) : null;
-if (pluginViewHost) new MutationObserver(() => pluginViewHost.refreshDemand()).observe(els.shell, { attributes: true, attributeFilter: ['class'] });
+if (pluginViewHost) new MutationObserver(() => { pluginViewHost.refreshDemand(); syncPluginLimitsDemand(); }).observe(els.shell, { attributes: true, attributeFilter: ['class'] });
 let pluginCatalogKey = '';
 
 function applyPluginCatalog(list) {
@@ -13468,6 +13476,7 @@ function applyPluginCatalogUpdates(catalog) {
 
 pluginApi = pluginBridge ? {
   list: loadPluginCatalog,
+  connection: (id, key, operation) => pluginBridge.connection(id, key, operation),
   orderContent: async (target, refs) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.orderContent(target, refs)),
   selectContent: async (target, ref) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.selectContent(target, ref)),
   setEnabled: async (id, enabled, initialSetup) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled, initialSetup)),
@@ -13849,6 +13858,7 @@ els.settingsButton.addEventListener('click', (event) => {
     stopWindowShortcutRecording();
   }
   els.shell.classList.toggle('settings-open', settingsOpen);
+  syncPluginLimitsDemand();
   if (!settingsOpen && event.detail > 0) els.settingsButton.blur();
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
@@ -14954,7 +14964,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
 function handleWindowVisibilityChange() {
-  void pluginBridge?.limitsDemand?.(state.breakdown === 'limits' && !isRendererWindowHidden());
+  syncPluginLimitsDemand();
   syncPluginTrayDemand();
   pluginViewHost?.refreshDemand();
   if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());

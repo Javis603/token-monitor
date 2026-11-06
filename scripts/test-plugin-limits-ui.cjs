@@ -109,8 +109,13 @@ app.whenReady().then(async () => {
   const capture=async name=>{await pause(250);fs.writeFileSync(path.join(evidence,name),(await win.webContents.capturePage()).toPNG());};
   assert.deepEqual(await js("[...document.querySelectorAll('#limitsPanel > *')].map(node=>node.innerText.split('\\n')[0])"),['API balance','Claude','Claude']);
   await capture('limits-mixed.png');
+  await js("applyFloatingBubbleState({collapsed:true,side:'left'})");
+  await waitFor("state.pluginCatalog.limits.modules.every(module=>!module.sampling)",'bubble releases quota demand');
+  await js("applyFloatingBubbleState({collapsed:false})");
+  await waitFor("state.pluginCatalog.limits.modules.every(module=>module.sampling)",'expand restores quota demand');
   await js("openSettingsPanel();setSettingsSectionExpanded('limits',true);renderLimitProviderCheckboxes();document.querySelector('[data-provider=\"plugin:synthetic-limits:one\"]').scrollIntoView({block:'center'})");
   await waitFor("document.querySelectorAll('.limit-provider-row[data-provider^=\"plugin:\"]').length===2",'mixed settings rows');
+  await waitFor("state.pluginCatalog.limits.modules.every(module=>!module.sampling)",'settings releases quota demand');
   assert.deepEqual(await js("limitProviderRows().providers.slice(0,3).map(p=>p.id)"),['plugin:synthetic-limits:two','claude','plugin:synthetic-limits:one']);
   assert.equal(await js("window.quotaViewEvents?.filter(event=>event.type==='mount').length||0"),0,'collapsed quota views do not execute');
   await js("document.getElementById('limitProviderDisclosure-plugin:synthetic-limits:one').click()");
@@ -136,25 +141,31 @@ app.whenReady().then(async () => {
   await capture('settings-author.png');
   await js(`els.settingsPanel.scrollTop=${settingsScroll}`);
   const moduleTags = id => js(`[...document.querySelectorAll('[data-provider="plugin:synthetic-limits:${id}"] .limit-provider-tags .limit-provider-tag')].map(node=>node.textContent)`);
-  assert.deepEqual(await moduleTags('one'), ['自動','OAuth/Web/CLI','作者團隊池']);
-  assert.deepEqual(await moduleTags('two'), ['自動','API 金鑰','作者自填池','Token Plan']);
+  assert.deepEqual(await moduleTags('one'), ['OAuth/Web/CLI','作者團隊池']);
+  assert.deepEqual(await moduleTags('two'), ['API 金鑰','作者自填池','Token Plan']);
   await capture('settings-mixed.png');
   await js("tokenMonitor.updateSettings({language:'en',locale:'en'})");
   await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:two"]').textContent.includes('Custom pool')`,'localized custom label');
-  assert.deepEqual(await moduleTags('two'), ['Auto','API key','Custom pool','Token Plan']);
+  assert.deepEqual(await moduleTags('two'), ['API key','Custom pool','Token Plan']);
   await js("tokenMonitor.updateSettings({language:'zh-TW',locale:'zh-TW'})");
   await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:two"]').textContent.includes('作者自填池')`,'restore localized labels');
   const statusSelector = '[data-provider="plugin:synthetic-limits:one"] .plugin-limit-status';
   assert.equal(await js(`document.querySelector(${JSON.stringify(statusSelector)})`),null,'healthy state has no duplicate pill');
   for (const [status,label] of [['notConfigured','尚未設定'],['unauthorized','需要重新連接'],['error','讀取失敗']]) {
     await runtime.manager.call('synthetic-limits','fixture-status',{status});
+    await js("openViewFromTray('limits')");
+    await waitFor("state.pluginCatalog.limits.modules.every(module=>module.sampling)",'quota visible');
     await runtime.refreshLimits();
+    await js("openSettingsPanel();setSettingsSectionExpanded('limits',true);renderLimitProviderCheckboxes()");
     await waitFor(`document.querySelector(${JSON.stringify(statusSelector)})?.textContent===${JSON.stringify(label)}`,'right-side '+status);
     assert.equal(await js(`document.querySelectorAll('[data-provider="plugin:synthetic-limits:one"] .limit-provider-tags .limit-provider-tag-status').length`),0,'no duplicate left status');
     await capture('settings-'+status+'.png');
   }
   await runtime.manager.call('synthetic-limits','fixture-status',{status:'ok'});
+  await js("openViewFromTray('limits')");
+  await waitFor("state.pluginCatalog.limits.modules.every(module=>module.sampling)",'healthy quota visible');
   await runtime.refreshLimits();
+  await js("openSettingsPanel();setSettingsSectionExpanded('limits',true);renderLimitProviderCheckboxes()");
   await waitFor(`!document.querySelector(${JSON.stringify(statusSelector)})`,'healthy state clears pill');
 
   await js("state.limitProviderSearchQuery='API balance';renderLimitProviderCheckboxes()");
@@ -191,7 +202,7 @@ app.whenReady().then(async () => {
   await js("tokenMonitor.plugins.reload()");
   await waitFor("state.pluginCatalog?.limits?.modules?.length===2",'reload retains modules');
   await js("tokenMonitor.plugins.restart('synthetic-limits')");
-  const updated = JSON.parse(fs.readFileSync(path.join(fixtureDir,'manifest.json'))); updated.version = '1.0.1'; updated.limits[1].tags[0] = {en:'Updated pool','zh-TW':'更新後自填池'};
+  const updated = JSON.parse(fs.readFileSync(path.join(fixtureDir,'manifest.json'))); updated.version = '1.0.1'; updated.limits.push({id:'plain',name:'Plain module'}); updated.limits[1].tags[0] = {en:'Updated pool','zh-TW':'更新後自填池'};
   fs.writeFileSync(path.join(fixtureDir,'manifest.json'),JSON.stringify(updated));
   const updatePreview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(updatePreview.token)},{trustUpdate:true})`);
@@ -199,6 +210,13 @@ app.whenReady().then(async () => {
   assert.equal(await js("state.settings.limitProviderOrder.split(',')[0]"),'plugin:synthetic-limits:one');
   await js("openSettingsPanel();setSettingsSectionExpanded('limits',true);renderLimitProviderCheckboxes()");
   await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:two"]').textContent.includes('更新後自填池')`,'updated custom labels');
+  assert.equal(await js("!!document.getElementById('limitProviderDisclosure-plugin:synthetic-limits:plain')"),false,'module with no controls has no empty disclosure');
+  await js("openSettingsPanel();setSettingsSectionExpanded('plugins',true);pluginSettingsPanel.refresh()");
+  await waitFor("document.querySelector('[data-plugin-id=\"synthetic-limits\"] .plugin-card-footer')",'installed plugin controls');
+  await js(`(()=>{const card=document.querySelector('[data-plugin-id="synthetic-limits"]');[...card.querySelectorAll('button')].find(button=>button.textContent===t('plugins.connection.forget')).click();})()`);
+  await waitFor("!state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')",'native forget clears captured connection quota');
+  await js("document.querySelector('.plugin-type-filter').value='appearance';document.querySelector('.plugin-type-filter').dispatchEvent(new Event('change'))");
+  await waitFor("document.querySelector('#pluginSettingsList').textContent.includes(t('plugins.catalog.noResults'))",'filtered installed empty state');
   await js("tokenMonitor.plugins.uninstall('synthetic-limits',{keepData:true})");
   await waitFor("state.pluginCatalog?.limits?.modules?.length===0",'uninstall');
   console.log('PASS custom quota UI: lazy mount, retained draft/focus, collapse visibility, host settings save, disable cleanup');

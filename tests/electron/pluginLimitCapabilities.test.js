@@ -36,3 +36,9 @@ test('API key uses existing translation and supersedes redundant API; custom tex
   assert.equal(translate('zh-TW', tags[0].key), 'API 金鑰');
   assert.deepEqual(tags[1], { label: '中轉站', kind: 'custom' });
 });
+test('limits module IDs do not coerce missing or non-string values', () => {
+  for (const id of [undefined, true, false, null, 123, {}, ['quota']]) {
+    const result = normalizeManifest({ ...base, limits: [{ id, name: 'Quota' }] });
+    assert.equal(result.ok, false, String(id));
+  }
+});

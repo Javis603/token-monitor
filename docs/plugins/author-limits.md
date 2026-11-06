@@ -76,7 +76,10 @@ exports.activate = async ({ host }) => ({
     const response = await host.call('webSession.request', {key: moduleId});
     // Parse the adapter response into quota windows; never infer prepaid balance
     // from spending. Return notConfigured/unauthorized when appropriate.
-    return {status: response.status === 200 ? 'ok' : 'unauthorized', windows: []};
+    const status = response.status === 200 ? 'ok'
+      : [401, 403].includes(response.status) ? 'unauthorized'
+      : response.status === 429 ? 'rateLimited' : 'error';
+    return {status, windows: []};
   }
 });
 ```
@@ -85,7 +88,7 @@ exports.activate = async ({ host }) => ({
 
 `host.call('limits.read')` returns captured `{modules, providers}` from this desktop registry without starting collection. This formal read is available to active plugin UI/backends; it contains no credentials. Native consumers use the same runtime service, independent of the selected Hub data source. Plugin quota records do not enter DeviceRecord, Hub/Worker wire data, iCloud sync, quota history or alerts in this phase.
 
-Sampling reuses `LimitsRuntime`: fixed/adaptive scheduling, bounded concurrency, finite deadlines, last-good/attempt retention, retry cooldowns and latest-wins cancellation. Only enabled selected modules with native visibility demand sample. Local token usage does not request a refresh. Multiple native owners share the registry/runtime; the initial owner is the main Limits view. The last owner leaving stops scheduling and fences late data; a later reveal starts a fresh sample. Backend calls retain the existing manager's finite deadline and process lifetime rules.
+Sampling reuses `LimitsRuntime`: fixed/adaptive scheduling, bounded concurrency, finite deadlines, last-good/attempt retention, retry cooldowns and latest-wins cancellation. Only enabled selected modules with native visibility demand sample. The initial main Limits owner releases demand while Settings overlays it, while collapsed into Floating Bubble, or while the native window/document is hidden. Settings retains captured readings without quota polling; reopening visible main Limits resumes sampling. Local token usage does not request a refresh. Multiple native owners share the registry/runtime; the initial owner is the main Limits view. The last owner leaving stops scheduling and fences late data; a later reveal starts a fresh sample. Backend calls retain the existing manager's finite deadline and process lifetime rules.
 
 ## Host-managed accounts
 

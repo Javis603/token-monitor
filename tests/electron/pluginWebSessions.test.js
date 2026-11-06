@@ -167,3 +167,10 @@ test('forget matches exact plugin namespace even when another valid ID begins wi
   assert.equal(fs.readdirSync(f.directory).length, 1);
   assert.equal((await f.service.status('fixture--other', 'platform')).state, 'connected');
 });
+test('forget clears an in-memory failure even when credential directory has disappeared', async t => {
+  const f = fixture(t); await f.service.connect('credit-test', config); await f.capture();
+  f.fetch(async () => ({ ok: false, status: 401 })); await f.service.request('credit-test', 'platform');
+  fs.rmSync(f.directory, { recursive: true, force: true });
+  f.service.forget('credit-test');
+  assert.deepEqual(await f.service.status('credit-test', 'platform'), { state: 'notConnected' });
+});
