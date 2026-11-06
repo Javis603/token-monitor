@@ -179,3 +179,16 @@ test('both renderers paint from the shared modules, not their own copies', () =>
     assert.doesNotMatch(dock, new RegExp(`function ${name}\\(`), `${name} should come from the shared view`);
   }
 });
+
+
+test('Mistral amount details follow used/remaining mode without inventing missing amounts', () => {
+  const quota = { kind: 'billing', label: 'Included Vibe Code', used: 5, limit: 150, currency: 'USD' };
+  for (const showUsed of [false, true]) {
+    assert.equal(text('mistral', quota, showUsed).detail, showUsed ? '$5.00 / $150.00' : '$145.00 / $150.00');
+  }
+  assert.equal(text('mistral', { ...quota, used: 0 }, true).detail, '$0.00 / $150.00');
+  assert.equal(text('mistral', { ...quota, used: null }).detail, '');
+  assert.equal(text('mistral', { ...quota, limit: null }).detail, '');
+  assert.equal(text('mistral', { kind: 'billing', usedPercent: 25 }).detail, '');
+  assert.equal(text('mistral', { ...quota, metric: 'credits' }).detail, '');
+});
