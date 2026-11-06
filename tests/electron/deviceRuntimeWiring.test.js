@@ -396,3 +396,15 @@ test('a pending Claude fallback refresh cannot discard an earlier credential cle
     assert.equal(pending.get('claude:*').clear, true);
   }
 });
+
+test('MiniMax key settings and unchanged credential saves clear only API readings', () => {
+  const { classifySettingsChange } = require('../../src/electron/runtimeConfig');
+  const previous = { minimaxApiKey: 'key-A', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' };
+  for (const patch of [{}, { minimaxApiKey: 'key-B' }, { minimaxBillingMode: 'token-plan' },
+    { minimaxApiRegion: 'intl' }, { minimaxApiProfiles: { saved: { apiKey: 'key-B' } } }]) {
+    const change = classifySettingsChange(previous, { ...previous, ...patch });
+    assert.deepEqual(settingsLimitInvalidationPlan(change, 'minimax'), [
+      { scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }
+    ]);
+  }
+});
