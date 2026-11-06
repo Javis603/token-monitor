@@ -407,3 +407,54 @@ test('Notch refresh action uses the shared composer without changing side settin
     assert.equal(settings.edgeDockRefreshEnabled, true);
   } finally { global.document = previous; }
 });
+
+test('third-party headline controls persist a specific account independently of card visibility', () => {
+  const previousDocument = global.document;
+  global.document = { createElement: (tag) => new Element(tag), activeElement: null };
+  try {
+    const root = new Element('div');
+    const settings = { edgeDockItems: [{ type: 'limit', provider: 'thirdparty', hiddenAccounts: ['c'] }] };
+    let rows = ['a', 'b', 'c'].map((accountKey) => ({ provider: 'thirdparty', accountKey, accountName: `Account ${accountKey}` }));
+    const saves = [];
+    const composer = createEdgeDockComposer({
+      root, itemsApi, t: (key) => key, presentationApi: {},
+      getSettings: () => settings, getStats: () => ({ limits: { providers: rows } }),
+      save: (patch) => { saves.push(patch); Object.assign(settings, patch); composer.render(); },
+      providerLabel: (id) => id, providerColor: () => '#fff', hasProviderMark: () => false,
+      maskEmail: (email) => email, createRowDrag: () => ({ deferRender: () => false })
+    });
+    const all = (node) => [node, ...node.children.flatMap(all)];
+    const radio = (value) => all(root).find((node) => node.type === 'radio' && node.value === value);
+    const chooseMode = (value) => { const input = radio(value); input.checked = true; input.listeners.change(); };
+    const accountPicker = () => all(root).find((node) => node.tagName === 'LABEL'
+      && node.children[0]?.textContent === 'trayComposer.account.specificLabel').children[1];
+    composer.render();
+    all(root).find((node) => node.className === 'edge-dock-composer-item').listeners.click();
+    assert.equal(radio('lowest').checked, true);
+    chooseMode('specific');
+    assert.equal(settings.edgeDockItems[0].accountKey, 'a');
+    assert.deepEqual(accountPicker().children.map((option) => option.value), ['a', 'b']);
+    let select = accountPicker();
+    select.value = 'b';
+    select.listeners.change();
+    assert.equal(settings.edgeDockItems[0].accountKey, 'b');
+    assert.deepEqual(settings.edgeDockItems[0].hiddenAccounts, ['c']);
+    assert.equal(all(root).filter((node) => node.className === 'edge-dock-composer-account-name').length, 3);
+    chooseMode('lowest');
+    chooseMode('specific');
+    assert.equal(accountPicker().value, 'b', 'mode changes retain the explicit account');
+    select = accountPicker();
+    global.document.activeElement = select;
+    rows = rows.filter((row) => row.accountKey !== 'b');
+    composer.render();
+    assert.equal(accountPicker(), select, 'stats refresh keeps the native picker attached while focused');
+    global.document.activeElement = null;
+    select.listeners.blur();
+    assert.equal(select.value, 'b');
+    assert.equal(select.children.find((option) => option.value === 'b').disabled, true);
+    assert.equal(select.children.find((option) => option.value === 'b').textContent, 'trayComposer.account.none');
+    assert.equal(saves.at(-1).edgeDockItems[0].accountKey, 'b', 'missing account never persists a sibling fallback');
+  } finally {
+    global.document = previousDocument;
+  }
+});

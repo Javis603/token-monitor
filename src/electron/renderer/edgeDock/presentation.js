@@ -598,7 +598,16 @@
     const activeHeadline = id === 'codex' && options.accountMode !== 'lowest'
       ? projected.find((account) => account.summary.active && account.summary.headlineRemaining !== null) || null
       : null;
-    const headline = activeHeadline || tightest || moneyOnly;
+    // A fixed third-party headline must not silently switch to a sibling when
+    // the selected account is hidden, missing, stale or unable to report.
+    const specificMode = id === 'thirdparty' && options.accountMode === 'specific';
+    const specificAccount = specificMode
+      ? projected.find((account) => options.accountKey && account.record.accountKey === options.accountKey) || null
+      : null;
+    const headline = specificMode
+      ? (specificAccount && (specificAccount.summary.headlineRemaining !== null
+        || specificAccount.summary.headlineIsMoney) ? specificAccount : null)
+      : activeHeadline || tightest || moneyOnly;
     const headlineWindow = headline?.summary.headlineWindow || null;
     const headlineCredits = headlineWindow && balanceDisplay.isCreditsWindow(headlineWindow)
       ? {
@@ -617,7 +626,9 @@
       id,
       kind: 'provider',
       provider: id,
-      status: headline ? 'ok' : (accounts.some((account) => account.summary.status === 'stale') ? 'stale' : 'error'),
+      status: headline ? 'ok' : (specificMode
+        ? (specificAccount?.summary.status === 'stale' ? 'stale' : 'error')
+        : (accounts.some((account) => account.summary.status === 'stale') ? 'stale' : 'error')),
       remainingPercent: headline ? headline.summary.headlineRemaining : null,
       severityPercent: headline ? headline.summary.severityPercent : null,
       windowKind: headlineWindow ? String(headlineWindow.kind || '') : '',
