@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const test = require('node:test');
 const { verifyVendoredTokscaleClients } = require('../../scripts/verify-vendored-tokscale-clients');
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
@@ -103,10 +104,15 @@ test('a binary that still recognizes the umbrella id but dropped its tokscale al
   );
 });
 
-test('fork-only clients are verified by an isolated scan, not by --help', () => {
+test('fork-only clients are verified by an isolated offline scan, not by --help', () => {
   const calls = [];
-  const spawn = (bin, args) => {
+  const spawn = (bin, args, options) => {
     calls.push(args);
+    if (args[0] !== '--help') {
+      assert.ok(args.includes('--offline'), 'capability scans must not fetch pricing');
+      assert.deepEqual(fs.readdirSync(args[5]), []);
+      assert.equal(options.timeout, 30_000);
+    }
     return { status: 0, stdout: args[0] === '--help' ? helpTextFor(ALL_TOKSCALE_SUPPORTED) : '{}', stderr: '' };
   };
   verifyVendoredTokscaleClients({
@@ -119,7 +125,27 @@ test('fork-only clients are verified by an isolated scan, not by --help', () => 
   const scan = calls.find((args) => args[0] !== '--help');
   assert.deepEqual(scan.slice(0, 4), ['--json', '--client', FORK_ONLY_CLIENT_IDS.join(','), '--today']);
   assert.equal(scan[4], '--home');
+  assert.equal(fs.existsSync(scan[5]), false, 'temporary scan home is removed');
   assert.ok(!FORK_ONLY_CLIENT_IDS.some((client) => helpTextFor(ALL_TOKSCALE_SUPPORTED).includes(client)));
+});
+
+test('an offline scan timeout still fails closed and removes its temporary home', () => {
+  let home;
+  assert.throws(
+    () => verifyVendoredTokscaleClients({
+      manifest: { platforms: { x: {} } },
+      resolveEntry: () => ({ key: 'linux-x64', entry: {} }),
+      resolveTarget: () => '/vendored/tokscale',
+      spawn: (bin, args) => {
+        if (args[0] === '--help') return { status: 0, stdout: helpTextFor(ALL_TOKSCALE_SUPPORTED) };
+        home = args[5];
+        return { status: null, error: new Error('spawnSync /vendored/tokscale ETIMEDOUT') };
+      },
+      log: () => {}
+    }),
+    /scan failed to execute: .* ETIMEDOUT/
+  );
+  assert.equal(fs.existsSync(home), false);
 });
 
 test('a binary without the fork client module fails closed', () => {

@@ -55,11 +55,11 @@ function fixture(t) {
   });
   return {
     hub,
-    open(blocked = false) {
+    open(blocked = false, version = '3') {
       const res = new SlowResponse(blocked);
       responses.push(res);
       hub.server.emit('request', {
-        method: 'GET', url: '/api/stats/stream', headers: { 'x-token-monitor-stream': '3' }
+        method: 'GET', url: '/api/stats/stream', headers: { 'x-token-monitor-stream': version }
       }, res);
       return res;
     },
@@ -210,3 +210,32 @@ for (const reason of ['close', 'error', 'stop']) {
     assert.equal(res.writes.length, writes);
   });
 }
+
+
+test('v4 drain sends a full resync before resuming a revisioned delta chain', async (t) => {
+  const { createStatsStreamReceiver } = require('../../src/shared/hubProtocol');
+  const { hub, open, publish } = fixture(t);
+  publish(1);
+  // Make patches smaller than full snapshots without relying on timing fields.
+  hub.ingest({ deviceId: 'padding', today: {totalTokens: 1, sessions: Object.fromEntries(Array.from({length:100},(_,i)=>['s'+i,{totalTokens:1}]))} });
+  const res = open(false, '4');
+  const receiver = createStatsStreamReceiver();
+  publish(2);
+  res.blocked = true;
+  publish(3);
+  publish(4);
+  publish(5);
+  await res.release();
+  assert.match(res.writes.at(-1), /^event: stats/);
+  // A catch-up snapshot has no shared base revision. Bootstrap it before deltas.
+  publish(6);
+  assert.match(res.writes.at(-1), /^event: stats/);
+  publish(7);
+  assert.match(res.writes.at(-1), /^event: delta/);
+  let last;
+  for (const frame of res.writes) {
+    const type = frame.match(/^event: (.+)$/m)[1];
+    last = receiver.receive(type, event(frame));
+  }
+  assert.equal(last.periods.today.totalTokens, 8);
+});

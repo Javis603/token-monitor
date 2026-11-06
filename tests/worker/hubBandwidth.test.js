@@ -5,6 +5,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 const zlib = require('node:zlib');
+const { prepareSseFanout, sseFrameForClient } = require('../../src/shared/hubProtocol');
 
 function fakeState() {
   const map = new Map();
@@ -24,6 +25,44 @@ async function createHub() {
   const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
   return new worker.HubDO(fakeState(), { TOKEN_MONITOR_SECRET: 'shh', STALE_AFTER_MS: '600000' });
 }
+
+test('Worker encodes only selected SSE frames and shares their bytes across peers', async t => {
+  const previousStats = { n: 1, stable: '中😀'.repeat(1000) };
+  const stats = { ...previousStats, n: 2 };
+  const changed = prepareSseFanout({ stats, previousStats, revision: 2, hasDeltaClients: true });
+  const renewed = prepareSseFanout({
+    stats, previousStats: stats, lastContentKey: changed.contentKey,
+    revision: 3, hasDeltaClients: true, hasFreshnessClients: true
+  });
+  assert.match(changed.delta, /^event: delta/);
+  const v4 = { deltaEvents: true, streamRevision: 1 };
+  for (const [name, frames, peers, expected] of [
+    ['no subscribers', changed, [], []],
+    ['v4 only', changed, [v4, v4], [changed.delta]],
+    ['legacy and late join fallback', changed, [v4, v4, {}, { deltaEvents: true, streamRevision: null }], [changed.delta, changed.stats]],
+    ['v3 and v4 freshness', renewed, [{ freshnessEvents: true }, { deltaEvents: true, streamRevision: 2 }], [renewed.freshness, renewed.delta]]
+  ]) await t.test(name, async t => {
+    const hub = await createHub();
+    const encode = t.mock.method(hub.encoder, 'encode');
+    const writes = [];
+    const clients = peers.map(peer => ({ ...peer, writer: {
+      write(chunk) { writes.push(chunk); return Promise.resolve(); }, close() {}
+    } }));
+    for (const client of clients) hub.sseClients.add(client);
+    t.after(() => { for (const client of clients) hub.dropClient(client); });
+    const selected = clients.map(client => sseFrameForClient(frames, client));
+    hub.fanoutSseFrames(frames);
+    assert.equal(encode.mock.callCount(), expected.length);
+    assert.deepEqual(new Set(encode.mock.calls.map(call => call.arguments[0])), new Set(expected));
+    assert.equal(writes.length, clients.length);
+    for (let i = 0; i < clients.length; i++) {
+      assert.deepEqual(Buffer.from(writes[i]), Buffer.from(selected[i]));
+      if (clients[i].deltaEvents) assert.equal(clients[i].streamRevision, frames.revision);
+      const first = selected.indexOf(selected[i]);
+      assert.equal(writes[i], writes[first], 'peers selecting the same frame share one encoded chunk');
+    }
+  });
+});
 
 function ingestRequest(payload, extraHeaders = {}) {
   return new Request('https://hub.example/api/ingest', {
@@ -98,10 +137,13 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
   const initialAt = utcTodayAt('10:00:00.000');
   const refreshedAt = utcTodayAt('10:01:00.000');
   const changedAt = utcTodayAt('10:02:00.000');
+  // Live observations must be in the past even when CI runs before 10:00 UTC.
+  const activityAt = new Date(Date.now() - 2000).toISOString();
+  const renewedActivityAt = new Date(Date.now() - 1000).toISOString();
   const base = {
     deviceId: 'dev-a',
     updatedAt: initialAt,
-    today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: initialAt } } } },
+    today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: activityAt } } } },
     clientHealth: {
       version: 1,
       clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
@@ -144,14 +186,14 @@ test('the Worker stream matches the Node Hub freshness and coalescing behavior',
     legacy.length = 0;
 
     await hub.fetch(ingestRequest({ ...base, today: { ...base.today, sessions: { a: {
-      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: refreshedAt }
+      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: renewedActivityAt }
     } } } }, { 'x-token-monitor-response': 'minimal' }));
     await waitFor(() => modern.length === 1 && legacy.length === 1);
     assert.equal(modern[0].event, 'freshness');
-    assert.equal(Object.values(modern[0].data.stats.sessionActivityObservedAt.today)[0], refreshedAt);
-    assert.equal(Object.values(modern[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], refreshedAt);
+    assert.equal(Object.values(modern[0].data.stats.sessionActivityObservedAt.today)[0], renewedActivityAt);
+    assert.equal(Object.values(modern[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], renewedActivityAt);
     assert.equal(legacy[0].event, 'stats');
-    assert.equal(Object.values(legacy[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, refreshedAt);
+    assert.equal(Object.values(legacy[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, renewedActivityAt);
     modern.length = 0;
     legacy.length = 0;
 

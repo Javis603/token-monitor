@@ -56,7 +56,7 @@
     const usageItems = window.TokenMonitorLimitUsageItems;
     const limitPresentation = window.TokenMonitorLimitProviderPresentation;
 
-    const view = { page: 'home', limitPage: 0, breakdownPeriod: 'today', scrub: null };
+    const view = { page: 'home', limitPage: 0, breakdownPeriod: 'today', scrub: null, monthDate: null };
     const node = el('div', 'notch-panel');
     const band = el('div', 'notch-band');
     const leadTrack = el('div', 'notch-tabs');
@@ -71,6 +71,7 @@
     const trailRail = el('div', 'notch-tab-rail is-trailing');
     trailRail.append(trailTrack);
     const status = el('div', 'notch-status');
+    const pluginMounts = new Map();
     const trailLane = el('div', 'notch-band-trailing');
     trailLane.append(trailRail, status);
     band.append(leadRail, el('div', 'notch-band-gap'), trailLane);
@@ -196,9 +197,9 @@
     function pluginPageState(page) {
       return pluginHost?.state('notch', page.slice(PLUGIN_PAGE_PREFIX.length));
     }
-    function pluginIconName(page) {
+    function pluginIconMetadata(page) {
       const ref = page.slice(PLUGIN_PAGE_PREFIX.length);
-      return pluginPageState(page)?.icon || payload?.panel?.pluginCatalog?.[ref]?.icon || 'dot';
+      return pluginPageState(page) || payload?.panel?.pluginCatalog?.[ref] || { icon: 'dot' };
     }
     function pageTitle(page) {
       if (!page.startsWith(PLUGIN_PAGE_PREFIX)) return t(`notch.tab.${page}`);
@@ -338,13 +339,6 @@
       if (hours < 24) return t('edgeDock.agoHours', { count: hours });
       return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
     }
-    function duration(fromValue, nowMs = Date.now()) {
-      const ms = Date.parse(fromValue || '');
-      if (!Number.isFinite(ms)) return '';
-      const minutes = Math.max(0, Math.round((nowMs - ms) / 60000));
-      if (minutes < 60) return t('notch.durationMinutes', { minutes });
-      return t('notch.durationHours', { hours: Math.floor(minutes / 60), minutes: String(minutes % 60).padStart(2, '0') });
-    }
     function clientLabel(id) {
       return CLIENT_LABELS[id] || providerLabel(id);
     }
@@ -377,8 +371,17 @@
 
     // A plugin page is mounted only while selected, so the plugin samples
     // nothing for a page the user is not looking at.
+    function unmountPluginPage(page) {
+      const mount = pluginMounts.get(page);
+      if (mount) {
+        pluginMounts.delete(page);
+        mount.headerActions.remove();
+        pluginHost?.unmount?.(mount.body);
+      }
+    }
     function releasePluginPage(page) {
       if (!page?.startsWith(PLUGIN_PAGE_PREFIX)) return;
+      unmountPluginPage(page);
       pageNodes.get(page)?.replaceChildren();
       pageKeys.delete(page);
       pluginHost?.refreshDemand();
@@ -388,7 +391,8 @@
       const previous = pageOrder.indexOf(view.page);
       settleRolls();
       stopTitleReading();
-      view.scrub = null;
+      if (view.scrub || view.monthDate) pageKeys.delete('home');
+      view.scrub = null; view.monthDate = null;
       releasePluginPage(view.page);
       view.page = page;
       for (const [name, pageNode] of pageNodes) {
@@ -483,10 +487,11 @@
         button.setAttribute('aria-selected', String(selected));
         if (page.startsWith(PLUGIN_PAGE_PREFIX)) {
           const icon = button.querySelector('.notch-tab-plugin-icon');
-          const iconName = pluginIconName(page);
+          const metadata = pluginIconMetadata(page);
+          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon]);
           if (icon && icon.dataset.icon !== iconName && pluginViews) {
             icon.dataset.icon = iconName;
-            icon.replaceChildren(pluginViews.iconNode(document, iconName, null, 15));
+            icon.replaceChildren(pluginViews.navigationIcon(document, metadata, 15));
           }
         }
         button.setAttribute('aria-label', pageTitle(page));
@@ -497,6 +502,7 @@
         pageNode.inert = page !== view.page;
         pageNode.setAttribute('aria-hidden', String(page !== view.page));
       }
+      for (const [page, mount] of pluginMounts) mount.headerActions.hidden = page !== view.page || !shown;
       pluginHost?.refreshDemand();
     }
 
@@ -627,13 +633,8 @@
       body.append(sessionHeading(row, 'notch-now-title'));
       const meta = el('div', 'notch-now-meta');
       if (running) meta.append(wave());
-      const label = el('span');
-      if (!running && live) label.append(text('', `${t('notch.waiting')} · `));
-      label.append(text('', clientLabel(row.client)));
-      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
-      const time = running ? duration(row.startedAt, nowMs) : !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
-      if (time) label.append(text('', ` · ${time}`));
-      meta.append(label);
+      const time = !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
+      meta.append(sessionMetaLabel(row, { running, lead: !running && live ? t('notch.waiting') : '', time }));
       const extra = (running ? waitingCount : Math.max(0, waitingCount - 1));
       if (extra > 0) meta.append(text('notch-waiting-note', t('notch.moreWaiting', { count: extra })));
       body.append(meta);
@@ -712,12 +713,10 @@
 
       const right = el('div', 'notch-week');
       const head = el('div', 'notch-week-head');
-      // Seven days can cross a month boundary; name both months then.
       const monthName = new Intl.DateTimeFormat(locale(), { month: 'long', timeZone: 'UTC' });
-      const months = [...new Set([week.days[0]?.date, week.days.at(-1)?.date].filter(Boolean)
-        .map((date) => monthName.format(new Date(`${date.slice(0, 7)}-01T00:00:00Z`))))];
-      head.append(text('notch-week-title', months.length ? months.join('–') : new Intl.DateTimeFormat(locale(), { month: 'long' }).format(new Date(nowMs))),
-        text('notch-week-caption', t('notch.last7')));
+      const currentMonth = new Intl.DateTimeFormat(locale(), { month: 'long' }).format(new Date(nowMs));
+      const monthTitle = text('notch-week-title', view.monthDate ? monthName.format(new Date(`${view.monthDate}T00:00:00Z`)) : currentMonth);
+      head.append(monthTitle, text('notch-week-caption', t('notch.last7')));
       const bars = el('div', 'notch-week-bars');
       const names = el('div', 'notch-week-names');
       const dates = el('div', 'notch-week-dates');
@@ -752,10 +751,12 @@
         if (day.tokens === null) column.classList.add('is-unknown');
         column.setAttribute('aria-label', `${day.date} · ${day.tokens === null ? '—' : formatTokens(day.tokens)}`);
         column.addEventListener('pointerenter', () => {
-          if (day.today || day.tokens === null) { scrub(null); return; }
+          if (day.today || day.tokens === null) { scrub(null, day.date); return; }
           scrub({ day, label: weekday.format(new Date(`${day.date}T00:00:00Z`)) });
         });
-        column.addEventListener('focus', () => { if (!day.today && day.tokens !== null) scrub({ day, label: weekday.format(new Date(`${day.date}T00:00:00Z`)) }); });
+        column.addEventListener('focus', () => {
+          scrub(!day.today && day.tokens !== null ? { day, label: weekday.format(new Date(`${day.date}T00:00:00Z`)) } : null, day.date);
+        });
         column.addEventListener('blur', () => scrub(null));
         bars.append(column);
         names.append(text(day.today ? 'is-today' : '', weekday.format(new Date(`${day.date}T00:00:00Z`))));
@@ -787,9 +788,10 @@
       right.append(head, bars, names, dates, foot);
       if (!payload?.panel?.week?.available) right.classList.add('is-partial');
 
-      function scrub(value) {
+      function scrub(value, date = value?.day.date) {
         const leaving = view.scrub && !value;
         view.scrub = value;
+        view.monthDate = date || null;
         kicker.classList.toggle('is-scrubbing', Boolean(value));
         label.textContent = value ? value.label : t('notch.today');
         scrubDate.textContent = value ? `${Number(value.day.date.slice(5, 7))}/${Number(value.day.date.slice(8, 10))}` : '';
@@ -803,6 +805,8 @@
         const costReading = reading ? usageCost('', reading) : text('', '');
         cost.replaceChildren(...costReading.children);
         cost.classList.toggle('edge-dock-cost-reading', Boolean(reading));
+        monthTitle.textContent = date ? monthName.format(new Date(`${date}T00:00:00Z`))
+          : new Intl.DateTimeFormat(locale(), { month: 'long' }).format(new Date());
         if (leaving) renderPage('home');
       }
       pageNode.replaceChildren(left, right);
@@ -868,10 +872,20 @@
       const sub = el('div', 'notch-limit-sub');
       if (records.length > 1) {
         const shown = limitAccountTitle(entry.provider, record, records.indexOf(record), records);
-        const accountName = text('notch-limit-account', shown || t('settings.codex.nAccounts', { count: records.length }), shown);
-        accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
-        overflowText.bind(accountName);
-        sub.append(accountName);
+        const minimaxFallback = entry.provider === 'minimax' && !shown
+          ? record?.source === 'oauth' ? (record.accountLabel || 'MiniMax Code')
+            : record?.source === 'api' ? t('settings.minimax.accountFallback', {
+              number: records.filter(value => value.source === 'api').indexOf(record) + 1
+            }) : ''
+          : '';
+        const title = shown || minimaxFallback || (entry.provider !== 'minimax'
+          ? t('settings.codex.nAccounts', { count: records.length }) : '');
+        if (title) {
+          const accountName = text('notch-limit-account', title, title);
+          accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
+          overflowText.bind(accountName);
+          sub.append(accountName);
+        }
         if (account?.active) {
           const live = text('notch-limit-active', '✓', t('limits.codex.activeAccountHint'));
           live.setAttribute('aria-label', t('limits.codex.activeAccountHint'));
@@ -1045,7 +1059,9 @@
       const title = text(className, sessionTitle(row));
       title.dataset.overflowKey = JSON.stringify(['notch', view.page, row.key || `${row.client}:${row.sessionId}`]);
       overflowText.bind(title);
-      heading.append(mark(row.client), title);
+      // The mark is a painted mask. Say the tool beside it, out of the visual
+      // line, the same way the Edge Dock does. The meta row has no room for it.
+      heading.append(mark(row.client), text('sr-only', `${clientLabel(row.client)} `), title);
       return heading;
     }
 
@@ -1068,6 +1084,26 @@
       });
     }
 
+    // The heading mark already names the tool. This line does not wrap, so
+    // repeating the name pushes the model, effort and cache reading off the row.
+    function sessionMetaLabel(row, { running = false, lead = '', time = '' } = {}) {
+      const label = el('span');
+      const parts = [];
+      if (lead) parts.push(text('', lead));
+      if (sessionRows.sessionModelMetadataLabel(row)) parts.push(sessionModelMetadata(row));
+      const percent = row.tokenDataUnavailable ? '' : sessionRows.cacheHitLabel(row);
+      if (percent) {
+        const reading = text('notch-session-cache-hit', `${running ? 'Cache ' : ''}${percent}`);
+        parts.push(reading);
+      }
+      if (time) parts.push(text('', time));
+      parts.forEach((part, index) => {
+        if (index) label.append(text('', ' · '));
+        label.append(part);
+      });
+      return label;
+    }
+
     function activeRow(row, stateName, nowMs) {
       const node = el('div', `notch-active is-${stateName}`);
       node.setAttribute('role', 'listitem');
@@ -1077,12 +1113,7 @@
       const meta = el('div', 'notch-active-meta');
       if (stateName === 'running') meta.append(wave());
       else meta.append(text('notch-pill', t('notch.waiting')));
-      const label = el('span');
-      label.append(text('', clientLabel(row.client)));
-      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
-      const time = duration(row.startedAt, nowMs);
-      if (time) label.append(text('', ` · ${time}`));
-      meta.append(label);
+      meta.append(sessionMetaLabel(row, { running: stateName === 'running' }));
       body.append(meta);
       const value = el('div', 'notch-active-value');
       value.append(sessionTokens(row, 'notch-active-tokens', false));
@@ -1309,24 +1340,21 @@
     }
 
     function renderPluginPage(pageNode, ref) {
-      const pluginState = pluginHost?.state('notch', ref);
-      const head = el('div', 'notch-kicker-row');
-      head.append(el('span', 'notch-kicker', pluginState?.title || t('notch.tab.plugin')));
-      if (pluginState?.pluginName && pluginState.pluginName !== pluginState.title) head.append(el('span', 'notch-plugin-owner', pluginState.pluginName));
+      const page = `${PLUGIN_PAGE_PREFIX}${ref}`;
+      unmountPluginPage(page);
+      const headerActions = el('div', 'notch-plugin-header-actions');
+      headerActions.hidden = page !== view.page || !shown;
+      trailLane.append(headerActions);
       const mount = el('div', 'notch-plugin-body');
-      pageNode.replaceChildren(head, mount);
-      pluginHost?.mount(mount, ref, 'notch');
+      pluginMounts.set(page, { body: mount, headerActions });
+      pageNode.replaceChildren(mount);
+      pluginHost?.mount(mount, ref, 'notch', { headerActions });
     }
 
     // Plugin pushes refresh tab titles and icons that arrived after mount.
     function pluginViewsChanged() {
       paintTabs();
       if (!view.page.startsWith(PLUGIN_PAGE_PREFIX)) renderPage(view.page, { force: true });
-      if (view.page.startsWith(PLUGIN_PAGE_PREFIX)) {
-        const kicker = pageNodes.get(view.page)?.querySelector('.notch-kicker');
-        const pluginState = pluginHost?.state('notch', view.page.slice(PLUGIN_PAGE_PREFIX.length));
-        if (kicker && pluginState?.title) kicker.textContent = pluginState.title;
-      }
     }
 
     function scrollEnv(hit) {
@@ -1404,7 +1432,7 @@
       syncPluginPages(next?.panel?.pluginPages, next?.panel?.builtinPages, next?.panel?.pageOrder);
       node.classList.toggle('is-reduced-motion', prefersReducedMotion());
       if (opening) {
-        view.scrub = null;
+        view.scrub = null; view.monthDate = null;
         dropHiddenPages();
         pageKeys = new Map();
         // Entrance motion plays once per reveal, never on a data push.
@@ -1430,7 +1458,7 @@
       fitTabs();
     }
 
-    node.addEventListener('pointerleave', () => { if (view.scrub) { view.scrub = null; renderPage('home', { force: true }); } });
+    node.addEventListener('pointerleave', () => { if (view.scrub || view.monthDate) { view.scrub = null; view.monthDate = null; renderPage('home', { force: true }); } });
     function stopTitleReading() {
       for (const title of node.querySelectorAll('.fade-overflow')) overflowText.stop(title);
     }
@@ -1445,7 +1473,7 @@
       dropGesture();
       clearPageMotion();
       node.classList.remove('is-entering');
-      view.scrub = null;
+      view.scrub = null; view.monthDate = null;
       dropHiddenPages();
     }
     const fuelObserver = typeof window.ResizeObserver === 'function'

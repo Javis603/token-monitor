@@ -39,6 +39,14 @@
     return [row?.modelLabel ?? sessionModelLabel(row), sessionReasoningEffortForRow(row)].filter(Boolean).join(' · ');
   }
 
+  function sessionSubtitleForDisplay(row, subtitle, { keepClient = false } = {}) {
+    const text = subtitle || '';
+    const client = row.clientLabel || row.client;
+    if (!keepClient && text === client) return '';
+    if (!keepClient && client && text.startsWith(`${client} · `)) return text.slice(client.length + 3);
+    return text;
+  }
+
   // Shared by full session rows and compact Home/Dock/Notch rows. Settings
   // remain visible after live metrics expire, including archived sessions.
   function sessionModelMetadataNode(document, row, { translate, view, ...options }) {
@@ -517,6 +525,7 @@
       stale: false,
       client,
       clientLabel,
+      sourceDevice: session.sourceDevice || options.localSourceDevice,
       nativeSessionId: textValue(session?.nativeSessionId),
       t3ThreadId: textValue(session?.t3ThreadId),
       modelTokens: session?.models || (session?.model ? { [session.model]: value } : {}),
@@ -615,6 +624,7 @@
           promptCache: sessionLive.sessionPromptCacheForRow(session, now),
           client,
           clientLabel,
+          sourceDevice: session.sourceDevice,
           nativeSessionId: textValue(session?.nativeSessionId),
           t3ThreadId: textValue(session?.t3ThreadId),
           titled: Boolean(sessionTitle) || undefined,
@@ -909,6 +919,7 @@
     sessionStatusNode,
     sessionReasoningEffortForRow,
     sessionModelMetadataLabel,
+    sessionSubtitleForDisplay,
     sessionModelMetadataNode,
     applyBreakdownRowSemantics,
     archivedSessionCount,
@@ -922,6 +933,7 @@
     handleBreakdownRowKeydown,
     sessionBreakdownIncomplete,
     sessionCacheHitPercent,
+    cacheHitLabel,
     sessionIdLabel,
     sessionDetailIdLabel,
     sessionTitleForDisplay,

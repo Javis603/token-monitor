@@ -65,7 +65,8 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsRefreshMode',
   'limitsRefreshMs',
   'cursorDisabledAccountIds',
-  'opencodeLocalLimitsEnabled'
+  'opencodeLocalLimitsEnabled',
+  'claudeCliFallbackEnabled'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
 // Derived from the account declarations: every watched field plus a
@@ -146,6 +147,7 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     limitsRefreshMode: normalizeLimitsRefreshMode(settings.limitsRefreshMode),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
     claudePrepaidBalanceEnabled: settings.claudePrepaidBalanceEnabled !== false,
+    claudeCliFallbackEnabled: settings.claudeCliFallbackEnabled !== false,
     opencodeLocalLimitsEnabled: settings.opencodeLocalLimitsEnabled === true,
     opencodeAmbientEnabled: settings.opencodeAmbientEnabled !== false,
     // Every declared account field: settings lane, declared env fallbacks,
@@ -228,7 +230,12 @@ function envelopeFromSettings(settings = {}, context = {}) {
 function classifySettingsChange(previous = {}, next = {}) {
   const limitScopes = [];
   for (const [provider, keys] of Object.entries(LIMIT_PROVIDER_SETTING_KEYS)) {
-    if (changedAny(previous, next, keys)) limitScopes.push({ provider });
+    if (!changedAny(previous, next, keys)) continue;
+    // A fallback preference does not change account identity. Keep last-good
+    // readings if the ensuing OAuth-only refresh fails transiently.
+    const preserveReadings = provider === 'claude'
+      && !changedAny(previous, next, keys.filter((key) => key !== 'claudeCliFallbackEnabled'));
+    limitScopes.push({ provider, ...(preserveReadings ? { preserveReadings: true } : {}) });
   }
   return {
     modeStructural: changedAny(previous, next, MODE_STRUCTURAL_KEYS),

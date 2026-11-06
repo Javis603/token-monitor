@@ -43,8 +43,9 @@
     }
     if (current !== meta.ref) {
       if (current) scroll.set(current, content.scrollTop);
+      if (content.firstElementChild) host.unmount(content.firstElementChild);
       current = meta.ref; content.replaceChildren();
-      const mount = document.createElement('div'); content.append(mount); host.mount(mount, current, 'page');
+      const mount = document.createElement('div'); content.append(mount); host.mount(mount, current, 'page', { headerActions: document.getElementById('pageHeaderActions') });
       content.scrollTop = scroll.get(current) || 0;
     }
   }

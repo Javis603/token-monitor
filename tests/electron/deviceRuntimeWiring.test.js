@@ -342,3 +342,69 @@ test('limits-only refresh waits for completion and reports errors without scanni
   assert.equal(completed, true);
   assert.deepEqual(errors, ['quota offline']);
 });
+
+test('changing only Claude CLI fallback retains last-good quota after a transient failure', async (t) => {
+  const { classifySettingsChange, limitsConfigFromSettings } = require('../../src/electron/runtimeConfig');
+  for (const status of ['sourceRateLimited', 'unavailable']) {
+    const before = { limitProviders: 'claude', claudeCliFallbackEnabled: true };
+    const after = { ...before, claudeCliFallbackEnabled: false };
+    const runtime = createLimitsRuntime(limitsConfigFromSettings(before), {
+      autoStart: false, autoRetry: false, cleanupGraceMs: 0,
+      probeProvider: async (_provider, config) => [
+        { provider: 'claude', accountKey: 'oauth', source: 'oauth', status: config.claudeCliFallbackEnabled ? 'ok' : status,
+          updatedAt: '2026-11-04T00:00:00Z', windows: config.claudeCliFallbackEnabled ? [{ kind: 'session', usedPercent: 25 }] : [] },
+        { provider: 'claude', accountKey: 'web', source: 'web', status: 'ok',
+          updatedAt: '2026-11-04T00:00:00Z', windows: [{ kind: 'session', usedPercent: 50 }] }
+      ]
+    });
+    t.after(() => runtime.stop());
+    await runtime.refresh({ provider: 'claude' }, 'startup');
+    const original = runtime.getSnapshot().providers;
+    runtime.reconfigure(limitsConfigFromSettings(after));
+    const plan = settingsLimitInvalidationPlan(classifySettingsChange(before, after));
+    assert.equal(plan[0].options.clear, false);
+    for (const entry of plan) await runLimitInvalidation({ clearLimits: runtime.clear, refreshLimits: runtime.refresh }, entry.scope, entry.reason, entry.options);
+    const rows = runtime.getSnapshot().providers;
+    const oauth = rows.find(row => row.accountKey === 'oauth');
+    assert.equal(oauth.status, status);
+    assert.deepEqual(oauth.windows, original.find(row => row.accountKey === 'oauth').windows);
+    assert.deepEqual(rows.find(row => row.accountKey === 'web').windows, original.find(row => row.accountKey === 'web').windows);
+  }
+});
+
+test('Claude credential changes still clear readings when fallback also changes', () => {
+  const { classifySettingsChange } = require('../../src/electron/runtimeConfig');
+  for (const key of ['claudeWebCookie', 'claudeWebOrganizationId']) {
+    const before = { claudeCliFallbackEnabled: true, [key]: 'old' };
+    const after = { claudeCliFallbackEnabled: false, [key]: 'new' };
+    const plan = settingsLimitInvalidationPlan(classifySettingsChange(before, after));
+    assert.deepEqual(plan, [{ scope: { provider: 'claude' }, reason: 'settings-change', options: { clear: true } }]);
+  }
+});
+
+test('a pending Claude fallback refresh cannot discard an earlier credential clear', () => {
+  const vm = require('node:vm');
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const source = main.slice(main.indexOf('function limitInvalidationKey('), main.indexOf('function queueLimitInvalidation('));
+  for (const priorScope of [{ provider: 'claude' }, { provider: 'claude', accountKey: 'old-account' }]) {
+    const pending = new Map();
+    const context = { pendingLimitInvalidations: pending };
+    vm.runInNewContext(source, context);
+    context.rememberPendingLimitInvalidation(priorScope, 'credential-change', { clear: true });
+    context.rememberPendingLimitInvalidation({ provider: 'claude' }, 'settings-change', { clear: false });
+    assert.equal(pending.size, 1);
+    assert.equal(pending.get('claude:*').clear, true);
+  }
+});
+
+test('MiniMax key settings and unchanged credential saves clear only API readings', () => {
+  const { classifySettingsChange } = require('../../src/electron/runtimeConfig');
+  const previous = { minimaxApiKey: 'key-A', minimaxBillingMode: 'api', minimaxApiRegion: 'cn' };
+  for (const patch of [{}, { minimaxApiKey: 'key-B' }, { minimaxBillingMode: 'token-plan' },
+    { minimaxApiRegion: 'intl' }, { minimaxApiProfiles: { saved: { apiKey: 'key-B' } } }]) {
+    const change = classifySettingsChange(previous, { ...previous, ...patch });
+    assert.deepEqual(settingsLimitInvalidationPlan(change, 'minimax'), [
+      { scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }
+    ]);
+  }
+});

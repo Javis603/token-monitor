@@ -17,7 +17,7 @@ const {
   shouldUseTemplateTrayIcon,
   sortCodexAccountsForDisplay
 } = require('../../src/electron/tray');
-const { translate } = require('../../src/electron/renderer/i18n');
+const { LANGUAGE_OPTIONS, MESSAGES, translate } = require('../../src/electron/renderer/i18n');
 const {
   compactLimitSelection,
   isBarsTrayIconMode,
@@ -37,6 +37,10 @@ const stats = {
     today: {
       clients: { claude: 10, codex: 25 },
       clientCosts: { claude: 0.5, codex: 0.2 }
+    },
+    month: {
+      clients: { claude: 50, codex: 75 },
+      clientCosts: { claude: 1.5, codex: 1.2 }
     },
     allTime: {
       clients: { claude: 100, codex: 40 },
@@ -544,6 +548,50 @@ test('tray context menu complements the primary click with useful commands', () 
   ]);
 });
 
+test('monthly tray menu presets are selectable radio items with exactly one checked mode', () => {
+  const monthlyItems = [
+    ['tokensMonth', 'Tokens This Month'],
+    ['costMonth', 'Cost This Month'],
+    ['bothMonth', 'Tokens + Cost This Month']
+  ];
+  for (const [selectedMode, selectedLabel] of monthlyItems) {
+    const calls = [];
+    const template = buildTrayMenuTemplate({
+      state: { trayContent: selectedMode },
+      onSetTrayContent: mode => calls.push(mode)
+    });
+    const { submenu } = template.find(item => item.label === 'Tray Display');
+    assert.deepEqual(submenu.filter(item => item.checked).map(item => item.label), [selectedLabel], selectedMode);
+    for (const [mode, label] of monthlyItems) {
+      const item = submenu.find(entry => entry.label === label);
+      assert.ok(item, label);
+      assert.equal(item.type, 'radio', label);
+      assert.equal(item.checked, mode === selectedMode, label);
+      item.click();
+    }
+    assert.deepEqual(calls, monthlyItems.map(([mode]) => mode), selectedMode);
+  }
+});
+
+test('monthly tray menu labels are localized in every supported language', async (t) => {
+  const keys = ['tokensMonth', 'costMonth', 'bothMonth'].map(mode => `trayMenu.content.${mode}`);
+  for (const { value: locale } of LANGUAGE_OPTIONS.filter(option => option.value !== 'auto')) {
+    await t.test(locale, () => {
+      assert.deepEqual(keys.filter(key => !MESSAGES[locale][key]), [], `${locale}: missing monthly labels`);
+      const template = buildTrayMenuTemplate({
+        state: { trayContent: 'tokensMonth' },
+        translate: (key, params) => translate(locale, key, params)
+      });
+      const { submenu } = template.find(item => item.label === translate(locale, 'trayMenu.trayDisplay'));
+      for (const key of keys) {
+        const label = MESSAGES[locale][key];
+        assert.equal(submenu.filter(item => item.label === label).length, 1, `${locale}: ${key}`);
+        if (locale !== 'en') assert.notEqual(label, MESSAGES.en[key], `${locale}: ${key} must not fall back to English`);
+      }
+    });
+  }
+});
+
 test('tray context menu offers edge dock controls only where the dock is supported', () => {
   const patches = [];
   const unsupported = buildTrayMenuTemplate({ state: { trayContent: 'tokens', windowBehavior: 'floating' } });
@@ -806,15 +854,18 @@ test('tray main-process actions surface refresh errors and expand a collapsed bu
   assert.match(source, /if \(value === 'tray'\)[\s\S]*?saveSettings\(\);\s*syncFloatingBubbleAvailability\(\);\s*enterTrayMode\(\);/);
 });
 
-test('usage tray icon picks the top token client for day and total token modes', () => {
+test('usage tray icon picks the top token client for day, month and total token modes', () => {
   assert.equal(pickUsageTrayIconId(stats, 'tokens', ['claude', 'codex']), 'codex');
   assert.equal(pickUsageTrayIconId(stats, 'both', ['claude', 'codex']), 'codex');
+  assert.equal(pickUsageTrayIconId(stats, 'tokensMonth', ['claude', 'codex']), 'codex');
+  assert.equal(pickUsageTrayIconId(stats, 'bothMonth', ['claude', 'codex']), 'codex');
   assert.equal(pickUsageTrayIconId(stats, 'tokensAll', ['claude', 'codex']), 'claude');
   assert.equal(pickUsageTrayIconId(stats, 'bothAll', ['claude', 'codex']), 'claude');
 });
 
-test('usage tray icon picks the top cost client for day and total cost modes', () => {
+test('usage tray icon picks the top cost client for day, month and total cost modes', () => {
   assert.equal(pickUsageTrayIconId(stats, 'cost', ['claude', 'codex']), 'claude');
+  assert.equal(pickUsageTrayIconId(stats, 'costMonth', ['claude', 'codex']), 'claude');
   assert.equal(pickUsageTrayIconId(stats, 'costAll', ['claude', 'codex']), 'codex');
 });
 
@@ -1369,6 +1420,13 @@ test('tray cost text uses the selected display currency', () => {
   assert.equal(formatTrayText({ periods: { today: { costUsd: 1, totalTokens: 12_000 } } }, 'cost'), '$1.0000');
   assert.equal(formatTrayText({ periods: { today: { costUsd: 1, totalTokens: 12_000 } } }, 'cost', 'TWD'), 'NT$31.50');
   assert.equal(formatTrayText({ periods: { today: { costUsd: 1, totalTokens: 12_000 } } }, 'both', 'HKD'), '12.0K · HK$7.80');
+});
+
+test('tray month modes use monthly token and cost totals', () => {
+  const monthlyStats = { periods: { month: { costUsd: 12, totalTokens: 345_000 } } };
+  assert.equal(formatTrayText(monthlyStats, 'tokensMonth'), '345.0K');
+  assert.equal(formatTrayText(monthlyStats, 'costMonth'), '$12.00');
+  assert.equal(formatTrayText(monthlyStats, 'bothMonth', 'HKD'), '345.0K · HK$93.60');
 });
 
 test('tray token text follows the shared localized unit setting', () => {

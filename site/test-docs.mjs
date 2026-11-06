@@ -17,23 +17,101 @@ test("canonical document links stay local while implementation links keep reposi
   assert.equal(referenceHref('README.md#ui-lifecycle', references[1].source), 'plugin-reference.html#ui-lifecycle');
   assert.equal(referenceHref('author-ui-options.md#original-content-targets', references[0].source), 'plugin-ui-reference.html#original-content-targets');
   assert.equal(referenceHref('../../src/shared/plugins/manifest.js', references[0].source), 'https://github.com/Javis603/token-monitor/blob/main/src/shared/plugins/manifest.js');
+  assert.equal(referenceHref('author-data-settings.md#plugin-settings', references[0].source), 'plugin-data-reference.html#plugin-settings');
+  assert.equal(referenceHref('author-data-resources.md#live-token-rate', references[0].source), 'plugin-resources-reference.html#live-token-rate');
+  assert.equal(referenceHref('publishing.md', references[0].source), 'plugin-publishing-reference.html');
+  assert.equal(referenceHref('validation.md#author-self-check', references[0].source), 'plugin-testing-reference.html#author-self-check');
   assert.equal(referenceHref('//external.test', references[0].source), null);
   assert.equal(referenceHref('data:text/html,example', references[0].source), null);
   assert.equal(referenceHref('../../../escape', references[0].source), null);
 });
 
-test("built references contain current canonical content and byte-identical agent Markdown", async () => {
+test("built references contain current canonical content and source-context Markdown links", async () => {
   for (const reference of references) {
     const markdown = await readFile(new URL(reference.source, root), 'utf8');
     const html = await readFile(new URL(`_site/docs/${reference.page}.html`, root), 'utf8');
-    const raw = await readFile(new URL(`_site/docs/${reference.page}.md`, root), 'utf8');
-    assert.equal(raw, markdown);
+    assert.ok(html.includes(`href="https://raw.githubusercontent.com/Javis603/token-monitor/main/${reference.source}"`));
+    assert.ok(!html.includes(`href="${reference.page}.md"`));
     assert.ok(html.includes(renderReference(markdown, reference.source).split('</h1>')[1]), reference.page);
     assert.equal((html.match(/<article /g) || []).length, 1);
     assert.ok(html.includes('data-docs-shared lang="en"'));
     assert.ok(!html.includes('src="../islands.js'));
     assert.ok(html.includes('href="../docs.css'));
   }
+});
+
+test("published Markdown bookmarks remain small canonical-source pointers", async () => {
+  for (const reference of references) {
+    const markdown = await readFile(new URL(`_site/docs/${reference.page}.md`, root), 'utf8');
+    assert.ok(markdown.includes(`[canonical Markdown](https://raw.githubusercontent.com/Javis603/token-monitor/main/${reference.source})`));
+    assert.ok(markdown.length < 512, reference.page);
+    assert.equal([...markdown.matchAll(/\]\(([^)]+)\)/g)].length, 1);
+  }
+});
+
+test("canonical reference edits trigger Pages and each reference has a navigation entry", async () => {
+  const workflow = await readFile(new URL('.github/workflows/pages.yml', root), 'utf8');
+  assert.match(workflow, /concurrency:\n  group: pages-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false/);
+  for (const event of ['push', 'pull_request']) {
+    const section = workflow.split(`  ${event}:`)[1].split(/\n  [a-z_]+:/)[0];
+    assert.ok(section.includes("'docs/plugins/author-quickstart.md'"), `${event}: quickstart parity trigger missing`);
+    for (const reference of references) assert.ok(section.includes(`'${reference.source}'`));
+  }
+  assert.ok(workflow.includes("if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"));
+  const output = new URL('_site/docs/', root);
+  for (const reference of references) {
+    assert.ok(workflow.includes(`'${reference.source}'`), `Pages does not watch ${reference.source}`);
+    const html = await readFile(new URL(reference.page + '.html', output), 'utf8');
+    assert.ok(html.includes(`<a href="${reference.page}.html" aria-current="page"`), reference.page);
+  }
+});
+
+test("agent Markdown relative links resolve to repository files in their original source context", async () => {
+  const { Marked } = await import('marked');
+  const marked = new Marked();
+  for (const reference of references) {
+    const markdown = await readFile(new URL(reference.source, root), 'utf8');
+    const links = [];
+    marked.walkTokens(marked.lexer(markdown), token => { if (token.type === 'link') links.push(token.href); });
+    const base = new URL(reference.source, 'https://raw.githubusercontent.com/Javis603/token-monitor/main/');
+    for (const href of links) {
+      if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')) continue;
+      const resolved = new URL(href, base);
+      const relative = resolved.pathname.split('/main/')[1];
+      assert.ok(relative, `${reference.page}: ${href}`);
+      assert.ok((await stat(new URL(relative, root))).isFile(), `${reference.page}: ${href}`);
+    }
+  }
+});
+
+for (const scenario of [
+  { name: 'success', query: async () => ({ availability: 'available', rows: [{totalTokens: 42}] }), expected: 'Today snapshot: 42 tokens' },
+  { name: 'not collected', query: async () => ({ availability: 'notCollected', rows: [] }), expected: 'Today snapshot: notCollected' },
+  { name: 'rejection', query: async () => { throw new Error('Plugin is disabled'); }, expected: 'Today snapshot: could not read data: Plugin is disabled' }
+]) test(`standalone quickstart query labels ${scenario.name} without retaining data in the mount`, async () => {
+  const markdown = await readFile(new URL('docs/plugins/author-quickstart.md', root), 'utf8');
+  const blocks = [...markdown.matchAll(/```js\n([\s\S]*?)```/g)].map(match => match[1]);
+  const describeToday = new Function(blocks[1] + '; return describeToday;')();
+  const ctx = { data: { query: async query => {
+    assert.deepEqual(query, { resource: 'usage', period: 'today' });
+    return scenario.query();
+  } } };
+  assert.equal(await describeToday(ctx), scenario.expected);
+  const module = await import('data:text/javascript,' + encodeURIComponent(blocks[0]));
+  const nodes = [];
+  const savedDocument = globalThis.document;
+  globalThis.document = { createElement: () => ({ remove() { this.removed = true; } }) };
+  try {
+    const mount = module.activate(ctx).mount({ append(...children) { nodes.push(...children); } }, {surface: 'page'});
+    assert.equal(nodes.length, 1, 'first UI retains only its context label');
+    mount.update({surface: 'page', width: 600, height: 400});
+    assert.equal(nodes[0].textContent, 'My view: page');
+    mount.update({surface: 'page', period: 'month', width: 800, height: 500});
+    assert.equal(nodes[0].textContent, 'My view: month');
+    assert.ok(!nodes[0].textContent.includes('42'), 'no previous query result remains under the new context');
+    mount.dispose();
+    assert.ok(nodes.every(node => node.removed));
+  } finally { globalThis.document = savedDocument; }
 });
 
 test("reference cross-links and section anchors resolve in the built pages", async () => {
@@ -214,6 +292,11 @@ test("legacy tutorial redirects reach real sections for every supported language
       const html = await readFile(new URL(`site/docs/${page}.html`, root), 'utf8');
       const article = html.match(new RegExp(`<article[^>]*lang="${lang}"[^>]*>([\\s\\S]*?)</article>`))[1];
       assert.ok(article.includes('plugin-distribution-reference.html#create-a-community-catalog'));
+      if (page === 'plugin-quickstart') {
+        for (const link of ['plugin-data-reference.html#live-updates-with-cleanup', 'plugin-data-reference.html#plugin-settings', 'plugin-resources-reference.html#live-token-rate', 'plugin-testing-reference.html#author-self-check', 'plugin-publishing-reference.html']) {
+          assert.ok(article.includes(`href="${link}"`), `${lang}: ${link}`);
+        }
+      }
     }
   }
 });
@@ -286,6 +369,12 @@ test("six-language plugin guides use the first API and packageable manifest exam
       const encoded = article.match(/<code>({&quot;tmApi&quot;[\s\S]*?)<\/code>/)?.[1];
       assert.ok(encoded, language);
       const manifest = JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&amp;', '&'));
+      const quickstart = await readFile(new URL('docs/plugins/author-quickstart.md', root), 'utf8');
+      const canonicalUI = quickstart.match(/```js\n([\s\S]*?)```/)[1].trim();
+      const encodedUI = article.match(/<code>(export function activate[\s\S]*?)<\/code>/)?.[1];
+      assert.ok(encodedUI, `${language}: complete activate(ctx) example missing`);
+      const decodedUI = encodedUI.replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
+      assert.equal(decodedUI.trim(), canonicalUI, `${language}: first UI differs from canonical quickstart`);
       assert.equal(manifest.tmApi, 1);
       const files = Object.fromEntries(manifest.files.map(name => [name, Buffer.from('// author fixture').toString('base64')]));
       const bytes = Buffer.from(JSON.stringify({ format: 2, manifest, files }));

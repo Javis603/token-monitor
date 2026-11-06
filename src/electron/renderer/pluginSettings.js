@@ -11,7 +11,19 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorPluginSettings = api;
 })(typeof window !== 'undefined' ? window : null, function createPluginSettingsApi(positionApi) {
+  const isFeatured = origin => origin?.kind === 'official' || origin?.kind === 'maintainer';
   const SURFACE_ORDER = ['home', 'page', 'tray', 'edgeDock', 'notch'];
+  const SURFACE_LABEL_KEYS = { home: 'views.home', page: 'plugins.initial.purpose.page', tray: 'settings.plugins.surface.tray',
+    edgeDock: 'settings.display.edgeDock', notch: 'settings.notch.title' };
+  const surfaceLabel = (surface, t) => t(SURFACE_LABEL_KEYS[surface] || `settings.plugins.surface.${surface}`);
+
+  function contentTargetLabel(target, t) {
+    const [surface, page, kind] = target.split('.');
+    const name = surface === 'edgeDock' && page === 'rail' ? kind : page;
+    const key = ['home', 'limits', 'model', 'tool', 'device', 'project', 'session', 'sessions', 'trends', 'status'].includes(name)
+      ? `views.${name === 'sessions' ? 'session' : name}` : `plugins.content.${name}`;
+    return surface === 'main' ? t(key) : `${surfaceLabel(surface, t)} · ${t(key)}${page === 'rail' ? ` · ${t('plugins.content.rail')}` : ''}`;
+  }
 
   function el(document, tag, className, text) {
     const node = document.createElement(tag);
@@ -39,6 +51,9 @@
     let operation = null;
     let catalogData = null, activeTab = 'installed', query = '', sourcesOpen = false;
     let selectedPluginId = '', diagnostics = false, installedPosition = null;
+    let catalogModal = null;
+    let catalogRefreshing = false, catalogRefreshPending = null, catalogRefreshError = '', disposed = false;
+    let updateCatalog = null, catalogResultsDirty = false;
     let catalogReview = null, menuId = 0, aboutOpen = false;
     let actionError = null;
     const sourceDraft = { url: '', publicKey: '' };
@@ -159,7 +174,7 @@
       node.type = 'button'; node.disabled = busy; node.addEventListener('click', action); return node;
     }
 
-    function identity(name, author, origin, iconName, image) {
+    function identity(name, author, origin, iconName, image, brand = '') {
       const group = el(document, 'div', 'plugin-identity');
       const art = el(document, 'span', 'plugin-identity-art'); art.setAttribute('aria-hidden', 'true');
       if (typeof image === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image) && image.length <= 90000) {
@@ -168,10 +183,15 @@
         art.append(img);
       } else art.append(window.TokenMonitorPluginViews.iconNode(document, iconName || 'dot', null, 20));
       const title = el(document, 'div', 'plugin-card-title');
-      const source = el(document, 'span', 'plugin-source');
-      if (author) source.append(el(document, 'span', 'plugin-author', author));
-      if (origin) {
-        const label = el(document, 'span', 'plugin-origin-label', origin);
+      const source = el(document, 'span', brand ? 'plugin-source plugin-source-official' : 'plugin-source');
+      if (author && !brand) source.append(el(document, 'span', 'plugin-author', author));
+      if (origin || brand) {
+        const label = el(document, 'span', `plugin-origin-label${brand ? ' plugin-origin-official' : ''}`);
+        if (brand) {
+          const shield = el(document, 'span', 'plugin-shield'); shield.setAttribute('aria-hidden', 'true');
+          label.append(shield);
+        }
+        label.append(document.createTextNode(brand ? `Token Monitor ${t(`plugins.origin.${brand}`)}` : origin));
         source.append(label);
       }
       title.append(el(document, 'span', 'plugin-name', name), source);
@@ -245,6 +265,11 @@
       packagePreview = await api.catalogPreview(entry.origin.id, entry.id, version);
     }
 
+    function catalogVersion(entry) {
+      const remembered = chosenVersions.get(`${entry.origin.id}/${entry.id}`);
+      return entry.versions?.some(version => version.version === remembered && version.installable) ? remembered : entry.version;
+    }
+
     function catalogReviewPanel() {
       const entry = catalogReview;
       const wrap = el(document, 'section', 'plugin-detail plugin-catalog-review');
@@ -253,7 +278,7 @@
         packagePreview = null; catalogReview = null; render(); tabControls.get(activeTab)?.focus({ preventScroll: true });
       }, 'plugin-back'));
       const key = `${entry.origin.id}/${entry.id}`;
-      const version = chosenVersions.get(key) || entry.version;
+      const version = catalogVersion(entry);
       if (entry.versions?.length) {
         const row = el(document, 'label', 'plugin-version-picker', t('plugins.catalog.version'));
         const select = el(document, 'select'); select.dataset.controlKey = 'review-version';
@@ -268,15 +293,24 @@
             // pending. Drain to its latest choice before enabling installation.
             let requested;
             do {
-              requested = chosenVersions.get(key);
+              requested = catalogVersion(entry);
               await previewCatalog(entry, requested);
-            } while (requested !== chosenVersions.get(key));
+            } while (requested !== catalogVersion(entry));
             return null;
           });
         });
         row.append(select); wrap.append(row);
         const selected = entry.versions.find(v => v.version === version);
-        if (selected?.changelog) wrap.append(el(document, 'p', 'plugin-description', selected.changelog));
+        if (entry.installedVersion && selected?.updateNotes.length) {
+          const notes = el(document, 'section', 'plugin-update-notes plugin-detail-section');
+          notes.append(el(document, 'h3', 'plugin-detail-heading', t('plugins.catalog.updateRange', { from: entry.installedVersion, to: version })));
+          for (const change of selected.updateNotes) {
+            const release = el(document, 'div', 'plugin-update-note');
+            release.append(el(document, 'h4', 'plugin-detail-heading', `v${change.version}`), el(document, 'p', 'plugin-description', change.changelog));
+            notes.append(release);
+          }
+          wrap.append(notes);
+        }
       }
       if (packagePreview) wrap.append(packagePanel());
       else wrap.append(button(t('plugins.ui.previewPackage'), () => void run(async () => { await previewCatalog(entry, version); return null; })));
@@ -285,7 +319,7 @@
 
     function typeLabels(plugin) {
       const labels = el(document, 'span', 'plugin-types');
-      for (const type of ['widget', 'page', 'appearance']) {
+      for (const type of ['widget', 'page', 'appearance', 'automation']) {
         if (!plugin.types?.includes(type)) continue;
         labels.append(el(document, 'span', `plugin-type plugin-type-${type}`, t(`plugins.type.${type}`)));
       }
@@ -300,30 +334,119 @@
       });
     }
 
+    function choiceLabel(row, input, name, purpose) {
+      row.append(input, el(document, 'span', 'plugin-choice-name', name));
+      if (purpose) {
+        row.classList.add('plugin-tagged-choice');
+        row.append(document.createTextNode(' '), el(document, 'span', 'plugin-purpose-tag', purpose));
+      }
+    }
+
+    function choiceControls({ key, title, options, value, change, toggle = null }) {
+      const group = el(document, 'fieldset', 'plugin-choice-group');
+      group.dataset.choiceKey = key;
+      if (toggle) {
+        const row = el(document, 'label', 'plugin-placement-choice');
+        const input = el(document, 'input'); input.type = 'checkbox'; input.value = toggle.value;
+        input.checked = value === toggle.value; input.dataset.controlKey = key;
+        input.addEventListener('change', () => change(input.checked ? toggle.value : toggle.offValue));
+        choiceLabel(row, input, toggle.label, toggle.purpose); group.append(row);
+      } else {
+        group.append(el(document, 'legend', '', title));
+        const name = `plugin-choice-${++menuId}`;
+        for (const option of options) {
+          const row = el(document, 'label', 'plugin-placement-choice');
+          const input = el(document, 'input'); input.type = 'radio'; input.name = name; input.value = option.value ?? '';
+          input.checked = value === option.value; input.dataset.controlKey = `${key}/${option.value ?? 'native'}`;
+          input.addEventListener('change', () => { if (input.checked) change(option.value); });
+          choiceLabel(row, input, option.label, option.purpose); group.append(row);
+        }
+      }
+      return group;
+    }
+
+    function initialSetupControls(source) {
+      const review = source.initialSetup;
+      if (!review?.fields?.length) return null;
+      source.initialChoices ??= { ...review.values };
+      const group = el(document, 'fieldset', 'plugin-initial-setup');
+      group.append(el(document, 'legend', '', t('plugins.initial.title')),
+        el(document, 'p', 'settings-note', t('plugins.initial.note')));
+      const rows = el(document, 'div', 'plugin-initial-choices'); group.append(rows);
+      for (const field of review.fields) {
+        if (field.kind === 'placement' || field.kind === 'background') {
+          const row = el(document, 'label', 'plugin-placement-choice');
+          const input = el(document, 'input'); input.type = 'checkbox'; input.checked = source.initialChoices[field.key] === true;
+          input.dataset.controlKey = `initial/${field.key}`;
+          input.addEventListener('change', () => { source.initialChoices[field.key] = input.checked; });
+          choiceLabel(row, input, field.kind === 'background' ? t('settings.plugins.background') : field.title,
+            field.kind === 'placement' ? field.surface === 'home'
+              ? t('plugins.initial.purpose.home', { name: surfaceLabel('home', t) }) : surfaceLabel(field.surface, t) : null);
+          rows.append(row);
+        } else {
+          if (field.kind === 'content') {
+            const current = field.options.find(option => option.current);
+            const choices = field.options.filter(option => !option.current).map(option => ({ ref: option.value, pluginName: source.name }));
+            rows.append(contentControls({ key: `initial/${field.key}`, target: field.target, choices, value: source.initialChoices[field.key],
+              current: current ? { value: current.value, label: t('plugins.initial.keepCurrent') } : null,
+              change: value => { source.initialChoices[field.key] = value; render(); }, tagged: true }));
+            continue;
+          }
+          const options = [{ value: null, label: t('plugins.initial.keepAppearance') },
+            ...field.options.map(option => ({ value: option.value, label: option.label, purpose: t('plugins.initial.appearance') }))];
+          rows.append(choiceControls({ key: `initial/${field.key}`, title: t('plugins.initial.appearance'),
+            options, value: source.initialChoices[field.key], change: value => { source.initialChoices[field.key] = value; },
+            toggle: field.options.length === 1 ? { value: field.options[0].value, offValue: null,
+              label: field.options[0].label, purpose: t('plugins.initial.appearance') } : null }));
+        }
+      }
+      return group;
+    }
+
+    function contentControls({ key, target, choices, value, change, current = null, tagged = false }) {
+      const label = contentTargetLabel(target, t);
+      const purpose = tagged ? t('plugins.initial.purpose.content', { target: label }) : null;
+      const options = [{ value: null, label: t('plugins.content.native') },
+        ...(current ? [current] : []), ...choices.map(view => ({ value: view.ref,
+          label: tagged ? view.pluginName : t('plugins.content.use', { name: view.pluginName }), purpose }))];
+      const row = choiceControls({ key, title: t('plugins.content.source', { target: label }), options, value, change,
+        toggle: choices.length === 1 && !current ? { value: choices[0].ref, offValue: null,
+          label: tagged ? choices[0].pluginName : t('plugins.content.replace', { name: choices[0].pluginName, target: label }), purpose } : null });
+      row.classList.add('plugin-content-choice');
+      return row;
+    }
+
     function packagePanel() {
       const p = packagePreview;
+      const featured = isFeatured(p.origin);
       const panel = el(document, 'section', 'plugin-consent plugin-package-preview');
       panel.dataset.errorTarget = 'package';
       panel.setAttribute('aria-label', t('plugins.package.review'));
-      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon));
+      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, isFeatured(p.origin) ? p.origin.kind : ''));
       const meta = el(document, 'div', 'plugin-card-meta');
       meta.append(el(document, 'span', 'plugin-version', `${p.installedVersion ? `${p.installedVersion} → ` : ''}${p.version}`), typeLabels(p)); panel.append(meta);
       panel.append(el(document, 'p', 'plugin-description', p.description));
       if (p.origin.kind !== 'local') panel.append(el(document, 'p', 'plugin-description', p.origin.label));
       if (p.origin.url) panel.append(el(document, 'code', 'plugin-log', p.origin.url));
       if (p.origin.packageUrl) panel.append(el(document, 'code', 'plugin-log', p.origin.packageUrl));
-      panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
-      panel.append(el(document, 'p', 'settings-note', t(p.operation === 'install' ? 'plugins.package.enableLater' : 'plugins.package.grants')));
+      if (!featured) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
+      panel.append(el(document, 'p', 'settings-note', t(featured
+        ? p.operation === 'update' ? 'plugins.package.officialUpdate' : list.enabled ? 'plugins.package.officialInstall' : 'plugins.package.officialEnableLater'
+        : p.operation === 'install' ? (list.enabled ? 'plugins.package.installConsent' : 'plugins.package.enableLater') : 'plugins.package.grants')));
+      const setup = initialSetupControls(p); if (setup) panel.append(setup);
       const details = el(document, 'details', 'plugin-logs'); details.append(el(document, 'summary', '', t('plugins.package.integrity')));
       details.append(el(document, 'code', 'plugin-log', p.sha256)); panel.append(details);
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
-      actions.append(button(t('settings.plugins.cancel'), () => { void api.cancelInstall(p.token); packagePreview = null; catalogReview = null; render(); }),
-        button(t(`plugins.package.${p.operation}`), () => void run(async () => {
-          const next = await api.install(p.token); packagePreview = null; catalogReview = null;
-          activeTab = 'installed';
-          if (p.operation === 'install' || next.plugins.find(plugin => plugin.id === p.id)?.status === 'needsApproval') { consentFor = p.id; revealConsent = true; }
-          return next;
-        }, 'package'), 'plugin-allow'));
+      const install = trustInstall => void run(async () => {
+        const next = await api.install(p.token, { trustUpdate: p.operation === 'update', trustInstall, initialSetup: p.initialChoices });
+        packagePreview = null; catalogReview = null; activeTab = 'installed';
+        if (p.operation === 'update' && next.plugins.find(plugin => plugin.id === p.id)?.status === 'needsApproval') { consentFor = p.id; revealConsent = true; }
+        return next;
+      }, 'package');
+      actions.append(button(t('settings.plugins.cancel'), () => { void api.cancelInstall(p.token); packagePreview = null; catalogReview = null; render(); }));
+      if (p.operation === 'install' && list.enabled) actions.append(button(t('plugins.package.installOnly'), () => install(false)));
+      actions.append(button(t(p.operation === 'update' ? featured ? 'plugins.package.update' : 'plugins.package.trustUpdate' : list.enabled ? featured ? 'plugins.package.installEnable' : 'plugins.package.trustInstall' : 'plugins.package.installOnly'),
+        () => install(p.operation === 'install' && list.enabled), 'plugin-allow'));
       panel.append(actions); return panel;
     }
 
@@ -374,44 +497,261 @@
       actions.append(copy, guide); panel.append(actions, prompt, status); return panel;
     }
 
+    function catalogDialog(entry) {
+      catalogModal?.close();
+      const previousFocus = document.activeElement;
+      const dialog = el(document, 'dialog', 'plugin-catalog-dialog');
+      catalogModal = dialog;
+      let imageObserver = null;
+      const heading = el(document, 'header', 'plugin-catalog-dialog-head');
+      heading.append(identity(entry.name, entry.author,
+        entry.origin.id === 'github-discovery' ? '' : t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon, isFeatured(entry.origin) ? entry.origin.kind : ''));
+      const close = button('×', () => dialog.close(), 'plugin-dialog-close');
+      close.setAttribute('aria-label', t('settings.plugins.cancel')); heading.append(close);
+      const body = el(document, 'div', 'plugin-catalog-dialog-body');
+      body.append(el(document, 'p', 'plugin-description', entry.description));
+      const meta = el(document, 'div', 'plugin-card-meta');
+      if (entry.version) meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`));
+      meta.append(typeLabels(entry));
+      if (Number.isSafeInteger(entry.stars)) {
+        const stars = el(document, 'span', 'plugin-stars', `☆ ${entry.stars.toLocaleString(getLocale())}`);
+        stars.setAttribute('aria-label', `${t('plugins.catalog.stars')}: ${entry.stars}`); meta.append(stars);
+      }
+      body.append(meta);
+      if (entry.repository) body.append(button(t('plugins.catalog.openRepository'), () => void onOpenExternal(entry.repository), 'plugin-inline-action'));
+      if (!isFeatured(entry.origin)) body.append(el(document, 'p', 'settings-note', t('plugins.catalog.unreviewed')));
+      const readme = el(document, 'div', 'plugin-catalog-readme', t('plugins.view.loading'));
+      body.append(readme);
+      void api.catalogDetails(entry.origin.id, entry.id).then(result => {
+        if (!dialog.isConnected || !dialog.open) return;
+        // Main supplies Markdown-generated markup with author HTML disabled.
+        readme.innerHTML = result.html || '';
+        if (!result.html) readme.textContent = t('plugins.catalog.noReadme');
+        for (const link of readme.querySelectorAll('a[href]')) {
+          link.addEventListener('click', event => {
+            event.preventDefault();
+            void Promise.resolve(onOpenExternal(link.href)).catch(() => {});
+          });
+        }
+        if (!result.imageCount) return;
+        const loadImage = async slot => {
+          if (!dialog.isConnected || !dialog.open) return;
+          const index = Number(slot.dataset.readmeImage);
+          try {
+            const data = await api.catalogReadmeImage(result.documentId, index);
+            if (!dialog.isConnected || !dialog.open) return;
+            const image = el(document, 'img'); image.src = data; image.alt = slot.getAttribute('aria-label') || t('plugins.catalog.screenshot', { index: index + 1 });
+            const zoom = button('', event => {
+              event.preventDefault(); event.stopPropagation();
+              const lightbox = el(document, 'dialog', 'plugin-catalog-dialog plugin-image-dialog');
+              const bar = el(document, 'header', 'plugin-catalog-dialog-head');
+              const exit = button('×', () => lightbox.close(), 'plugin-dialog-close'); exit.setAttribute('aria-label', t('settings.plugins.cancel')); bar.append(exit);
+              const imageBody = el(document, 'div', 'plugin-catalog-dialog-body');
+              const large = el(document, 'img'); large.src = data; large.alt = image.alt; imageBody.append(large);
+              lightbox.append(bar, imageBody); dialog.append(lightbox);
+              dismissOnOutside(lightbox);
+              lightbox.addEventListener('close', () => { lightbox.remove(); if (zoom.isConnected) zoom.focus({ preventScroll: true }); });
+              lightbox.showModal();
+            }, 'plugin-screenshot'); zoom.setAttribute('aria-label', image.alt); zoom.append(image); slot.replaceWith(zoom);
+          } catch { if (dialog.isConnected && dialog.open) slot.textContent = t('plugins.catalog.imageUnavailable'); }
+        };
+        const slots = [...readme.querySelectorAll('[data-readme-image]')];
+        if (isFeatured(entry.origin)) {
+          // Observe the dialog's scroll body, and serialize requests so the
+          // existing main-process document budgets also bound automatic loads.
+          let pending = Promise.resolve();
+          imageObserver = new window.IntersectionObserver(entries => {
+            for (const item of entries) {
+              if (!item.isIntersecting) continue;
+              imageObserver.unobserve(item.target);
+              pending = pending.then(() => loadImage(item.target));
+            }
+          }, { root: body, rootMargin: '120px' });
+          for (const slot of slots) imageObserver.observe(slot);
+        } else {
+          const loadImages = button(t('plugins.catalog.loadImages'), async () => {
+            loadImages.disabled = true; loadImages.textContent = t('plugins.view.loading');
+            for (const slot of slots) await loadImage(slot);
+            loadImages.remove();
+          }, 'plugin-inline-action plugin-readme-load');
+          readme.before(loadImages);
+        }
+      }).catch(() => { if (dialog.isConnected) readme.textContent = t('plugins.catalog.noReadme'); });
+      const footer = el(document, 'footer', 'plugin-catalog-dialog-footer');
+      const selected = entry.versions?.find(v => v.version === entry.version);
+      if (selected ? selected.installable : ['available', 'update'].includes(entry.status)) {
+        footer.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => {
+          dialog.close();
+          void run(async () => { activeTab = 'discover'; sourcesOpen = false; catalogReview = entry; await previewCatalog(entry, catalogVersion(entry)); return null; });
+        }, 'plugin-allow'));
+      } else if (entry.status === 'repository') footer.append(el(document, 'span', 'settings-note', t('plugins.catalog.repositoryOnly')));
+      else if (entry.status === 'incompatible') footer.append(el(document, 'span', 'plugin-risk', t('plugins.catalog.incompatible')));
+      footer.append(button(t('settings.plugins.cancel'), () => dialog.close()));
+      dialog.append(heading, body, footer); container.append(dialog);
+      dialog.setAttribute('aria-label', entry.name);
+      dismissOnOutside(dialog);
+      dialog.addEventListener('close', () => {
+        imageObserver?.disconnect();
+        dialog.remove(); if (catalogModal === dialog) {
+          catalogModal = null; void api.closeCatalogDetails().catch(() => {});
+        }
+        if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+        applyCatalogResults();
+      });
+      dialog.showModal();
+    }
+
+    function dismissOnOutside(dialog) {
+      // Chromium may group programmatically opened close watchers. Handle the
+      // key on the focused dialog so one Escape cannot close both layers.
+      dialog.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || event.target.closest('dialog') !== dialog) return;
+        event.preventDefault(); event.stopPropagation(); dialog.close();
+      });
+      let startedOutside = false;
+      const outside = event => {
+        const rect = dialog.getBoundingClientRect();
+        return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom);
+      };
+      dialog.addEventListener('pointerdown', event => { startedOutside = outside(event); });
+      dialog.addEventListener('click', event => { if (startedOutside && outside(event)) dialog.close(); startedOutside = false; });
+    }
+
     function catalogPanel() {
       const wrap = el(document, 'div', 'plugin-catalog');
       if (!catalogData) { wrap.append(el(document, 'p', 'settings-note', t('plugins.view.loading'))); return wrap; }
-      if (catalogData.error) wrap.append(el(document, 'p', 'plugin-risk', catalogData.error));
+      const errors = el(document, 'div');
       const search = el(document, 'input', 'plugin-catalog-search');
       search.type = 'search'; search.value = query;
       search.placeholder = t('plugins.catalog.search'); search.setAttribute('aria-label', t('plugins.catalog.search'));
       const results = el(document, 'div', 'plugin-catalog-results');
       function renderResults() {
-        const entries = catalogData.entries.filter(p => `${p.name} ${p.description} ${p.author} ${p.id}`.toLowerCase().includes(query.toLowerCase()));
-        const cards = entries.map(entry => {
-          const card = el(document, 'article', 'plugin-card'); card.dataset.catalogId = entry.id;
-          const head = el(document, 'div', 'plugin-card-head');
-          head.append(identity(entry.name, entry.author || entry.id, t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon));
-          card.append(head, el(document, 'p', 'plugin-description', entry.description));
-          const meta = el(document, 'div', 'plugin-card-meta');
-          meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`), typeLabels(entry));
-          if (entry.origin.kind === 'community') meta.append(el(document, 'span', 'plugin-origin-note', entry.origin.label));
-          card.append(meta);
-          const key = `${entry.origin.id}/${entry.id}`;
-          const version = entry.versions?.find(v => v.version === chosenVersions.get(key)) || entry.versions?.find(v => v.version === entry.version);
-          const actions = el(document, 'div', 'settings-actions');
-          const available = version ? version.installable : ['available', 'update'].includes(entry.status);
-          if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => {
-            catalogReview = entry; await previewCatalog(entry, version?.version || entry.version); return null;
-          })));
-          if (entry.installedVersion) actions.append(button(t('plugins.catalog.installed'), () => { activeTab = 'installed'; selectedPluginId = ''; diagnostics = false; render(); container.querySelector(`[data-plugin-id="${entry.id}"]`)?.scrollIntoView({ block: 'nearest' }); }, 'plugin-installed-link plugin-installed-check'));
-          if (!entry.installedVersion && !available) actions.append(el(document, 'span', 'settings-note', t('plugins.catalog.incompatible')));
-          head.append(actions); return card;
-        });
-        if (!cards.length) cards.push(el(document, 'p', 'settings-note', t('plugins.catalog.noResults')));
-        results.replaceChildren(...cards);
+        const matches = p => `${p.name} ${p.description} ${p.author || ''} ${p.id}`.toLowerCase().includes(query.toLowerCase());
+        const sections = [];
+        const groups = [
+          ['plugins.catalog.featured', [
+            ...catalogData.entries.filter(p => p.origin.kind === 'official'),
+            ...catalogData.entries.filter(p => p.origin.kind === 'maintainer')
+          ]],
+          ['plugins.catalog.github', catalogData.github?.entries || []],
+          ['plugins.catalog.custom', catalogData.entries.filter(p => !isFeatured(p.origin))]
+        ];
+        for (const [label, all] of groups) {
+          if (label === 'plugins.catalog.github' && !catalogData.github?.enabled) continue;
+          if (label === 'plugins.catalog.custom' && !all.length) continue;
+          const section = el(document, 'section', 'plugin-catalog-group');
+          section.append(el(document, 'h3', 'plugin-detail-heading', t(label)));
+          if (label === 'plugins.catalog.github') {
+            section.append(el(document, 'p', 'settings-note', t('plugins.catalog.githubNote')));
+            if (catalogData.github?.error) section.append(el(document, 'p', 'settings-note', t('plugins.catalog.githubFailed', { error: catalogData.github.error })));
+            if (catalogData.github?.limited) section.append(el(document, 'p', 'settings-note', t('plugins.catalog.githubLimited')));
+          }
+          const grid = el(document, 'div', 'plugin-catalog-grid');
+          for (const entry of all.filter(matches)) {
+            const card = el(document, 'article', 'plugin-card'); card.dataset.catalogId = entry.id;
+            const head = el(document, 'div', 'plugin-card-head');
+            const title = button('', () => catalogDialog(entry), 'plugin-catalog-title');
+            title.append(identity(entry.name, entry.author, '', entry.icon, entry.identityIcon, isFeatured(entry.origin) ? entry.origin.kind : ''));
+            head.append(title);
+            const actions = el(document, 'div', 'settings-actions');
+            const available = entry.versions?.find(v => v.version === entry.version)?.installable ?? ['available', 'update'].includes(entry.status);
+            if (available) actions.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => void run(async () => { catalogReview = entry; await previewCatalog(entry, catalogVersion(entry)); return null; })));
+            else if (!entry.installedVersion && (entry.versions?.length || entry.status === 'incompatible' || entry.status === 'installed')) {
+              const install = button(t('plugins.package.install'), () => {});
+              install.disabled = true; actions.append(install);
+            }
+            if (entry.installedVersion) actions.append(button(t('plugins.catalog.installed'), () => { activeTab = 'installed'; selectedPluginId = ''; diagnostics = false; render(); container.querySelector(`[data-plugin-id="${entry.id}"]`)?.scrollIntoView({ block: 'nearest' }); }, 'plugin-installed-link plugin-installed-check'));
+            head.append(actions);
+            card.append(head, el(document, 'p', 'plugin-description', entry.description));
+            const meta = el(document, 'div', 'plugin-card-meta');
+            if (entry.version) meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`));
+            meta.append(typeLabels(entry));
+            if (entry.status === 'incompatible') meta.append(el(document, 'span', 'plugin-risk', t('plugins.catalog.incompatible')));
+            if (Number.isSafeInteger(entry.stars)) {
+              const stars = el(document, 'span', 'plugin-stars', `☆ ${entry.stars.toLocaleString(getLocale())}`);
+              stars.setAttribute('aria-label', `${t('plugins.catalog.stars')}: ${entry.stars}`); meta.append(stars);
+            } else if (entry.origin.kind === 'community' && entry.origin.id !== 'github-discovery') meta.append(el(document, 'span', 'plugin-origin-note', entry.origin.label));
+            card.append(meta);
+            card.addEventListener('click', event => { if (!event.target.closest('button')) catalogDialog(entry); });
+            grid.append(card);
+          }
+          if (!grid.children.length) grid.append(el(document, 'p', 'settings-note', t('plugins.catalog.noResults')));
+          section.append(grid); sections.push(section);
+        }
+        results.replaceChildren(...sections);
         if (content?.contains(results)) identifyContent();
       }
       search.addEventListener('input', () => { query = search.value; renderResults(); });
-      wrap.append(search, results); renderResults();
+      wrap.append(errors, search, results);
+      const refresh = el(document, 'div', 'settings-actions plugin-catalog-refresh');
+      const canRefresh = catalogData.github?.enabled || catalogData.sources.some(source => Boolean(source.url));
+      if (canRefresh) refresh.append(button(t('plugins.catalog.refresh'), () => void refreshCatalog(true)));
+      const lastChecked = el(document, 'span', 'settings-note'); refresh.append(lastChecked);
+      updateCatalog = () => {
+        errors.replaceChildren();
+        for (const error of [catalogData.error, catalogRefreshError, ...catalogData.sources.filter(source => source.url && source.error).map(source => `${source.label}: ${source.error}`)].filter(Boolean)) {
+          errors.append(el(document, 'p', 'plugin-risk', error));
+        }
+        lastChecked.textContent = catalogData.github?.lastFetched ? t('plugins.catalog.lastChecked', { time: new Date(catalogData.github.lastFetched).toLocaleString(getLocale()) }) : '';
+        renderResults();
+        catalogResultsDirty = false;
+      };
+      if (canRefresh) wrap.append(refresh);
+      updateCatalog(); return wrap;
+    }
 
-      return wrap;
+    function catalogRefreshControls() {
+      const control = container.querySelector('.plugin-catalog-refresh button');
+      if (!control) return;
+      control.disabled = busy || catalogRefreshing;
+      control.textContent = t(catalogRefreshing ? 'plugins.view.loading' : 'plugins.catalog.refresh');
+      control.setAttribute('aria-busy', String(catalogRefreshing));
+    }
+
+    function applyCatalogResults() {
+      if (!catalogResultsDirty || disposed || busy || activeTab !== 'discover' || catalogReview || sourcesOpen || aboutOpen || catalogModal) return;
+      const saved = rememberPosition();
+      updateCatalog?.();
+      restorePosition(saved);
+    }
+
+    function refreshCatalog(force = false) {
+      const discover = catalogData.github?.enabled || catalogData.sources.some(source => source.kind === 'maintainer' || (source.kind === 'official' && source.url));
+      if (disposed || catalogRefreshPending || (!force && !discover)) return catalogRefreshPending;
+      catalogRefreshing = true; catalogRefreshError = ''; catalogRefreshControls();
+      catalogRefreshPending = (async () => {
+        try {
+          // Sources own their per-request deadlines. Bound concurrent custom
+          // requests, and let GitHub run alongside them without locking writes.
+          const sources = force ? catalogData.sources.filter(source => source.kind === 'community') : [];
+          const failures = [];
+          let next = 0;
+          const workers = Array.from({ length: Math.min(4, sources.length) }, async () => {
+            while (!disposed && next < sources.length) {
+              const source = sources[next++];
+              try { await api.refreshSource(source.id); }
+              catch (error) { failures.push(`${source.label}: ${actionErrorMessage(error, t)}`); }
+            }
+          });
+          if (discover) workers.push(api.discoverCatalog(force));
+          const results = await Promise.allSettled(workers);
+          if (disposed) return;
+          catalogData = await api.catalog();
+          const failure = results.find(result => result.status === 'rejected');
+          if (failure) failures.push(actionErrorMessage(failure.reason, t));
+          catalogRefreshError = failures.join('\n');
+        } catch (error) { if (!disposed) catalogRefreshError = actionErrorMessage(error, t); }
+        finally {
+          catalogRefreshing = false; catalogRefreshPending = null;
+          // A package review/settings draft can stay open while results arrive.
+          if (!disposed) {
+            catalogResultsDirty = true;
+            applyCatalogResults();
+            catalogRefreshControls();
+          }
+        }
+      })();
+      return catalogRefreshPending;
     }
 
     function sourcesPanel() {
@@ -450,24 +790,27 @@
 
     function statusChip(plugin) {
       const status = plugin.status;
-      const chip = el(document, 'span', `plugin-status plugin-status-${status}`, t(`settings.plugins.status.${status}`));
+      const chip = el(document, 'span', `plugin-status plugin-status-${status}`, t(status === 'needsApproval' && isFeatured(plugin.installation?.origin) ? 'plugins.package.enableRequired' : `settings.plugins.status.${status}`));
       if (status === 'active' && plugin.runtime?.state === 'running') chip.classList.add('is-live');
       return chip;
     }
 
     function consentPanel(plugin) {
       const panel = el(document, 'div', 'plugin-consent');
-      panel.append(el(document, 'div', 'plugin-consent-title', t('settings.plugins.consentTitle', { name: plugin.name })));
-      panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
+      const featured = isFeatured(plugin.installation?.origin);
+      const needsTrust = !featured && !plugin.trusted;
+      panel.append(el(document, 'div', 'plugin-consent-title', t(needsTrust ? 'settings.plugins.consentTitle' : 'settings.plugins.enable', { name: plugin.name })));
+      if (needsTrust) panel.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.warning')));
+      const setup = initialSetupControls(plugin); if (setup) panel.append(setup);
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const cancel = el(document, 'button', '', t('settings.plugins.cancel'));
       cancel.type = 'button';
       cancel.addEventListener('click', () => { consentFor = ''; render(); });
-      const allow = el(document, 'button', 'plugin-allow', t('settings.plugins.allow'));
+      const allow = el(document, 'button', 'plugin-allow', t(needsTrust ? 'settings.plugins.allow' : 'settings.plugins.enable', { name: plugin.name }));
       allow.type = 'button';
       allow.addEventListener('click', () => {
         consentFor = '';
-        void run(() => api.setEnabled(plugin.id, true), `plugin:${plugin.id}`);
+        void run(() => api.setEnabled(plugin.id, true, plugin.initialChoices), `plugin:${plugin.id}`);
       });
       actions.append(cancel, allow);
       panel.append(actions);
@@ -484,11 +827,11 @@
         const chips = el(document, 'div', 'plugin-surface-chips');
         for (const surface of SURFACE_ORDER.filter((name) => view.surfaces.includes(name))) {
           const placed = view.placements?.[surface] === true;
-          const chip = el(document, 'button', `plugin-surface-chip${placed ? ' is-on' : ''}`, t(`settings.plugins.surface.${surface}`));
+          const chip = el(document, 'button', `plugin-surface-chip${placed ? ' is-on' : ''}`, surfaceLabel(surface, t));
           chip.type = 'button';
           chip.dataset.controlKey = `place/${view.ref}/${surface}`;
           chip.setAttribute('aria-pressed', String(placed));
-          chip.setAttribute('aria-label', t(placed ? 'settings.plugins.unplace' : 'settings.plugins.place', { view: view.title, surface: t(`settings.plugins.surface.${surface}`) }));
+          chip.setAttribute('aria-label', t(placed ? 'settings.plugins.unplace' : 'settings.plugins.place', { view: view.title, surface: surfaceLabel(surface, t) }));
           chip.addEventListener('click', () => void run(async () => {
             const next = await api.place(view.ref, surface, !placed);
             onPlaced(surface, view.ref, !placed);
@@ -540,13 +883,13 @@
 
     function pluginIdentity(plugin) {
       const head = el(document, 'div', 'plugin-card-head');
-      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon));
+      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon, isFeatured(plugin.installation?.origin) ? plugin.installation.origin.kind : ''));
       if (!plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) {
         const toggle = el(document, 'input', 'plugin-enable');
         toggle.type = 'checkbox'; toggle.checked = plugin.enabled; toggle.disabled = !list?.enabled;
         toggle.setAttribute('aria-label', t('settings.plugins.enable', { name: plugin.name }));
         toggle.addEventListener('change', () => {
-          if (toggle.checked && !plugin.trusted) { consentFor = plugin.id; openPlugin(plugin.id); }
+          if (toggle.checked && (!plugin.trusted || plugin.initialSetup?.fields?.length)) { consentFor = plugin.id; openPlugin(plugin.id); }
           else void run(() => api.setEnabled(plugin.id, toggle.checked), `plugin:${plugin.id}`);
         });
         const label = el(document, 'label', 'checkbox-label plugin-toggle'); label.append(toggle); head.append(label);
@@ -578,7 +921,7 @@
         const count = button(t('plugins.ui.locationCount', { count: surfaces.length }), () => openPlugin(plugin.id, true), 'plugin-location-count');
         count.dataset.controlKey = 'placements';
         const details = surfaces.length
-          ? [{ full: t('plugins.ui.selectedLocations'), heading: true }, ...surfaces.map(surface => ({ full: t(`settings.plugins.surface.${surface}`) }))]
+          ? [{ full: t('plugins.ui.selectedLocations'), heading: true }, ...surfaces.map(surface => ({ full: surfaceLabel(surface, t) }))]
           : [{ full: t('plugins.ui.noPlacements') }];
         if (setDetailTooltip) {
           setDetailTooltip(count, details, { centered: true });
@@ -590,12 +933,14 @@
         count.setAttribute('aria-label', `${t('settings.plugins.views')}: ${t('plugins.ui.locationCount', { count: surfaces.length })}`);
         summary.append(count); footer.append(summary);
       }
-      const manage = button(t(plugin.status === 'needsApproval' ? 'settings.plugins.reapprove' : 'plugins.ui.manage'), () => {
+      const manage = button(t(plugin.status === 'needsApproval' ? isFeatured(plugin.installation?.origin) ? 'settings.plugins.enable' : 'settings.plugins.reapprove' : 'plugins.ui.manage', { name: plugin.name }), () => {
         if (plugin.status === 'needsApproval') consentFor = plugin.id;
         openPlugin(plugin.id);
       }, 'plugin-manage');
       manage.setAttribute('aria-label', t('plugins.ui.manageNamed', { name: plugin.name }));
       if (plugin.status === 'crashed') footer.append(button(t('settings.plugins.restart'), () => void run(() => api.restart(plugin.id)), 'plugin-restart plugin-inline-action'));
+      const update = catalogData?.entries.find(entry => entry.id === plugin.id && entry.status === 'update' && entry.origin.id === plugin.installation?.origin.id);
+      if (update) footer.append(button(t('plugins.catalog.updateTo', { version: update.version }), () => catalogDialog(update), 'plugin-update-action'));
       footer.append(manage); card.append(footer);
       return card;
     }
@@ -736,6 +1081,17 @@
       return section;
     }
 
+    function contentSourceRows(plugin) {
+      const targets = new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode === 'replace').flatMap(view => view.targets));
+      return [...targets].map(target => {
+        const choices = (list.plugins || []).filter(item => item.status === 'active').flatMap(item => (item.views || [])
+          .filter(view => view.mode === 'replace' && view.targets.includes(target)).map(view => ({ ...view, pluginName: item.name })));
+        return contentControls({ key: `content/${target}`, target, choices,
+          value: choices.some(view => view.ref === list.contentSelections?.[target]) ? list.contentSelections[target] : null,
+          change: value => void run(() => api.selectContent(target, value)) });
+      });
+    }
+
     function pluginDetail(plugin) {
       const wrap = el(document, 'section', 'plugin-detail'); wrap.dataset.pluginId = plugin.id;
       const toolbar = el(document, 'div', 'plugin-detail-toolbar');
@@ -751,7 +1107,7 @@
       if (consentFor === plugin.id && !plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) wrap.append(consentPanel(plugin));
       else if (plugin.status === 'needsApproval') {
         const actions = el(document, 'div', 'settings-actions');
-        actions.append(button(t('settings.plugins.reapprove'), () => { consentFor = plugin.id; diagnostics = false; render(); })); wrap.append(actions);
+        actions.append(button(t(isFeatured(plugin.installation?.origin) ? 'settings.plugins.enable' : 'settings.plugins.reapprove', { name: plugin.name }), () => { consentFor = plugin.id; diagnostics = false; render(); })); wrap.append(actions);
       }
       if (plugin.installation && ['invalid', 'missing'].includes(plugin.status)) {
         const note = el(document, 'p', 'plugin-risk', t(plugin.status === 'missing' ? 'plugins.package.missingNote' : 'plugins.package.repairRequired'));
@@ -770,6 +1126,7 @@
         }
         return wrap;
       }
+      wrap.append(...contentSourceRows(plugin));
       if (plugin.settings && api.getSettings && api.updateSettings) wrap.append(authorSettingsSection(plugin));
       // Disabled plugins keep their saved placements visible, without offering
       // mutations until enabled. The count is a selection, not runtime activity.
@@ -777,7 +1134,7 @@
         const selected = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
         const placements = el(document, 'div', 'plugin-views');
         placements.append(el(document, 'div', 'plugin-subhead', t('plugins.ui.selectedLocations')));
-        for (const surface of selected) placements.append(el(document, 'span', 'settings-note', t(`settings.plugins.surface.${surface}`)));
+        for (const surface of selected) placements.append(el(document, 'span', 'settings-note', surfaceLabel(surface, t)));
         if (!selected.length) placements.append(el(document, 'span', 'settings-note', t('plugins.ui.noPlacements')));
         wrap.append(placements);
       }
@@ -793,7 +1150,8 @@
           const text = el(document, 'span', 'settings-item-text'); text.append(el(document, 'span', 'settings-item-title', t('settings.plugins.background')));
           const input = el(document, 'input'); input.type = 'checkbox'; input.checked = plugin.background.enabled;
           input.addEventListener('change', () => void run(() => api.setBackground(plugin.id, input.checked)));
-          label.append(text, input, el(document, 'span', 'settings-note settings-item-desc', t('settings.plugins.backgroundNote'))); wrap.append(label);
+          input.setAttribute('aria-description', t('settings.plugins.backgroundNote'));
+          label.append(text, input, el(document, 'span', 'settings-note settings-item-desc', plugin.background.description || t('settings.plugins.backgroundNote'))); wrap.append(label);
         }
         if (plugin.skins?.length) {
           const skins = el(document, 'div', 'plugin-skins');
@@ -816,14 +1174,6 @@
             actions.append(open);
           }
           wrap.append(detailSection(t('plugins.ui.pages'), el(document, 'p', 'settings-note', t('plugins.ui.pagesNote')), actions));
-        }
-      }
-      for (const view of plugin.status === 'active' ? plugin.views || [] : []) {
-        for (const target of view.mode === 'replace' ? view.targets || [] : []) {
-          const selected = list.contentSelections?.[target] === view.ref;
-          const row = el(document, 'div', 'settings-actions');
-          row.append(el(document, 'span', 'settings-note', target), button(t(selected ? 'plugins.trusted.restore' : 'plugins.trusted.useContent'), () => void run(() => api.selectContent(target, selected ? null : view.ref))));
-          wrap.append(row);
         }
       }
       for (const target of new Set((plugin.status === 'active' ? plugin.views || [] : []).filter(view => view.mode !== 'replace').flatMap(view => view.targets || []))) {
@@ -904,6 +1254,7 @@
       }
       content.setAttribute('aria-labelledby', tabControls.get(activeTab).id);
       setBusy();
+      catalogRefreshControls();
       restorePosition(saved);
     }
 
@@ -928,8 +1279,8 @@
         ]) {
           const node = el(document, tag, className); overviewLabels.set(key, node); heading.append(node);
         }
-        const note = el(document, 'p', 'plugin-overview-note');
-        overviewLabels.set('settings.plugins.experimentalNote', note);
+        const description = el(document, 'p', 'plugin-overview-note');
+        overviewLabels.set('settings.plugins.overviewDescription', description);
         const guides = el(document, 'div', 'plugin-guide-links');
         for (const [page, key] of [['plugins', 'settings.plugins.guide'], ['plugin-quickstart', 'settings.plugins.authorGuide']]) {
           const link = el(document, 'a', 'plugin-guide-link');
@@ -940,7 +1291,7 @@
           });
           overviewLabels.set(key, link); guideLinks.set(page, link); guides.append(link);
         }
-        overview.append(heading, note, guides);
+        overview.append(heading, description, guides);
         tabs = el(document, 'nav', 'plugin-catalog-tabs');
         tabs.setAttribute('aria-label', t('settings.plugins.title'));
         tabs.setAttribute('role', 'tablist');
@@ -952,7 +1303,7 @@
               // the current page and its drafts intact.
               if (tab !== 'installed') catalogData = await api.catalog();
               activeTab = tab; query = ''; sourcesOpen = false; if (tab === 'installed') { selectedPluginId = ''; diagnostics = false; } return null;
-            });
+            }).then(() => { if (tab === 'discover' && activeTab === tab) void refreshCatalog(); });
           });
           control.dataset.tab = tab;
           control.id = `${container.id || 'plugin-settings'}-tab-${tab}`;
@@ -976,6 +1327,29 @@
       }
       for (const [key, node] of overviewLabels) {
         const label = t(key); if (node.textContent !== label) node.textContent = label;
+      }
+      const sectionToggle = document.querySelector('[data-settings-section="plugins"]');
+      const experimentalBadge = sectionToggle?.querySelector('.plugin-section-experimental');
+      if (experimentalBadge && setDetailTooltip) {
+        let trigger = sectionToggle.querySelector('.plugin-experimental-tooltip');
+        if (!trigger) {
+          trigger = el(document, 'span', 'plugin-experimental-tooltip');
+          experimentalBadge.before(trigger);
+          trigger.append(experimentalBadge);
+          // The disclosure remains the sole keyboard stop; only the badge is a hover target.
+          sectionToggle.addEventListener('focus', () => {
+            if (sectionToggle.matches(':focus-visible')) trigger.dispatchEvent(new Event('focusin'));
+          });
+          sectionToggle.addEventListener('pointerdown', () => trigger.dispatchEvent(new Event('focusout')));
+          sectionToggle.addEventListener('blur', () => trigger.dispatchEvent(new Event('focusout')));
+          sectionToggle.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+          });
+        }
+        setDetailTooltip(trigger, [{ full: t('settings.plugins.experimentalNote') }], { centered: true });
+        trigger.removeAttribute('tabindex');
+        const tooltip = trigger.querySelector('[role="tooltip"]');
+        if (tooltip) { tooltip.id = 'plugin-experimental-tip'; sectionToggle.setAttribute('aria-describedby', tooltip.id); }
       }
       for (const [page, link] of guideLinks) link.href = `https://javis-ai.com/token-monitor/docs/${page}.html?lang=${encodeURIComponent(getLocale())}`;
       overview.hidden = activeTab === 'installed' && Boolean(selectedPluginId || aboutOpen);
@@ -1042,6 +1416,7 @@
       async refresh() {
         try {
           list = await api.list();
+          if (api.catalog) catalogData = await api.catalog();
           if (actionError?.load) actionError = null;
         } catch (error) {
           actionError = { error, target: '', scope: errorScope(), load: true };
@@ -1049,7 +1424,7 @@
         render();
       },
       render,
-      dispose() { authorSettings.clear(); for (const held of settingsMounts.values()) unmountSettings(held.node); settingsMounts.clear(); },
+      dispose() { disposed = true; catalogModal?.close(); authorSettings.clear(); for (const held of settingsMounts.values()) unmountSettings(held.node); settingsMounts.clear(); },
       summary() {
         if (!list) return '';
         const active = list.plugins.filter((plugin) => plugin.status === 'active').length;
@@ -1058,7 +1433,7 @@
       list: () => list,
       // Consent and logs are interaction state: a background push must not
       // close an open consent panel the user is reading.
-      isInteracting: () => activeTab === 'style' || Boolean(consentFor || packagePreview || operation || selectedPluginId || aboutOpen) || busy || Boolean(container.querySelector('.plugin-menu:popover-open, .plugin-location-count [role="tooltip"]:popover-open')) || container.contains(document.activeElement)
+      isInteracting: () => activeTab === 'style' || Boolean(catalogModal || consentFor || packagePreview || operation || selectedPluginId || aboutOpen) || busy || Boolean(container.querySelector('.plugin-menu:popover-open, .plugin-location-count [role="tooltip"]:popover-open')) || container.contains(document.activeElement)
     };
   }
 

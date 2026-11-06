@@ -10,20 +10,21 @@
     <link rel="stylesheet" href="pluginViews.css" />
   </head>
   <body>
-    <main class="shell">
+    <main class="shell" tabindex="-1">
       <header class="titlebar">
         <div>
-          <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" aria-label="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
+          <div class="app-title"><span class="app-title-text">Token Monitor</span><span class="app-title-mark" aria-hidden="true">Σ</span><span id="liveDot" class="live-dot" aria-label="Stream offline"></span><span id="tokenRateReveal" class="token-rate-reveal" aria-hidden="true"></span><div id="pluginPageHeading" class="plugin-page-heading hidden"></div><span class="app-title-measure" aria-hidden="true">Token Monitor</span></div>
           <div id="status" class="status">Starting</div>
         </div>
         <div class="title-controls">
+          <div id="pluginPageActions" class="plugin-page-actions hidden"></div>
           <nav class="tabs" aria-label="Period tabs">
             <span class="tab-indicator" aria-hidden="true"></span>
             <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
             <button id="monthPeriodTab" class="tab" data-period="month" data-period-slot="month" aria-haspopup="menu" aria-expanded="false">MONTH</button>
             <button class="tab" data-period="allTime" data-period-slot="allTime">TOTAL</button>
           </nav>
-          <div id="monthPeriodMenu" class="view-switcher-menu period-menu hidden" role="menu" aria-labelledby="monthPeriodTab">
+          <div id="monthPeriodMenu" class="view-switcher-menu period-menu hidden" popover="manual" role="menu" aria-labelledby="monthPeriodTab">
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="month"><span class="view-switcher-menu-label" data-i18n="periodRange.month">This month</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="week"><span class="view-switcher-menu-label" data-i18n="periodRange.week">This week</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last7"><span class="view-switcher-menu-label" data-i18n="periodRange.last7">Last 7 days</span></button>
@@ -125,6 +126,13 @@
                       <div id="tokscaleBundledBuildRow" class="maintenance-version-item hidden"><span data-i18n="settings.tokscale.bundledBuild">Bundled build</span><strong id="tokscaleBundledBuild"></strong></div>
                     </div>
                     <p class="settings-note"><span data-i18n="settings.tokscale.noteBefore">Token Monitor uses tokscale (MIT, open-source) to read token data.</span> <button id="openTokscaleLinkButton" type="button" class="inline-link" data-i18n="settings.tokscale.learnMore">Learn more</button></p>
+                  </div>
+                  <div id="networkProxyGroup" class="settings-group advanced-settings-block maintenance-panel">
+                    <div class="settings-group-header maintenance-header"><span data-i18n="settings.proxy.title">Network proxy</span><span id="networkProxySource"></span></div>
+                    <label><span data-i18n="settings.proxy.url">Proxy URL</span><input id="proxyUrlInput" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890" aria-describedby="networkProxyNote" /></label>
+                    <label><span data-i18n="settings.proxy.noProxy">Bypass proxy for</span><input id="noProxyInput" type="text" spellcheck="false" autocomplete="off" placeholder="example.com, .internal.net, 10.0.0.1:8080" data-i18n-placeholder="settings.proxy.noProxyPlaceholder" /></label>
+                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Used only for Token Monitor's own limit and account requests; sign-ins in your browser or a CLI are not affected. While set, it replaces HTTP(S)_PROXY and NO_PROXY for these requests, so list any hosts to bypass here; local addresses always stay direct. Leave empty to use the environment or system proxy.</p>
+                    <div id="proxyUrlError" class="hub-status error" role="alert" hidden></div>
                   </div>
                   <div class="settings-group advanced-settings-block advanced-config-row">
                     <p class="settings-note"><span data-i18n="settings.advanced.note">Additional options are available in</span> <code>settings.json</code>.</p>
@@ -386,6 +394,9 @@
                       <option value="tokens" data-i18n="settings.tray.tokensToday">Tokens Today</option>
                       <option value="cost" data-i18n="settings.tray.costToday">Cost Today ($1.23)</option>
                       <option value="both" data-i18n="settings.tray.bothToday">Tokens + Cost Today</option>
+                      <option value="tokensMonth" data-i18n="settings.tray.tokensMonth">Tokens This Month</option>
+                      <option value="costMonth" data-i18n="settings.tray.costMonth">Cost This Month ($1.23)</option>
+                      <option value="bothMonth" data-i18n="settings.tray.bothMonth">Tokens + Cost This Month</option>
                       <option value="tokensAll" data-i18n="settings.tray.tokensTotal">Tokens Total</option>
                       <option value="costAll" data-i18n="settings.tray.costTotal">Cost Total ($8.28)</option>
                       <option value="bothAll" data-i18n="settings.tray.bothTotal">Tokens + Cost Total</option>
@@ -409,6 +420,9 @@
                       <option value="tokens" data-i18n="settings.tray.tokensToday">Tokens Today</option>
                       <option value="cost" data-i18n="settings.tray.costToday">Cost Today ($1.23)</option>
                       <option value="both" data-i18n="settings.tray.bothToday">Tokens + Cost Today</option>
+                      <option value="tokensMonth" data-i18n="settings.tray.tokensMonth">Tokens This Month</option>
+                      <option value="costMonth" data-i18n="settings.tray.costMonth">Cost This Month ($1.23)</option>
+                      <option value="bothMonth" data-i18n="settings.tray.bothMonth">Tokens + Cost This Month</option>
                       <option value="tokensAll" data-i18n="settings.tray.tokensTotal">Tokens Total</option>
                       <option value="costAll" data-i18n="settings.tray.costTotal">Cost Total ($8.28)</option>
                       <option value="bothAll" data-i18n="settings.tray.bothTotal">Tokens + Cost Total</option>
@@ -980,11 +994,13 @@
                         <button id="cursorLoginButton" data-i18n="settings.cursor.openBrowser">Open Cursor dashboard</button>
                       </div>
                       <p class="settings-note">
-                        <strong>1.</strong> <span data-i18n="settings.cursor.step1Before">Open</span> <code>cursor.com/dashboard</code> <span data-i18n="settings.cursor.step1After">in your browser using the button above, then sign in.</span><br>
-                        <strong>2.</strong> <span data-i18n="settings.cursor.step2Before">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -></span> cursor.com.<br>
-                        <strong>3.</strong> <span data-i18n="settings.cursor.step3Before">Copy the</span> <code>WorkosCursorSessionToken</code> <span data-i18n="settings.cursor.step3After">value.</span><br>
-                        <strong>4.</strong> <span data-i18n="settings.cursor.step4">Paste it below and click Save.</span>
+                        <strong>1.</strong> <span data-i18n="settings.cursor.step1Before">Open</span> <code>cursor.com</code> <span data-i18n="settings.cursor.step1After">in your browser using “Open Cursor dashboard”, then sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.cursor.cookiePage">If sign-in redirects to grok.com/dashboard, click “Open Cursor dashboard” again to return to cursor.com in the same browser. Copy the Cursor cookie, not a Grok cookie.</span><br>
+                        <strong>3.</strong> <span data-i18n="settings.cursor.step2Before">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -></span> cursor.com.<br>
+                        <strong>4.</strong> <span data-i18n="settings.cursor.step3Before">Copy the</span> <code>WorkosCursorSessionToken</code> <span data-i18n="settings.cursor.step3After">value.</span><br>
+                        <strong>5.</strong> <span data-i18n="settings.cursor.step4">Paste it below and click Save.</span>
                       </p>
+                      <p class="settings-note" data-i18n="settings.cursor.cookieMissing">If the cookie is missing, sign in to the Cursor desktop app, then reopen this account section to detect the account.</p>
                       <textarea id="cursorManualInput" rows="3" spellcheck="false" placeholder="WorkosCursorSessionToken=..." data-i18n-placeholder="settings.cursor.manualPlaceholder" aria-label="Cursor token" data-i18n-aria-label="settings.cursor.tokenLabel"></textarea>
                       <div class="settings-actions">
                         <button id="cursorManualSubmit" data-i18n="settings.cursor.saveToken">Save token</button>
@@ -1145,6 +1161,47 @@
                 </div>
                 <div id="workbuddyLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
                 <div id="workbuddyAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
+            <div id="minimaxAccountGroup" class="settings-group cursor-account-group">
+              <button id="minimaxSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="minimaxSettingsDetails">
+                <span data-i18n="settings.minimax.title">MiniMax Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="minimaxStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="minimaxSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="minimaxOpenBrowser" data-i18n="settings.minimax.openBrowser">Open MiniMax billing page</button>
+                  <button id="minimaxRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="minimaxKeyList" class="managed-account-list"></div>
+                <div class="opencode-credential-fields">
+                  <label>
+                    <span data-i18n="settings.minimax.billingMode">Billing type</span>
+                    <select id="minimaxBillingModeInput" class="credential-input">
+                      <option value="token-plan" data-i18n="settings.minimax.billingTokenPlan">Token Plan</option>
+                      <option value="api" data-i18n="settings.minimax.billingApi">API billing</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span data-i18n="settings.minimax.apiRegion">API region</span>
+                    <select id="minimaxApiRegionInput" class="credential-input">
+                      <option value="auto" data-i18n="settings.minimax.regionAuto">Auto</option>
+                      <option value="cn" data-i18n="settings.minimax.regionCn">China (api.minimaxi.com)</option>
+                      <option value="intl" data-i18n="settings.minimax.regionIntl">International (api.minimax.io)</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span data-i18n="settings.limits.capability.apiKey">API key</span>
+                    <input id="minimaxApiKeyInput" class="credential-input" type="password" autocomplete="off" spellcheck="false" placeholder="API key" data-i18n-placeholder="settings.minimax.apiKeyPlaceholder" />
+                  </label>
+                  <div class="settings-actions">
+                    <button id="minimaxKeySubmit" data-i18n="settings.minimax.saveApiKey">Save API key</button>
+                  </div>
+                </div>
+                <div id="minimaxErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
@@ -1584,6 +1641,7 @@
                 </div>
                 <div id="syncConnectionSaveError" class="hub-status error" role="alert" hidden></div>
               </div>
+              <div id="deviceIconLocalRow" class="settings-item"><label for="deviceIconInput" class="settings-item-text" data-i18n="devices.icon.thisDevice">This device’s icon</label><span class="device-icon-local-control"><select id="deviceIconInput"></select></span></div>
               <label id="syncUploadIntervalRow" class="sync-upload-interval-row settings-item" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
                 <select id="syncUploadIntervalInput">
                   <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
@@ -1668,6 +1726,11 @@
       <section id="serviceStatusPanel" class="service-status-panel hidden"></section>
       <section id="limitsPanel" class="limits-panel hidden"></section>
       <section id="trendsPanel" class="trends-panel hidden"></section>
+      <div id="sessionToolFilter" class="session-tool-filter hidden" role="group">
+        <button id="sessionToolPrevious" class="session-tool-scroll" type="button" disabled><span class="session-page-icon" aria-hidden="true"></span></button>
+        <div id="sessionToolFilterItems" class="session-tool-filter-items"></div>
+        <button id="sessionToolNext" class="session-tool-scroll session-tool-scroll-next" type="button" disabled><span class="session-page-icon" aria-hidden="true"></span></button>
+      </div>
       <div id="sessionPagerHost" class="session-pager-host hidden"></div>
       <footer class="footer">
         <div id="viewSwitcher" class="view-switcher"></div>
@@ -1750,6 +1813,7 @@
     <script src="../../shared/limits/windowLabels.js"></script>
     <script src="../../shared/limits/usageItems.js"></script>
     <script src="../../shared/limits/windowText.js"></script>
+    <script src="../limits/historyIdentity.js"></script>
     <script src="limits/windowsView.js"></script>
     <script src="trayBars.js"></script>
     <script src="usageCharts.js"></script>
@@ -1793,9 +1857,11 @@
     <script src="statsRenderScheduler.js"></script>
     <script src="allTimeSessions.js"></script>
     <script src="hubBuildPresentation.js"></script>
+    <script src="../../shared/deviceKind.js"></script>
+    <script src="selectControl.js"></script>
+    <script src="deviceIcons.js"></script>
     <script src="deviceBreakdown.js"></script>
     <script src="syncDevicePanel.js"></script>
-    <script src="selectControl.js"></script>
     <script src="usageAttributionRows.js"></script>
     <script src="toolDetails.js"></script>
     <script src="../../shared/projectKey.js"></script>
@@ -1826,6 +1892,7 @@
     <script src="pluginSettings.js"></script>
 
     <script src="pluginMainPages.js"></script>
+    <script src="windowActivationFocus.js"></script>
 
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>
@@ -1837,6 +1904,7 @@
     <script src="notch/pageSettings.js"></script>
     <script src="displaySettings.js"></script>
     <script src="displaySettingsPreview.js"></script>
+    <script src="contentBlur.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

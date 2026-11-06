@@ -43,7 +43,7 @@ test('entries pair a short label, a de-duplicated title and the tab icon', () =>
   const mini = list.find(entry => entry.id === 'plugin:pulse/mini');
   assert.equal(mini.title, 'Token Pulse · Mini');
   assert.equal(mini.label, 'Mini');
-  assert.deepEqual(mini.icon, { kind: 'plugin', name: 'memory' });
+  assert.deepEqual(mini.icon, { kind: 'plugin', name: 'memory', identityIcon: undefined });
   assert.equal(mini.checked, false);
   assert.equal(same.checked, true);
 });

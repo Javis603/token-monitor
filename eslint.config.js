@@ -25,7 +25,7 @@ module.exports = [
   },
 
   {
-    files: ['tests/fixtures/trusted-plugin/**/*.mjs'],
+    files: ['tests/fixtures/trusted-plugin/**/*.mjs', 'plugins/quota-alerts/**/*.mjs'],
     languageOptions: { sourceType: 'module', globals: globals.browser },
   },
 

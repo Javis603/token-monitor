@@ -669,3 +669,16 @@ test('session detail IPC scopes its price revision to the requested client', t =
     assert.equal(handler(null, { client, sessionId: 'fixture' }), before, client);
   }
 });
+
+test('Claude CLI fallback defaults on and toggling it reconfigures only Claude limits', () => {
+  assert.equal(limitsConfigFromSettings({}).claudeCliFallbackEnabled, true);
+  for (const enabled of [false, true]) {
+    const settings = { claudeCliFallbackEnabled: enabled };
+    assert.equal(limitsConfigFromSettings(settings).claudeCliFallbackEnabled, enabled);
+    const change = classifySettingsChange({ claudeCliFallbackEnabled: !enabled }, settings);
+    assert.equal(change.limitsReconfigure, true);
+    assert.deepEqual(change.limitScopes, [{ provider: 'claude', preserveReadings: true }]);
+    assert.equal(change.usageStructural, false);
+    assert.equal(change.modeStructural, false);
+  }
+});

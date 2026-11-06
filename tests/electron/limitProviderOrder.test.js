@@ -59,6 +59,8 @@ test('default provider order follows tracked tools, named services, then third-p
     'alibaba',
     'stepfun',
     'notion',
+    'manus',
+    'opendesign',
     'thirdparty'
   ]);
 });

@@ -216,6 +216,7 @@ function buildTrayIcon(options = {}) {
 
 function trayUsagePeriod(contentMode) {
   if (contentMode === 'tokensAll' || contentMode === 'costAll' || contentMode === 'bothAll') return 'allTime';
+  if (contentMode === 'tokensMonth' || contentMode === 'costMonth' || contentMode === 'bothMonth') return 'month';
   if (contentMode === 'tokens' || contentMode === 'cost' || contentMode === 'both') return 'today';
   return null;
 }
@@ -223,7 +224,7 @@ function trayUsagePeriod(contentMode) {
 function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = []) {
   const periodKey = trayUsagePeriod(contentMode);
   if (!periodKey) return null;
-  const metric = contentMode === 'cost' || contentMode === 'costAll' ? 'cost' : 'tokens';
+  const metric = contentMode === 'cost' || contentMode === 'costMonth' || contentMode === 'costAll' ? 'cost' : 'tokens';
   return pickUsageProviderId(stats, metric, periodKey, availableIconIds);
 }
 
@@ -258,6 +259,9 @@ const TRAY_CONTENT_MENU_ITEMS = [
   ['tokens', 'trayMenu.content.todayTokens'],
   ['cost', 'trayMenu.content.todayCost'],
   ['both', 'trayMenu.content.todayBoth'],
+  ['tokensMonth', 'trayMenu.content.tokensMonth'],
+  ['costMonth', 'trayMenu.content.costMonth'],
+  ['bothMonth', 'trayMenu.content.bothMonth'],
   ['tokensAll', 'trayMenu.content.totalTokens'],
   ['costAll', 'trayMenu.content.totalCost'],
   ['bothAll', 'trayMenu.content.totalBoth'],
@@ -573,7 +577,7 @@ function createTray({
     press = null;
     releasedPress = null;
     if (completedPress?.canceled) return;
-    onToggle(tray, pointerPoint(position, electron, platform), completedPress?.visible ?? null, completedPress?.matchedBlur === true);
+    onToggle(tray, pointerPoint(position, electron, platform), completedPress?.visible ?? null, completedPress?.matchedBlur === true, Boolean(completedPress));
   });
   tray.on('double-click', () => {
     press = null;

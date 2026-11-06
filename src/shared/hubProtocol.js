@@ -1,9 +1,11 @@
 'use strict';
 
+const { statsPatch, createStatsStreamReceiver: createReceiver } = require('./hubDelta');
+
 const HUB_RESPONSE_HEADER = 'x-token-monitor-response';
 const HUB_RESPONSE_MINIMAL = 'minimal';
 const HUB_STREAM_HEADER = 'x-token-monitor-stream';
-const HUB_STREAM_VERSION = '3';
+const HUB_STREAM_VERSION = '4';
 
 function headerValue(source, name) {
   const headers = source?.headers || source;
@@ -20,7 +22,15 @@ function wantsMinimalResponse(source) {
 }
 
 function wantsFreshnessEvents(source) {
-  return headerValue(source, HUB_STREAM_HEADER) === HUB_STREAM_VERSION;
+  return ['3', '4'].includes(headerValue(source, HUB_STREAM_HEADER));
+}
+
+function wantsDeltaEvents(source) {
+  return headerValue(source, HUB_STREAM_HEADER) === '4';
+}
+
+function createStatsStreamReceiver() {
+  return createReceiver(applyFreshnessEvent);
 }
 
 function acceptsEncoding(source, requestedEncoding) {
@@ -170,12 +180,14 @@ function encodeSseEvent(event, data) {
 function sseClientKinds(clients) {
   let hasFreshnessClients = false;
   let hasLegacyClients = false;
+  let hasDeltaClients = false;
   for (const client of clients || []) {
-    if (client?.freshnessEvents) hasFreshnessClients = true;
+    if (client?.deltaEvents) hasDeltaClients = true;
+    else if (client?.freshnessEvents) hasFreshnessClients = true;
     else hasLegacyClients = true;
-    if (hasFreshnessClients && hasLegacyClients) break;
+
   }
-  return { hasFreshnessClients, hasLegacyClients };
+  return { hasFreshnessClients, hasLegacyClients, ...(hasDeltaClients ? { hasDeltaClients } : {}) };
 }
 
 // One stringify per distinct frame. The content-key still chooses freshness vs
@@ -187,7 +199,10 @@ function prepareSseFanout({
   lastContentKey = '',
   hasFreshnessClients = false,
   hasLegacyClients = false,
-  allowFreshness = true
+  allowFreshness = true,
+  hasDeltaClients = false,
+  previousStats = null,
+  revision = 0
 } = {}) {
   const nextContentKey = hubStatsContentKey(stats);
   const unchanged = Boolean(lastContentKey) && nextContentKey === lastContentKey;
@@ -198,20 +213,40 @@ function prepareSseFanout({
     stats: '',
     freshness: ''
   };
-  if (!useFreshness) {
-    frames.stats = encodeSseEvent('stats', { type: 'stats', reason, stats, at });
-    return frames;
+  if (!useFreshness || hasLegacyClients || hasDeltaClients) {
+    frames.stats = encodeSseEvent('stats', { type: 'stats', reason, stats, at, ...(hasDeltaClients ? { revision } : {}) });
   }
-  if (hasLegacyClients) {
-    frames.stats = encodeSseEvent('stats', { type: 'stats', reason, stats, at });
-  }
-  if (hasFreshnessClients) {
+  if (useFreshness && hasFreshnessClients) {
     frames.freshness = encodeSseEvent('freshness', freshnessEvent(stats, reason, at));
+  }
+  if (hasDeltaClients) {
+    frames.baseRevision = revision - 1;
+    frames.revision = revision;
+    if (previousStats && useFreshness) {
+      frames.delta = encodeSseEvent('freshness', { ...freshnessEvent(stats, reason, at), baseRevision: revision - 1, revision });
+    } else if (previousStats && allowFreshness) {
+      const delta = encodeSseEvent('delta', {
+        type: 'delta', reason, baseRevision: revision - 1, revision,
+        patch: statsPatch(previousStats, stats), at
+      });
+      // UTF-8 uses 1–3 bytes per UTF-16 code unit. Encode only if the bounds overlap.
+      let smaller;
+      if (delta.length * 3 < frames.stats.length) smaller = true;
+      else if (delta.length >= frames.stats.length * 3) smaller = false;
+      else {
+        const encoder = new TextEncoder();
+        smaller = encoder.encode(delta).byteLength < encoder.encode(frames.stats).byteLength;
+      }
+      if (smaller) frames.delta = delta;
+    }
   }
   return frames;
 }
 
 function sseFrameForClient(frames, client) {
+  if (client?.deltaEvents) {
+    return frames?.delta && client.streamRevision === frames.baseRevision ? frames.delta : frames?.stats || '';
+  }
   if (frames?.unchanged && client?.freshnessEvents) return frames.freshness || '';
   return frames?.stats || '';
 }
@@ -222,6 +257,8 @@ module.exports = {
   HUB_STREAM_HEADER,
   HUB_STREAM_VERSION,
   acceptsEncoding,
+  createStatsStreamReceiver,
+  wantsDeltaEvents,
   applyFreshnessEvent,
   encodeSseEvent,
   freshnessEvent,

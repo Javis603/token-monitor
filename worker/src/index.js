@@ -1,3 +1,4 @@
+import uploadDelta from './shared/uploadDelta.js';
 import { publicLimits } from './shared/limits/core.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
@@ -16,7 +17,7 @@ import hubProtocol from './shared/hubProtocol.js';
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-  'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret,x-token-monitor-response,x-token-monitor-stream'
+  'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret,x-token-monitor-response,x-token-monitor-stream,x-token-monitor-upload'
 };
 
 function jsonResponse(status, payload, extra = {}, request = null) {
@@ -37,6 +38,31 @@ function jsonResponse(status, payload, extra = {}, request = null) {
     },
     ...(shouldCompress ? { encodeBody: 'manual' } : {})
   });
+}
+
+// Bound full and delta ingest bytes before JSON materialization, including
+// requests without Content-Length.
+async function readIngestJson(request) {
+  const reader = request.body?.getReader();
+  if (!reader) return JSON.parse('');
+  const chunks = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > uploadDelta.MAX_UPLOAD_BYTES) {
+        await reader.cancel();
+        throw Object.assign(new Error('payload_too_large'), { status: 413 });
+      }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const body = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return JSON.parse(new TextDecoder().decode(body));
 }
 
 function textResponse(status, body, contentType = 'text/plain; charset=utf-8') {
@@ -92,11 +118,18 @@ export default {
 export class HubDO {
   constructor(state, env) {
     this.state = state;
+    this.uploadBaselines = uploadDelta.createUploadBaselines();
     this.env = env;
     this.sseClients = new Set();
     this.heartbeatTimer = null;
     this.broadcastTimer = null;
     this.lastSseContentKey = '';
+    this.lastSseStats = null;
+    this.streamRevision = 0;
+    this.sseGeneration = 0;
+    this.broadcastTail = Promise.resolve();
+    this.pendingBroadcast = null;
+    this.broadcasting = false;
     this.encoder = new TextEncoder();
     this.mutationTail = Promise.resolve();
     this.titlePrivacyServerEnabled = null;
@@ -133,6 +166,7 @@ export class HubDO {
   }
 
   async cleanTitlePrivacy() {
+    this.uploadBaselines.clear();
     const enabled = this.syncSessionTitles;
     await this.withStorageTransaction(async (storage) => {
       const policies = await storage.list({ prefix: TITLE_POLICY_PREFIX });
@@ -198,6 +232,7 @@ export class HubDO {
       const previous = await storage.get(key);
       const next = syncContent.nextTitlePolicy(previous, enabled);
       if (enabled && syncContent.normalizeTitlePolicy(previous).enabled) return next;
+      this.uploadBaselines.forget(deviceId);
       await storage.put(key, next);
       if (!enabled) {
         const record = await storage.get(`dev:${deviceId}`);
@@ -270,7 +305,7 @@ export class HubDO {
     this.heartbeatTimer = setInterval(() => {
       const chunk = this.encoder.encode(': hb\n\n');
       for (const client of this.sseClients) {
-        client.writer.write(chunk).catch(() => this.dropClient(client));
+        if (!client.busy) this.writeEncoded(client, chunk);
       }
       if (this.sseClients.size === 0 && this.heartbeatTimer) {
         clearInterval(this.heartbeatTimer);
@@ -281,66 +316,120 @@ export class HubDO {
 
   dropClient(client) {
     this.sseClients.delete(client);
-    try { client.writer.close(); } catch (_) {}
+    client.onDrop?.();
+    try {
+      const stop = client.writer.close;
+      Promise.resolve(stop?.call(client.writer)).catch(() => {});
+    } catch (_) {}
     if (this.sseClients.size === 0 && this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
     if (this.sseClients.size === 0) {
       this.lastSseContentKey = '';
+      this.lastSseStats = null;
+      this.sseGeneration++;
+      this.pendingBroadcast?.resolve();
+      this.pendingBroadcast = null;
       if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
       this.broadcastTimer = null;
     }
   }
 
   writeEncoded(client, chunk) {
-    client.writer.write(chunk).catch(() => this.dropClient(client));
+    if (!this.sseClients.has(client)) return false;
+    if (client.busy) {
+      client.needsSnapshot = true;
+      return false;
+    }
+    client.busy = true;
+    let write;
+    try { write = client.writer.write(chunk); }
+    catch (_) { this.dropClient(client); return false; }
+    Promise.resolve(write).then(async () => {
+      if (!this.sseClients.has(client)) return;
+      if (!client.needsSnapshot) { client.busy = false; return; }
+      // No queued frames: the pending write plus one dirty bit bounds memory.
+      // Keep busy during the read, so a concurrent broadcast cannot overtake it.
+      client.needsSnapshot = false;
+      client.streamRevision = null;
+      const stats = await this.statsWithSubscriptionVersion();
+      if (!this.sseClients.has(client)) return;
+      client.busy = false;
+      this.writeEncoded(client, this.encoder.encode(hubProtocol.encodeSseEvent('stats', {
+        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
+        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {})
+      })));
+    }, () => this.dropClient(client)).catch(() => this.dropClient(client));
+    return true;
   }
 
   fanoutSseFrames(frames) {
-    // Reuse the same encoded frame across all subscribers of each kind.
+    // Encode only selected frames, once for all peers that need the same bytes.
     const chunks = new Map();
-    for (const frame of [frames.stats, frames.freshness]) {
-      if (frame) chunks.set(frame, this.encoder.encode(frame));
-    }
     for (const client of this.sseClients) {
-      const chunk = chunks.get(hubProtocol.sseFrameForClient(frames, client));
-      if (chunk) this.writeEncoded(client, chunk);
+      const frame = hubProtocol.sseFrameForClient(frames, client);
+      if (!frame) continue;
+      if (!chunks.has(frame)) chunks.set(frame, this.encoder.encode(frame));
+      if (this.writeEncoded(client, chunks.get(frame)) && client.deltaEvents) client.streamRevision = frames.revision;
     }
   }
 
-  async broadcast(reason = 'update') {
+  publishStats(reason, allowFreshness) {
+    // One active read and one pending batch, shared by all waiting updates.
+    // A later ingest must not downgrade an explicit mutation's full snapshot.
+    if (this.pendingBroadcast) {
+      if (!allowFreshness) Object.assign(this.pendingBroadcast, { reason, allowFreshness: false });
+      return this.pendingBroadcast.promise;
+    }
+    const batch = { reason, allowFreshness, generation: this.sseGeneration };
+    batch.promise = new Promise((resolve, reject) => Object.assign(batch, { resolve, reject }));
+    this.pendingBroadcast = batch;
+    this.broadcastTail = batch.promise.catch(() => {});
+    this.state.waitUntil?.(this.broadcastTail);
+    if (!this.broadcasting) {
+      this.broadcasting = true;
+      void this.drainBroadcasts();
+    }
+    return batch.promise;
+  }
+
+  async drainBroadcasts() {
+    while (this.pendingBroadcast) {
+      const batch = this.pendingBroadcast;
+      this.pendingBroadcast = null;
+      try {
+        if (this.sseClients.size && batch.generation === this.sseGeneration) {
+          const stats = await this.statsWithSubscriptionVersion();
+          if (this.sseClients.size && batch.generation === this.sseGeneration) {
+            const frames = hubProtocol.prepareSseFanout({
+              reason: batch.reason, stats, at: new Date().toISOString(),
+              lastContentKey: this.lastSseContentKey,
+              previousStats: this.lastSseStats,
+              revision: ++this.streamRevision,
+              ...hubProtocol.sseClientKinds(this.sseClients), allowFreshness: batch.allowFreshness
+            });
+            this.lastSseContentKey = frames.contentKey;
+            this.lastSseStats = stats;
+            this.fanoutSseFrames(frames);
+          }
+        }
+        batch.resolve();
+      } catch (error) { batch.reject(error); }
+    }
+    this.broadcasting = false;
+  }
+
+  broadcast(reason = 'update') {
     if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
     this.broadcastTimer = null;
-    if (this.sseClients.size === 0) return;
-    const stats = await this.statsWithSubscriptionVersion();
-    const at = new Date().toISOString();
-    const frames = hubProtocol.prepareSseFanout({
-      reason,
-      stats,
-      at,
-      lastContentKey: this.lastSseContentKey,
-      ...hubProtocol.sseClientKinds(this.sseClients),
-      allowFreshness: false
-    });
-    this.lastSseContentKey = frames.contentKey;
-    this.fanoutSseFrames(frames);
+    return this.publishStats(reason, false);
   }
 
-  async flushBroadcast() {
+  flushBroadcast() {
+    if (this.broadcastTimer) clearTimeout(this.broadcastTimer);
     this.broadcastTimer = null;
-    if (this.sseClients.size === 0) return;
-    const stats = await this.statsWithSubscriptionVersion();
-    const at = new Date().toISOString();
-    const frames = hubProtocol.prepareSseFanout({
-      reason: 'ingest',
-      stats,
-      at,
-      lastContentKey: this.lastSseContentKey,
-      ...hubProtocol.sseClientKinds(this.sseClients)
-    });
-    this.lastSseContentKey = frames.contentKey;
-    this.fanoutSseFrames(frames);
+    return this.publishStats('ingest', true);
   }
 
   queueBroadcast() {
@@ -439,14 +528,25 @@ export class HubDO {
       const stats = await this.statsWithSubscriptionVersion();
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
-      writer.write(this.encoder.encode(hubProtocol.encodeSseEvent('snapshot', {
-        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString()
-      }))).catch(() => {});
-      const client = { writer, freshnessEvents: hubProtocol.wantsFreshnessEvents(request) };
-      if (this.sseClients.size === 0) this.lastSseContentKey = hubProtocol.hubStatsContentKey(stats);
+      const client = {
+        writer, freshnessEvents: hubProtocol.wantsFreshnessEvents(request),
+        deltaEvents: hubProtocol.wantsDeltaEvents(request), streamRevision: null
+      };
+      if (this.sseClients.size === 0) {
+        this.lastSseContentKey = hubProtocol.hubStatsContentKey(stats);
+        this.lastSseStats = stats;
+        if (client.deltaEvents) client.streamRevision = this.streamRevision;
+      }
       this.sseClients.add(client);
+      this.writeEncoded(client, this.encoder.encode(hubProtocol.encodeSseEvent('snapshot', {
+        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
+        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {})
+      })));
       this.ensureHeartbeat();
-      request.signal.addEventListener('abort', () => this.dropClient(client));
+      const onAbort = () => this.dropClient(client);
+      request.signal.addEventListener('abort', onAbort, { once: true });
+      client.onDrop = () => request.signal.removeEventListener('abort', onAbort);
+      if (request.signal.aborted) this.dropClient(client);
       return new Response(readable, {
         status: 200,
         headers: {
@@ -459,23 +559,38 @@ export class HubDO {
       });
     }
 
-    if (request.method === 'POST' && url.pathname === '/api/ingest') {
+    if (request.method === 'POST' && ['/api/ingest', '/api/ingest/delta'].includes(url.pathname)) {
+      const delta = url.pathname === '/api/ingest/delta';
       let payload;
-      try { payload = await request.json(); }
-      catch (error) { return jsonResponse(400, { error: 'bad_request', message: error.message }); }
-      if (!payload || (!payload.deviceId && !payload.id)) return jsonResponse(400, { error: 'deviceId_required' });
-      const deviceId = String(payload.deviceId || payload.id);
-      const record = await this.mutate(async () => {
-        const policy = await this.state.storage.get(`${TITLE_POLICY_PREFIX}${deviceId}`);
-        const existing = await this.state.storage.get(`dev:${deviceId}`);
-        const next = mergeSyncDeviceRecord(existing, { ...payload, receivedAt: new Date().toISOString() }, {
-          preserveSessionTitles: syncContent.acceptsSessionTitles(this.syncSessionTitles, policy, payload.sessionTitleSyncGeneration)
+      try { payload = await readIngestJson(request); }
+      catch (error) {
+        return jsonResponse(error.status === 413 ? 413 : 400, {
+          error: error.status === 413 ? 'payload_too_large' : 'bad_request', message: error.message
         });
-        await this.state.storage.put(`dev:${next.deviceId}`, next);
-        return next;
-      });
+      }
+      let record, upload;
+      try {
+        record = await this.mutate(async () => {
+          const incoming = delta ? this.uploadBaselines.prepare(payload) : payload;
+          if (!incoming || (!incoming.deviceId && !incoming.id)) throw Object.assign(new Error('deviceId_required'), { status: 400, code: 'deviceId_required' });
+          const deviceId = String(incoming.deviceId || incoming.id);
+          const policy = await this.state.storage.get(`${TITLE_POLICY_PREFIX}${deviceId}`);
+          const existing = await this.state.storage.get(`dev:${deviceId}`);
+          const preserveSessionTitles = syncContent.acceptsSessionTitles(this.syncSessionTitles, policy, incoming.sessionTitleSyncGeneration);
+          const next = mergeSyncDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() }, { preserveSessionTitles });
+          await this.state.storage.put(`dev:${next.deviceId}`, next);
+          this.uploadBaselines.forget(deviceId);
+          if (delta || request.headers.get(uploadDelta.UPLOAD_HEADER) === uploadDelta.UPLOAD_VERSION) {
+            upload = this.uploadBaselines.commit(deviceId, stripSessionTextFromDeviceRecord(incoming, { preserveSessionTitles }));
+          }
+          return next;
+        });
+      } catch (error) {
+        if (error.status) return jsonResponse(error.status, { error: error.code });
+        throw error;
+      }
       this.queueBroadcast();
-      const response = { ok: true, deviceId: record.deviceId };
+      const response = { ok: true, deviceId: record.deviceId, ...(upload ? { upload } : {}) };
       return jsonResponse(
         200,
         hubProtocol.wantsMinimalResponse(request)
@@ -542,6 +657,7 @@ export class HubDO {
     if (request.method === 'DELETE' && url.pathname.startsWith('/api/devices/')) {
       const deviceId = decodeURIComponent(url.pathname.slice('/api/devices/'.length));
       await this.mutate(() => this.withStorageTransaction(async (storage) => {
+        this.uploadBaselines.forget(deviceId);
         const key = `${TITLE_POLICY_PREFIX}${deviceId}`;
         await storage.put(key, syncContent.nextTitlePolicy(await storage.get(key), false));
         await storage.delete(`dev:${deviceId}`);
