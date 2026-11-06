@@ -283,6 +283,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   // Plugin management and the views this window draws (Home, tray bitmap).
   // Trust and installation run in main; enabled author UI executes in this page.
   plugins: {
+    limitsDemand: value => ipcRenderer.invoke('plugins:limitsDemand', value),
+    connection: (id, key, operation) => ipcRenderer.invoke('plugins:connection', id, key, operation),
+
     getSettings: id => pluginSettingsResult(ipcRenderer.invoke('plugins:getSettings', id)),
     updateSettings: (id, input) => pluginSettingsResult(ipcRenderer.invoke('plugins:updateSettings', id, input)),
     list: () => ipcRenderer.invoke('plugins:list'),

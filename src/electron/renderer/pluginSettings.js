@@ -49,7 +49,7 @@
     let revealConsent = false;
     let packagePreview = null;
     let operation = null;
-    let catalogData = null, activeTab = 'installed', query = '', sourcesOpen = false;
+    let catalogData = null, activeTab = 'installed', query = '', typeFilter = '', sourcesOpen = false;
     let selectedPluginId = '', diagnostics = false, installedPosition = null;
     let catalogModal = null;
     let catalogRefreshing = false, catalogRefreshPending = null, catalogRefreshError = '', disposed = false;
@@ -317,9 +317,20 @@
       return wrap;
     }
 
+    function typeSelector(onChange) {
+      const select = el(document, 'select', 'plugin-type-filter');
+      select.setAttribute('aria-label', t('plugins.filter.type'));
+      for (const type of ['', 'widget', 'page', 'appearance', 'automation', 'limits']) {
+        const option = el(document, 'option', '', t(type ? `plugins.type.${type}` : 'plugins.filter.all'));
+        option.value = type; option.selected = type === typeFilter; select.append(option);
+      }
+      select.addEventListener('change', () => { typeFilter = select.value; onChange(); });
+      return select;
+    }
+
     function typeLabels(plugin) {
       const labels = el(document, 'span', 'plugin-types');
-      for (const type of ['widget', 'page', 'appearance', 'automation']) {
+      for (const type of ['widget', 'page', 'appearance', 'automation', 'limits']) {
         if (!plugin.types?.includes(type)) continue;
         labels.append(el(document, 'span', `plugin-type plugin-type-${type}`, t(`plugins.type.${type}`)));
       }
@@ -626,7 +637,7 @@
       search.placeholder = t('plugins.catalog.search'); search.setAttribute('aria-label', t('plugins.catalog.search'));
       const results = el(document, 'div', 'plugin-catalog-results');
       function renderResults() {
-        const matches = p => `${p.name} ${p.description} ${p.author || ''} ${p.id}`.toLowerCase().includes(query.toLowerCase());
+        const matches = p => (!typeFilter || p.types?.includes(typeFilter)) && `${p.name} ${p.description} ${p.author || ''} ${p.id}`.toLowerCase().includes(query.toLowerCase());
         const sections = [];
         const groups = [
           ['plugins.catalog.featured', [
@@ -682,7 +693,7 @@
         if (content?.contains(results)) identifyContent();
       }
       search.addEventListener('input', () => { query = search.value; renderResults(); });
-      wrap.append(errors, search, results);
+      wrap.append(errors, search, typeSelector(renderResults), results);
       const refresh = el(document, 'div', 'settings-actions plugin-catalog-refresh');
       const canRefresh = catalogData.github?.enabled || catalogData.sources.some(source => Boolean(source.url));
       if (canRefresh) refresh.append(button(t('plugins.catalog.refresh'), () => void refreshCatalog(true)));
@@ -913,6 +924,7 @@
         meta.append(el(document, 'span', 'plugin-version', `v${plugin.version}`), typeLabels(plugin)); card.append(meta);
       }
       const footer = el(document, 'div', 'plugin-card-footer');
+      footer.append(button(t('plugins.connection.forget'), () => void run(async () => { await api.connection(plugin.id, null, 'forget'); return api.list(); }, `plugin:${plugin.id}`)));
       const surfaces = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
       const exceptional = !['active', 'disabled'].includes(plugin.status);
       if (exceptional) footer.append(statusChip(plugin));
@@ -1405,8 +1417,9 @@
       if (previousToolbar) previousToolbar.replaceWith(actions);
       else navigation.append(actions);
       if (packagePreview) nodes.push(packagePanel());
+      nodes.push(typeSelector(render));
       if (!list.plugins.length) nodes.push(el(document, 'p', 'settings-note', t('settings.plugins.empty')));
-      for (const plugin of [...list.plugins].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
+      for (const plugin of [...list.plugins].filter(plugin => !typeFilter || plugin.types?.includes(typeFilter)).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
         nodes.push(pluginCard(plugin));
       }
       replaceContent(nodes, saved);

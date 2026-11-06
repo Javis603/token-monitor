@@ -4584,17 +4584,46 @@ async function submitSubscription() {
   });
 }
 
+function desktopLimitProviders() {
+  return [...LIMIT_PROVIDERS, ...(state.pluginCatalog?.limits?.modules || [])];
+}
+function desktopLimitRecords() {
+  return [...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || [])];
+}
+function pluginLimitAccountOptions(module) {
+  const box = document.createElement('div');
+  box.className = 'settings-actions';
+  const status = document.createElement('span');
+  box.append(status);
+  if (!module.connection) return box;
+  for (const operation of ['connect', 'status', 'disconnect']) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'settings-button';
+    button.textContent = t(`plugins.connection.${operation}`);
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const result = await pluginBridge.connection(module.pluginId, module.moduleId, operation);
+        status.textContent = t(`plugins.connection.state.${result.state}`);
+      }
+      catch { status.textContent = t('limits.status.error'); }
+      finally { button.disabled = false; }
+    });
+    box.append(button);
+  }
+  return box;
+}
 function configuredLimitProviderOrder() {
   const enabled = enabledLimitProviderSet();
   return limitProviderOrderApi
-    .normalizeLimitProviderOrder(state.settings?.limitProviderOrder, LIMIT_PROVIDERS)
+    .normalizeLimitProviderOrder(state.settings?.limitProviderOrder, desktopLimitProviders())
     .filter((id) => enabled.has(id));
 }
 
 function configuredLimitProviderSelection() {
   const raw = state.pendingLimitProviderSelection?.limitProviders ?? state.settings?.limitProviders;
   const source = raw === undefined || raw === null ? DEFAULT_LIMIT_PROVIDER_ORDER : raw;
-  return limitProviderOrderApi.normalizeLimitProviderSelection(source, LIMIT_PROVIDERS);
+  return limitProviderOrderApi.normalizeLimitProviderSelection(source, desktopLimitProviders());
 }
 
 function enabledLimitProviderSet() {
@@ -5007,9 +5036,10 @@ function renderLimits() {
   state.limitDetailTooltipRenderPending = false;
   const limitsEnabled = state.settings?.limitsEnabled !== false;
   const enabled = enabledLimitProviderSet();
-  const providers = providersByLimitProviderId(state.stats?.limits?.providers || []);
+  void pluginBridge?.limitsDemand?.(state.breakdown === 'limits' && !document.hidden);
+  const providers = providersByLimitProviderId(desktopLimitRecords());
   const orderedProviders = limitProviderOrderApi
-    .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+    .orderedLimitProviders(desktopLimitProviders(), state.settings?.limitProviderOrder)
     .filter(({ id }) => limitsEnabled && enabled.has(id));
   const visibleProviderEntries = new Map(orderedProviders.map(({ id }) => {
     const providerEntries = limitsEnabled && enabled.has(id)
@@ -8084,6 +8114,7 @@ function setBreakdown(breakdown, options = {}) {
   }
   state.homeReturnVisible = options.fromHome === true && state.breakdown === 'home' && next !== 'home';
   state.breakdown = next;
+  void pluginBridge?.limitsDemand?.(next === 'limits' && !document.hidden);
   state.sessionPage = 0;
   state.rowSignature = '';
   publishViewState();
@@ -12148,7 +12179,7 @@ function limitProviderQuery() {
 }
 
 function limitProviderRows() {
-  const providers = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder);
+  const providers = limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), state.settings?.limitProviderOrder);
   // `settingsLabel` first because that is what the row actually shows: without
   // it, searching a provider by the name printed in front of you hides it.
   const matches = settingsListFilterApi.filterListItems(
@@ -12201,7 +12232,7 @@ function renderLimitProviderCheckboxesNow() {
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? (limitProviderPresentationApi.limitProviderSettingsRecord(state.stats?.limits?.providers, id)
+      ? (limitProviderPresentationApi.limitProviderSettingsRecord(desktopLimitRecords(), id)
         || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
@@ -12235,7 +12266,9 @@ function renderLimitProviderCheckboxesNow() {
     const provenance = limitProviderProvenance(provider);
     const connectionDetailKey = LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS[id];
     const accountGroup = limitProviderAccountGroup(id);
+    const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === id);
     const tagInfos = limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance);
+    if (pluginModule) tagInfos.push(...limitProviderPresentationApi.pluginLimitCapabilityTags(pluginModule));
     const detected = provider.status === 'ok' && !provider.stale;
     if (detected) {
       const statusTag = tagInfos.find((tagInfo) => tagInfo.kind === 'status');
@@ -12246,7 +12279,7 @@ function renderLimitProviderCheckboxesNow() {
       nameLine.append(dot);
     }
     for (const tagInfo of tagInfos) {
-      if ((detected || !isEnabled) && tagInfo.kind === 'status') continue;
+      if ((pluginModule || detected || !isEnabled) && tagInfo.kind === 'status') continue;
       // Account groups own their configuration summary on the right. Avoid
       // repeating "Not set up" beside the same account state, as with Codex.
       if (accountGroup && provider.status === 'notConfigured' && tagInfo.kind === 'status') continue;
@@ -12257,7 +12290,9 @@ function renderLimitProviderCheckboxesNow() {
       const tag = document.createElement('span');
       tag.className = `limit-provider-tag limit-provider-tag-${tagInfo.kind}`;
       if (tagInfo.tone) tag.classList.add(`limit-provider-tag-${tagInfo.tone}`);
-      tag.textContent = translatedLimitProviderTag(tagInfo);
+      tag.textContent = tagInfo.kind === 'custom' ? tagInfo.label
+        : tagInfo.parts ? tagInfo.parts.map(translatedLimitCapabilityTag).join('/')
+          : translatedLimitProviderTag(tagInfo);
       tags.append(tag);
     }
     copy.append(nameLine, tags);
@@ -12265,6 +12300,16 @@ function renderLimitProviderCheckboxesNow() {
     const actions = document.createElement('span');
     actions.className = 'limit-provider-actions';
     const accountStatus = limitProviderAccountStatus(id);
+    if (pluginModule) {
+      const reading = limitProviderPresentationApi.limitProviderSettingsRecord(state.pluginCatalog?.limits?.providers, id);
+      const summary = limitProviderPresentationApi.pluginLimitSettingsStatus(pluginModule, reading, isEnabled);
+      if (summary) {
+        const pill = document.createElement('span');
+        pill.className = 'cursor-status-pill plugin-limit-status';
+        pill.textContent = translatedLimitProviderTag(summary);
+        actions.append(pill);
+      }
+    }
     // Multi-account providers use this space for their account summary. Their
     // automatic collection support stays with the capability tags on the left.
     if (connectionDetailKey && !accountGroup) {
@@ -12275,7 +12320,7 @@ function renderLimitProviderCheckboxesNow() {
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
     const usageItems = isEnabled ? limitProviderUsageItemRows(id) : [];
-    const hasOptions = Boolean(accountGroup || settings || connectionDetailKey || usageItems.length);
+    const hasOptions = Boolean(pluginModule || accountGroup || settings || connectionDetailKey || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
@@ -12303,6 +12348,7 @@ function renderLimitProviderCheckboxesNow() {
         accountGroup.classList.add('limit-provider-account-group');
       }
       if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
+      if (pluginModule) optionsInner.append(pluginLimitAccountOptions(pluginModule));
       if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
       if (usageItems.length) optionsInner.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
       optionsContainer.append(optionsInner);
@@ -12333,6 +12379,11 @@ function renderLimitProviderCheckboxesNow() {
     // destination must already be connected, so the row is mounted first.
     moveLimitProviderLiveNode(actions, accountStatus, disclosureIcon);
     moveLimitProviderLiveNode(optionsInner, accountGroup);
+    if (pluginModule) {
+      const authorSettings = pluginLimitSettings?.node(pluginModule);
+      if (authorSettings?.isConnected) moveLimitProviderLiveNode(optionsInner, authorSettings);
+      else if (authorSettings) optionsInner?.append(authorSettings);
+    }
     // OpenCode's one setting is an off-by-default fallback estimate. Rendered by
     // the shared path it lands above the account list, reading as the first
     // thing to set up; it belongs below the accounts, collapsed. Reparented
@@ -12346,6 +12397,7 @@ function renderLimitProviderCheckboxesNow() {
     document.getElementById(focusedId)?.focus({ preventScroll: true });
   }
   state.limitProviderRenderSignature = renderSignature;
+  pluginLimitSettings?.reconcile();
 }
 
 // Moves the OpenCode local-DB toggle into its own collapsed group beneath the
@@ -12945,7 +12997,7 @@ async function onLimitProviderToggle() {
     enabledLimitProviderSet(),
     rendered,
     limitProviderOrderApi
-      .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+      .orderedLimitProviders(desktopLimitProviders(), state.settings?.limitProviderOrder)
       .map(({ id }) => id)
   );
   if (checked.length === 0 && state.breakdown === 'limits') {
@@ -12975,13 +13027,13 @@ async function onLimitProviderToggle() {
 }
 
 async function onLimitProviderMove(providerId, direction) {
-  const next = limitProviderOrderApi.moveLimitProvider(state.settings?.limitProviderOrder, LIMIT_PROVIDERS, providerId, direction);
+  const next = limitProviderOrderApi.moveLimitProvider(state.settings?.limitProviderOrder, desktopLimitProviders(), providerId, direction);
   await saveSettings({ limitProviderOrder: next });
 }
 
 async function onLimitProviderReorder(providerId, targetIndex) {
-  const current = limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, LIMIT_PROVIDERS).join(',');
-  const next = limitProviderOrderApi.reorderLimitProvider(state.settings?.limitProviderOrder, LIMIT_PROVIDERS, providerId, targetIndex);
+  const current = limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, desktopLimitProviders()).join(',');
+  const next = limitProviderOrderApi.reorderLimitProvider(state.settings?.limitProviderOrder, desktopLimitProviders(), providerId, targetIndex);
   if (next === current) return;
   await saveSettings({ limitProviderOrder: next });
 }
@@ -13338,6 +13390,22 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
     && (surface === 'settings' ? isSettingsPanelOpen() : !isSettingsPanelOpen()
       || (surface === 'page' && Boolean(container?.closest('#pluginMainPanel'))))
 }) : null;
+const pluginLimitSettings = pluginViewHost ? window.TokenMonitorPluginLimitSettings.create({
+  document, host: pluginViewHost,
+  getModules: () => state.pluginCatalog?.limits?.modules || [],
+  getView: module => state.pluginCatalog?.plugins?.find(plugin => plugin.id === module.pluginId && plugin.status === 'active')?.views?.find(view => view.id === module.settingsView && view.surfaces.includes('settings')),
+  isVisible: (module, container) => container.isConnected && isSettingsSurfaceVisible()
+    && state.settingsSections?.limits && state.limitProviderSettingsExpanded === module.id
+    && !container.closest('.is-filtered-out')
+}) : null;
+if (pluginLimitSettings) {
+  new MutationObserver(records => {
+    if (records.some(({ target }) => target === els.shell || target === els.settingsPanel
+      || target === document.getElementById('limitsSettingsDetails')
+      || (target.parentElement === els.limitProviderCheckboxes && target.classList.contains('limit-provider-row'))
+      || (target.parentElement?.parentElement === els.limitProviderCheckboxes && target.classList.contains('accordion-animated-container')))) pluginLimitSettings.reconcile();
+  }).observe(els.shell, { subtree: true, attributes: true, attributeFilter: ['class'] });
+}
 pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ document,
   host: { mount: (container, view, context) => pluginViewHost.mount(container, view.ref, 'page', context), unmount: container => pluginViewHost.unmount(container) },
   getViews: () => (state.pluginCatalog?.plugins || []).filter(plugin => plugin.status === 'active').flatMap(plugin => plugin.views || []),
@@ -13354,12 +13422,15 @@ let pluginCatalogKey = '';
 function applyPluginCatalog(list) {
   if (!list) return list;
   state.pluginCatalog = list;
+  pluginLimitSettings?.reconcile();
   // Home and the theme chips depend only on which plugins and views are
   // active; process metrics refresh every few seconds and must not re-render.
-  const key = JSON.stringify([list.contentSelections, list.contentOrder, (list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.revision,
+  const key = JSON.stringify([list.limits, list.contentSelections, list.contentOrder, (list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.revision,
     (plugin.views || []).map((view) => [view.ref, view.title, view.surfaces, view.placements?.page, view.placements?.notch]), plugin.skins, plugin.revision])]);
   if (key !== pluginCatalogKey) {
     pluginCatalogKey = key;
+    state.limitProviderRenderSignature = '';
+    if (isSettingsSurfaceVisible()) renderLimitProviderCheckboxes();
     render();
     renderViewSwitcher();
     renderThemePresetChips();
@@ -14877,6 +14948,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
 function handleWindowVisibilityChange() {
+  void pluginBridge?.limitsDemand?.(state.breakdown === 'limits' && !isRendererWindowHidden());
   syncPluginTrayDemand();
   pluginViewHost?.refreshDemand();
   if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());

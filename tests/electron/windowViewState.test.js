@@ -128,7 +128,7 @@ test('native host visibility does not refill settings drafts, while pending sett
   let flushes = 0;
   const context = vm.createContext({
     state: { settings: { hubMode: 'local' }, floatingBubble: {} }, els: {}, settingsDomSyncPending: false,
-    syncPluginTrayDemand() {}, pluginViewHost: null,
+    syncPluginTrayDemand() {}, pluginViewHost: null, pluginBridge: null,
     statsRenderScheduler: { visibilityChanged: () => true, flush: () => flushes++ },
     isRendererWindowHidden: () => false, applyFloatingBubbleState() {},
     isSettingsSurfaceVisible: () => true, syncSettingsForm: () => syncs++,
