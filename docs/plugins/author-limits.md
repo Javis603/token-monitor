@@ -74,9 +74,9 @@ exports.activate = async ({ host }) => ({
       {kind: 'daily', usedPercent: 20, remainingPercent: 80}
     ]};
     const response = await host.call('webSession.request', {key: moduleId});
-    // Parse the adapter response into quota windows; never infer prepaid balance
-    // from spending. Return notConfigured/unauthorized when appropriate.
-    const status = response.status === 200 ? 'ok'
+    // Parse response.body into quota windows before returning ok. This skeleton
+    // has no parser yet; never infer prepaid balance from spending.
+    const status = response.status === 200 ? 'unavailable'
       : [401, 403].includes(response.status) ? 'unauthorized'
       : response.status === 429 ? 'rateLimited' : 'error';
     return {status, windows: []};
