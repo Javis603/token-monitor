@@ -16,7 +16,7 @@ const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 const fixtureDir = path.join(scratch, 'source');
 fs.mkdirSync(fixtureDir, { recursive: true });
 fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'string',label:'Display mode',default:'meter'}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',connection:'openai',capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
-fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async()=>({call:async(method,args)=>{if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',windows:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60}]};}});`);
+fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async()=>({call:async(method,args)=>{if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60}]};}});`);
 fs.writeFileSync(path.join(fixtureDir,'settings.mjs'), `
 export async function activate(ctx) {
   window.quotaViewEvents ||= [];
@@ -137,6 +137,8 @@ app.whenReady().then(async () => {
   await waitFor("state.pluginCatalog?.limits?.providers?.length===2",'native module samples');
   const capture=async name=>{await pause(250);fs.writeFileSync(path.join(evidence,name),(await win.webContents.capturePage()).toPNG());};
   assert.deepEqual(await js("[...document.querySelectorAll('#limitsPanel > *')].map(node=>node.innerText.split('\\n')[0])"),['API balance','Claude','Claude']);
+  assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('Synthetic Team')"),true,'documented plugin plan appears in native Limits');
+  assert.equal(await js("state.pluginCatalog.limits.providers.find(row=>row.provider==='plugin:synthetic-limits:two').planLabel"),'','missing plan stays blank');
   await capture('limits-mixed.png');
   await js("applyFloatingBubbleState({collapsed:true,side:'left'})");
   await waitFor("state.pluginCatalog.limits.modules.every(module=>!module.sampling)",'bubble releases quota demand');
