@@ -38,6 +38,10 @@
     };
   }
 
+  function hasTrustworthyPricingMatch(result) {
+    return result?.resolution?.submissionSafe === true;
+  }
+
   function upsertOverride(list, entry) {
     const arr = Array.isArray(list) ? list.slice() : [];
     const i = arr.findIndex((e) => e && e.modelId === entry.modelId);
@@ -59,5 +63,12 @@
     return entry.inputPerM !== undefined || entry.outputPerM !== undefined;
   }
 
-  return { inUseModelIds, perMillionFromPricing, upsertOverride, removeOverride, hasUsableBasePrice };
+  return {
+    inUseModelIds,
+    perMillionFromPricing,
+    hasTrustworthyPricingMatch,
+    upsertOverride,
+    removeOverride,
+    hasUsableBasePrice
+  };
 });
