@@ -406,6 +406,9 @@ test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
 test('the default Cursor cache stays home-relative while Antigravity follows the config dir', () => {
   const homeDir = 'C:\\Users\\alice';
   const appData = 'C:\\Users\\alice\\AppData\\Roaming';
+  const configAppData = process.platform === 'win32'
+    ? require('../../src/shared/windowsKnownFolders').nativeWindowsFolders().roaming
+    : appData;
   const env = { APPDATA: appData };
   const roots = clientSourceRoots('cursor,antigravity', { homeDir, platform: 'win32', env });
 
@@ -415,7 +418,7 @@ test('the default Cursor cache stays home-relative while Antigravity follows the
   }]);
   assert.deepEqual(roots.antigravity, [{
     id: 'tokscale-antigravity-cache',
-    dir: path.join(appData, 'tokscale', 'antigravity-cache')
+    dir: path.join(configAppData, 'tokscale', 'antigravity-cache')
   }, {
     id: 'antigravity-extension-data',
     dir: path.join(homeDir, '.gemini', 'antigravity', 'conversations')
@@ -423,7 +426,7 @@ test('the default Cursor cache stays home-relative while Antigravity follows the
   // The sync lock lives inside the Antigravity cache, so it has to move with it.
   assert.equal(
     antigravitySyncLockPath(homeDir, env, 'win32'),
-    path.join(appData, 'tokscale', 'antigravity-cache', 'sync.lock')
+    path.join(configAppData, 'tokscale', 'antigravity-cache', 'sync.lock')
   );
 });
 
