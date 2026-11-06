@@ -79,13 +79,19 @@ test('a provider rule only touches the window kind it belongs to', () => {
   assert.equal(text('zai', { kind: 'daily', remaining: 100, limit: 200 }).detail, '100 / 200');
   assert.equal(text('zai', { kind: 'billing', limitId: 'zcode-model:x', remaining: 100, limit: 200 }).detail, '100 / 200');
 
-  for (const id of ['kiro', 'qoder', 'zed', 'kimi']) {
+  for (const id of ['kiro', 'qoder', 'qwenwork', 'zed', 'kimi']) {
     assert.equal(text(id, { kind: 'session', used: 1, limit: 4, detail: 'x' }).detail, '', id);
   }
 });
 
+test('QwenWork credits keep the remaining-over-total detail Qoder uses', () => {
+  const credits = { kind: 'billing', label: 'Credits', used: 45514.26, limit: 46000, remaining: 485.74 };
+  assert.deepEqual(text('qwenwork', credits), { value: null, detail: '485.74/46000', percentLeads: false });
+  assert.equal(text('qwenwork', credits, true).detail, '45514.26/46000');
+});
+
 test('a window with no absolute units keeps its percentage-only look', () => {
-  for (const id of ['kiro', 'qoder', 'zed', 'zai']) {
+  for (const id of ['kiro', 'qoder', 'qwenwork', 'zed', 'zai']) {
     assert.deepEqual(text(id, { kind: 'billing', usedPercent: 40 }), { value: null, detail: '', percentLeads: false }, id);
   }
   assert.deepEqual(text('codex', { kind: 'session', usedPercent: 40 }), { value: null, detail: '', percentLeads: false });

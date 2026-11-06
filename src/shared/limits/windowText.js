@@ -159,7 +159,7 @@
       return result(null, rawCount(window, showUsed));
     }
 
-    if (id === 'qoder') return billing ? result(null, rawCount(window, showUsed)) : EMPTY;
+    if (id === 'qoder' || id === 'qwenwork') return billing ? result(null, rawCount(window, showUsed)) : EMPTY;
 
     if (id === 'zed') {
       if (!billing) return EMPTY;
