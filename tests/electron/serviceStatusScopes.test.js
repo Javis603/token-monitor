@@ -217,3 +217,58 @@ test('revealed status providers render immediately without bypassing manual refr
   state.serviceStatusBusy = false;
   assert.equal(vm.runInContext('serviceStatusRows()[0]', context), refreshed);
 });
+
+test('unhiding checks status immediately and follows an in-flight request with the new selection', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const names = ['refreshServiceStatus', 'onServiceProviderVisibilityToggle', 'showAllServiceProviders'];
+  const functions = names.map((name) => {
+    const start = source.indexOf(`async function ${name}(`);
+    return source.slice(start, source.indexOf('\n}\n', start) + 3);
+  }).join('\n');
+  const state = { settings: { hiddenServiceProviders: 'minimax-intl' }, serviceStatusBusy: false };
+  const calls = [];
+  const pending = [];
+  const context = vm.createContext({
+    state,
+    window: { tokenMonitor: { getServiceStatus: (options) => {
+      calls.push(options);
+      return new Promise((resolve) => pending.push(() => resolve({ providers: options.providerIds.map((id) => ({ id, status: 'ok' })) })));
+    } } },
+    hiddenServiceProviderSet: () => new Set(state.settings.hiddenServiceProviders.split(',').filter(Boolean)),
+    visibleServiceProviderIds: () => ['claude', 'minimax-intl'].filter((id) => !state.settings.hiddenServiceProviders.split(',').includes(id)),
+    saveSettings: async (patch) => Object.assign(state.settings, patch),
+    renderServiceStatus: () => {}
+  });
+  vm.runInContext(functions, context);
+  const toggle = vm.runInContext('onServiceProviderVisibilityToggle("minimax-intl")', context);
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].force, true);
+  assert.deepEqual(Array.from(calls[0].providerIds), ['claude', 'minimax-intl']);
+  pending.shift()();
+  await toggle;
+
+  await vm.runInContext('onServiceProviderVisibilityToggle("minimax-intl")', context);
+  assert.equal(calls.length, 1, 'hiding does not fetch');
+  const inFlight = vm.runInContext('refreshServiceStatus()', context);
+  await vm.runInContext('onServiceProviderVisibilityToggle("minimax-intl")', context);
+  assert.equal(calls.length, 2, 'no overlapping request');
+  pending.shift()();
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 3, 'new selection is checked after the active request');
+  assert.deepEqual(Array.from(calls[2].providerIds), ['claude', 'minimax-intl']);
+  assert.equal(calls[2].force, true);
+  pending.shift()();
+  await inFlight;
+  assert.equal(state.serviceStatusBusy, false);
+  assert.equal(state.serviceStatus.providers[1].status, 'ok');
+  await vm.runInContext('showAllServiceProviders()', context);
+  assert.equal(calls.length, 3, 'show all with nothing hidden does not fetch');
+  await vm.runInContext('onServiceProviderVisibilityToggle("minimax-intl")', context);
+  const showAll = vm.runInContext('showAllServiceProviders()', context);
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 4);
+  assert.equal(calls[3].force, true);
+  pending.shift()();
+  await showAll;
+});

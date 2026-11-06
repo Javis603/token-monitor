@@ -130,7 +130,8 @@ test('view drag query does not select the nested status-provider rows', () => {
 test('the Status panel passes the visible provider ids to the fetch and orders by prefs', () => {
   const app = readRendererFile('app.js');
   const refreshBody = functionBody(app, 'refreshServiceStatus', 'formatAgo');
-  assert.match(refreshBody, /providerIds:/);
+  assert.match(refreshBody, /const providerIds = visibleServiceProviderIds\(\)/);
+  assert.match(refreshBody, /getServiceStatus\(\{[^\n]*providerIds\s*\}/);
   assert.match(app, /function visibleServiceProviderIds/);
   assert.match(app, /serviceStatus\.allHidden/);
 });

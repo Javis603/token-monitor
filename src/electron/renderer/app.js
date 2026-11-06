@@ -5187,10 +5187,11 @@ function renderServiceStatus() {
 
 async function refreshServiceStatus(options = {}) {
   if (!window.tokenMonitor.getServiceStatus || state.serviceStatusBusy) return;
+  const providerIds = visibleServiceProviderIds();
   state.serviceStatusBusy = true;
   renderServiceStatus();
   try {
-    state.serviceStatus = await window.tokenMonitor.getServiceStatus({ force: options.force === true, providerIds: visibleServiceProviderIds() });
+    state.serviceStatus = await window.tokenMonitor.getServiceStatus({ force: options.force === true, providerIds });
   } catch (error) {
     const checkedAt = new Date().toISOString();
     state.serviceStatus = {
@@ -5211,6 +5212,9 @@ async function refreshServiceStatus(options = {}) {
   } finally {
     state.serviceStatusBusy = false;
     renderServiceStatus();
+    if (visibleServiceProviderIds().some((id) => !providerIds.includes(id))) {
+      await refreshServiceStatus({ force: true });
+    }
   }
 }
 
@@ -13046,9 +13050,11 @@ function hiddenServiceProviderSet() {
 
 async function onServiceProviderVisibilityToggle(providerId) {
   const hidden = hiddenServiceProviderSet();
-  if (hidden.has(providerId)) hidden.delete(providerId);
+  const showing = hidden.has(providerId);
+  if (showing) hidden.delete(providerId);
   else hidden.add(providerId);
   await saveSettings({ hiddenServiceProviders: Array.from(hidden).join(',') });
+  if (showing) await refreshServiceStatus({ force: true });
 }
 
 async function onServiceProviderMove(providerId, direction) {
@@ -13100,7 +13106,9 @@ async function resetServiceProviderOrder() {
 }
 
 async function showAllServiceProviders() {
+  const showing = hiddenServiceProviderSet().size > 0;
   await saveSettings({ hiddenServiceProviders: '' });
+  if (showing) await refreshServiceStatus({ force: true });
 }
 
 async function onPreferenceReorder(kind, id, targetIndex) {
