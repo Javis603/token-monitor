@@ -58,6 +58,8 @@ test('forgetting host connections clears their retained quota but preserves unco
   const service = createPluginLimits({ manager, getSettings: () => ({ limitProviders: 'plugin:sample-plugin:one,plugin:sample-plugin:two' }), changed() {} });
   t.after(() => service.dispose()); service.demand(true);
   for (let n = 0; n < 20 && service.records().length < 2; n++) await new Promise(setImmediate);
-  service.demand(false); service.forgetConnections('sample-plugin');
+  service.demand(false);
+  assert.deepEqual(new Set(service.records().map(row => row.provider)), new Set(['plugin:sample-plugin:one', 'plugin:sample-plugin:two']));
+  service.forgetConnections('sample-plugin');
   assert.deepEqual(service.records().map(row => row.provider), ['plugin:sample-plugin:two']);
 });
