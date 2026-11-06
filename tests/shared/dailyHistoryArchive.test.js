@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { CLIENT_IDENTITY_GENERATION } = require('../../src/shared/clientIdentitySplits');
 
 const {
   captureDailyHistoryArchive,
@@ -944,7 +945,7 @@ test('durable archive keeps a day separate when Pi is captured before Oh My Pi',
     client('pi', 'gpt', 10, 1, 1)
   ]), { todayKey: '2026-09-20' });
   assert.equal(
-    morning.days['2026-09-20'].clientIdentityGeneration, 2,
+    morning.days['2026-09-20'].clientIdentityGeneration, CLIENT_IDENTITY_GENERATION,
     'a day this version writes must be marked, or it can never be split again'
   );
 

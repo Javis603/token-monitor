@@ -238,10 +238,16 @@ function graphsArray(graphs) {
 function foldClientForDate(client, date, options = {}) {
   if (!client) return client;
   const day = options.archive?.days?.[date];
-  if (!day || !isPreSplitEntry(day)) return client;
-  for (const { merged, split } of CLIENT_IDENTITY_SPLITS) {
-    if (client !== split) continue;
-    return merged;
+  for (const splitDef of CLIENT_IDENTITY_SPLITS) {
+    if (client !== splitDef.split) continue;
+    // A disabled Claude Desktop split folds every day back onto `claude`, so a
+    // live scan that no longer emits `claude-desktop` cannot be replayed next
+    // to archived Desktop rows of the same sessions.
+    if (splitDef.split === 'claude-desktop' && options.claudeDesktopSplitEnabled === false) {
+      return splitDef.merged;
+    }
+    if (!day || !isPreSplitEntry(day, splitDef)) continue;
+    return splitDef.merged;
   }
   return client;
 }
@@ -300,7 +306,7 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   }
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
-  const incomingDays = observationsFromGraphs(graphs, { archive });
+  const incomingDays = observationsFromGraphs(graphs, { archive, claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled });
   // A failed/empty graph did not confirm any current prices. Keep the old
   // revision so a later successful scan still reconciles retained live costs.
   if (incomingDays.size > 0 && typeof options.pricingRevision === 'string') archive.pricingRevision = options.pricingRevision;
@@ -314,11 +320,18 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
     // Anything else is written at the current generation, which is what stops a
     // post-split day from being absorbed into the merged id when Pi happens to be
     // scanned first.
+    //
+    // The same holds per split: a day first stored under an older generation
+    // keeps that generation, so it stays merged for every split that came after
+    // it while remaining post-split for the ones before.
     const legacy = existing !== null && isPreSplitEntry(existing);
+    const existingGeneration = Number(existing?.clientIdentityGeneration);
     const next = {
       date,
       activeTimeMs: Math.max(previous.activeTimeMs, incoming.activeTimeMs),
-      ...(legacy ? {} : { clientIdentityGeneration: CLIENT_IDENTITY_GENERATION }),
+      ...(legacy
+        ? (Number.isFinite(existingGeneration) ? { clientIdentityGeneration: existingGeneration } : {})
+        : { clientIdentityGeneration: CLIENT_IDENTITY_GENERATION }),
       observations: { ...previous.observations }
     };
     for (const [key, observation] of Object.entries(incoming.observations)) {
@@ -614,7 +627,7 @@ function graphTimeMetrics(graphs, activeTimeMs) {
 
 function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   const normalizedArchive = normalizeDailyHistoryArchive(archive);
-  const currentDays = observationsFromGraphs(graphs, { archive: normalizedArchive });
+  const currentDays = observationsFromGraphs(graphs, { archive: normalizedArchive, claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled });
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
 
