@@ -175,3 +175,45 @@ test('status external links admit provider roots and reject unrelated Google URL
     'https://www.google.com/appsstatus/dashboard?q=test', 'https://www.google.com/appsstatus/dashboard#test'
   ]) assert.equal(allowed(url), false, url);
 });
+
+test('revealed status providers render immediately without bypassing manual refresh', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const names = ['visibleServiceProviderIds', 'serviceStatusRows', 'serviceStatusRefreshMs', 'lastServiceStatusCheckedAt', 'maybeFetchServiceStatus'];
+  const functions = names.map((name) => {
+    const start = app.indexOf(`function ${name}(`);
+    return app.slice(start, app.indexOf('\n}\n', start) + 3);
+  }).join('\n');
+  const claude = { id: 'claude', status: 'outage', description: 'API down', checkedAt: new Date().toISOString(), componentIssues: [] };
+  const state = {
+    settings: { serviceStatusRefreshMs: 0, hiddenServiceProviders: 'minimax-intl', serviceProviderDisplayOrder: 'minimax-intl,claude' },
+    serviceStatus: { checkedAt: claude.checkedAt, providers: [claude] },
+    serviceStatusBusy: false
+  };
+  let fetches = 0;
+  const context = vm.createContext({
+    state, SERVICE_STATUS_PLACEHOLDERS: SERVICE_STATUS_PROVIDERS,
+    SERVICE_PROVIDER_OPTIONS: SERVICE_STATUS_PROVIDERS,
+    serviceStatusProviderPreferencesApi: require('../../src/electron/renderer/serviceStatusProviderPreferences'),
+    t: (key) => key,
+    refreshServiceStatus: async () => { fetches += 1; }
+  });
+  vm.runInContext(functions, context);
+  assert.equal(vm.runInContext('serviceStatusRows().some(row => row.id === "minimax-intl")', context), false);
+  state.settings.hiddenServiceProviders = '';
+  const rows = vm.runInContext('serviceStatusRows()', context);
+  assert.equal(rows[0].id, 'minimax-intl');
+  assert.equal(rows[0].status, 'unknown');
+  assert.equal(rows[0].description, 'serviceStatus.notChecked');
+  assert.equal(rows[0].checkedAt, '');
+  assert.equal(rows[1], claude);
+  vm.runInContext('maybeFetchServiceStatus()', context);
+  assert.equal(fetches, 0);
+  assert.equal(state.serviceStatus.providers.length, 1);
+
+  state.serviceStatusBusy = true;
+  assert.equal(vm.runInContext('serviceStatusRows()[0].description', context), 'serviceStatus.loading');
+  const refreshed = { ...rows[0], status: 'ok', description: 'All Systems Operational', checkedAt: claude.checkedAt };
+  state.serviceStatus.providers.push(refreshed);
+  state.serviceStatusBusy = false;
+  assert.equal(vm.runInContext('serviceStatusRows()[0]', context), refreshed);
+});

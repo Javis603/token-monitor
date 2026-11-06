@@ -5102,18 +5102,17 @@ function visibleServiceProviderIds() {
 function serviceStatusRows() {
   const order = visibleServiceProviderIds();
   const rank = new Map(order.map((id, index) => [id, index]));
-  const base = (state.serviceStatus?.providers?.length)
-    ? state.serviceStatus.providers
-    : SERVICE_STATUS_PLACEHOLDERS.map((provider) => ({
-        ...provider,
-        status: 'unknown',
-        description: state.serviceStatusBusy ? t('serviceStatus.loading') : t('serviceStatus.notChecked'),
-        checkedAt: '',
-        updatedAt: '',
-        componentIssues: [],
-        incidentCount: 0,
-        maintenanceCount: 0
-      }));
+  const checked = new Map((state.serviceStatus?.providers || []).map((provider) => [provider.id, provider]));
+  const base = SERVICE_STATUS_PLACEHOLDERS.map((provider) => checked.get(provider.id) || ({
+    ...provider,
+    status: 'unknown',
+    description: state.serviceStatusBusy ? t('serviceStatus.loading') : t('serviceStatus.notChecked'),
+    checkedAt: '',
+    updatedAt: '',
+    componentIssues: [],
+    incidentCount: 0,
+    maintenanceCount: 0
+  }));
   return base
     .filter((provider) => rank.has(provider.id))
     .sort((a, b) => rank.get(a.id) - rank.get(b.id));
