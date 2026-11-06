@@ -10,6 +10,12 @@ const { sameCycle, hourStart, dayKey, trendBounds, observationPoints, distributi
 const BREAK_INTERRUPTED = 1;
 const BREAK_ALLOWANCE_MISSING = 2;
 
+// Persisted guarded values: legacy 1 remains a genuine conflict, including
+// old ambiguous histories we cannot safely reclassify. Preference alone keeps
+// a healthy replacement in charge without making its next handoff a conflict.
+const GUARD_CONFLICT = 1;
+const GUARD_PREFERRED = 2;
+
 function retentionStart(now, days) {
   const date = new Date(now);
   date.setHours(0, 0, 0, 0);
@@ -112,7 +118,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
   const breakRun = sql(`UPDATE runs SET break_after = break_after | ${BREAK_INTERRUPTED} WHERE id = ?`);
   const markInterruption = sql('UPDATE runs SET break_after = break_after | ?, uncertain_until = MAX(COALESCE(uncertain_until, until), ?) WHERE id = ?');
   const markFailed = sql('UPDATE streams SET failed = 1 WHERE id = ?');
-  const guardHead = sql('UPDATE streams SET guarded = 1 WHERE id = ?');
+  const guardHead = sql(`UPDATE streams SET guarded = ${GUARD_CONFLICT} WHERE id = ?`);
   const ambiguousStart = sql('UPDATE runs SET uncertain_before = 1 WHERE id = ?');
   const basisInsert = sql('INSERT INTO run_basis VALUES (?, ?)');
   const failAccount = sql(`SELECT r.id, r.until, s.id AS stream FROM streams s
@@ -245,22 +251,20 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           const switched = !!tail && head.source !== source;
           const consistent = !tail || sameCycle(previous, point);
           const healthy = tail && !head?.failed && point.at - tail.until <= Math.max(tail.interval, point.interval) * 2.5;
-          // Prefer continuity once sources disagree. A healthy observer is not
-          // replaced by a contradictory or out-of-date observer. After it fails
-          // or expires, the replacement starts an uncertain baseline, not a
-          // fabricated reset or a jump in measured consumption.
+          // Prefer continuity after an uncertain takeover or source disagreement.
+          // Keep the replacement while healthy so an old observer cannot inject
+          // a jump. After failure/expiry, only genuine conflicts prevent a
+          // compatible handoff from establishing same-bucket net consumption.
           if (switched && healthy && (head.guarded || !consistent)) {
             // Omitted allowance metadata cannot establish a conflicting quota pool.
             if (!consistent && !missingBasisOnly) conflict(id, tail, point, now);
             continue;
           }
           const basisChanged = !!tail && (tail.basis || '') !== (point.basis || '');
-          const ambiguous = basisChanged || switched && (!!head.guarded || !consistent || !healthy);
-          // A stale/failed observer can hand over compatible endpoints without
-          // establishing disagreement. Only incompatible readings or basis
-          // changes require the persistent source guard.
-          const guarded = !!head?.guarded || basisChanged || switched && !consistent;
-          if (switched && head.guarded) {
+          const ambiguous = basisChanged || switched && (head.guarded === GUARD_CONFLICT || !consistent || !healthy);
+          const guarded = head?.guarded === GUARD_CONFLICT || basisChanged || switched && !consistent
+            ? GUARD_CONFLICT : head?.guarded || (ambiguous ? GUARD_PREFERRED : 0);
+          if (switched && head.guarded === GUARD_CONFLICT) {
             // An established disagreement still blocks a compatible-looking
             // replacement from turning the source difference into consumption.
             interrupt(id, tail, point, now);

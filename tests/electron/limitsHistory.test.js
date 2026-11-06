@@ -358,7 +358,6 @@ for (const failed of [false, true]) {
     assert.equal(hourly.buckets.find(b => new Date(b.at).getHours() === 10).value, failed ? 4 : 2);
     assert.equal(hourly.buckets.find(b => new Date(b.at).getHours() === 11).value, failed ? null : 2);
     assert.equal(hourly.unallocated, 0);
-    assert.equal(f.sql('SELECT guarded FROM streams')[0].guarded, 0);
   });
 }
 
@@ -387,8 +386,11 @@ test('inactive device failures do not interrupt an active observer; active failu
   assert.equal(segments(f.query().windows[0].points).length, 1);
   f.record([{ account: accountA, source: 'a', failed: true }]);
   f.reopen();
-  f.record([action(at(2, 10, 10), 25, { source: 'b' }), action(at(2, 10, 15), 26, { source: 'b' }),
-    action(at(2, 10, 20), 27, { source: 'b' })]);
+  f.record([action(at(2, 10, 10), 25, { source: 'b' }), action(at(2, 10, 15), 26, { source: 'b' })]);
+  f.reopen();
+  f.record([action(at(2, 10, 20), 90, { source: 'a' }), action(at(2, 10, 20), 27, { source: 'b' })]);
+  assert.equal(f.query().windows[0].distribution.buckets.at(-1).value, 7);
+  f.reopen();
   for (const grain of ['day', 'hour']) {
     const data = f.query({ grain, day: dayKey(f.clock) }).windows[0].distribution;
     const bucket = grain === 'day' ? data.buckets.at(-1) : data.buckets.find(b => new Date(b.at).getHours() === 10);
@@ -433,7 +435,7 @@ test('handoff across midnight leaves the intervening change unallocated and pres
   const f = databaseFixture(t);
   f.record([action(at(1, 23, 50), 20, { source: 'a' }), action(at(1, 23, 55), 22, { source: 'a' }),
     action(at(2, 0, 30), 30, { source: 'b' }), action(at(2, 0, 35), 31, { source: 'b' }),
-    action(at(2, 0, 40), 32, { source: 'b' })]);
+    action(at(2, 0, 40), 80, { source: 'a' }), action(at(2, 0, 40), 32, { source: 'b' })]);
   f.reopen();
   const daily = f.query().windows[0].distribution;
   assert.equal(daily.buckets.at(-2).value, 2);
