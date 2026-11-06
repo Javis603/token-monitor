@@ -170,7 +170,10 @@ app.whenReady().then(async () => {
 
   await js("state.limitProviderSearchQuery='API balance';renderLimitProviderCheckboxes()");
   assert.deepEqual(await js("[...document.querySelectorAll('.limit-provider-row:not(.is-filtered-out)')].map(row=>row.dataset.provider)"),['plugin:synthetic-limits:two']);
-  await js("state.limitProviderSearchQuery='';renderLimitProviderCheckboxes()");
+  await js("state.limitProviderSearchQuery='';renderLimitProviderCheckboxes();onLimitProviderMove('plugin:synthetic-limits:one','up')");
+  await waitFor("[...document.querySelectorAll('.limit-provider-row')][1]?.dataset.provider==='plugin:synthetic-limits:one'",'keyboard mixed reorder repaints');
+  await js("onLimitProviderMove('plugin:synthetic-limits:one','down')");
+  await waitFor("[...document.querySelectorAll('.limit-provider-row')][2]?.dataset.provider==='plugin:synthetic-limits:one'",'keyboard reorder restores');
   await pause(200);
   const drag = await js(`(() => {
     const source = document.getElementById('limitProviderDisclosure-plugin:synthetic-limits:one').getBoundingClientRect();

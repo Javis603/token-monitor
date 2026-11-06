@@ -17,3 +17,15 @@ test('quota demand exists only for visible main Limits, never bubble or settings
   assert.deepEqual(demands, [true, false, false, false, true, false]);
   for (const name of ['renderLimits', 'setBreakdown', 'applyFloatingBubbleState', 'handleWindowVisibilityChange', 'openSettingsPanel', 'openViewFromTray']) assert.match(extract(name), /syncPluginLimitsDemand\(\)/, name);
 });
+test('settings render signature includes mixed module order for keyboard moves', () => {
+  const order = require('../../src/electron/renderer/limits/providerOrder');
+  const state = { settings: { limitProviderOrder: 'plugin:fixture:one,claude,plugin:fixture:two' }, stats: {} };
+  const context = vm.createContext({ state, currentLocale: () => 'en', enabledLimitProviderSet: () => new Set(),
+    LIMIT_PROVIDER_SETTINGS: {}, LIMIT_PROVIDERS: [{ id: 'claude' }], limitProviderOrderApi: order,
+    desktopLimitProviders: () => [{ id: 'claude' }, { id: 'plugin:fixture:one' }, { id: 'plugin:fixture:two' }],
+    limitProviderQuery: () => '', limitProviderUsageItemRows: () => [] });
+  vm.runInContext(extract('limitProviderSettingsRenderSignature'), context);
+  const before = context.limitProviderSettingsRenderSignature();
+  state.settings.limitProviderOrder = 'plugin:fixture:two,claude,plugin:fixture:one';
+  assert.notEqual(context.limitProviderSettingsRenderSignature(), before);
+});

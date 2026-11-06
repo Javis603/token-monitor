@@ -60,6 +60,7 @@ function createPluginRuntime({
   placementContext = () => ({}),
   log = (message) => console.log(message),
   hostActions = {},
+  fetchImpl,
   env = process.env
 }) {
   const { BrowserWindow, Notification, ipcMain, session, shell, dialog } = electron;
@@ -154,7 +155,7 @@ function createPluginRuntime({
   const manager = createPluginManager({ userDir, dataDir: path.join(userDataDir, 'plugin-data'), authorSettings,
     getSettings, saveStates: persistPluginStates, getLocale, safeMode, hostCall,
     fork: (...args) => electron.utilityProcess.fork(...args), log });
-  const connections = createPluginWebSessions({ electron, directory: path.join(userDataDir, 'plugin-credentials'), active: id => manager.active(id), changed: (id, key) => { void limits.refresh(`plugin:${id}:${key}`); } });
+  const connections = createPluginWebSessions({ electron, fetchImpl: fetchImpl || netFetch, directory: path.join(userDataDir, 'plugin-credentials'), active: id => manager.active(id), changed: (id, key) => { void limits.refresh(`plugin:${id}:${key}`); } });
   const limits = createPluginLimits({ manager, getSettings, changed: () => { for (const subscriber of subscribers.values()) if (!subscriber.webContents.isDestroyed()) subscriber.webContents.send('plugins:changed'); } });
   const mime = name => ({ js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', woff2: 'font/woff2' }[name.split('.').pop()] || 'application/octet-stream');
   const protocol = session.defaultSession.protocol;

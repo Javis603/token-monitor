@@ -22,7 +22,7 @@ function authorizationExpiry(authorization) {
     return Number.isFinite(value.exp) && value.exp > 0 && value.exp < 8640000000000 ? value.exp * 1000 : null;
   } catch { return null; }
 }
-function createPluginWebSessions({ electron, directory, active, timeoutMs = 180000, platform = process.platform, changed = () => {} }) {
+function createPluginWebSessions({ electron, fetchImpl, directory, active, timeoutMs = 180000, platform = process.platform, changed = () => {} }) {
   const { BrowserWindow, session, safeStorage, dialog } = electron;
   const live = new Map(), requests = new Map(), failures = new Map(), versions = new Map();
   let disposed = false;
@@ -141,7 +141,7 @@ function createPluginWebSessions({ electron, directory, active, timeoutMs = 1800
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       // No cookies or redirects: a captured bearer may go only to its confirmed URL.
-      const response = await session.fromPartition('plugin-web-requests').fetch(stored.requestUrl, {
+      const response = await fetchImpl(stored.requestUrl, {
         method: 'GET', headers: { ...stored.headers, Authorization: stored.authorization, Accept: 'application/json' },
         credentials: 'omit', redirect: 'error', signal: controller.signal
       });
