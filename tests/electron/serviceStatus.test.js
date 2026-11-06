@@ -441,8 +441,8 @@ test('summarizeOpenCodeProvider takes the worst of the top-level and component s
 
   assert.equal(result.status, 'outage');
   assert.equal(result.indicator, 'major');
-  // The affected service names stand in for the missing incident headline.
-  assert.equal(result.description, 'go; payg');
+  // The headline describes the overall problem rather than raw component IDs.
+  assert.equal(result.description, 'Partial Service Outage');
   assert.deepEqual(result.componentIssues, [
     { name: 'go', status: 'degraded_performance' },
     { name: 'payg', status: 'partial_outage' }
@@ -635,4 +635,19 @@ test('the status probe takes the runtime transport', () => {
   const main = fs.readFileSync(path.join(ROOT, 'src', 'electron', 'main.js'), 'utf8');
 
   assert.match(main, /createServiceStatusClient\(\{\s*fetchImpl: electronLimitsFetch\(\)\s*\}\)/);
+});
+
+
+test('OpenCode headlines describe upstream issues and fall back for unknown or mixed reasons', () => {
+  const summarize = (components) => summarizeOpenCodeProvider(openCodeProvider, { status: 'degraded', components });
+  const result = summarize([{ service: 'go', status: 'degraded', reason: 'upstream' }]);
+  assert.equal(result.description, 'Upstream provider issues');
+  assert.deepEqual(result.componentIssues, [{ name: 'go', status: 'degraded_performance' }]);
+  for (const reason of [undefined, 'new-reason']) {
+    assert.equal(summarize([{ service: 'go', status: 'degraded', reason }]).description, 'Degraded Performance');
+  }
+  assert.equal(summarize([
+    { service: 'go', status: 'degraded', reason: 'upstream' },
+    { service: 'payg', status: 'partial_outage', reason: 'errors' }
+  ]).description, 'Partial Service Outage');
 });

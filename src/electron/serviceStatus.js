@@ -423,6 +423,7 @@ function summarizeOpenCodeProvider(provider, payload, options = {}) {
     if (payload.components !== undefined && !Array.isArray(payload.components)) throw new Error('Unexpected components');
     let worst = openCodeStatusToIndicator(payload.status);
     const componentIssues = [];
+    const issueReasons = new Set();
     // A malformed component entry must not be skipped: swallowing it would let
     // an otherwise-broken payload read green.
     for (const component of payload.components || []) {
@@ -433,6 +434,7 @@ function summarizeOpenCodeProvider(provider, payload, options = {}) {
       worst = worstIndicator(worst, indicator);
       if (indicator !== 'none') {
         componentIssues.push({ name: component.service.trim(), status: indicatorToComponentStatus(indicator) });
+        issueReasons.add(normalizeStatus(component.reason));
       }
     }
     // The feed carries the reading's millisecond epoch instead of an ISO
@@ -446,11 +448,10 @@ function summarizeOpenCodeProvider(provider, payload, options = {}) {
       pageUrl: provider.pageUrl,
       status: providerTone(worst),
       indicator: worst,
-      // The affected service names are the closest thing this format has to an
-      // incident headline.
-      description: worst === 'none'
-        ? canonicalDescription(worst)
-        : (componentIssues.map((issue) => issue.name).join('; ') || canonicalDescription(worst)),
+      // Only attribute a common cause when every affected service reports it.
+      description: issueReasons.size === 1 && issueReasons.has('upstream')
+        ? 'Upstream provider issues'
+        : canonicalDescription(worst),
       checkedAt,
       updatedAt,
       componentIssues,
