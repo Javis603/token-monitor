@@ -3605,3 +3605,71 @@ test('detail tooltip flipping uses the painted card top in CSS pixels', () => {
     }
   }
 });
+
+
+test('a fixed third-party headline keeps sibling accounts in the card and never switches on failure', () => {
+  const money = (accountKey, amount, extra = {}) => provider('thirdparty', {
+    accountKey, windows: [{ kind: 'billing', metric: 'credits', remaining: amount, currency: 'USD', showMeter: false }], ...extra
+  });
+  const selected = money('chosen', 21.53);
+  const sibling = money('sibling', 0.18);
+  const item = { type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: 'chosen' };
+  const build = (records, patch = {}) => buildEdgeDockCells({ limits: { providers: records } }, { items: [{ ...item, ...patch }] })[0];
+  const fixed = build([sibling, selected]);
+  assert.equal(fixed.credits.amount, 21.53);
+  assert.equal(fixed.remainingPercent, null);
+  assert.equal(fixed.accounts.length, 2);
+  assert.equal(build([selected, sibling], { accountMode: 'lowest' }).credits.amount, 0.18);
+  for (const status of ['unauthorized', 'unavailable']) {
+    const failed = build([sibling, { ...selected, status, windows: [] }]);
+    assert.equal(failed.status, 'error');
+    assert.equal(failed.credits, null);
+    assert.equal(failed.remainingPercent, null);
+  }
+  const stale = build([sibling, { ...selected, stale: true }]);
+  assert.equal(stale.status, 'stale');
+  assert.equal(stale.credits, null);
+  for (const records of [[sibling], []]) {
+    const missing = build(records);
+    assert.equal(missing.status, 'error');
+    assert.equal(missing.credits, null);
+  }
+  const hidden = build([selected, sibling], { hiddenAccounts: ['chosen'] });
+  assert.equal(hidden.credits, null);
+  assert.equal(hidden.accounts.length, 1);
+  assert.equal(build([money('', 99), sibling], { accountKey: '' }).credits, null);
+  assert.equal(build([selected, sibling], { accountKey: 'sibling' }).credits.amount, 0.18);
+});
+
+test('a fixed third-party account owns quota selection as well as its balance', () => {
+  const chosen = provider('thirdparty', { accountKey: 'chosen', windows: [
+    { kind: 'weekly', label: 'Weekly', remainingPercent: 80 },
+    { kind: 'billing', metric: 'credits', remaining: 20, showMeter: false }
+  ] });
+  const sibling = provider('thirdparty', { accountKey: 'sibling', windows: [{ kind: 'weekly', label: 'Weekly', remainingPercent: 5 }] });
+  const [cell] = buildEdgeDockCells({ limits: { providers: [sibling, chosen] } }, {
+    items: [{ type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: 'chosen' }]
+  });
+  assert.equal(cell.remainingPercent, 80);
+  assert.equal(cell.credits, null);
+  assert.equal(cell.accounts.length, 2);
+});
+
+test('third-party headline account settings survive normalization without changing other providers', () => {
+  const [item] = normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: '  sha256:chosen  ' }]);
+  assert.equal(item.accountMode, 'specific');
+  assert.equal(item.accountKey, 'sha256:chosen');
+  assert.deepEqual(normalizeEdgeDockItems([item]), [item]);
+  const [legacy] = normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty' }]);
+  assert.equal(legacy.accountMode, 'lowest');
+  assert.equal(legacy.accountKey, '');
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty', accountKey: {} }])[0].accountKey, '');
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty', accountKey: 'x'.repeat(201) }])[0].accountKey.length, 200);
+  const [codex, claude] = normalizeEdgeDockItems([
+    { type: 'limit', provider: 'codex', accountMode: 'specific', accountKey: 'chosen' },
+    { type: 'limit', provider: 'claude', accountMode: 'specific', accountKey: 'chosen' }
+  ]);
+  assert.equal(codex.accountMode, 'active');
+  assert.equal(claude.accountMode, 'lowest');
+  assert.equal(Object.hasOwn(codex, 'accountKey'), false);
+});
