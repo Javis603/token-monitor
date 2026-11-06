@@ -8,7 +8,8 @@
 // connected limit providers — or an ordered list the user composed:
 //   { type: 'limit', provider, hiddenAccounts: [accountKey], showUsage,
 //     accountMode: 'active' | 'lowest', windowKey: '' | limitWindowKey(window) }
-//   { type: 'stat', metric }   metric: a usage period, 'liveRate', or 'sessions'
+//   { type: 'stat', metric }   metric: a usage period, 'liveRate', 'sessions',
+//                              or 'cacheHit'
 //                              ('sessions' additionally carries runningOnly
 //                              and groupBy; see normalizeItem)
 //   { type: 'plugin', ref }    a plugin view (`<pluginId>/<viewId>`); kept when
@@ -32,7 +33,7 @@
   // than of a usage period: it is the one item that lists work every client can
   // answer for, including the clients that have no limits provider at all.
   const SESSIONS_METRIC = 'sessions';
-  const STAT_METRICS = Object.freeze([...USAGE_PERIODS, 'liveRate', SESSIONS_METRIC]);
+  const STAT_METRICS = Object.freeze([...USAGE_PERIODS, 'liveRate', SESSIONS_METRIC, 'cacheHit']);
   const STAT_METRIC_SET = new Set(STAT_METRICS);
   // Earlier development builds split tokens and cost into separate metrics.
   const LEGACY_METRICS = Object.freeze({
