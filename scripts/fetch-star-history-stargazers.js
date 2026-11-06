@@ -5,9 +5,6 @@ const path = require('node:path');
 
 const PAGE_SIZE = 30;
 const MAX_PAGES = 100;
-// The live star count can move between the metadata read and the history
-// fetch; a larger gap indicates truncated or inconsistent history.
-const MAX_COUNT_DRIFT = 10;
 const REQUEST_TIMEOUT_MS = 30_000;
 const SECONDS_PER_DAY = 86_400;
 const GITHUB_API_VERSION = '2026-03-10';
@@ -79,6 +76,11 @@ const normalizeWeekStart = (week) => {
   return Math.floor(sunday / SECONDS_PER_DAY) * SECONDS_PER_DAY;
 };
 
+const weekStartForTimestamp = (timestampSeconds) => {
+  const day = new Date(timestampSeconds * 1000).getUTCDay();
+  return Math.floor((timestampSeconds - day * SECONDS_PER_DAY) / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+};
+
 const normalizeHistoryPage = (entries, offset) => {
   if (!Array.isArray(entries)) fail('GitHub star history response was not an array');
   return entries.map((entry, index) => {
@@ -102,10 +104,14 @@ const normalizeHistoryPage = (entries, offset) => {
 const fetchRepositoryMetadata = async ({ repository, token, apiUrl, fetchImpl }) => {
   const response = await fetchJson(apiEndpoint(apiUrl, `/repos/${repository}`), token, fetchImpl);
   const stargazersCount = response.data?.stargazers_count;
+  const createdAt = Date.parse(response.data?.created_at);
   if (!Number.isInteger(stargazersCount) || stargazersCount < 0) {
     fail('repository metadata has an invalid stargazers_count');
   }
-  return { stargazersCount };
+  if (!Number.isFinite(createdAt)) {
+    fail('repository metadata has an invalid created_at');
+  }
+  return { stargazersCount, createdAt };
 };
 
 const fetchHistoryWeeks = async ({ repository, token, apiUrl, fetchImpl }) => {
@@ -138,7 +144,14 @@ const fetchHistoryWeeks = async ({ repository, token, apiUrl, fetchImpl }) => {
       break;
     }
   }
-  return weeks;
+
+  const ordered = [...weeks].sort((left, right) => left.week - right.week);
+  for (let index = 1; index < ordered.length; index += 1) {
+    if (ordered[index].week - ordered[index - 1].week !== 7 * SECONDS_PER_DAY) {
+      fail(`GitHub star history is not contiguous between weeks ${ordered[index - 1].week} and ${ordered[index].week}`);
+    }
+  }
+  return ordered;
 };
 
 // The aggregate endpoint exposes daily star counts without identities. Expand
@@ -169,7 +182,7 @@ const fetchSanitizedStargazers = async ({
   assertRepository(repository);
   if (typeof fetchImpl !== 'function') fail('this Node runtime does not provide fetch');
 
-  const { stargazersCount } = await fetchRepositoryMetadata({ repository, token, apiUrl, fetchImpl });
+  const { stargazersCount, createdAt } = await fetchRepositoryMetadata({ repository, token, apiUrl, fetchImpl });
   if (stargazersCount === 0) return [];
 
   const weeks = await fetchHistoryWeeks({ repository, token, apiUrl, fetchImpl });
@@ -177,12 +190,16 @@ const fetchSanitizedStargazers = async ({
   if (stars.length === 0) {
     fail('GitHub returned no star history for a repository with stargazers');
   }
-  const drift = Math.abs(stars.length - stargazersCount);
-  if (drift > MAX_COUNT_DRIFT) {
-    fail(`fetched ${stars.length} timestamps but repository metadata reports ${stargazersCount}`);
+
+  // Contiguous weeks plus the creation-week check above prove the history is
+  // complete. Any remaining count difference is a live star change during the
+  // fetch, so keep the fetched total instead of failing the scheduled run.
+  const creationWeek = weekStartForTimestamp(Math.floor(createdAt / 1000));
+  if (weeks[0].week > creationWeek) {
+    fail(`star history starts at week ${weeks[0].week}, after repository creation week ${creationWeek}`);
   }
-  if (drift > 0) {
-    console.warn(`Star History stargazer count changed by ${drift} during fetch; using the fetched history total.`);
+  if (stars.length !== stargazersCount) {
+    console.warn(`Star History stargazer count changed by ${Math.abs(stars.length - stargazersCount)} during fetch; using the fetched history total.`);
   }
   return stars;
 };
