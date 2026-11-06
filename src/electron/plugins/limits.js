@@ -48,7 +48,7 @@ function createPluginLimits({ manager, getSettings, changed }) {
       for (const module of revisions) void runtime.refresh({ provider: module.id }, 'settings-change');
       return;
     }
-    runtime = createLimitsRuntime(options, {
+    runtime = createLimitsRuntime({ ...options, previousLimits: { providers: retained } }, {
       autoStart: false,
       parseProviders: value => (Array.isArray(value) ? value : String(value || '').split(',')).filter(id => byId.has(id)),
       normalizeProvider: value => {
