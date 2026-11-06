@@ -256,7 +256,10 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           }
           const basisChanged = !!tail && (tail.basis || '') !== (point.basis || '');
           const ambiguous = basisChanged || switched && (!!head.guarded || !consistent || !healthy);
-          const guarded = !!head?.guarded || ambiguous;
+          // A stale/failed observer can hand over compatible endpoints without
+          // establishing disagreement. Only incompatible readings or basis
+          // changes require the persistent source guard.
+          const guarded = !!head?.guarded || basisChanged || switched && !consistent;
           if (switched && head.guarded) {
             // An established disagreement still blocks a compatible-looking
             // replacement from turning the source difference into consumption.
