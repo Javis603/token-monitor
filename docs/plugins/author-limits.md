@@ -73,6 +73,8 @@ exports.activate = async ({ host }) => ({
     if (moduleId === 'local') return {status: 'ok', windows: [
       {kind: 'daily', usedPercent: 20, remainingPercent: 80}
     ]};
+    const connection = await host.call('webSession.status', {key: moduleId});
+    if (connection.state === 'notConnected') return {status: 'notConfigured', windows: []};
     const response = await host.call('webSession.request', {key: moduleId});
     // Parse response.body into quota windows before returning ok. This skeleton
     // has no parser yet; never infer prepaid balance from spending.
