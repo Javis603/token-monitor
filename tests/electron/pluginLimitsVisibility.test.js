@@ -9,7 +9,7 @@ const extract = name => source.match(new RegExp(`function ${name}\\([^]*?\\n}`))
 test('quota demand exists only for visible main Limits, never bubble or settings overlay', () => {
   let surface = 'main', settings = false;
   const demands = [], state = { breakdown: 'limits' };
-  const context = vm.createContext({ state, pluginBridge: { limitsDemand: value => demands.push(value) }, visibleStatsSurface: () => surface, isSettingsPanelOpen: () => settings });
+  const context = vm.createContext({ state, pluginBridge: { limitsDemand: value => { demands.push(value); return Promise.resolve(); } }, visibleStatsSurface: () => surface, isSettingsPanelOpen: () => settings });
   vm.runInContext(extract('syncPluginLimitsDemand'), context);
   const sync = () => context.syncPluginLimitsDemand();
   sync(); settings = true; sync(); settings = false; surface = 'bubble'; sync();
