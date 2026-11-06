@@ -87,6 +87,7 @@
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
     minimax: ['Auto', 'Token Plan', 'Pay-as-you-go', 'API key'],
+    mistral: ['Web', 'Manual'],
     typesafe: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
