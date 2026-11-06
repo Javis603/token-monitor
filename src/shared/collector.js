@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { customPricingPath } = require('./tokscaleConfig');
+const { catalogRevision, createPricingCatalogRefresher } = require('./pricingCatalog');
 const { senpiWatchSources } = require('./providers/senpi/paths');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
@@ -555,6 +556,7 @@ function runTokscale({
   onTerminationUnconfirmed,
   customScanPaths,
   homeDir,
+  offlinePricing = false,
   workspaces = true
 }) {
   throwIfAborted(signal);
@@ -574,7 +576,7 @@ function runTokscale({
   const groupBy = () => (workspaces && workspaceGroupBySupported(command.identity)
     ? TOKSCALE_WORKSPACE_GROUP_BY
     : TOKSCALE_SESSION_GROUP_BY);
-  const runArgs = (filter, grouping) => ['--json', '--client', filter, '--group-by', grouping, ...flags];
+  const runArgs = (filter, grouping) => [...(offlinePricing ? ['--offline'] : []), '--json', '--client', filter, '--group-by', grouping, ...flags];
   const subprocessOptions = {
     operation: 'tokscale scan',
     terminationOptions,
@@ -610,14 +612,14 @@ function runTokscale({
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, offlinePricing = false }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ contributions: [] });
-  const runArgs = (filter) => ['graph', '--client', filter, '--no-spinner'];
+  const runArgs = (filter) => [...(offlinePricing ? ['--offline'] : []), 'graph', '--client', filter, '--no-spinner'];
   const subprocessOptions = {
     operation: 'tokscale graph',
     terminationOptions,
@@ -638,7 +640,7 @@ function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOption
 function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
   const id = String(modelId || '').trim();
   if (!id) return Promise.reject(new Error('lookupModelPricing: modelId is required'));
-  return spawnTokscaleJson(['pricing', id, '--json', '--no-spinner'], commandTimeoutMs);
+  return spawnTokscaleJson(['--offline', 'pricing', id, '--json', '--no-spinner'], commandTimeoutMs);
 }
 
 // The collector's stamp and history.js's window/streak boundary have to be the same
@@ -902,6 +904,7 @@ async function collectUsageOnce(options) {
   const runTokscaleScan = options.runTokscale || ((input) => runTokscale({
     ...input,
     workspaces: projectsEnabled,
+    offlinePricing: options.offlinePricing,
     customScanPaths: options.customScanPaths,
     homeDir: options.homeDir,
     terminationOptions: options.subprocessTerminationOptions,
@@ -914,6 +917,7 @@ async function collectUsageOnce(options) {
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
+    offlinePricing: options.offlinePricing,
     customScanPaths: options.customScanPaths,
     homeDir: options.homeDir,
     terminationOptions: options.subprocessTerminationOptions,
@@ -2243,6 +2247,7 @@ function pricingFingerprint(options = {}) {
     env: tokscaleEnvWithBlanksDropped(process.env)
   });
   const hash = createHash('sha256');
+  hash.update(JSON.stringify(catalogRevision({ env: tokscaleEnvWithBlanksDropped(process.env) })));
   hash.update(pricingPath);
   try { hash.update(fs.readFileSync(pricingPath)); }
   catch (error) { hash.update(`|file:${error.code || 'unreadable'}`); }
@@ -2664,6 +2669,7 @@ function startCollector(options) {
   let intervalTimer = null;
   let stopped = false;
   let activityScheduler = null;
+  let pricingRefresher = null;
   let activityWatchReady = false;
   let activityUpdate = null;
   let latestActivitySummary = null;
@@ -2909,6 +2915,7 @@ function startCollector(options) {
       let catpawSourceChangeObserved = false;
       const summary = await collectUsageOnce({
         ...options,
+        offlinePricing: true,
         codexDotsVisible,
         signal: runtimeSignal,
         clients,
@@ -3689,6 +3696,7 @@ function startCollector(options) {
     stopped = true;
     runtimeAbortController.abort(new Error('collector stopped'));
     codexLocalSource?.stop();
+    pricingRefresher?.stop();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     activityScheduler?.stop();
@@ -3705,7 +3713,12 @@ function startCollector(options) {
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
     const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
-    return usageIdle.then(() => activityUpdate).then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
+    return usageIdle.then(() => activityUpdate).then(async () => {
+      if (stopped) {
+        await pricingRefresher?.whenIdle();
+        await codexLocalSource?.whenIdle();
+      }
+    });
   }
 
   function getDiagnostics() {
@@ -3751,6 +3764,23 @@ function startCollector(options) {
 
   setupWatchers();
   loop();
+  // Injected scans own their pricing in tests/embedders. Production downloads
+  // run independently of usage ticks, never once per model or source event.
+  if (!options.runTokscale || options.refreshPricingCatalog) {
+    pricingRefresher = createPricingCatalogRefresher({
+      env: tokscaleEnvWithBlanksDropped(process.env),
+      refresh: options.refreshPricingCatalog || (() => spawnTokscaleJson(
+        ['pricing', 'refresh', '--json', '--no-spinner'], 120_000,
+        tokscaleCommand(), runtimeSignal, {
+          operation: 'tokscale pricing refresh',
+          terminationOptions: options.subprocessTerminationOptions
+        }
+      )),
+      onUpdate: () => runTick('pricing-change', { forceHistory: true }),
+      onError: error => log(`Pricing refresh failed; retaining cached prices: ${error.message}`)
+    }, options.pricingCatalogTimers);
+    pricingRefresher.start();
+  }
   if (options.sessionActivityPolling !== false && sessionActivityProvidersFor(trackedClients).length) {
     activityScheduler = createSessionActivityScheduler({
       refresh: pollSessionActivity,

@@ -23,6 +23,58 @@ function fixture(t) {
   return { dir, pricingPath, setPrice };
 }
 
+test('a background catalog replacement reprices all periods and history without waiting for a source event', { timeout: 10_000 }, async t => {
+  const f = fixture(t);
+  const previous = process.env.TOKSCALE_CONFIG_DIR;
+  process.env.TOKSCALE_CONFIG_DIR = f.dir;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TOKSCALE_CONFIG_DIR;
+    else process.env.TOKSCALE_CONFIG_DIR = previous;
+  });
+  let runRefresh;
+  let price = 1;
+  let scans = 0;
+  let graphs = 0;
+  const updates = [];
+  let published;
+  const refreshed = new Promise(resolve => { published = resolve; });
+  const options = {
+    clients: 'claude', allTimeSince: '2024-01-01', deviceId: 'catalog-reprice',
+    pricingPath: f.pricingPath, binaryRevision: 'fork-a', intervalMs: 3_600_000,
+    anchorPersistenceEnabled: false, watchEnabled: false, wslScanEnabled: false,
+    projectsEnabled: false, historyEnabled: true, dailyHistoryArchiveEnabled: false,
+    runTokscale: async () => {
+      scans++;
+      return { entries: [{ client: 'claude', sessionId: 's', model: 'test', input: 100, cost: price }] };
+    },
+    runGraph: async () => {
+      graphs++;
+      return { contributions: [{ date: localTodayKey(), clients: [{ client: 'claude', modelId: 'test', tokens: { input: 100 }, cost: price }] }] };
+    },
+    refreshPricingCatalog: async () => {
+      price = 7;
+      fs.mkdirSync(path.join(f.dir, 'cache'));
+      fs.writeFileSync(path.join(f.dir, 'cache', 'pricing-models-dev.json'), JSON.stringify({ timestamp: Date.now() / 1000, data: {} }));
+    },
+    pricingCatalogTimers: { setTimeout(fn) { runRefresh = fn; return 1; }, clearTimeout() {} },
+    onUpdate: summary => { updates.push(summary); if (updates.length === 2) published(); }
+  };
+  const handle = startCollector(options);
+  t.after(() => handle.stop());
+  await handle.whenIdle();
+  const before = pricingFingerprint(options);
+  runRefresh();
+  // The refresher's completion queues its own tick, independently of whenIdle's
+  // foreground contract. Observe that publication directly.
+  await refreshed;
+  assert.equal(updates.length, 2);
+  assert.notEqual(pricingFingerprint(options), before);
+  assert.equal(scans, 6);
+  assert.equal(graphs, 2);
+  for (const period of ['today', 'month', 'allTime']) assert.equal(updates[1][period].costUsd, 7);
+  assert.equal(updates[1].history.daily.at(-1).cost, 7);
+});
+
 test('both collector and cold-start seed refuse anchors after pricing or binary changes', t => {
   const f = fixture(t);
   f.setPrice(1);
