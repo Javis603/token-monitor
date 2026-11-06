@@ -55,6 +55,16 @@ test('Flight byte payloads cannot introduce fake budget rows', () => {
   assert.throws(() => parseMistralSubscription(flight('a:{broken}\n')));
 });
 
+test('Flight records preserve Unicode separators and skip byte payloads containing carriage returns', () => {
+  for (const separator of ['\u2028', '\u2029', '\r']) {
+    const fake = `text${separator}\n${row({ budget: { api_budget: budget(99) } })}`;
+    const stream = `1:T${Buffer.byteLength(fake).toString(16)},${fake}` + row({ budget: { api_budget: budget(12) } });
+    assert.equal(parseMistralSubscription(flight(stream))[0].usedPercent, 12);
+  }
+  const stream = row({ title: 'API\u2028and\u2029Vibe', budget: { api_budget: budget(12) } });
+  assert.equal(parseMistralSubscription(flight(stream))[0].usedPercent, 12);
+});
+
 test('credits retain zero, adjustments and reported currency; malformed money is unknown', () => {
   assert.equal(parseMistralCredits(credits).remaining, 13);
   assert.equal(parseMistralCredits({ wallet_amount: 0, currency: 'USD' }).remaining, 0);

@@ -80,7 +80,7 @@ function parseMistralSubscription(html) {
     const newline = stream.indexOf(10, cursor);
     const end = newline < 0 ? stream.length : newline;
     const line = stream.toString('utf8', cursor, end);
-    const row = /^[\da-f]+:(.*)$/iu.exec(line);
+    const row = /^[\da-f]+:([\s\S]*)$/iu.exec(line);
     if (row && /^[TAOoUSsLlGgMmV]/u.test(row[1])) {
       // Flight text/binary payload lengths are UTF-8 bytes, and may contain
       // apparent JSON records. Skip the entire payload rather than scanning it.
