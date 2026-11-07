@@ -656,6 +656,9 @@ function providerCollapseKey(provider) {
       || provider.provider === 'notion'
       // OpenDesign workspace IDs are portable across devices.
       || provider.provider === 'opendesign'
+      // QwenWork keys hash the gateway user id, which is the same on every
+      // device; two keys therefore mean two accounts, not one account twice.
+      || provider.provider === 'qwenwork'
       // Manus keys hash the account's user id from its session, so the same
       // account hashes identically on every device.
       || provider.provider === 'manus'
@@ -998,7 +1001,9 @@ function betterProvider(current, candidate) {
 // Muse/MiniMax lanes refresh by source; OpenDesign workspaces refresh by account.
 // A fresh sibling cannot retire another lane's last-good quota.
 function providerFreshnessKey(provider) {
-  if (provider.provider === 'opendesign' && provider.accountKey) return `opendesign:${provider.accountKey}`;
+  if ((provider.provider === 'opendesign' || provider.provider === 'qwenwork') && provider.accountKey) {
+    return `${provider.provider}:${provider.accountKey}`;
+  }
   if (['muse', 'minimax'].includes(provider.provider)) return `${provider.provider}:${provider.source}`;
   return provider.provider;
 }
@@ -1057,9 +1062,13 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   const hasKnownMinimaxAccount = knownMinimaxSources.size > 0;
   const hasKnownOpendesignWorkspace = Array.from(byKey.values()).some((candidate) =>
     candidate.provider === 'opendesign' && isConfiguredProvider(candidate));
+  const hasKnownQwenworkAccount = Array.from(byKey.values()).some((candidate) =>
+    candidate.provider === 'qwenwork' && isConfiguredProvider(candidate));
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
     if (hasKnownOpendesignWorkspace && candidate.provider === 'opendesign'
+      && ['notConfigured', 'disabled'].includes(candidate.status)) continue;
+    if (hasKnownQwenworkAccount && candidate.provider === 'qwenwork'
       && ['notConfigured', 'disabled'].includes(candidate.status)) continue;
     // A local-app sentinel is an onboarding hint, not an extra account. Real
     // identities keep their own failure hints even when none has credentials.

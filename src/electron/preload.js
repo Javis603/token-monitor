@@ -280,6 +280,16 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
       return () => ipcRenderer.removeListener('copilot:loginStatus', handler);
     }
   },
+  qwenwork: {
+    signIn: (options = {}) => ipcRenderer.invoke('qwenwork:signIn', options),
+    cancelSignIn: (options = {}) => ipcRenderer.invoke('qwenwork:cancelSignIn', options),
+    signOut: () => ipcRenderer.invoke('qwenwork:signOut'),
+    onLoginStatus: (callback) => {
+      const handler = (_event, status) => callback(status);
+      ipcRenderer.on('qwenwork:loginStatus', handler);
+      return () => ipcRenderer.removeListener('qwenwork:loginStatus', handler);
+    }
+  },
   // Plugin management and the views this window draws (Home, tray bitmap).
   // Trust and installation run in main; enabled author UI executes in this page.
   plugins: {

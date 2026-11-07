@@ -198,6 +198,8 @@ const { createCredentialCommands } = require('./limits/credentialCommands');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
+const { runQwenworkDeviceFlowLogin } = require('../shared/providers/qwenwork/deviceFlow');
+const { normalizeQwenworkSession, qwenworkAuthBaseUrl, qwenworkBaseUrl } = require('../shared/providers/qwenwork/limits');
 const {
   codexAuthIdentity,
   codexAccountKey,
@@ -582,6 +584,8 @@ let initialLimitProvidersPending = false;
 // settings are written through saveSettings() after the window exists, so the flag
 // carries the decision from the read to that first save.
 let seededClientSplitsPending = false;
+let qwenworkLimitProviderPersistPending = false;
+let qwenworkHomeLimitProviderPersistPending = false;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
@@ -1024,6 +1028,17 @@ function persistStepfunTokenRenewal({ previousToken, token } = {}) {
   return true;
 }
 
+function persistQwenworkSessionRenewal({ previousSession, session } = {}) {
+  const current = normalizeQwenworkSession(settings?.qwenworkSession);
+  if (!current || !session || !previousSession) return false;
+  if (current.access !== previousSession.access
+    || current.refresh !== previousSession.refresh
+    || current.expiresAt !== previousSession.expiresAt) return false;
+  settings.qwenworkSession = session;
+  saveSettings({ throwOnError: true });
+  return true;
+}
+
 // A save-time probe gets the collector's transports but none of its write-backs:
 // a credential that has not been saved yet must not renew itself into
 // settings, so a rotation is reported into `renewed` and stored with the rest
@@ -1067,6 +1082,7 @@ function electronLimitsDeps() {
     onClaudeWebAccountResolved: (observation) => claudeAccountService().resolved(observation),
     resolveClaudeWebCredential: (account) => claudeAccountService().resolveCredential(account),
     onStepfunTokenRenewed: persistStepfunTokenRenewal,
+    onQwenworkSessionRenewed: persistQwenworkSessionRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
     resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
@@ -1082,6 +1098,8 @@ let codexWorkspaceSelection = null;
 let codexWorkspaceLabelHydrationPromise = null;
 let copilotLoginController = null;
 let copilotLoginFlowId = '';
+let qwenworkLoginController = null;
+let qwenworkLoginFlowId = '';
 const CODEX_WORKSPACE_LABEL_HYDRATION_CONCURRENCY = 3;
 
 // Startup label hydration is a small one-shot map. LimitsRuntime's bounded
@@ -2141,6 +2159,60 @@ function migrateLimitProviders(value) {
   return parseLimitProviders(value).join(',');
 }
 
+// A saved provider selection predates QwenWork, so it cannot have deliberately
+// excluded it. Seed the new provider once for upgrading installs; a later
+// disable leaves qwenwork in limitProviderOrder, which keeps this migration
+// from re-enabling it on every launch.
+function ensureQwenworkLimitProviderEnabled(settings) {
+  if (!settings || typeof settings !== 'object') return false;
+  const providers = parseLimitProviders(settings.limitProviders);
+  const order = parseLimitProviders(settings.limitProviderOrder);
+  let changed = false;
+  if (!providers.includes('qwenwork')) {
+    providers.push('qwenwork');
+    settings.limitProviders = providers.join(',');
+    changed = true;
+  }
+  if (!order.includes('qwenwork')) {
+    const nextOrder = [...order];
+    const qoder = nextOrder.indexOf('qoder');
+    if (qoder >= 0) nextOrder.splice(qoder + 1, 0, 'qwenwork');
+    else nextOrder.push('qwenwork');
+    settings.limitProviderOrder = nextOrder.join(',');
+    changed = true;
+  }
+  return changed;
+}
+
+function migrateQwenworkLimitProvider(settings, { hadSavedOrder = true } = {}) {
+  if (!settings || typeof settings !== 'object') return false;
+  const providers = parseLimitProviders(settings.limitProviders);
+  const order = parseLimitProviders(settings.limitProviderOrder);
+  if (!providers.length || providers.includes('qwenwork')) return false;
+  if (hadSavedOrder && order.includes('qwenwork')) return false;
+  settings.limitProviders = [...providers, 'qwenwork'].join(',');
+  const nextOrder = [...order];
+  const qoder = nextOrder.indexOf('qoder');
+  if (qoder >= 0) nextOrder.splice(qoder + 1, 0, 'qwenwork');
+  else nextOrder.push('qwenwork');
+  if (nextOrder.length) settings.limitProviderOrder = nextOrder.join(',');
+  return true;
+}
+
+// The Home/tray limits card keeps its own provider subset. A pre-QwenWork
+// subset cannot have excluded it deliberately, so append it once and remember
+// that this install has made the decision; removing it later sticks.
+function migrateQwenworkHomeLimitProvider(settings) {
+  if (!settings || typeof settings !== 'object' || settings.qwenworkHomeLimitProviderSeeded === true) return false;
+  if (!parseLimitProviders(settings.limitProviders).includes('qwenwork')) return false;
+  const order = parseLimitProviders(settings.homeLimitProviderOrder);
+  settings.qwenworkHomeLimitProviderSeeded = true;
+  if (!order.length || order.includes('qwenwork')) return true;
+  if (String(settings.hiddenHomeLimitProviders || '').split(',').map((value) => value.trim()).includes('qwenwork')) return true;
+  settings.homeLimitProviderOrder = [...order, 'qwenwork'].join(',');
+  return true;
+}
+
 function migrateLimitProviderOrder(value) {
   return parseLimitProviders(value).join(',') || defaultLimitProviderOrder();
 }
@@ -2305,6 +2377,14 @@ function ensureSettingsLoaded() {
   // losing the tracked client.
   if (seededClientSplitsPending) {
     seededClientSplitsPending = false;
+    saveSettings();
+  }
+  if (qwenworkLimitProviderPersistPending) {
+    qwenworkLimitProviderPersistPending = false;
+    saveSettings();
+  }
+  if (qwenworkHomeLimitProviderPersistPending) {
+    qwenworkHomeLimitProviderPersistPending = false;
     saveSettings();
   }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
@@ -2724,6 +2804,7 @@ function readSettings() {
     if (saved.limitProviderOrder !== undefined) {
       merged.limitProviderOrder = migrateLimitProviderOrder(saved.limitProviderOrder);
     }
+    if (migrateQwenworkLimitProvider(merged, { hadSavedOrder: saved.limitProviderOrder !== undefined })) qwenworkLimitProviderPersistPending = true;
     if (saved.clientDisplayOrder !== undefined) {
       merged.clientDisplayOrder = migrateClientDisplayOrder(saved.clientDisplayOrder);
     }
@@ -2761,6 +2842,7 @@ function readSettings() {
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
     }
+    if (migrateQwenworkHomeLimitProvider(merged)) qwenworkHomeLimitProviderPersistPending = true;
     if (saved.hiddenHomeLimitProviders !== undefined) {
       merged.hiddenHomeLimitProviders = normalizeHiddenLimitProviders(saved.hiddenHomeLimitProviders);
     }
@@ -9904,6 +9986,78 @@ app.whenReady().then(() => {
       copilotLoginController = null;
       copilotLoginFlowId = '';
     }
+    return { ok: true };
+  });
+
+  ipcMain.handle('qwenwork:signIn', async (event, request = {}) => {
+    if (qwenworkLoginController) return { ok: false, error: 'A QwenWork sign-in is already in progress.', flowId: qwenworkLoginFlowId };
+    const controller = new AbortController();
+    const flowId = String(request?.flowId || '').trim();
+    qwenworkLoginController = controller;
+    qwenworkLoginFlowId = flowId;
+    const sendStatus = (payload) => {
+      if (qwenworkLoginController !== controller) return;
+      if (!event.sender.isDestroyed()) event.sender.send('qwenwork:loginStatus', { ...payload, flowId });
+    };
+    try {
+      const result = await runQwenworkDeviceFlowLogin({
+        authBaseUrl: qwenworkAuthBaseUrl(process.env),
+        apiBaseUrl: qwenworkBaseUrl(process.env),
+        signal: controller.signal,
+        onStatus: sendStatus
+      }, {
+        openExternal: (url) => shell.openExternal(url),
+        fetch: electronLimitsFetch(),
+        signal: controller.signal
+      });
+      if (qwenworkLoginController !== controller) {
+        return { ok: false, error: 'QwenWork sign-in cancelled.', flowId };
+      }
+      ensureQwenworkLimitProviderEnabled(settings);
+      migrateQwenworkHomeLimitProvider(settings);
+      settings.qwenworkSession = result.session;
+      saveSettings({ throwOnError: true });
+      pushSettingsToRenderer();
+      void queueLimitInvalidation({ provider: 'qwenwork' }, 'login', { clear: true });
+      return { ok: true, flowId };
+    } catch (error) {
+      if (qwenworkLoginController !== controller) {
+        return { ok: false, error: 'QwenWork sign-in cancelled.', flowId };
+      }
+      const message = error?.status === 'timedOut'
+        ? 'QwenWork sign-in timed out. Finish authorization in the browser, then try again.'
+        : error?.status === 'cancelled'
+          ? 'QwenWork sign-in cancelled.'
+          : String(error?.message || error || 'QwenWork sign-in failed.');
+      sendStatus({ phase: 'error', error: message });
+      return { ok: false, error: message, flowId };
+    } finally {
+      if (qwenworkLoginController === controller) {
+        qwenworkLoginController = null;
+        qwenworkLoginFlowId = '';
+      }
+    }
+  });
+  ipcMain.handle('qwenwork:cancelSignIn', (_event, request = {}) => {
+    const flowId = String(request?.flowId || '').trim();
+    if (flowId && qwenworkLoginFlowId && flowId !== qwenworkLoginFlowId) return { ok: true };
+    const controller = qwenworkLoginController;
+    controller?.abort();
+    if (qwenworkLoginController === controller) {
+      qwenworkLoginController = null;
+      qwenworkLoginFlowId = '';
+    }
+    return { ok: true };
+  });
+  ipcMain.handle('qwenwork:signOut', () => {
+    const controller = qwenworkLoginController;
+    qwenworkLoginController = null;
+    qwenworkLoginFlowId = '';
+    controller?.abort();
+    settings.qwenworkSession = '';
+    saveSettings({ throwOnError: true });
+    pushSettingsToRenderer();
+    void queueLimitInvalidation({ provider: 'qwenwork' }, 'logout', { clear: true });
     return { ok: true };
   });
   ipcMain.on('window:minimize', (event) => {

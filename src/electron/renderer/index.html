@@ -1163,6 +1163,25 @@
                 <div id="workbuddyAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
+            <div id="qwenworkAccountGroup" class="settings-group cursor-account-group">
+              <button id="qwenworkSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="qwenworkSettingsDetails">
+                <span data-i18n="settings.qwenwork.title">QwenWork Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="qwenworkAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="qwenworkSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="qwenworkSignInButton" data-i18n="settings.qwenwork.signIn">Sign in with QwenWork</button>
+                  <button id="qwenworkCancelSignInButton" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
+                  <button id="qwenworkLogoutButton" class="hidden" data-i18n="settings.qwenwork.logout">Sign out</button>
+                  <button id="qwenworkRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <pre id="qwenworkLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"></pre>
+                <div id="qwenworkErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
             <div id="minimaxAccountGroup" class="settings-group cursor-account-group">
               <button id="minimaxSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="minimaxSettingsDetails">
                 <span data-i18n="settings.minimax.title">MiniMax Accounts</span>

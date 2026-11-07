@@ -402,6 +402,21 @@ test('Notion rolling and monthly allowances render in both display modes and hid
   assert.equal(JSON.stringify(provider), before);
 });
 
+test('QwenWork allowance credits render a meter without the money metric', () => {
+  const provider = normalizeLimitProvider({
+    provider: 'qwenwork', status: 'ok', source: 'web',
+    windows: [{
+      kind: 'billing', label: 'Credits', used: 90, limit: 100, usedPercent: 90, remaining: 10,
+      resetsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    }]
+  });
+  const card = dockView().renderProviderWindows(provider, '#7771F4');
+  assert.equal(card.children.length, 1);
+  assert.equal(card.children[0].children[0].children[0].textContent, 'Credits');
+  assert.ok(card.children[0].find('limit-meter'));
+  assert.match(card.text, /10% left/);
+});
+
 test('Manus daily refresh credits and credits balance render in both display modes and hide independently', () => {
   const nextRefreshTime = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
   const { windows } = parseManusCredits({ ...manusCreditsFixture, nextRefreshTime });

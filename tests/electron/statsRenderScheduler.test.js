@@ -295,7 +295,8 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     'updateThirdPartyProfilesStatus',
     'renderDeepseekStatus',
     'renderMinimaxStatus',
-    'renderCopilotStatus'
+    'renderCopilotStatus',
+    'renderQwenworkStatus'
   ];
   const context = {
     visibleStatsSurface: () => 'main',
