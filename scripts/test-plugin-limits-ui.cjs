@@ -19,7 +19,7 @@ const fixtureSvg = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http:
 fixtureManifest.presentation = { icon: { native: 'codex' }, color: { palette: 'codex' } };
 fixtureManifest.limits[1].presentation = { icon: { data: fixtureSvg, mode: process.env.TM_PLUGIN_SVG_MASK === '1' ? 'mask' : 'image' }, color: { hex: '#d68cf0' } };
 fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify(fixtureManifest));
-fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-read'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return {configured:value.token==='synthetic-token'};}if(method==='fixture-network'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return host.call('network.request',{moduleId:args.moduleId,requestId:'fixture-probe',url:'https://example.test/quota',headers:{Authorization:'Bearer '+value.token}});}if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='credentials.validate'){await new Promise(resolve=>setTimeout(resolve,150));await host.call('credentials.read',{moduleId,expectedRevision:args.revision});return {status:fs.existsSync(file+'.validation')?fs.readFileSync(file+'.validation','utf8'):'valid'};}if(method==='fixture-validation'){fs.writeFileSync(file+'.validation',args.status);return true;}if(method==='fixture-layout'){fs.writeFileSync(file+'.layout',JSON.stringify(args));return true;}if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,notes:moduleId==='two'&&fs.existsSync(file+'.layout')?JSON.parse(fs.readFileSync(file+'.layout','utf8')).notes:undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'&&fs.existsSync(file+'.layout')?JSON.parse(fs.readFileSync(file+'.layout','utf8')).windows:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
+fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-read'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return {configured:value.token==='synthetic-token'};}if(method==='fixture-network'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return host.call('network.request',{moduleId:args.moduleId,requestId:'fixture-probe',url:'https://example.test/quota',headers:{Authorization:'Bearer '+value.token}});}if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='fixture-check-count')return fs.existsSync(file+'.checks')?Number(fs.readFileSync(file+'.checks','utf8')):0;if(method==='credentials.validate'){fs.writeFileSync(file+'.checks',String(1+(fs.existsSync(file+'.checks')?Number(fs.readFileSync(file+'.checks','utf8')):0)));await new Promise(resolve=>setTimeout(resolve,150));await host.call('credentials.read',{moduleId,expectedRevision:args.revision});return {status:fs.existsSync(file+'.validation')?fs.readFileSync(file+'.validation','utf8'):'valid'};}if(method==='fixture-validation'){fs.writeFileSync(file+'.validation',args.status);return true;}if(method==='fixture-layout'){fs.writeFileSync(file+'.layout',JSON.stringify(args));return true;}if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,notes:moduleId==='two'&&fs.existsSync(file+'.layout')?JSON.parse(fs.readFileSync(file+'.layout','utf8')).notes:undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'&&fs.existsSync(file+'.layout')?JSON.parse(fs.readFileSync(file+'.layout','utf8')).windows:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
 fs.writeFileSync(path.join(fixtureDir,'settings.mjs'), `
 export async function activate(ctx) {
   window.quotaViewEvents ||= [];
@@ -142,12 +142,25 @@ app.whenReady().then(async () => {
     await js(`${box}.closest('.limit-provider-row').scrollIntoView({block:'center'})`);
     await capture('settings-credentials-empty.png');
     await js(`(()=>{const input=${box}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${box}.querySelector('[data-credential-action=save]').click();})()`);
-    await waitFor(`${box}.querySelector('.plugin-credential-editor').hidden`,'verified credentials collapse');
+    await waitFor(`${box}.querySelector('.plugin-credential-editor').hidden&&!${box}.querySelector('[data-credential-action=save]').disabled&&credentialUiState.verification==='valid'`,'verified credentials collapse');
     await js('window.scrollTo(0,0)');
     await capture('settings-credentials-connected.png');
+    if (process.env.TM_CREDENTIAL_RETRY_PROOF === '1') {
+      const checks=await runtime.manager.call(fixtureManifest.id,'fixture-check-count',{});
+      await js(`tokenMonitor.plugins.restart('${fixtureManifest.id}')`);
+      await waitFor("credentialUiState.verification==='unverified'&&!credentialUiState.pending",'restart shows saved presence without a validation request');
+      assert.equal(await runtime.manager.call(fixtureManifest.id,'fixture-check-count',{}),checks,'Settings restart does not verify saved credentials');
+      await waitFor(`document.querySelector('[data-provider="plugin:${fixtureManifest.id}:one"] .plugin-limit-status')?.textContent===t('plugins.credentials.status.configured')`,'saved status reaches the native header');
+      await capture('settings-credentials-configured.png');
+      if (process.env.TM_CREDENTIAL_LAYOUT_AFTER === '1') {
+        assert.equal(await js(`${box}.querySelector('.plugin-credential-editor').hidden`),true,'configured credentials remain compact');
+        assert.equal(await js(`${box}.querySelector('[data-credential-action=verify]').hidden`),true,'no routine verify action');
+        assert.equal(await js(`document.querySelector('[data-provider="plugin:${fixtureManifest.id}:one"] .plugin-limit-status').textContent`),await js("t('plugins.credentials.status.configured')"));
+      }
+    }
     if (process.env.TM_CREDENTIAL_LAYOUT_AFTER === '1') {
       assert.equal(await js(`${box}.querySelector('[role="status"]').hidden`),true,'no duplicate inline status');
-      await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:one"] .plugin-limit-status')?.textContent===t('plugins.credentials.valid')`,'connected status in native header');
+      await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:one"] .plugin-limit-status')?.textContent===t('${process.env.TM_CREDENTIAL_RETRY_PROOF === '1' ? 'plugins.credentials.status.configured' : 'plugins.credentials.valid'}')`,'credential status in native header');
     }
     await js(`${box}.querySelector('[data-credential-action=edit]').click()`);
     await capture('settings-credentials-edit.png');
@@ -159,6 +172,15 @@ app.whenReady().then(async () => {
     if (process.env.TM_CREDENTIAL_LAYOUT_AFTER === '1') {
       await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:one"] .plugin-limit-status')?.textContent===t('plugins.credentials.status.rejected')`,'rejected status in native header');
       assert.equal(await js(`${box}.querySelector('.plugin-credential-editor').hidden`),false);
+    }
+    if (process.env.TM_CREDENTIAL_RETRY_PROOF === '1') {
+      assert.equal(await js(`${box}.querySelector('[data-credential-action=verify]').hidden`),false,'failed check offers retry');
+      if (process.env.TM_CREDENTIAL_LAYOUT_AFTER === '1') assert.equal(await js(`${box}.querySelector('[data-credential-action=verify]').textContent`),await js("t('plugins.credentials.retry')"));
+      await runtime.manager.call(fixtureManifest.id,'fixture-validation',{status:'valid'});
+      await js(`${box}.querySelector('[data-credential-action=verify]').click()`);
+      await waitFor(`${box}.querySelector('.plugin-credential-editor').hidden&&!${box}.querySelector('[data-credential-action=save]').disabled`,'retry validates and collapses');
+      assert.equal(await js(`${box}.querySelector('[data-credential-action=verify]').hidden`),true,'success removes retry');
+      await capture('settings-credentials-retry-success.png');
     }
     console.log('PASS real Settings credential layout, verified/edit/rejected states; Evidence:',evidence);
     await runtime.dispose();win.destroy();app.exit(0);return;
