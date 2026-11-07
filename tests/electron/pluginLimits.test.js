@@ -1,0 +1,130 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { normalizeManifest } = require('../../src/shared/plugins/manifest');
+const { pluginTypes } = require('../../src/electron/plugins/types');
+const { createPluginLimits, desktopProviderPreference, normalizeReading } = require('../../src/electron/plugins/limits');
+const order = require('../../src/electron/renderer/limits/providerOrder');
+const manifest = { tmApi: 1, id: 'sample-plugin', name: 'Sample', version: '1.0.0', backend: 'index.cjs', files: ['index.cjs'], limits: [{ id: 'one', name: 'Claude' }, { id: 'two', name: 'Claude' }] };
+test('declarations require backend, bounded unique IDs, derived Limits type', () => {
+  const parsed = normalizeManifest(manifest); assert.equal(parsed.ok, true);
+  assert.deepEqual(pluginTypes(parsed.manifest), ['limits']);
+  assert.equal(normalizeManifest({ ...manifest, backend: undefined }).ok, false);
+  assert.equal(normalizeManifest({ ...manifest, limits: [manifest.limits[0], manifest.limits[0]] }).ok, false);
+  assert.equal(normalizeManifest({ ...manifest, limits: [{ id: 'one', name: 'X', connection: 'arbitrary' }] }).ok, false);
+});
+test('mixed namespaced preferences survive absent modules without entering built-in parser', () => {
+  const ids = ['plugin:sample-plugin:two', 'claude', 'plugin:sample-plugin:one'];
+  const providers = ids.map(id => ({ id, label: 'Claude' }));
+  const raw = desktopProviderPreference(ids.join(','), value => String(value).split(',').filter(id => id === 'claude'));
+  assert.deepEqual(raw.split(','), ids);
+  assert.deepEqual(order.orderedLimitProviders(providers, ids).map(p => p.id), ids);
+});
+test('normalization projects fields and rejects bad windows', () => {
+  assert.throws(() => normalizeReading({ status: 'ok', windows: [null] }, 'plugin:sample-plugin:one'));
+  const value = normalizeReading({ status: 'ok', windows: [], authorization: 'synthetic' }, 'plugin:sample-plugin:one');
+  assert.equal(value.authorization, undefined);
+});
+test('documented plan reaches the native label through repeated runtime normalization', async t => {
+  const id = 'plugin:sample-plugin:one';
+  const reading = { status: 'ok', windows: [], plan: 'Synthetic Team' };
+  const normalized = normalizeReading(reading, id);
+  assert.equal(normalized.planLabel, reading.plan);
+  assert.deepEqual(normalizeReading(normalized, id), normalized);
+  assert.equal(normalizeReading({ status: 'ok', windows: [] }, id).planLabel, '');
+  const manager = { list: () => ({ plugins: [{ id: manifest.id, status: 'active', revision: 'a', limits: [manifest.limits[0]] }] }), call: async () => reading };
+  const service = createPluginLimits({ manager, getSettings: () => ({ limitProviders: id }), changed() {} });
+  t.after(() => service.dispose()); service.demand(true);
+  for (let n = 0; n < 20 && !service.records().length; n++) await new Promise(setImmediate);
+  assert.equal(service.records()[0].planLabel, reading.plan);
+  service.demand(false);
+  assert.equal(service.records()[0].planLabel, reading.plan);
+});
+test('native demand samples two modules, clears on disable, resumes after revision update', async t => {
+  let active = true, revision = 'a', calls = 0;
+  const settings = { limitProviders: 'plugin:sample-plugin:one,plugin:sample-plugin:two', limitsEnabled: true };
+  const manager = { list: () => ({ plugins: [{ id: manifest.id, status: active ? 'active' : 'disabled', revision, limits: manifest.limits }] }), call: async () => { calls++; return { status: 'ok', windows: [] }; } };
+  const service = createPluginLimits({ manager, getSettings: () => settings, changed: () => {} }); t.after(() => service.dispose());
+  service.reconcile(); assert.equal(calls, 0);
+  service.demand(true);
+  for (let n = 0; n < 20 && service.records().length < 2; n++) await new Promise(setImmediate);
+  assert.equal(calls, 2); assert.equal(service.records().length, 2);
+  active = false; service.reconcile(); assert.deepEqual(service.records(), []);
+  active = true; revision = 'b'; service.reconcile();
+  for (let n = 0; n < 20 && service.records().length < 2; n++) await new Promise(setImmediate);
+  assert.equal(calls, 4); service.demand(false); assert.equal(service.records().length, 2, 'paused settings retain captured readings without sampling');
+  assert.ok(service.catalog().every(module => !module.sampling));
+  revision = 'c'; service.reconcile(); assert.deepEqual(service.records(), [], 'paused records do not cross a code revision');
+});
+test('editing visible preferences while a plugin is disabled retains its selection and mixed-order slots', () => {
+  const providers = [{ id: 'claude' }, { id: 'codex' }];
+  const one = 'plugin:sample-plugin:one', two = 'plugin:sample-plugin:two';
+  const saved = `${one},claude,${two},codex`;
+  assert.deepEqual(order.absentPluginProviders(saved, providers), [one, two]);
+  const selection = [...['codex'], ...order.absentPluginProviders(saved, providers)];
+  assert.deepEqual(new Set(selection), new Set(['codex', one, two]));
+  const moved = order.preserveAbsentPluginOrder(saved, ['codex', 'claude'], providers);
+  assert.deepEqual(moved, [one, 'codex', two, 'claude']);
+  assert.deepEqual(order.orderedLimitProviders([...providers, { id: one }, { id: two }], moved).map(row => row.id), moved);
+});
+test('forgetting host connections clears their retained quota but preserves unconnected modules', async t => {
+  const modules = [{ id: 'one', name: 'One', credentials: { fields: [] } }, { id: 'two', name: 'Two' }];
+  const manager = { list: () => ({ plugins: [{ id: 'sample-plugin', status: 'active', revision: 'a', limits: modules }] }), call: async () => ({ status: 'ok', windows: [] }) };
+  const service = createPluginLimits({ manager, getSettings: () => ({ limitProviders: 'plugin:sample-plugin:one,plugin:sample-plugin:two' }), changed() {} });
+  t.after(() => service.dispose()); service.demand(true);
+  for (let n = 0; n < 20 && service.records().length < 2; n++) await new Promise(setImmediate);
+  service.demand(false);
+  assert.deepEqual(new Set(service.records().map(row => row.provider)), new Set(['plugin:sample-plugin:one', 'plugin:sample-plugin:two']));
+  service.invalidateCredentials('sample-plugin');
+  assert.deepEqual(service.records().map(row => row.provider), ['plugin:sample-plugin:two']);
+});
+test('disconnect invalidates only its module while paused or sampling', async t => {
+  for (const paused of [true,false]) {
+    const modules=[{id:'one',name:'One',credentials:{fields:[]}},{id:'two',name:'Two',credentials:{fields:[]}},{id:'plain',name:'Plain'}];
+    const ids=modules.map(module=>`plugin:sample-plugin:${module.id}`);
+    const manager={list:()=>({plugins:[{id:'sample-plugin',status:'active',revision:'a',limits:modules}]}),
+      call:async()=>({status:'ok',windows:[{kind:'billing',metric:'credits',remaining:80,currency:'USD'}]})};
+    const service=createPluginLimits({manager,getSettings:()=>({limitProviders:ids.join(',')}),changed(){}});
+    t.after(()=>service.dispose()); service.demand(true);
+    for(let n=0;n<30&&service.records().length<3;n++) await new Promise(setImmediate);
+    assert.equal(service.records().length,3);
+    if(paused) service.demand(false);
+    service.invalidateCredentials('sample-plugin','one');
+    assert.deepEqual(service.records().map(row=>row.provider),ids.slice(1));
+  }
+});
+test('visibility resume preserves last-good windows while pending and after transient failure', async t => {
+  const id = 'plugin:sample-plugin:one';
+  let finish;
+  const settings = { limitProviders: id };
+  const manager = { list: () => ({ plugins: [{ id: manifest.id, status: 'active', revision: 'a', limits: [manifest.limits[0]] }] }),
+    call: async () => ({ status: 'ok', windows: [{ kind: 'daily', usedPercent: 20, remainingPercent: 80 }] }) };
+  const service = createPluginLimits({ manager, getSettings: () => settings, changed() {} });
+  t.after(() => service.dispose()); service.demand(true);
+  for (let n = 0; n < 20 && !service.records().length; n++) await new Promise(setImmediate);
+  const windows = service.records()[0].windows;
+  assert.equal(windows.length, 1);
+  service.demand(false);
+  manager.call = () => new Promise(resolve => { finish = resolve; });
+  service.demand(true);
+  assert.deepEqual(service.records()[0]?.windows, windows, 'returning to Limits keeps readings before the probe settles');
+  for (let n = 0; n < 20 && !finish; n++) await new Promise(setImmediate);
+  finish({ status: 'error', windows: [] });
+  for (let n = 0; n < 20 && service.records()[0]?.status !== 'error'; n++) await new Promise(setImmediate);
+  assert.equal(service.records()[0].status, 'error');
+  assert.deepEqual(service.records()[0].windows, windows);
+  service.demand(false); service.demand(true);
+  assert.deepEqual(service.records()[0]?.windows, windows, 'a repeated reveal also seeds the transient reading');
+  service.demand(false); settings.limitProviders = ''; service.reconcile(); service.demand(true);
+  assert.deepEqual(service.records(), [], 'deselection does not revive retained readings');
+});
+test('quota demand cancellation aborts only that module host transport', async t => {
+  const id='plugin:sample-plugin:one',cancelled=[];
+  let finish;
+  const manager={list:()=>({plugins:[{id:'sample-plugin',status:'active',revision:'a',limits:[{id:'one',name:'One'}]}]}),call:()=>new Promise(resolve=>{finish=resolve;})};
+  const service=createPluginLimits({manager,getSettings:()=>({limitProviders:id}),changed(){},cancelModule:(...args)=>cancelled.push(args)});
+  t.after(()=>service.dispose());service.demand(true);
+  for(let n=0;n<20&&!finish;n++)await new Promise(setImmediate);
+  service.demand(false);assert.deepEqual(cancelled,[['sample-plugin','one']]);
+  finish({status:'ok',windows:[]});await new Promise(setImmediate);assert.deepEqual(service.records(),[]);
+});

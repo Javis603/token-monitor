@@ -4,6 +4,10 @@
 // Formal data operations reuse captured App state without refreshing collectors.
 
 const fs = require('node:fs');
+const { createCredentialValidation } = require('./credentialValidation');
+const { createPluginCredentials } = require('./credentials');
+const { createPluginNetwork } = require('./network');
+const { createPluginLimits } = require('./limits');
 const { showPluginNotification } = require('./notification');
 const path = require('node:path');
 const { createBusinessDataService } = require('./businessData');
@@ -58,6 +62,7 @@ function createPluginRuntime({
   placementContext = () => ({}),
   log = (message) => console.log(message),
   hostActions = {},
+  fetchImpl,
   env = process.env
 }) {
   const { BrowserWindow, Notification, ipcMain, session, shell, dialog } = electron;
@@ -116,7 +121,7 @@ function createPluginRuntime({
   const authorSettings = createPluginSettingsStore({ directory: path.join(userDataDir, 'plugin-settings') });
   const userDir = path.join(userDataDir, 'plugins');
 
-  // Catalog downloads use the App transport. Plugin backends use their own Node networking.
+  // Catalog downloads and backend network requests use injected host transports.
   const proxy = resolveProxyConfig(env);
   const netFetch = proxy.httpProxy || proxy.httpsProxy
     ? createOutboundFetch(env)
@@ -125,10 +130,24 @@ function createPluginRuntime({
   const auth = id => () => ({ pluginId: id, active: manager.active(id) });
   async function hostCall(id, method, args, owner = id) {
     if (!manager.active(id)) throw new Error('Plugin is disabled');
+    if (method.startsWith('credentials.') || method.startsWith('network.')) {
+      const module = manager.list().plugins.find(plugin => plugin.id === id)?.limits?.find(module => module.id === args?.moduleId);
+      if (!module) throw new Error('Undeclared quota module');
+      if (method === 'network.request') return network.request(id, args);
+      if (method === 'network.cancel') { network.cancel(id, module.id, args.requestId); return; }
+      if (!module.credentials) throw new Error('Credentials not declared');
+      const op = method.slice(12);
+      if (op === 'status') return validation.snapshot(id, module.id, module.credentials);
+      if (op === 'verify') return validation.verify(id, module.id, module.credentials, args);
+      if (!['update', 'clear', 'read'].includes(op)) throw new Error('Unknown credential operation');
+      const result = credentials[op](id, module.id, module.credentials, args);
+      return op === 'read' ? result : validation.snapshot(id, module.id, module.credentials);
+    }
     if (method === 'data.query') {
       businessReaders.add(id);
       return businessData.query({ version: 1, ...args }, auth(id), { owner });
     }
+    if (method === 'limits.read') return { modules: limits.catalog(), providers: limits.records() };
     if (method === 'settings.get') return manager.getAuthorSettings(id);
     if (method === 'settings.update') return manager.updateAuthorSettings(id, args);
     if (method === 'app.context') return getContext();
@@ -142,8 +161,24 @@ function createPluginRuntime({
     throw new Error(`Unknown host operation: ${method}`);
   }
   const manager = createPluginManager({ userDir, dataDir: path.join(userDataDir, 'plugin-data'), authorSettings,
-    getSettings, saveStates: persistPluginStates, getLocale, safeMode, hostCall,
+    getSettings, saveStates: persistPluginStates, getLocale, safeMode, hostCall, onBackendStopped: id => network.cancelPlugin(id),
     fork: (...args) => electron.utilityProcess.fork(...args), log });
+  const network = createPluginNetwork({ fetchImpl: fetchImpl || netFetch, active: id => manager.active(id) });
+  const credentials = createPluginCredentials({ directory: path.join(userDataDir, 'plugin-credentials'), changed: (id, moduleId, reason) => {
+    network.cancelPlugin(id, moduleId);
+    validation.invalidate(id, moduleId);
+    limits.invalidateCredentials(id, moduleId);
+    if (reason === 'update') void limits.refresh(`plugin:${id}:${moduleId}`);
+    for (const host of listListeners) if (!host.isDestroyed()) host.send('plugins:changed');
+  } });
+  const validation = createCredentialValidation({ status: credentials.status,
+    revision: id => manager.active(id) ? manager.list().plugins.find(plugin => plugin.id === id)?.revision : null,
+    validate: (id, args) => manager.call(id, 'credentials.validate', args),
+    changed: () => { for (const host of listListeners) if (!host.isDestroyed()) host.send('plugins:changed'); }
+  });
+  const limits = createPluginLimits({ manager, getSettings, credentialRevision: (id, moduleId, schema) => credentials.status(id, moduleId, schema).revision,
+    onReading: (id, moduleId, schema, savedRevision, reading) => { if (schema && reading.status === 'unauthorized') validation.reject(id, moduleId, schema, savedRevision); },
+    cancelModule: (id, moduleId) => network.cancelPlugin(id, moduleId), changed: () => { for (const subscriber of subscribers.values()) if (!subscriber.webContents.isDestroyed()) subscriber.webContents.send('plugins:changed'); } });
   const mime = name => ({ js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', woff2: 'font/woff2' }[name.split('.').pop()] || 'application/octet-stream');
   const protocol = session.defaultSession.protocol;
   protocol.handle('tm-plugin', request => {
@@ -157,7 +192,7 @@ function createPluginRuntime({
   const contentSelections = () => getSettings().pluginContentSelections || {};
   let pages = null;
   const managed = createManagedPlugins({ root: path.join(userDataDir, 'plugin-manager'), userDir,
-    dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), manager, getSettings, saveSettings: persistManagementSettings, getLocale, placementContext });
+    dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), credentialsDir: path.join(userDataDir, 'plugin-credentials'), manager, getSettings, saveSettings: persistManagementSettings, getLocale, placementContext });
   try { managed.recover(); }
   catch (error) { log(`[plugins] Plugin management unavailable: ${error.message}`); }
   const catalog = createPluginCatalog({ nativeImage: electron.nativeImage, manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch, maintainerSources, officialSources });
@@ -218,14 +253,16 @@ function createPluginRuntime({
   function registerSubscriber(webContents) {
     let subscriber = subscribers.get(webContents.id);
     if (!subscriber) {
+      const ownsMainLimits = isMainSender({ sender: webContents });
       subscriber = { webContents, demands: new Map() };
       subscribers.set(webContents.id, subscriber);
       const destroyed = () => {
         businessData.releaseOwner(String(webContents.id));
+        if (ownsMainLimits) limits.demand(false);
         subscribers.delete(webContents.id);
         demand.remove(webContents.id);
       };
-      const navigating = (_event, _url, inPlace, isMainFrame) => { if (isMainFrame !== false && !inPlace) { businessData.releaseOwner(String(webContents.id)); subscriber.demands.clear(); demand.remove(webContents.id); } };
+      const navigating = (_event, _url, inPlace, isMainFrame) => { if (isMainFrame !== false && !inPlace) { businessData.releaseOwner(String(webContents.id)); subscriber.demands.clear(); demand.remove(webContents.id); if (ownsMainLimits) limits.demand(false); } };
       webContents.on('did-start-navigation', navigating);
       observerCleanup.push(() => webContents.removeListener('did-start-navigation', navigating));
       webContents.once('destroyed', destroyed);
@@ -263,6 +300,9 @@ function createPluginRuntime({
   const listListeners = new Set();
   manager.onChanged(() => {
     if (disposed) return;
+    network.cancelInactive();
+    validation.reconcile();
+    limits.reconcile();
     for (const id of businessReaders) if (!manager.active(id)) {
       businessData.revoke(id); businessReaders.delete(id);
     }
@@ -285,6 +325,7 @@ function createPluginRuntime({
 
   function listWithPlacements() {
     const list = manager.list();
+    list.limits = { modules: limits.catalog(), providers: limits.records() };
     list.contentSelections = { ...contentSelections() };
     list.contentOrder = { ...(getSettings().pluginContentOrder || {}) };
     list.management = managed.status?.() || { available: true, error: null };
@@ -356,7 +397,7 @@ function createPluginRuntime({
   async function confirm(event, note, detail = null) {
     requireMain(event);
     const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
-      type: 'warning', title: translate(getLocale(), note === 'plugins.content.unsavedNote' ? 'plugins.content.unsavedTitle' : note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
+      type: 'warning', title: translate(getLocale(), note === 'plugins.credentials.forgetConfirm' ? 'plugins.credentials.forgetTitle' : note === 'plugins.content.unsavedNote' ? 'plugins.content.unsavedTitle' : note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
       message: translate(getLocale(), note),
       ...(detail ? { detail: translate(getLocale(), detail) } : {}),
       buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.trusted.continue')],
@@ -420,6 +461,7 @@ function createPluginRuntime({
     requireMain(event);
     const affected = await inspectHosts(ids);
     if (affected.length) await confirm(event, 'plugins.trusted.reloadNote');
+    for (const id of ids) { network.cancelPlugin(id); validation.invalidate(id); }
     await change();
     const result = listWithPlacements();
     reloadHosts(affected.map(item => item.host));
@@ -440,6 +482,7 @@ function createPluginRuntime({
     if (reload.length) await confirm(event, 'plugins.trusted.reloadNote', unsaved ? 'plugins.trusted.packageUnsavedNote' : null);
     else if (unsaved) await confirm(event, 'plugins.trusted.packageUnsavedNote');
     await beforeRelease?.();
+    for (const id of ids) { network.cancelPlugin(id); validation.invalidate(id); }
     const released = [], recovery = [];
     try {
       for (const item of affected.filter(item => !item.error)) {
@@ -524,6 +567,13 @@ function createPluginRuntime({
   }
 
   function registerIpc() {
+    handle('plugins:limitsDemand', (event, value) => { requireMain(event); registerSubscriber(event.sender); limits.demand(value); });
+    handle('plugins:forgetCredentials', async (event, id) => {
+      requireMain(event);
+      await confirm(event, 'plugins.credentials.forgetConfirm');
+      credentials.forget(id);
+      return { ok: true };
+    });
     handle('plugins:orderContent', (event, target, refs) => {
       requireMain(event);
       const allowed = new Set(manager.list().plugins.flatMap(plugin => (plugin.views || []).filter(view => view.targets?.includes(target) && view.mode !== 'replace').map(view => view.ref)));
@@ -596,6 +646,7 @@ function createPluginRuntime({
     });
     handle('plugins:restart', (event, { id } = {}) => {
       requireMain(event);
+      network.cancelPlugin(String(id)); validation.invalidate(String(id));
       manager.restart(String(id));
       return listWithPlacements();
     });
@@ -694,6 +745,7 @@ function createPluginRuntime({
     handle('plugins:call', (event, id, method, args) => { requireHost(event); return manager.call(id, method, args); });
     handle('plugins:host', (event, id, method, args) => {
       requireHost(event);
+      if (method === 'credentials.read' || method.startsWith('network.')) throw new Error('Backend-only operation');
       if (method === 'data.query') registerSubscriber(event.sender);
       return hostCall(id, method, args, String(event.sender.id));
     });
@@ -744,6 +796,7 @@ function createPluginRuntime({
       return structuredClone(skin);
     },
     manager,
+    refreshLimits: () => limits.refresh(null, 'manual'),
     trayMenu: () => manager.trayMenu(),
     trayAction(id, action) {
       if (!manager.trayMenu().some(item => item.pluginId === id && item.id === action)) return Promise.reject(new Error('Plugin Tray action is unavailable'));
@@ -757,6 +810,7 @@ function createPluginRuntime({
     refreshBusinessData,
     refreshWindowVisibility(win) {
       if (disposed) return;
+      if (win?.webContents && isMainSender({ sender: win.webContents }) && !win.isVisible()) limits.demand(false);
       const subscriber = subscribers.get(win?.webContents?.id);
       if (subscriber) for (const surface of ['home', 'page', 'settings', 'tray']) {
         if (subscriber.demands.has(surface)) setDemand(subscriber.webContents, surface, subscriber.demands.get(surface));
@@ -792,6 +846,9 @@ function createPluginRuntime({
       if (disposed) return;
       refreshBusinessData();
       manager.settingsChanged();
+      network.cancelInactive();
+      validation.reconcile();
+      limits.reconcile();
         pages.refresh();
       for (const subscriber of subscribers.values()) {
         for (const surface of ['home', 'page', 'settings', 'tray', 'notch', 'edgeDock']) if (subscriber.demands.has(surface)) setDemand(subscriber.webContents, surface, subscriber.demands.get(surface));
@@ -812,6 +869,8 @@ function createPluginRuntime({
       clearTimeout(catalogRefreshTimer);
       catalog.dispose();
       managed.dispose();
+      network.dispose(); validation.dispose();
+      limits.dispose();
       pages.dispose();
       protocol.unhandle('tm-plugin');
       businessData.dispose();
