@@ -17,7 +17,10 @@ function createBackend({ host }, { now = Date.now } = {}) {
       const token = String(saved.sessionBearer || '').trim().replace(/^Bearer\s+/i, '');
       const organization = String(saved.organization || '').trim();
       if (!token || /\s|[\x00-\x1f\x7f]/.test(token) || !organization || /[\x00-\x1f\x7f]/.test(organization)) return failure('error');
-      if (!validating) settings = await host.call('settings.get');
+      if (!validating) {
+        settings = await host.call('settings.get');
+        if (settings.status !== 'ready') return failure('unavailable');
+      }
       response = await host.call('network.request', { moduleId: 'credits', requestId: validating ? 'credential-check' : 'credit-balance',
         url: CREDIT_BALANCE_URL, method: 'GET', timeoutMs: 15000,
         headers: { Authorization: `Bearer ${token}`, 'OpenAI-Organization': organization, Accept: 'application/json' } });

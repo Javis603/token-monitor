@@ -1,6 +1,6 @@
 # OpenAI API Credits
 
-Veja o saldo real de créditos da API do OpenAI Platform na tela nativa de cotas do Token Monitor.
+Veja o saldo real de créditos da API da plataforma OpenAI na tela nativa de cotas do Token Monitor.
 
 ![Saldo de créditos da API OpenAI na tela de cotas](assets/limits.png)
 
@@ -35,13 +35,13 @@ Use a opção de alterar credenciais para substituir os valores salvos; os segre
 
 O saldo vem diretamente do serviço. A barra compara o saldo com a soma dos valores concedidos dos créditos atualmente utilizáveis que ainda têm saldo. Um crédito disponível de $100 e um crédito inativo de $0/$24 aparecem como **$100 / $100**. Isso representa o conjunto utilizável atual, não gastos mensais ou históricos. O denominador muda quando um crédito expira ou se esgota.
 
-Se os créditos não explicarem o saldo com segurança, apenas o saldo será exibido. Zero continua sendo zero. Abaixo da barra aparece o vencimento conhecido mais próximo dos créditos utilizáveis. O tooltip lista saldos individuais apenas quando há vários créditos utilizáveis com vencimentos diferentes; não repete totais históricos nem trata créditos expirados como gastos.
+Se os créditos não explicarem o saldo com segurança, apenas o saldo será exibido. Zero continua sendo zero. Abaixo da barra aparece o vencimento conhecido mais próximo dos créditos utilizáveis. O tooltip lista saldos individuais apenas quando há vários créditos utilizáveis com vencimentos diferentes; não repete totais históricos nem trata créditos expirados como gastos. Com mais de 12 créditos utilizáveis, o detalhamento é omitido em vez de ser truncado.
 
 A atualização segue o intervalo de cotas, a configuração adaptativa e a visibilidade da interface do App. Salvar credenciais realiza uma verificação separada. O plugin não tem temporizador próprio de consulta. Você também pode escolher **Apenas saldo** nas configurações.
 
 ## Dados e acesso
 
-O App armazena as credenciais em um arquivo privado e não criptografado em `plugin-credentials/openai-api-credit/credits.json`, no diretório de dados do usuário, separado do código e das preferências comuns. O backend as envia para `https://api.openai.com/v1/dashboard/billing/credit_grants` pelo transporte do App com suporte a proxy. Esse endpoint não documentado e as credenciais de sessão podem mudar ou expirar.
+O App armazena as credenciais em um arquivo privado e não criptografado em `plugin-credentials/openai-api-credit/credits.json`, no diretório de dados do usuário, separado do código e das preferências comuns. O backend as envia para `https://api.openai.com/v1/dashboard/billing/credit_grants` pelo transporte do App com suporte a proxy. Esse endpoint não documentado e as credenciais de sessão podem mudar ou expirar. No Windows, o acesso segue as permissões herdadas da pasta; o App não define uma ACL exclusiva do proprietário.
 
 Somente dados normalizados de cota chegam à interface. O plugin não lê arquivos de login de outros apps, abre janelas de login ou envia dados de análise. Plugins são código local confiável e não ficam isolados dos arquivos do usuário do sistema. Este módulo se integra atualmente às telas nativas de cotas e configurações.
 
@@ -52,7 +52,7 @@ Importe um pacote mais recente em **Configurações → Plugins** e revise a atu
 Para compilar na raiz do repositório, escolha um caminho de saída que ainda não exista:
 
 ```sh
-node scripts/build-plugin-package.js plugins/openai-api-credit /tmp/openai-api-credit-0.1.0.tmplugin
+node scripts/build-plugin-package.js plugins/openai-api-credit ./openai-api-credit-0.1.0.tmplugin
 ```
 
 ## Licença

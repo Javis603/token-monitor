@@ -23,7 +23,9 @@ export const messages = {
     "step4": "Choose Save credentials, then return to Limits to view the balance.",
     "credentialHelp": "Use Platform session credentials, not an API key. The token may include Bearer; replace it when expired.",
     "expires": "Expires {time} UTC",
-    "noExpiry": "No expiry reported"
+    "noExpiry": "No expiry reported",
+    "newerSettings": "These settings were saved by a newer plugin version. Update the plugin to edit them.",
+    "invalidSettings": "The saved display option is invalid. Choose a display mode and save it."
   },
   "zh-TW": {
     "description": "使用手動提供的 Platform 登入憑證讀取實際 API 點數餘額。",
@@ -49,7 +51,9 @@ export const messages = {
     "step4": "按「儲存憑證」，再返回「額度」查看餘額。",
     "credentialHelp": "使用 Platform 登入憑證，不是 API key。Token 可含 Bearer；過期後重新取得。",
     "expires": "到期時間：{time} UTC",
-    "noExpiry": "未提供到期時間"
+    "noExpiry": "未提供到期時間",
+    "newerSettings": "這些設定由較新的插件版本儲存。請更新插件後再編輯。",
+    "invalidSettings": "已儲存的顯示選項無效。請選擇顯示方式並儲存。"
   },
   "zh-CN": {
     "description": "使用手动提供的 Platform 登录凭证读取实际 API 点数余额。",
@@ -75,7 +79,9 @@ export const messages = {
     "step4": "点击“保存凭证”，再返回“额度”查看余额。",
     "credentialHelp": "使用 Platform 登录凭证，而非 API key。Token 可包含 Bearer；过期后重新获取。",
     "expires": "到期时间：{time} UTC",
-    "noExpiry": "未提供到期时间"
+    "noExpiry": "未提供到期时间",
+    "newerSettings": "这些设置由较新的插件版本保存。请更新插件后再编辑。",
+    "invalidSettings": "已保存的显示选项无效。请选择显示方式并保存。"
   },
   "ja": {
     "description": "手動で入力した Platform のログイン認証情報で、実際の API クレジット残高を取得します。",
@@ -101,7 +107,9 @@ export const messages = {
     "step4": "「認証情報を保存」を押し、「クォータ」に戻って残高を確認します。",
     "credentialHelp": "API key ではなく、Platform のログイン認証情報を使用します。Token は Bearer 付きでも入力できます。有効期限が切れたら再取得してください。",
     "expires": "有効期限：{time} UTC",
-    "noExpiry": "有効期限の記載なし"
+    "noExpiry": "有効期限の記載なし",
+    "newerSettings": "この設定は新しいバージョンのプラグインで保存されています。編集するにはプラグインを更新してください。",
+    "invalidSettings": "保存された表示オプションが無効です。表示方法を選択して保存してください。"
   },
   "ko": {
     "description": "직접 입력한 Platform 로그인 자격 증명으로 실제 API 크레딧 잔액을 조회합니다.",
@@ -127,7 +135,9 @@ export const messages = {
     "step4": "자격 증명 저장을 누른 후 할당량으로 돌아가 잔액을 확인하세요.",
     "credentialHelp": "API key가 아닌 Platform 로그인 자격 증명을 사용하세요. Token에 Bearer가 포함되어도 됩니다. 만료되면 다시 가져오세요.",
     "expires": "만료: {time} UTC",
-    "noExpiry": "만료 시간 정보 없음"
+    "noExpiry": "만료 시간 정보 없음",
+    "newerSettings": "이 설정은 더 최신 플러그인 버전에서 저장되었습니다. 편집하려면 플러그인을 업데이트하세요.",
+    "invalidSettings": "저장된 표시 옵션이 유효하지 않습니다. 표시 방식을 선택하고 저장하세요."
   },
   "pt-BR": {
     "description": "Consulte o saldo real de créditos da API com credenciais de sessão do Platform inseridas manualmente.",
@@ -153,7 +163,9 @@ export const messages = {
     "step4": "Selecione Salvar credenciais e volte a Cotas para consultar o saldo.",
     "credentialHelp": "Use as credenciais de sessão do Platform, não uma API key. O token pode incluir Bearer; obtenha outro quando expirar.",
     "expires": "Expira em {time} UTC",
-    "noExpiry": "Validade não informada"
+    "noExpiry": "Validade não informada",
+    "newerSettings": "Estas configurações foram salvas por uma versão mais recente do plugin. Atualize o plugin para editá-las.",
+    "invalidSettings": "A opção de exibição salva é inválida. Escolha um modo de exibição e salve."
   }
 };
 

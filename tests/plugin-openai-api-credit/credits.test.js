@@ -41,14 +41,14 @@ test('unreconciled and paid balances keep their amount without inventing a meter
   }
 });
 function fixture() {
-  const state = { locale: 'en', mode: 'bar', configured: true, credentials: { sessionBearer: 'synthetic-session', organization: 'org-synthetic' }, response: { status: 200, body: JSON.stringify(sample()) }, calls: [] };
+  const state = { locale: 'en', settingsStatus: 'ready', mode: 'bar', configured: true, credentials: { sessionBearer: 'synthetic-session', organization: 'org-synthetic' }, response: { status: 200, body: JSON.stringify(sample()) }, calls: [] };
   const body=sample();body.total_available=83.25;body.grants.data[0].used_amount=16.75;body.grants.data[1].expires_at=50;state.response.body=JSON.stringify(body);
   state.host = { async call(method, args) {
     state.calls.push({method,args});
     if(method==='credentials.status')return {configured:state.configured};
     if(method==='credentials.read')return state.credentials;
     if(method==='app.settings')return {locale:state.locale};
-    if(method==='settings.get')return {values:{displayMode:state.mode}};
+    if(method==='settings.get')return {status:state.settingsStatus,readOnly:state.settingsStatus==='newer-schema',values:{displayMode:state.mode}};
     if(method==='network.request')return state.response;
     throw Error('Unexpected host operation');
   }};
@@ -133,5 +133,15 @@ test('batch details follow the App locale and retain the same money and expiry s
     assert.equal(window.infoRows[0].label, messages[locale].expires.replace('{time}', '2033-05-18 03:33'));
     assert.equal(window.infoRows[1].label, messages[locale].noExpiry);
     assert.deepEqual(window.infoRows.map(row => row.value), [{ amount: 100, currency: 'USD' }, { amount: 40, currency: 'USD' }]);
+  }
+});
+
+test('unusable preferences never invent a display mode or trigger collection', async () => {
+  for (const [status, mode] of [['invalid', null], ['newer-schema', 'balance']]) {
+    const state = fixture(); state.settingsStatus = status; state.mode = mode;
+    const backend = createBackend({ host: state.host }, { now: () => 100000 });
+    assert.deepEqual(await backend.call('limits.collect', { moduleId: 'credits' }), { status: 'unavailable', windows: [] });
+    assert.ok(!state.calls.some(call => call.method === 'network.request'));
+    assert.deepEqual(await backend.call('credentials.validate', { moduleId: 'credits', revision: 1 }), { status: 'valid' }, 'credential verification is independent of display preferences');
   }
 });

@@ -35,13 +35,13 @@ Use **Change credentials** to replace saved values; secrets are never filled bac
 
 The balance comes directly from the service. The bar compares it with the total allowance of grants that are currently usable and still have remaining credit. An available $100 grant and an inactive $0/$24 grant display **$100 / $100**. This is the current usable pool, not monthly or lifetime spending. The denominator changes as grants expire or are depleted.
 
-If the grants do not reliably explain the balance, only the balance is shown. Zero remains zero. The expiry below the bar is the earliest known expiry of usable credit. A tooltip lists individual remaining amounts only when multiple usable grants have different expiry times; it does not repeat historical totals or claim expired credit was spent.
+If the grants do not reliably explain the balance, only the balance is shown. Zero remains zero. The expiry below the bar is the earliest known expiry of usable credit. A tooltip lists individual remaining amounts only when multiple usable grants have different expiry times; it does not repeat historical totals or claim expired credit was spent. With more than 12 usable grants, the breakdown is omitted rather than truncated.
 
 Refresh follows the App’s Limits interval, adaptive setting and visibility demand. Saving credentials performs a separate verification. The plugin has no polling timer. Choose **Balance only** in settings if preferred.
 
 ## Data and access
 
-The App stores credentials in a private, unencrypted file at `plugin-credentials/openai-api-credit/credits.json` under its user data directory, separate from plugin code and ordinary preferences. The backend sends them to `https://api.openai.com/v1/dashboard/billing/credit_grants` through the App’s proxy-aware transport. This undocumented endpoint and session credentials may change or expire.
+The App stores credentials in a private, unencrypted file at `plugin-credentials/openai-api-credit/credits.json` under its user data directory, separate from plugin code and ordinary preferences. The backend sends them to `https://api.openai.com/v1/dashboard/billing/credit_grants` through the App’s proxy-aware transport. This undocumented endpoint and session credentials may change or expire. On Windows, access follows inherited folder permissions; the App does not set an owner-only ACL.
 
 Only normalized quota data reaches the interface. The plugin does not read other apps’ login files, open a login window or send analytics. Plugins are trusted local code, not isolated from the operating-system user’s files. This module currently integrates with native Limits and settings.
 
@@ -52,7 +52,7 @@ Import a newer package through **Settings → Plugins** and review the update. N
 To build from the repository root, choose an output path that does not already exist:
 
 ```sh
-node scripts/build-plugin-package.js plugins/openai-api-credit /tmp/openai-api-credit-0.1.0.tmplugin
+node scripts/build-plugin-package.js plugins/openai-api-credit ./openai-api-credit-0.1.0.tmplugin
 ```
 
 ## License

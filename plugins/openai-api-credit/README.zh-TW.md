@@ -35,13 +35,13 @@
 
 餘額直接取自服務。進度條以目前可用而且仍有餘額的點數批次總額作分母。例如可用 $100 加上已停用的 $0/$24，會顯示 **$100 / $100**。這是目前可用的點數池，不是每月或歷史消費；批次到期或耗盡時，分母亦會改變。
 
-批次資料無法可靠解釋餘額時，只顯示實際餘額；零仍顯示零。進度條下方顯示可用點數最早的已知到期時間。只有多筆可用點數到期時間不同時，Tooltip 才列出各筆餘額，不重複歷史總額，也不會把過期點數稱為消費。
+批次資料無法可靠解釋餘額時，只顯示實際餘額；零仍顯示零。進度條下方顯示可用點數最早的已知到期時間。只有多筆可用點數到期時間不同時，Tooltip 才列出各筆餘額，不重複歷史總額，也不會把過期點數稱為消費。 超過 12 筆可用點數時不顯示明細，避免截斷資料。
 
 刷新沿用 App 的額度間隔、自適應設定及介面可見狀態。儲存憑證會另作一次驗證；插件沒有自行輪詢的計時器。你亦可在設定選擇「純餘額」。
 
 ## 資料及存取
 
-App 在使用者資料目錄下的 `plugin-credentials/openai-api-credit/credits.json` 以私人權限、未加密檔案儲存憑證，與插件程式及一般偏好設定分開。後端經 App 支援代理的傳輸層，將憑證送至 `https://api.openai.com/v1/dashboard/billing/credit_grants`。這是未公開記載的端點，端點及登入憑證可能改變或失效。
+App 在使用者資料目錄下的 `plugin-credentials/openai-api-credit/credits.json` 以私人權限、未加密檔案儲存憑證，與插件程式及一般偏好設定分開。後端經 App 支援代理的傳輸層，將憑證送至 `https://api.openai.com/v1/dashboard/billing/credit_grants`。這是未公開記載的端點，端點及登入憑證可能改變或失效。 Windows 沿用資料夾的存取權限，App 不會額外設定僅擁有者可讀的 ACL。
 
 介面只接收整理後的額度資料。插件不讀取其他 App 的登入檔案、不開登入視窗，也不傳送分析資料。插件屬受信任的本機程式，並非與作業系統使用者檔案隔離。目前此模組整合原生額度及設定頁。
 
@@ -52,7 +52,7 @@ App 在使用者資料目錄下的 `plugin-credentials/openai-api-credit/credits
 如要從儲存庫根目錄打包，請選擇尚不存在的輸出路徑：
 
 ```sh
-node scripts/build-plugin-package.js plugins/openai-api-credit /tmp/openai-api-credit-0.1.0.tmplugin
+node scripts/build-plugin-package.js plugins/openai-api-credit ./openai-api-credit-0.1.0.tmplugin
 ```
 
 ## 授權

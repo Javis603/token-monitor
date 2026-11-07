@@ -72,10 +72,10 @@ export function activate(ctx) {
     const feedback = document.createElement('p'); feedback.className = 'settings-note'; feedback.setAttribute('role', 'status'); feedback.setAttribute('aria-live', 'polite');
     actions.append(save, reload); root.append(row, actions, feedback);
     let snapshot, disposed = false, busy = false, recoveryRequired = false;
-    function sync() { select.disabled = busy || !snapshot || snapshot.readOnly; save.disabled = select.disabled || recoveryRequired || select.value === snapshot.values.displayMode; reload.disabled = busy; reload.hidden = !recoveryRequired; }
+    function sync() { select.disabled = busy || !snapshot || snapshot.readOnly; save.disabled = select.disabled || recoveryRequired || !select.value || select.value === snapshot.values.displayMode; reload.disabled = busy; reload.hidden = !recoveryRequired; }
     async function load() {
       busy = true; sync();
-      try { const value = await ctx.host.call('settings.get'); if (!disposed) { snapshot = value; select.value = value.values.displayMode ?? ''; setText(feedback); recoveryRequired = false; } }
+      try { const value = await ctx.host.call('settings.get'); if (!disposed) { snapshot = value; select.value = value.values.displayMode ?? ''; setText(feedback, value.status === 'newer-schema' ? 'newerSettings' : value.status === 'invalid' ? 'invalidSettings' : undefined); recoveryRequired = false; } }
       catch (_) { if (!disposed) { setText(feedback, 'loadFailed'); recoveryRequired = true; } }
       finally { if (!disposed) { busy = false; sync(); } }
     }
@@ -92,7 +92,7 @@ export function activate(ctx) {
     reload.addEventListener('click', () => void load());
     await load();
     return { update(next) { if (updateWords()) renderGuide(); return credentials.update(next); },
-      hasUnsavedChanges: () => credentials.hasUnsavedChanges() || Boolean(snapshot && select.value !== snapshot.values.displayMode),
+      hasUnsavedChanges: () => credentials.hasUnsavedChanges() || Boolean(snapshot && !snapshot.readOnly && select.value !== (snapshot.values.displayMode ?? '')),
       dispose() { disposed = true; credentials.dispose(); root.remove(); } };
   } };
 }

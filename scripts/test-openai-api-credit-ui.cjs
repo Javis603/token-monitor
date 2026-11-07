@@ -258,8 +258,27 @@ app.whenReady().then(async () => {
     assert.ok(await js(`${guide}.scrollWidth <= ${guide}.clientWidth`), `${locale} guide fits narrow settings`);
     await capture(`openai-setup-${locale}.png`);
   }
-    assert.deepEqual(errors.filter(text=>!text.includes('Electron Security Warning')&&!text.includes('Autofill.')),[]);
+  const settingsFile=path.join(scratch,'plugin-settings','openai-api-credit.json');
+  const originalSettings=JSON.parse(fs.readFileSync(settingsFile,'utf8'));
+  for (const status of ['newer-schema','invalid']) {
+    fs.writeFileSync(settingsFile,JSON.stringify({...originalSettings,schemaVersion:status==='newer-schema'?2:1,values:{displayMode:status==='newer-schema'?'bar':'unknown'}}));
+    await new Promise(resolve=>{win.webContents.once('did-finish-load',resolve);win.webContents.reload();});
+    await waitFor("state.stats?.periods?.today?.totalTokens===125000",'renderer reinitialized');
+    await showSettings();
+    const message=messages['pt-BR'][status==='newer-schema'?'newerSettings':'invalidSettings'];
+    await waitFor(`${moduleBox}.textContent.includes(${JSON.stringify(message)})`, `${status} preference recovery guidance`);
+    assert.equal(await js(`${moduleBox}.querySelector('[data-openai-mode]').disabled`),status==='newer-schema');
+    assert.equal(await js(`${moduleBox}.querySelector('[data-openai-save]').disabled`),true,'no saving a blocked or unselected preference');
+    await js(`${moduleBox}.querySelector('[data-openai-save]').scrollIntoView({block:'center',behavior:'instant'})`);
+    await capture(`openai-settings-${status}.png`);
+    if(status==='invalid') {
+      await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='bar';select.dispatchEvent(new Event('change'));${moduleBox}.querySelector('[data-openai-save]').click();})()`);
+      await waitFor(`${moduleBox}.textContent.includes(${JSON.stringify(messages['pt-BR'].saved)})`,'invalid preference explicitly repaired');
+      assert.equal(JSON.parse(fs.readFileSync(settingsFile,'utf8')).values.displayMode,'bar');
+    }
+  }
+  assert.deepEqual(errors.filter(text=>!text.includes('Electron Security Warning')&&!text.includes('Autofill.')),[]);
   win.destroy();await pause(100);await runtime.dispose();clearTimeout(deadline);
-  console.log('PASS six live UI locales and real OpenAI manual plugin and native credential helper: explicit revision-bound credential verification, folded summary/instructions, edit/cancel/no readback, native credit tooltip/hover/Escape handler/no extra request, native Codex SVG and live palette override, contextual display reload and real revision-conflict recovery, no duplicate management editor, native compact setup/header mapping, public URL copy and narrow layout, save/partial update/clear, no readback/browser login, private persistence/reload, mixed order, both modes, used/remaining, zero/unknown denominator and 401. Synthetic transport only.');
+  console.log('PASS invalid/newer settings recovery, six live UI locales and real OpenAI manual plugin and native credential helper: explicit revision-bound credential verification, folded summary/instructions, edit/cancel/no readback, native credit tooltip/hover/Escape handler/no extra request, native Codex SVG and live palette override, contextual display reload and real revision-conflict recovery, no duplicate management editor, native compact setup/header mapping, public URL copy and narrow layout, save/partial update/clear, no readback/browser login, private persistence/reload, mixed order, both modes, used/remaining, zero/unknown denominator and 401. Synthetic transport only.');
   console.log('Screenshots:',evidence);app.exit(0);
 }).catch(error=>{console.error(error);clearTimeout(deadline);app.exit(1);});
