@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512.00 512.00" width="512.00" height="512.00" role="img" aria-labelledby="title desc">
-<title id="title">jcode mark</title>
-<desc id="desc">The jcode halftone donut: a raymarched torus screened through a 45-degree halftone lattice.</desc>
-<g fill="#111">
+<svg fill="currentColor" height="1em" style="flex:none;line-height:1" viewBox="1.24 0 509.53 512" width="1em" xmlns="http://www.w3.org/2000/svg">
+<title>Jcode</title>
+<desc>The jcode halftone donut: a raymarched torus screened through a 45-degree halftone lattice.</desc>
+<g>
 <circle cx="389.65" cy="45.62" r="0.91"/>
 <circle cx="397.67" cy="53.65" r="1.91"/>
 <circle cx="405.69" cy="61.67" r="2.93"/>
