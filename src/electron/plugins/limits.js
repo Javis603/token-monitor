@@ -24,13 +24,13 @@ function normalizeReading(input, provider) {
   const plan = typeof input.plan === 'string' ? input.plan.slice(0, 80) : '';
   return { provider, status: input.status, windows, plan, planLabel: plan, updatedAt: Number.isFinite(Date.parse(input.updatedAt)) ? new Date(input.updatedAt).toISOString() : new Date().toISOString() };
 }
-function createPluginLimits({ manager, getSettings, changed, cancelModule = () => {} }) {
+function createPluginLimits({ manager, getSettings, changed, cancelModule = () => {}, credentialRevision = () => null, onReading = () => {} }) {
   let runtime = null, disposed = false;
   let byId = new Map(), retained = [];
   const demands = new Map();
   function catalog() {
     return manager.list().plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => (plugin.limits || []).map(module => ({
-      ...module, id: identity(plugin.id, module.id), moduleId: module.id, pluginId: plugin.id, label: module.name,
+      ...module, identityIcon: plugin.identityIcon, id: identity(plugin.id, module.id), moduleId: module.id, pluginId: plugin.id, label: module.name,
       settingsLabel: module.name, revision: plugin.revision, sampling: runtime !== null && byId.has(identity(plugin.id, module.id))
     })));
   }
@@ -65,12 +65,15 @@ function createPluginLimits({ manager, getSettings, changed, cancelModule = () =
       probeProvider: async (id, _options, { signal }) => {
         const module = byId.get(id);
         if (signal.aborted) return [];
+        const savedRevision = module.credentials ? credentialRevision(module.pluginId, module.moduleId, module.credentials) : null;
         const cancel = () => cancelModule(module.pluginId, module.moduleId);
         signal.addEventListener('abort', cancel, { once: true });
         try {
           const value = await manager.call(module.pluginId, 'limits.collect', { moduleId: module.moduleId });
           if (signal.aborted) return [];
-          return [normalizeReading(value, id)];
+          const reading = normalizeReading(value, id);
+          onReading(module.pluginId, module.moduleId, module.credentials, savedRevision, reading);
+          return [reading];
         } finally { signal.removeEventListener('abort', cancel); }
       }
     });

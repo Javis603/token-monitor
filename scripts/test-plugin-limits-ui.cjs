@@ -1,7 +1,7 @@
 'use strict';
 // Actual App HTML, renderer, preload and plugin runtime. Host collection/account
 // IPC uses synthetic records; no personal profile, collector or credentials load.
-const { app, BrowserWindow, ipcMain, session, utilityProcess, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, session, utilityProcess, protocol, nativeImage } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
@@ -14,8 +14,8 @@ const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 
 const fixtureDir = path.join(scratch, 'source');
 fs.mkdirSync(fixtureDir, { recursive: true });
-fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'select',label:'Display mode',default:'meter',options:[{value:'meter',label:'Percentage + balance'},{value:'balance',label:'Balance only'}]}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Platform session Bearer',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]},capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Token',required:true}]},capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
-fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-read'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return {configured:value.token==='synthetic-token'};}if(method==='fixture-network'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return host.call('network.request',{moduleId:args.moduleId,requestId:'fixture-probe',url:'https://example.test/quota',headers:{Authorization:'Bearer '+value.token}});}if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
+fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',identityIcon:nativeImage.createFromBitmap(Buffer.from([80,180,130,255,80,180,130,255,80,180,130,255,80,180,130,255]),{width:2,height:2}).toDataURL(),version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'select',label:'Display mode',default:'meter',options:[{value:'meter',label:'Percentage + balance'},{value:'balance',label:'Balance only'}]}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',credentials:{validation:true,fields:[{id:'token',label:'Platform session Bearer',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]},capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Token',required:true}]},capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
+fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-read'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return {configured:value.token==='synthetic-token'};}if(method==='fixture-network'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return host.call('network.request',{moduleId:args.moduleId,requestId:'fixture-probe',url:'https://example.test/quota',headers:{Authorization:'Bearer '+value.token}});}if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='credentials.validate'){await new Promise(resolve=>setTimeout(resolve,150));await host.call('credentials.read',{moduleId,expectedRevision:args.revision});return {status:fs.existsSync(file+'.validation')?fs.readFileSync(file+'.validation','utf8'):'valid'};}if(method==='fixture-validation'){fs.writeFileSync(file+'.validation',args.status);return true;}if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
 fs.writeFileSync(path.join(fixtureDir,'settings.mjs'), `
 export async function activate(ctx) {
   window.quotaViewEvents ||= [];
@@ -28,8 +28,8 @@ export async function activate(ctx) {
     const mode=container.querySelector('[data-quota-mode]'),draft=container.querySelector('[data-quota-draft]');
     let credentialEditor;
     if(id==='one') {
-      const extra=document.createElement('p');extra.textContent='Author explanation + shared native credentials';container.prepend(extra);
-      credentialEditor=await ctx.native.credentials.mount(container,{moduleId:id});
+      const extra=document.createElement('p');extra.dataset.credentialHelp='';extra.textContent='Author explanation + shared native credentials';container.prepend(extra);
+      credentialEditor=await ctx.native.credentials.mount(container,{moduleId:id,onStateChange(state){extra.hidden=!state.editing;(window.credentialUiStates ||= []).push(state);window.credentialUiState=state;}});
     } else {
       let saved=await ctx.host.call('credentials.status',{moduleId:id});
       const editor=document.createElement('div');editor.innerHTML='<p>Custom author layout</p><input type="password" data-custom-token placeholder="Token (saved value never loaded)" /><div class="settings-actions"><button data-custom-save>Save custom credentials</button><span data-custom-result class="settings-note"></span></div>';
@@ -124,6 +124,10 @@ app.whenReady().then(async () => {
   assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('Synthetic Team')"),true,'documented plugin plan appears in native Limits');
   assert.equal(await js("state.pluginCatalog.limits.providers.find(row=>row.provider==='plugin:synthetic-limits:two').planLabel"),'','missing plan stays blank');
   assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('Daily pool')&&document.querySelector('#limitsPanel').textContent.includes('Billing pool')"),true,'non-credit daily and billing plugin quotas render');
+  await waitFor("document.querySelector('#limitsPanel .limit-name img')?.naturalWidth>0",'plugin identity icon decodes in native Limits');
+  await js("document.querySelector('#limitsPanel .limit-name img').dispatchEvent(new Event('error'))");
+  assert.equal(await js("!!document.querySelector('#limitsPanel .limit-name .pv-icon')"),true,'icon decode failure uses shared fallback');
+  await js("state.limitsRenderSignature='';renderLimits()");
   await capture('limits-mixed.png');
   await js("window.quotaThemeRebuilds=0;window.originalQuotaThemeRender=renderThemePresetChips;renderThemePresetChips=(...args)=>{quotaThemeRebuilds++;return originalQuotaThemeRender(...args);};true");
   const creditWindow = {creditsDisplay:'percent',remaining:83.25,limit:100,boundaryKind:'expiry',resetsAt:new Date(Date.now()+30*86400000).toISOString()};
@@ -174,12 +178,14 @@ app.whenReady().then(async () => {
   await waitFor("document.querySelector('[data-limit-module=\"plugin:synthetic-limits:one\"] [data-quota-draft]')",'author settings view');
   const helperBox = `document.querySelector('[data-limit-module="plugin:synthetic-limits:one"] .plugin-credential-form')`;
   await waitFor(`${helperBox}`,'author composed native credential helper');
+  assert.equal(await js(`${helperBox}.querySelector('[data-credential-action=clear]').hidden`),true,'no saved field hides clear');
+  await capture('credentials-empty.png');
   const nativeStyleProof=await js(`(()=>{
     const own=${helperBox}.querySelector('input'), builtin=document.getElementById('minimaxApiKeyInput');
     const properties=['fontFamily','fontSize','backgroundColor','paddingTop','paddingRight','paddingBottom','paddingLeft','borderRadius','borderTopColor'];
     const pick=node=>Object.fromEntries(properties.map(key=>[key,getComputedStyle(node)[key]]));
     return {own:pick(own),builtin:pick(builtin),fieldGap:getComputedStyle(own.closest('label')).gap,builtinFieldGap:getComputedStyle(builtin.closest('label')).gap,
-      formGap:getComputedStyle(${helperBox}).gap,builtinFormGap:getComputedStyle(builtin.closest('.opencode-credential-fields')).gap};
+      formGap:getComputedStyle(${helperBox}.querySelector('.plugin-credential-editor')).gap,builtinFormGap:getComputedStyle(builtin.closest('.opencode-credential-fields')).gap};
   })()`);
   assert.deepEqual(nativeStyleProof.own,nativeStyleProof.builtin,'shared credentials use built-in provider input styles');
   assert.equal(nativeStyleProof.fieldGap,nativeStyleProof.builtinFieldGap);
@@ -192,7 +198,7 @@ app.whenReady().then(async () => {
     return {
       select:style(document.querySelector('[data-quota-mode]'),selectKeys),builtinSelect:style(document.getElementById('languageInput'),selectKeys),
       textarea:style(box.querySelector('textarea'),inputKeys),builtinTextarea:style(document.querySelector('#cursorManualPanel textarea'),inputKeys),
-      button:style(box.querySelector('button'),['fontSize','paddingLeft','paddingRight','borderRadius','minHeight']),builtinButton:style(document.getElementById('minimaxKeySubmit'),['fontSize','paddingLeft','paddingRight','borderRadius','minHeight']),
+      button:style(box.querySelector('[data-credential-action=save]'),['fontSize','paddingLeft','paddingRight','borderRadius','minHeight']),builtinButton:style(document.getElementById('minimaxKeySubmit'),['fontSize','paddingLeft','paddingRight','borderRadius','minHeight']),
       label:style(box.querySelector('label'),['fontSize','color','gap']),builtinLabel:style(document.getElementById('minimaxApiKeyInput').closest('label'),['fontSize','color','gap']),
       note:style(box.querySelector('.settings-note'),['fontSize','color','lineHeight']),builtinNote:style(document.getElementById('networkProxyNote'),['fontSize','color','lineHeight'])
     };
@@ -201,8 +207,8 @@ app.whenReady().then(async () => {
   console.log('PASS native select, textarea, button, label and note style audit');
 
 
-  await js(`(()=>{const input=${helperBox}.querySelector('[data-credential-field="token"]');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
-  await waitFor(`${helperBox}.querySelector('[role="status"]').textContent===t('plugins.credentials.configured')`,'manual credentials saved');
+  await js(`(()=>{const input=${helperBox}.querySelector('[data-credential-field="token"]');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('[data-credential-action=save]').click();})()`);
+  await waitFor(`${helperBox}.querySelector('[role="status"]').textContent===t('plugins.credentials.valid')`,'manual credentials saved and verified');
   assert.equal(await js(`${helperBox}.querySelector('input').value`),'','save clears input');
   assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')"),false,'credential update invalidates paused reading');
   assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:two')"),true,'credential update preserves sibling');
@@ -217,23 +223,43 @@ app.whenReady().then(async () => {
   if(process.platform!=='win32')assert.equal(fs.statSync(credentialFile).mode&0o777,0o600);
   await js(`${helperBox}.scrollIntoView({block:'center'})`);
   await capture('settings-native-helper.png');
-  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
+  assert.equal(await js(`${helperBox}.querySelector('.plugin-credential-editor').hidden`),true,'successful validation collapses editor');
+  assert.equal(await js("document.querySelector('[data-credential-help]').hidden"),true,'author help follows public state callback');
+  await capture('credentials-linked-summary.png');
+  await js(`${helperBox}.querySelector('[data-credential-action=edit]').click()`);
+  assert.equal(await js(`${helperBox}.querySelector('input').value`),'','edit never fills saved secret');
+
+  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('[data-credential-action=save]').click();})()`);
   await waitFor(`${helperBox}.querySelector('[role="alert"]').textContent.length>0`,'explicit required empty rejected');
   assert.equal((await runtime.manager.call('synthetic-limits','fixture-read',{moduleId:'one'})).configured,true);
-  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
-  await waitFor(`!${helperBox}.querySelector('button').disabled&&${helperBox}.querySelector('input').value===''`,'helper resave');
+  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('[data-credential-action=save]').click();})()`);
+  await waitFor(`!${helperBox}.querySelector('[data-credential-action=save]').disabled&&${helperBox}.querySelector('input').value===''`,'helper resave');
+  await js(`${helperBox}.querySelector('[data-credential-action=edit]').click()`);
   await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='conflict-draft';input.dispatchEvent(new Event('input'));})()`);
   const external=await js("tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.status',{moduleId:'one'})");
   await js(`tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.update',{moduleId:'one',expectedRevision:${external.revision},patch:{cookies:'synthetic-cookie'}})`);
-  await js(`${helperBox}.querySelector('button').click()`);
+  await js(`${helperBox}.querySelector('[data-credential-action=save]').click()`);
   await waitFor(`${helperBox}.querySelector('[role="alert"]').textContent===t('plugins.credentials.conflict')`,'conflict keeps draft');
   assert.equal(await js(`${helperBox}.querySelector('input').value`),'conflict-draft');
   await js(`${helperBox}.querySelector('input').value='';${helperBox}.scrollIntoView({block:'center'})`);
   await capture('settings-credential-conflict.png');
-  await js(`${helperBox}.querySelectorAll('button')[2].click()`);
-  await waitFor(`!${helperBox}.querySelector('button').disabled`,'explicit revision reload');
-  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
-  await waitFor(`!${helperBox}.querySelector('button').disabled&&${helperBox}.querySelector('input').value===''`,'save after explicit conflict reload');
+  await js(`${helperBox}.querySelector('[data-credential-action=reload]').click()`);
+  await waitFor(`!${helperBox}.querySelector('[data-credential-action=save]').disabled`,'explicit revision reload');
+  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('[data-credential-action=save]').click();})()`);
+  await waitFor(`!${helperBox}.querySelector('[data-credential-action=save]').disabled&&${helperBox}.querySelector('input').value===''`,'save after explicit conflict reload');
+  for(const status of ['rejected','expired','unavailable']) {
+    await runtime.manager.call('synthetic-limits','fixture-validation',{status});
+    await js(`${helperBox}.querySelector('[data-credential-action=edit]').click()`);
+    await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('[data-credential-action=save]').click();})()`);
+    await waitFor("credentialUiState.verification==='verifying'",'verifying state callback');
+    await waitFor(`credentialUiState.verification==='${status}'&&!credentialUiState.pending`,'explicit '+status+' result');
+    assert.equal(await js(`${helperBox}.querySelector('.plugin-credential-editor').hidden`),false,'failed validation keeps editor');
+    assert.equal(await js(`${helperBox}.querySelector('[data-credential-action=clear]').hidden`),false,'failed credentials remain clearable');
+    await capture('credentials-'+status+'.png');
+  }
+  await runtime.manager.call('synthetic-limits','fixture-validation',{status:'valid'});
+  await js(`${helperBox}.querySelector('[data-credential-action=verify]').click()`);
+  await waitFor("credentialUiState.verification==='valid'&&!credentialUiState.pending",'reverify succeeds');
   await js("setLimitProviderSettingsExpanded('plugin:synthetic-limits:two')");
   await waitFor("document.querySelector('[data-custom-token]')",'custom credential DOM');
   await js("document.querySelector('[data-custom-token]').value='synthetic-token';document.querySelector('[data-custom-save]').click()");
@@ -340,13 +366,21 @@ app.whenReady().then(async () => {
   await js("setLimitProviderSettingsExpanded('plugin:synthetic-limits:native')");
   const defaultBox=`document.querySelector('[data-limit-module="plugin:synthetic-limits:native"] .plugin-credential-form')`;
   await waitFor(defaultBox,'host default credentials without author view');
-  await js(`(()=>{const input=${defaultBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${defaultBox}.querySelector('button').click();})()`);
+  await js(`${defaultBox}.scrollIntoView({block:'center'})`);await pause(150);
+  await js("tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.update',{moduleId:'native',expectedRevision:0,patch:{cookies:'synthetic=partial'}})");
+  await waitFor(`${defaultBox}.querySelector('[role=status]').textContent===t('plugins.credentials.partial')`,'partial saved status');
+  assert.equal(await js(`${defaultBox}.querySelector('[data-credential-action=clear]').hidden`),false,'partial saved fields enable clear');
+  await capture('credentials-partial.png');
+  await js(`${defaultBox}.querySelector('[data-credential-action=clear]').click()`);
+  await waitFor(`${defaultBox}.querySelector('[data-credential-action=clear]').hidden`,'clear returns to empty editor');
+
+  await js(`(()=>{const input=${defaultBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${defaultBox}.querySelector('[data-credential-action=save]').click();})()`);
   await waitFor(`${defaultBox}.querySelector('[role="status"]').textContent===t('plugins.credentials.configured')`,'host default form saves');
   assert.equal((await runtime.manager.call('synthetic-limits','fixture-read',{moduleId:'native'})).configured,true);
   await js(`${defaultBox}.querySelector('input').value='unsaved';${defaultBox}.querySelector('input').dispatchEvent(new Event('input'))`);
   assert.equal(await js("pluginViewHost.hasUnsavedChanges(['synthetic-limits'])"),true,'default form participates in existing unsaved-work lifecycle');
-  await js(`${defaultBox}.querySelector('input').value='synthetic-token';${defaultBox}.querySelector('input').dispatchEvent(new Event('input'));${defaultBox}.querySelector('button').click()`);
-  await waitFor(`!${defaultBox}.querySelector('button').disabled&&${defaultBox}.querySelector('input').value===''`,'default form save resets draft');
+  await js(`${defaultBox}.querySelector('input').value='synthetic-token';${defaultBox}.querySelector('input').dispatchEvent(new Event('input'));${defaultBox}.querySelector('[data-credential-action=save]').click()`);
+  await waitFor(`!${defaultBox}.querySelector('[data-credential-action=save]').disabled&&${defaultBox}.querySelector('input').value===''`,'default form save resets draft');
   await js(`${defaultBox}.scrollIntoView({block:'center'})`);
   await capture('settings-default-credentials.png');
   await js("openSettingsPanel();setSettingsSectionExpanded('plugins',true);pluginSettingsPanel.refresh()");

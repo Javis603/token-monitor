@@ -4763,6 +4763,10 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
     canSwitchSystemAccount: () => Boolean(window.tokenMonitor?.codex?.switchSystemAccount)
   },
   hasMark: (id) => limitMarksWithIcon.has(id),
+  pluginMark: id => {
+    const module = state.pluginCatalog?.limits?.modules?.find(module => module.id === id);
+    return module?.identityIcon ? window.TokenMonitorPluginViews.navigationIcon(document, { identityIcon: module.identityIcon }, 12) : null;
+  },
   formatAgo: (ms) => formatAgo(ms),
   openExternal: (url) => window.tokenMonitor.openExternal?.(url),
   // The subscription side of the plan cell. The records are the user's own, so

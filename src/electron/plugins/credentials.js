@@ -46,7 +46,6 @@ function createPluginCredentials({ directory, changed = () => {} }) {
         if (typeof value !== 'string' || value.length > 16384 || field.required && !value.trim()) throw Error('credentials-invalid-value');
         if (value === '') delete values[key]; else values[key] = value;
       }
-      if (schema.fields.some(field => field.required && !values[field.id]?.trim())) throw Error('credentials-required');
     }
     const candidate = { formatVersion: 1, revision: record.revision + 1, values };
     if (!Number.isSafeInteger(candidate.revision) || Buffer.byteLength(JSON.stringify(candidate)) > MAX_BYTES - 2048) throw Error('credentials-quota');
@@ -59,8 +58,9 @@ function createPluginCredentials({ directory, changed = () => {} }) {
   return { status,
     update: (id, moduleId, schema, request) => commit(id, moduleId, schema, request, false),
     clear: (id, moduleId, schema, request) => commit(id, moduleId, schema, request, true),
-    read(id, moduleId, schema) {
+    read(id, moduleId, schema, request) {
       const record = read(id, moduleId);
+      if (request?.expectedRevision !== undefined && request.expectedRevision !== record.revision) throw Error('credentials-conflict');
       return Object.fromEntries(schema.fields.filter(field => Object.hasOwn(record.values, field.id)).map(field => [field.id, record.values[field.id]]));
     },
     forget(id) {

@@ -56,9 +56,15 @@ test('corrupt files and symlinks fail closed without returning secret-bearing ca
 test('failed atomic replacement preserves prior values and revision, and missing storage still notifies clear',t=>{
   const f=fixture(t),s=f.service;
   s.update('fixture','one',schema,{expectedRevision:0,patch:{token:'prior'}});
-  const rename=fs.renameSync;t.mock.method(fs,'renameSync',()=>{throw Error('failed synthetic rename');});
+  t.mock.method(fs,'renameSync',()=>{throw Error('failed synthetic rename');});
   assert.throws(()=>s.update('fixture','one',schema,{expectedRevision:1,patch:{token:'replacement'}}),/^Error: credentials-storage-unavailable$/);
-  t.mock.method(fs,'renameSync',rename);
+  fs.renameSync.mock.restore();
   assert.deepEqual(s.read('fixture','one',schema),{token:'prior'});assert.equal(s.status('fixture','one',schema).revision,1);
   fs.rmSync(f.directory,{recursive:true});s.forget('fixture');assert.deepEqual(f.events.at(-1),['fixture',undefined,'clear']);
+});
+test('partial saved credentials remain incomplete, revision-bound reads reject replacement values',t=>{
+  const {service:s}=fixture(t);const first=s.update('fixture','one',schema,{expectedRevision:0,patch:{cookies:'synthetic=partial'}});
+  assert.equal(first.configured,false);assert.equal(first.fields.cookies,true);assert.equal(first.fields.token,false);
+  assert.throws(()=>s.read('fixture','one',schema,{expectedRevision:0}),/credentials-conflict/);
+  assert.deepEqual(s.read('fixture','one',schema,{expectedRevision:1}),{cookies:'synthetic=partial'});
 });

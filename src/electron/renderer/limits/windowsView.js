@@ -1976,6 +1976,8 @@
   }
 
   function renderLimitProviderMark(id, color) {
+    const pluginMark = deps.pluginMark?.(id);
+    if (pluginMark) return pluginMark;
     const mark = document.createElement('span');
     if (hasMark(id)) {
       // .limit-icon sizes the mark, .row-icon-<id> supplies the mask: one table,

@@ -4,6 +4,7 @@
 // Formal data operations reuse captured App state without refreshing collectors.
 
 const fs = require('node:fs');
+const { createCredentialValidation } = require('./credentialValidation');
 const { createPluginCredentials } = require('./credentials');
 const { createPluginNetwork } = require('./network');
 const { createPluginLimits } = require('./limits');
@@ -136,8 +137,11 @@ function createPluginRuntime({
       if (method === 'network.cancel') { network.cancel(id, module.id, args.requestId); return; }
       if (!module.credentials) throw new Error('Credentials not declared');
       const op = method.slice(12);
-      if (!['status', 'update', 'clear', 'read'].includes(op)) throw new Error('Unknown credential operation');
-      return credentials[op](id, module.id, module.credentials, args);
+      if (op === 'status') return validation.snapshot(id, module.id, module.credentials);
+      if (op === 'verify') return validation.verify(id, module.id, module.credentials, args);
+      if (!['update', 'clear', 'read'].includes(op)) throw new Error('Unknown credential operation');
+      const result = credentials[op](id, module.id, module.credentials, args);
+      return op === 'read' ? result : validation.snapshot(id, module.id, module.credentials);
     }
     if (method === 'data.query') {
       businessReaders.add(id);
@@ -162,11 +166,19 @@ function createPluginRuntime({
   const network = createPluginNetwork({ fetchImpl: fetchImpl || netFetch, active: id => manager.active(id) });
   const credentials = createPluginCredentials({ directory: path.join(userDataDir, 'plugin-credentials'), changed: (id, moduleId, reason) => {
     network.cancelPlugin(id, moduleId);
+    validation.invalidate(id, moduleId);
     limits.invalidateCredentials(id, moduleId);
     if (reason === 'update') void limits.refresh(`plugin:${id}:${moduleId}`);
     for (const host of listListeners) if (!host.isDestroyed()) host.send('plugins:changed');
   } });
-  const limits = createPluginLimits({ manager, getSettings, cancelModule: (id, moduleId) => network.cancelPlugin(id, moduleId), changed: () => { for (const subscriber of subscribers.values()) if (!subscriber.webContents.isDestroyed()) subscriber.webContents.send('plugins:changed'); } });
+  const validation = createCredentialValidation({ status: credentials.status,
+    revision: id => manager.active(id) ? manager.list().plugins.find(plugin => plugin.id === id)?.revision : null,
+    validate: (id, args) => manager.call(id, 'credentials.validate', args),
+    changed: () => { for (const host of listListeners) if (!host.isDestroyed()) host.send('plugins:changed'); }
+  });
+  const limits = createPluginLimits({ manager, getSettings, credentialRevision: (id, moduleId, schema) => credentials.status(id, moduleId, schema).revision,
+    onReading: (id, moduleId, schema, savedRevision, reading) => { if (schema && reading.status === 'unauthorized') validation.reject(id, moduleId, schema, savedRevision); },
+    cancelModule: (id, moduleId) => network.cancelPlugin(id, moduleId), changed: () => { for (const subscriber of subscribers.values()) if (!subscriber.webContents.isDestroyed()) subscriber.webContents.send('plugins:changed'); } });
   const mime = name => ({ js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', woff2: 'font/woff2' }[name.split('.').pop()] || 'application/octet-stream');
   const protocol = session.defaultSession.protocol;
   protocol.handle('tm-plugin', request => {
@@ -289,6 +301,7 @@ function createPluginRuntime({
   manager.onChanged(() => {
     if (disposed) return;
     network.cancelInactive();
+    validation.reconcile();
     limits.reconcile();
     for (const id of businessReaders) if (!manager.active(id)) {
       businessData.revoke(id); businessReaders.delete(id);
@@ -448,7 +461,7 @@ function createPluginRuntime({
     requireMain(event);
     const affected = await inspectHosts(ids);
     if (affected.length) await confirm(event, 'plugins.trusted.reloadNote');
-    for (const id of ids) network.cancelPlugin(id);
+    for (const id of ids) { network.cancelPlugin(id); validation.invalidate(id); }
     await change();
     const result = listWithPlacements();
     reloadHosts(affected.map(item => item.host));
@@ -469,7 +482,7 @@ function createPluginRuntime({
     if (reload.length) await confirm(event, 'plugins.trusted.reloadNote', unsaved ? 'plugins.trusted.packageUnsavedNote' : null);
     else if (unsaved) await confirm(event, 'plugins.trusted.packageUnsavedNote');
     await beforeRelease?.();
-    for (const id of ids) network.cancelPlugin(id);
+    for (const id of ids) { network.cancelPlugin(id); validation.invalidate(id); }
     const released = [], recovery = [];
     try {
       for (const item of affected.filter(item => !item.error)) {
@@ -633,7 +646,7 @@ function createPluginRuntime({
     });
     handle('plugins:restart', (event, { id } = {}) => {
       requireMain(event);
-      network.cancelPlugin(String(id));
+      network.cancelPlugin(String(id)); validation.invalidate(String(id));
       manager.restart(String(id));
       return listWithPlacements();
     });
@@ -834,6 +847,7 @@ function createPluginRuntime({
       refreshBusinessData();
       manager.settingsChanged();
       network.cancelInactive();
+      validation.reconcile();
       limits.reconcile();
         pages.refresh();
       for (const subscriber of subscribers.values()) {
@@ -855,7 +869,7 @@ function createPluginRuntime({
       clearTimeout(catalogRefreshTimer);
       catalog.dispose();
       managed.dispose();
-      network.dispose();
+      network.dispose(); validation.dispose();
       limits.dispose();
       pages.dispose();
       protocol.unhandle('tm-plugin');
