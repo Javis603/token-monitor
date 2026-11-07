@@ -847,7 +847,8 @@
     // push/expiry; a stats-key cache would freeze time-dependent selection.
     const groupedSessions = items.some(item => item.metric === dockItems.SESSIONS_METRIC
       || (item.type === 'limit' && options.limitsEnabled !== false))
-      ? groupedSessionRows(stats) : { rows: [], project: row => row, stateFor: sessionActivityState };
+      ? groupedSessionRows(stats, { subagents: { separateClients: sessionRowsApi.separateSubagentClients({ hermesMergeSubagents: options.hermesMergeSubagents }) } })
+      : { rows: [], project: row => row, stateFor: sessionActivityState };
     const pluginRefs = Array.isArray(options.availablePluginRefs) ? new Set(options.availablePluginRefs) : null;
     const cells = [];
     for (const item of items) {

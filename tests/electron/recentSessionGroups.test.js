@@ -153,9 +153,9 @@ function incumbentOptions(stats) {
   const { translate: localize } = require('../../src/electron/renderer/i18n');
   const source = app.slice(app.indexOf('function sessionPresentationOptions()'), app.indexOf('function rawSessionRowsForPeriod('));
   return Function('clientLabels', 'clientColors', 'modelColor', 'stableColor', 'fallbackModelColors', 't',
-    'state', 'formatCompact', 'effectiveCompactTokenUnits', 'currentLocale', `${source}; return sessionPresentationOptions();`)(
+    'state', 'formatCompact', 'effectiveCompactTokenUnits', 'currentLocale', 'sessionRowsApi', `${source}; return sessionPresentationOptions();`)(
     CLIENT_LABELS, clientColors, () => '', () => '', [], (key, params) => localize('zh-TW', key, params),
-    { stats, period: 'month' }, String, () => '', () => 'zh-TW'
+    { stats, period: 'month' }, String, () => '', () => 'zh-TW', rowApi
   );
 }
 

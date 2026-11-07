@@ -657,7 +657,14 @@
   // A subagent session folds under the session that started it while that
   // parent is visible in the same list. Background reviews keep their own
   // global group and Grok Bot runs theirs, so neither side of a link may be one.
-  // A child whose parent is outside the period stays a row of its own.
+  // The renderer and the main-process dock both group from settings, so the
+  // preference becomes `subagents.separateClients` in one place.
+  function separateSubagentClients(settings) {
+    return settings?.hermesMergeSubagents === false ? new Set(['hermes']) : undefined;
+  }
+
+  // A child whose parent is outside the period stays a row of its own, and so
+  // does every child of a client in `separateClients` (a user preference).
   function groupSubagentRows(rows, options = {}) {
     const list = Array.isArray(rows) ? rows : [];
     const eligible = row => row?.kind === 'session' && row.backgroundReview !== true && row.grokBot !== true;
@@ -687,7 +694,7 @@
     const parentLinks = new Map();
     const conflicts = new Set();
     for (const row of byKey.values()) {
-      if (!row.parentKey) continue;
+      if (!row.parentKey || options.separateClients?.has(row.client)) continue;
       const id = identity(row);
       const parent = byKey.get(row.parentKey);
       const link = parent ? identity(parent) : row.parentKey;
@@ -928,6 +935,7 @@
     sessionModelLabel,
     sessionModelTooltipEntries,
     sessionRowsForPeriod,
-    sessionTokenRate
+    sessionTokenRate,
+    separateSubagentClients
   };
 });
