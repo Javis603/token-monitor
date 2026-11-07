@@ -14,6 +14,7 @@ function fixture(t) {
   const artifacts = path.join(home, 'session-artifacts');
   const child = path.join(artifacts, 'root', 'sub-worker');
   fs.mkdirSync(child, { recursive: true });
+  fs.writeFileSync(path.join(artifacts, 'metadata.json'), '{}\n');
   for (const dir of ['node_modules/pkg', '.git/objects', 'Library/unrelated', 'project/src']) {
     fs.mkdirSync(path.join(home, dir), { recursive: true });
     fs.writeFileSync(path.join(home, dir, 'noise.jsonl'), '{}\n');
@@ -52,6 +53,8 @@ test('Prime empty setting keeps its nested RLM source and other client roots', (
     const ignored = watchIgnoreMatcher('prime-agent', options);
     assert.equal(typeof ignored, 'function');
     assert.deepEqual(clientSourceRoots('prime-agent', options)['prime-agent'].map(({ dir }) => dir), [f.home, f.artifacts]);
+    assert.equal(ignored(path.join(f.artifacts, 'metadata.json')), true, 'direct metadata files are not transcript ancestors');
+    assert.equal(ignored(path.join(f.artifacts, 'removed-parent')), false, 'missing parent directories retain removal events');
     for (const relative of ['root', 'root/sub-new', 'root/sub-new/new.jsonl', 'root/sub-worker/child.jsonl']) {
       assert.equal(ignored(path.join(f.artifacts, relative)), false, relative);
     }
@@ -82,6 +85,7 @@ for (const usePolling of [false, true]) {
     const watched = watcher.getWatched();
     assert.ok(watched[sessions]?.includes('root.jsonl'));
     assert.ok(watched[f.child]?.includes('child.jsonl'));
+    assert.equal(watched[artifacts]?.includes('metadata.json'), false);
     assert.equal(Object.keys(watched).some((dir) => dir.includes('node_modules')), false);
     assert.equal(Object.keys(watched).some((dir) => dir.includes('Library')), false);
     // `ready` completes discovery before the native stream necessarily starts.

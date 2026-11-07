@@ -1925,9 +1925,14 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     const isTranscript = (name) => name.endsWith('.jsonl') && name !== 'rlm-subagents.jsonl';
     bound('prime-agent', roots.filter(({ id }) => id === 'prime-agent-sessions').map(({ dir }) => dir),
       directChildOnly(isTranscript));
-    bound('prime-agent', roots.filter(({ id }) => id === 'prime-agent-artifacts').map(({ dir }) => dir), (parts) => {
+    bound('prime-agent', roots.filter(({ id }) => id === 'prime-agent-artifacts').map(({ dir }) => dir), (parts, resolved) => {
       if (pruneDependencyTrees(parts)) return true;
-      if (parts.length === 1) return false;
+      if (parts.length === 1) {
+        try { return !fs.statSync(resolved).isDirectory(); } catch (_) {
+          // Removed parents can contain transcripts; keep their removal signal.
+          return false;
+        }
+      }
       if (!parts[1].startsWith('sub-')) return true;
       if (parts.length === 2) return false;
       return parts.length !== 3 || !isTranscript(parts[2]);
