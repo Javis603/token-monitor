@@ -47,6 +47,7 @@
         clear.hidden = !hasSaved(); cancel.hidden = !hasSaved() && dirty.size === 0; cancel.disabled = pending;
         const clearActions = editing ? buttons : summary;
         if (clear.parentNode !== clearActions) clearActions.append(clear);
+        if (reload.parentNode !== clearActions) clearActions.append(reload);
         summary.hidden = feedback.hidden && edit.hidden && verify.hidden && (editing || clear.hidden);
         for (const [id, input] of controls) input.placeholder = t(snapshot.fields[id] ? 'plugins.credentials.present' : 'plugins.credentials.empty');
         error.hidden = !error.textContent; reload.hidden = !conflict;

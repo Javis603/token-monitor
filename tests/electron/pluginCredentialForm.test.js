@@ -121,3 +121,23 @@ test('failed explicit and post-save verification restore saved state and expose 
     editor.dispose();
   }
 });
+
+test('clear conflict exposes reload outside a collapsed credential editor', async () => {
+  const document={createElement:tag=>{const node=new Element(tag);if(['input','textarea'].includes(tag))node.value='';return node;}};
+  let revision=1;
+  const saved=()=>({revision,fields:{token:true},configured:true,verification:'valid',declaration:{validation:true,fields:[{id:'token',label:'Token',control:'input',required:true}]}});
+  const root=new Element(),editor=await create({document,t:key=>key,localize:value=>value,statusInHeader:()=>true,call:async(method,args)=>{
+    if(method==='credentials.status')return saved();
+    if(args.expectedRevision!==revision)throw Error('credentials-conflict');
+    return {...saved(),revision:++revision,fields:{token:false},configured:false,verification:'unverified'};
+  }}).mount(root,{moduleId:'one'});
+  const action=id=>root.querySelectorAll('button').find(node=>node.dataset.credentialAction===id),form=root.querySelector('.plugin-credential-editor');
+  assert.equal(form.hidden,true);revision=2;
+  action('clear').fire('click');await tick();
+  assert.equal(action('reload').hidden,false);
+  assert.equal(form.hidden,true);
+  assert.equal(action('reload').parentNode,action('clear').parentNode,'recovery is visible beside clear while the editor stays collapsed');
+  action('reload').fire('click');await tick();assert.equal(action('reload').hidden,true);
+  action('clear').fire('click');await tick();assert.equal(form.hidden,false);assert.equal(action('clear').hidden,true);
+  editor.dispose();
+});
