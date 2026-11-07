@@ -11,13 +11,15 @@ Quota modules are independent of plugin views. Declare once; the desktop host ow
   "backend": "backend.cjs",
   "files": ["backend.cjs"],
   "limits": [
-    {"id": "credits", "name": "OpenAI", "capabilities": ["web"], "credentials": {"fields": [{"id": "sessionBearer", "label": "Platform session Bearer", "required": true}, {"id": "organization", "label": "Organization ID", "required": true}]}},
+    {"id": "credits", "name": "OpenAI", "capabilities": ["web"], "credentials": {"validation": true, "fields": [{"id": "sessionBearer", "label": "Platform session Bearer", "required": true}, {"id": "organization", "label": "Organization ID", "required": true}]}},
     {"id": "local", "name": "Local budget", "capabilities": ["cli"], "tags": [{"en": "Team pool", "zh-TW": "團隊共享"}]}
   ]
 }
 ```
 
 `limits` accepts up to 16 modules with unique IDs (`[a-z][a-z0-9-]{0,31}`) and localized names. Modules can declare manual `credentials` independently of `settingsView`. There is no browser login adapter or login-window API. A module without credentials can implement another trusted backend data source without a core change. Capability-derived **Limits** labels and type filters coexist with Widgets, Pages, Appearance and Automation; labels grant no authority.
+
+The validated plugin `identityIcon`, when declared, is also used by its native Limits modules. Decode failures use the existing fallback; provider names are never matched to a built-in icon whitelist.
 
 The stable identity is `plugin:<plugin-id>:<module-id>`. Display names do not identify modules. The same identity must be used by every future native picker/composer and data consumer; no surface-specific registration, login or fetcher is needed. Removing or disabling a plugin removes its active modules, while display selection/order remain saved for re-enable/reinstall. Plugin execution/trust and module sampling/display checkboxes are independent. Native settings use the same right-side status pill as built-ins: missing readings wait for data; explicit `notConfigured` means not set up; `unauthorized` marks declared credentials as rejected; errors mean a failed read. Healthy readings use the status dot without a duplicate connected pill. These are mutually exclusive states, not author-supplied badge text.
 
@@ -116,14 +118,14 @@ Sampling reuses `LimitsRuntime`: fixed/adaptive scheduling, bounded concurrency,
 
 ## Manual credential contract
 
-`limits[].credentials` declares `{fields: [...]}` with 1–16 unique fields. Each field has `id` (`[a-z][a-zA-Z0-9-]{0,39}`), a localized `label`, optional `required` boolean (default false), and `control: 'input' | 'textarea'` (default input). Single-line native controls mask typed text; textarea supports cookies or other long content. All declared values are private credentials, including organization IDs. General select/preferences use the existing ordinary settings schema and API.
+`limits[].credentials` declares `{fields: [...], validation?: boolean}` with 1–16 unique fields. Each field has `id` (`[a-z][a-zA-Z0-9-]{0,39}`), a localized `label`, optional `required` boolean (default false), and `control: 'input' | 'textarea'` (default input). Single-line native controls mask typed text; textarea supports cookies or other long content. All declared values are private credentials, including organization IDs. General select/preferences use the existing ordinary settings schema and API.
 
 All calls derive the plugin ID from the host context; callers supply only their declared `moduleId`. The same module namespace serves every surface and all three UI choices:
 
-- `credentials.status({moduleId})` returns `{revision, configured, fields, declaration}`. `fields` maps each declared field ID to a presence boolean; `declaration` contains public field metadata. `configured` means at least one value exists and all required fields are present, **not** that a service has accepted them.
-- `credentials.update({moduleId, expectedRevision, patch})` validates and atomically saves submitted strings, returning status only. Omitted fields retain their saved values. Explicit empty required values fail; explicit empty optional values remove that field. Required fields must be complete after the update. Each string is bounded to 16,384 characters and each record to 64 KiB. No silent trimming, parsing or guessed authentication mode occurs.
+- `credentials.status({moduleId})` returns `{revision, configured, fields, declaration, verification}`. `fields` maps each declared field ID to a presence boolean; `declaration` contains public field metadata. `configured` means at least one value exists and all required fields are present, **not** that a service has accepted them.
+- `credentials.update({moduleId, expectedRevision, patch})` validates and atomically saves submitted strings, returning status only. Omitted fields retain their saved values. Explicit empty required values fail; explicit empty optional values remove that field. Partial saves are allowed; `configured` stays false until all required fields are present. An explicitly submitted empty required value is still rejected. Each string is bounded to 16,384 characters and each record to 64 KiB. No silent trimming, parsing or guessed authentication mode occurs.
 - `credentials.clear({moduleId, expectedRevision})` removes that module's values and returns status. An empty revision record remains to reject stale editors; it contains no credentials. Update and clear require the exact current revision. `credentials-conflict` is never silently retried.
-- `credentials.read({moduleId})` returns a map of saved declared values **to the Node backend only**. Renderer host calls are explicitly denied. The host's settings, catalog and stats projections contain no saved credential values. Trusted backend code can deliberately relay data, so this is an API discipline, not a secret sandbox.
+- `credentials.read({moduleId, expectedRevision?})` returns a map of saved declared values **to the Node backend only**. Renderer host calls are explicitly denied. Validators pass `expectedRevision` so a concurrent replacement fails with `credentials-conflict` before reading values. The host's settings, catalog and stats projections contain no saved credential values. Trusted backend code can deliberately relay data, so this is an API discipline, not a secret sandbox.
 
 Without `settingsView`, the host mounts the native form through the existing UI lifecycle. With `settingsView`, authors choose their entire layout and may mount the same form wherever it belongs:
 
@@ -137,7 +139,10 @@ export function activate(ctx) {
         : 'Open AI tool quota settings to edit module credentials.';
       container.append(help);
       const editor = context.moduleId
-        ? await ctx.native.credentials.mount(container, {moduleId: context.moduleId})
+        ? await ctx.native.credentials.mount(container, {
+          moduleId: context.moduleId,
+          onStateChange(state) { help.hidden = !state.editing; }
+        })
         : null;
       return {
         update: value => editor?.update(value),
@@ -150,6 +155,34 @@ export function activate(ctx) {
 ```
 
 The helper returns `update(context)`, `hasUnsavedChanges()` and `dispose()`. Forward these through the author view's lifecycle. It loads presence only, distinguishes untouched inputs from explicit edits, clears input only after successful save, retains drafts on failure, and preserves its base revision while dirty. After a conflict, **Reload saved status** explicitly adopts the current revision while retaining input; the user can then decide to save again. Custom DOM may call the same status/update/clear API directly; authors own validation buttons, explanatory content and service validity feedback. Do not reinsert saved secrets into renderer controls. No fixed Connect/Status/Disconnect UI is appended.
+
+### Verification and shared summary/editor state
+
+Opt into `credentials.validation: true` when the backend implements the explicit validation operation below. Without this declaration the host never invents connected status or calls a missing validator. `verification` is one of `unverified`, `verifying`, `valid`, `rejected`, `expired`, `unavailable`, independent of `configured`/field presence.
+
+```js
+// Inside the backend call dispatcher:
+if (method === 'credentials.validate') {
+  const {moduleId, revision} = args;
+  const values = await host.call('credentials.read', {moduleId, expectedRevision: revision});
+  // Use network.request and the service's actual authentication check here.
+  // Return valid only after a successful server authentication response.
+  const response = await host.call('network.request', {
+    moduleId, requestId: 'credential-check', url: validationUrl,
+    headers: {Authorization: `Bearer ${values.sessionBearer}`}
+  });
+  return {status: response.status === 200 ? 'valid'
+    : [401, 403].includes(response.status) ? 'rejected' : 'unavailable'};
+}
+```
+
+Return `{status: 'valid' | 'rejected' | 'expired' | 'unavailable'}` without secrets or service error bodies. The host owns state and accepts the result only for the unchanged saved credential revision and active executable revision. Update, clear, disable/re-enable, restart and code update fence old results. Verification is an in-memory last explicit check, not a permanent promise of server validity; app/runtime restart returns to unverified. Ordinary quota readings never mark credentials valid. An `unauthorized` quota attempt for the unchanged credential revision can mark it rejected; stale attempts from older revisions are ignored. Authors should classify known expiry in their validation operation.
+
+`credentials.verify({moduleId, expectedRevision})` is available to custom UI/backends; it performs this one explicit backend call and returns the updated status. It requires complete saved credentials and the current revision. The native helper automatically verifies after a successful complete save when declared; otherwise the user can explicitly verify. This does not enable quota demand or introduce Settings polling. Use `network.request` for the probe so host proxy/cancellation policy applies. Direct custom UI must respect the same revision/conflict semantics.
+
+The shared helper initially expands empty, partially saved or unverified credentials. Successful validation switches to a compact **Connected** summary. **Change credentials** explicitly opens editing without loading saved values; pushes do not interrupt deliberate editing or dirty drafts. **Cancel editing** discards only the draft, rereads presence/status and returns to a summary when any saved field exists. Save failures retain drafts; a failed validation keeps the saved credentials and shows its honest status. Clear appears only when `fields` contains a saved value, including partial/rejected/expired records; unsaved input alone does not count. Clear returns to the empty editor.
+
+`mount(container, {moduleId, onStateChange?})` calls `onStateChange` after its state transitions, including the initial state. The public DTO is `{editing, hasSaved, configured, verification, pending, revision}`; it never includes raw values. Use `editing` to show/hide author instructions, as in the example above. Forward `update(context)` on host view updates and `dispose()` on cleanup; do not inspect private DOM or add a status polling loop. The callback is for presenting local UI, not starting another verification/refresh on every push.
 
 ### Backend network requests
 

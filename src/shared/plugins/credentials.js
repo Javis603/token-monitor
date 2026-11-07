@@ -4,7 +4,8 @@ const FIELD_ID = /^[a-z][a-zA-Z0-9-]{0,39}$/;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 function normalizeCredentials(raw) {
   if (raw === undefined) return null;
-  if (!object(raw) || Object.keys(raw).some(key => key !== 'fields') || !Array.isArray(raw.fields)
+  if (!object(raw) || Object.keys(raw).some(key => !['fields', 'validation'].includes(key)) || !Array.isArray(raw.fields)
+    || raw.validation !== undefined && typeof raw.validation !== 'boolean'
     || !raw.fields.length || raw.fields.length > 16) throw Error('invalid credential declaration');
   const ids = new Set();
   const fields = raw.fields.map(field => {
@@ -16,6 +17,6 @@ function normalizeCredentials(raw) {
     ids.add(field.id);
     return Object.freeze({ id: field.id, label, control: field.control || 'input', required: field.required === true });
   });
-  return Object.freeze({ fields: Object.freeze(fields) });
+  return Object.freeze({ validation: raw.validation === true, fields: Object.freeze(fields) });
 }
 module.exports = { normalizeCredentials };
