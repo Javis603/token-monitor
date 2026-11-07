@@ -53,5 +53,7 @@ test('credential permission split, namespace identity, backend transport, disabl
   await f.invoke('plugins:reload');assert.equal(reloadSignal.aborted,true,'reload cancels requests even when the plugin stays active');
   assert.equal((await host('credentials.status',{moduleId:'one'})).configured,true);
   fs.rmSync(path.join(f.dir,'plugins/trusted-fixture'),{recursive:true});await f.runtime.manager.reload();
-  f.invoke('plugins:forgetCredentials','trusted-fixture');assert.deepEqual(fs.readdirSync(path.join(f.dir,'plugin-credentials')),[]);
+  f.cancel();await assert.rejects(f.invoke('plugins:forgetCredentials','trusted-fixture'),/cancelled/);
+  assert.equal(fs.readdirSync(path.join(f.dir,'plugin-credentials')).length,1,'cancelled cleanup preserves saved credentials for missing code');
+  f.accept();await f.invoke('plugins:forgetCredentials','trusted-fixture');assert.deepEqual(fs.readdirSync(path.join(f.dir,'plugin-credentials')),[]);
 });

@@ -924,9 +924,10 @@
         meta.append(el(document, 'span', 'plugin-version', `v${plugin.version}`), typeLabels(plugin)); card.append(meta);
       }
       const footer = el(document, 'div', 'plugin-card-footer');
-      footer.append(button(t('plugins.credentials.forget'), () => void run(async () => { await api.forgetCredentials(plugin.id); return api.list(); }, `plugin:${plugin.id}`)));
-      const surfaces = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
       const exceptional = !['active', 'disabled'].includes(plugin.status);
+      // Broken/missing packages still need host-owned cleanup without code.
+      if (exceptional || plugin.limits?.some(module => module.credentials)) footer.append(button(t('plugins.credentials.forget'), () => void run(async () => { await api.forgetCredentials(plugin.id); return api.list(); }, `plugin:${plugin.id}`)));
+      const surfaces = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
       if (exceptional) footer.append(statusChip(plugin));
       else {
         const summary = el(document, 'span', 'plugin-placement-summary');

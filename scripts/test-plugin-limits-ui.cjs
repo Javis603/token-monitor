@@ -51,7 +51,7 @@ app.commandLine.appendSwitch('host-resolver-rules','MAP * ~NOTFOUND, EXCLUDE loc
 registerPluginScheme(protocol);
 app.on('window-all-closed',()=>{});
 let runtime,win;
-let transportCalls=[];
+let transportCalls=[], fixtureConsent=1, credentialConfirmations=0;
 const errors=[];
 const deadline=setTimeout(()=>{console.error('UI deadline',errors);app.exit(1);},45000);
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -104,7 +104,7 @@ app.whenReady().then(async () => {
   }
   const patch=value=>{settings={...settings,...value};win.webContents.send('settings:push',settings);};
   runtime=createPluginRuntime({electron:{BrowserWindow,ipcMain,session,utilityProcess,
-   dialog:{showMessageBox:async()=>({response:1}),showOpenDialog:async()=>({canceled:false,filePaths:[fixtureDir]})}},
+   dialog:{showMessageBox:async(_win,options)=>{if(options.message===require('../src/electron/renderer/i18n').translate(settings.language,'plugins.credentials.forgetConfirm'))credentialConfirmations++;return {response:fixtureConsent};},showOpenDialog:async()=>({canceled:false,filePaths:[fixtureDir]})}},
    fetchImpl:async(url,init)=>{transportCalls.push({url,init});return new Response('{"remaining":80}',{status:200});},userDataDir:scratch,getSettings:()=>settings,getAppSettings:()=>settings,getContext:()=>({source:'fixture'}),getLocale:()=>settings.language,
    isMainSender:event=>event.sender===win.webContents,persistPluginStates:pluginStates=>patch({pluginStates}),
    persistManagementSettings:patch,applySettingsPatch:patch,env:{},log:console.log});
@@ -323,7 +323,14 @@ app.whenReady().then(async () => {
   await capture('settings-default-credentials.png');
   await js("openSettingsPanel();setSettingsSectionExpanded('plugins',true);pluginSettingsPanel.refresh()");
   await waitFor("document.querySelector('[data-plugin-id=\"synthetic-limits\"] .plugin-card-footer')",'installed plugin controls');
+  fixtureConsent=0;
   await js(`(()=>{const card=document.querySelector('[data-plugin-id="synthetic-limits"]');[...card.querySelectorAll('button')].find(button=>button.textContent===t('plugins.credentials.forget')).click();})()`);
+  await waitFor("!document.querySelector('[data-plugin-id=\"synthetic-limits\"]')?.querySelector('button:disabled')",'cancelled credential clear settles');
+  await pause(100);assert.ok(fs.readdirSync(credentialDirectory).length>0,'cancel preserves credentials');
+  fixtureConsent=1;
+  await js(`(()=>{const card=document.querySelector('[data-plugin-id="synthetic-limits"]');[...card.querySelectorAll('button')].find(button=>button.textContent===t('plugins.credentials.forget')).click();})()`);
+  await waitFor("!document.querySelector('[data-plugin-id=\"synthetic-limits\"]')?.querySelector('button:disabled')",'credential clear settles');
+  assert.equal(credentialConfirmations,2,'cancel and confirm use host native dialog');
   await waitFor("!state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')",'native forget clears captured connection quota');
   await js("document.querySelector('.plugin-type-filter').value='appearance';document.querySelector('.plugin-type-filter').dispatchEvent(new Event('change'))");
   await waitFor("document.querySelector('#pluginSettingsList').textContent.includes(t('plugins.catalog.noResults'))",'filtered installed empty state');
