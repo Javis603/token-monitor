@@ -40,7 +40,7 @@ test('documented plan reaches the native label through repeated runtime normaliz
   service.demand(false);
   assert.equal(service.records()[0].planLabel, reading.plan);
 });
-test('native demand samples two modules, drops late data on disable, resumes after revision update', async t => {
+test('native demand samples two modules, clears on disable, resumes after revision update', async t => {
   let active = true, revision = 'a', calls = 0;
   const settings = { limitProviders: 'plugin:sample-plugin:one,plugin:sample-plugin:two', limitsEnabled: true };
   const manager = { list: () => ({ plugins: [{ id: manifest.id, status: active ? 'active' : 'disabled', revision, limits: manifest.limits }] }), call: async () => { calls++; return { status: 'ok', windows: [] }; } };
