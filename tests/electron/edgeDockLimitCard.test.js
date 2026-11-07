@@ -1694,17 +1694,11 @@ test('MiMo hidden products retain recovery and subscription access without empty
     subscriptions: [unbound], accounts: [console, { ...console, accountKey: 'other', accountName: 'MiMo abcdef2' }] })
     .renderLimitProviderGroup('mimo', 'MiMo', [console], '#000000');
   assert.match(allHidden.text, /Subscriptions/);
-  assert.match(allHidden.text, /Price ¥10\.00/);
-  const unnamedPlan = { ...membership, planLabel: '' };
-  const fallback = dockView({ subscriptions: [{ ...subscription, binding: { accountKey: 'membership' } }], accounts: [unnamedPlan] })
-    .renderLimitProviderGroup('mimo', 'MiMo', [unnamedPlan], '#000000');
-  assert.match(fallback.text, /Subscriptions/);
   const otherAccount = { ...console, accountKey: 'other', accountName: 'MiMo abcdef2' };
-  const collapsed = dockView({ limitProviderHiddenItems: { mimo: ['credits'] },
-    subscriptions: [subscription, { ...subscription, id: 'membership-plan', binding: { accountKey: 'membership' } }],
-    accounts: [console, membership, otherAccount] })
+  const remaining = dockView({ limitProviderHiddenItems: { mimo: ['credits'] },
+    subscriptions: [subscription], accounts: [console, membership, otherAccount] })
     .renderLimitProviderGroup('mimo', 'MiMo', [console, membership, otherAccount], '#000000');
-  assert.match(collapsed.text, /Subscriptions/);
+  assert.match(remaining.text, /MiMo abcdef1/);
 });
 
 test('MiMo groups products under each account and keeps their own plan and status', () => {

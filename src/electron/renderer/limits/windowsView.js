@@ -2567,12 +2567,7 @@
   }
 
   function mimoAccountRepresentatives(groups) {
-    return groups.map(group => [...group].sort((left, right) => (
-      Number(Boolean(String(right.accountEmail || '').trim())) - Number(Boolean(String(left.accountEmail || '').trim()))
-      || Number(Boolean(String(right.accountName || '').trim())) - Number(Boolean(String(left.accountName || '').trim()))
-      || Number(mimoProductLabel(right) === 'Console') - Number(mimoProductLabel(left) === 'Console')
-      || String(left.accountKey || '').localeCompare(String(right.accountKey || ''))
-    ))[0]);
+    return groups.map(group => group.find(row => row.accountEmail) || group[0]);
   }
 
   function mimoAccountTitle(provider, index, providers) {
@@ -2674,16 +2669,11 @@
     })).filter(group => group.providers.length > 0);
     const visible = visibleGroups.flatMap(group => group.providers);
     const recorded = subscriptionsForProviderGroup('mimo', visible);
-    const subscriptionHeading = visibleGroups.length <= 1 && (
-      recorded.length > 1 && groups.length > 1
-      || recorded.some(entry => !entry.account || !visible.some(provider => (
-        subscriptionAccountMatches(entry.account, provider) && limitProviderPlan(provider)
-      )))
-    );
+    const oneAccount = groups.length === 1;
     const { row, list, groupProvider } = renderLimitProviderGroupFrame('mimo', label, visible, color, {
-      count: visibleGroups.length > 1 ? visibleGroups.length : 0
+      count: oneAccount ? 0 : visibleGroups.length
     });
-    if (subscriptionHeading) {
+    if (visible.length === 0 && recorded.length > 0) {
       row.children[0].replaceWith(renderLimitProviderHead('mimo', label, groupProvider, color, {
         planText: t('settings.subscriptions.title'), hideMeta: true
       }));
@@ -2692,7 +2682,7 @@
       row.style.display = 'none';
       return row;
     }
-    if (visibleGroups.length === 1) {
+    if (oneAccount && visibleGroups.length === 1) {
       appendMimoAccountProducts(list, visibleGroups[0].providers, color);
     } else {
       visibleGroups.forEach(({ providers: productsForAccount, index }) => {
