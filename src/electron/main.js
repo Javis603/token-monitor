@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
-const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, safeStorage, systemPreferences } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
 const { createRetainedWindow, captureRetainedWindowState, restoreRetainedWindowState } = require('./retainedWindow');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
@@ -9953,7 +9953,7 @@ app.whenReady().then(() => {
       pluginRuntime = createPluginRuntime({
         fetchImpl: electronLimitsFetch(),
         getAppSettings: settingsForRenderer,
-        electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, nativeImage, session, shell, dialog, safeStorage },
+        electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, nativeImage, session, shell, dialog },
         userDataDir: app.getPath('userData'),
         getSettings: () => settings,
         applySettingsPatch,

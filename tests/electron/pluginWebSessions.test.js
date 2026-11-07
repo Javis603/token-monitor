@@ -11,7 +11,7 @@ const config = { adapter: 'openai', key: 'platform', loginUrl: 'https://platform
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-web-session-test-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const sessions = [], windows = [], calls = []; let enabled = true, encrypted = true, backend = 'gnome_libsecret', approval = 1;
+  const sessions = [], windows = [], calls = [], dialogs = []; let enabled = true, approval = 1;
   let fetch = async () => ({ ok: true, status: 200, body: Readable.from([Buffer.from('{"total_available":100}')]) });
   let applyProxy = async () => {}, closeConnections = async () => {};
   class Window extends EventEmitter {
@@ -20,10 +20,8 @@ function fixture(t) {
     destroy() { this.dead = true; this.emit('closed'); }
     async loadURL(url) { this.url = url; }
   }
-  const crypt = value => Buffer.from([...value].map(byte => byte ^ 113));
   const electron = { BrowserWindow: Window,
-    safeStorage: { isAsyncEncryptionAvailable: async () => encrypted, getSelectedStorageBackend: () => backend, encryptStringAsync: async value => crypt(Buffer.from(value)), decryptStringAsync: async value => ({ result: crypt(value).toString(), shouldReEncrypt: false }) },
-    dialog: { showMessageBox: async () => ({ response: approval }) },
+    dialog: { showMessageBox: async options => { dialogs.push(options); return { response: approval }; } },
     session: { fromPartition: partition => {
       const sess = { partition, setProxy: async config => { sess.proxyConfig = config; await applyProxy(config); }, closeAllConnections: async () => { await closeConnections(); sess.connectionsClosed = true; }, clearStorageData: async () => {}, webRequest: { onBeforeSendHeaders: (...args) => { sess.before = args.at(-1); }, onCompleted: (...args) => { sess.completed = args.at(-1); } }, setPermissionRequestHandler: fn => { sess.permission = fn; }, fetch: async (...args) => { calls.push(args); return fetch(...args); } }; sessions.push(sess); return sess;
     } }
@@ -37,9 +35,9 @@ function fixture(t) {
     let called = false; sess.before(request, () => { called = true; }); assert.equal(called, true);
     await sess.completed({ id: 10, statusCode });
   }
-  return { service, create, capture, calls, windows, sessions, directory, electron,
+  return { service, create, capture, calls, windows, sessions, directory, electron, dialogs,
     applyProxy: value => { applyProxy = value; }, closeConnections: value => { closeConnections = value; },
-    enabled: value => { enabled = value; }, encrypted: value => { encrypted = value; }, backend: value => { backend = value; }, approval: value => { approval = value; }, fetch: value => { fetch = value; } };
+    enabled: value => { enabled = value; }, approval: value => { approval = value; }, fetch: value => { fetch = value; } };
 }
 test('isolated login awaits current app proxy and socket cleanup before opening its page', async t => {
   const f = fixture(t), settings = {proxyUrl:'http://127.0.0.1:7890',noProxy:'example.test'};
@@ -89,14 +87,22 @@ test('a cancelled proxy setup failure cannot close a replacement login', async t
   assert.equal(f.windows[0].dead,false);
   assert.equal((await service.status('credit-test','platform')).state,'connecting');
 });
-test('encrypted connection survives service restart; fixed GET includes captured organization and never returns the bearer', async t => {
+test('private JSON connection survives service restart; fixed GET includes captured organization and never returns the bearer', async t => {
   const f = fixture(t);
   assert.deepEqual(await f.service.connect('credit-test', config), { state: 'connecting' });
+  assert.match(f.dialogs[0].detail,/private JSON file/);
+  assert.match(f.dialogs[0].detail,/not encrypted/);
   assert.ok(f.sessions[0].partition.startsWith('plugin-web-login-'));
   assert.equal(f.sessions[0].partition.startsWith('persist:'), false);
   await f.capture(); assert.equal(f.windows[0].dead, true);
   const files = fs.readdirSync(f.directory); assert.equal(files.length, 1);
-  assert.equal(fs.readFileSync(path.join(f.directory, files[0]), 'utf8').includes('synthetic-session-private'), false);
+  const record=JSON.parse(fs.readFileSync(path.join(f.directory,files[0]),'utf8'));
+  assert.equal(record.authorization,'Bearer synthetic-session-private');
+  assert.equal(record.encrypted,undefined);
+  if(process.platform!=='win32'){assert.equal(fs.statSync(path.join(f.directory,files[0])).mode&0o777,0o600);assert.equal(fs.statSync(f.directory).mode&0o777,0o700);}
+  f.enabled(false); f.service.cancelInactive();
+  assert.deepEqual(fs.readdirSync(f.directory),files,'disable retains the private record');
+  f.enabled(true);
   const second = f.create(); t.after(() => second.dispose());
   assert.deepEqual(await second.status('credit-test', 'platform'), { state: 'connected' });
   const result = await second.request('credit-test', 'platform');
@@ -107,12 +113,11 @@ test('encrypted connection survives service restart; fixed GET includes captured
   assert.equal(f.calls[0][1].redirect, 'error'); assert.equal(f.calls[0][1].credentials, 'omit');
   assert.deepEqual(await second.status('other-plugin', 'platform'), { state: 'notConnected' });
 });
-test('consent cancellation and unsafe storage do not start login or persist anything', async t => {
+test('consent cancellation does not start login or persist anything', async t => {
   const f = fixture(t); f.approval(0);
   assert.deepEqual(await f.service.connect('credit-test', config), { state: 'notConnected' });
   assert.equal(f.windows.length, 0); assert.equal(fs.readdirSync(f.directory).length, 0);
-  f.encrypted(false); await assert.rejects(f.service.connect('credit-test', config), /secure-storage-unavailable/);
-  f.encrypted(true); f.backend('basic_text'); await assert.rejects(f.service.connect('credit-test', config), /secure-storage-unavailable/);
+
 });
 for (const changes of [{ webContentsId: 999 }, { method: 'POST' }, { url: config.requestUrl + '/other' }, { requestHeaders: { Authorization: 'Bearer synthetic-session-private' } }]) test(`unrelated request cannot capture authorization: ${JSON.stringify(changes)}`, async t => {
   const f = fixture(t); await f.service.connect('credit-test', config); await f.capture(200, changes);
@@ -150,34 +155,60 @@ test('host adapter ignores caller destinations and rejects unknown adapters', as
   assert.equal(f.windows.length, 0);
 });
 
-test('disconnect during async encryption cannot restore a deleted authorization', async t => {
-  const f = fixture(t); await f.service.connect('credit-test', config);
-  let finish;
-  f.electron.safeStorage.encryptStringAsync = () => new Promise(resolve => { finish = resolve; });
-  const capture = f.capture(); await new Promise(setImmediate);
-  f.service.disconnect('credit-test', 'platform'); finish(Buffer.from('fixture-encrypted-data')); await capture;
-  assert.equal(fs.readdirSync(f.directory).length, 0);
-  assert.equal((await f.service.status('credit-test', 'platform')).state, 'notConnected');
+test('a cancelled capture cannot restore deleted authorization', async t => {
+  const f=fixture(t); await f.service.connect('credit-test',config);
+  const session=f.sessions[0], window=f.windows[0];
+  const request={id:12,url:config.requestUrl,method:'GET',webContentsId:window.webContents.id,
+    requestHeaders:{Authorization:'Bearer synthetic-session-private','OpenAI-Organization':'org-fixture'}};
+  session.before(request,()=>{}); const completed=session.completed;
+  f.service.disconnect('credit-test','platform'); await completed({id:12,statusCode:200});
+  assert.equal(fs.readdirSync(f.directory).length,0);
 });
-test('disconnect while decrypting prevents sending a request with the old authorization', async t => {
-  const f = fixture(t); await f.service.connect('credit-test', config); await f.capture();
-  const original = f.electron.safeStorage.decryptStringAsync; let finish;
-  f.electron.safeStorage.decryptStringAsync = value => new Promise(resolve => { finish = async () => resolve(await original(value)); });
-  const request = f.service.request('credit-test', 'platform'); await new Promise(setImmediate);
-  f.service.disconnect('credit-test', 'platform'); await finish();
-  await assert.rejects(request, /cancelled/); assert.equal(f.calls.length, 0);
+test('disconnect before a queued request sends prevents using the old authorization', async t => {
+  const f=fixture(t); await f.service.connect('credit-test',config); await f.capture();
+  const request=f.service.request('credit-test','platform');
+  f.service.disconnect('credit-test','platform');
+  await assert.rejects(request,/cancelled/); assert.equal(f.calls.length,0);
 });
-test('disconnect during encryption availability checks cannot open a late login window', async t => {
-  const f = fixture(t); let finish;
-  f.electron.safeStorage.isAsyncEncryptionAvailable = () => new Promise(resolve => { finish = resolve; });
-  const pending = f.service.connect('credit-test', config); await new Promise(setImmediate);
-  f.service.disconnect('credit-test', 'platform'); finish(true);
-  assert.equal((await pending).state, 'notConnected'); assert.equal(f.windows.length, 0);
+test('private storage works without a keyring or safeStorage API', async t => {
+  const f=fixture(t); assert.equal(Object.hasOwn(f.electron,'safeStorage'),false);
+  await f.service.connect('credit-test',config); await f.capture();
+  assert.equal((await f.service.status('credit-test','platform')).state,'connected');
+  assert.equal((await f.service.request('credit-test','platform')).body.total_available,100);
 });
-test('unknown Linux key providers fail closed', async t => {
-  const f = fixture(t); f.backend('unknown'); const linux = f.create({ platform: 'linux' }); t.after(() => linux.dispose());
-  await assert.rejects(linux.connect('credit-test', config), /secure-storage-unavailable/);
-  assert.equal(f.windows.length, 0);
+test('failed atomic replacement preserves the previous record and removes temporary files', async t => {
+  const f=fixture(t); await f.service.connect('credit-test',config); await f.capture();
+  const files=fs.readdirSync(f.directory), target=path.join(f.directory,files[0]);
+  const before=fs.readFileSync(target);
+  await f.service.connect('credit-test',config);
+  const rename=fs.renameSync;
+  t.mock.method(fs,'renameSync',(from,to)=>{if(to===target)throw Error('synthetic write failure');return rename(from,to);});
+  await f.capture();
+  assert.deepEqual(fs.readFileSync(target),before);
+  assert.deepEqual(fs.readdirSync(f.directory),files);
+  assert.deepEqual(await f.service.status('credit-test','platform'),{state:'error',error:'web-session-storage-unavailable'});
+});
+test('private record reads reject malformed authorization, headers and destinations without sending requests', async t => {
+  const f=fixture(t); await f.service.connect('credit-test',config); await f.capture();
+  const target=path.join(f.directory,fs.readdirSync(f.directory)[0]), record=JSON.parse(fs.readFileSync(target));
+  for(const change of [{version:99},{authorization:null},{authorization:'Bearer bad\nheader'},
+    {headers:null},{headers:{'OpenAI-Organization':'bad\nheader'}},{requestUrl:'https://other.example'},
+    {loginUrl:'https://other.example'},{expiresAt:'invalid'}]) {
+    fs.writeFileSync(target,JSON.stringify({...record,...change}));
+    await assert.rejects(f.service.request('credit-test','platform'),error=>error.message==='web-session-storage-unavailable');
+  }
+  assert.equal(f.calls.length,0);
+});
+test('private record reads reject symlinks and repair file permissions using the shared helper', async t => {
+  const f=fixture(t); await f.service.connect('credit-test',config); await f.capture();
+  const target=path.join(f.directory,fs.readdirSync(f.directory)[0]);
+  if(process.platform!=='win32') {
+    fs.chmodSync(target,0o644); await f.service.status('credit-test','platform');
+    assert.equal(fs.statSync(target).mode&0o777,0o600);
+    const other=path.join(f.directory,'synthetic-private-record'); fs.renameSync(target,other);fs.symlinkSync(other,target);
+    await assert.rejects(f.service.status('credit-test','platform'),/storage-unavailable/);
+    assert.equal(f.calls.length,0);
+  }
 });
 
 test('disconnect and missing-code cleanup isolate both connection and plugin namespaces', async t => {

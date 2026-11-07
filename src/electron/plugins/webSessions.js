@@ -1,5 +1,5 @@
 'use strict';
-/* eslint preserve-caught-error: off -- Do not retain transport/crypto causes that may contain authorization material. */
+/* eslint preserve-caught-error: off -- Do not retain transport/storage causes that may contain authorization material. */
 
 // Convenience for trusted backends, not a sandbox against OS-user code.
 // Raw Authorization stays in main. Each connection owns an ephemeral web session.
@@ -23,8 +23,8 @@ function authorizationExpiry(authorization) {
     return Number.isFinite(value.exp) && value.exp > 0 && value.exp < 8640000000000 ? value.exp * 1000 : null;
   } catch { return null; }
 }
-function createPluginWebSessions({ electron, fetchImpl, directory, active, getSettings = () => ({}), timeoutMs = 180000, platform = process.platform, changed = () => {} }) {
-  const { BrowserWindow, session, safeStorage, dialog } = electron;
+function createPluginWebSessions({ electron, fetchImpl, directory, active, getSettings = () => ({}), timeoutMs = 180000, changed = () => {} }) {
+  const { BrowserWindow, session, dialog } = electron;
   const live = new Map(), requests = new Map(), failures = new Map(), versions = new Map();
   let disposed = false;
   const identity = (id, key) => {
@@ -34,30 +34,24 @@ function createPluginWebSessions({ electron, fetchImpl, directory, active, getSe
     return ref;
   };
   const file = ref => path.join(directory, `${ref.split('/')[0]}--${createHash('sha256').update(ref).digest('hex')}.json`);
-  async function encryption() {
-    const backend = safeStorage?.getSelectedStorageBackend?.();
-    if (platform === 'linux' && !/^(gnome_libsecret|kwallet[56]?)$/.test(backend || '')) throw Error('web-session-secure-storage-unavailable');
-    if (!safeStorage?.isAsyncEncryptionAvailable || !await safeStorage.isAsyncEncryptionAvailable() || safeStorage.getSelectedStorageBackend?.() === 'basic_text') throw Error('web-session-secure-storage-unavailable');
-  }
   async function read(ref) {
-    await encryption();
     try {
-      const doc = JSON.parse(readRegularFileNoFollow(file(ref), { maxBytes: 65536 }));
-      const decrypted = await safeStorage.decryptStringAsync(Buffer.from(doc.encrypted, 'base64'));
-      const value = JSON.parse(decrypted.result);
+      const value = JSON.parse(readRegularFileNoFollow(file(ref), { maxBytes: 65536, mode: 0o600 }));
       const config = connectionConfig({ adapter: 'openai' });
-      if (value.requestUrl !== config.requestUrl || value.loginUrl !== config.loginUrl) throw Error('invalid-destination');
-      return value;
+      if (value.version !== 1 || value.requestUrl !== config.requestUrl || value.loginUrl !== config.loginUrl
+        || typeof value.authorization !== 'string' || !/^Bearer [^\s\x00-\x1f\x7f]+$/.test(value.authorization)
+        || !config.scopeHeaders.every(name => typeof value.headers?.[name] === 'string' && !/[\r\n]/.test(value.headers[name]))
+        || (value.expiresAt !== null && (!Number.isFinite(value.expiresAt) || value.expiresAt <= 0 || value.expiresAt >= 8640000000000000))) throw Error('invalid-record');
+      return { ...config, authorization: value.authorization, expiresAt: value.expiresAt,
+        headers: Object.fromEntries(config.scopeHeaders.map(name => [name, value.headers[name]])) };
     } catch (error) {
       if (error.code === 'ENOENT') return null;
       throw Error('web-session-storage-unavailable');
     }
   }
-  async function save(ref, value, current) {
-    await encryption();
-    const encrypted = await safeStorage.encryptStringAsync(JSON.stringify(value));
+  function save(ref, value, current) {
     if (!current()) return false;
-    writePrivateJsonAtomic(file(ref), { version: 1, encrypted: encrypted.toString('base64') });
+    writePrivateJsonAtomic(file(ref), { version: 1, ...value });
     return true;
   }
 
@@ -81,16 +75,13 @@ function createPluginWebSessions({ electron, fetchImpl, directory, active, getSe
     return { state: stored ? 'connected' : 'notConnected', ...(stored?.expiresAt ? { expiresAt: new Date(stored.expiresAt).toISOString() } : {}) };
   }
   async function connect(id, args) {
-    available(id); const ref = identity(id, args.key), config = connectionConfig(args), version = versions.get(ref) || 0;
-    await encryption();
-    available(id);
-    if (version !== (versions.get(ref) || 0)) return { state: 'notConnected' };
+    available(id); const ref = identity(id, args.key), config = connectionConfig(args);
     if (live.has(ref)) return { state: 'connecting' };
     const entry = {}; live.set(ref, entry);
     try {
       const consent = await dialog.showMessageBox({ type: 'question', title: 'Connect plugin account',
         message: `${id}: connect a website account?`,
-        detail: `Sign in at ${config.loginUrl}\nAllow authenticated GET requests to ${config.requestUrl}\nThe host saves the captured authorization encrypted on this device.`,
+        detail: `Sign in at ${config.loginUrl}\nAllow authenticated GET requests to ${config.requestUrl}\nThe host saves authorization in a private JSON file on this device. It is not encrypted.`,
         buttons: ['Cancel', 'Connect'], defaultId: 0, cancelId: 0 });
       if (live.get(ref) !== entry || disposed || !active(id)) return { state: 'notConnected' };
       if (consent.response !== 1) { stop(ref); return status(id, args.key); }
@@ -119,11 +110,11 @@ function createPluginWebSessions({ electron, fetchImpl, directory, active, getSe
         }
         callback({ requestHeaders: headers });
       });
-      browserSession.webRequest.onCompleted({ urls: [config.requestUrl] }, async details => {
+      browserSession.webRequest.onCompleted({ urls: [config.requestUrl] }, details => {
         const candidate = candidates.get(details.id); candidates.delete(details.id);
         if (!candidate || details.statusCode < 200 || details.statusCode >= 300 || live.get(ref) !== entry || !active(id)) return;
         const current = () => live.get(ref) === entry && !disposed && active(id);
-        try { if (await save(ref, { ...config, ...candidate }, current) && current()) { failures.delete(ref); stop(ref); changed(id, args.key); } }
+        try { if (save(ref, { ...config, ...candidate }, current)) { failures.delete(ref); stop(ref); changed(id, args.key); } }
         catch (_) { if (current()) { failures.set(ref, 'web-session-storage-unavailable'); stop(ref); } }
       });
       win.once('closed', () => { if (live.get(ref) === entry) stop(ref); });

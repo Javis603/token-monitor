@@ -64,11 +64,6 @@ const fixtureSessions = { get defaultSession() { return session.defaultSession; 
   } };
   return loginSession;
 } };
-const fixtureCrypt = value => Buffer.from([...value].map(byte => byte ^ 113));
-const fixtureSafeStorage = { isAsyncEncryptionAvailable: async () => true,
-  getSelectedStorageBackend: () => 'gnome_libsecret',
-  encryptStringAsync: async value => fixtureCrypt(Buffer.from(value)),
-  decryptStringAsync: async value => ({ result: fixtureCrypt(value).toString(), shouldReEncrypt: false }) };
 const errors=[];
 const deadline=setTimeout(()=>{console.error('UI deadline',errors);app.exit(1);},45000);
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -120,7 +115,7 @@ app.whenReady().then(async () => {
     ipcMain.removeHandler(channel); ipcMain.handle(channel, handler);
   }
   const patch=value=>{settings={...settings,...value};win.webContents.send('settings:push',settings);};
-  runtime=createPluginRuntime({electron:{BrowserWindow:FixtureWindow,ipcMain,session:fixtureSessions,utilityProcess,safeStorage:fixtureSafeStorage,
+  runtime=createPluginRuntime({electron:{BrowserWindow:FixtureWindow,ipcMain,session:fixtureSessions,utilityProcess,
    dialog:{showMessageBox:async()=>({response:fixtureConsent}),showOpenDialog:async()=>({canceled:false,filePaths:[fixtureDir]})}},
    fetchImpl:async()=>({ok:false,status:401}),userDataDir:scratch,getSettings:()=>settings,getAppSettings:()=>settings,getContext:()=>({source:'fixture'}),getLocale:()=>settings.language,
    isMainSender:event=>event.sender===win.webContents,persistPluginStates:pluginStates=>patch({pluginStates}),
@@ -202,6 +197,14 @@ app.whenReady().then(async () => {
   loginSession.before(request, () => {});
   await loginSession.completed({...request,statusCode:200});
   await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connected')`,'login completion updates rebuilt row without Status click');
+  const credentialDirectory=path.join(scratch,'plugin-credentials');
+  const credentialFiles=fs.readdirSync(credentialDirectory);
+  assert.equal(credentialFiles.length,1);
+  const credentialFile=path.join(credentialDirectory,credentialFiles[0]);
+  const privateRecord=JSON.parse(fs.readFileSync(credentialFile,'utf8'));
+  assert.equal(privateRecord.authorization,'Bearer synthetic-ui-account');
+  assert.equal(Object.hasOwn(privateRecord,'encrypted'),false,'private JSON is the only storage format');
+  if(process.platform!=='win32')assert.equal(fs.statSync(credentialFile).mode&0o777,0o600);
   assert.equal(await js("state.pluginCatalog.limits.modules.every(module=>!module.sampling)"),true,'connection notification does not start quota demand');
   await capture('settings-connected.png');
   await runtime.manager.call('synthetic-limits','fixture-reject');
@@ -328,8 +331,13 @@ app.whenReady().then(async () => {
   await waitFor("!state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')",'native forget clears captured connection quota');
   await js("document.querySelector('.plugin-type-filter').value='appearance';document.querySelector('.plugin-type-filter').dispatchEvent(new Event('change'))");
   await waitFor("document.querySelector('#pluginSettingsList').textContent.includes(t('plugins.catalog.noResults'))",'filtered installed empty state');
+  await js("tokenMonitor.plugins.connection('synthetic-limits','one','connect')");
+  const uninstallRequest={...request,webContentsId:loginWindow.webContents.id};
+  loginSession.before(uninstallRequest,()=>{});await loginSession.completed({...uninstallRequest,statusCode:200});
+  assert.equal(fs.readdirSync(credentialDirectory).length,1,'credential exists before keepData uninstall');
   await js("tokenMonitor.plugins.uninstall('synthetic-limits',{keepData:true})");
   await waitFor("state.pluginCatalog?.limits?.modules?.length===0",'uninstall');
+  assert.equal(fs.readdirSync(credentialDirectory).length,0,'keepData uninstall removes private credentials');
   console.log('PASS custom quota UI: lazy mount, retained draft/focus, collapse visibility, host settings save, disable cleanup');
   console.log('PASS synthetic native Limits: mixed pointer drag/order, same-name identities, search, disclosure, visibility, disable, reenable, reload, restart, update, uninstall');
   console.log('Evidence:',evidence);
