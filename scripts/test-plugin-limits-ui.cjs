@@ -177,11 +177,14 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('.plugin-author-status').hidden",'boolean autosaves');
     assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.showCost,true);
     await js("(()=>{const input=document.querySelector('[data-control-key=author-label]');input.focus();window.textControl=input;input.value='New label';input.dispatchEvent(new Event('input'));input.setSelectionRange(2,5);})()");
-    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'Synthetic','text does not save mid-input');
+    const textBase=await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`);
+    assert.equal(textBase.values.label,'Synthetic','text does not save mid-input');
     await js("pluginSettingsPanel.refresh()");await pause(100);
     assert.deepEqual(await js("[document.activeElement===textControl,textControl.value,textControl.selectionStart,textControl.selectionEnd]"),[true,'New label',2,5]);
-    await js("textControl.dispatchEvent(new Event('change'))");await waitFor("document.querySelector('.plugin-author-status').hidden",'completed text saves');
-    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'New label');
+    await js("textControl.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));textControl.dispatchEvent(new Event('change'))");await waitFor("document.querySelector('.plugin-author-status').hidden",'completed text saves');
+    const textSaved=await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`);
+    assert.equal(textSaved.values.label,'New label');
+    assert.equal(textSaved.revision,textBase.revision+1,'Enter then blur saves one revision');
     await js("(()=>{window.restoreSetEnabled=pluginApi.setEnabled;pluginApi.setEnabled=()=>new Promise(resolve=>{window.releaseSettingsManagement=async()=>resolve(await pluginApi.list());});textControl.focus();const toggle=document.querySelector('.plugin-detail .plugin-enable');toggle.checked=!toggle.checked;toggle.dispatchEvent(new Event('change'));})()");
     await waitFor("typeof releaseSettingsManagement==='function'",'management action pending');
     assert.equal(await js("textControl.disabled"),false,'focused field stays editable during management');

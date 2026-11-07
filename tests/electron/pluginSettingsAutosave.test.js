@@ -71,3 +71,11 @@ test('management pauses writes but retains focused edits; removed editors cannot
   if(!removed){assert.deepEqual(f.calls[0].patch,{text:'edited during management'});f.finish(0,{mode:'a',text:'edited during management'});await tick();}f.c.dispose();
  }
 });
+test('Enter then blur completes one version only, including queued and rejected edits',async()=>{
+ for(const queued of [false,true]){
+  const f=fixture();if(queued)f.c.pause();f.c.edit('text','new');f.c.complete('text');f.c.complete('text');if(queued)f.c.resume();
+  assert.equal(f.calls.length,1);f.finish(0,{mode:'a',text:'new'});await tick();assert.equal(f.calls.length,1);f.c.dispose();
+ }
+ const f=fixture();f.c.edit('text','bad');f.c.complete('text');f.c.complete('text');f.pending[0].reject(Object.assign(Error('invalid-settings-values'),{fields:{text:'length'}}));await tick();f.c.complete('text');await tick();assert.equal(f.calls.length,1);assert.equal(f.c.state.errors.text,'length');
+ f.c.edit('text','fixed');f.c.complete('text');assert.equal(f.calls.length,2);f.c.dispose();
+});

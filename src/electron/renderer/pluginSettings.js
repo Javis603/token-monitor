@@ -46,9 +46,10 @@
   // pending; only completed edits are queued, and conflicts never auto-rebase.
   function createSettingsAutosave({ snapshot, save, changed = () => {} }) {
     const state = { snapshot, draft: { ...snapshot.values }, errors: { ...snapshot.errors }, message: '', pending: false };
-    const dirty = new Set(), ready = new Set(), versions = new Map(), waiters = new Set();
+    const dirty = new Set(), ready = new Set(), versions = new Map(), queued = new Map(), waiters = new Set();
     let disposed = false, paused = false, validationPaused = false;
     const publish = () => { if (!disposed) changed(state); };
+    const enqueue = id => { queued.set(id, versions.get(id)); ready.add(id); };
     async function flush() {
       if (disposed || paused || validationPaused || state.pending || state.snapshot.readOnly || ['conflict', 'saveFailed'].includes(state.message)) return;
       const patch = Object.fromEntries([...ready].map(id => [id, state.draft[id]]));
@@ -87,16 +88,17 @@
         state.draft[id] = value; dirty.add(id); versions.set(id, (versions.get(id) || 0) + 1);
         delete state.errors[id]; ready.delete(id);
         if (!['conflict', 'saveFailed'].includes(state.message)) state.message = '';
-        if (complete) { validationPaused = false; ready.add(id); void flush(); }
+        if (complete) { validationPaused = false; enqueue(id); void flush(); }
         publish();
       },
-      complete(id) { if (dirty.has(id)) { validationPaused = false; ready.add(id); void flush(); } },
+      complete(id) { if (dirty.has(id) && queued.get(id) !== versions.get(id)) { validationPaused = false; enqueue(id); void flush(); } },
       defaults() {
         if (disposed || state.snapshot.readOnly || state.message === 'conflict') return;
         state.message = ''; validationPaused = false;
         for (const field of state.snapshot.schema.fields) {
-          state.draft[field.id] = field.default; dirty.add(field.id); ready.add(field.id);
+          state.draft[field.id] = field.default; dirty.add(field.id);
           versions.set(field.id, (versions.get(field.id) || 0) + 1);
+          enqueue(field.id);
         }
         state.errors = {}; void flush(); publish();
       },
@@ -104,7 +106,7 @@
       reload(next) {
         if (disposed || state.pending) return;
         state.snapshot = next; state.draft = { ...next.values }; state.errors = { ...next.errors }; state.message = '';
-        dirty.clear(); ready.clear(); versions.clear(); validationPaused = false; publish();
+        dirty.clear(); ready.clear(); versions.clear(); queued.clear(); validationPaused = false; publish();
       },
       settle() { return state.pending ? new Promise(resolve => waiters.add(resolve)) : Promise.resolve(); },
       pause() { paused = true; },
