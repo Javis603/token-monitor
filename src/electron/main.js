@@ -2138,11 +2138,11 @@ function migrateLimitProviders(value) {
   // Saved provider selections are user intent. Normalize ids, but do not expand
   // older defaults into today's full provider list because the saved shape is
   // indistinguishable from a deliberate "only these providers" choice.
-  return parseLimitProviders(value).join(',');
+  return require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders);
 }
 
 function migrateLimitProviderOrder(value) {
-  return parseLimitProviders(value).join(',') || defaultLimitProviderOrder();
+  return require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders) || defaultLimitProviderOrder();
 }
 
 function migrateHomeLimitProviderOrder(value) {
@@ -6686,7 +6686,7 @@ function ensureTray() {
           home: true,
           project: settings?.projectsEnabled !== false,
           session: true,
-          limits: settings?.limitsEnabled !== false && parseLimitProviders(settings?.limitProviders).length > 0,
+          limits: settings?.limitsEnabled !== false && migrateLimitProviders(settings?.limitProviders).length > 0,
           trends: settings?.historyEnabled !== false,
           status: true
         }
@@ -8429,7 +8429,7 @@ app.whenReady().then(() => {
           { currencyApi: { normalizeCurrency } }
         )
       },
-      limitProviders: patch.limitProviders !== undefined ? parseLimitProviders(patch.limitProviders).join(',') : settings.limitProviders,
+      limitProviders: patch.limitProviders !== undefined ? migrateLimitProviders(patch.limitProviders) : settings.limitProviders,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
       clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
       hiddenClients: patch.hiddenClients !== undefined ? migrateClientSelection(patch.hiddenClients, normalizeHiddenClients) : migrateClientSelection(settings.hiddenClients, normalizeHiddenClients),
@@ -8787,6 +8787,7 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', async (_event, options) => {
+    if (options?.force === true && options?.feedback === true) void pluginRuntime?.refreshLimits().catch(error => console.log(`[plugins] Limits refresh failed: ${error.message}`));
     const revision = statsPushRevision;
     const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
     // A push from the same source/generation supersedes its pending read. A
@@ -9950,6 +9951,7 @@ app.whenReady().then(() => {
   function startPluginRuntime() {
     try {
       pluginRuntime = createPluginRuntime({
+        fetchImpl: electronLimitsFetch(),
         getAppSettings: settingsForRenderer,
         electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, nativeImage, session, shell, dialog },
         userDataDir: app.getPath('userData'),

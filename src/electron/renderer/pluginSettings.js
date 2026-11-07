@@ -49,7 +49,7 @@
     let revealConsent = false;
     let packagePreview = null;
     let operation = null;
-    let catalogData = null, activeTab = 'installed', query = '', sourcesOpen = false;
+    let catalogData = null, activeTab = 'installed', query = '', typeFilter = '', sourcesOpen = false;
     let selectedPluginId = '', diagnostics = false, installedPosition = null;
     let catalogModal = null;
     let catalogRefreshing = false, catalogRefreshPending = null, catalogRefreshError = '', disposed = false;
@@ -174,14 +174,10 @@
       node.type = 'button'; node.disabled = busy; node.addEventListener('click', action); return node;
     }
 
-    function identity(name, author, origin, iconName, image, brand = '') {
+    function identity(name, author, origin, iconName, image, brand = '', presentation = {}) {
       const group = el(document, 'div', 'plugin-identity');
       const art = el(document, 'span', 'plugin-identity-art'); art.setAttribute('aria-hidden', 'true');
-      if (typeof image === 'string' && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(image) && image.length <= 90000) {
-        const img = el(document, 'img'); img.alt = ''; img.src = image;
-        img.addEventListener('error', () => { img.remove(); art.append(window.TokenMonitorPluginViews.iconNode(document, iconName || 'dot', null, 20)); }, { once: true });
-        art.append(img);
-      } else art.append(window.TokenMonitorPluginViews.iconNode(document, iconName || 'dot', null, 20));
+      art.append(window.TokenMonitorPluginViews.navigationIcon(document, { icon: iconName, identityIcon: image, presentation }, 20));
       const title = el(document, 'div', 'plugin-card-title');
       const source = el(document, 'span', brand ? 'plugin-source plugin-source-official' : 'plugin-source');
       if (author && !brand) source.append(el(document, 'span', 'plugin-author', author));
@@ -317,9 +313,20 @@
       return wrap;
     }
 
+    function typeSelector(onChange) {
+      const select = el(document, 'select', 'plugin-type-filter');
+      select.setAttribute('aria-label', t('plugins.filter.type'));
+      for (const type of ['', 'widget', 'page', 'appearance', 'automation', 'limits']) {
+        const option = el(document, 'option', '', t(type ? `plugins.type.${type}` : 'plugins.filter.all'));
+        option.value = type; option.selected = type === typeFilter; select.append(option);
+      }
+      select.addEventListener('change', () => { typeFilter = select.value; onChange(); });
+      return select;
+    }
+
     function typeLabels(plugin) {
       const labels = el(document, 'span', 'plugin-types');
-      for (const type of ['widget', 'page', 'appearance', 'automation']) {
+      for (const type of ['widget', 'page', 'appearance', 'automation', 'limits']) {
         if (!plugin.types?.includes(type)) continue;
         labels.append(el(document, 'span', `plugin-type plugin-type-${type}`, t(`plugins.type.${type}`)));
       }
@@ -422,7 +429,7 @@
       const panel = el(document, 'section', 'plugin-consent plugin-package-preview');
       panel.dataset.errorTarget = 'package';
       panel.setAttribute('aria-label', t('plugins.package.review'));
-      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, isFeatured(p.origin) ? p.origin.kind : ''));
+      panel.append(identity(p.name, p.author || p.id, t(`plugins.origin.${p.origin.kind}`), p.icon, p.identityIcon, isFeatured(p.origin) ? p.origin.kind : '', p.presentation));
       const meta = el(document, 'div', 'plugin-card-meta');
       meta.append(el(document, 'span', 'plugin-version', `${p.installedVersion ? `${p.installedVersion} → ` : ''}${p.version}`), typeLabels(p)); panel.append(meta);
       panel.append(el(document, 'p', 'plugin-description', p.description));
@@ -505,7 +512,7 @@
       let imageObserver = null;
       const heading = el(document, 'header', 'plugin-catalog-dialog-head');
       heading.append(identity(entry.name, entry.author,
-        entry.origin.id === 'github-discovery' ? '' : t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon, isFeatured(entry.origin) ? entry.origin.kind : ''));
+        entry.origin.id === 'github-discovery' ? '' : t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon, isFeatured(entry.origin) ? entry.origin.kind : '', entry.presentation));
       const close = button('×', () => dialog.close(), 'plugin-dialog-close');
       close.setAttribute('aria-label', t('settings.plugins.cancel')); heading.append(close);
       const body = el(document, 'div', 'plugin-catalog-dialog-body');
@@ -626,7 +633,7 @@
       search.placeholder = t('plugins.catalog.search'); search.setAttribute('aria-label', t('plugins.catalog.search'));
       const results = el(document, 'div', 'plugin-catalog-results');
       function renderResults() {
-        const matches = p => `${p.name} ${p.description} ${p.author || ''} ${p.id}`.toLowerCase().includes(query.toLowerCase());
+        const matches = p => (!typeFilter || p.types?.includes(typeFilter)) && `${p.name} ${p.description} ${p.author || ''} ${p.id}`.toLowerCase().includes(query.toLowerCase());
         const sections = [];
         const groups = [
           ['plugins.catalog.featured', [
@@ -651,7 +658,7 @@
             const card = el(document, 'article', 'plugin-card'); card.dataset.catalogId = entry.id;
             const head = el(document, 'div', 'plugin-card-head');
             const title = button('', () => catalogDialog(entry), 'plugin-catalog-title');
-            title.append(identity(entry.name, entry.author, '', entry.icon, entry.identityIcon, isFeatured(entry.origin) ? entry.origin.kind : ''));
+            title.append(identity(entry.name, entry.author, '', entry.icon, entry.identityIcon, isFeatured(entry.origin) ? entry.origin.kind : '', entry.presentation));
             head.append(title);
             const actions = el(document, 'div', 'settings-actions');
             const available = entry.versions?.find(v => v.version === entry.version)?.installable ?? ['available', 'update'].includes(entry.status);
@@ -682,7 +689,7 @@
         if (content?.contains(results)) identifyContent();
       }
       search.addEventListener('input', () => { query = search.value; renderResults(); });
-      wrap.append(errors, search, results);
+      wrap.append(errors, search, typeSelector(renderResults), results);
       const refresh = el(document, 'div', 'settings-actions plugin-catalog-refresh');
       const canRefresh = catalogData.github?.enabled || catalogData.sources.some(source => Boolean(source.url));
       if (canRefresh) refresh.append(button(t('plugins.catalog.refresh'), () => void refreshCatalog(true)));
@@ -883,7 +890,7 @@
 
     function pluginIdentity(plugin) {
       const head = el(document, 'div', 'plugin-card-head');
-      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon, isFeatured(plugin.installation?.origin) ? plugin.installation.origin.kind : ''));
+      head.append(identity(plugin.name, plugin.author, t(plugin.installation ? `plugins.origin.${plugin.installation.origin.kind}` : `settings.plugins.source.${plugin.source}`), plugin.views?.[0]?.icon, plugin.identityIcon, isFeatured(plugin.installation?.origin) ? plugin.installation.origin.kind : '', plugin.presentation));
       if (!plugin.managementOnly && !['invalid', 'missing'].includes(plugin.status)) {
         const toggle = el(document, 'input', 'plugin-enable');
         toggle.type = 'checkbox'; toggle.checked = plugin.enabled; toggle.disabled = !list?.enabled;
@@ -903,6 +910,12 @@
       return wrap;
     }
 
+    function credentialCleanupAction(plugin) {
+      // Broken/missing packages still need host-owned cleanup without code.
+      if (['active', 'disabled'].includes(plugin.status) && !plugin.limits?.some(module => module.credentials)) return null;
+      return button(t('plugins.credentials.forget'), () => void run(async () => { await api.forgetCredentials(plugin.id); return api.list(); }, `plugin:${plugin.id}`));
+    }
+
     function pluginCard(plugin) {
       const card = el(document, 'section', `plugin-card plugin-installed-card plugin-card-${plugin.status}`);
       card.dataset.pluginId = plugin.id;
@@ -913,8 +926,9 @@
         meta.append(el(document, 'span', 'plugin-version', `v${plugin.version}`), typeLabels(plugin)); card.append(meta);
       }
       const footer = el(document, 'div', 'plugin-card-footer');
-      const surfaces = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
       const exceptional = !['active', 'disabled'].includes(plugin.status);
+
+      const surfaces = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
       if (exceptional) footer.append(statusChip(plugin));
       else {
         const summary = el(document, 'span', 'plugin-placement-summary');
@@ -1073,6 +1087,7 @@
       });
       defaults.dataset.controlKey = 'author-defaults'; defaults.disabled = busy || snapshot.readOnly;
       const reload = button(t('plugins.authorSettings.reload'), refresh); reload.dataset.controlKey = 'author-reload';
+      reload.hidden = !['conflict', 'loadFailed'].includes(state.message);
       actions.append(save, defaults, reload); form.append(actions);
       status.textContent = state.message ? t(`plugins.authorSettings.${state.message}`)
         : snapshot.readOnly ? t('plugins.authorSettings.newerSchema')
@@ -1199,6 +1214,8 @@
         wrap.append(detailSection(target, rows));
       }
       const utility = el(document, 'div', 'settings-actions plugin-detail-utilities');
+      const clearCredentials = credentialCleanupAction(plugin);
+      if (clearCredentials) utility.append(clearCredentials);
       if (plugin.runtime || plugin.logs?.length) utility.append(button(t('plugins.ui.diagnostics'), () => { diagnostics = true; render(); content.querySelector('.plugin-back')?.focus({ preventScroll: true }); }, 'plugin-diagnostics'));
       if (plugin.installation) {
         if (plugin.installation.previousVersion) utility.append(button(t('plugins.package.rollback'), () => { operation = { id: plugin.id, kind: 'rollback' }; render(); }));
@@ -1387,7 +1404,8 @@
       }
       if (list.safeMode) nodes.push(el(document, 'p', 'plugin-banner', t('settings.plugins.safeMode')));
       const actions = el(document, 'div', 'plugin-toolbar');
-      const countText = t('plugins.ui.count', { count: list.plugins.length });
+      const visiblePlugins = list.plugins.filter(plugin => !typeFilter || plugin.types?.includes(typeFilter));
+      const countText = t('plugins.ui.count', { count: visiblePlugins.length });
       const count = el(document, 'span', 'plugin-toolbar-count', countText);
       count.setAttribute('role', 'status'); count.setAttribute('aria-atomic', 'true');
       if (!list.enabled) {
@@ -1405,8 +1423,9 @@
       if (previousToolbar) previousToolbar.replaceWith(actions);
       else navigation.append(actions);
       if (packagePreview) nodes.push(packagePanel());
-      if (!list.plugins.length) nodes.push(el(document, 'p', 'settings-note', t('settings.plugins.empty')));
-      for (const plugin of [...list.plugins].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
+      nodes.push(typeSelector(render));
+      if (!visiblePlugins.length) nodes.push(el(document, 'p', 'settings-note', t(list.plugins.length ? 'plugins.catalog.noResults' : 'settings.plugins.empty')));
+      for (const plugin of [...visiblePlugins].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))) {
         nodes.push(pluginCard(plugin));
       }
       replaceContent(nodes, saved);
