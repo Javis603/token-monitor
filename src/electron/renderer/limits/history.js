@@ -197,7 +197,8 @@
     $('guide-caption').textContent = t('guide');
     plot.append(paintSvg(svgNode('line', { x1: left, x2: right, y1: Y(100), y2: Y(0), class: 'quota-history-guide', 'aria-hidden': 'true' }), { stroke: 'var(--accent)' }));
     const shownRows = rows.map(row => {
-      let points = (row.item.points || []).filter(point => point.at >= row.bounds.start && point.at <= row.bounds.end);
+      const source = row.item.points?.length ? row.item.points : row.item.recentPoints;
+      let points = (source || []).filter(point => point.at >= row.bounds.start && point.at <= row.bounds.end);
       if (!points.length) {
         const reading = model.historyReadings(row.item.window).primary;
         if (reading?.unit === 'pp') points = [
@@ -213,20 +214,23 @@
       const strokeWidth = rows.length > 1 ? (isSelected ? 2 : 1.45) : 1.65;
       const opacity = rows.length > 1 && !isSelected ? 0.78 : 1;
       const XAt = at => X((at - row.bounds.start) / Math.max(1, row.bounds.end - row.bounds.start));
-      for (const segment of model.segments(row.points)) {
+      // The scaled view is a comparison of cycle progress, so draw one
+      // continuous path per lane. The source has already been clipped to the
+      // current cycle; splitting here again on reset/deadline changes produced
+      // the missing sections and visible breaks reported for Claude/Antigravity.
+      if (row.points.length > 1) {
         let d = '';
-        segment.forEach((point, index) => {
+        row.points.forEach((point, index) => {
           d += `${index === 0 ? 'M' : 'L'}${XAt(point.at)},${Y(100 - point.value)}`;
         });
-        if (segment.length > 1 && isSelected) {
-          const areaD = `${d} L${XAt(segment.at(-1).at)},${bottom} L${XAt(segment[0].at)},${bottom} Z`;
+        if (isSelected) {
+          const areaD = `${d} L${XAt(row.points.at(-1).at)},${bottom} L${XAt(row.points[0].at)},${bottom} Z`;
           plot.append(paintSvg(svgNode('path', { d: areaD, class: 'quota-history-area' }), { fill: row.color }));
         }
         plot.append(paintSvg(svgNode('path', { d, class: 'quota-history-curve' }), { stroke: row.color, 'stroke-width': strokeWidth, opacity }));
-        if (segment.length === 1) {
-          const point = segment[0];
-          plot.append(paintSvg(svgNode('line', { x1: Math.max(left, XAt(point.at) - 2), x2: Math.min(right, XAt(point.at) + 2), y1: Y(100 - point.value), y2: Y(100 - point.value), class: 'quota-history-curve' }), { stroke: row.color, 'stroke-width': strokeWidth }));
-        }
+      } else if (row.points.length === 1) {
+        const point = row.points[0];
+        plot.append(paintSvg(svgNode('line', { x1: Math.max(left, XAt(point.at) - 2), x2: Math.min(right, XAt(point.at) + 2), y1: Y(100 - point.value), y2: Y(100 - point.value), class: 'quota-history-curve' }), { stroke: row.color, 'stroke-width': strokeWidth }));
       }
       const last = row.points.at(-1);
       if (last) plot.append(paintSvg(svgNode('circle', { cx: XAt(last.at), cy: Y(100 - last.value), r: isSelected ? 2.6 : 2, class: 'quota-history-dot' }), { fill: row.color, opacity }));
