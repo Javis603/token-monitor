@@ -1308,7 +1308,8 @@ test('a MiMo wallet meters against its month spend and carries the spend line', 
     Math.abs(Number(card.find('limit-meter-fill').style['--bar-scale']) - 0.5169) < 0.001,
     'the bar is the wallet against its month spend'
   );
-  assert.match(labels[0], /Balance ¥9\.95 Gift ¥9\.95 · Cash ¥0\.00/);
+  assert.match(labels[0], /Balance ¥9\.95/);
+  assert.ok([...card.walk()].some(node => node.getAttribute('aria-label') === 'Gift: ¥9.95, Cash: ¥0.00'));
   // This fixture has no locally tracked Today or Week spend.
   const spend = card.find('limit-spend');
   assert.ok(spend, 'the card should carry the spend row the wallet providers have');
@@ -3099,6 +3100,20 @@ test('history hover is automatic by default and optional without adding a separa
       assert.equal(preventedRepeats, 2, 'repeated Space cannot scroll the page');
       assert.equal(row.querySelectorAll('.limit-history-open').length, 0);
     }
+    const opened = [];
+    const history = { key: () => 'wallet', open: async key => opened.push(key), enter() {}, leave() {} };
+    const row = dockView({ limitsHistoryOpenMode: 'click' }, { history }).renderLimitProviderRow('mimo', 'MiMo', {
+      provider: 'mimo', status: 'ok', windows: [{ kind: 'billing', metric: 'credits', remaining: 10, currency: 'CNY' }],
+      balance: { amount: 10, currency: 'CNY', giftBalance: 5 }
+    }, '#123456');
+    row.isConnected = true;
+    row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+    const info = [...row.walk()].find(node => node.getAttribute('aria-label') === 'Gift: ¥5.00');
+    row.listeners.click({ target: { closest(selector) {
+      if (selector === '.limit-row') return row;
+      return selector.split(',').some(part => info.parent.classList.contains(part.trim().slice(1))) ? info.parent : null;
+    } } });
+    assert.deepEqual(opened, [], 'viewing balance details does not open history');
   } finally { global.setTimeout = nativeSetTimeout; global.clearTimeout = nativeClearTimeout; }
 });
 

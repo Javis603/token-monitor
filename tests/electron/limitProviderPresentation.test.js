@@ -1906,11 +1906,6 @@ test('MiMo Limits draws a credits balance when the provider balance object is ab
 
   const windowOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
   assert.deepEqual(Array.from(windowOnly.children, (node) => [node.label, node.value]), [['Balance', '¥9.95']]);
-
-  context.provider.balance = { amount: 9.95, currency: 'CNY', giftBalance: 9.95, cashBalance: 0 };
-  const withBalance = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
-  assert.deepEqual(Array.from(withBalance.children, (node) => [node.label, node.value, node.detail]),
-    [['Balance', '¥9.95', 'Gift ¥9.95 · Cash ¥0.00']]);
 });
 
 test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
@@ -3078,6 +3073,7 @@ test('MiMo plan cells keep missing plan names empty and use shared recovery text
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] }), 'Pro');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), 'Sign in again');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), 'Sign in again');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'error', accountLabel: 'Desktop Membership' }), 'Unavailable');
 });
 
 test('MiMo product rows name the shared account and the product when both are known', () => {

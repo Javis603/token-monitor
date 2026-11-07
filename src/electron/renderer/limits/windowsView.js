@@ -1212,6 +1212,7 @@
       for (const quotaWindow of quotaWindows) {
         const node = limitWindowNode(providerWindowLabel(provider, quotaWindow), quotaWindow, color, 0.68);
         node.classList.add('limit-window-wide');
+        if (!quotaWindow.resetsAt && !quotaWindow.resetDescription) node.classList.add('limit-window-no-reset');
         windows.append(node);
       }
       const balance = provider.balance || null;
@@ -1221,7 +1222,7 @@
         const tokenPlan = mimoTokenPlanWindowFromBalance(balance);
         if (tokenPlan) {
           const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
-          node.classList.add('limit-window-wide');
+          node.classList.add('limit-window-wide', 'limit-window-no-reset');
           windows.append(node);
         } else if (balance?.planStatus === 'expired') {
           const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
@@ -1236,9 +1237,9 @@
       const giftBalance = optionalFiniteNumber(balance?.giftBalance);
       const cashBalance = optionalFiniteNumber(balance?.cashBalance);
       if (amount !== null || giftBalance !== null || cashBalance !== null) {
-        const detailParts = [];
-        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, currency)}`);
-        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
+        const details = [];
+        if (giftBalance !== null) details.push(['Gift', formatMoney(giftBalance, currency)]);
+        if (cashBalance !== null) details.push(['Cash', formatMoney(cashBalance, currency)]);
         const balanceText = formatMoney(amount, currency) || '—';
         // Reuse the shared display-only balance meter; do not put it on the wire.
         const meterPercent = creditsMeterPercent(provider, creditsWindow);
@@ -1247,9 +1248,15 @@
           meterPercent === null ? { showMeter: false } : { remainingPercent: meterPercent },
           color,
           0.68,
-          balanceText,
-          detailParts.join(' · ')
+          balanceText
         );
+        if (details.length) {
+          const value = balanceNode.querySelector('.limit-window-text').children[1];
+          const right = document.createElement('span');
+          right.className = 'limit-spend-right';
+          value.replaceWith(right);
+          right.append(value, limitDetailInfoNode(details));
+        }
         tagUsageItem(balanceNode, 'credits', 'Balance');
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
@@ -1896,6 +1903,9 @@
   }
 
   function limitProviderFailureLabel(provider) {
+    if (provider?.provider === 'mimo' && provider.status === 'error') {
+      return presentationApi.limitProviderStatusLabel(provider).label;
+    }
     if (provider?.provider === 'workbuddy' && provider.actionRequired === 'appSessionEncrypted') {
       return t('settings.limits.status.appSessionEncrypted');
     }
@@ -2310,7 +2320,7 @@
       row.addEventListener('click', event => {
         const clickedRow = event.target.closest('.limit-row');
         if (clickedRow && clickedRow !== row && clickedRow.dataset?.limitLead === undefined) return;
-        if (event.target.closest('button, a, input, select, summary, [role="button"]')) return;
+        if (event.target.closest('button, a, input, select, summary, [role="button"], .limit-detail-tooltip-wrap')) return;
         clearTimeout(hoverTimer); openHistory(true);
       });
     }
