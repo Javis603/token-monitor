@@ -27,7 +27,9 @@ JSONL files and `session-artifacts/*/sub-*/*.jsonl`, excluding
 `rlm-subagents.jsonl` and dependency/VCS trees. This bounds traversal when a
 session override selects the home or working directory. Root creation/removal
 and new RLM child directories remain observable; overlapping client sources keep
-the union of their watch policies. Full Tokscale scans still recurse through
+the union of their watch policies. Prime event attribution separately applies
+its own policy, so another client's admitted transcript cannot trigger a Prime
+scan just because it is below a broad Prime root. Full Tokscale scans still recurse through
 all resolved roots, so nonstandard nested transcripts can be counted on a full
 scan without becoming live watch targets. Explicit extra scan paths retain the
 shared custom-root watch policy. Settings changes

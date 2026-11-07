@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { clientSourceRoots } = require('../../src/shared/clientSources');
-const { watchIgnoreMatcher, openWatch } = require('../../src/shared/collector');
+const { watchIgnoreMatcher, openWatch, watchAttributionRootsForClients, clientsForWatchPath } = require('../../src/shared/collector');
 const chokidar = require('chokidar');
 
 function fixture(t) {
@@ -106,3 +106,24 @@ for (const usePolling of [false, true]) {
     await event;
   });
 }
+
+
+test('Codex events retained by the global matcher do not target a broad Prime root', (t) => {
+  const f = fixture(t);
+  const codexRoot = path.join(f.home, '.codex', 'sessions');
+  fs.mkdirSync(codexRoot, { recursive: true });
+  const codexFile = path.join(codexRoot, 'rollout.jsonl');
+  const options = { ...f.options, customScanPaths: { codex: [codexRoot] } };
+  const primeRoots = clientSourceRoots('prime-agent', options)['prime-agent'].map(({ dir }) => dir);
+  const attributed = watchAttributionRootsForClients('prime-agent,codex', {
+    'prime-agent': primeRoots, codex: [codexRoot]
+  }, options);
+  const ignored = watchIgnoreMatcher('prime-agent,codex', options);
+  const ignoreByClient = { 'prime-agent': watchIgnoreMatcher('prime-agent', options) };
+  assert.equal(ignored(codexFile), false, 'the Codex event must survive the policy union');
+  assert.deepEqual(clientsForWatchPath(codexFile, attributed, ignoreByClient), ['codex']);
+  assert.deepEqual(clientsForWatchPath(path.join(f.home, 'root.jsonl'), attributed, ignoreByClient), ['prime-agent']);
+  assert.deepEqual(clientsForWatchPath(path.join(primeRoots[1], 'parent', 'sub-new', 'child.jsonl'), attributed, ignoreByClient), ['prime-agent']);
+  // Other clients retain prefix attribution even when their source roots overlap.
+  assert.deepEqual(clientsForWatchPath(codexFile, { codex: [codexRoot], pi: [f.home] }, ignoreByClient), ['codex', 'pi']);
+});
