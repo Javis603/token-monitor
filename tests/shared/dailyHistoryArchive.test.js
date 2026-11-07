@@ -56,47 +56,6 @@ function livePeriod(totalTokens, costUsd = 0) {
   };
 }
 
-test('vendor model-prefix folding reconciles retained history before cumulative replacement', () => {
-  const date = '2026-07-18';
-  // A released archive can contain both spellings as disjoint source buckets.
-  // Build the persisted shape directly so the current normalizer cannot hide it.
-  const legacy = { version: 1, days: { [date]: { date, observations: [
-    { client: 'qodercn', modelId: 'openai/gpt-5', tokens: 1120, cost: 1, messages: 2 },
-    { client: 'qodercn', modelId: 'gpt-5', tokens: 80, cost: 0.2, messages: 1 },
-    { client: 'qodercn', modelId: 'openai/gpt-4o', tokens: 50, cost: 0.1, messages: 1 }
-  ] } } };
-  for (const incomingTokens of [1120, 1200, 1300]) {
-    const incoming = graph(date, [client('qodercn', 'gpt-5', incomingTokens, 2, 3)]);
-    const archive = captureDailyHistoryArchive(legacy, incoming, { todayKey: date });
-    const restored = historyFrom(graphFromDailyHistoryArchive([], archive), date).daily[0];
-    assert.equal(restored.tokens, Math.max(1200, incomingTokens) + 50);
-    assert.equal(restored.perModel['gpt-4o'].tokens, 50, 'archive-only model survives');
-    assert.equal(restored.perModel['gpt-5'].tokens, Math.max(1200, incomingTokens));
-    assert.equal(restored.perModel['gpt-5'].cost, incomingTokens < 1200 ? 1.2 : 2);
-    assert.equal(Object.keys(archive.days[date].observations).length, 2);
-    assert.deepEqual(normalizeDailyHistoryArchive(archive), archive, 'normalization is idempotent');
-  }
-});
-
-test('vendor model-prefix folding preserves live-only model components', () => {
-  const date = '2026-07-18';
-  const legacy = { version: 1, liveDays: { [date]: { date, observations: [
-    { client: 'qodercn', modelId: 'openai/gpt-5', tokens: 1120, cost: 1, messages: 2 }
-  ], componentSummary: {
-    tokenComponentsAvailable: true, cacheReadTokens: 100, cacheWriteTokens: 20, outputTokens: 120,
-    perClient: { qodercn: { cacheReadTokens: 100, cacheWriteTokens: 20, outputTokens: 120 } },
-    perModel: { 'openai/gpt-5': { cacheReadTokens: 100, cacheWriteTokens: 20, outputTokens: 120 } }
-  } } } };
-  const incoming = graph(date, [client('qodercn', 'gpt-5', 1120, 2, 2)]);
-  const archive = captureDailyHistoryArchive(legacy, incoming, { todayKey: date });
-  const restored = historyFrom(graphFromDailyHistoryArchive([], archive), date).daily[0];
-  assert.equal(restored.tokens, 1120);
-  assert.equal(restored.perModel['gpt-5'].outputTokens, 120);
-  assert.equal(restored.perModel['gpt-5'].cacheReadTokens, 100);
-  assert.equal(restored.perModel['gpt-5'].cacheWriteTokens, 20);
-  assert.equal(restored.tokenComponentsAvailable, true);
-});
-
 test('fresh pricing replaces stale live costs in either direction, including zero, without losing archive-only usage', () => {
   for (const cost of [0, 0.01, 9]) {
     const date = '2026-08-18';

@@ -3,58 +3,58 @@
   "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative \u2014 but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them \u2014 it tracks the installed dependency in both modes (see baseVersionNote). While the client catalog has forkOnly clients (CatPaw, Qoder CN), \"upstream\" fails verify-vendored-tokscale-clients.js by design: no upstream release parses them, and failing closed beats silently reporting zero usage for them.",
   "upstream": "junhoyeo/tokscale",
   "fork": "Javis603/tokscale",
-  "commit": "855494f7eb28416d993d3effb1f6a837fba74d02",
-  "commitTitle": "feat(report): link Codex subagent and guardian sessions to their parent",
+  "commit": "05e00a31170a0f2ee051e8f35e59895684d154bd",
+  "commitTitle": "fix(models): preserve released Token Monitor model identities",
   "baseVersion": "4.21.0",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file \u2014 either pin a new build or flip the mode \u2014 instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
-  "releaseTag": "token-monitor-855494f7",
-  "reason": "Pinned to upstream 82613d2f5e96654ce3729892afbb0025979f1c75 (post-v4.21.0 upstream main at alignment; npm baseline remains 4.21.0), retaining the downstream session/workspace report, parent links, request-performance timing, custom-price authority, and fork-owned clients. Proma moves from the fork to upstream's native client, which reads the Agent journals and both SDK transcript trees under ~/.proma and ~/.proma-dev; session ids come from the record or Pi session header, falling back to the transcript file stem, instead of the fork's path-hashed ids. This alignment also inherits machine labels, offline reports, streamed DSH transcripts, Cursor usage events counted once across snapshots with recount-proof cache rows, OpenCode V2 provider configs and UTF-8 BOM configs, pre-5.6 OpenAI cache-write pricing, legacy OpenCode/MiMo cache replay fixes, Qwen cached/reasoning double-count fixes, Pi standalone usage entries, Grok Build per-inference timing, OpenCodex strict-then-late matching, the Codex review-parent diagnostic exemption, and the rustls-webpki/webpki-roots emSign distrust fix. Custom rates use raw model and billing evidence and remain final without Fast or hosted markup; incomplete coverage preserves reported costs. Combined cache generations remain shared 14, MiMo 15 and Claude/Copilot 16. Codex parser generation 24 joins upstream review-mode state with downstream timing/parent state and excludes explicitly empty completions without reasoning from performance while preserving usage and activity, retaining tool/reasoning/nonempty output evidence even when an item timestamp is missing or invalid. Explicit new-turn boundaries clear the preceding delayed-flush window, while terminal events retain it; total-only usage uses the emitted increment for empty-completion classification; DSH generation 12 retains the seed/keepalive fixes over upstream streaming; Codex sources reparse once when upgrading this pin. Token Monitor preserves manually authored provider_overrides in its pricing file. OpenCodex ledger-only changes and Proma index-only edits have no dedicated App watcher and wait for normal collection/full-period reconciliation. Upstream usage-dashboard additions do not change Token Monitor limits UI. Codex archives whose first frame declares decoded output above the existing per-file limit are rejected before decoding; unknown sizes and concatenated frames retain bounded streaming checks, with usage accounting and archive-limit diagnostics unchanged. This update adds Codex world_state model fallback, Droid per-call model attribution and transcript-dated reply counts with parser generation 10, Copilot empty-window session discovery and migrated-copy deduplication, Hermes session titles, and Senpi home-agent project children and memory transcript roots. Token Monitor aligns the Copilot and Senpi source checks, watch attribution and WSL discovery, and shares Cursor cache resolution between source checks and event indexing. Cursor cache relocation honours nonblank TOKSCALE_CONFIG_DIR while its default remains home-relative and independent of XDG_CONFIG_HOME and APPDATA; self-synced caches remain unwatched. This alignment adds native Copilot session-state usage with file/DB overlap reconciliation and watcher support, CodeBuddy/WorkBuddy generation and turn duration, OpenCode claude-agent transcript ownership filtering, Magpie Responses attribution for Codex, first-party provider-prefix model folding, and the FreeBuff root-agent match fix. Devin CLI sources preserve complete raw snapshots and invalidate stale partial caches; shared message strings reduce scan allocations and non-session model reports stream their aggregation, while session groupings retain post-filter parent resolution. Codex generation 24 freezes timing per response usage record so missing or late token_count does not carry tool waits into the next response; parser-19 pending-record wire decoding remains frozen for historical accounting. Antigravity session discovery excludes tempmediaStorage. BB is available in the source binary but is not exposed as an App tracked client. Model-name folding can merge or relabel rows without changing their underlying token totals; the Qoder CN fixture now reports gpt-5 instead of openai/gpt-5. Magpie ledger-only changes have no dedicated App watcher and reconcile on normal scans.",
+  "releaseTag": "token-monitor-05e00a31",
+  "reason": "Pinned to upstream 82613d2f5e96654ce3729892afbb0025979f1c75 (post-v4.21.0 upstream main at alignment; npm baseline remains 4.21.0), retaining the downstream session/workspace report, parent links, request-performance timing, custom-price authority, and fork-owned clients. Proma moves from the fork to upstream's native client, which reads the Agent journals and both SDK transcript trees under ~/.proma and ~/.proma-dev; session ids come from the record or Pi session header, falling back to the transcript file stem, instead of the fork's path-hashed ids. This alignment also inherits machine labels, offline reports, streamed DSH transcripts, Cursor usage events counted once across snapshots with recount-proof cache rows, OpenCode V2 provider configs and UTF-8 BOM configs, pre-5.6 OpenAI cache-write pricing, legacy OpenCode/MiMo cache replay fixes, Qwen cached/reasoning double-count fixes, Pi standalone usage entries, Grok Build per-inference timing, OpenCodex strict-then-late matching, the Codex review-parent diagnostic exemption, and the rustls-webpki/webpki-roots emSign distrust fix. Custom rates use raw model and billing evidence and remain final without Fast or hosted markup; incomplete coverage preserves reported costs. Combined cache generations remain shared 14, MiMo 15 and Claude/Copilot 16. Codex parser generation 24 joins upstream review-mode state with downstream timing/parent state and excludes explicitly empty completions without reasoning from performance while preserving usage and activity, retaining tool/reasoning/nonempty output evidence even when an item timestamp is missing or invalid. Explicit new-turn boundaries clear the preceding delayed-flush window, while terminal events retain it; total-only usage uses the emitted increment for empty-completion classification; DSH generation 12 retains the seed/keepalive fixes over upstream streaming; Codex sources reparse once when upgrading this pin. Token Monitor preserves manually authored provider_overrides in its pricing file. OpenCodex ledger-only changes and Proma index-only edits have no dedicated App watcher and wait for normal collection/full-period reconciliation. Upstream usage-dashboard additions do not change Token Monitor limits UI. Codex archives whose first frame declares decoded output above the existing per-file limit are rejected before decoding; unknown sizes and concatenated frames retain bounded streaming checks, with usage accounting and archive-limit diagnostics unchanged. This update adds Codex world_state model fallback, Droid per-call model attribution and transcript-dated reply counts with parser generation 10, Copilot empty-window session discovery and migrated-copy deduplication, Hermes session titles, and Senpi home-agent project children and memory transcript roots. Token Monitor aligns the Copilot and Senpi source checks, watch attribution and WSL discovery, and shares Cursor cache resolution between source checks and event indexing. Cursor cache relocation honours nonblank TOKSCALE_CONFIG_DIR while its default remains home-relative and independent of XDG_CONFIG_HOME and APPDATA; self-synced caches remain unwatched. This alignment adds native Copilot session-state usage with file/DB overlap reconciliation and watcher support, CodeBuddy/WorkBuddy generation and turn duration, OpenCode claude-agent transcript ownership filtering, Magpie Responses attribution for Codex, and the FreeBuff root-agent match fix. Devin CLI sources preserve complete raw snapshots and invalidate stale partial caches; shared message strings reduce scan allocations and non-session model reports stream their aggregation, while session groupings retain post-filter parent resolution. Codex generation 24 freezes timing per response usage record so missing or late token_count does not carry tool waits into the next response; parser-19 pending-record wire decoding remains frozen for historical accounting. Antigravity session discovery excludes tempmediaStorage. BB is available in the source binary but is not exposed as an App tracked client. Upstream first-party provider-prefix model folding (junhoyeo/tokscale#1603) is deliberately reverted to preserve released model identities in reports, daily archives and saved aliases. Existing optional prefix grouping remains in Token Monitor presentation; no model-identity migration is needed from the shipped pin. Magpie ledger-only changes have no dedicated App watcher and reconcile on normal scans.",
   "platforms": {
     "android-arm64": {
       "package": "@tokscale/cli-android-arm64",
       "asset": "tokscale-android-arm64",
-      "sha256": "3dea5e4a316ba5c23b3062b4bc72305b0dad38a308530ec6d184ce91eea8af37"
+      "sha256": "687bf6a9acc40dd311cac15513c84691a737ed444eca5e7e3b6399ac10132b00"
     },
     "darwin-arm64": {
       "package": "@tokscale/cli-darwin-arm64",
       "asset": "tokscale-darwin-arm64",
-      "sha256": "d909e957511d056b87615d9c85d9e540e59fdec2d853c1aacff009a0558c473d"
+      "sha256": "1346fe58d7751e2f4a9b68d305b6d7aaf1d36c631223bf2c112b468af27e00a2"
     },
     "darwin-x64": {
       "package": "@tokscale/cli-darwin-x64",
       "asset": "tokscale-darwin-x64",
-      "sha256": "87d941db6124dc40084b12a62db6e65ff132533cae8da8fc2187a6726c43e3b0"
+      "sha256": "4325f67581b5fcc79045c07b3444bb5e7265091a69aeb209f94a0718a88c60d7"
     },
     "linux-arm64": {
       "package": "@tokscale/cli-linux-arm64-gnu",
       "asset": "tokscale-linux-arm64",
-      "sha256": "b5812be479d6907302b684e5c5706e949df419444f5cd574f53422f11dfbd6c1"
+      "sha256": "cd20b05ca5d4a5a19d1f76cd8769b768f16e5d27abd61fbcb6977ad6c5bcc2b7"
     },
     "linux-arm64-musl": {
       "package": "@tokscale/cli-linux-arm64-musl",
       "asset": "tokscale-linux-arm64-musl",
-      "sha256": "3e0e3204550c33df915a3ce3bcd74ba4b6d97a2344f980b0bcf035bd78f7af14"
+      "sha256": "21a788038c341101581925e2e8e4e170949a2414931cd215eed2d2645fdff169"
     },
     "linux-x64": {
       "package": "@tokscale/cli-linux-x64-gnu",
       "asset": "tokscale-linux-x64",
-      "sha256": "cc26aaf44de0addf5eeacb7af2a264011428805eec6e10bb8fbb8e2ef6ead87d"
+      "sha256": "a02fc8f3c82642326c63dc5a52cee1e4b71ee1aa256f96f3a7986bc061a9962d"
     },
     "linux-x64-musl": {
       "package": "@tokscale/cli-linux-x64-musl",
       "asset": "tokscale-linux-x64-musl",
-      "sha256": "f29053666cb5149157cbc10d39deb6613f2b722c0df48127d7a880d3ce6d6b68"
+      "sha256": "bd845afbf3911ad93ca700ca535aa4f6787aac6a171f10322a37d7c55d627661"
     },
     "win32-arm64": {
       "package": "@tokscale/cli-win32-arm64-msvc",
       "asset": "tokscale-win32-arm64.exe",
-      "sha256": "9d59b1cefae962a680c991b2644a303601e609da0ea5857373a9efc6de547b3b"
+      "sha256": "8db949c9b9b0acc464f6c6ef15422ef605d7abcd76507e443ba9539aab8ac36d"
     },
     "win32-x64": {
       "package": "@tokscale/cli-win32-x64-msvc",
       "asset": "tokscale-win32-x64.exe",
-      "sha256": "160a6d88d493303606b5dc297a5559c3343541c55252824460df1864879d15f0"
+      "sha256": "7243da80b12ca6af2eb0a301998433d7839da6c4e52a60eb7fb6e97ce9e8c0c0"
     }
   }
 }

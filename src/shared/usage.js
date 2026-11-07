@@ -350,7 +350,7 @@ function detectClient(obj) {
 }
 
 function normalizeModelName(value) {
-  const raw = normalizeTokscaleModelNameForClient(value).toLowerCase();
+  const raw = String(value || '').trim().toLowerCase();
   return raw || null;
 }
 
@@ -1116,24 +1116,24 @@ function normalizePeriod(input, options = {}) {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelName(model);
       if (key) {
-        const tokens = Math.max(0, Math.round(asNumber(value)));
-        const cacheRead = Math.max(0, Math.round(asNumber(input.modelCacheReads?.[model])));
-        const cacheWrite = Math.max(0, Math.round(asNumber(input.modelCacheWrites?.[model])));
-        const output = Math.max(0, Math.round(asNumber(input.modelOutputs?.[model])));
-        period.models[key] = (period.models[key] || 0) + tokens;
-        if (cacheRead > 0) period.modelCacheReads[key] = (period.modelCacheReads[key] || 0) + cacheRead;
-        if (cacheWrite > 0) period.modelCacheWrites[key] = (period.modelCacheWrites[key] || 0) + cacheWrite;
-        if (output > 0) period.modelOutputs[key] = (period.modelOutputs[key] || 0) + output;
-        // Bound each source bucket before adding aliases to the canonical map.
-        const known = Math.min(tokens, cacheRead + cacheWrite + output);
+        period.models[key] = (period.models[key] || 0) + Math.max(0, Math.round(asNumber(value)));
+        if (input.modelCacheReads?.[model]) period.modelCacheReads[key] = (period.modelCacheReads[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheReads[model])));
+        if (input.modelCacheWrites?.[model]) period.modelCacheWrites[key] = (period.modelCacheWrites[key] || 0) + Math.max(0, Math.round(asNumber(input.modelCacheWrites[model])));
+        if (input.modelOutputs?.[model]) period.modelOutputs[key] = (period.modelOutputs[key] || 0) + Math.max(0, Math.round(asNumber(input.modelOutputs[model])));
+        const known = Math.min(
+          period.models[key],
+          asNumber(period.modelCacheReads[key])
+            + asNumber(period.modelCacheWrites[key])
+            + asNumber(period.modelOutputs[key])
+        );
         const hasExplicitUnclassified = hasOwn(input, 'modelUnclassifiedTokens');
         const unclassified = Math.min(
-          tokens - known,
+          period.models[key] - known,
           Math.max(0, Math.round(asNumber(hasExplicitUnclassified
             ? input.modelUnclassifiedTokens?.[model]
-            : (period.capabilities.tokenComponents ? 0 : tokens - known))))
+            : (period.capabilities.tokenComponents ? 0 : period.models[key] - known))))
         );
-        if (unclassified > 0) period.modelUnclassifiedTokens[key] = (period.modelUnclassifiedTokens[key] || 0) + unclassified;
+        if (unclassified > 0) period.modelUnclassifiedTokens[key] = unclassified;
       }
     }
   }

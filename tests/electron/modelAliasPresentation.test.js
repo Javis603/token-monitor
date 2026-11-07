@@ -44,15 +44,14 @@ for (const labels of [['__proto__', 'app'], ['app', '__proto__']]) {
     test(`project aliases retain reserved rollup keys with ${labels.join(', ')} and ${aliasedProject} aliased`, () => {
       const { projectRollupFromSessions } = require('../../src/shared/usage');
       const { projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
-      const rawModel = 'openrouter/claude-opus-5';
       const sessions = Object.fromEntries(labels.map((label, index) => [`session-${index}`, {
         client: 'codex', projectLabel: label, totalTokens: 100, costUsd: 1,
-        models: { [label === aliasedProject ? rawModel : 'gpt-5']: 100 }
+        models: { [label === aliasedProject ? 'anthropic/claude-opus-5' : 'gpt-5']: 100 }
       }]));
       const projects = projectRollupFromSessions(sessions);
       const stats = { periods: { allTime: { totalTokens: 200, costUsd: 2, projects } } };
       const before = JSON.stringify(stats);
-      const projected = projectModelAliasStats(stats, { [rawModel]: 'claude-opus-5' }).periods.allTime;
+      const projected = projectModelAliasStats(stats, aliases).periods.allTime;
 
       assert.equal(Object.hasOwn(projected.projects, '__proto__'), true);
       assert.deepEqual(Object.keys(projected.projects), labels);
@@ -185,10 +184,7 @@ test('projection conserves priced totals and components in every period, client,
   assert.deepEqual(projected.limits, stats.limits);
   assert.deepEqual(stats, before);
   assert.deepEqual(projectModelAliasStats(stats, {}, { grouping: 'duplicates' }).periods.today.models, { 'claude-opus-5': 70, 'gpt-5.5-pro': 30 });
-  assert.deepEqual(projectModelAliasStats(stats, { 'anthropic/claude-opus-5': 'separate' }).periods.today.models, { separate: 70, 'gpt-5.5-pro': 30 });
-  assert.deepEqual(projectModelAliasStats(stats, {
-    'anthropic/claude-opus-5': 'separate', 'claude-opus-5': 'canonical name'
-  }).periods.today.models, { separate: 40, 'canonical name': 30, 'gpt-5.5-pro': 30 });
+  assert.deepEqual(projectModelAliasStats(stats, { 'anthropic/claude-opus-5': 'separate' }).periods.today.models, { separate: 40, 'claude-opus-5': 30, 'gpt-5.5-pro': 30 });
 });
 
 test('a pulled session list is grouped by the same plan as the stats it belongs to', () => {
