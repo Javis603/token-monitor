@@ -26,6 +26,7 @@
       hasProviderMark,
       maskEmail,
       mimoProductLabel,
+      limitAccountTitle,
       createRowDrag,
       enabledLimitProviders,
       isWindowHidden = () => false
@@ -430,7 +431,7 @@
         const hidden = new Set(item.hiddenAccounts || []);
         const group = el('div', 'edge-dock-composer-accounts');
         group.append(el('div', 'edge-dock-composer-menu-title', t('settings.edgeDock.accounts')));
-        for (const account of accounts) {
+        for (const [index, account] of accounts.entries()) {
           const label = el('label', 'edge-dock-composer-account');
           const input = document.createElement('input');
           input.type = 'checkbox';
@@ -444,7 +445,7 @@
           const identity = account.accountName || maskEmail(account.accountEmail);
           const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
           const name = product
-            ? [identity, product].filter(Boolean).join(' · ')
+            ? limitAccountTitle('mimo', account, index, accounts)
             : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
           text.setAttribute('aria-label', name);
@@ -476,8 +477,10 @@
         connected: isAutomatic() ? connectedProviders() : null,
         addable: ui.menuOpen ? enabledLimitProviders?.() : null,
         windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
-        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account) => [
-          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel
+        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account, index, accounts) => [
+          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel,
+          selectedItem.provider === 'mimo' && mimoProductLabel(account)
+            ? limitAccountTitle('mimo', account, index, accounts) : ''
         ]) : null,
         wording: [t('settings.edgeDock.window'), t('settings.edgeDock.window.auto'), t('settings.edgeDock.window.unavailable')]
       });

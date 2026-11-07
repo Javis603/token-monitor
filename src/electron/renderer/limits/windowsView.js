@@ -2554,14 +2554,23 @@
     return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
   }
 
+  function mimoAccountRepresentatives(groups) {
+    return groups.map(group => [...group].sort((left, right) => (
+      Number(Boolean(String(right.accountEmail || '').trim())) - Number(Boolean(String(left.accountEmail || '').trim()))
+      || Number(Boolean(String(right.accountName || '').trim())) - Number(Boolean(String(left.accountName || '').trim()))
+      || Number(mimoProductLabel(right) === 'Console') - Number(mimoProductLabel(left) === 'Console')
+      || String(left.accountKey || '').localeCompare(String(right.accountKey || ''))
+    ))[0]);
+  }
+
   function mimoAccountTitle(provider, index, providers) {
     const product = mimoProductLabel(provider);
     if (product) {
-      const identity = accountIdentity.accountEmailLabel(provider, providers || [provider], {
-        maskEmail: limitAccountEmailsMasked(),
-        suffix: String(provider?.accountName || '').trim()
-      }) || String(provider?.accountName || '').trim();
-      return [identity, product].filter(Boolean).join(' · ') || `Account ${index + 1}`;
+      const groups = mimoAccountGroups(providers || [provider]);
+      const representatives = mimoAccountRepresentatives(groups);
+      const groupIndex = groups.findIndex(group => group.includes(provider));
+      const identity = limitAccountDefaultTitle(representatives[groupIndex], groupIndex, representatives);
+      return `${identity} · ${product}`;
     }
     // Compatibility for rows from versions that put the product in accountName
     // and the plan in accountLabel.
@@ -2641,7 +2650,7 @@
 
   function renderMimoProviderGroup(label, providers, color) {
     const groups = mimoAccountGroups(providers);
-    const representatives = groups.map((group) => group.find((row) => row.accountEmail) || group[0]);
+    const representatives = mimoAccountRepresentatives(groups);
     const accountTitle = (index) => limitAccountDefaultTitle(representatives[index], index, representatives);
     const oneAccount = groups.length === 1;
     const { row, list } = renderLimitProviderGroupFrame(
