@@ -29,6 +29,13 @@
   let hoveredBucket = '';
   let trendRangeMode = 'cycle';
   let trendScaleMode = 'unified';
+  function currentTrendView() {
+    return trendScaleMode === 'normalized' ? 'normalized' : trendRangeMode === 'recent' ? 'unifiedRecent' : 'unifiedCycle';
+  }
+  function setTrendView(view) {
+    trendScaleMode = view === 'normalized' ? 'normalized' : 'unified';
+    trendRangeMode = view === 'unifiedRecent' ? 'recent' : 'cycle';
+  }
   let restoreReading = () => {};
   let contentAnimation = null;
   let animateMeasurement = false;
@@ -373,13 +380,19 @@
     $('trend-heading').textContent = normalized
       ? t('trendNormalized')
       : bounds.cycle ? t(spent ? 'trendSpent' : 'trend') : t(spent ? 'trendSpentRecent' : 'trendRecent', { count: 14 });
-    const rangeBtn = $('trend-range-btn');
-    rangeBtn.hidden = normalized || !hasAnyCycle;
-    rangeBtn.textContent = `${t(trendRangeMode === 'recent' ? 'rangeRecent' : 'rangeCycle', { count: 14 })} ▾`;
-    const scaleBtn = $('trend-scale-btn');
-    scaleBtn.hidden = unit(entry) !== 'pp' || !hasAnyCycle || series.length < 2;
-    scaleBtn.textContent = normalized ? t('scaleUnified') : t('scaleNormalized');
-    scaleBtn.setAttribute('aria-pressed', String(normalized));
+    const view = currentTrendView();
+    const viewBtn = $('trend-view-btn');
+    viewBtn.hidden = unit(entry) !== 'pp' || !hasAnyCycle;
+    viewBtn.textContent = `${t(view === 'normalized' ? 'viewNormalized' : view === 'unifiedRecent' ? 'viewUnifiedRecent' : 'viewUnifiedCycle', { count: 14 })} ▾`;
+    viewBtn.setAttribute('aria-label', t('viewMenu'));
+    viewBtn.setAttribute('aria-expanded', 'false');
+    const viewMenu = $('trend-view-menu');
+    viewMenu.hidden = true;
+    for (const option of viewMenu.querySelectorAll('[data-trend-view]')) {
+      const optionView = option.dataset.trendView;
+      option.textContent = t(optionView === 'normalized' ? 'viewNormalized' : optionView === 'unifiedRecent' ? 'viewUnifiedRecent' : 'viewUnifiedCycle', { count: 14 });
+      option.setAttribute('aria-checked', String(optionView === view));
+    }
     const money = window.TokenMonitorLimitBalanceDisplay;
     const rawAmount = entry.window.metric === 'spend' ? entry.window.used : entry.window.remaining;
     const hasBalance = ['credits', 'spend'].includes(entry.window.metric) && unit(entry) === 'pp' && typeof rawAmount === 'number';
@@ -442,15 +455,28 @@
   }
 
   reducedMotionMedia.addEventListener('change', () => { if (reduceMotion()) renderContent(); });
-  $('trend-range-btn').addEventListener('mousedown', event => event.preventDefault());
-  $('trend-range-btn').addEventListener('click', () => {
-    trendRangeMode = trendRangeMode === 'cycle' ? 'recent' : 'cycle';
-    renderContent(true);
+  const viewBtn = $('trend-view-btn');
+  const viewMenu = $('trend-view-menu');
+  viewBtn.addEventListener('mousedown', event => event.preventDefault());
+  viewBtn.addEventListener('click', () => {
+    const open = viewMenu.hidden;
+    viewMenu.hidden = !open;
+    viewBtn.setAttribute('aria-expanded', String(open));
   });
-  $('trend-scale-btn').addEventListener('mousedown', event => event.preventDefault());
-  $('trend-scale-btn').addEventListener('click', () => {
-    trendScaleMode = trendScaleMode === 'unified' ? 'normalized' : 'unified';
-    renderContent(true);
+  for (const option of viewMenu.querySelectorAll('[data-trend-view]')) {
+    option.addEventListener('mousedown', event => event.preventDefault());
+    option.addEventListener('click', () => {
+      setTrendView(option.dataset.trendView);
+      viewMenu.hidden = true;
+      viewBtn.setAttribute('aria-expanded', 'false');
+      renderContent(true);
+    });
+  }
+  document.addEventListener('pointerdown', event => {
+    if (!event.target.closest?.('.quota-history-view')) {
+      viewMenu.hidden = true;
+      viewBtn.setAttribute('aria-expanded', 'false');
+    }
   });
   $('bars').addEventListener('pointerleave', () => {
     hoveredBucket = '';
