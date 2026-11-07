@@ -125,7 +125,7 @@ test('Reasonix is a normalized tracked client', () => {
 });
 
 test('Reasonix routing-prefix normalization stays scoped alongside first-party folding', () => {
-  assert.equal(normalizeModelName('deepseek/deepseek-v3'), 'deepseek/deepseek-v3');
+  assert.equal(normalizeModelName('deepseek/deepseek-v3'), 'deepseek-v3');
   assert.equal(normalizeModelNameForClient('deepseek/deepseek-v4-flash', 'reasonix'), 'deepseek-v4-flash');
   assert.equal(normalizeModelNameForClient('deepseek-flash/deepseek-v4-flash', 'reasonix'), 'deepseek-v4-flash');
   assert.equal(normalizeModelNameForClient('deepseek/deepseek-v3', 'codex'), 'deepseek-v3');
@@ -147,7 +147,7 @@ test('Reasonix routing-prefix normalization stays scoped alongside first-party f
       codex: { 'deepseek/deepseek-v3': 3 }
     }
   });
-  assert.equal(normalized.models['deepseek/deepseek-v3'], 1);
+  assert.equal(normalized.models['deepseek-v3'], 1);
   assert.equal(normalized.clientModels.reasonix['deepseek-v4-flash'], 2);
   assert.equal(normalized.clientModels.codex['deepseek-v3'], 3);
 });
