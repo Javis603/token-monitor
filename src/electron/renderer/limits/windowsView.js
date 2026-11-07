@@ -2642,12 +2642,11 @@
   function appendMimoAccountProducts(list, providers, color) {
     providers.forEach((provider, index) => {
       const policy = limitAccountRowPolicy('mimo', provider, color, { grouped: true, sharedFamily: null });
-      // Readings and plan metadata identify healthy products. A status-only row
-      // needs its product title; older records fall back to the account title.
-      const statusOnly = Boolean(provider.status) && provider.status !== 'ok' && !provider.stale;
-      const title = statusOnly
-        ? (mimoProductLabel(provider) || limitAccountTitle('mimo', provider, index, providers))
-        : '';
+      // Product titles share the account heading layout; legacy failures retain their identity fallback.
+      const product = mimoProductLabel(provider);
+      const title = product === 'Console' ? 'Console' : product ? 'Desktop'
+        : provider.status && provider.status !== 'ok' && !provider.stale
+          ? limitAccountTitle('mimo', provider, index, providers) : '';
       list.append(renderLimitProviderRow('mimo', title, provider, policy.color, {
         accountRow: true,
         ...policy.options
