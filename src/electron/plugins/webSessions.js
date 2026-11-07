@@ -86,7 +86,6 @@ function createPluginWebSessions({ electron, fetchImpl, directory, active, getSe
     available(id);
     if (version !== (versions.get(ref) || 0)) return { state: 'notConnected' };
     if (live.has(ref)) return { state: 'connecting' };
-    failures.delete(ref);
     const entry = {}; live.set(ref, entry);
     try {
       const consent = await dialog.showMessageBox({ type: 'question', title: 'Connect plugin account',
@@ -94,7 +93,7 @@ function createPluginWebSessions({ electron, fetchImpl, directory, active, getSe
         detail: `Sign in at ${config.loginUrl}\nAllow authenticated GET requests to ${config.requestUrl}\nThe host saves the captured authorization encrypted on this device.`,
         buttons: ['Cancel', 'Connect'], defaultId: 0, cancelId: 0 });
       if (live.get(ref) !== entry || disposed || !active(id)) return { state: 'notConnected' };
-      if (consent.response !== 1) { stop(ref); return { state: 'notConnected' }; }
+      if (consent.response !== 1) { stop(ref); return status(id, args.key); }
       const browserSession = session.fromPartition(`plugin-web-login-${randomUUID()}`);
       entry.browserSession = browserSession;
       await createSessionProxyApplier({ getSession: () => browserSession, getConfig: () => sessionProxyConfig(getSettings()) }).ensureReady();
@@ -124,7 +123,7 @@ function createPluginWebSessions({ electron, fetchImpl, directory, active, getSe
         const candidate = candidates.get(details.id); candidates.delete(details.id);
         if (!candidate || details.statusCode < 200 || details.statusCode >= 300 || live.get(ref) !== entry || !active(id)) return;
         const current = () => live.get(ref) === entry && !disposed && active(id);
-        try { if (await save(ref, { ...config, ...candidate }, current) && current()) { stop(ref); changed(id, args.key); } }
+        try { if (await save(ref, { ...config, ...candidate }, current) && current()) { failures.delete(ref); stop(ref); changed(id, args.key); } }
         catch (_) { if (current()) { failures.set(ref, 'web-session-storage-unavailable'); stop(ref); } }
       });
       win.once('closed', () => { if (live.get(ref) === entry) stop(ref); });
@@ -176,7 +175,7 @@ function createPluginWebSessions({ electron, fetchImpl, directory, active, getSe
     available(id); const ref = identity(id, key); versions.set(ref, (versions.get(ref) || 0) + 1); failures.delete(ref); stop(ref);
     for (const controller of requests.get(ref) || []) controller.abort();
     try { fs.unlinkSync(file(ref)); } catch (error) { if (error.code !== 'ENOENT') throw Error('web-session-storage-unavailable'); }
-    changed(id, key);
+    changed(id, key, 'disconnect');
     return { state: 'notConnected' };
   }
   function forget(id) {

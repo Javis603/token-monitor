@@ -79,8 +79,9 @@ function createPluginLimits({ manager, getSettings, changed }) {
       reconcile();
       changed();
     },
-    forgetConnections(pluginId) {
-      const modules = catalog().filter(module => module.pluginId === pluginId && module.connection);
+    forgetConnections(pluginId, moduleId) {
+      const modules = catalog().filter(module => module.pluginId === pluginId && module.connection
+        && (moduleId === undefined || module.moduleId === moduleId));
       for (const module of modules) runtime?.clear({ provider: module.id }, 'connection removed');
       const ids = new Set(modules.map(module => module.id));
       retained = retained.filter(row => !ids.has(row.provider));
