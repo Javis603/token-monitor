@@ -49,5 +49,22 @@ test('localized metadata and public documents are included in the importable pac
   assert.equal(manifest.limits[0].name, 'OpenAI');
   assert.deepEqual(manifest.limits[0].credentials.fields.map(field => field.label), ['Platform session token', 'Organization ID']);
   const { packageDirectory } = require('../../src/electron/plugins/package');
-  assert.ok(packageDirectory(directory).bytes.length > 0);
+  assert.ok(packageDirectory(directory, { checkCompatibility: false }).bytes.length > 0);
+});
+
+test('the declared minimum App version is enforced by the host package importer', () => {
+  const { packageDirectory, parsePackage } = require('../../src/electron/plugins/package');
+  const appMetadata = require('../../package.json'), originalVersion = appMetadata.version;
+  const packaged = packageDirectory(directory, { checkCompatibility: false });
+  assert.equal(manifest.engines.tokenMonitor, '>=0.88.0');
+  try {
+    for (const version of ['0.82.0', '0.87.0', '0.87.99']) {
+      appMetadata.version = version;
+      assert.throws(() => parsePackage(packaged.bytes), /incompatible Token Monitor version/, version);
+    }
+    for (const version of ['0.88.0', '0.88.1', '0.89.0']) {
+      appMetadata.version = version;
+      assert.equal(parsePackage(packaged.bytes).rawManifest.engines.tokenMonitor, manifest.engines.tokenMonitor, version);
+    }
+  } finally { appMetadata.version = originalVersion; }
 });

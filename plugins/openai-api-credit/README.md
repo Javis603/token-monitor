@@ -18,7 +18,7 @@ This plugin shows API credits, not ChatGPT message limits or a Costs-based estim
 
 ## Compatibility and installation
 
-Use Token Monitor with native quota plugins, credential verification and native presentation support (`tmApi: 1`). Update the App if it cannot display this quota module.
+Requires **Token Monitor 0.88.0 or later** (`tmApi: 1`) for native quota modules, credential verification and presentation. Version 0.87.x is unsupported; update the App before importing this plugin.
 
 In **Settings → Plugins**, import the `.tmplugin` file or this complete source folder, review it and enable it. Then select and expand **OpenAI** in **AI tool quota**. Installation does not configure an account automatically.
 

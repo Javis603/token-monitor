@@ -7,6 +7,13 @@ const path = require('node:path');
 const os = require('node:os');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
+// Explicit test-only version metadata lets current main exercise the declared
+// future release boundary without changing package.json or the imported plugin.
+if (process.env.TM_PLUGIN_FIXTURE_HOST_VERSION) {
+  assert.ok(require('semver').valid(process.env.TM_PLUGIN_FIXTURE_HOST_VERSION));
+  require('../package.json').version = process.env.TM_PLUGIN_FIXTURE_HOST_VERSION;
+  console.log('Fixture host version (metadata only):', process.env.TM_PLUGIN_FIXTURE_HOST_VERSION);
+}
 const { createPluginRuntime, registerPluginScheme } = require('../src/electron/plugins/runtime');
 const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-credit-limits-'));
@@ -63,7 +70,7 @@ app.whenReady().then(async () => {
     'settings:get': () => settings,
     'settings:displayPreview': (_event, surface, phase, slots) => require('../src/electron/displayPreview').buildDisplayPreview(settings, surface, phase, process.platform, Date.now(), slots),
     'settings:update': async (event, patch) => { const after = await runtime.beforeSettingsChange(event, patch); settings = { ...settings, ...patch }; runtime.settingsChanged(); win.webContents.send('settings:push',settings); await after(); return settings; },
-    'app:getInfo': () => ({ version: 'fixture', platform: process.platform, systemUiTheme: 'dark', loginItemSupported: false }),
+    'app:getInfo': () => ({ version: require('../package.json').version, platform: process.platform, systemUiTheme: 'dark', loginItemSupported: false }),
     'appUpdate:get': () => ({}), 'appearance:getNativeMaterial': () => null,
     'stats:get': () => stats, 'stream:status': () => ({ connected: true, mode: 'local' }),
     'syncContent:status': () => ({ identity: 'fixture', available: false }),

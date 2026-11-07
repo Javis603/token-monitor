@@ -18,7 +18,7 @@ O plugin mostra créditos da API, não limites de mensagens do ChatGPT nem estim
 
 ## Compatibilidade e instalação
 
-Use uma versão do Token Monitor com suporte a plugins de cota nativos, verificação de credenciais e apresentação nativa (`tmApi: 1`). Atualize o App se o módulo não aparecer.
+Requer **Token Monitor 0.88.0 ou posterior** (`tmApi: 1`) para módulos nativos de cota, verificação de credenciais e apresentação. A versão 0.87.x não é compatível; atualize o App antes de importar o plugin.
 
 Em **Configurações → Plugins**, importe o arquivo `.tmplugin` ou a pasta completa do código-fonte, revise e ative. Em **Cota de ferramentas de IA**, selecione e expanda **OpenAI**. A instalação não configura uma conta automaticamente.
 

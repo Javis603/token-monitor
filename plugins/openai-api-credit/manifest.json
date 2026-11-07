@@ -143,5 +143,8 @@
     }
   },
   "author": "Javis603",
-  "homepage": "https://github.com/Javis603/token-monitor"
+  "homepage": "https://github.com/Javis603/token-monitor",
+  "engines": {
+    "tokenMonitor": ">=0.88.0"
+  }
 }
