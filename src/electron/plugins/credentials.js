@@ -2,7 +2,7 @@
 /* eslint preserve-caught-error: off -- Storage errors must not include secret values. */
 const fs = require('node:fs');
 const path = require('node:path');
-const { createHash } = require('node:crypto');
+const { isPortableCredentialId } = require('../../shared/plugins/credentials');
 const { readRegularFileNoFollow, writePrivateJsonAtomic } = require('../../shared/credentialStore');
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const MAX_BYTES = 65536;
@@ -12,17 +12,27 @@ function createPluginCredentials({ directory, changed = () => {} }) {
   const revisions = new Map();
   function file(id, moduleId) {
     if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{1,39}$/.test(id)
-      || typeof moduleId !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(moduleId)) throw Error('credentials-invalid-namespace');
-    return path.join(directory, `${id}--${createHash('sha256').update(moduleId).digest('hex')}.json`);
+      || typeof moduleId !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(moduleId)
+      || !isPortableCredentialId(id) || !isPortableCredentialId(moduleId)) throw Error('credentials-invalid-namespace');
+    return path.join(directory, id, `${moduleId}.json`);
   }
-  function checkDirectory() {
+  function checkDirectory(target) {
     try {
-      const stat = fs.lstatSync(directory);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('credentials-storage-unavailable');
-    } catch (error) { if (error.code !== 'ENOENT') throw Error('credentials-storage-unavailable'); }
+      const stat = fs.lstatSync(target);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('invalid directory');
+      return true;
+    } catch (error) {
+      if (error.code === 'ENOENT') return false;
+      throw Error('credentials-storage-unavailable');
+    }
+  }
+  function pluginDirectory(id) {
+    const target = path.dirname(file(id, 'check'));
+    checkDirectory(directory); checkDirectory(target);
+    return target;
   }
   function read(id, moduleId) {
-    checkDirectory();
+    pluginDirectory(id);
     try {
       const record = JSON.parse(readRegularFileNoFollow(file(id, moduleId), { maxBytes: MAX_BYTES, mode: 0o600 }));
       if (!object(record) || record.formatVersion !== 1 || !Number.isSafeInteger(record.revision) || record.revision < 1
@@ -53,8 +63,13 @@ function createPluginCredentials({ directory, changed = () => {} }) {
     }
     const candidate = { formatVersion: 1, revision: record.revision + 1, values };
     if (!Number.isSafeInteger(candidate.revision) || Buffer.byteLength(JSON.stringify(candidate)) > MAX_BYTES - 2048) throw Error('credentials-quota');
-    checkDirectory();
-    try { writePrivateJsonAtomic(file(id, moduleId), candidate); }
+    const target = pluginDirectory(id);
+    try {
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+      if (process.platform !== 'win32') { fs.chmodSync(directory, 0o700); fs.chmodSync(target, 0o700); }
+      writePrivateJsonAtomic(file(id, moduleId), candidate);
+    }
     catch { throw Error('credentials-storage-unavailable'); }
     revisions.set(file(id, moduleId), candidate.revision);
     changed(id, moduleId, clear ? 'clear' : 'update');
@@ -69,11 +84,11 @@ function createPluginCredentials({ directory, changed = () => {} }) {
       return Object.fromEntries(schema.fields.filter(field => Object.hasOwn(record.values, field.id)).map(field => [field.id, record.values[field.id]]));
     },
     forget(id) {
-      file(id, 'check'); checkDirectory();
+      const folder = pluginDirectory(id);
       let files = [], failed = false;
-      try { files = fs.readdirSync(directory); } catch (error) { if (error.code !== 'ENOENT') failed = true; }
-      for (const name of files) if (new RegExp(`^${id}--[a-f0-9]{64}\\.json$`).test(name)) {
-        const target = path.join(directory, name);
+      try { files = fs.readdirSync(folder); } catch (error) { if (error.code !== 'ENOENT') failed = true; }
+      for (const name of files) if (/^[a-z][a-z0-9-]{0,31}\.json$/.test(name) && isPortableCredentialId(name.slice(0, -5))) {
+        const target = path.join(folder, name);
         let revision = revisions.get(target) || 0;
         try {
           const record = JSON.parse(readRegularFileNoFollow(target, { maxBytes: MAX_BYTES, mode: 0o600 }));

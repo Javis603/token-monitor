@@ -94,10 +94,9 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, cred
       const credentialsBackup = path.join(txDir, 'plugin-credentials');
       if (credentialsDir && fs.existsSync(credentialsBackup)) {
         fs.mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
-        for (const name of fs.readdirSync(credentialsBackup)) {
-          if (!new RegExp(`^${j.id}--[a-f0-9]{64}\\.json$`).test(name)) throw Error('invalid credential recovery name');
-          fs.renameSync(path.join(credentialsBackup, name), path.join(credentialsDir, name));
-        }
+        const stat = fs.lstatSync(credentialsDir);
+        if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('invalid credential directory');
+        fs.renameSync(credentialsBackup, path.join(credentialsDir, j.id));
       }
       const previous = path.join(historyDir, `${j.id}.tmplugin`), previousBackup = path.join(txDir, 'previous.tmplugin');
       if (j.hadPrevious) fs.copyFileSync(previousBackup, previous);
@@ -245,10 +244,14 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, cred
             if (credentialsDir && fs.existsSync(credentialsDir)) {
               const stat = fs.lstatSync(credentialsDir);
               if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('invalid credential directory');
-              const backup = path.join(txDir, 'plugin-credentials'); fs.mkdirSync(backup, { mode: 0o700 });
-              for (const name of fs.readdirSync(credentialsDir)) if (new RegExp(`^${id}--[a-f0-9]{64}\\.json$`).test(name)) {
-                fs.renameSync(path.join(credentialsDir, name), path.join(backup, name));
+              const target = path.join(credentialsDir, id);
+              // Rename the owned namespace itself, never traverse its contents.
+              try {
+                const owned = fs.lstatSync(target);
+                if (!owned.isDirectory() || owned.isSymbolicLink()) throw Error('invalid credential directory');
+                fs.renameSync(target, path.join(txDir, 'plugin-credentials'));
               }
+              catch (error) { if (error.code !== 'ENOENT') throw error; }
               fault('credentials-moved');
             }
             fs.rmSync(previous, { force: true });

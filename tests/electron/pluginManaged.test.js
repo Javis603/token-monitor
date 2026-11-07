@@ -652,9 +652,20 @@ for(const point of ['credentials-moved','registry-written','settings-written','r
  let armed=false;const f=fixture(t,phase=>{if(armed&&phase===point)throw Error('synthetic transaction failure');});
  await f.install('1.0.0');f.args.credentialsDir=path.join(f.dir,'private-credentials');
  const api=createManagedPlugins(f.args);api.recover();fs.mkdirSync(f.args.credentialsDir,{mode:0o700});
- const own=`test-plugin--${'a'.repeat(64)}.json`,other=`test-plugin--other--${'b'.repeat(64)}.json`;
- for(const name of [own,other])fs.writeFileSync(path.join(f.args.credentialsDir,name),'synthetic-private-record',{mode:0o600});
+ const own=path.join('test-plugin','one.json'),other=path.join('test-plugin--other','one.json');
+ for(const name of [own,other]){fs.mkdirSync(path.dirname(path.join(f.args.credentialsDir,name)),{recursive:true,mode:0o700});fs.writeFileSync(path.join(f.args.credentialsDir,name),'synthetic-private-record',{mode:0o600});}
  armed=true;await assert.rejects(api.uninstall('test-plugin',{keepData:true}),/synthetic transaction failure/);
  assert.equal(fs.readFileSync(path.join(f.args.credentialsDir,own),'utf8'),'synthetic-private-record');assert.ok(fs.existsSync(path.join(f.args.userDir,'test-plugin')));
  armed=false;await api.uninstall('test-plugin',{keepData:true});assert.equal(fs.existsSync(path.join(f.args.credentialsDir,own)),false);assert.equal(fs.existsSync(path.join(f.args.credentialsDir,other)),true);
+});
+
+for(const dangling of [false,true])test(`uninstall rejects a plugin credential directory symlink without touching its target, dangling=${dangling}`,async t=>{
+ const f=fixture(t);await f.install('1.0.0');f.args.credentialsDir=path.join(f.dir,'private-credentials');
+ const api=createManagedPlugins(f.args);api.recover();fs.mkdirSync(f.args.credentialsDir,{mode:0o700});
+ const outside=path.join(f.dir,'outside-credentials'),link=path.join(f.args.credentialsDir,'test-plugin');
+ if(!dangling){fs.mkdirSync(outside,{mode:0o700});fs.writeFileSync(path.join(outside,'one.json'),'synthetic outside',{mode:0o600});}
+ fs.symlinkSync(outside,link,process.platform==='win32'?'junction':'dir');
+ await assert.rejects(api.uninstall('test-plugin',{keepData:true}),/invalid credential directory/);
+ assert.equal(fs.lstatSync(link).isSymbolicLink(),true);assert.ok(fs.existsSync(path.join(f.args.userDir,'test-plugin')));
+ if(!dangling)assert.equal(fs.readFileSync(path.join(outside,'one.json'),'utf8'),'synthetic outside');
 });
