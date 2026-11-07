@@ -67,7 +67,15 @@ function createPluginCredentials({ directory, changed = () => {} }) {
       file(id, 'check'); checkDirectory();
       let files;
       try { files = fs.readdirSync(directory); } catch (error) { if (error.code === 'ENOENT') files = []; else throw Error('credentials-storage-unavailable'); }
-      try { for (const name of files) if (new RegExp(`^${id}--[a-f0-9]{64}\\.json$`).test(name)) fs.unlinkSync(path.join(directory, name)); }
+      try {
+        for (const name of files) if (new RegExp(`^${id}--[a-f0-9]{64}\\.json$`).test(name)) {
+          const target = path.join(directory, name);
+          const record = JSON.parse(readRegularFileNoFollow(target, { maxBytes: MAX_BYTES, mode: 0o600 }));
+          if (record.formatVersion !== 1 || !Number.isSafeInteger(record.revision) || record.revision < 1
+            || !Number.isSafeInteger(record.revision + 1)) throw Error('invalid-record');
+          writePrivateJsonAtomic(target, { formatVersion: 1, revision: record.revision + 1, values: {} });
+        }
+      }
       catch { throw Error('credentials-storage-unavailable'); }
       changed(id, undefined, 'clear');
     }

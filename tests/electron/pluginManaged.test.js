@@ -648,3 +648,13 @@ for (const point of ['settings-written', 'reloaded']) test(`default locations ro
   assert.deepEqual(f.settings, before);
   assert.equal(f.api.list().length, 0);
 });
+for(const point of ['credentials-moved','registry-written','settings-written','reloaded'])test(`uninstall rolls back only its private credentials after ${point}`,async t=>{
+ let armed=false;const f=fixture(t,phase=>{if(armed&&phase===point)throw Error('synthetic transaction failure');});
+ await f.install('1.0.0');f.args.credentialsDir=path.join(f.dir,'private-credentials');
+ const api=createManagedPlugins(f.args);api.recover();fs.mkdirSync(f.args.credentialsDir,{mode:0o700});
+ const own=`test-plugin--${'a'.repeat(64)}.json`,other=`test-plugin--other--${'b'.repeat(64)}.json`;
+ for(const name of [own,other])fs.writeFileSync(path.join(f.args.credentialsDir,name),'synthetic-private-record',{mode:0o600});
+ armed=true;await assert.rejects(api.uninstall('test-plugin',{keepData:true}),/synthetic transaction failure/);
+ assert.equal(fs.readFileSync(path.join(f.args.credentialsDir,own),'utf8'),'synthetic-private-record');assert.ok(fs.existsSync(path.join(f.args.userDir,'test-plugin')));
+ armed=false;await api.uninstall('test-plugin',{keepData:true});assert.equal(fs.existsSync(path.join(f.args.credentialsDir,own)),false);assert.equal(fs.existsSync(path.join(f.args.credentialsDir,other)),true);
+});

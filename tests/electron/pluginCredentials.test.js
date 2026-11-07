@@ -42,7 +42,7 @@ test('private atomic JSON survives restart, isolates modules and overlapping IDs
   assert.equal(restarted.status('fixture','one',schema).configured,true);
   if(process.platform!=='win32') for(const file of fs.readdirSync(f.directory)) assert.equal(fs.statSync(path.join(f.directory,file)).mode&0o777,0o600);
   s.clear('fixture','one',schema,{expectedRevision:1}); assert.equal(s.status('fixture','two',schema).configured,true);
-  s.forget('fixture'); assert.equal(s.status('fixture--other','one',schema).configured,true); assert.equal(fs.readdirSync(f.directory).length,1);
+  s.forget('fixture'); assert.equal(s.status('fixture--other','one',schema).configured,true); assert.equal(fs.readdirSync(f.directory).length,3);assert.deepEqual(s.read('fixture','two',schema),{});
   assert.throws(()=>s.status('../other','one',schema));
 });
 test('corrupt files and symlinks fail closed without returning secret-bearing causes',t=>{
@@ -67,4 +67,13 @@ test('partial saved credentials remain incomplete, revision-bound reads reject r
   assert.equal(first.configured,false);assert.equal(first.fields.cookies,true);assert.equal(first.fields.token,false);
   assert.throws(()=>s.read('fixture','one',schema,{expectedRevision:0}),/credentials-conflict/);
   assert.deepEqual(s.read('fixture','one',schema,{expectedRevision:1}),{cookies:'synthetic=partial'});
+});
+test('plugin-wide forget fences retained editors across replacement credentials and restart',t=>{
+ const f=fixture(t),s=f.service;
+ s.update('fixture','one',schema,{expectedRevision:0,patch:{token:'first'}});
+ s.forget('fixture');const cleared=s.status('fixture','one',schema);assert.equal(cleared.configured,false);assert.equal(cleared.revision,2);
+ const replacement=s.update('fixture','one',schema,{expectedRevision:cleared.revision,patch:{token:'replacement'}});assert.equal(replacement.revision,3);
+ const restarted=createPluginCredentials({directory:f.directory});
+ assert.throws(()=>restarted.update('fixture','one',schema,{expectedRevision:1,patch:{token:'stale'}}),/credentials-conflict/);
+ assert.deepEqual(restarted.read('fixture','one',schema),{token:'replacement'});
 });

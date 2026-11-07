@@ -192,7 +192,7 @@ function createPluginRuntime({
   const contentSelections = () => getSettings().pluginContentSelections || {};
   let pages = null;
   const managed = createManagedPlugins({ root: path.join(userDataDir, 'plugin-manager'), userDir,
-    dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), manager, getSettings, saveSettings: persistManagementSettings, getLocale, placementContext });
+    dataDir: path.join(userDataDir, 'plugin-data'), settingsDir: path.join(userDataDir, 'plugin-settings'), credentialsDir: path.join(userDataDir, 'plugin-credentials'), manager, getSettings, saveSettings: persistManagementSettings, getLocale, placementContext });
   try { managed.recover(); }
   catch (error) { log(`[plugins] Plugin management unavailable: ${error.message}`); }
   const catalog = createPluginCatalog({ nativeImage: electron.nativeImage, manager, managed, getLocale, root: path.join(userDataDir, 'plugin-catalogs'), fetchImpl: netFetch, maintainerSources, officialSources });
@@ -691,7 +691,7 @@ function createPluginRuntime({
     });
     handle('plugins:cancelInstall', (event, token) => { requireMain(event); managed.cancel(token); });
     handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id), [id]));
-    handle('plugins:uninstall', (event, id, options) => changePackage(event, async () => { credentials.forget(id); return managed.uninstall(id, options); }, [id]));
+    handle('plugins:uninstall', (event, id, options) => changePackage(event, () => managed.uninstall(id, options), [id]));
     handle('plugins:openPage', (event, ref) => { requireMain(event); pages.open(ref); return { ok: true }; });
     handle('plugins:openFolder', async (event) => {
       requireMain(event);
