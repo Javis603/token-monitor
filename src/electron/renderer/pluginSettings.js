@@ -914,6 +914,12 @@
       return wrap;
     }
 
+    function credentialCleanupAction(plugin) {
+      // Broken/missing packages still need host-owned cleanup without code.
+      if (['active', 'disabled'].includes(plugin.status) && !plugin.limits?.some(module => module.credentials)) return null;
+      return button(t('plugins.credentials.forget'), () => void run(async () => { await api.forgetCredentials(plugin.id); return api.list(); }, `plugin:${plugin.id}`));
+    }
+
     function pluginCard(plugin) {
       const card = el(document, 'section', `plugin-card plugin-installed-card plugin-card-${plugin.status}`);
       card.dataset.pluginId = plugin.id;
@@ -925,8 +931,7 @@
       }
       const footer = el(document, 'div', 'plugin-card-footer');
       const exceptional = !['active', 'disabled'].includes(plugin.status);
-      // Broken/missing packages still need host-owned cleanup without code.
-      if (exceptional || plugin.limits?.some(module => module.credentials)) footer.append(button(t('plugins.credentials.forget'), () => void run(async () => { await api.forgetCredentials(plugin.id); return api.list(); }, `plugin:${plugin.id}`)));
+
       const surfaces = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
       if (exceptional) footer.append(statusChip(plugin));
       else {
@@ -1086,6 +1091,7 @@
       });
       defaults.dataset.controlKey = 'author-defaults'; defaults.disabled = busy || snapshot.readOnly;
       const reload = button(t('plugins.authorSettings.reload'), refresh); reload.dataset.controlKey = 'author-reload';
+      reload.hidden = !['conflict', 'loadFailed'].includes(state.message);
       actions.append(save, defaults, reload); form.append(actions);
       status.textContent = state.message ? t(`plugins.authorSettings.${state.message}`)
         : snapshot.readOnly ? t('plugins.authorSettings.newerSchema')
@@ -1212,6 +1218,8 @@
         wrap.append(detailSection(target, rows));
       }
       const utility = el(document, 'div', 'settings-actions plugin-detail-utilities');
+      const clearCredentials = credentialCleanupAction(plugin);
+      if (clearCredentials) utility.append(clearCredentials);
       if (plugin.runtime || plugin.logs?.length) utility.append(button(t('plugins.ui.diagnostics'), () => { diagnostics = true; render(); content.querySelector('.plugin-back')?.focus({ preventScroll: true }); }, 'plugin-diagnostics'));
       if (plugin.installation) {
         if (plugin.installation.previousVersion) utility.append(button(t('plugins.package.rollback'), () => { operation = { id: plugin.id, kind: 'rollback' }; render(); }));
