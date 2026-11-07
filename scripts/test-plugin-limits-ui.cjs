@@ -15,6 +15,7 @@ const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 const fixtureDir = path.join(scratch, 'source');
 fs.mkdirSync(fixtureDir, { recursive: true });
 const fixtureManifest = {tmApi:1,id:'synthetic-limits',name:'Synthetic limits',identityIcon:nativeImage.createFromBitmap(Buffer.from([80,180,130,255,80,180,130,255,80,180,130,255,80,180,130,255]),{width:2,height:2}).toDataURL(),version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'select',label:'Display mode',default:'meter',options:[{value:'meter',label:'Percentage + balance'},{value:'balance',label:'Balance only'}]}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',credentials:{validation:true,fields:[{id:'token',label:'Platform session Bearer',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]},capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Token',required:true}]},capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]};
+if(process.env.TM_PLUGIN_SETTINGS_AUTOSAVE_PROOF==='1')fixtureManifest.settings.fields.push({id:'showCost',type:'boolean',label:'顯示費用',default:false},{id:'label',type:'string',label:'顯示名稱',default:'Synthetic'},{id:'rows',type:'number',label:'列數',default:2,min:1,max:10,integer:true});
 const fixtureSvg = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect fill="#f06b77" x="2" y="2" width="20" height="20" rx="4"/><path fill="#ffdb70" d="M7 7h10v10H7z"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ffffff"/></svg>').toString('base64');
 fixtureManifest.presentation = { icon: { native: 'codex' }, color: { palette: 'codex' } };
 fixtureManifest.limits[1].presentation = { icon: { data: fixtureSvg, mode: process.env.TM_PLUGIN_SVG_MASK === '1' ? 'mask' : 'image' }, color: { hex: '#d68cf0' } };
@@ -66,6 +67,7 @@ app.commandLine.appendSwitch('host-resolver-rules','MAP * ~NOTFOUND, EXCLUDE loc
 registerPluginScheme(protocol);
 app.on('window-all-closed',()=>{});
 let runtime,win;
+let packageSource=fixtureDir;
 let transportCalls=[], fixtureConsent=1, credentialConfirmations=0;
 const errors=[];
 const deadline=setTimeout(()=>{console.error('UI deadline',errors);app.exit(1);},45000);
@@ -119,7 +121,7 @@ app.whenReady().then(async () => {
   }
   const patch=value=>{settings={...settings,...value};win.webContents.send('settings:push',settings);};
   runtime=createPluginRuntime({electron:{BrowserWindow,ipcMain,session,utilityProcess,
-   dialog:{showMessageBox:async(_win,options)=>{if(options.message===require('../src/electron/renderer/i18n').translate(settings.language,'plugins.credentials.forgetConfirm'))credentialConfirmations++;return {response:fixtureConsent};},showOpenDialog:async()=>({canceled:false,filePaths:[fixtureDir]})}},
+   dialog:{showMessageBox:async(_win,options)=>{if(options.message===require('../src/electron/renderer/i18n').translate(settings.language,'plugins.credentials.forgetConfirm'))credentialConfirmations++;return {response:fixtureConsent};},showOpenDialog:async()=>({canceled:false,filePaths:[packageSource]})}},
    fetchImpl:async(url,init)=>{transportCalls.push({url,init});return new Response('{"remaining":80}',{status:200});},userDataDir:scratch,getSettings:()=>settings,getAppSettings:()=>settings,getContext:()=>({source:'fixture'}),getLocale:()=>settings.language,
    isMainSender:event=>event.sender===win.webContents,persistPluginStates:pluginStates=>patch({pluginStates}),
    persistManagementSettings:patch,applySettingsPatch:patch,env:{},log:console.log});
@@ -133,7 +135,93 @@ app.whenReady().then(async () => {
   await js("tokenMonitor.updateSettings({limitsEnabled:true,limitProviders:'claude,plugin:synthetic-limits:one,plugin:synthetic-limits:two',limitProviderOrder:'plugin:synthetic-limits:two,claude,plugin:synthetic-limits:one'})");
   await js("openViewFromTray('limits')");
   await waitFor("state.pluginCatalog?.limits?.providers?.length===2",'native module samples');
-  const capture=async name=>{if(process.env.TM_CREDENTIAL_LAYOUT_PROOF==='1')await js("(()=>{for(let node=els.settingsPanel.parentElement;node;node=node.parentElement)node.scrollTop=0;window.scrollTo(0,0);})()");await pause(250);fs.writeFileSync(path.join(evidence,name),(await win.webContents.capturePage()).toPNG());};
+  const capture=async name=>{
+    await pause(250);
+    if(process.env.TM_CREDENTIAL_LAYOUT_PROOF==='1')await js("(()=>{for(let node=els.settingsPanel.parentElement;node;node=node.parentElement)node.scrollTop=0;window.scrollTo(0,0);})()");
+    if(process.env.TM_PLUGIN_SETTINGS_AUTOSAVE_PROOF==='1') {
+      await js("(()=>{const target=document.querySelector('.plugin-author-form');els.settingsPanel.scrollTop+=target.getBoundingClientRect().top-els.settingsPanel.getBoundingClientRect().top-150;})()");
+      await pause(80);
+      const frame=await js("(()=>{const a=document.querySelector('.plugin-author-form').getBoundingClientRect(),p=els.settingsPanel.getBoundingClientRect();return {form:a.toJSON(),panel:p.toJSON(),scroll:els.settingsPanel.scrollTop,height:els.settingsPanel.scrollHeight};})()");
+      console.log('native settings viewport',JSON.stringify(frame));
+      assert.ok(frame.form.top>=frame.panel.top&&frame.form.bottom<=frame.panel.bottom,'settings controls must be visible in native proof');
+    }
+    fs.writeFileSync(path.join(evidence,name),(await win.webContents.capturePage()).toPNG());
+  };
+  if (process.env.TM_PLUGIN_SETTINGS_AUTOSAVE_PROOF === '1') {
+    if(process.env.TM_PLUGIN_SETTINGS_SOURCE){
+      await js(fs.readFileSync(process.env.TM_PLUGIN_SETTINGS_SOURCE,'utf8'));
+      const appSource=fs.readFileSync(path.join(root,'src/electron/renderer/app.js'),'utf8');
+      const start=appSource.indexOf('pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings');
+      const end=appSource.indexOf('}) : null;',start)+'}) : null;'.length;
+      assert.ok(start>=0&&end>start);
+      await js('pluginSettingsPanel.dispose();'+appSource.slice(start,end)+';true');
+    }
+    await js("openSettingsPanel();setSettingsSectionExpanded('plugins',true);pluginSettingsPanel.refresh()");
+    await waitFor("document.querySelector('.plugin-manage')",'plugin management');
+    await js(`document.querySelector('[data-plugin-id="${fixtureManifest.id}"] .plugin-manage').click()`);
+    await waitFor("document.querySelector('.plugin-author-form select')",'native declarative settings form');
+    await js("document.querySelector('.plugin-author-settings').scrollIntoView({block:'center'})");
+    await capture('plugin-settings-before-change.png');
+    if(process.env.TM_PLUGIN_SETTINGS_SOURCE){console.log('PASS baseline native manual-settings capture. Evidence:',evidence);await runtime.dispose();win.destroy();app.exit(0);return;}
+    assert.equal(await js("!!document.querySelector('[data-control-key=author-save]')"),false,'no routine Save button');
+    await js("(()=>{const select=document.querySelector('.plugin-author-form select');select.focus();window.ordinaryControl=select;select.value='balance';select.dispatchEvent(new Event('change'));})()");
+    await waitFor(`document.querySelector('.plugin-author-status').hidden&&!document.querySelector('[data-control-key=author-reload]').getAttribute('disabled')`,'autosave feedback settles');
+    const saved=await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`);
+    assert.equal(saved.values.displayMode,'balance','select saved without a Save action');
+    assert.equal(await js("document.activeElement===ordinaryControl"),true,'save preserves focus');
+    await js("pluginSettingsPanel.refresh()");await pause(150);
+    assert.equal(await js("document.querySelector('.plugin-author-form select')===ordinaryControl"),true,'refresh retains native form controls');
+    assert.equal(await js("document.activeElement===ordinaryControl"),true,'refresh preserves focus');
+    await capture('plugin-settings-autosaved.png');
+    await js("(()=>{const input=document.querySelector('[data-control-key=author-showCost]');input.checked=true;input.dispatchEvent(new Event('change'));})()");
+    await waitFor("document.querySelector('.plugin-author-status').hidden",'boolean autosaves');
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.showCost,true);
+    await js("(()=>{const input=document.querySelector('[data-control-key=author-label]');input.focus();window.textControl=input;input.value='New label';input.dispatchEvent(new Event('input'));input.setSelectionRange(2,5);})()");
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'Synthetic','text does not save mid-input');
+    await js("pluginSettingsPanel.refresh()");await pause(100);
+    assert.deepEqual(await js("[document.activeElement===textControl,textControl.value,textControl.selectionStart,textControl.selectionEnd]"),[true,'New label',2,5]);
+    await js("textControl.dispatchEvent(new Event('change'))");await waitFor("document.querySelector('.plugin-author-status').hidden",'completed text saves');
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'New label');
+    await js("(()=>{const input=document.querySelector('[data-control-key=author-rows]');input.value='0';input.dispatchEvent(new Event('input'));input.dispatchEvent(new Event('change'));})()");
+    await waitFor("document.querySelector('[data-control-key=author-rows]').getAttribute('aria-invalid')==='true'",'invalid number remains visible');
+    await js("(()=>{const input=document.querySelector('.plugin-author-form select');input.value='meter';input.dispatchEvent(new Event('change'));})()");
+    await waitFor("document.querySelector('.plugin-author-status').textContent!==t('plugins.authorSettings.saving')",'other valid control saves despite invalid draft');
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.displayMode,'meter');
+    assert.equal(await js("document.querySelector('[data-control-key=author-rows]').getAttribute('aria-invalid')"),'true','invalid draft/error stays visible');
+    await js("(()=>{const input=document.querySelector('[data-control-key=author-rows]');input.value='3';input.dispatchEvent(new Event('input'));input.dispatchEvent(new Event('change'));})()");
+    await waitFor("document.querySelector('.plugin-author-status').hidden",'corrected number saves');
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.rows,3);
+    await capture('plugin-settings-controls.png');
+    await js("(()=>{const trigger=document.querySelector('.plugin-author-heading .plugin-more');trigger.click();})()");
+    await waitFor("document.querySelector('.plugin-author-heading .plugin-menu').matches(':popover-open')",'secondary settings menu');
+    await capture('plugin-settings-defaults-menu.png');
+    await js("document.querySelector('.plugin-author-heading .plugin-menu button').click()");
+    await waitFor("document.querySelector('.plugin-author-status').hidden",'defaults apply without Save');
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'Synthetic');
+
+    const externalBase=await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`);
+    await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.update',{schemaVersion:${externalBase.schemaVersion},expectedRevision:${externalBase.revision},patch:{displayMode:'balance'}})`);
+    await js("(()=>{const select=document.querySelector('.plugin-author-form select');select.value='meter';select.dispatchEvent(new Event('change'));})()");
+    await waitFor("!document.querySelector('[data-control-key=author-reload]').hidden",'conflict offers explicit reload');
+    await capture('plugin-settings-conflict.png');
+    await js("document.querySelector('[data-control-key=author-reload]').click()");
+    await waitFor("document.querySelector('.plugin-author-form select')?.value==='balance'&&document.querySelector('[data-control-key=author-reload]').hidden",'reload recovers');
+    const second=path.join(scratch,'second-settings-plugin');fs.cpSync(fixtureDir,second,{recursive:true});
+    const secondManifest={...fixtureManifest,id:'synthetic-settings-two',name:'Second settings plugin'};fs.writeFileSync(path.join(second,'manifest.json'),JSON.stringify(secondManifest));
+    packageSource=second;
+    const secondPreview=await js("tokenMonitor.plugins.importPackage('directory')");await js(`tokenMonitor.plugins.install(${JSON.stringify(secondPreview.token)},{trustInstall:false})`);
+    await js("document.querySelector('.plugin-detail .plugin-back').click();pluginSettingsPanel.refresh()");
+    await waitFor("document.querySelector('[data-plugin-id=synthetic-settings-two] .plugin-manage')",'second disabled plugin');
+    await js("document.querySelector('[data-plugin-id=synthetic-settings-two] .plugin-manage').click()");
+    await waitFor("document.querySelector('.plugin-author-form select')",'disabled plugin settings');
+    await js("(()=>{const input=document.querySelector('.plugin-author-form select');input.value='balance';input.dispatchEvent(new Event('change'));})()");
+    await waitFor("document.querySelector('.plugin-author-status').hidden",'second plugin autosaves independently');
+    assert.equal((await js("tokenMonitor.plugins.getSettings('synthetic-settings-two')")).values.displayMode,'balance');
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.displayMode,'balance','first plugin stays at external saved value');
+    await capture('plugin-settings-second-plugin.png');
+    console.log('PASS native shared settings autosave, no Save row, durable select, retained focus/control and conflict recovery. Evidence:',evidence);
+    await runtime.dispose();win.destroy();app.exit(0);return;
+  }
   if (process.env.TM_CREDENTIAL_LAYOUT_PROOF === '1') {
     if (process.env.TM_CREDENTIAL_CONTROLLER_SOURCE) await js(fs.readFileSync(process.env.TM_CREDENTIAL_CONTROLLER_SOURCE, 'utf8'));
     await js("openSettingsPanel();setSettingsSectionExpanded('limits',true);renderLimitProviderCheckboxes();document.getElementById('limitProviderDisclosure-plugin:synthetic-limits:one').click()");
@@ -577,10 +665,9 @@ app.whenReady().then(async () => {
   await js("document.querySelector('.plugin-author-form select').scrollIntoView({block:'center'})");
   await capture('settings-plugin-native-select.png');
   assert.equal(await js("document.querySelector('[data-control-key=author-reload]').hidden"),true,'reload hidden during ordinary editing');
-  await js("(()=>{const input=document.querySelector('.plugin-author-form select');input.value='meter';input.dispatchEvent(new Event('change'));})()");
   const settingsBase=await js("tokenMonitorTrustedPlugins.host('synthetic-limits','settings.get')");
   await js(`tokenMonitorTrustedPlugins.host('synthetic-limits','settings.update',{schemaVersion:${settingsBase.schemaVersion},expectedRevision:${settingsBase.revision},patch:{displayMode:'balance'}})`);
-  await js("document.querySelector('[data-control-key=author-save]').click()");
+  await js("(()=>{const input=document.querySelector('.plugin-author-form select');input.value='meter';input.dispatchEvent(new Event('change'));})()");
   await waitFor("document.querySelector('[data-control-key=author-reload]')?.hidden===false",'conflict exposes recovery action');
   assert.equal(await js("document.querySelector('.plugin-author-form select').value"),'meter','conflict retains draft');
   await js("document.querySelector('[data-control-key=author-reload]').click()");

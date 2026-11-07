@@ -9054,3 +9054,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-catalog-readme table { display: block; overflow: auto; border-collapse: collapse; }
 .plugin-catalog-readme th, .plugin-catalog-readme td { padding: 6px; border: 1px solid var(--line); }
 .plugin-catalog-readme a { color: var(--accent); }
+
+.plugin-author-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.plugin-author-heading .plugin-detail-heading { margin: 0; }

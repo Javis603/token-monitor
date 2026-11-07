@@ -122,7 +122,9 @@ Add this top-level `settings` member to the quickstart manifest (keep its UI and
 }
 ```
 
-This creates a native form that works even with plugin code disabled. A custom `settings` view is optional and executes trusted UI only when enabled.
+This creates a native form that works even with plugin code disabled. Switches and selects save immediately; text and number fields save when editing finishes (focus leaves the control or Enter). Writes are serialized per plugin without blocking other controls. Inputs and newer edits remain intact during pending saves and ordinary status updates. Only changed/completed fields are sent. Save errors expose Retry save; revision conflicts stop further automatic writes until the user explicitly reloads saved values. Restore defaults is a secondary menu action and applies immediately. This changes ordinary preferences only; credential submission remains explicit.
+
+A custom `settings` view is optional and executes trusted UI only when enabled.
 
 Each field needs a unique `id`, `type`, `label` and valid `default`; `description` is optional. Labels/descriptions may be strings or locale maps. There are at most 64 fields. IDs start with an ASCII letter, then letters, digits, `_` or `-`, up to 64 characters; prototype-reserved names are rejected.
 
