@@ -14,13 +14,14 @@ const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 
 const fixtureDir = path.join(scratch, 'source');
 fs.mkdirSync(fixtureDir, { recursive: true });
-fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'string',label:'Display mode',default:'meter'}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Platform session Bearer',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]},capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Token',required:true}]},capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
+fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'select',label:'Display mode',default:'meter',options:[{value:'meter',label:'Percentage + balance'},{value:'balance',label:'Balance only'}]}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Platform session Bearer',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]},capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Token',required:true}]},capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
 fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-read'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return {configured:value.token==='synthetic-token'};}if(method==='fixture-network'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return host.call('network.request',{moduleId:args.moduleId,requestId:'fixture-probe',url:'https://example.test/quota',headers:{Authorization:'Bearer '+value.token}});}if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
 fs.writeFileSync(path.join(fixtureDir,'settings.mjs'), `
 export async function activate(ctx) {
   window.quotaViewEvents ||= [];
   return {async mount(container,context) {
     const id=context.moduleId;
+    if(!id){container.textContent='Open quota settings to edit credentials.';return {dispose(){container.replaceChildren();}};}
     window.quotaViewEvents.push({type:'mount',id});
     let snapshot=await ctx.host.call('settings.get');
     container.innerHTML='<label class="settings-item"><span class="settings-item-text">Display mode</span><select data-quota-mode><option value="meter">Percentage + balance</option><option value="balance">Balance only</option></select></label><label class="settings-item"><span class="settings-item-text">Organization draft</span><input data-quota-draft placeholder="Synthetic organization" /></label><div class="settings-actions"><button data-quota-save>Save preferences</button><span data-quota-feedback></span></div>';
@@ -31,8 +32,8 @@ export async function activate(ctx) {
       credentialEditor=await ctx.native.credentials.mount(container,{moduleId:id});
     } else {
       let saved=await ctx.host.call('credentials.status',{moduleId:id});
-      const editor=document.createElement('div');editor.innerHTML='<p>Custom author layout</p><input type="password" data-custom-token placeholder="Token (saved value never loaded)" /><button data-custom-save>Save custom credentials</button><span data-custom-result></span>';
-      container.append(editor);const token=editor.querySelector('[data-custom-token]');
+      const editor=document.createElement('div');editor.innerHTML='<p>Custom author layout</p><input type="password" data-custom-token placeholder="Token (saved value never loaded)" /><div class="settings-actions"><button data-custom-save>Save custom credentials</button><span data-custom-result class="settings-note"></span></div>';
+      container.append(editor);const token=editor.querySelector('[data-custom-token]');token.className='credential-input';
       editor.querySelector('[data-custom-save]').onclick=async()=>{try{saved=await ctx.host.call('credentials.update',{moduleId:id,expectedRevision:saved.revision,patch:{token:token.value}});token.value='';editor.querySelector('[data-custom-result]').textContent='Saved';}catch{editor.querySelector('[data-custom-result]').textContent='Failed';}};
       credentialEditor={update(){},hasUnsavedChanges:()=>!!token.value,dispose(){editor.remove();}};
     }
@@ -184,6 +185,21 @@ app.whenReady().then(async () => {
   assert.equal(nativeStyleProof.fieldGap,nativeStyleProof.builtinFieldGap);
   assert.equal(nativeStyleProof.formGap,nativeStyleProof.builtinFormGap);
   console.log('PASS native credential input and spacing match built-in provider computed styles');
+  const sharedControlAudit=await js(`(()=>{
+    const box=${helperBox};const style=(node,keys)=>Object.fromEntries(keys.map(key=>[key,getComputedStyle(node)[key]]));
+    const inputKeys=['fontFamily','fontSize','backgroundColor','paddingTop','paddingRight','borderRadius','borderTopColor'];
+    const selectKeys=['fontFamily','fontSize','backgroundColor','paddingTop','paddingRight','borderRadius','borderTopColor'];
+    return {
+      select:style(document.querySelector('[data-quota-mode]'),selectKeys),builtinSelect:style(document.getElementById('languageInput'),selectKeys),
+      textarea:style(box.querySelector('textarea'),inputKeys),builtinTextarea:style(document.querySelector('#cursorManualPanel textarea'),inputKeys),
+      button:style(box.querySelector('button'),['fontSize','paddingLeft','paddingRight','borderRadius','minHeight']),builtinButton:style(document.getElementById('minimaxKeySubmit'),['fontSize','paddingLeft','paddingRight','borderRadius','minHeight']),
+      label:style(box.querySelector('label'),['fontSize','color','gap']),builtinLabel:style(document.getElementById('minimaxApiKeyInput').closest('label'),['fontSize','color','gap']),
+      note:style(box.querySelector('.settings-note'),['fontSize','color','lineHeight']),builtinNote:style(document.getElementById('networkProxyNote'),['fontSize','color','lineHeight'])
+    };
+  })()`);
+  for(const name of ['select','textarea','button','label','note'])assert.deepEqual(sharedControlAudit[name],sharedControlAudit['builtin'+name[0].toUpperCase()+name.slice(1)],name+' matches existing native settings');
+  console.log('PASS native select, textarea, button, label and note style audit');
+
 
   await js(`(()=>{const input=${helperBox}.querySelector('[data-credential-field="token"]');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
   await waitFor(`${helperBox}.querySelector('[role="status"]').textContent===t('plugins.credentials.configured')`,'manual credentials saved');
@@ -335,6 +351,15 @@ app.whenReady().then(async () => {
   await capture('settings-default-credentials.png');
   await js("openSettingsPanel();setSettingsSectionExpanded('plugins',true);pluginSettingsPanel.refresh()");
   await waitFor("document.querySelector('[data-plugin-id=\"synthetic-limits\"] .plugin-card-footer')",'installed plugin controls');
+  await js(`document.querySelector('[data-plugin-id="synthetic-limits"] .plugin-manage').click()`);
+  await waitFor("document.querySelector('.plugin-author-form select')",'host ordinary settings select');
+  const ordinarySelectAudit=await js(`(()=>{const a=getComputedStyle(document.querySelector('.plugin-author-form select')),b=getComputedStyle(document.getElementById('minimaxBillingModeInput'));return ['fontFamily','fontSize','backgroundColor','paddingTop','paddingRight','borderRadius','borderTopColor'].map(key=>[key,a[key],b[key]]);})()`);
+  assert.ok(ordinarySelectAudit.every(([,a,b])=>a===b),'host ordinary select matches provider select: '+JSON.stringify(ordinarySelectAudit));
+  console.log('PASS host-generated ordinary settings select uses built-in provider visual styles');
+  await js("document.querySelector('.plugin-author-form select').scrollIntoView({block:'center'})");
+  await capture('settings-plugin-native-select.png');
+  await js("document.querySelector('#pluginSettingsList .plugin-back').click()");
+  await waitFor("document.querySelector('[data-plugin-id=\"synthetic-limits\"] .plugin-card-footer')",'return from plugin detail');
   fixtureConsent=0;
   await js(`(()=>{const card=document.querySelector('[data-plugin-id="synthetic-limits"]');[...card.querySelectorAll('button')].find(button=>button.textContent===t('plugins.credentials.forget')).click();})()`);
   await waitFor("!document.querySelector('[data-plugin-id=\"synthetic-limits\"]')?.querySelector('button:disabled')",'cancelled credential clear settles');
