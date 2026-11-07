@@ -7,7 +7,9 @@ const test = require('node:test');
 
 const { addableLimitProviders, createEdgeDockComposer } = require('../../src/electron/renderer/edgeDock/composer');
 const itemsApi = require('../../src/electron/renderer/edgeDock/items');
-const { limitWindowLabel, mimoProductLabel } = require('../../src/shared/limits/windowLabels');
+const { limitWindowLabel, mimoProductLabel, mimoAccountGroups } = require('../../src/shared/limits/windowLabels');
+const accountIdentity = require('../../src/electron/renderer/accountIdentity');
+const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -35,15 +37,17 @@ class Element {
   contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
 }
 
-function accountChoices(provider, rows, presentationApi) {
+function accountChoices(provider, rows, presentationApi, settings = {}) {
   const root = new Element('div');
   const composer = createEdgeDockComposer({
     root, itemsApi, t: (key) => key,
     presentationApi,
-    getSettings: () => ({ edgeDockItems: [{ type: 'limit', provider }] }),
+    getSettings: () => ({ ...settings, edgeDockItems: [{ type: 'limit', provider }] }),
     getStats: () => ({ limits: { providers: rows } }), save: () => {},
     providerLabel: (id) => id, providerColor: () => '#000000', hasProviderMark: () => false,
-    maskEmail: (email) => email, mimoProductLabel,
+    maskEmail: (email) => settings.maskLimitAccountEmails ? accountIdentity.maskEmailAddress(email) : email, mimoProductLabel,
+    limitAccountTitle: createLimitWindowsView({ mimoProductLabel, mimoAccountGroups, accountIdentity,
+      settings: () => settings }).limitAccountTitle,
     createRowDrag: () => ({ deferRender: () => false })
   });
   const all = (node) => [node, ...node.children.flatMap(all)];
@@ -67,7 +71,7 @@ test('dock account choices distinguish MiMo products without changing sibling pr
     assert.deepEqual(labels('mimo', [
       { provider: 'mimo', accountKey: 'console', accountLabel: 'Console', planLabel: 'Pay-as-you-go' },
       { provider: 'mimo', accountKey: 'membership', accountLabel: 'Desktop Membership', planLabel: 'Pro' }
-    ]), ['Console', 'Desktop Membership']);
+    ]), ['Account 1 · Console', 'Account 2 · Desktop Membership']);
     assert.deepEqual(labels('codex', [
       { provider: 'codex', accountKey: 'a', accountName: 'Account A', accountLabel: 'Console' },
       { provider: 'codex', accountKey: 'b', accountName: 'Account B' }
@@ -81,7 +85,7 @@ test('dock account choices distinguish MiMo products without changing sibling pr
   }
 });
 
-test('a MiMo product label change repaints its account choices', () => {
+test('MiMo account choices repaint when product labels or account identity change', () => {
   const previousDocument = global.document;
   global.document = { createElement: (tag) => new Element(tag), activeElement: null };
   try {
@@ -91,6 +95,16 @@ test('a MiMo product label change repaints its account choices', () => {
     rows[1].accountLabel = 'Desktop Membership';
     composer.render();
     assert.deepEqual(names(), ['MiMo abcdef1', 'MiMo abcdef1 · Desktop Membership']);
+    const maskedRows = [
+      { provider: 'mimo', accountKey: 'sha256:aaaaaa', accountEmail: 'james@example.com', accountLabel: 'Console' },
+      { provider: 'mimo', accountKey: 'sha256:bbbbbb', accountEmail: 'jones@example.com', accountLabel: 'Console' }
+    ];
+    const masked = accountChoices('mimo', maskedRows, {}, { maskLimitAccountEmails: true });
+    assert.equal(new Set(masked.names()).size, 2);
+    maskedRows[1].accountEmail = maskedRows[0].accountEmail;
+    masked.composer.render();
+    assert.equal(new Set(masked.names()).size, 1);
+    assert.ok(masked.names().every(name => !/james@|jones@/.test(name)));
   } finally {
     global.document = previousDocument;
   }
@@ -492,10 +506,10 @@ test('app-wired composer preserves account edits while asynchronous settings wri
       TokenMonitorLimitProviders: { LIMIT_PROVIDER_LABELS: { thirdparty: 'Third-party APIs' } }
     };
     const root = new Element('div');
-    const create = Function('window', 'state', 'pendingSettingsPatches', 't', 'saveSettings', 'mimoProductLabel',
+    const create = Function('window', 'state', 'pendingSettingsPatches', 't', 'saveSettings', 'mimoProductLabel', 'limitAccountTitle',
       'rowDragControllerApi', 'verticalDragSortApi', 'preserveSettingsPanelScroll', 'limitMarksWithIcon',
       'limitProviderColor', `${factory}; return createDockItemsComposer;`)(
-      window, state, pendingSettingsPatches, (key) => key, save, () => '',
+      window, state, pendingSettingsPatches, (key) => key, save, () => '', () => '',
       { createRowDragController: () => ({ deferRender: () => false }) }, {}, (fn) => fn(), new Set(), () => '#fff'
     );
     const composer = create(root, 'edgeDockItems');

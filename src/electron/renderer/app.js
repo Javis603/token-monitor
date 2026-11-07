@@ -14405,6 +14405,7 @@ function createDockItemsComposer(root, itemsKey) {
         ? accountIdentityApi.maskEmailAddress(email)
         : String(email || '')),
       mimoProductLabel,
+      limitAccountTitle,
       createRowDrag: (config) => rowDragControllerApi.createRowDragController({
         dragSort: verticalDragSortApi,
         getScrollPanel: () => els.settingsPanel,
