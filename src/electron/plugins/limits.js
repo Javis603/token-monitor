@@ -27,14 +27,15 @@ function normalizeReading(input, provider) {
   const notes = normalizeNotes(input.notes);
   return { provider, status: input.status, windows, ...(notes === undefined ? {} : { notes }), plan, planLabel: plan, updatedAt: Number.isFinite(Date.parse(input.updatedAt)) ? new Date(input.updatedAt).toISOString() : new Date().toISOString() };
 }
-function createPluginLimits({ manager, getSettings, changed, cancelModule = () => {}, credentialRevision = () => null, onReading = () => {} }) {
+function createPluginLimits({ manager, getSettings, changed, cancelModule = () => {}, credentialRevision = () => null, credentialState = () => null, onReading = () => {} }) {
   let runtime = null, disposed = false;
   let byId = new Map(), retained = [];
   const demands = new Map();
   function catalog() {
     return manager.list().plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => (plugin.limits || []).map(module => ({
       ...module, presentation: { ...plugin.presentation, ...module.presentation }, identityIcon: plugin.identityIcon, id: identity(plugin.id, module.id), moduleId: module.id, pluginId: plugin.id, label: module.name,
-      settingsLabel: module.name, revision: plugin.revision, sampling: runtime !== null && byId.has(identity(plugin.id, module.id))
+      settingsLabel: module.name, revision: plugin.revision, sampling: runtime !== null && byId.has(identity(plugin.id, module.id)),
+      ...(module.credentials ? { credentialState: credentialState(plugin.id, module.id, module.credentials) } : {})
     })));
   }
   function reconcile() {

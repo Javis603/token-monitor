@@ -8933,6 +8933,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-author-settings .plugin-author-actions { flex-wrap: wrap; }
 
 .plugin-author-settings .plugin-author-editor { min-width: 0; overflow: auto; }
+.plugin-credential-form { display: grid; gap: 8px; }
+.plugin-credential-summary { align-items: center; }
+.plugin-credential-summary > .settings-note, .plugin-credential-error { margin: 0; }
 /* Display settings keep mounted controls; navigation has no height animation. */
 .settings-section-details-inner > .display-settings { min-width: 0; margin-top: 0; }
 .display-settings .settings-window-group { margin-top: 0; padding-top: 0; border-top: 0; }

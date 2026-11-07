@@ -178,6 +178,12 @@ function createPluginRuntime({
     changed: () => { for (const host of listListeners) if (!host.isDestroyed()) host.send('plugins:changed'); }
   });
   const limits = createPluginLimits({ manager, getSettings, credentialRevision: (id, moduleId, schema) => credentials.status(id, moduleId, schema).revision,
+    credentialState: (id, moduleId, schema) => {
+      try {
+        const saved = validation.snapshot(id, moduleId, schema);
+        return { hasSaved: Object.values(saved.fields).some(Boolean), configured: saved.configured, verification: saved.verification };
+      } catch { return { verification: 'unavailable' }; }
+    },
     onReading: (id, moduleId, schema, savedRevision, reading) => { if (schema && reading.status === 'unauthorized') validation.reject(id, moduleId, schema, savedRevision); },
     cancelModule: (id, moduleId) => network.cancelPlugin(id, moduleId), changed: () => { for (const subscriber of subscribers.values()) if (!subscriber.webContents.isDestroyed()) subscriber.webContents.send('plugins:changed'); } });
   const mime = name => ({ js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', woff2: 'font/woff2' }[name.split('.').pop()] || 'application/octet-stream');

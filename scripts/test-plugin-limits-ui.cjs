@@ -41,6 +41,16 @@ export async function activate(ctx) {
       editor.querySelector('[data-custom-save]').onclick=async()=>{try{saved=await ctx.host.call('credentials.update',{moduleId:id,expectedRevision:saved.revision,patch:{token:token.value}});token.value='';editor.querySelector('[data-custom-result]').textContent='Saved';}catch{editor.querySelector('[data-custom-result]').textContent='Failed';}};
       credentialEditor={update(){},hasUnsavedChanges:()=>!!token.value,dispose(){editor.remove();}};
     }
+    if (${process.env.TM_CREDENTIAL_LAYOUT_PROOF === '1'}) {
+      container.querySelector('[data-quota-draft]').closest('label').hidden=true;
+      container.querySelector('[data-quota-mode]').closest('label').querySelector('span').textContent='餘額顯示方式';
+      mode.options[0].textContent='進度條及餘額';mode.options[1].textContent='僅顯示餘額';
+      container.querySelector('[data-quota-save]').textContent='儲存設定';
+      const helper=container.querySelector('.plugin-credential-form');
+      if(helper)container.prepend(helper);
+      const help=container.querySelector('[data-credential-help]');
+      if(help){help.className='settings-note';help.textContent='貼上服務提供的憑證；已儲存的值不會重新填入。';}
+    }
     mode.value=snapshot.values.displayMode;
     container.querySelector('[data-quota-save]').onclick=async()=>{
       snapshot=await ctx.host.call('settings.update',{schemaVersion:snapshot.schemaVersion,expectedRevision:snapshot.revision,patch:{displayMode:mode.value}});
@@ -123,7 +133,36 @@ app.whenReady().then(async () => {
   await js("tokenMonitor.updateSettings({limitsEnabled:true,limitProviders:'claude,plugin:synthetic-limits:one,plugin:synthetic-limits:two',limitProviderOrder:'plugin:synthetic-limits:two,claude,plugin:synthetic-limits:one'})");
   await js("openViewFromTray('limits')");
   await waitFor("state.pluginCatalog?.limits?.providers?.length===2",'native module samples');
-  const capture=async name=>{await pause(250);fs.writeFileSync(path.join(evidence,name),(await win.webContents.capturePage()).toPNG());};
+  const capture=async name=>{if(process.env.TM_CREDENTIAL_LAYOUT_PROOF==='1')await js("(()=>{for(let node=els.settingsPanel.parentElement;node;node=node.parentElement)node.scrollTop=0;window.scrollTo(0,0);})()");await pause(250);fs.writeFileSync(path.join(evidence,name),(await win.webContents.capturePage()).toPNG());};
+  if (process.env.TM_CREDENTIAL_LAYOUT_PROOF === '1') {
+    if (process.env.TM_CREDENTIAL_CONTROLLER_SOURCE) await js(fs.readFileSync(process.env.TM_CREDENTIAL_CONTROLLER_SOURCE, 'utf8'));
+    await js("openSettingsPanel();setSettingsSectionExpanded('limits',true);renderLimitProviderCheckboxes();document.getElementById('limitProviderDisclosure-plugin:synthetic-limits:one').click()");
+    const box=`document.querySelector('[data-limit-module="plugin:synthetic-limits:one"] .plugin-credential-form')`;
+    await waitFor(box,'real Settings credential form');
+    await js(`${box}.closest('.limit-provider-row').scrollIntoView({block:'center'})`);
+    await capture('settings-credentials-empty.png');
+    await js(`(()=>{const input=${box}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${box}.querySelector('[data-credential-action=save]').click();})()`);
+    await waitFor(`${box}.querySelector('.plugin-credential-editor').hidden`,'verified credentials collapse');
+    await js('window.scrollTo(0,0)');
+    await capture('settings-credentials-connected.png');
+    if (process.env.TM_CREDENTIAL_LAYOUT_AFTER === '1') {
+      assert.equal(await js(`${box}.querySelector('[role="status"]').hidden`),true,'no duplicate inline status');
+      await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:one"] .plugin-limit-status')?.textContent===t('plugins.credentials.valid')`,'connected status in native header');
+    }
+    await js(`${box}.querySelector('[data-credential-action=edit]').click()`);
+    await capture('settings-credentials-edit.png');
+    await runtime.manager.call(fixtureManifest.id,'fixture-validation',{status:'rejected'});
+    // Save a replacement through the editor to exercise rejected validation.
+    await js(`(()=>{const input=${box}.querySelector('input');input.value='synthetic-replacement';input.dispatchEvent(new Event('input'));${box}.querySelector('[data-credential-action=save]').click();})()`);
+    await waitFor(`${box}.querySelector('[role="status"]').textContent===t('plugins.credentials.rejected')&&!${box}.querySelector('[data-credential-action=save]').disabled`,'rejected replacement');
+    await capture('settings-credentials-rejected.png');
+    if (process.env.TM_CREDENTIAL_LAYOUT_AFTER === '1') {
+      await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:one"] .plugin-limit-status')?.textContent===t('plugins.credentials.status.rejected')`,'rejected status in native header');
+      assert.equal(await js(`${box}.querySelector('.plugin-credential-editor').hidden`),false);
+    }
+    console.log('PASS real Settings credential layout, verified/edit/rejected states; Evidence:',evidence);
+    await runtime.dispose();win.destroy();app.exit(0);return;
+  }
   if (process.env.TM_CREDENTIAL_RECOVERY_PROOF === '1') {
     const before = process.env.TM_CREDENTIAL_CONTROLLER_SOURCE;
     if (before) await js(fs.readFileSync(before, 'utf8'));
@@ -416,8 +455,9 @@ app.whenReady().then(async () => {
   await js("tokenMonitor.updateSettings({language:'zh-TW',locale:'zh-TW'})");
   await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:two"]').textContent.includes('作者自填池')`,'restore localized labels');
   const statusSelector = '[data-provider="plugin:synthetic-limits:one"] .plugin-limit-status';
-  assert.equal(await js(`document.querySelector(${JSON.stringify(statusSelector)})`),null,'healthy state has no duplicate pill');
-  for (const [status,label] of [['notConfigured','尚未設定'],['unauthorized','憑證無效'],['error','讀取失敗']]) {
+  assert.equal(await js(`document.querySelector(${JSON.stringify(statusSelector)})?.textContent`),'已連接','verified state is in the native header');
+  assert.equal(await js(`${helperBox}.querySelector('[role="status"]').hidden`),true,'expanded form omits duplicate status');
+  for (const [status,label] of [['notConfigured','已連接'],['unauthorized','驗證失敗'],['error','驗證失敗']]) {
     await runtime.manager.call('synthetic-limits','fixture-status',{status});
     await js("openViewFromTray('limits')");
     await waitFor("state.pluginCatalog.limits.modules.every(module=>module.sampling)",'quota visible');
@@ -432,7 +472,10 @@ app.whenReady().then(async () => {
   await waitFor("state.pluginCatalog.limits.modules.every(module=>module.sampling)",'healthy quota visible');
   await runtime.refreshLimits();
   await js("openSettingsPanel();setSettingsSectionExpanded('limits',true);renderLimitProviderCheckboxes()");
-  await waitFor(`!document.querySelector(${JSON.stringify(statusSelector)})`,'healthy state clears pill');
+  await waitFor(`document.querySelector(${JSON.stringify(statusSelector)})?.textContent==='驗證失敗'`,'a healthy quota cannot revalidate rejected credentials');
+  const savedForVerify=await js("tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.status',{moduleId:'one'})");
+  await js(`tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.verify',{moduleId:'one',expectedRevision:${savedForVerify.revision}})`);
+  await waitFor(`document.querySelector(${JSON.stringify(statusSelector)})?.textContent==='已連接'`,'explicit verification restores native header status');
 
   await js("state.limitProviderSearchQuery='API balance';renderLimitProviderCheckboxes()");
   assert.deepEqual(await js("[...document.querySelectorAll('.limit-provider-row:not(.is-filtered-out)')].map(row=>row.dataset.provider)"),['plugin:synthetic-limits:two']);

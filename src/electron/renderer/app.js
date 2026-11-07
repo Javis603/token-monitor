@@ -12305,7 +12305,9 @@ function renderLimitProviderCheckboxesNow() {
       if (summary) {
         const pill = document.createElement('span');
         pill.className = 'cursor-status-pill plugin-limit-status';
+        pill.setAttribute('role', 'status');
         pill.textContent = translatedLimitProviderTag(summary);
+        if (summary.detailKey) pill.setAttribute('aria-description', t(summary.detailKey));
         actions.append(pill);
       }
     }
@@ -13374,7 +13376,8 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
     app: window.tokenMonitor,
     native: {
       quota: limitWindowsView,
-      credentials: call => window.TokenMonitorPluginCredentials.create({ document, call, t, localize: value => window.TokenMonitorPluginLocalized.localize(value, state.settings?.language) }),
+      credentials: call => window.TokenMonitorPluginCredentials.create({ document, call, t, localize: value => window.TokenMonitorPluginLocalized.localize(value, state.settings?.language),
+        statusInHeader: container => Boolean(container.closest('[data-limit-module]')) }),
       usageRow: data => { const node = rowTemplate(data); updateRow(node, { ...data, barValue: data.barValue ?? data.value, max: data.max ?? data.value, color: data.color || 'var(--accent)' }); return node; },
       updateUsageRow: updateRow,
       quotaProvider: (id, label, record, color) => renderLimitProviderSolo(id, label, record, color),

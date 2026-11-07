@@ -5,7 +5,7 @@
   if (root) root.TokenMonitorPluginCredentials = api;
 })(typeof window !== 'undefined' ? window : null, function () {
   // Both host-default and author-composed forms use this exact controller.
-  function create({ document, call, t, localize }) {
+  function create({ document, call, t, localize, statusInHeader = () => false }) {
     async function mount(container, { moduleId, onStateChange = () => {} }) {
       let snapshot = await call('credentials.status', { moduleId });
       let disposed = false, pending = false, generation = 0, conflict = false;
@@ -39,11 +39,15 @@
         feedback.textContent = t(!hasSaved() ? 'plugins.credentials.notConfigured' : verification === 'unverified'
           ? snapshot.configured ? 'plugins.credentials.configured' : 'plugins.credentials.partial'
           : `plugins.credentials.${verification}`);
+        feedback.hidden = statusInHeader(container);
         form.hidden = !editing;
         edit.hidden = editing; edit.disabled = pending;
         verify.hidden = !snapshot.configured || !snapshot.declaration.validation || verification === 'valid';
         verify.disabled = pending || dirty.size > 0 || verification === 'verifying';
         clear.hidden = !hasSaved(); cancel.hidden = !hasSaved() && dirty.size === 0; cancel.disabled = pending;
+        const clearActions = editing ? buttons : summary;
+        if (clear.parentNode !== clearActions) clearActions.append(clear);
+        summary.hidden = feedback.hidden && edit.hidden && verify.hidden && (editing || clear.hidden);
         for (const [id, input] of controls) input.placeholder = t(snapshot.fields[id] ? 'plugins.credentials.present' : 'plugins.credentials.empty');
         error.hidden = !error.textContent; reload.hidden = !conflict;
         save.disabled = pending; clear.disabled = pending; reload.disabled = pending;

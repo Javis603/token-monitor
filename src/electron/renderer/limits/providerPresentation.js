@@ -647,10 +647,17 @@
     return tags;
   }
 
-  // A missing reading is unknown, never proof that a connection is absent.
-  // Only modules declaring host login can offer a reconnect action.
+  // Credential state comes from the host's revision-bound verification, never
+  // from a quota reading or whether an author has mounted its settings UI.
   function pluginLimitSettingsStatus(module, provider, enabled = true) {
     if (!enabled || provider?.status === 'disabled') return null;
+    if (module.credentials && module.credentialState) {
+      const saved = module.credentialState;
+      const status = saved.verification !== 'unverified' ? saved.verification
+        : !saved.hasSaved ? 'notConfigured' : saved.configured ? 'configured' : 'partial';
+      return { key: `plugins.credentials.${['valid', 'verifying'].includes(status) ? '' : 'status.'}${status}`,
+        detailKey: `plugins.credentials.${status}`, tone: status === 'valid' ? 'ok' : 'setup' };
+    }
     if (!provider) return { key: 'plugins.limits.awaitingData', tone: 'muted' };
     if (provider.status === 'ok' && !provider.stale) return null;
     if (provider.status === 'notConfigured') return { key: 'settings.limits.status.notSetUp', tone: 'setup' };

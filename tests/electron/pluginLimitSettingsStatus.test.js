@@ -24,3 +24,28 @@ test('new status copy is localized in all supported languages', () => {
     for (const key of ['plugins.limits.awaitingData', 'plugins.limits.readFailed']) assert.notEqual(translate(locale, key), key);
   }
 });
+
+test('credential pills use saved/verified host state even with no reading or settings mount', () => {
+  const module = {credentials: {fields: []}};
+  for (const [hasSaved, configured, verification, key] of [
+    [false, false, 'unverified', 'status.notConfigured'],
+    [true, false, 'unverified', 'status.partial'],
+    [true, true, 'unverified', 'status.configured'],
+    [true, true, 'verifying', 'verifying'],
+    [true, true, 'valid', 'valid'],
+    [true, true, 'rejected', 'status.rejected'],
+    [true, true, 'expired', 'status.expired'],
+    [true, true, 'unavailable', 'status.unavailable']
+  ]) {
+    module.credentialState = {hasSaved, configured, verification};
+    for (const reading of [null, {status: 'ok'}, {status: 'error'}]) {
+      const summary = pluginLimitSettingsStatus(module, reading);
+      assert.equal(summary.key, 'plugins.credentials.' + key);
+      for (const language of ['en','zh-TW','zh-CN','ja','ko','pt-BR']) {
+        assert.notEqual(translate(language, summary.key), summary.key);
+        assert.notEqual(translate(language, summary.detailKey), summary.detailKey);
+      }
+    }
+  }
+  assert.equal(pluginLimitSettingsStatus(module, null, false), null);
+});

@@ -36,6 +36,10 @@ test('credential permission split, namespace identity, backend transport, disabl
   const response=await f.backend('network.request',{moduleId:'one',requestId:'probe',url:'https://fixture.example/quota',headers:{Authorization:'Bearer fixture-value'}});
   assert.equal(response.body,'fixture response');assert.equal(f.request[1].credentials,'omit');
   assert.equal(JSON.stringify(f.invoke('plugins:list')).includes('fixture-value'),false);
+  const modules=f.invoke('plugins:list').limits.modules;
+  assert.deepEqual(modules.find(module=>module.moduleId==='one').credentialState,{hasSaved:true,configured:true,verification:'unverified'});
+  assert.deepEqual(modules.find(module=>module.moduleId==='two').credentialState,{hasSaved:false,configured:false,verification:'unverified'});
+
   f.children.at(-1).emit('message',{type:'host-call',id:986,method:'network.request',args:{moduleId:'one',requestId:'hide',url:'https://fixture.example/slow'}});
   await tick();const hiddenSignal=f.request[1].signal;f.send(f.main,'home',[]);await tick();
   assert.equal(hiddenSignal.aborted,true,'backend demand loss cancels host requests');

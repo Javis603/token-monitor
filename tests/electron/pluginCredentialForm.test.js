@@ -4,12 +4,12 @@ const assert=require('node:assert/strict');
 const {create}=require('../../src/electron/renderer/pluginCredentials');
 const {Element}=require('../helpers/notchPanel');
 const tick=()=>new Promise(setImmediate);
-function fixture(){
+function fixture(statusInHeader=()=>false){
   const document={createElement:tag=>{const node=new Element(tag);if(['input','textarea'].includes(tag))node.value='';node.prepend=(...nodes)=>node.replaceChildren(...nodes,...node.children);return node;}};
   const root=new Element();let revision=1, fail=false;
   const calls=[];
   const snapshot=()=>({revision,fields:{token:true,cookies:false},configured:true,declaration:{fields:[{id:'token',label:'Token',required:true,control:'input'},{id:'cookies',label:'Cookies',control:'textarea'}]}});
-  const controller=create({document,t:key=>key,localize:v=>v,call:async(method,_args)=>{calls.push({method,args:_args});if(method==='credentials.status')return snapshot();if(fail)throw Error('credentials-conflict');revision++;return snapshot();}});
+  const controller=create({document,statusInHeader,t:key=>key,localize:v=>v,call:async(method,_args)=>{calls.push({method,args:_args});if(method==='credentials.status')return snapshot();if(fail)throw Error('credentials-conflict');revision++;return snapshot();}});
   return{root,calls,controller,set fail(value){fail=value;}};
 }
 test('form submits only touched fields, handles explicit empty, retains failed drafts and masks saved presence',async()=>{
@@ -71,4 +71,23 @@ test('conflicting clear retains its revision until explicit reload, including an
  assert.equal(input.value,'synthetic-draft');assert.equal(action('reload').hidden,false);
  defer=false;action('reload').fire('click');await tick();assert.equal(input.value,'synthetic-draft');action('save').fire('click');await tick();
  assert.equal(calls.at(-1).args.expectedRevision,3);assert.equal(input.value,'');editor.dispose();
+});
+
+test('host header owns the credential label; editing actions remain with fields and standalone status stays available', async () => {
+  const f=fixture(()=>true),editor=await f.controller.mount(f.root,{moduleId:'one'});
+  const summary=f.root.querySelector('.plugin-credential-summary');
+  const feedback=summary.querySelector('p');
+  const buttons=f.root.querySelectorAll('button');
+  const clear=buttons.find(button=>button.dataset.credentialAction==='clear');
+  const save=buttons.find(button=>button.dataset.credentialAction==='save');
+  assert.equal(feedback.hidden,true);
+  assert.equal(clear.parentNode,save.parentNode,'clear is beside save/cancel while editing');
+  const cancel=buttons.find(button=>button.dataset.credentialAction==='cancel');
+  cancel.fire('click');await tick();
+  assert.equal(clear.parentNode,summary,'collapsed editor retains its management actions');
+  assert.equal(feedback.hidden,true);
+  editor.dispose();
+  const standalone=fixture(),own=await standalone.controller.mount(standalone.root,{moduleId:'one'});
+  assert.equal(standalone.root.querySelector('.plugin-credential-summary').querySelector('p').hidden,false);
+  own.dispose();
 });
