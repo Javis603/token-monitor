@@ -16,7 +16,7 @@ const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 const fixtureDir = path.join(scratch, 'source');
 fs.mkdirSync(fixtureDir, { recursive: true });
 fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'string',label:'Display mode',default:'meter'}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',connection:'openai',capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
-fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async()=>({call:async(method,args)=>{if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
+fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-reject')return host.call('webSession.request',{key:'one'});if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
 fs.writeFileSync(path.join(fixtureDir,'settings.mjs'), `
 export async function activate(ctx) {
   window.quotaViewEvents ||= [];
@@ -41,7 +41,7 @@ app.commandLine.appendSwitch('host-resolver-rules','MAP * ~NOTFOUND, EXCLUDE loc
 registerPluginScheme(protocol);
 app.on('window-all-closed',()=>{});
 let runtime,win;
-let loginSession, loginWindow;
+let loginSession, loginWindow, fixtureConsent = 1;
 // Synthetic account capture exercises the real main/preload/renderer path.
 // It never opens a website or invokes the OS credential backend.
 function FixtureWindow(options) {
@@ -121,8 +121,8 @@ app.whenReady().then(async () => {
   }
   const patch=value=>{settings={...settings,...value};win.webContents.send('settings:push',settings);};
   runtime=createPluginRuntime({electron:{BrowserWindow:FixtureWindow,ipcMain,session:fixtureSessions,utilityProcess,safeStorage:fixtureSafeStorage,
-   dialog:{showMessageBox:async()=>({response:1}),showOpenDialog:async()=>({canceled:false,filePaths:[fixtureDir]})}},
-   userDataDir:scratch,getSettings:()=>settings,getAppSettings:()=>settings,getContext:()=>({source:'fixture'}),getLocale:()=>settings.language,
+   dialog:{showMessageBox:async()=>({response:fixtureConsent}),showOpenDialog:async()=>({canceled:false,filePaths:[fixtureDir]})}},
+   fetchImpl:async()=>({ok:false,status:401}),userDataDir:scratch,getSettings:()=>settings,getAppSettings:()=>settings,getContext:()=>({source:'fixture'}),getLocale:()=>settings.language,
    isMainSender:event=>event.sender===win.webContents,persistPluginStates:pluginStates=>patch({pluginStates}),
    persistManagementSettings:patch,applySettingsPatch:patch,env:{},log:console.log});
   await runtime.start();runtime.publishStats(stats);
@@ -204,6 +204,30 @@ app.whenReady().then(async () => {
   await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connected')`,'login completion updates rebuilt row without Status click');
   assert.equal(await js("state.pluginCatalog.limits.modules.every(module=>!module.sampling)"),true,'connection notification does not start quota demand');
   await capture('settings-connected.png');
+  await runtime.manager.call('synthetic-limits','fixture-reject');
+  await js(`${accountBox}.refreshConnectionStatus()`);
+  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.reconnectRequired')`,'rejected connection before reconnect');
+  fixtureConsent=0;
+  await js(`${accountBox}.querySelector('button').click()`);
+  await pause(100);
+  await js(`${accountBox}.refreshConnectionStatus()`);
+  await capture('reconnect-cancelled.png');
+  assert.equal(await js(`${accountBox}.querySelector('span').textContent`),await js("t('plugins.connection.state.reconnectRequired')"),'cancelled reconnect remains rejected');
+  assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')"),true,'last quota exists before disconnect');
+  await capture('disconnect-before.png');
+  await js(`${accountBox}.querySelectorAll('button')[2].click()`);
+  await pause(150);
+  await js("loadPluginCatalog()");
+  await capture('disconnect-after.png');
+  assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')"),false,'disconnect clears paused quota');
+  assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:two')"),true,'disconnect preserves sibling quota');
+  fixtureConsent=1;
+  await js(`${accountBox}.querySelector('button').click()`);
+  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connecting')`,'replacement login');
+  const replacementRequest={...request,webContentsId:loginWindow.webContents.id};
+  loginSession.before(replacementRequest,()=>{}); await loginSession.completed({...replacementRequest,statusCode:200});
+  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connected')`,'replacement login clears rejection');
+
   await js(`(()=>{window.quotaDraftNode=document.querySelector('[data-limit-module="plugin:synthetic-limits:one"] [data-quota-draft]');quotaDraftNode.value='unsaved fixture';quotaDraftNode.focus();state.limitProviderRenderSignature='';renderLimitProviderCheckboxes();})()`);
   assert.equal(await js("quotaDraftNode===document.querySelector('[data-limit-module=\"plugin:synthetic-limits:one\"] [data-quota-draft]')&&quotaDraftNode.value==='unsaved fixture'&&document.activeElement===quotaDraftNode"),true,'row refresh retains controls, draft and focus');
   await js("setLimitProviderSettingsExpanded('')");

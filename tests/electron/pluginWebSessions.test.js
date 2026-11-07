@@ -200,6 +200,20 @@ test('bearer responses are bounded and 401 makes reconnect visible', async t => 
   await f.service.request('credit-test', 'platform');
   assert.deepEqual(await f.service.status('credit-test', 'platform'), { state: 'error', error: 'reconnect-required' });
 });
+test('cancelled reconnect retains confirmed rejection until replacement authorization is saved', async t => {
+  for (const code of [401,403]) {
+    const f=fixture(t); await f.service.connect('credit-test',config); await f.capture();
+    f.fetch(async()=>({ok:false,status:code})); await f.service.request('credit-test','platform');
+    const rejected={state:'error',error:'reconnect-required'};
+    f.approval(0);
+    await f.service.connect('credit-test',config);
+    assert.deepEqual(await f.service.status('credit-test','platform'),rejected,'consent cancellation preserves rejection');
+    f.approval(1); await f.service.connect('credit-test',config); f.windows.at(-1).destroy();
+    assert.deepEqual(await f.service.status('credit-test','platform'),rejected,'closing login preserves rejection');
+    await f.service.connect('credit-test',config); await f.capture();
+    assert.equal((await f.service.status('credit-test','platform')).state,'connected','saved replacement clears rejection');
+  }
+});
 test('captured JWT expiry requires reconnect without sending expired authorization', async t => {
   const f = fixture(t); await f.service.connect('credit-test', config);
   const payload = Buffer.from(JSON.stringify({ exp: 1 })).toString('base64url');

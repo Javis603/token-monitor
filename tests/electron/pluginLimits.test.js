@@ -78,6 +78,21 @@ test('forgetting host connections clears their retained quota but preserves unco
   service.forgetConnections('sample-plugin');
   assert.deepEqual(service.records().map(row => row.provider), ['plugin:sample-plugin:two']);
 });
+test('disconnect invalidates only its module while paused or sampling', async t => {
+  for (const paused of [true,false]) {
+    const modules=[{id:'one',name:'One',connection:'openai'},{id:'two',name:'Two',connection:'openai'},{id:'plain',name:'Plain'}];
+    const ids=modules.map(module=>`plugin:sample-plugin:${module.id}`);
+    const manager={list:()=>({plugins:[{id:'sample-plugin',status:'active',revision:'a',limits:modules}]}),
+      call:async()=>({status:'ok',windows:[{kind:'billing',metric:'credits',remaining:80,currency:'USD'}]})};
+    const service=createPluginLimits({manager,getSettings:()=>({limitProviders:ids.join(',')}),changed(){}});
+    t.after(()=>service.dispose()); service.demand(true);
+    for(let n=0;n<30&&service.records().length<3;n++) await new Promise(setImmediate);
+    assert.equal(service.records().length,3);
+    if(paused) service.demand(false);
+    service.forgetConnections('sample-plugin','one');
+    assert.deepEqual(service.records().map(row=>row.provider),ids.slice(1));
+  }
+});
 test('visibility resume preserves last-good windows while pending and after transient failure', async t => {
   const id = 'plugin:sample-plugin:one';
   let finish;
