@@ -2298,6 +2298,8 @@
       const key = deps.history.key(provider);
       const openHistory = (interactive) => {
         if (!row.isConnected) return;
+        if (!interactive && id === 'mimo'
+          && row.querySelector('[data-usage-item="credits"] .limit-detail-tooltip-wrap:hover')) return;
         const rect = row.getBoundingClientRect();
         void deps.history.open(key, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, interactive).catch(() => {});
       };
@@ -2308,6 +2310,15 @@
         if (deps.history.activeKey?.()) openHistory(false);
         else hoverTimer = setTimeout(() => openHistory(false), 160);
       });
+      if (id === 'mimo') {
+        const detail = row.querySelector('[data-usage-item="credits"] .limit-detail-tooltip-wrap');
+        detail?.addEventListener('pointerenter', () => clearTimeout(hoverTimer));
+        detail?.addEventListener('pointerleave', () => {
+          if (settings()?.limitsHistoryOpenMode !== 'click' && row.matches(':hover')) {
+            hoverTimer = setTimeout(() => openHistory(false), 160);
+          }
+        });
+      }
       row.addEventListener('pointerleave', () => { clearTimeout(hoverTimer); deps.history.leave(key); });
       row.dataset.limitHistory = key;
       row.classList.toggle('is-history-active', deps.history.activeKey?.() === key);
