@@ -470,6 +470,9 @@ Object.assign(els, {
   edgeDockMoreOptionsDetails: document.getElementById('edgeDockMoreOptionsDetails'),
   edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
   edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockBubbleSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockBubbleSize"]')),
+  edgeDockBubbleCustomScaleRow: document.getElementById('edgeDockBubbleCustomScaleRow'),
+  edgeDockBubbleCustomScaleInput: document.getElementById('edgeDockBubbleCustomScaleInput'),
   edgeDockSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockSize"]')),
   edgeDockCustomScaleRow: document.getElementById('edgeDockCustomScaleRow'),
   edgeDockCustomScaleInput: document.getElementById('edgeDockCustomScaleInput'),
@@ -14339,7 +14342,7 @@ function edgeDockAvailable() {
 
 function syncDockSizeControls(surface) {
   const sizes = (els[`${surface}SizeInputs`] || []).map((input) => input.value);
-  const size = sizes.includes(state.settings?.[`${surface}Size`]) ? state.settings[`${surface}Size`] : 'medium';
+  const size = sizes.includes(state.settings?.[`${surface}Size`]) ? state.settings[`${surface}Size`] : surface === 'edgeDockBubble' ? 'inherit' : 'medium';
   for (const input of els[`${surface}SizeInputs`] || []) input.checked = input.value === size;
   els[`${surface}CustomScaleRow`]?.classList.toggle('hidden', size !== 'custom');
   if (els[`${surface}CustomScaleInput`] && document.activeElement !== els[`${surface}CustomScaleInput`]) {
@@ -14413,6 +14416,7 @@ function syncDockControls() {
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
   syncDockSizeControls('edgeDock');
+  syncDockSizeControls('edgeDockBubble');
   syncDockSizeControls('notch');
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
@@ -14595,7 +14599,7 @@ for (const input of els.edgeDockModeInputs || []) {
     if (input.checked) void saveSettings({ edgeDockMode: input.value });
   });
 }
-for (const surface of ['edgeDock', 'notch']) {
+for (const surface of ['edgeDock', 'edgeDockBubble', 'notch']) {
   for (const input of els[`${surface}SizeInputs`] || []) {
     input.addEventListener('change', () => {
       if (!input.checked) return;
