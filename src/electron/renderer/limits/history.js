@@ -193,16 +193,17 @@
       plot.append(svgNode('line', { x1: left, x2: right, y1: Y(value), y2: Y(value), class: 'quota-history-grid' }));
       if (value !== 50) plot.append(svgNode('text', { x: 0, y: Y(value) + 4 }, `${value}%`));
     }
-    $('guide-caption').hidden = false;
-    $('guide-caption').textContent = t('guide');
-    plot.append(paintSvg(svgNode('line', { x1: left, x2: right, y1: Y(100), y2: Y(0), class: 'quota-history-guide', 'aria-hidden': 'true' }), { stroke: 'var(--accent)' }));
+    // The scaled view compares each lane at the same current instant. Its x
+    // axis is therefore cycle start -> now, not cycle start -> reset; otherwise
+    // the latest points of a 5h and a 7d lane land at different fractions.
+    $('guide-caption').hidden = true;
     const shownRows = rows.map(row => {
       let points = (row.item.points || []).filter(point => point.at >= row.bounds.start && point.at <= row.bounds.end);
       if (!points.length) {
         const reading = model.historyReadings(row.item.window).primary;
         if (reading?.unit === 'pp') points = [
           { at: row.bounds.start, value: reading.value },
-          { at: row.bounds.end, value: reading.value }
+          { at: Math.min(now, row.bounds.end), value: reading.value }
         ];
       }
       return { ...row, points };
@@ -212,7 +213,8 @@
       const isSelected = row.item === current();
       const strokeWidth = rows.length > 1 ? (isSelected ? 2 : 1.45) : 1.65;
       const opacity = rows.length > 1 && !isSelected ? 0.78 : 1;
-      const XAt = at => X((at - row.bounds.start) / Math.max(1, row.bounds.end - row.bounds.start));
+      const viewEnd = Math.min(now, row.bounds.end);
+      const XAt = at => X((at - row.bounds.start) / Math.max(1, viewEnd - row.bounds.start));
       for (const segment of model.segments(row.points)) {
         let d = '';
         segment.forEach((point, index) => {
@@ -232,7 +234,7 @@
       if (last) plot.append(paintSvg(svgNode('circle', { cx: XAt(last.at), cy: Y(100 - last.value), r: isSelected ? 2.6 : 2, class: 'quota-history-dot' }), { fill: row.color, opacity }));
     }
     plot.append(svgNode('text', { x: left, y: 81 }, t('cycleStart')));
-    plot.append(svgNode('text', { x: right, y: 81, 'text-anchor': 'end' }, t('cycleEnd')));
+    plot.append(svgNode('text', { x: right, y: 81, 'text-anchor': 'end' }, t('cycleNow')));
   }
 
   function drawDistribution(entry) {
