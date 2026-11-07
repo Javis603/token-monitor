@@ -31,16 +31,42 @@ function normalizeTokscaleClientName(value) {
   return TOKSCALE_CLIENT_ALIASES.get(raw) || raw;
 }
 
+// Match the bundled scanner's first-party prefix fold, including its ordered
+// family inference. Router, reseller, cross-vendor and nested names stay distinct.
+const TOKSCALE_MODEL_PROVIDERS = [
+  [/^(?:anthropic|vertex|vertex_ai)$/, /(?:^|[^\p{L}\p{N}])(?:claude|anthropic|opus|sonnet|haiku|fable)(?=$|[^a-z])/u],
+  [/^openai(?:_codex)?$/, /(?:^|[^\p{L}\p{N}])(?:gpt|openai)(?=$|[^a-z])|(?:^|[^a-z0-9])o[134](?=$|[^a-z0-9])/u],
+  [/^(?:google|gemini)$/, /(?:^|[^\p{L}\p{N}])(?:gemini|google)(?=$|[^a-z])/u],
+  [/^x_?ai$/, /(?:^|[^\p{L}\p{N}])grok(?=$|[^a-z])/u],
+  [/^deepseek(?:_ai)?$/, /(?:^|[^\p{L}\p{N}])deepseek(?=$|[^a-z])/u],
+  [/^minimax(?:ai|_ai)?$/, /(?:^|[^\p{L}\p{N}])minimax(?=$|[^a-z])/u],
+  [/^mistral(?:ai)?$/, /(?:^|[^\p{L}\p{N}])(?:mistral|mixtral|codestral|devstral)(?=$|[^a-z])/u],
+  [/^meta(?:_llama)?$/, /(?:^|[^\p{L}\p{N}])(?:llama|meta|muse-spark)(?=$|[^a-z])/u],
+  [/^qwen$/, /(?:^|[^\p{L}\p{N}])qwen(?=$|[^a-z])/u],
+  [/^sakana$/, /(?:^|[^\p{L}\p{N}])fugu(?=$|[^a-z])/u],
+  [/^(?:moonshot(?:ai)?|kimi_for_coding)$/, /(?:^|[^\p{L}\p{N}])kimi(?=$|[^a-z])|(?:^|[^a-z0-9])k[23](?=$|[^a-z0-9])/u],
+  [/^xiaomi$/, /(?:^|[^\p{L}\p{N}])mimo(?=$|[^a-z])/u],
+  [/^z_?ai$/, /(?:^|[^\p{L}\p{N}])glm(?=$|[^a-z])/u]
+];
+
 function normalizeTokscaleModelNameForClient(value, client) {
   const model = String(value ?? '').trim();
   if (normalizeTokscaleClientName(client) === 'cursor' && /^(?:auto|default)$/i.test(model)) {
     return 'cursor-auto';
   }
-  return model;
+  const qualified = model.toLowerCase().match(/^([^/]+)\/([^/]+)$/);
+  if (!qualified) return model;
+  const [, prefix, bare] = qualified;
+  // The old scanner already applied casing, dates and Claude decimal folding;
+  // only this prefix-dependent Claude ordering is new in the bundled revision.
+  const claude = prefix === 'anthropic' && bare.match(/^claude-([^-]+)-([^-]+)-(opus|sonnet|haiku)$/);
+  if (claude) return `claude-${claude[3]}-${claude[1]}-${claude[2]}`;
+  const provider = TOKSCALE_MODEL_PROVIDERS.find(([, family]) => family.test(bare));
+  return provider?.[0].test(prefix.trim().replaceAll('-', '_')) ? bare : model;
 }
 
 // A graph/day component summary is keyed by the source model labels. Its
-// per-model buckets can follow a Cursor rename only if no other client shares
+// per-model buckets can follow a rename only if no other client shares
 // the old label; otherwise the aggregate has no client split to recover.
 function normalizeTokscaleModelComponentSummary(summary, rows) {
   if (!summary?.perModel) return summary;

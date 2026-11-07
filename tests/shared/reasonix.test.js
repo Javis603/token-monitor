@@ -124,11 +124,12 @@ test('Reasonix is a normalized tracked client', () => {
   assert.equal(normalizeClientName('reasonix-stats'), 'reasonix');
 });
 
-test('Reasonix model prefix normalization is scoped to explicit client context', () => {
+test('Reasonix routing-prefix normalization stays scoped alongside first-party folding', () => {
   assert.equal(normalizeModelName('deepseek/deepseek-v3'), 'deepseek/deepseek-v3');
   assert.equal(normalizeModelNameForClient('deepseek/deepseek-v4-flash', 'reasonix'), 'deepseek-v4-flash');
   assert.equal(normalizeModelNameForClient('deepseek-flash/deepseek-v4-flash', 'reasonix'), 'deepseek-v4-flash');
-  assert.equal(normalizeModelNameForClient('deepseek/deepseek-v3', 'codex'), 'deepseek/deepseek-v3');
+  assert.equal(normalizeModelNameForClient('deepseek/deepseek-v3', 'codex'), 'deepseek-v3');
+  assert.equal(normalizeModelNameForClient('deepseek-flash/deepseek-v4-flash', 'codex'), 'deepseek-flash/deepseek-v4-flash');
 
   const period = extractUsageFromTokscale({ entries: [{
     client: 'codex',
@@ -136,8 +137,8 @@ test('Reasonix model prefix normalization is scoped to explicit client context',
     input: 10,
     output: 2
   }] });
-  assert.equal(period.models['deepseek/deepseek-v3'], 12);
-  assert.equal(period.models['deepseek-v3'], undefined);
+  assert.equal(period.models['deepseek-v3'], 12);
+  assert.equal(period.models['deepseek/deepseek-v3'], undefined);
 
   const normalized = normalizePeriod({
     models: { 'deepseek/deepseek-v3': 1 },
@@ -148,7 +149,7 @@ test('Reasonix model prefix normalization is scoped to explicit client context',
   });
   assert.equal(normalized.models['deepseek/deepseek-v3'], 1);
   assert.equal(normalized.clientModels.reasonix['deepseek-v4-flash'], 2);
-  assert.equal(normalized.clientModels.codex['deepseek/deepseek-v3'], 3);
+  assert.equal(normalized.clientModels.codex['deepseek-v3'], 3);
 });
 
 test('Reasonix and latest Tokscale Codex reasoning close over the public output bucket', () => {
