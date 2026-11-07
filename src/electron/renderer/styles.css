@@ -5505,6 +5505,22 @@ html.is-windows .limit-live-badge {
   right: auto;
   left: calc(anchor(left) - 1px);
 }
+.plugin-quota-info .limit-detail-tooltip {
+  right: auto;
+  left: anchor(center);
+  translate: calc(-50% + var(--tooltip-shift, 0px)) 0;
+  max-width: calc(100vw - 16px);
+  grid-template-columns: minmax(0, max-content) minmax(0, max-content);
+}
+.plugin-quota-info .limit-detail-tooltip-row > span {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.plugin-quota-info .limit-detail-tooltip::after {
+  right: auto;
+  left: calc(50% - 4px - var(--tooltip-shift, 0px));
+}
 .usage-cost-info .limit-detail-tooltip {
   right: auto;
   left: anchor(center);
