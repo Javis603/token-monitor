@@ -121,6 +121,7 @@ async function runQwenworkDeviceFlowLogin(options = {}, deps = {}) {
   const onStatus = typeof options.onStatus === 'function' ? options.onStatus : () => {};
   const now = deps.now || Date.now;
   const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : QWENWORK_LOGIN_TIMEOUT_MS;
+  const signal = options.signal || deps.signal || null;
   const flow = {
     ...createPkce(),
     nonce: crypto.randomUUID(),
@@ -132,17 +133,19 @@ async function runQwenworkDeviceFlowLogin(options = {}, deps = {}) {
   onStatus({ phase: 'polling' });
   const deadline = now() + timeoutMs;
   while (true) {
-    if (deps.signal?.aborted) throw errorWithStatus('cancelled', 'QwenWork sign-in cancelled');
+    if (signal?.aborted) throw errorWithStatus('cancelled', 'QwenWork sign-in cancelled');
     if (now() >= deadline) throw errorWithStatus('timedOut', 'QwenWork sign-in timed out');
     let body = null;
     try {
       const result = await requestJson(pollUrl(options.apiBaseUrl, flow), {
         method: 'GET',
         headers: { Accept: 'application/json', 'X-Request-Id': crypto.randomUUID() }
-      }, deps);
+      }, { ...deps, signal });
       if (result.response.ok) body = result.body;
     } catch (error) {
-      if (error?.status === 'cancelled' || error?.status === 'timedOut') throw error;
+      if (error?.status === 'cancelled') throw error;
+      // A single slow poll is not the end of the five-minute login window.
+      // Keep polling until the overall deadline below.
       // An unauthorized or not-yet-authorized poll is the normal pending state
       // for this endpoint; keep polling until the deadline.
     }
@@ -151,7 +154,7 @@ async function runQwenworkDeviceFlowLogin(options = {}, deps = {}) {
       onStatus({ phase: 'success' });
       return { ok: true, session };
     }
-    await (deps.sleep || sleep)(deps.pollIntervalMs ?? QWENWORK_POLL_INTERVAL_MS, deps.signal);
+    await (deps.sleep || sleep)(deps.pollIntervalMs ?? QWENWORK_POLL_INTERVAL_MS, signal);
   }
 }
 
@@ -164,7 +167,10 @@ async function refreshQwenworkSession(session, deps = {}) {
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({ refresh_token: session.refresh, target: 'c' })
   }, deps);
-  if (!response.ok) throw errorWithStatus('unauthorized', `QwenWork refresh failed (HTTP ${response.status})`);
+  if (!response.ok) {
+    throw errorWithStatus(response.status === 429 ? 'sourceRateLimited' : 'unavailable',
+      `QwenWork refresh failed (HTTP ${response.status})`);
+  }
   const token = String(body?.token ?? '').trim();
   if (!token) throw errorWithStatus('unauthorized', 'QwenWork refresh returned no token');
   return {

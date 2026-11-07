@@ -1447,11 +1447,12 @@ function ensureQwenworkLimitProviderEnabled(settings) {
   return changed;
 }
 
-function migrateQwenworkLimitProvider(settings) {
+function migrateQwenworkLimitProvider(settings, { hadSavedOrder = true } = {}) {
   if (!settings || typeof settings !== 'object') return false;
   const providers = parseLimitProviders(settings.limitProviders);
   const order = parseLimitProviders(settings.limitProviderOrder);
-  if (!providers.length || providers.includes('qwenwork') || order.includes('qwenwork')) return false;
+  if (!providers.length || providers.includes('qwenwork')) return false;
+  if (hadSavedOrder && order.includes('qwenwork')) return false;
   settings.limitProviders = [...providers, 'qwenwork'].join(',');
   const nextOrder = [...order];
   const qoder = nextOrder.indexOf('qoder');
@@ -2213,7 +2214,7 @@ function readSettings() {
     if (saved.limitProviderOrder !== undefined) {
       merged.limitProviderOrder = migrateLimitProviderOrder(saved.limitProviderOrder);
     }
-    if (migrateQwenworkLimitProvider(merged)) qwenworkLimitProviderPersistPending = true;
+    if (migrateQwenworkLimitProvider(merged, { hadSavedOrder: saved.limitProviderOrder !== undefined })) qwenworkLimitProviderPersistPending = true;
     if (saved.clientDisplayOrder !== undefined) {
       merged.clientDisplayOrder = migrateClientDisplayOrder(saved.clientDisplayOrder);
     }
@@ -9245,7 +9246,8 @@ app.whenReady().then(() => {
         onStatus: sendStatus
       }, {
         openExternal: (url) => shell.openExternal(url),
-        fetch
+        fetch: electronLimitsFetch(),
+        signal: controller.signal
       });
       if (qwenworkLoginController !== controller) {
         return { ok: false, error: 'QwenWork sign-in cancelled.', flowId };
@@ -9287,6 +9289,10 @@ app.whenReady().then(() => {
     return { ok: true };
   });
   ipcMain.handle('qwenwork:signOut', () => {
+    const controller = qwenworkLoginController;
+    qwenworkLoginController = null;
+    qwenworkLoginFlowId = '';
+    controller?.abort();
     settings.qwenworkSession = '';
     saveSettings({ throwOnError: true });
     pushSettingsToRenderer();
