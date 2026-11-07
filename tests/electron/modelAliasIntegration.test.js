@@ -21,21 +21,25 @@ function mainFunction(name, dependencies) {
 }
 
 test('saved first-party aliases still apply after persisted period normalization', () => {
-  const aliases = { 'openai/gpt-5': 'Work model', 'openrouter/gpt-5': 'Router model' };
-  const before = JSON.stringify(aliases);
-  const period = normalizePeriod({ totalTokens: 100, models: { 'openai/gpt-5': 100 } });
-  const stats = { periods: { today: period } };
-  for (const grouping of ['off', 'duplicates', 'prefix']) {
-    const projected = presentation.projectModelAliasStats(stats, aliases, { grouping });
-    assert.equal(projected.periods.today.models['Work model'], 100);
-    assert.equal(period.models['gpt-5'], 100, 'presentation does not change canonical accounting');
+  for (const label of ['Work model', 'GPT 5']) {
+    const aliases = { 'openai/gpt-5': label, 'openrouter/gpt-5': 'Router model' };
+    const before = JSON.stringify(aliases);
+    const period = normalizePeriod({ totalTokens: 100, models: { 'openai/gpt-5': 100 } });
+    const stats = { periods: { today: period } };
+    for (const grouping of ['off', 'duplicates', 'prefix']) {
+      const projected = presentation.projectModelAliasStats(stats, aliases, { grouping });
+      assert.equal(projected.periods.today.models[label], 100);
+      assert.equal(period.models['gpt-5'], 100, 'presentation does not change canonical accounting');
+    }
+    const preferred = presentation.projectModelAliasStats(stats, { ...aliases, 'gpt-5': 'Current name' });
+    assert.equal(preferred.periods.today.models['Current name'], 100, 'direct canonical alias wins');
+    assert.equal(presentation.projectModelAliasStats(stats, { 'openrouter/gpt-5': 'Router model' }).periods.today, period);
+    const history = { daily: [{ date: '2026-07-18', perModel: { 'gpt-5': { tokens: 100 } } }] };
+    assert.equal(presentation.projectModelAliasHistory(history, aliases).daily[0].perModel[label].tokens, 100);
+    assert.equal(JSON.stringify(aliases), before, 'saved preferences remain unchanged');
   }
-  const preferred = presentation.projectModelAliasStats(stats, { ...aliases, 'gpt-5': 'Current name' });
-  assert.equal(preferred.periods.today.models['Current name'], 100, 'direct canonical alias wins');
-  assert.equal(presentation.projectModelAliasStats(stats, { 'openrouter/gpt-5': 'Router model' }).periods.today, period);
-  const history = { daily: [{ date: '2026-07-18', perModel: { 'gpt-5': { tokens: 100 } } }] };
-  assert.equal(presentation.projectModelAliasHistory(history, aliases).daily[0].perModel['Work model'].tokens, 100);
-  assert.equal(JSON.stringify(aliases), before, 'saved preferences remain unchanged');
+  const stats = { periods: { today: normalizePeriod({ totalTokens: 10, models: { 'openai/gpt-5.5': 10 } }) } };
+  assert.equal(presentation.projectModelAliasStats(stats, { 'openai/gpt-5-5': 'GPT 5.5' }).periods.today.models['GPT 5.5'], 10);
 });
 
 test('Electron presentation applies aliases after limit projection without changing cached stats', () => {

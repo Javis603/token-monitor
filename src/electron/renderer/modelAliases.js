@@ -188,6 +188,7 @@
   }
 
   return {
+    modelAliasMatchKey: matchKey,
     normalizeModelAliases,
     normalizeModelAliasGrouping,
     inferModelAliases,
