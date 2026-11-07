@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { readRegularFileNoFollow, writePrivateJsonAtomic } = require('../../shared/credentialStore');
+const { createSessionProxyApplier, sessionProxyConfig } = require('../networkProxy');
 const keyPattern = /^[a-z0-9][a-z0-9-]{0,39}$/;
 // Host-owned adapter. Plugin or renderer input cannot choose a bearer destination.
 function connectionConfig(args) {
@@ -22,7 +23,7 @@ function authorizationExpiry(authorization) {
     return Number.isFinite(value.exp) && value.exp > 0 && value.exp < 8640000000000 ? value.exp * 1000 : null;
   } catch { return null; }
 }
-function createPluginWebSessions({ electron, fetchImpl, directory, active, timeoutMs = 180000, platform = process.platform, changed = () => {} }) {
+function createPluginWebSessions({ electron, fetchImpl, directory, active, getSettings = () => ({}), timeoutMs = 180000, platform = process.platform, changed = () => {} }) {
   const { BrowserWindow, session, safeStorage, dialog } = electron;
   const live = new Map(), requests = new Map(), failures = new Map(), versions = new Map();
   let disposed = false;
@@ -96,6 +97,8 @@ function createPluginWebSessions({ electron, fetchImpl, directory, active, timeo
       if (consent.response !== 1) { stop(ref); return { state: 'notConnected' }; }
       const browserSession = session.fromPartition(`plugin-web-login-${randomUUID()}`);
       entry.browserSession = browserSession;
+      await createSessionProxyApplier({ getSession: () => browserSession, getConfig: () => sessionProxyConfig(getSettings()) }).ensureReady();
+      if (live.get(ref) !== entry || disposed || !active(id)) return { state: 'notConnected' };
       browserSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
       const win = new BrowserWindow({ width: 980, height: 760, title: `${id} — Sign in`,
         webPreferences: { session: browserSession, nodeIntegration: false, contextIsolation: true, sandbox: true } });
@@ -128,7 +131,10 @@ function createPluginWebSessions({ electron, fetchImpl, directory, active, timeo
       entry.timer = setTimeout(() => stop(ref), timeoutMs); entry.timer.unref?.();
       void win.loadURL(config.loginUrl).catch(() => stop(ref));
       return { state: 'connecting' };
-    } catch (_) { stop(ref); throw Error('web-session-connect-failed'); }
+    } catch (_) {
+      if (live.get(ref) !== entry) return { state: 'notConnected' };
+      stop(ref); throw Error('web-session-connect-failed');
+    }
   }
   async function request(id, key) {
     available(id); const ref = identity(id, key), version = versions.get(ref) || 0;
