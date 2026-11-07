@@ -1575,11 +1575,12 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
   return attributed;
 }
 
-function clientsForWatchPath(filePath, rootsByClient) {
+function clientsForWatchPath(filePath, rootsByClient, ignoreByClient = null) {
   if (!filePath) return [];
   const resolved = path.resolve(filePath);
   const matched = [];
   for (const [client, roots] of Object.entries(rootsByClient || {})) {
+    if (ignoreByClient?.[client]?.(resolved)) continue;
     if (roots.some((root) => {
       const resolvedRoot = path.resolve(root);
       return resolved === resolvedRoot || resolved.startsWith(resolvedRoot + path.sep);
@@ -1914,6 +1915,29 @@ function watchPolicyEntries(clientsCsv, options = {}) {
       return true;
     }
   );
+
+  // Prime's sessionDir may be cwd or the whole home. Its normal root sessions
+  // are direct JSONL files; RLM transcripts are artifacts/<parent>/sub-*/*.jsonl.
+  // Bound live traversal to that layout, while full Tokscale scans remain
+  // recursive. Explicit extra scan roots keep the custom-root policy below.
+  if (candidates['prime-agent']) {
+    const roots = clientSourceRoots('prime-agent', options)['prime-agent'];
+    const isTranscript = (name) => name.endsWith('.jsonl') && name !== 'rlm-subagents.jsonl';
+    bound('prime-agent', roots.filter(({ id }) => id === 'prime-agent-sessions').map(({ dir }) => dir),
+      directChildOnly(isTranscript));
+    bound('prime-agent', roots.filter(({ id }) => id === 'prime-agent-artifacts').map(({ dir }) => dir), (parts, resolved) => {
+      if (pruneDependencyTrees(parts)) return true;
+      if (parts.length === 1) {
+        try { return !fs.statSync(resolved).isDirectory(); } catch (_) {
+          // Removed parents can contain transcripts; keep their removal signal.
+          return false;
+        }
+      }
+      if (!parts[1].startsWith('sub-')) return true;
+      if (parts.length === 2) return false;
+      return parts.length !== 3 || !isTranscript(parts[2]);
+    });
+  }
 
   // Command Code recursively stores session transcripts below projects/, but
   // checkpoint streams use the same JSONL suffix and are explicitly skipped by
@@ -3490,6 +3514,10 @@ function startCollector(options) {
       Object.entries(watchAttributionRootsForClients(clients, watchRoots, watchOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
+    // Another client's policy may keep an event under a broad Prime root.
+    // Attribute it using Prime's own source policy, not the global union.
+    const attributionIgnores = rootsByClient['prime-agent']
+      ? { 'prime-agent': watchIgnoreMatcher('prime-agent', watchOptions) } : null;
     // A subset of the same roots, matched separately so a write to a client's
     // parse-local data cannot pass for a write to its self-sync source.
     const sourceSyncRootsByClient = Object.fromEntries(
@@ -3523,7 +3551,7 @@ function startCollector(options) {
       // the collector cannot re-trigger itself. See
       // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
       if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
-      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient);
+      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient, attributionIgnores);
       const activityClients = activityClientsForPath(filePath, activitySources);
       if (activityClients.length || eventClients.some(isSessionActivityClient)) {
         activityScheduler?.request();

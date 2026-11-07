@@ -11,6 +11,7 @@ const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/herme
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { catpawDataSources, nativeWindowsFolders } = require('./providers/catpaw/paths');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { primeAgentSessionRoots } = require('./providers/prime-agent/paths');
 const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
@@ -233,6 +234,11 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // at the profile while the scan read the $HOME tree, so Amp could show
   // `detected` next to usage collected from another directory.
   const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
+  add('jcode', ['jcode-sessions', path.join(nonBlankEnvPath('JCODE_HOME', path.join(tokscaleHome, '.jcode'), env), 'sessions')]);
+  if (enabled.has('prime-agent')) {
+    const [sessions, artifacts] = primeAgentSessionRoots({ homeDir: tokscaleHome, env });
+    add('prime-agent', ['prime-agent-sessions', sessions], ['prime-agent-artifacts', artifacts]);
+  }
   const xdgHome = xdgDataHome(tokscaleHome, env);
   const gooseFiles = enabled.has('goose')
     ? gooseSessionFiles({ homeDir: home, platform, env, windowsFolders: options.windowsFolders }) : [];
