@@ -14,7 +14,11 @@ const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 
 const fixtureDir = path.join(scratch, 'source');
 fs.mkdirSync(fixtureDir, { recursive: true });
-fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',identityIcon:nativeImage.createFromBitmap(Buffer.from([80,180,130,255,80,180,130,255,80,180,130,255,80,180,130,255]),{width:2,height:2}).toDataURL(),version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'select',label:'Display mode',default:'meter',options:[{value:'meter',label:'Percentage + balance'},{value:'balance',label:'Balance only'}]}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',credentials:{validation:true,fields:[{id:'token',label:'Platform session Bearer',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]},capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Token',required:true}]},capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
+const fixtureManifest = {tmApi:1,id:'synthetic-limits',name:'Synthetic limits',identityIcon:nativeImage.createFromBitmap(Buffer.from([80,180,130,255,80,180,130,255,80,180,130,255,80,180,130,255]),{width:2,height:2}).toDataURL(),version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'select',label:'Display mode',default:'meter',options:[{value:'meter',label:'Percentage + balance'},{value:'balance',label:'Balance only'}]}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',credentials:{validation:true,fields:[{id:'token',label:'Platform session Bearer',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]},capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Token',required:true}]},capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]};
+const fixtureSvg = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect fill="#f06b77" x="2" y="2" width="20" height="20" rx="4"/><path fill="#ffdb70" d="M7 7h10v10H7z"/></svg>').toString('base64');
+fixtureManifest.presentation = { icon: { native: 'codex' }, color: { palette: 'codex' } };
+fixtureManifest.limits[1].presentation = { icon: { data: fixtureSvg, mode: process.env.TM_PLUGIN_SVG_MASK === '1' ? 'mask' : 'image' }, color: { hex: '#d68cf0' } };
+fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify(fixtureManifest));
 fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-read'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return {configured:value.token==='synthetic-token'};}if(method==='fixture-network'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return host.call('network.request',{moduleId:args.moduleId,requestId:'fixture-probe',url:'https://example.test/quota',headers:{Authorization:'Bearer '+value.token}});}if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='credentials.validate'){await new Promise(resolve=>setTimeout(resolve,150));await host.call('credentials.read',{moduleId,expectedRevision:args.revision});return {status:fs.existsSync(file+'.validation')?fs.readFileSync(file+'.validation','utf8'):'valid'};}if(method==='fixture-validation'){fs.writeFileSync(file+'.validation',args.status);return true;}if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
 fs.writeFileSync(path.join(fixtureDir,'settings.mjs'), `
 export async function activate(ctx) {
@@ -124,10 +128,30 @@ app.whenReady().then(async () => {
   assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('Synthetic Team')"),true,'documented plugin plan appears in native Limits');
   assert.equal(await js("state.pluginCatalog.limits.providers.find(row=>row.provider==='plugin:synthetic-limits:two').planLabel"),'','missing plan stays blank');
   assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('Daily pool')&&document.querySelector('#limitsPanel').textContent.includes('Billing pool')"),true,'non-credit daily and billing plugin quotas render');
-  await waitFor("document.querySelector('#limitsPanel .limit-name img')?.naturalWidth>0",'plugin identity icon decodes in native Limits');
-  await js("document.querySelector('#limitsPanel .limit-name img').dispatchEvent(new Event('error'))");
-  assert.equal(await js("!!document.querySelector('#limitsPanel .limit-name .pv-icon')"),true,'icon decode failure uses shared fallback');
-  await js("state.limitsRenderSignature='';renderLimits()");
+  await waitFor("document.querySelector('#limitsPanel .limit-name .row-icon-codex')",'native Codex mask decodes');
+  const imageMode = process.env.TM_PLUGIN_SVG_MASK !== '1';
+  if (imageMode) {
+    await waitFor("document.querySelector('#limitsPanel .limit-name img')?.naturalWidth>0",'custom multicolor SVG decodes');
+    assert.equal(await js("document.querySelector('#limitsPanel .limit-name img').src.startsWith('data:image/svg+xml;base64,')"),true);
+    await js("document.querySelector('#limitsPanel .limit-name img').dispatchEvent(new Event('error'))");
+    await waitFor("document.querySelector('#limitsPanel .limit-name img')?.naturalWidth>0",'PNG identity fallback decodes');
+    assert.equal(await js("document.querySelector('#limitsPanel .limit-name img').src.startsWith('data:image/png;base64,')"),true);
+    await js("document.querySelector('#limitsPanel .limit-name img').dispatchEvent(new Event('error'))");
+    assert.equal(await js("!!document.querySelector('#limitsPanel .limit-name .pv-icon')"),true,'failed artwork ultimately uses shared fallback');
+  } else {
+    await waitFor("document.querySelector('#limitsPanel > :first-child .limit-name span[style*=mask-image]')",'custom SVG mask decodes');
+  }
+  await js("state.limitPanelRenderSignature='';renderLimits()");
+  await capture('presentation-native-and-custom.png');
+  assert.equal(await js("limitProviderColor(state.pluginCatalog.limits.modules.find(m=>m.moduleId==='one').id)===clientColors.codex"),true);
+  assert.equal(await js("limitProviderColor(state.pluginCatalog.limits.modules.find(m=>m.moduleId==='two').id)"),'#d68cf0');
+  const beforePalette = await js("clientColors.codex");
+  await js("tokenMonitor.updateSettings({vendorColors:{...state.settings.vendorColors,codex:'#efab45'}})");
+  await waitFor("clientColors.codex==='#efab45'",'live Codex user override');
+  assert.equal(await js("limitProviderColor(state.pluginCatalog.limits.modules.find(m=>m.moduleId==='one').id)"),'#efab45');
+  assert.equal(await js("limitProviderColor(state.pluginCatalog.limits.modules.find(m=>m.moduleId==='two').id)"),'#d68cf0');
+  await capture('presentation-user-palette.png');
+  await js(`tokenMonitor.updateSettings({vendorColors:{codex:${JSON.stringify(beforePalette)}}})`);
   await capture('limits-mixed.png');
   await js("window.quotaThemeRebuilds=0;window.originalQuotaThemeRender=renderThemePresetChips;renderThemePresetChips=(...args)=>{quotaThemeRebuilds++;return originalQuotaThemeRender(...args);};true");
   const creditWindow = {creditsDisplay:'percent',remaining:83.25,limit:100,boundaryKind:'expiry',resetsAt:new Date(Date.now()+30*86400000).toISOString()};
@@ -385,6 +409,8 @@ app.whenReady().then(async () => {
   await capture('settings-default-credentials.png');
   await js("openSettingsPanel();setSettingsSectionExpanded('plugins',true);pluginSettingsPanel.refresh()");
   await waitFor("document.querySelector('[data-plugin-id=\"synthetic-limits\"] .plugin-card-footer')",'installed plugin controls');
+  await waitFor("document.querySelector('.plugin-identity-art .row-icon-codex')",'native plugin identity before author settings opens');
+  await capture('presentation-management.png');
   await js(`document.querySelector('[data-plugin-id="synthetic-limits"] .plugin-manage').click()`);
   await waitFor("document.querySelector('.plugin-author-form select')",'host ordinary settings select');
   const ordinarySelectAudit=await js(`(()=>{const a=getComputedStyle(document.querySelector('.plugin-author-form select')),b=getComputedStyle(document.getElementById('minimaxBillingModeInput'));return ['fontFamily','fontSize','backgroundColor','paddingTop','paddingRight','borderRadius','borderTopColor'].map(key=>[key,a[key],b[key]]);})()`);

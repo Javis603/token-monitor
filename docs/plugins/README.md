@@ -9,6 +9,7 @@ Choose a guide for your next step:
 - [Resource fields, measurement coverage and limitations](author-data-resources.md)
 - [UI surfaces and composition](author-ui-options.md)
 - [Native quota modules and manual credentials](author-limits.md)
+- [Native icons and quota colors](author-presentation.md)
 - [Publishing and README template](publishing.md)
 - [Author self-check](validation.md#author-self-check)
 

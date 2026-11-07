@@ -30,7 +30,7 @@ function createPluginLimits({ manager, getSettings, changed, cancelModule = () =
   const demands = new Map();
   function catalog() {
     return manager.list().plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => (plugin.limits || []).map(module => ({
-      ...module, identityIcon: plugin.identityIcon, id: identity(plugin.id, module.id), moduleId: module.id, pluginId: plugin.id, label: module.name,
+      ...module, presentation: { ...plugin.presentation, ...module.presentation }, identityIcon: plugin.identityIcon, id: identity(plugin.id, module.id), moduleId: module.id, pluginId: plugin.id, label: module.name,
       settingsLabel: module.name, revision: plugin.revision, sampling: runtime !== null && byId.has(identity(plugin.id, module.id))
     })));
   }

@@ -146,6 +146,8 @@ const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentatio
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 
 function limitProviderColor(providerId) {
+  const module = state.pluginCatalog?.limits?.modules?.find(module => module.id === providerId);
+  if (module) return window.TokenMonitorPluginViews.presentationColor(module.presentation, clientColors);
   if (providerId === 'factory') return clientColors.droid;
   return clientColors[providerId] || clientColors.default;
 }
@@ -4765,7 +4767,7 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   hasMark: (id) => limitMarksWithIcon.has(id),
   pluginMark: id => {
     const module = state.pluginCatalog?.limits?.modules?.find(module => module.id === id);
-    return module?.identityIcon ? window.TokenMonitorPluginViews.navigationIcon(document, { identityIcon: module.identityIcon }, 12) : null;
+    return module && (module.presentation?.icon || module.identityIcon) ? window.TokenMonitorPluginViews.navigationIcon(document, module, 12) : null;
   },
   formatAgo: (ms) => formatAgo(ms),
   openExternal: (url) => window.tokenMonitor.openExternal?.(url),
@@ -5059,6 +5061,7 @@ function renderLimits() {
       state.codexResetForecast || null
     ],
     providerOrder: orderedProviders.map(({ id }) => id),
+    presentation: orderedProviders.map(({ id }) => [id, limitProviderColor(id), state.pluginCatalog?.limits?.modules?.find(module => module.id === id)?.presentation]),
     providers: [...visibleProviderEntries.entries()]
   });
   if (
@@ -13349,7 +13352,7 @@ function renderNotchPageChoices() {
     resetButton: document.getElementById('resetNotchPageOrderButton'),
     save: async patch => { await saveSettings(patch); },
     place: async (ref, placed) => { await pluginApi.place(ref, 'notch', placed); },
-    pluginIcon: (name, identityIcon) => window.TokenMonitorPluginViews?.navigationIcon(document, { icon: name, identityIcon }, 14),
+    pluginIcon: (name, identityIcon, presentation) => window.TokenMonitorPluginViews?.navigationIcon(document, { icon: name, identityIcon, presentation }, 14),
     createRowDrag: config => rowDragControllerApi.createRowDragController({
       dragSort: verticalDragSortApi, getScrollPanel: () => els.settingsPanel,
       preserveScroll: preserveSettingsPanelScroll, ...config
