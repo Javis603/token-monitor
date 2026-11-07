@@ -19,7 +19,7 @@ const fixtureSvg = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http:
 fixtureManifest.presentation = { icon: { native: 'codex' }, color: { palette: 'codex' } };
 fixtureManifest.limits[1].presentation = { icon: { data: fixtureSvg, mode: process.env.TM_PLUGIN_SVG_MASK === '1' ? 'mask' : 'image' }, color: { hex: '#d68cf0' } };
 fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify(fixtureManifest));
-fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-read'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return {configured:value.token==='synthetic-token'};}if(method==='fixture-network'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return host.call('network.request',{moduleId:args.moduleId,requestId:'fixture-probe',url:'https://example.test/quota',headers:{Authorization:'Bearer '+value.token}});}if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='credentials.validate'){await new Promise(resolve=>setTimeout(resolve,150));await host.call('credentials.read',{moduleId,expectedRevision:args.revision});return {status:fs.existsSync(file+'.validation')?fs.readFileSync(file+'.validation','utf8'):'valid'};}if(method==='fixture-validation'){fs.writeFileSync(file+'.validation',args.status);return true;}if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
+fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-read'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return {configured:value.token==='synthetic-token'};}if(method==='fixture-network'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return host.call('network.request',{moduleId:args.moduleId,requestId:'fixture-probe',url:'https://example.test/quota',headers:{Authorization:'Bearer '+value.token}});}if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='credentials.validate'){await new Promise(resolve=>setTimeout(resolve,150));await host.call('credentials.read',{moduleId,expectedRevision:args.revision});return {status:fs.existsSync(file+'.validation')?fs.readFileSync(file+'.validation','utf8'):'valid'};}if(method==='fixture-validation'){fs.writeFileSync(file+'.validation',args.status);return true;}if(method==='fixture-layout'){fs.writeFileSync(file+'.layout',JSON.stringify(args));return true;}if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,notes:moduleId==='two'&&fs.existsSync(file+'.layout')?JSON.parse(fs.readFileSync(file+'.layout','utf8')).notes:undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'&&fs.existsSync(file+'.layout')?JSON.parse(fs.readFileSync(file+'.layout','utf8')).windows:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
 fs.writeFileSync(path.join(fixtureDir,'settings.mjs'), `
 export async function activate(ctx) {
   window.quotaViewEvents ||= [];
@@ -153,6 +153,48 @@ app.whenReady().then(async () => {
   await capture('presentation-user-palette.png');
   await js(`tokenMonitor.updateSettings({vendorColors:{codex:${JSON.stringify(beforePalette)}}})`);
   await capture('limits-mixed.png');
+  const detailRows=[{label:'Today',value:{amount:0.25,currency:'USD'}},{label:'Week',value:{amount:1.5,currency:'USD'}},{label:'Month',value:{amount:4.25,currency:'USD'}},{label:'All time',value:{amount:12,currency:'USD'}}];
+  const layouts={windows:[
+    {kind:'session',label:'5-hour',usedPercent:3,span:1,infoRows:[{label:'Scope',value:'Synthetic team pool'}]},
+    {kind:'weekly',usedPercent:11,span:1},
+    {kind:'billing',label:'Monthly',metric:'credits',remaining:54.89,limit:70,currency:'USD',creditsDisplay:'percent',span:2},
+    {kind:'daily',label:'Daily pool',usedPercent:25,span:1},
+    {kind:'billing',label:'Credit pool',metric:'credits',remaining:83.25,limit:100,currency:'USD',creditsDisplay:'percent',span:1}
+  ],notes:[{label:'Spend',value:{amount:4.25,currency:'USD'},infoRows:detailRows}]};
+  await runtime.manager.call(fixtureManifest.id,'fixture-layout',layouts);await runtime.refreshLimits();
+  await waitFor("document.querySelector('#limitsPanel > :first-child .limit-spend-summary')?.textContent==='$4.25'",'native plugin notes');
+  const layoutProof=await js("[...document.querySelectorAll('#limitsPanel > :first-child .limit-windows > .limit-window')].map(node=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width};})");
+  assert.equal(layoutProof.length,6);
+  assert.equal(layoutProof[0].y,layoutProof[1].y,'two half-width bars share row');
+  assert.ok(layoutProof[2].w>layoutProof[0].w*1.9,'monthly window spans full row');
+  assert.equal(layoutProof[3].y,layoutProof[4].y,'percentage and credit bars share next row');
+  assert.ok(layoutProof[2].y>layoutProof[0].y&&layoutProof[3].y>layoutProof[2].y,'input order survives mixed metrics');
+  assert.equal(await js("getComputedStyle(document.querySelector('#limitsPanel > :first-child .limit-windows > :nth-child(3) .limit-reset')).display==='none'"),false,'money detail remains visible without reset/expiry');
+  await capture('quota-layout-multiple.png');
+  await js("document.querySelector('#limitsPanel > :first-child .limit-window-label .limit-detail-tooltip-trigger').focus()");
+  await waitFor("document.querySelector('#limitsPanel > :first-child .limit-window-label .limit-detail-tooltip').matches(':popover-open')",'window label shares native tooltip');
+  assert.equal(await js("document.querySelector('#limitsPanel > :first-child .limit-window-label .limit-detail-tooltip-trigger').getAttribute('aria-label')"),'Scope: Synthetic team pool');
+  await capture('quota-tooltip-window.png');
+  await js("document.activeElement.blur()");
+  await js("document.querySelector('#limitsPanel > :first-child .limit-spend .limit-detail-tooltip-trigger').focus()");
+  await waitFor("document.querySelector('#limitsPanel > :first-child .limit-spend .limit-detail-tooltip').matches(':popover-open')",'keyboard focus opens native tooltip');
+  assert.equal(await js("[...document.querySelectorAll('#limitsPanel > :first-child .limit-spend .limit-detail-tooltip-row')].map(row=>row.textContent).join('|')"),'Today$0.25|Week$1.50|Month$4.25|All time$12.00');
+  await capture('quota-tooltip-keyboard.png');
+  await win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});await win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
+  await waitFor("!document.querySelector('#limitsPanel > :first-child .limit-spend .limit-detail-tooltip').matches(':popover-open')",'Escape closes tooltip');
+  await js("document.activeElement.blur();document.querySelector('#limitsPanel > :first-child .limit-spend .limit-detail-tooltip-wrap').dispatchEvent(new PointerEvent('pointerenter'))");
+  await waitFor("document.querySelector('#limitsPanel > :first-child .limit-spend .limit-detail-tooltip').matches(':popover-open')",'hover opens native tooltip');
+  await js("document.querySelector('#limitsPanel > :first-child .limit-spend .limit-detail-tooltip-wrap').dispatchEvent(new PointerEvent('pointerleave'))");
+  await waitFor("!document.querySelector('#limitsPanel > :first-child .limit-spend .limit-detail-tooltip').matches(':popover-open')",'hover exit closes tooltip');
+  await js("tokenMonitor.updateSettings({showLimitUsed:true})");
+  await waitFor("document.querySelector('#limitsPanel > :first-child').textContent.includes('$16.75 / $100.00')",'mixed-row money follows used mode');
+  await capture('quota-layout-used.png');
+  await js("tokenMonitor.updateSettings({showLimitUsed:false})");
+  await runtime.manager.call(fixtureManifest.id,'fixture-layout',{windows:[{kind:'daily',label:'Daily pool',usedPercent:25},{kind:'billing',label:'Billing pool',usedPercent:40}]});await runtime.refreshLimits();
+  await waitFor("!document.querySelector('#limitsPanel > :first-child .limit-spend')",'native notes dispose on replacement reading');
+  assert.equal(await js("document.querySelectorAll('#limitsPanel .limit-detail-tooltip:popover-open').length"),0,'no detached tooltip remains open');
+  console.log('PASS native plugin multi-row spans, mixed metric order, money mode, tooltip focus/Escape/hover and disposal');
+
   await js("window.quotaThemeRebuilds=0;window.originalQuotaThemeRender=renderThemePresetChips;renderThemePresetChips=(...args)=>{quotaThemeRebuilds++;return originalQuotaThemeRender(...args);};true");
   const creditWindow = {creditsDisplay:'percent',remaining:83.25,limit:100,boundaryKind:'expiry',resetsAt:new Date(Date.now()+30*86400000).toISOString()};
   await runtime.manager.call('synthetic-limits','fixture-window',creditWindow);

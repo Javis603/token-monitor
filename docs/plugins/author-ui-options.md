@@ -73,3 +73,5 @@ Declare `trayMenu: [{"id":"refresh","label":"Refresh my data"}]` with a backend.
 Native quota modules can embed a declared settings view inside their own settings accordion. See [custom quota settings UI](author-limits.md#custom-ui-in-each-modules-settings-accordion) for the module binding, lazy mounting and retained-draft lifecycle.
 
 Quota settings views can optionally compose `ctx.native.credentials.mount(container, {moduleId})`, forwarding the returned update/unsaved/dispose lifecycle. See the [manual credential contract](author-limits.md#manual-credential-contract). Custom DOM uses the same scoped API; no fixed account buttons are appended.
+
+Registry-hosted native quota modules use declarative [window layout, tooltips and information rows](author-limits.md#window-layout-and-detail-information). The host renders these DTOs; authors do not need a custom view or Limits DOM access for them.

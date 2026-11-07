@@ -5249,6 +5249,8 @@ html.is-windows .limit-live-badge {
   gap: 8px;
 }
 .limit-window { display: grid; gap: 5px; min-width: 0; }
+.limit-windows > .limit-window[data-limit-span="1"] { grid-column: auto; }
+.limit-window-label { display: inline-flex; align-items: center; gap: 4px; }
 .limit-window-wide {
   grid-column: 1 / -1;
 }

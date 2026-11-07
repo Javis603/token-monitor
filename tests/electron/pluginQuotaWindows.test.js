@@ -10,7 +10,7 @@ const balance = require('../../src/shared/limits/balanceDisplay');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/limits/windowsView.js'), 'utf8');
 const extract = name => source.match(new RegExp(`  function ${name}\\([^]*?\\n  }`))[0];
-function render(windows, { showLimitUsed = false, native = false } = {}) {
+function render(windows, { showLimitUsed = false, native = false, details = false, notes } = {}) {
   const context = vm.createContext({
     document: { createElement: tag => new Element(tag) },
     settings: () => ({ showLimitUsed }), usageItems: { hiddenUsageItemSet: () => new Set(), limitUsageItemId: () => 'credits' }, hideUsageItems() {},
@@ -18,15 +18,20 @@ function render(windows, { showLimitUsed = false, native = false } = {}) {
     windowForKind: (provider, kind) => provider.windows.find(window => window.kind === kind),
     windowsForKind: (provider, kind) => provider.windows.filter(window => window.kind === kind),
     providerWindowLabel: (provider, window, fallback) => limitWindowLabel(provider.provider, window, fallback),
+    limitDetailInfoNode: () => null,
     limitWindowNode: (label, window) => Object.assign(new Element(), { label, window }),
     motion: { remainingPercent: window => window.remainingPercent, displayPercent: value => value, windowKey: label => label },
     ...require('../../src/electron/renderer/limits/displayMode'),
     formatPercent: value => `${Math.round(value)}%`, formatLimitBoundary: window => window.boundaryKind === 'expiry' ? 'Expires 30d' : 'Reset 30d',
     colorWithAlpha: value => value, applyBarScale: (node, value) => { node.scale = value; }, tagUsageItem: node => node,
-    provider: normalizeReading({ status: 'ok', windows }, 'plugin:fixture:quota')
+    provider: normalizeReading({ status: 'ok', windows, notes }, 'plugin:fixture:quota')
   });
+  if (details) {
+    Object.assign(context, { tooltipHost: { hasOpened: () => false }, attachLimitDetailTooltip: () => {} });
+    vm.runInContext(['detailTooltipNode', 'limitDetailInfoNode', 'limitNoteRowNode'].map(extract).join('\n'), context);
+  }
   if (native) vm.runInContext(['limitMeterNode', 'formatLimitWindowValue', 'limitWindowNode'].map(extract).join('\n'), context);
-  vm.runInContext(extract('repairWindowPairs') + '\n' + extract('renderProviderWindows'), context);
+  vm.runInContext(['quotaDetailEntries', 'genericCreditWindowNode', 'pluginQuotaWindowNode', 'repairWindowPairs', 'renderProviderWindows'].map(extract).join('\n'), context);
   return context.renderProviderWindows(context.provider, 'blue').children;
 }
 test('normalized daily and billing plugin quotas each produce a native window', () => {
@@ -79,4 +84,57 @@ test('mixed plugin quotas preserve repeated windows and render credits exactly o
   const nodes = render(windows);
   assert.deepEqual(Array.from(nodes, node => node.label), [...windows.map(window => window.label)]);
   assert.equal(nodes.filter(node => node.window.metric === 'credits').length, 1);
+});
+
+
+test('plugin window spans keep input order across money and percentage windows', () => {
+  const mixed = [
+    {kind:'session',label:'First',usedPercent:10,span:1},
+    {...credit,label:'Second',span:1},
+    {kind:'weekly',label:'Third',usedPercent:20,span:2},
+    {...credit,label:'Fourth',span:1}
+  ];
+  const nodes = render(mixed);
+  assert.deepEqual(Array.from(nodes,node=>node.label),['First','Second','Third','Fourth']);
+  assert.deepEqual(Array.from(nodes,node=>node.classList.contains('limit-window-wide')),[false,false,true,false]);
+  assert.equal(nodes[3].dataset.limitSpan,'1','explicit half width survives odd-run repair');
+});
+test('window and note details share native tooltip cells and money formatting', () => {
+  const infoRows=[{label:'Today',value:{amount:1.25,currency:'USD'}},{label:'Scope',value:'<b>plain text</b>'}];
+  const nodes=render([{...credit,infoRows}],{native:true,details:true,notes:[{label:'Spend',value:{amount:4,currency:'USD'},infoRows}]});
+  assert.equal(nodes.length,2);
+  for (const node of nodes) {
+    const trigger=node.querySelector('.limit-detail-tooltip-trigger');
+    assert.equal(trigger.tabIndex,0);
+    assert.equal(trigger.getAttribute('aria-label'),'Today: $1.25, Scope: <b>plain text</b>');
+    assert.equal(node.querySelectorAll('.limit-detail-tooltip-row').length,2);
+    assert.equal(node.querySelector('b'),null,'author strings are text, not markup');
+  }
+  assert.equal(nodes[1].querySelector('.limit-spend-summary').textContent,'$4.00');
+});
+test('detail DTO limits reject malformed shapes and never enter shared windows', () => {
+  const row={label:'Today',value:{amount:0,currency:'USD'}};
+  const make=window=>normalizeReading({status:'ok',windows:[{...credit,...window}]},'plugin:fixture:quota');
+  const value=make({span:1,infoRows:[row]});
+  assert.deepEqual(value.windows[0].infoRows,[row]);
+  const shared=require('../../src/shared/limits/core').normalizeLimitWindow(value.windows[0]);
+  assert.equal(shared.span,undefined);assert.equal(shared.infoRows,undefined);
+  for (const patch of [{span:0},{span:3},{span:'1'},{infoRows:{}},{infoRows:[...Array(13)].map(()=>row)},{infoRows:[{label:'x',value:{amount:Infinity,currency:'USD'}}]},{infoRows:[{label:'x',value:{amount:1,currency:'usd'}}]},{infoRows:[{label:'x',value:{html:'x'}}]},{infoRows:[{label:'x'.repeat(81),value:'x'}]},{infoRows:[{label:'x',value:'x'.repeat(161)}]},{infoRows:[{label:'\u202e',value:'x'}]}]) assert.throws(()=>make(patch));
+  for (const notes of [{},Array(9).fill({label:'Note'}),[{label:'Note',value:null}]]) assert.throws(()=>normalizeReading({status:'ok',windows:[],notes},'plugin:fixture:quota'));
+  const notes=[{label:'Partial details',infoRows:[row]}];
+  assert.deepEqual(normalizeReading({status:'ok',windows:[],notes},'plugin:fixture:quota').notes,notes);
+});
+
+
+test('percent credit detail remains visible without an expiry/reset date', () => {
+  const [node]=render([{...credit,resetsAt:null,creditsDisplay:'percent'}],{native:true});
+  assert.equal(node.classList.contains('limit-window-no-reset'),false);
+  assert.equal(node.children[2].children[0].textContent,'');
+  assert.equal(node.children[2].children[1].textContent,'$83.25 / $100.00');
+});
+
+
+test('default percentage windows pair and expand an odd trailing window', () => {
+  const nodes=render(['session','weekly','daily'].map(kind=>({kind,usedPercent:10})),{native:true});
+  assert.deepEqual(Array.from(nodes,node=>node.classList.contains('limit-window-wide')),[false,false,true]);
 });

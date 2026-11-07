@@ -92,9 +92,39 @@ exports.activate = async ({ host }) => ({
 });
 ```
 
-`limits.collect` returns `{status, windows, plan?}`; status is `ok`, `notConfigured`, `unauthorized`, `rateLimited`, `unavailable` or `error`. Up to 16 windows use the existing native window contract (`kind`, `label`, percentages, `used`, `limit`, `remaining`, `currency`, `resetsAt`, `boundaryKind`). Money uses `metric: 'credits'`; an expiry uses `boundaryKind: 'expiry'`, never an invented monthly reset. Unknown values remain unknown. A plan is optional and must describe a real plan. The host projects declared fields, not arbitrary backend data.
+`limits.collect` returns `{status, windows, plan?, notes?}`; status is `ok`, `notConfigured`, `unauthorized`, `rateLimited`, `unavailable` or `error`. Up to 16 windows use the existing native window contract (`kind`, `label`, percentages, `used`, `limit`, `remaining`, `currency`, `resetsAt`, `boundaryKind`). Money uses `metric: 'credits'`; an expiry uses `boundaryKind: 'expiry'`, never an invented monthly reset. Unknown values remain unknown. A plan is optional and must describe a real plan. The host projects declared fields, not arbitrary backend data.
 
 For non-credit percentage windows, provide `usedPercent` or numeric `used` and a positive `limit`. A standalone `remainingPercent` is not a normalization input; if that is all the service supplies, derive `usedPercent = 100 - remainingPercent` before returning the window.
+
+### Window layout and detail information
+
+The native renderer uses its existing two-column grid. Windows keep the order returned by the plugin, including mixed money/percentage windows. Without `span`, non-credit windows pair automatically and an odd trailing window expands to full width; credits retain their full-width default. Optional `span: 1` keeps a window half-width (even when alone), and `span: 2` makes it full-width. This supports two bars on a row, multiple paired rows, or a pair followed by a full-width monthly allowance. It does not create arbitrary columns or a custom layout engine.
+
+A window can include `infoRows` for the native ⓘ tooltip beside its label. Each row is `{label, value}`; `value` is a short string or `{amount, currency}`. The host formats money using the App currency/formatting policy. A reading can also include `notes`, rendered after its windows as native full-width information rows: `{label, value?, infoRows?}`. These support a spend breakdown or reset-credit explanation without inventing a meter. Examples below are synthetic.
+
+```js
+return {
+  status: 'ok',
+  windows: [
+    {kind: 'session', label: '5-hour', usedPercent: 3, span: 1},
+    {kind: 'weekly', usedPercent: 11, span: 1},
+    {kind: 'billing', label: 'Monthly', metric: 'credits',
+      remaining: 54.89, limit: 70, currency: 'USD',
+      creditsDisplay: 'percent', span: 2,
+      infoRows: [{label: 'Included allowance', value: {amount: 70, currency: 'USD'}}]}
+  ],
+  notes: [{label: 'Spend', value: {amount: 4.25, currency: 'USD'}, infoRows: [
+    {label: 'Today', value: {amount: 0.25, currency: 'USD'}},
+    {label: 'Week', value: {amount: 1.5, currency: 'USD'}},
+    {label: 'Month', value: {amount: 4.25, currency: 'USD'}},
+    {label: 'All time', value: {amount: 12, currency: 'USD'}}
+  ]}]
+};
+```
+
+Each tooltip has at most 12 rows; each reading has at most 8 notes. Labels are at most 80 characters, text values 160; amounts must be finite numbers and currency a three-letter uppercase code. Detail text is plain text, never HTML. Unsupported spans or invalid detail structures reject the reading. Tooltip values and notes do not change quota amounts, percentages, expiry semantics or account verification. Return only intentional non-sensitive display data, never credentials or raw responses.
+
+The host reuses its existing hover/focus tooltip, keyboard dismissal, theme and rendering lifecycle. No plugin DOM injection or extra fetching is needed. `span`, `infoRows`, `notes` and `creditsDisplay` are desktop presentation fields; the shared Hub/wire window contract is unchanged. These fields expose generic rendering, not provider-specific reset prediction, account switching or entitlement calculations.
 
 ### Credit presentation
 
@@ -198,9 +228,9 @@ Disable/update cancels requests and retains saved credentials. Credential update
 
 This unpublished experimental API intentionally replaces `connection: 'openai'` and `webSession.*` without aliases or migration. Plugins using that old contract, including OpenAI 0.2.0, must be updated before use. Existing old records on disk are not read, converted or proactively cleaned. Real service credentials and Windows/Linux native acceptance remain unverified; synthetic tests do not establish provider login validity.
 
-## Native surface rollout
+## Native surface support
 
-| Existing surface / entry point | This phase | Follow-up connection |
+| Existing surface / entry point | Current support | Boundary for future integration |
 | --- | --- | --- |
 | Main Limits, `app.js:renderLimits` | Native records and mixed built-in/module order | Same registry |
 | AI tool quota settings, `renderLimitProviderCheckboxes` | Search, checkbox, disclosure, drag/keyboard mixed ordering, account controls | Same identity/preferences |
@@ -213,4 +243,4 @@ This unpublished experimental API intentionally replaces `connection: 'openai'` 
 | System Tray and Floating Bubble, `trayComposer.js`, `trayBars.js`, custom layouts | Existing composer behavior | Add native quota module references to existing pickers and modes |
 | Home provider selectors, subscriptions, history, alerts | Built-ins only | Review each consumer's semantics before admission |
 
-The user's “sidebar” is not presumed to mean Edge Dock: main navigation/content and the screen-edge rail/card are separate owners. These follow-ups are planned integration points, not supported quota surfaces today. They must union visibility demand and share accounts/data instead of requiring per-page login or author-rendered quota DOM.
+Main navigation/content, the responsive main-window layout and the screen-edge rail/card are separate surfaces. Rows marked as built-in-only do not support native plugin quota modules. Future integrations must use the same module identity, shared records and visibility demand rather than add a second backend, login or provider registry.
