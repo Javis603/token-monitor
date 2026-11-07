@@ -1698,6 +1698,26 @@
           ariaParts: [balanceValue]
         }), 'credits', label));
       }
+    } else if (provider.provider === 'mistral') {
+      // Keep API and Vibe allowances on separate full-width rows. The wallet
+      // has no quota denominator and must not become a percentage meter.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => !isCreditsWindow(window))
+        .map((window) => {
+          const node = limitWindowNode(
+            providerWindowLabel(provider, window), window, color, 0.78,
+            null, providerWindowText(provider, window).detail
+          );
+          node.classList.add('limit-window-wide');
+          return node;
+        });
+      windows.append(...quotaNodes);
+      for (const wallet of (provider.windows || []).filter(isCreditsWindow)) {
+        const value = creditsBalanceValue(provider, wallet);
+        if (!value) continue;
+        const label = providerWindowLabel(provider, wallet, 'Balance');
+        windows.append(tagUsageItem(limitNoteRowNode({ label, summary: value, ariaParts: [value] }), 'credits', label));
+      }
     } else if (provider.provider === 'notion') {
       // Both included allowances are percentage quotas. Monthly is a billing
       // window, which the default session/weekly branch would omit.
@@ -1742,9 +1762,22 @@
       // the real one. Credits windows carry money rather than quota percentages;
       // their display meter is derived without changing the provider reading.
       const session = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
-      if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
-      if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      if (session) {
+        const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
+        if (provider.provider === 'minimax' && !session.resetsAt && !session.resetDescription) node.classList.add('limit-window-no-reset');
+        windows.append(node);
+      }
+      if (provider.provider === 'minimax') {
+        for (const weekly of windowsForKind(provider, 'weekly')) {
+          const detail = providerWindowText(provider, weekly).detail;
+          const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68, null, detail);
+          if (!weekly.resetsAt && !weekly.resetDescription && !detail) node.classList.add('limit-window-no-reset');
+          windows.append(node);
+        }
+      } else {
+        const weekly = windowForKind(provider, 'weekly');
+        if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      }
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
         // Muse supplies the token balance as display text; keep it ahead of the
         // monetary fallback without changing the underlying credits reading.
@@ -1774,6 +1807,10 @@
         balanceNode.classList.add('limit-window-wide');
         if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
         windows.append(balanceNode);
+      }
+      if (provider.provider === 'minimax') {
+        const spendNode = provider.balance && providerSpendNode(provider.balance, provider);
+        if (spendNode) windows.append(spendNode);
       }
       repairWindowPairs(windows);
     }
@@ -1854,7 +1891,8 @@
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
     volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers),
-    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers)
+    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers),
+    minimax: minimaxAccountTitle
   };
 
   // Fallback names for `provider.source`, used when the provider has no override
@@ -1904,6 +1942,10 @@
 
   function limitProviderPlan(provider) {
     if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitProviderFailureLabel(provider);
+    if (provider?.provider === 'minimax') {
+      const plan = String(provider.planLabel || '').trim();
+      return plan ? presentationApi.limitProviderPlanDisplayLabel(provider, plan) : '';
+    }
     const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
     if (mimoProduct) {
       const plan = String(provider?.planLabel || '').trim();
@@ -2002,6 +2044,9 @@
     const plan = document.createElement('div');
     plan.className = 'limit-plan';
     plan.textContent = limitPlanText(provider, options);
+    if (provider.provider === 'minimax' && !plan.textContent && options.planText === undefined && subscriptionForProvider(provider)) {
+      plan.textContent = t('settings.subscriptions.title');
+    }
     // A record binds to one account, so the provider-wide rollup belongs on the
     // row that stands for the provider as a whole — the header of a group, or a
     // provider's single row — and not on each member of a group, which would
@@ -2279,6 +2324,8 @@
         clearTimeout(hoverTimer); openHistory(true);
       });
       row.addEventListener('click', event => {
+        const clickedRow = event.target.closest('.limit-row');
+        if (clickedRow && clickedRow !== row && clickedRow.dataset?.limitLead === undefined) return;
         if (event.target.closest('button, a, input, select, summary, [role="button"]')) return;
         clearTimeout(hoverTimer); openHistory(true);
       });
@@ -2316,6 +2363,9 @@
       }
     }),
     claude: (provider, color, { grouped }) => ({
+      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
+    }),
+    minimax: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
     workbuddy: (provider, color, { grouped }) => ({
@@ -2437,6 +2487,30 @@
       && Boolean(label)
       && label !== 'Go'
       && label !== 'Zen';
+  }
+
+  function minimaxAccountGroups(providers) {
+    const groups = new Map();
+    for (const provider of providers) {
+      const code = provider.source === 'api' && providers.find(row => row.source === 'oauth'
+        && row.accountKey && provider.accountKey && row.region && row.region === provider.region
+        && provider.relatedAccountKey === row.accountKey);
+      const key = code?.accountKey || provider.accountKey || provider;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(provider);
+    }
+    // The Code row owns plan and subscription identity, so it leads its group.
+    return [...groups.values()].map((group) => group.sort(
+      (a, b) => Number(b.source === 'oauth') - Number(a.source === 'oauth')
+    ));
+  }
+
+  function minimaxAccountTitle(provider, index, providers) {
+    const groups = minimaxAccountGroups(providers);
+    if (providers.length > 1 && groups.length === 1) return '';
+    const representatives = groups.map(group => group[0]);
+    const groupIndex = groups.findIndex(group => group.includes(provider));
+    return limitAccountDefaultTitle(representatives[groupIndex], groupIndex, representatives);
   }
 
   function limitAccountDefaultTitle(provider, index, providerEntries = [provider]) {
@@ -2610,12 +2684,79 @@
     return row;
   }
 
+  function renderMinimaxAccount(label, providers, color, grouped = false) {
+    const [lead, ...rest] = providers;
+    const hidden = usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, 'minimax');
+    const fullyHidden = (provider) => {
+      const items = limitProviderUsageItems([provider]);
+      return items.length > 0 && items.every((item) => hidden.has(item.id));
+    };
+    const leadPolicy = limitAccountRowPolicy('minimax', lead, color, { grouped, sharedFamily: null });
+    const row = renderLimitProviderRow('minimax', label, lead, color, {
+      accountRow: grouped, accountLabel: label, ...leadPolicy.options
+    });
+    if (rest.some((provider) => provider.stale)) row.classList.add('stale');
+    const lanes = [];
+    if (rest.length) {
+      const list = document.createElement('div');
+      list.className = 'limit-account-list';
+      const windows = [...row.children].find((node) => node.classList.contains('limit-windows'));
+      if (windows) {
+        const leadLane = document.createElement('div');
+        leadLane.className = 'limit-row limit-account-row';
+        // This is the lead account's own quota, not a separate history row.
+        leadLane.dataset.limitLead = '';
+        windows.remove();
+        leadLane.append(windows);
+        list.append(leadLane);
+        lanes.push({ node: leadLane, windows, provider: lead });
+      }
+      for (const provider of rest) {
+        const policy = limitAccountRowPolicy('minimax', provider, color, { grouped: true, sharedFamily: null });
+        const lane = renderLimitProviderRow('minimax', '', provider, policy.color, {
+          accountRow: true,
+          ...policy.options
+        });
+        list.append(lane);
+        lanes.push({ node: lane, windows: lane.querySelector('.limit-windows'), provider });
+      }
+      row.append(list);
+    } else {
+      const windows = [...row.children].find((node) => node.classList.contains('limit-windows'));
+      if (windows) lanes.push({ node: row, windows, provider: lead });
+    }
+    const emptied = lanes.filter(({ windows, provider }) => windows?.children.length === 0 && fullyHidden(provider));
+    if (lanes.length > 0 && emptied.length === lanes.length) return null;
+    for (const { node } of emptied) node.remove();
+    return row;
+  }
+
   // A provider's several accounts, as the page's group header plus one row each.
   // No options: what the header wears and what each row says is the provider's
   // policy above, so a second surface cannot render the same group differently by
   // passing a different set.
   function renderLimitProviderGroup(providerId, label, providers, color) {
     if (providerId === 'mimo') return renderMimoProviderGroup(label, providers, color);
+    if (providerId === 'minimax') {
+      const groups = minimaxAccountGroups(providers);
+      if (groups.length === 1 && providers.length > 1) {
+        const account = renderMinimaxAccount(label, groups[0], color);
+        if (account) return account;
+        const { row } = renderLimitProviderGroupFrame(providerId, label, providers, color, { count: 0 });
+        row.style.display = 'none';
+        return row;
+      }
+      if (groups.some(group => group.length > 1)) {
+        const representatives = groups.map(group => group[0]);
+        const accounts = groups.map((group, index) => renderMinimaxAccount(
+          limitAccountDefaultTitle(representatives[index], index, representatives), group, color, true
+        )).filter(Boolean);
+        const { row, list } = renderLimitProviderGroupFrame(providerId, label, providers, color, { count: accounts.length });
+        accounts.forEach((account) => list.append(account));
+        if (accounts.length === 0) row.style.display = 'none';
+        return row;
+      }
+    }
     const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
     const { markId, sharedFamily, forecastOnGroup } = policy(providers);
     const { row, list: accountList } = renderLimitProviderGroupFrame(

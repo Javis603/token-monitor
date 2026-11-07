@@ -1536,3 +1536,25 @@ test('swipe previews keep plugin header tools hidden until the page is selected'
   f.panel.selectPage('plugin:demo/panel');
   assert.equal(mounts.at(-1)[3].headerActions.hidden, false);
 });
+
+test('linked MiniMax API keys keep distinct Notch column labels', t => {
+  const f = panelFixture(t);
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const records = [
+    { provider: 'minimax', source: 'oauth', status: 'ok', region: 'cn',
+      accountKey: codeKey, accountLabel: 'MiniMax Code', windows: [{ kind: 'weekly', usedPercent: 20 }] },
+    ...['b', 'c'].map(letter => ({ provider: 'minimax', source: 'api', status: 'ok',
+      region: 'cn', accountKey: `sha256:${letter.repeat(64)}`, relatedAccountKey: codeKey,
+      accountLabel: 'Pay-as-you-go', windows: [{ kind: 'billing', metric: 'credits',
+        remaining: 12, currency: 'CNY' }] }))
+  ];
+  const cells = buildEdgeDockCells({ limits: { providers: records } },
+    { items: [{ type: 'limit', provider: 'minimax' }] });
+  f.panel.render({ ...payload(), cells });
+  f.panel.selectPage('limits');
+  const names = f.all('notch-limit-account').map(node => node.textContent);
+  assert.equal(names.length, 3);
+  assert.equal(names[0], 'MiniMax Code');
+  assert.ok(names[1] && names[2], 'each API column has its own visible label');
+  assert.notEqual(names[1], names[2], 'separate keys must remain distinguishable');
+});

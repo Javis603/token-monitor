@@ -179,7 +179,9 @@ test('usage replacement waits for an aborted tokscale child to close before spaw
       anchorPersistenceEnabled: false
     };
     runtime = createDeviceRuntime({ usageOptions }, {
-      createUsageRuntime: (next) => fresh.startCollector(next),
+      createUsageRuntime: (next) => fresh.startCollector({
+        ...next, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+      }),
       createLimitsRuntime: () => ({ stop() {} })
     });
     await waitFor(() => children.length === 1);
@@ -256,7 +258,9 @@ test('usage replacement abandons its wait for a shared capability probe without 
       anchorPersistenceEnabled: false
     };
     runtime = createDeviceRuntime({ usageOptions }, {
-      createUsageRuntime: (next) => fresh.startCollector(next),
+      createUsageRuntime: (next) => fresh.startCollector({
+        ...next, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+      }),
       createLimitsRuntime: () => ({ stop() {} })
     });
     await waitFor(() => helpChild !== null);
@@ -339,7 +343,9 @@ test('timed-out tokscale remains the replacement barrier through forced terminat
       anchorPersistenceEnabled: false
     };
     runtime = createDeviceRuntime({ usageOptions }, {
-      createUsageRuntime: (next) => fresh.startCollector(next),
+      createUsageRuntime: (next) => fresh.startCollector({
+        ...next, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+      }),
       createLimitsRuntime: () => ({ stop() {} })
     });
     await waitFor(() => children[0]?.signals.includes('SIGTERM'));
@@ -405,7 +411,9 @@ test('unconfirmed forced termination releases the replacement barrier with a dia
       usageOptions,
       onDiagnosticEvent: (event) => diagnostics.push(event)
     }, {
-      createUsageRuntime: (next) => fresh.startCollector(next),
+      createUsageRuntime: (next) => fresh.startCollector({
+        ...next, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+      }),
       createLimitsRuntime: () => ({ stop() {} })
     });
     await waitFor(() => children[0]?.signals.includes('SIGTERM'));

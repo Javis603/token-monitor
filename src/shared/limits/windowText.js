@@ -152,6 +152,12 @@
       return result(null, moneyOfRemaining(window, showUsed), window.showMeter !== false);
     }
 
+    if (id === 'mistral') {
+      if (!billing || metric === 'credits') return EMPTY;
+      // Match the grant detail's used/remaining mode without a text prefix.
+      return result(null, moneyOfUsed(window, showUsed));
+    }
+
     if (id === 'kiro') {
       if (!billing) return EMPTY;
       // Overage has no meter and no denominator: one compact line, no bar.
@@ -179,6 +185,12 @@
     // Kimi's single shared membership meter ships its Kimi-vs-Code composition
     // as `detail` and is the only other provider that shows one.
     if (id === 'kimi') return billing ? result(null, window.detail || '') : EMPTY;
+
+    // MiniMax Video uses interval counts; its kind does not establish a weekly pool.
+    if (id === 'minimax') {
+      if (kind === 'weekly' && window.label === 'Video') return result(null, rawCount(window, showUsed));
+      return EMPTY;
+    }
 
     // Everything else has no second line. `detail` is deliberately NOT surfaced
     // by default: several providers carry one for a different purpose — Zed and

@@ -274,6 +274,11 @@ test('Cursor account discovery runs automatically without a separate refresh act
   assert.match(statusBody, /await cursorAuth\.runCursorDiscover\(\)/);
   assert.doesNotMatch(statusBody, /runCursorSync/);
   assert.match(statusBody, /managementBlocked/);
+  // Desktop-detected accounts follow the desktop sign-in; manual accounts are never hidden.
+  assert.match(statusBody, /const desktop = cursorAuth\.readCursorDesktopSignIn\(\)/);
+  assert.match(statusBody, /if \(!manual\.has\(account\.id\) && !isCursorDetectedAccountCurrent\(\{/);
+  assert.match(statusBody, /unauthorized: expired/);
+  assert.match(statusBody, /listedAccounts\.filter\(Boolean\)/);
   assert.match(main, /options\?\.discover !== true/);
   assert.doesNotMatch(main, /ipcMain\.handle\('cursor:refresh'/);
 
@@ -758,16 +763,15 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.doesNotMatch(renderLimits, /codexSwitchPopoverRenderPending/);
 });
 
-test('DeepSeek and MiniMax API key panels come from the generic account form', () => {
+test('DeepSeek uses the generic form and MiniMax keys use the shared account shell', () => {
   const html = readRendererFile('index.html');
   const css = readRendererFile('styles.css');
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const forms = limitAccountFormsForRenderer();
   const expectedFields = {
-    deepseek: [['deepseekApiKey', 'password']],
-    minimax: [['minimaxBillingMode', 'select'], ['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
+    deepseek: [['deepseekApiKey', 'password']]
   };
-  for (const id of ['deepseek', 'minimax']) {
+  for (const id of ['deepseek']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
     assert.doesNotMatch(css, new RegExp(`#${id}ManualPanel`), id);
     const form = forms.find((candidate) => candidate.id === id);
@@ -790,38 +794,8 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   }
   assert.deepEqual(forms.find(({ id }) => id === 'deepseek').openUrl, { url: 'https://platform.deepseek.com/api_keys' });
 
-  // MiniMax follows the selection, with successful-probe status for Auto;
-  // the form declares that, so the renderer has no MiniMax branch of its own.
   const app = readRendererFile('app.js');
-  assert.deepEqual(forms.find(({ id }) => id === 'minimax').openUrl, {
-    byField: 'minimaxApiRegion',
-    urls: {
-      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
-      intl: 'https://platform.minimax.io/user-center/payment/token-plan'
-    },
-    byStatus: 'region',
-    statusUrls: {
-      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
-      en: 'https://platform.minimax.io/user-center/payment/token-plan'
-    },
-    default: 'https://platform.minimaxi.com/user-center/payment/token-plan',
-    pathByField: {
-      byField: 'minimaxBillingMode',
-      values: { 'token-plan': '/user-center/payment/token-plan', api: '/user-center/payment/balance' }
-    }
-  });
-
-  // The region is a plain setting beside the credential, so Clear leaves it
-  // alone and it stays reachable once a key is saved — a user whose auto-probe
-  // keeps flapping needs the switch after linking, not before.
-  const minimax = forms.find(({ id }) => id === 'minimax');
-  const region = minimax.fields.find(({ key }) => key === 'minimaxApiRegion');
-  assert.equal(region.saveOnChange, true);
-  assert.deepEqual(region.options.map(({ value }) => value), ['auto', 'cn', 'intl']);
-  for (const { labelKey } of region.options) {
-    assert.match(labelKey, /^settings\.minimax\./, labelKey);
-  }
-  assert.deepEqual(minimax.top, [{ field: 'minimaxBillingMode' }, { field: 'minimaxApiRegion' }]);
+  assert.equal(forms.some(({ id }) => id === 'minimax'), false);
 
   // The region never becomes a credential: no store path, so it stays in
   // settings.json only after a selection; an implicit default stays empty.
@@ -1250,14 +1224,12 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.equal(limitProviderUrlAllowed('claude.ai', '/'), false);
 });
 
-test('DeepSeek and MiniMax key changes invalidate stale provider status before re-checking', () => {
+test('DeepSeek key changes invalidate stale provider status before re-checking', () => {
   const app = readRendererFile('app.js');
-  // Their pills and groups are generated from the form id, so the hand-kept id
-  // maps no longer name them.
+  // Its pills and groups are generated from the form id, so the hand-kept id
+  // map no longer names it.
   assert.doesNotMatch(app, /deepseek: 'deepseek(AccountGroup|ApiKeyStatus)'/);
-  assert.doesNotMatch(app, /minimax: 'minimax(AccountGroup|ApiKeyStatus)'/);
   assert.match(app, /deepseekPendingCheckSince: 0/);
-  assert.match(app, /minimaxPendingCheckSince: 0/);
 
   const saveBody = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
   assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\);/);

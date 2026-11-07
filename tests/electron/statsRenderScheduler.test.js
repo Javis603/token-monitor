@@ -291,7 +291,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     'renderLimitProviderCheckboxes',
     'renderToolPreferences',
     'renderWslPanel',
-    'updateOpenRouterProfilesStatus',
+    'updateOpenRouterProfilesStatus', 'updateMinimaxApiKeysStatus',
     'updateThirdPartyProfilesStatus',
     'renderDeepseekStatus',
     'renderMinimaxStatus',
