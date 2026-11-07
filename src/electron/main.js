@@ -567,9 +567,9 @@ const SMART_COLLECTION_INTERVAL_MS = 10 * 60 * 1000;
 const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
 const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
-const DEFAULT_VIEW_LIST = ['home', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status'].map((id) => ({ id }));
+const DEFAULT_VIEW_LIST = ['home', 'provider', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status'].map((id) => ({ id }));
 const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'model', 'session', 'device', 'trends'].map((id) => ({ id }));
-const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
+const TRAY_OPEN_VIEW_IDS = new Set(['home', 'provider', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
 let dashboardWindow = null;
@@ -9922,6 +9922,11 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
+  ipcMain.handle('limitsHistory:read', (event, key) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner || owner !== mainWindow || typeof key !== 'string' || key.length > 2048) return null;
+    return limitsHistoryPayload(key);
+  });
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== dashboardWindow || win.isDestroyed()) return;

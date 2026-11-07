@@ -346,7 +346,7 @@ test('forecast refresh cadence follows the cache policy returned by the main pro
   assert.match(renderer, /const checkedAtMs = Date\.parse\(state\.codexResetForecast\?\.checkedAt \|\| ''\);/);
   assert.match(renderer, /const remainingMs = Math\.max\(0, baseMs \+ refreshMs - nowMs\);/);
   assert.doesNotMatch(renderer, /const age =/);
-  assert.match(renderer, /setTimeout\(\(\) => \{[\s\S]*?state\.breakdown === 'limits' && visibleStatsSurface\(\) === 'main'/);
+  assert.match(renderer, /setTimeout\(\(\) => \{[\s\S]*?codexResetForecastSurfaceVisible\(\) && visibleStatsSurface\(\) === 'main'/);
 });
 
 test('first forecast response follows the active surface and schedules only on main', async () => {

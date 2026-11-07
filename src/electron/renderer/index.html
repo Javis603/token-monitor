@@ -18,6 +18,7 @@
         </div>
         <div class="title-controls">
           <div id="pluginPageActions" class="plugin-page-actions hidden"></div>
+          <div id="providerRail" class="provider-rail"></div>
           <nav class="tabs" aria-label="Period tabs">
             <span class="tab-indicator" aria-hidden="true"></span>
             <button class="tab active" data-period="today" data-period-slot="today">DAY</button>
@@ -1719,6 +1720,7 @@
       <section id="fixedPeriodMessage" class="fixed-period-message hidden" role="status" aria-live="polite"></section>
 
       <section id="pluginMainPanel" class="plugin-main-panel hidden"></section>
+      <section id="providerPanel" class="provider-panel hidden"><div id="providerHeader" class="provider-header"></div><div id="providerContent" class="provider-content"></div></section>
       <section id="homePanel" class="home-panel hidden"></section>
       <section id="breakdown" class="breakdown"></section>
       <div id="session-detail-head" class="detail-head hidden"></div>
@@ -1818,6 +1820,9 @@
     <script src="trayBars.js"></script>
     <script src="usageCharts.js"></script>
     <script src="homeOverview.js"></script>
+    <script src="limits/historyModel.js"></script>
+    <script src="limits/inlineHistory.js"></script>
+    <script src="providerPage.js"></script>
     <script src="themePresets.js"></script>
     <script src="trayProviderIcons.js"></script>
     <script src="limits/providerOrder.js"></script>
