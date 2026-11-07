@@ -395,7 +395,7 @@ app.whenReady().then(async () => {
   assert.equal(routed.status,200);assert.equal(transportCalls.at(-1).init.credentials,'omit');
   await assert.rejects(js("tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.read',{moduleId:'one'})"),/Backend-only/);
   await assert.rejects(js("tokenMonitorTrustedPlugins.host('synthetic-limits','network.request',{moduleId:'one'})"),/Backend-only/);
-  const credentialDirectory=path.join(scratch,'plugin-credentials');
+  const credentialDirectory=path.join(scratch,'plugin-credentials','synthetic-limits');
   const credentialFile=path.join(credentialDirectory,fs.readdirSync(credentialDirectory)[0]);
   assert.equal(JSON.parse(fs.readFileSync(credentialFile)).values.token,'synthetic-token');
   if(process.platform!=='win32')assert.equal(fs.statSync(credentialFile).mode&0o777,0o600);
@@ -607,7 +607,7 @@ app.whenReady().then(async () => {
   assert.ok(fs.readdirSync(credentialDirectory).length>0,'credential records exist before keepData uninstall');
   await js("tokenMonitor.plugins.uninstall('synthetic-limits',{keepData:true})");
   await waitFor("state.pluginCatalog?.limits?.modules?.length===0",'uninstall');
-  assert.equal(fs.readdirSync(credentialDirectory).length,0,'keepData uninstall removes private credentials');
+  assert.equal(fs.existsSync(credentialDirectory),false,'keepData uninstall removes private credential namespace');
   console.log('PASS custom quota UI: lazy mount, retained draft/focus, collapse visibility, host settings save, disable cleanup');
   console.log('PASS synthetic native Limits: mixed pointer drag/order, same-name identities, search, disclosure, visibility, disable, reenable, reload, restart, update, uninstall');
   console.log('Evidence:',evidence);

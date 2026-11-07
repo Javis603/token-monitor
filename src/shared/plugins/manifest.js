@@ -4,7 +4,7 @@ const { normalizeSettings } = require('./settings');
 const { normalizeIdentityIcon } = require('./identityIcon');
 const { normalizePresentation } = require('./presentation');
 const { normalizeAppearance } = require('./appearance');
-const { normalizeCredentials } = require('./credentials');
+const { normalizeCredentials, isPortableCredentialId } = require('./credentials');
 const { normalizeLocalized, cleanText } = require('./localized');
 const API_MAJOR = 1;
 const LIMIT_CAPABILITY_IDS = Object.freeze(['api', 'apiKey', 'oauth', 'web', 'cli']);
@@ -121,6 +121,7 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
     if (tags.some(tag => !tag || Object.values(tag).some(text => [...text].length > 16))) { fail('limits tags must be nonempty localized labels of at most 16 characters'); continue; }
     let credentials, presentation;
     try { credentials = normalizeCredentials(entry.credentials); presentation = normalizePresentation(entry.presentation); } catch (error) { fail(error.message); continue; }
+    if (credentials && (!isPortableCredentialId(raw.id) || !isPortableCredentialId(entry.id))) { fail('credential plugin and module IDs must not be Windows device names'); continue; }
     limitIds.add(entry.id);
     limits.push({ id: entry.id, name: title, credentials, presentation,
       capabilities: LIMIT_CAPABILITY_IDS.filter(id => declared.includes(id)), tags, settingsView });

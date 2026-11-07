@@ -1,5 +1,6 @@
 'use strict';
 const { normalizeLocalized } = require('./localized');
+const isPortableCredentialId = id => typeof id === 'string' && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(id);
 const FIELD_ID = /^[a-z][a-zA-Z0-9-]{0,39}$/;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 function normalizeCredentials(raw) {
@@ -19,4 +20,4 @@ function normalizeCredentials(raw) {
   });
   return Object.freeze({ validation: raw.validation === true, fields: Object.freeze(fields) });
 }
-module.exports = { normalizeCredentials };
+module.exports = { normalizeCredentials, isPortableCredentialId };

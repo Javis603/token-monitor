@@ -64,7 +64,7 @@ test('credential permission split, namespace identity, backend transport, disabl
   fs.rmSync(path.join(f.dir,'plugins/trusted-fixture'),{recursive:true});await f.runtime.manager.reload();
   f.cancel();await assert.rejects(f.invoke('plugins:forgetCredentials','trusted-fixture'),/cancelled/);
   assert.equal(fs.readdirSync(path.join(f.dir,'plugin-credentials')).length,1,'cancelled cleanup preserves saved credentials for missing code');
-  f.accept();await f.invoke('plugins:forgetCredentials','trusted-fixture');assert.ok(fs.readdirSync(path.join(f.dir,'plugin-credentials')).every(name=>Object.keys(JSON.parse(fs.readFileSync(path.join(f.dir,'plugin-credentials',name))).values).length===0));
+  f.accept();await f.invoke('plugins:forgetCredentials','trusted-fixture');assert.ok(fs.readdirSync(path.join(f.dir,'plugin-credentials','trusted-fixture')).every(name=>Object.keys(JSON.parse(fs.readFileSync(path.join(f.dir,'plugin-credentials','trusted-fixture',name))).values).length===0));
 });
 
 
@@ -78,8 +78,7 @@ test('unknown network methods cannot alias credential operations',async t=>{
 test('plugin-wide corrupt-record recovery cancels requests and clears sibling modules through real host routing',async t=>{
  const f=await fixture(t),host=(method,args)=>f.invoke('plugins:host','trusted-fixture',method,args);
  for(const moduleId of ['one','two'])await host('credentials.update',{moduleId,expectedRevision:0,patch:{token:'synthetic'}});
- const hash=require('node:crypto').createHash('sha256').update('one').digest('hex');
- fs.writeFileSync(path.join(f.dir,'plugin-credentials',`trusted-fixture--${hash}.json`),'{synthetic corrupt');
+ fs.writeFileSync(path.join(f.dir,'plugin-credentials','trusted-fixture','one.json'),'{synthetic corrupt');
  f.children.at(-1).emit('message',{type:'host-call',id:991,method:'network.request',args:{moduleId:'one',requestId:'pending',url:'https://fixture.example/slow'}});
  await tick();const signal=f.request[1].signal;assert.equal(signal.aborted,false);
  f.accept();await f.invoke('plugins:forgetCredentials','trusted-fixture');
