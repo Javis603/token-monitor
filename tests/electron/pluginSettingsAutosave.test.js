@@ -64,3 +64,10 @@ test('invalid stored fields park rejected writes until correction or defaults, w
   await tick();assert.equal(calls.length,2);assert.equal(stored.values.rows,recovery==='defaults'?2:4);assert.equal(stored.values.label,recovery==='defaults'?'base':'changed');assert.deepEqual(c.state.errors,{});c.dispose();
  }
 });
+test('management pauses writes but retains focused edits; removed editors cannot resume writes',async()=>{
+ for(const removed of [false,true]){
+  const f=fixture();f.c.pause();f.c.edit('text','edited during management');f.c.complete('text');assert.equal(f.calls.length,0);assert.equal(f.c.state.draft.text,'edited during management');
+  if(removed)f.c.dispose();f.c.resume();assert.equal(f.calls.length,removed?0:1);
+  if(!removed){assert.deepEqual(f.calls[0].patch,{text:'edited during management'});f.finish(0,{mode:'a',text:'edited during management'});await tick();}f.c.dispose();
+ }
+});

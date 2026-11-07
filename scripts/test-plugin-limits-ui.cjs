@@ -162,7 +162,7 @@ app.whenReady().then(async () => {
     await waitFor("document.querySelector('.plugin-author-form select')",'native declarative settings form');
     await js("document.querySelector('.plugin-author-settings').scrollIntoView({block:'center'})");
     await capture('plugin-settings-before-change.png');
-    if(process.env.TM_PLUGIN_SETTINGS_SOURCE){console.log('PASS baseline native manual-settings capture. Evidence:',evidence);await runtime.dispose();win.destroy();app.exit(0);return;}
+    if(process.env.TM_PLUGIN_SETTINGS_SOURCE&&!process.env.TM_PLUGIN_BUSY_SETTINGS_PROOF){console.log('PASS baseline native manual-settings capture. Evidence:',evidence);await runtime.dispose();win.destroy();app.exit(0);return;}
     assert.equal(await js("!!document.querySelector('[data-control-key=author-save]')"),false,'no routine Save button');
     await js("(()=>{const select=document.querySelector('.plugin-author-form select');select.focus();window.ordinaryControl=select;select.value='balance';select.dispatchEvent(new Event('change'));})()");
     await waitFor(`document.querySelector('.plugin-author-status').hidden&&!document.querySelector('[data-control-key=author-reload]').getAttribute('disabled')`,'autosave feedback settles');
@@ -182,6 +182,16 @@ app.whenReady().then(async () => {
     assert.deepEqual(await js("[document.activeElement===textControl,textControl.value,textControl.selectionStart,textControl.selectionEnd]"),[true,'New label',2,5]);
     await js("textControl.dispatchEvent(new Event('change'))");await waitFor("document.querySelector('.plugin-author-status').hidden",'completed text saves');
     assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'New label');
+    await js("(()=>{window.restoreSetEnabled=pluginApi.setEnabled;pluginApi.setEnabled=()=>new Promise(resolve=>{window.releaseSettingsManagement=async()=>resolve(await pluginApi.list());});textControl.focus();const toggle=document.querySelector('.plugin-detail .plugin-enable');toggle.checked=!toggle.checked;toggle.dispatchEvent(new Event('change'));})()");
+    await waitFor("typeof releaseSettingsManagement==='function'",'management action pending');
+    assert.equal(await js("textControl.disabled"),false,'focused field stays editable during management');
+    await js("textControl.value='Edited while busy';textControl.dispatchEvent(new Event('input'));textControl.dispatchEvent(new Event('change'))");
+    await pause(80);
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'New label','management holds completed writes');
+    await js("releaseSettingsManagement();pluginApi.setEnabled=restoreSetEnabled;true");
+    await waitFor("document.querySelector('.plugin-author-status').hidden&&document.querySelector('.plugin-detail').closest('[aria-busy]')?.getAttribute('aria-busy')==='false'",'management releases completed edit');
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'Edited while busy','focused busy edit saved after management');
+    assert.equal(await js("textControl.value"),'Edited while busy','management render preserves the edit');
     await js("(()=>{const input=document.querySelector('[data-control-key=author-rows]');input.value='0';input.dispatchEvent(new Event('input'));input.dispatchEvent(new Event('change'));})()");
     await waitFor("document.querySelector('[data-control-key=author-rows]').getAttribute('aria-invalid')==='true'",'invalid number remains visible');
     await js("(()=>{const input=document.querySelector('.plugin-author-form select');input.value='meter';input.dispatchEvent(new Event('change'));})()");

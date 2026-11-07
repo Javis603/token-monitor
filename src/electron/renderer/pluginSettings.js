@@ -47,10 +47,10 @@
   function createSettingsAutosave({ snapshot, save, changed = () => {} }) {
     const state = { snapshot, draft: { ...snapshot.values }, errors: { ...snapshot.errors }, message: '', pending: false };
     const dirty = new Set(), ready = new Set(), versions = new Map(), waiters = new Set();
-    let disposed = false, validationPaused = false;
+    let disposed = false, paused = false, validationPaused = false;
     const publish = () => { if (!disposed) changed(state); };
     async function flush() {
-      if (disposed || validationPaused || state.pending || state.snapshot.readOnly || ['conflict', 'saveFailed'].includes(state.message)) return;
+      if (disposed || paused || validationPaused || state.pending || state.snapshot.readOnly || ['conflict', 'saveFailed'].includes(state.message)) return;
       const patch = Object.fromEntries([...ready].map(id => [id, state.draft[id]]));
       ready.clear();
       if (!Object.keys(patch).length) return;
@@ -107,6 +107,8 @@
         dirty.clear(); ready.clear(); versions.clear(); validationPaused = false; publish();
       },
       settle() { return state.pending ? new Promise(resolve => waiters.add(resolve)) : Promise.resolve(); },
+      pause() { paused = true; },
+      resume() { paused = false; void flush(); },
       dispose() { disposed = true; ready.clear(); }
     };
   }
@@ -223,6 +225,7 @@
       setBusy();
       try {
         await Promise.all([...authorSettings.values()].map(state => state.editor?.settle()));
+        for (const state of authorSettings.values()) state.editor?.pause();
         const next = await action();
         if (next) { list = next; if (catalogData) catalogData = await api.catalog(); }
       } catch (error) {
@@ -231,6 +234,7 @@
         busy = false;
         if (revealConsent && consentFor) { selectedPluginId = consentFor; diagnostics = false; }
         render();
+        for (const state of authorSettings.values()) state.editor?.resume();
         if (actionError) container.querySelector('.plugin-action-error')?.scrollIntoView({ block: 'nearest' });
         if (revealConsent) {
           container.querySelector(`[data-plugin-id="${consentFor}"] .plugin-consent`)?.scrollIntoView({ block: 'nearest' });
@@ -1117,9 +1121,9 @@
         error.id = `${id}-error`; describedBy.push(error.id); row.append(error); input.setAttribute('aria-describedby', describedBy.join(' '));
         const value = () => field.type === 'boolean' ? input.checked : field.type === 'number' ? input.value === '' ? null : input.valueAsNumber : input.value;
         const immediate = field.type === 'boolean' || field.type === 'select';
-        input.addEventListener(immediate ? 'change' : 'input', () => { if (!busy) editor.edit(field.id, value(), immediate); });
+        input.addEventListener(immediate ? 'change' : 'input', () => editor.edit(field.id, value(), immediate));
         if (!immediate) {
-          input.addEventListener('change', () => { if (!busy) editor.complete(field.id); });
+          input.addEventListener('change', () => editor.complete(field.id));
           input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); editor.complete(field.id); } });
         }
         controls.set(field.id, { input, error, field }); form.append(row);
@@ -1134,7 +1138,7 @@
         disabledNote.hidden = Boolean(list?.plugins.find(item => item.id === plugin.id)?.enabled && list?.enabled);
         for (const control of headingRow.querySelectorAll('button')) control.disabled = busy || current.snapshot.readOnly || state.loading || current.message === 'conflict';
         for (const [id, { input, error, field }] of controls) {
-          input.disabled = busy || current.snapshot.readOnly || state.loading;
+          input.disabled = (busy && document.activeElement !== input) || current.snapshot.readOnly || state.loading;
           if (field.type === 'boolean') input.checked = current.draft[id] === true;
           else if (document.activeElement !== input || field.type === 'select') input.value = current.draft[id] ?? '';
           input.setAttribute('aria-invalid', String(Boolean(current.errors[id]))); error.hidden = !current.errors[id];
