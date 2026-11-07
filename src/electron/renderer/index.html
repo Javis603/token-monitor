@@ -29,6 +29,7 @@
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="week"><span class="view-switcher-menu-label" data-i18n="periodRange.week">This week</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last7"><span class="view-switcher-menu-label" data-i18n="periodRange.last7">Last 7 days</span></button>
             <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="last30"><span class="view-switcher-menu-label" data-i18n="periodRange.last30">Last 30 days</span></button>
+            <button class="view-switcher-menu-item" type="button" role="menuitemradio" data-fixed-period="cycle"><span class="view-switcher-menu-label" data-i18n="periodRange.cycle">Billing cycle</span></button>
           </div>
           <div class="actions-hotspot" aria-label="Window controls"></div>
           <div class="window-actions">
@@ -192,8 +193,16 @@
                   <option value="week" data-i18n="periodRange.week">This week</option>
                   <option value="last7" data-i18n="periodRange.last7">Last 7 days</option>
                   <option value="last30" data-i18n="periodRange.last30">Last 30 days</option>
+                  <option value="cycle" data-i18n="periodRange.cycle">Billing cycle</option>
                 </select>
                 <span class="settings-note settings-item-desc" data-i18n="periodRange.settingsNote">Choose the default usage range shown on Home. On Home, click the selected period at the top again to open the menu and switch quickly.</span>
+              </label>
+              <label class="settings-item period-default-setting">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="periodRange.cycleStartTitle">Billing cycle start day</span>
+                </span>
+                <input id="billingCycleStartDayInput" type="number" min="1" max="31" step="1" />
+                <span class="settings-note settings-item-desc" data-i18n="periodRange.cycleStartNote">Day of the month your subscription renews. Billing cycle counts usage from that day; in shorter months it starts on the last day.</span>
               </label>
               <div class="settings-note-row">
                 <p class="settings-note" data-i18n="settings.views.note">Choose which main views appear and the order of the mode button.</p>
