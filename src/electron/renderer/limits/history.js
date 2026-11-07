@@ -6,6 +6,7 @@
   const cardFrames = window.TokenMonitorCardMotion.createCardFrameLoop({ sendFrame: id => bridge.cardFrame(id) });
   bridge.onCardMotion(next => { if (bridge.platform === 'win32') cardFrames.update(next); });
   const model = window.TokenMonitorLimitsHistoryModel;
+  const paintSvg = window.TokenMonitorLimitSvgPaint.paint;
   const i18n = window.TokenMonitorI18n;
   const $ = id => document.getElementById(id);
   let payload = null;
@@ -26,10 +27,12 @@
 
   let selected = '';
   let hoveredBucket = '';
+  let trendRangeMode = 'cycle';
   let restoreReading = () => {};
   let contentAnimation = null;
   let animateMeasurement = false;
   const reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const SERIES_PALETTE = ['var(--accent)', '#0ea5e9', '#8b5cf6', '#f59e0b'];
 
   function t(key, args) { return i18n.translate(payload?.locale || 'en', `limits.history.${key}`, args); }
   function number(value) { return new Intl.NumberFormat(payload?.locale || 'en', { maximumFractionDigits: 2 }).format(value); }
@@ -38,6 +41,28 @@
   function amount(value, entry) { return unit(entry) === 'pp' ? `${number(value)}%` : `${number(value)} ${unit(entry)}`; }
   function label(entry) { return window.TokenMonitorLimitWindowLabels.limitWindowLabel(payload.provider, entry.window, entry.window.kind); }
   function current() { return payload?.windows.find(entry => entry.key === selected) || payload?.windows[0]; }
+  function seriesColor(index, total) {
+    if (total <= 1) return 'var(--accent)';
+    // Magpie-inspired distinct colors when merging multiple quota cycles (e.g. 5h indigo + 7d sky/accent)
+    const multiPalette = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+    return multiPalette[index % multiPalette.length] || SERIES_PALETTE[index % SERIES_PALETTE.length];
+  }
+  function formatRelativeReset(resetsAt) {
+    const ms = Date.parse(resetsAt) - Date.now();
+    if (!Number.isFinite(ms) || ms <= 0) return '';
+    const totalMinutes = Math.max(1, Math.round(ms / 60_000));
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    const duration = days > 0 ? `${days}d ${hours}h` : hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+    return t('inDuration', { duration });
+  }
+  function overlayEntries(primaryEntry) {
+    if (!payload?.windows?.length || !primaryEntry) return [];
+    if (unit(primaryEntry) !== 'pp') return [primaryEntry];
+    const ppWindows = payload.windows.filter(item => unit(item) === 'pp');
+    return ppWindows.length > 1 ? ppWindows : [primaryEntry];
+  }
   function svgNode(tag, attrs, text) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
@@ -45,25 +70,36 @@
     return node;
   }
 
+
   function drawTrend() {
     const entry = current();
     if (!entry) return;
     const plot = $('trend');
     const width = plot.getBoundingClientRect().width;
     if (!width) return;
-    const points = entry.points;
+    const now = Date.now();
+    const series = overlayEntries(entry);
     plot.replaceChildren();
-    plot.setAttribute('viewBox', `0 0 ${width} 80`);
+    plot.setAttribute('viewBox', `0 0 ${width} 86`);
     plot.setAttribute('aria-label', `${label(entry)} · ${$('trend-heading').textContent}`);
     const moneyAxis = unit(entry) !== 'pp';
-    const { start, end, cycle } = model.trendBounds(entry.window, Date.now(), payload.provider);
-    const shown = points.filter(p => p.at >= start && p.at <= end);
-    $('empty').hidden = shown.length > 0;
+    const { start, end, cycle, guideEntry } = moneyAxis
+      ? { ...model.trendBounds(entry.window, now, payload.provider), guideEntry: entry }
+      : model.combinedTrendBounds(series, now, payload.provider, { rangeMode: trendRangeMode, primaryEntry: entry });
+    const seriesWithPoints = series.map((item, idx) => {
+      const sourcePoints = trendRangeMode === 'recent' && item.recentPoints ? item.recentPoints : item.points;
+      const shown = sourcePoints.filter(p => p.at >= start && p.at <= end);
+      return { item, shown, color: seriesColor(idx, series.length) };
+    });
+    const anyShown = seriesWithPoints.some(s => s.shown.length > 0);
+    $('empty').hidden = anyShown;
     plot.hidden = false;
-    const max = moneyAxis ? Math.max(1, model.historyReadings(entry.window).primary?.value || 0, ...shown.map(p => p.value)) * 1.08 : 100;
-    const left = 26, right = width - 5, top = 10, bottom = 58;
-    const X = at => left + (at - start) / (end - start) * (right - left);
-    const Y = value => bottom - Math.max(0, value) / max * (bottom - top);
+    const allShownPoints = seriesWithPoints.flatMap(s => s.shown);
+    const max = moneyAxis ? Math.max(1, model.historyReadings(entry.window).primary?.value || 0, ...allShownPoints.map(p => p.value)) * 1.08 : 100;
+    const left = 26, right = width - 5, top = 10, bottom = 62;
+    const span = Math.max(1, end - start);
+    const X = at => left + Math.max(0, Math.min(1, (at - start) / span)) * (right - left);
+    const Y = value => bottom - Math.max(0, Math.min(max, value)) / max * (bottom - top);
     for (const value of [max, max / 2, 0]) {
       plot.append(svgNode('line', { x1: left, x2: right, y1: Y(value), y2: Y(value), class: 'quota-history-grid' }));
       if (value !== max / 2) plot.append(svgNode('text', { x: 0, y: Y(value) + 4 }, moneyAxis ? number(value) : `${number(value)}%`));
@@ -71,23 +107,47 @@
     const showGuide = !moneyAxis && cycle;
     $('guide-caption').hidden = !showGuide;
     $('guide-caption').textContent = t('guide');
-    if (showGuide) plot.append(svgNode('line', { x1: X(start), x2: X(end), y1: Y(100), y2: Y(0), class: 'quota-history-guide', 'aria-hidden': 'true' }));
-    for (const segment of model.segments(shown)) {
-      let d = '';
-      segment.forEach((point, index) => {
-        const y = Y(moneyAxis ? point.value : 100 - point.value);
-        d += `${index === 0 ? 'M' : 'L'}${X(point.at)},${y}`;
-      });
-      plot.append(svgNode('path', { d, class: 'quota-history-curve' }));
-      if (segment.length === 1) {
-        const point = segment[0];
-        const x = X(point.at), y = Y(moneyAxis ? point.value : 100 - point.value);
-        plot.append(svgNode('line', { x1: Math.max(left, x - 1.5), x2: Math.min(right, x + 1.5), y1: y, y2: y, class: 'quota-history-curve' }));
+    if (showGuide) {
+      const guideColor = guideEntry ? seriesColor(Math.max(0, series.indexOf(guideEntry)), series.length) : 'var(--accent)';
+      plot.append(paintSvg(svgNode('line', { x1: X(start), x2: X(end), y1: Y(100), y2: Y(0), class: 'quota-history-guide', 'aria-hidden': 'true' }), { stroke: guideColor }));
+      if (now > start && now < end) {
+        plot.append(svgNode('line', { x1: X(now), x2: X(now), y1: top, y2: bottom, class: 'quota-history-now', 'aria-hidden': 'true' }));
       }
     }
-    const format = end - start < 86400_000 ? { hour: '2-digit', minute: '2-digit' } : { month: 'numeric', day: 'numeric' };
-    plot.append(svgNode('text', { x: left, y: 77 }, date(start, format)));
-    plot.append(svgNode('text', { x: right, y: 77, 'text-anchor': 'end' }, date(end, format)));
+    for (const { item, shown, color } of seriesWithPoints) {
+      const isSelected = item === entry;
+      const strokeWidth = series.length > 1 ? (isSelected ? 2 : 1.45) : 1.65;
+      const opacity = series.length > 1 && !isSelected ? 0.78 : 1;
+      const segs = model.segments(shown);
+      for (const segment of segs) {
+        let d = '';
+        segment.forEach((point, index) => {
+          const y = Y(moneyAxis ? point.value : 100 - point.value);
+          d += `${index === 0 ? 'M' : 'L'}${X(point.at)},${y}`;
+        });
+        if (segment.length > 1 && isSelected) {
+          const firstX = X(segment[0].at), lastX = X(segment.at(-1).at);
+          const areaD = `${d} L${lastX},${bottom} L${firstX},${bottom} Z`;
+          plot.append(paintSvg(svgNode('path', { d: areaD, class: 'quota-history-area' }), { fill: color }));
+        }
+        plot.append(paintSvg(svgNode('path', { d, class: 'quota-history-curve' }), { stroke: color, 'stroke-width': strokeWidth, opacity }));
+        if (segment.length === 1) {
+          const point = segment[0];
+          const x = X(point.at), y = Y(moneyAxis ? point.value : 100 - point.value);
+          plot.append(paintSvg(svgNode('line', { x1: Math.max(left, x - 2), x2: Math.min(right, x + 2), y1: y, y2: y, class: 'quota-history-curve' }), { stroke: color, 'stroke-width': strokeWidth }));
+        }
+      }
+      const lastPoint = shown.at(-1);
+      if (lastPoint) {
+        const cx = X(lastPoint.at), cy = Y(moneyAxis ? lastPoint.value : 100 - lastPoint.value);
+        plot.append(paintSvg(svgNode('circle', { cx, cy, r: isSelected ? 2.6 : 2, class: 'quota-history-dot' }), { fill: color, opacity }));
+      }
+    }
+    const format = end - start < 86400_000
+      ? { hour: '2-digit', minute: '2-digit' }
+      : cycle ? { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'numeric', day: 'numeric' };
+    plot.append(svgNode('text', { x: left, y: 81 }, date(start, format)));
+    plot.append(svgNode('text', { x: right, y: 81, 'text-anchor': 'end' }, date(end, format)));
   }
 
   function drawDistribution(entry) {
@@ -140,6 +200,7 @@
   function render() {
     if (!payload) return;
     document.documentElement.lang = payload.locale;
+    const now = Date.now();
     const entry = current();
     $('provider').textContent = payload.label;
     $('account').textContent = payload.account;
@@ -147,34 +208,110 @@
     const selector = $('windows');
     selector.setAttribute('aria-label', t('windows'));
     selector.replaceChildren();
-    selector.hidden = payload.windows.length < 2;
-    for (const item of payload.windows) {
+    const meters = $('meters');
+    meters.replaceChildren();
+    const series = overlayEntries(entry);
+    const hasNonPercentWindows = payload.windows.some(item => unit(item) !== 'pp');
+    // Show pill selector only when there are non-percent windows mixed in;
+    // otherwise the Magpie-style top progress meter cards act as the interactive selector.
+    selector.hidden = !hasNonPercentWindows || payload.windows.length < 2;
+    for (const [idx, item] of payload.windows.entries()) {
+      const reading = model.historyReadings(item.window).primary;
+      const placeholder = item.placeholder === true;
+      const isPp = unit(item) === 'pp' && (reading || placeholder);
+      const remainingPct = isPp ? (reading ? Math.round(100 - reading.value) : 0) : null;
+      const value = isPp
+        ? `${remainingPct}% ${t('remaining')}`
+        : `${number(reading?.value)} ${item.window.currency || 'credits'}`;
+      const duplicateLabel = payload.windows.some(other => other !== item && label(other) === label(item));
+      const itemLabel = duplicateLabel && item.window.currency ? `${label(item)} · ${item.window.currency}` : label(item);
+      const description = `${label(item)} · ${value}`;
+      const selectWindow = () => {
+        if (selected === item.key) return;
+        selected = item.key; hoveredBucket = '';
+        renderContent(true);
+      };
+
       const option = document.createElement('button');
       option.type = 'button';
       option.tabIndex = -1;
       option.dataset.historyWindow = item.key;
-      const reading = model.historyReadings(item.window).primary;
-      const value = unit(item) === 'pp' && reading
-        ? `${Math.round(100 - reading.value)}% ${t('remaining')}`
-        : `${number(reading?.value)} ${item.window.currency || 'credits'}`;
-      const duplicateLabel = payload.windows.some(other => other !== item && label(other) === label(item));
-      option.textContent = duplicateLabel && item.window.currency ? `${label(item)} · ${item.window.currency}` : label(item);
-      const description = `${label(item)} · ${value}`;
+      option.textContent = itemLabel;
       option.setAttribute('aria-label', description);
       option.setAttribute('aria-pressed', String(item === entry));
       option.addEventListener('mousedown', event => event.preventDefault());
-      option.addEventListener('click', () => {
-        if (selected === item.key) return;
-        selected = item.key; hoveredBucket = '';
-        renderContent(true);
-      });
+      option.addEventListener('click', selectWindow);
       if (item === entry) $('quota').textContent = description;
       selector.append(option);
+
+      // Magpie-style top meter card with progress bar, reset countdown, and pace indicator
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.tabIndex = -1;
+      card.className = 'quota-history-meter-card';
+      card.dataset.historyMeter = item.key;
+      card.setAttribute('aria-pressed', String(item === entry));
+      card.addEventListener('mousedown', event => event.preventDefault());
+      card.addEventListener('click', selectWindow);
+      const topRow = document.createElement('div');
+      topRow.className = 'quota-history-meter-top';
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'quota-history-meter-label';
+      nameSpan.textContent = itemLabel;
+      const valSpan = document.createElement('span');
+      valSpan.className = 'quota-history-meter-value';
+      valSpan.textContent = value;
+      topRow.append(nameSpan, valSpan);
+      card.append(topRow);
+      if (isPp) {
+        const track = document.createElement('div');
+        track.className = 'quota-history-meter-track';
+        const fill = document.createElement('div');
+        fill.className = 'quota-history-meter-fill';
+        const seriesIdx = series.indexOf(item);
+        const barColor = seriesIdx >= 0 ? seriesColor(seriesIdx, series.length) : seriesColor(idx, payload.windows.length);
+        fill.style.width = `${Math.max(0, Math.min(100, remainingPct))}%`;
+        fill.style.background = barColor;
+        track.append(fill);
+        card.append(track);
+      }
+      const metaParts = [];
+      if (item.window.resetsAt) {
+        const resetTime = date(item.window.resetsAt, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const rel = formatRelativeReset(item.window.resetsAt);
+        metaParts.push([t('resetAt', { time: resetTime }), rel].filter(Boolean).join(' · '));
+      }
+      const pace = model.windowPace(item.window, now, payload.provider);
+      if (metaParts.length > 0 || pace) {
+        const meta = document.createElement('div');
+        meta.className = 'quota-history-meter-meta';
+        if (metaParts.length > 0) {
+          const resetNode = document.createElement('span');
+          resetNode.textContent = metaParts.join(' · ') + (pace ? ' · ' : '');
+          meta.append(resetNode);
+        }
+        if (pace) {
+          const paceNode = document.createElement('span');
+          const sign = pace.delta > 0 ? '+' : '';
+          paceNode.className = `quota-history-pace ${pace.delta > 2 ? 'is-ahead' : pace.delta < -2 ? 'is-behind' : ''}`.trim();
+          paceNode.textContent = t('pace', { delta: `${sign}${pace.delta}%` });
+          meta.append(paceNode);
+        }
+        card.append(meta);
+      }
+      meters.append(card);
     }
+    $('quota').hidden = meters.children.length > 0;
     if (!entry) return;
-    const bounds = model.trendBounds(entry.window, Date.now(), payload.provider);
+    const hasAnyCycle = series.some(item => model.trendBounds(item.window, now, payload.provider).cycle);
+    const bounds = unit(entry) !== 'pp'
+      ? model.trendBounds(entry.window, now, payload.provider)
+      : model.combinedTrendBounds(series, now, payload.provider, { rangeMode: trendRangeMode, primaryEntry: entry });
     const spent = unit(entry) !== 'pp' && entry.balance === false;
     $('trend-heading').textContent = bounds.cycle ? t(spent ? 'trendSpent' : 'trend') : t(spent ? 'trendSpentRecent' : 'trendRecent', { count: 14 });
+    const rangeBtn = $('trend-range-btn');
+    rangeBtn.hidden = !hasAnyCycle;
+    rangeBtn.textContent = `${t(trendRangeMode === 'recent' ? 'rangeRecent' : 'rangeCycle', { count: 14 })} ▾`;
     const money = window.TokenMonitorLimitBalanceDisplay;
     const rawAmount = entry.window.metric === 'spend' ? entry.window.used : entry.window.remaining;
     const hasBalance = ['credits', 'spend'].includes(entry.window.metric) && unit(entry) === 'pp' && typeof rawAmount === 'number';
@@ -182,7 +319,33 @@
     $('balance').textContent = hasBalance ? [money.formatMoney(rawAmount, entry.window.currency || 'credits'),
       ...(entry.window.limit > 0 ? [money.formatMoney(entry.window.limit, entry.window.currency || 'credits')] : [])].join(' / ') : '';
     $('reset').textContent = entry.window.resetsAt ? t('resetAt', { time: date(entry.window.resetsAt, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }) : '';
+    $('reset').hidden = meters.children.length > 0;
     $('updated').textContent = payload.updatedAt ? date(payload.updatedAt, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    const legend = $('legend');
+    legend.replaceChildren();
+    legend.hidden = series.length < 2;
+    for (const [idx, item] of series.entries()) {
+      const reading = model.historyReadings(item.window).primary;
+      const pct = reading ? `${Math.round(100 - reading.value)}%` : item.placeholder === true ? '0%' : '';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.tabIndex = -1;
+      btn.className = 'quota-history-legend-item';
+      btn.setAttribute('aria-pressed', String(item === entry));
+      const dot = document.createElement('span');
+      dot.className = 'quota-history-legend-dot';
+      dot.style.background = seriesColor(idx, series.length);
+      const text = document.createElement('span');
+      text.textContent = [label(item), pct].filter(Boolean).join(' ');
+      btn.append(dot, text);
+      btn.addEventListener('mousedown', event => event.preventDefault());
+      btn.addEventListener('click', () => {
+        if (selected === item.key) return;
+        selected = item.key; hoveredBucket = '';
+        renderContent(true);
+      });
+      legend.append(btn);
+    }
     $('distribution-heading').textContent = t('distribution');
     $('empty').textContent = t('empty');
     $('notice').textContent = t('notice');
@@ -211,6 +374,11 @@
   }
 
   reducedMotionMedia.addEventListener('change', () => { if (reduceMotion()) renderContent(); });
+  $('trend-range-btn').addEventListener('mousedown', event => event.preventDefault());
+  $('trend-range-btn').addEventListener('click', () => {
+    trendRangeMode = trendRangeMode === 'cycle' ? 'recent' : 'cycle';
+    renderContent(true);
+  });
   $('bars').addEventListener('pointerleave', () => {
     hoveredBucket = '';
     restoreReading();
@@ -225,6 +393,7 @@
     if (accountChanged) {
       selected = next.windows.find(entry => entry.window.kind === 'weekly')?.key || next.windows[0]?.key || '';
       hoveredBucket = '';
+      trendRangeMode = 'cycle';
     }
     payload = next;
     const frameStyle = getComputedStyle($('history'));

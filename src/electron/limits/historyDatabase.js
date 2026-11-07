@@ -313,21 +313,25 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     }
     return observationPoints(runs);
   }
+  const hasStreamData = sql('SELECT 1 FROM runs WHERE stream = ? UNION ALL SELECT 1 FROM daily WHERE stream = ? LIMIT 1');
   function query(windows, range, now) {
     if (maintainedDay !== dayKey(now)) transaction(() => {}, now);
     const anchor = new Date(`${range.day}T23:59:59.999`).getTime();
     const viewNow = Math.min(now, anchor);
     const detailSince = retentionStart(now, 180);
     return { persistent: persistent && !saveFailed, range, detailSince, since: retentionStart(now, 730), windows: windows.map(entry => {
+      const streamId = !hasStreamData.get(entry.id, entry.id) && entry.fallbackId && hasStreamData.get(entry.fallbackId, entry.fallbackId)
+        ? entry.fallbackId
+        : entry.id;
       const options = { grain: range.grain, day: range.day, now: viewNow };
       let result;
       if (range.grain === 'hour') {
         const start = new Date(`${range.day}T00:00:00`).getTime();
-        result = distribution(start < detailSince ? [] : points(entry.id, start, viewNow, true), options);
+        result = distribution(start < detailSince ? [] : points(streamId, start, viewNow, true), options);
       } else {
         result = distribution([], options);
         const summaries = sql('SELECT * FROM daily WHERE stream = ? AND day >= ? AND day <= ?')
-          .all(entry.id, result.buckets[0]?.key || range.day, range.day);
+          .all(streamId, result.buckets[0]?.key || range.day, range.day);
         const byDay = new Map(summaries.map(row => [row.day, row]));
         for (const bucket of result.buckets) {
           const row = byDay.get(bucket.key);
@@ -338,7 +342,15 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
         }
       }
       const { start: trendStart } = trendBounds(entry.window, now, entry.provider);
-      return { key: entry.key, window: entry.window, ...(entry.unit ? { unit: entry.unit, balance: entry.balance } : {}), points: points(entry.id, Math.max(detailSince, trendStart), now),
+      // Include a 14-day recent window so switching the trend chart between
+      // 'current cycle' and 'last 14 days' in the renderer has data for short cycles.
+      const queryFrom = Math.max(detailSince, trendStart);
+      const recentFrom = Math.max(detailSince, now - 14 * 86400_000);
+      const cyclePoints = points(streamId, queryFrom, now);
+      const recentPoints = recentFrom < queryFrom ? points(streamId, recentFrom, now) : cyclePoints;
+      return { key: entry.key, window: entry.window, ...(entry.unit ? { unit: entry.unit, balance: entry.balance } : {}),
+        ...(entry.placeholder ? { placeholder: true } : {}), points: cyclePoints,
+        ...(recentPoints !== cyclePoints ? { recentPoints } : {}),
         distribution: result, summaryOnly: new Date(`${range.day}T00:00:00`).getTime() < detailSince };
     }) };
   }
