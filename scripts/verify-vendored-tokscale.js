@@ -382,7 +382,7 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
     // JSONL input_tokens includes the cached prefix, which is split out into
     // cacheRead, and the qoder-custom-<profile>/ prefix is stripped.
     client: 'qodercn',
-    expectedRow: { model: 'openai/gpt-5', input: 400, output: 120, cacheRead: 600, cacheWrite: 0, reasoning: 0 },
+    expectedRow: { model: 'gpt-5', input: 400, output: 120, cacheRead: 600, cacheWrite: 0, reasoning: 0 },
     hasExplicitTotal: false,
     expectedPeriod: { totalTokens: 1120, clientTokens: 1120, clientOutputTokens: 120 },
     expectedSession: { id: QODER_CN_SESSION_ID, totalTokens: 1120, outputTokens: 120, reasoningTokens: 0 },

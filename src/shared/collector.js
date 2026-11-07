@@ -1855,6 +1855,12 @@ function watchPolicyEntries(clientsCsv, options = {}) {
 
   bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
     if (parts[0] === 'otel') return false;
+    if (parts[0] === 'session-state') {
+      // Native CLI sessions can appear after the watcher starts. Keep their
+      // discovery directories and direct legacy JSONL files, but prune each
+      // session's plans, checkpoints and other non-usage content.
+      return parts.length > 2 && !(parts.length === 3 && parts[2] === 'events.jsonl');
+    }
     if (parts.length === 1) return !COPILOT_DB_WATCH_PATTERN.test(parts[0]);
     return true;
   });
