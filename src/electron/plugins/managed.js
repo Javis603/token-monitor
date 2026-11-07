@@ -14,6 +14,13 @@ function boundedJson(value, limit) {
   if (Buffer.byteLength(json) > limit) throw new Error(`plugin metadata exceeds ${limit} bytes`);
   return json;
 }
+function hasCredentialDirectory(target) {
+  let stat;
+  try { stat = fs.lstatSync(target); }
+  catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('invalid credential recovery directory');
+  return true;
+}
 function atomicJson(file, value, limit = Infinity) {
   const json = boundedJson(value, limit);
   const tmp = `${file}.tmp`;
@@ -83,6 +90,12 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, cred
     // A prepared journal owns the rollback baseline; a committed one uses disk.
     if (j.phase === 'committed') readRegistry();
     if (j.phase === 'prepared') {
+      const credentialsBackup = path.join(txDir, 'plugin-credentials');
+      const restoreCredentials = credentialsDir && hasCredentialDirectory(credentialsBackup);
+      if (restoreCredentials) {
+        hasCredentialDirectory(credentialsDir);
+        if (hasCredentialDirectory(path.join(credentialsDir, j.id))) throw Error('credential recovery destination already exists');
+      }
       const target = path.join(userDir, j.id), old = path.join(txDir, 'old'), stage = path.join(txDir, 'stage');
       if (fs.existsSync(old)) {
         fs.rmSync(target, { recursive: true, force: true }); fs.renameSync(old, target);
@@ -91,11 +104,8 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, cred
       if (fs.existsSync(directoryBackup)) { fs.mkdirSync(dataDir, { recursive: true }); fs.renameSync(directoryBackup, path.join(dataDir, j.id)); }
       const settingsBackup = path.join(txDir, 'author-settings.json');
       if (settingsDir && fs.existsSync(settingsBackup)) { fs.mkdirSync(settingsDir, { recursive: true }); fs.renameSync(settingsBackup, path.join(settingsDir, `${j.id}.json`)); }
-      const credentialsBackup = path.join(txDir, 'plugin-credentials');
-      if (credentialsDir && fs.existsSync(credentialsBackup)) {
+      if (restoreCredentials) {
         fs.mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
-        const stat = fs.lstatSync(credentialsDir);
-        if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('invalid credential directory');
         fs.renameSync(credentialsBackup, path.join(credentialsDir, j.id));
       }
       const previous = path.join(historyDir, `${j.id}.tmplugin`), previousBackup = path.join(txDir, 'previous.tmplugin');
