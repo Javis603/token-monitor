@@ -12,7 +12,7 @@ test('capability declarations have a closed vocabulary and stable order, without
   assert.equal(result.ok, true);
   assert.deepEqual(result.manifest.limits[0].capabilities, ['api', 'apiKey', 'oauth', 'web', 'cli']);
   assert.equal(result.manifest.background, false);
-  assert.equal(result.manifest.limits[0].connection, null);
+  assert.equal(result.manifest.limits[0].credentials, null);
   for (const capabilities of [['Auto'], ['manual'], ['local'], ['relay'], ['desktopApp'], ['api', 'api'], 'api', [null]]) assert.equal(parse({ capabilities }).ok, false);
 });
 test('custom labels are author text, localized, optional and bounded', () => {
@@ -24,11 +24,11 @@ test('custom labels are author text, localized, optional and bounded', () => {
   assert.equal(parse({ tags: ['😀'.repeat(16)] }).ok, true);
   assert.equal(parse({ tags: ['Local'] }).ok, true);
 });
-test('adapter-derived capabilities deduplicate, authors choose sources, host owns automatic sampling', () => {
-  const module = { connection: 'openai', capabilities: ['web', 'oauth', 'cli'], tags: ['自訂方案'], sampling: true };
+test('declared capabilities deduplicate, authors choose sources, host owns automatic sampling', () => {
+  const module = { credentials: { fields: [] }, capabilities: ['web', 'oauth', 'cli'], tags: ['自訂方案'], sampling: true };
   assert.deepEqual(pluginLimitCapabilityTags(module).map(tag => tag.label), ['Auto', 'OAuth/Web/CLI', '自訂方案']);
   assert.deepEqual(pluginLimitCapabilityTags({ ...module, sampling: false }).map(tag => tag.label), ['OAuth/Web/CLI', '自訂方案']);
-  assert.deepEqual(pluginLimitCapabilityTags({ connection: 'openai' }).map(tag => tag.label), ['Web']);
+  assert.deepEqual(pluginLimitCapabilityTags({ credentials: { fields: [] } }).map(tag => tag.label), []);
 });
 test('API key uses existing translation and supersedes redundant API; custom text is not interpreted as status', () => {
   const tags = pluginLimitCapabilityTags({ capabilities: ['api', 'apiKey'], tags: ['中轉站'] });

@@ -4590,40 +4590,8 @@ function desktopLimitProviders() {
 function desktopLimitRecords() {
   return [...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || [])];
 }
-function pluginLimitAccountOptions(module) {
-  const box = document.createElement('div');
-  box.className = 'settings-actions plugin-limit-account';
-  const status = document.createElement('span');
-  box.append(status);
-  if (!module.connection) return box;
-  let revision = 0;
-  box.refreshConnectionStatus = async (operation = 'status') => {
-    const current = ++revision;
-    try {
-      const result = await pluginBridge.connection(module.pluginId, module.moduleId, operation);
-      if (current !== revision) return;
-      const connectionState = result.state === 'error' && result.error === 'reconnect-required' ? 'reconnectRequired' : result.state;
-      status.textContent = t(`plugins.connection.state.${connectionState}`);
-    }
-    catch { if (current === revision) status.textContent = t('settings.limits.status.error'); }
-  };
-  for (const operation of ['connect', 'status', 'disconnect']) {
-    const button = document.createElement('button');
-    button.type = 'button'; button.className = 'settings-button';
-    button.textContent = t(`plugins.connection.${operation}`);
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      try { await box.refreshConnectionStatus(operation); }
-      finally { button.disabled = false; }
-    });
-    box.append(button);
-  }
-  void box.refreshConnectionStatus();
-  return box;
-}
-function refreshPluginLimitAccountStatuses() {
-  if (!isSettingsSurfaceVisible()) return;
-  for (const box of els.limitProviderCheckboxes.querySelectorAll('.plugin-limit-account')) void box.refreshConnectionStatus?.();
+function refreshPluginLimitCredentialStatuses() {
+  if (isSettingsSurfaceVisible()) pluginLimitSettings?.refreshCredentials();
 }
 function configuredLimitProviderOrder() {
   const enabled = enabledLimitProviderSet();
@@ -12344,7 +12312,7 @@ function renderLimitProviderCheckboxesNow() {
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
     const usageItems = isEnabled ? limitProviderUsageItemRows(id) : [];
-    const hasOptions = Boolean(pluginModule?.connection || pluginModule?.settingsView || accountGroup || settings || connectionDetailKey || usageItems.length);
+    const hasOptions = Boolean(pluginModule?.credentials || pluginModule?.settingsView || accountGroup || settings || connectionDetailKey || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
@@ -12372,7 +12340,6 @@ function renderLimitProviderCheckboxesNow() {
         accountGroup.classList.add('limit-provider-account-group');
       }
       if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
-      if (pluginModule) optionsInner.append(pluginLimitAccountOptions(pluginModule));
       if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
       if (usageItems.length) optionsInner.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
       optionsContainer.append(optionsInner);
@@ -13400,6 +13367,7 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
     app: window.tokenMonitor,
     native: {
       quota: limitWindowsView,
+      credentials: call => window.TokenMonitorPluginCredentials.create({ document, call, t, localize: value => window.TokenMonitorPluginLocalized.localize(value, state.settings?.language) }),
       usageRow: data => { const node = rowTemplate(data); updateRow(node, { ...data, barValue: data.barValue ?? data.value, max: data.max ?? data.value, color: data.color || 'var(--accent)' }); return node; },
       updateUsageRow: updateRow,
       quotaProvider: (id, label, record, color) => renderLimitProviderSolo(id, label, record, color),
@@ -13471,7 +13439,7 @@ function applyPluginCatalog(list) {
     if (state.breakdown === 'limits') renderLimits();
     if (isSettingsSurfaceVisible()) renderLimitProviderCheckboxes();
   }
-  refreshPluginLimitAccountStatuses();
+  refreshPluginLimitCredentialStatuses();
   return list;
 }
 
@@ -13497,7 +13465,7 @@ function applyPluginCatalogUpdates(catalog) {
 
 pluginApi = pluginBridge ? {
   list: loadPluginCatalog,
-  connection: (id, key, operation) => pluginBridge.connection(id, key, operation),
+  forgetCredentials: id => pluginBridge.forgetCredentials(id),
   orderContent: async (target, refs) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.orderContent(target, refs)),
   selectContent: async (target, ref) => applyPluginCatalog(await window.tokenMonitorTrustedPlugins.selectContent(target, ref)),
   setEnabled: async (id, enabled, initialSetup) => applyPluginCatalog(await pluginBridge.setEnabled(id, enabled, initialSetup)),

@@ -3,6 +3,7 @@ const semver = require('semver');
 const { normalizeSettings } = require('./settings');
 const { normalizeIdentityIcon } = require('./identityIcon');
 const { normalizeAppearance } = require('./appearance');
+const { normalizeCredentials } = require('./credentials');
 const { normalizeLocalized, cleanText } = require('./localized');
 const API_MAJOR = 1;
 const LIMIT_CAPABILITY_IDS = Object.freeze(['api', 'apiKey', 'oauth', 'web', 'cli']);
@@ -108,7 +109,7 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
   for (const entry of Array.isArray(raw.limits) ? raw.limits : []) {
     const title = normalizeLocalized(entry?.name, 48);
     if (!backend || !entry || typeof entry.id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(entry.id) || limitIds.has(entry.id) || !title
-      || (entry.connection !== undefined && entry.connection !== 'openai')) { fail('invalid limits module'); continue; }
+      || entry.connection !== undefined) { fail('invalid limits module'); continue; }
     const settingsView = entry.settingsView ?? null;
     if (settingsView !== null && (typeof settingsView !== 'string' || !views.some(view => view.id === settingsView && view.surfaces.includes('settings')))) { fail('limits settingsView must reference a declared settings view'); continue; }
     const declared = entry.capabilities ?? [];
@@ -117,8 +118,10 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
     if (!Array.isArray(rawTags) || rawTags.length > 2) { fail('limits tags must contain at most 2 labels'); continue; }
     const tags = rawTags.map(value => normalizeLocalized(value, 256));
     if (tags.some(tag => !tag || Object.values(tag).some(text => [...text].length > 16))) { fail('limits tags must be nonempty localized labels of at most 16 characters'); continue; }
+    let credentials;
+    try { credentials = normalizeCredentials(entry.credentials); } catch (error) { fail(error.message); continue; }
     limitIds.add(entry.id);
-    limits.push({ id: entry.id, name: title, connection: entry.connection || null,
+    limits.push({ id: entry.id, name: title, credentials,
       capabilities: LIMIT_CAPABILITY_IDS.filter(id => declared.includes(id)), tags, settingsView });
   }
   let settings, identityIcon;

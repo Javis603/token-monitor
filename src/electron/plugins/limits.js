@@ -24,7 +24,7 @@ function normalizeReading(input, provider) {
   const plan = typeof input.plan === 'string' ? input.plan.slice(0, 80) : '';
   return { provider, status: input.status, windows, plan, planLabel: plan, updatedAt: Number.isFinite(Date.parse(input.updatedAt)) ? new Date(input.updatedAt).toISOString() : new Date().toISOString() };
 }
-function createPluginLimits({ manager, getSettings, changed }) {
+function createPluginLimits({ manager, getSettings, changed, cancelModule = () => {} }) {
   let runtime = null, disposed = false;
   let byId = new Map(), retained = [];
   const demands = new Map();
@@ -65,9 +65,13 @@ function createPluginLimits({ manager, getSettings, changed }) {
       probeProvider: async (id, _options, { signal }) => {
         const module = byId.get(id);
         if (signal.aborted) return [];
-        const value = await manager.call(module.pluginId, 'limits.collect', { moduleId: module.moduleId });
-        if (signal.aborted) return [];
-        return [normalizeReading(value, id)];
+        const cancel = () => cancelModule(module.pluginId, module.moduleId);
+        signal.addEventListener('abort', cancel, { once: true });
+        try {
+          const value = await manager.call(module.pluginId, 'limits.collect', { moduleId: module.moduleId });
+          if (signal.aborted) return [];
+          return [normalizeReading(value, id)];
+        } finally { signal.removeEventListener('abort', cancel); }
       }
     });
     runtime.subscribe(changed); runtime.start();
@@ -79,10 +83,10 @@ function createPluginLimits({ manager, getSettings, changed }) {
       reconcile();
       changed();
     },
-    forgetConnections(pluginId, moduleId) {
-      const modules = catalog().filter(module => module.pluginId === pluginId && module.connection
+    invalidateCredentials(pluginId, moduleId) {
+      const modules = catalog().filter(module => module.pluginId === pluginId && module.credentials
         && (moduleId === undefined || module.moduleId === moduleId));
-      for (const module of modules) runtime?.clear({ provider: module.id }, 'connection removed');
+      for (const module of modules) runtime?.clear({ provider: module.id }, 'credentials changed');
       const ids = new Set(modules.map(module => module.id));
       retained = retained.filter(row => !ids.has(row.provider));
       changed();

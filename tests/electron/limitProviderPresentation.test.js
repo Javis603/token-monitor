@@ -2401,7 +2401,7 @@ function createLimitProviderToggleHarness({
   saveSettings
 } = {}) {
   const app = readRendererFile('app.js');
-  const providerSelection = functionBody(app, 'desktopLimitProviders', 'pluginLimitAccountOptions') + functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
+  const providerSelection = functionBody(app, 'desktopLimitProviders', 'refreshPluginLimitCredentialStatuses') + functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
   const enabledProviderSelection = functionBody(app, 'enabledLimitProviderSet', 'limitProviderEnabled');
   const toggleStart = app.indexOf('async function onLimitProviderToggle()');
   const toggleEnd = app.indexOf('async function onLimitProviderMove(', toggleStart);
@@ -2667,7 +2667,7 @@ test('settings pushes sync once while repainting the background main view', () =
 
 test('main limits cache reuses unchanged data and repaints when token units change', () => {
   const app = readRendererFile('app.js');
-  const source = functionBody(app, 'desktopLimitProviders', 'pluginLimitAccountOptions') + functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  const source = functionBody(app, 'desktopLimitProviders', 'refreshPluginLimitCredentialStatuses') + functionBody(app, 'renderLimits', 'serviceStatusLabel');
   let paints = 0;
   const state = { settings: { compactTokenUnits: 'western' }, stats: { limits: { providers: [{ provider: 'muse', source: 'web', status: 'ok' }] } } };
   const context = vm.createContext({

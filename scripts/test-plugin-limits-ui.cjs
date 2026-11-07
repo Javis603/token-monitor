@@ -7,7 +7,6 @@ const path = require('node:path');
 const os = require('node:os');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const { EventEmitter } = require('node:events');
 const { createPluginRuntime, registerPluginScheme } = require('../src/electron/plugins/runtime');
 const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-credit-limits-'));
@@ -15,8 +14,8 @@ const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 
 const fixtureDir = path.join(scratch, 'source');
 fs.mkdirSync(fixtureDir, { recursive: true });
-fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'string',label:'Display mode',default:'meter'}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',connection:'openai',capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
-fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-reject')return host.call('webSession.request',{key:'one'});if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
+fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'string',label:'Display mode',default:'meter'}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Platform session Bearer',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]},capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Token',required:true}]},capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
+fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async({host})=>({call:async(method,args)=>{if(method==='fixture-read'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return {configured:value.token==='synthetic-token'};}if(method==='fixture-network'){const value=await host.call('credentials.read',{moduleId:args.moduleId});return host.call('network.request',{moduleId:args.moduleId,requestId:'fixture-probe',url:'https://example.test/quota',headers:{Authorization:'Bearer '+value.token}});}if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='one'&&status==='error'?[]:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
 fs.writeFileSync(path.join(fixtureDir,'settings.mjs'), `
 export async function activate(ctx) {
   window.quotaViewEvents ||= [];
@@ -26,12 +25,23 @@ export async function activate(ctx) {
     let snapshot=await ctx.host.call('settings.get');
     container.innerHTML='<label class="settings-item"><span class="settings-item-text">Display mode</span><select data-quota-mode><option value="meter">Percentage + balance</option><option value="balance">Balance only</option></select></label><label class="settings-item"><span class="settings-item-text">Organization draft</span><input data-quota-draft placeholder="Synthetic organization" /></label><div class="settings-actions"><button data-quota-save>Save preferences</button><span data-quota-feedback></span></div>';
     const mode=container.querySelector('[data-quota-mode]'),draft=container.querySelector('[data-quota-draft]');
+    let credentialEditor;
+    if(id==='one') {
+      const extra=document.createElement('p');extra.textContent='Author explanation + shared native credentials';container.prepend(extra);
+      credentialEditor=await ctx.native.credentials.mount(container,{moduleId:id});
+    } else {
+      let saved=await ctx.host.call('credentials.status',{moduleId:id});
+      const editor=document.createElement('div');editor.innerHTML='<p>Custom author layout</p><input type="password" data-custom-token placeholder="Token (saved value never loaded)" /><button data-custom-save>Save custom credentials</button><span data-custom-result></span>';
+      container.append(editor);const token=editor.querySelector('[data-custom-token]');
+      editor.querySelector('[data-custom-save]').onclick=async()=>{try{saved=await ctx.host.call('credentials.update',{moduleId:id,expectedRevision:saved.revision,patch:{token:token.value}});token.value='';editor.querySelector('[data-custom-result]').textContent='Saved';}catch{editor.querySelector('[data-custom-result]').textContent='Failed';}};
+      credentialEditor={update(){},hasUnsavedChanges:()=>!!token.value,dispose(){editor.remove();}};
+    }
     mode.value=snapshot.values.displayMode;
     container.querySelector('[data-quota-save]').onclick=async()=>{
       snapshot=await ctx.host.call('settings.update',{schemaVersion:snapshot.schemaVersion,expectedRevision:snapshot.revision,patch:{displayMode:mode.value}});
       container.querySelector('[data-quota-feedback]').textContent='Saved';
     };
-    return {update(value){window.quotaViewEvents.push({type:'visible',id,visible:value.visible});},hasUnsavedChanges(){return !!draft.value||mode.value!==snapshot.values.displayMode;},dispose(){window.quotaViewEvents.push({type:'dispose',id});container.replaceChildren();}};
+    return {update(value){void credentialEditor.update(value);window.quotaViewEvents.push({type:'visible',id,visible:value.visible});},hasUnsavedChanges(){return credentialEditor.hasUnsavedChanges()||!!draft.value||mode.value!==snapshot.values.displayMode;},dispose(){credentialEditor.dispose();window.quotaViewEvents.push({type:'dispose',id});container.replaceChildren();}};
   }};
 }
 `);
@@ -41,29 +51,7 @@ app.commandLine.appendSwitch('host-resolver-rules','MAP * ~NOTFOUND, EXCLUDE loc
 registerPluginScheme(protocol);
 app.on('window-all-closed',()=>{});
 let runtime,win;
-let loginSession, loginWindow, fixtureConsent = 1;
-// Synthetic account capture exercises the real main/preload/renderer path.
-// It never opens a website or invokes the OS credential backend.
-function FixtureWindow(options) {
-  if (!options.webPreferences?.session?.fixtureLogin) return new BrowserWindow(options);
-  loginWindow = new EventEmitter();
-  loginWindow.webContents = new EventEmitter();
-  loginWindow.webContents.id = 900001;
-  loginWindow.webContents.setWindowOpenHandler = () => {};
-  loginWindow.isDestroyed = () => loginWindow.dead === true;
-  loginWindow.destroy = () => { loginWindow.dead = true; loginWindow.emit('closed'); };
-  loginWindow.loadURL = async () => {};
-  return loginWindow;
-}
-FixtureWindow.fromWebContents = BrowserWindow.fromWebContents;
-const fixtureSessions = { get defaultSession() { return session.defaultSession; }, fromPartition: (partition, ...args) => {
-  if (!partition.startsWith('plugin-web-login-')) return session.fromPartition(partition, ...args);
-  loginSession = { fixtureLogin: true, setProxy: async config => { loginSession.proxyConfig = config; }, closeAllConnections: async () => { loginSession.proxyReady = true; }, setPermissionRequestHandler() {}, clearStorageData: async () => {}, webRequest: {
-    onBeforeSendHeaders: (...values) => { loginSession.before = values.at(-1); },
-    onCompleted: (...values) => { loginSession.completed = values.at(-1); }
-  } };
-  return loginSession;
-} };
+let transportCalls=[];
 const errors=[];
 const deadline=setTimeout(()=>{console.error('UI deadline',errors);app.exit(1);},45000);
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -115,9 +103,9 @@ app.whenReady().then(async () => {
     ipcMain.removeHandler(channel); ipcMain.handle(channel, handler);
   }
   const patch=value=>{settings={...settings,...value};win.webContents.send('settings:push',settings);};
-  runtime=createPluginRuntime({electron:{BrowserWindow:FixtureWindow,ipcMain,session:fixtureSessions,utilityProcess,
-   dialog:{showMessageBox:async()=>({response:fixtureConsent}),showOpenDialog:async()=>({canceled:false,filePaths:[fixtureDir]})}},
-   fetchImpl:async()=>({ok:false,status:401}),userDataDir:scratch,getSettings:()=>settings,getAppSettings:()=>settings,getContext:()=>({source:'fixture'}),getLocale:()=>settings.language,
+  runtime=createPluginRuntime({electron:{BrowserWindow,ipcMain,session,utilityProcess,
+   dialog:{showMessageBox:async()=>({response:1}),showOpenDialog:async()=>({canceled:false,filePaths:[fixtureDir]})}},
+   fetchImpl:async(url,init)=>{transportCalls.push({url,init});return new Response('{"remaining":80}',{status:200});},userDataDir:scratch,getSettings:()=>settings,getAppSettings:()=>settings,getContext:()=>({source:'fixture'}),getLocale:()=>settings.language,
    isMainSender:event=>event.sender===win.webContents,persistPluginStates:pluginStates=>patch({pluginStates}),
    persistManagementSettings:patch,applySettingsPatch:patch,env:{},log:console.log});
   await runtime.start();runtime.publishStats(stats);
@@ -183,53 +171,49 @@ app.whenReady().then(async () => {
   assert.equal(await js("window.quotaViewEvents?.filter(event=>event.type==='mount').length||0"),0,'collapsed quota views do not execute');
   await js("document.getElementById('limitProviderDisclosure-plugin:synthetic-limits:one').click()");
   await waitFor("document.querySelector('[data-limit-module=\"plugin:synthetic-limits:one\"] [data-quota-draft]')",'author settings view');
-  const accountBox = `document.getElementById('limitProviderOptions-plugin:synthetic-limits:one').querySelector('.plugin-limit-account')`;
-  await js("tokenMonitor.updateSettings({proxyUrl:'http://127.0.0.1:7890',noProxy:'example.test'})");
-  await js(`${accountBox}.querySelector('button').click()`);
-  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connecting')`,'synthetic login starts');
-  assert.ok(loginSession && loginWindow);
-  assert.equal(loginSession.proxyConfig?.proxyRules,'http://127.0.0.1:7890','runtime injects current proxy into isolated login');
-  assert.equal(loginSession.proxyReady,true,'proxy cleanup completes before login window');
-  await js("state.limitProviderRenderSignature='';renderLimitProviderCheckboxes()");
-  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connecting')`,'rebuilt row reads current connection');
-  const request = {id:10,url:'https://api.openai.com/v1/dashboard/billing/credit_grants',method:'GET',webContentsId:loginWindow.webContents.id,
-    requestHeaders:{Authorization:'Bearer synthetic-ui-account', 'OpenAI-Organization':'org-synthetic'}};
-  loginSession.before(request, () => {});
-  await loginSession.completed({...request,statusCode:200});
-  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connected')`,'login completion updates rebuilt row without Status click');
+  const helperBox = `document.querySelector('[data-limit-module="plugin:synthetic-limits:one"] .plugin-credential-form')`;
+  await waitFor(`${helperBox}`,'author composed native credential helper');
+  await js(`(()=>{const input=${helperBox}.querySelector('[data-credential-field="token"]');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
+  await waitFor(`${helperBox}.querySelector('[role="status"]').textContent===t('plugins.credentials.configured')`,'manual credentials saved');
+  assert.equal(await js(`${helperBox}.querySelector('input').value`),'','save clears input');
+  assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')"),false,'credential update invalidates paused reading');
+  assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:two')"),true,'credential update preserves sibling');
+  assert.equal((await runtime.manager.call('synthetic-limits','fixture-read',{moduleId:'one'})).configured,true,'backend-only read');
+  const routed=await runtime.manager.call('synthetic-limits','fixture-network',{moduleId:'one'});
+  assert.equal(routed.status,200);assert.equal(transportCalls.at(-1).init.credentials,'omit');
+  await assert.rejects(js("tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.read',{moduleId:'one'})"),/Backend-only/);
+  await assert.rejects(js("tokenMonitorTrustedPlugins.host('synthetic-limits','network.request',{moduleId:'one'})"),/Backend-only/);
   const credentialDirectory=path.join(scratch,'plugin-credentials');
-  const credentialFiles=fs.readdirSync(credentialDirectory);
-  assert.equal(credentialFiles.length,1);
-  const credentialFile=path.join(credentialDirectory,credentialFiles[0]);
-  const privateRecord=JSON.parse(fs.readFileSync(credentialFile,'utf8'));
-  assert.equal(privateRecord.authorization,'Bearer synthetic-ui-account');
-  assert.equal(Object.hasOwn(privateRecord,'encrypted'),false,'private JSON is the only storage format');
+  const credentialFile=path.join(credentialDirectory,fs.readdirSync(credentialDirectory)[0]);
+  assert.equal(JSON.parse(fs.readFileSync(credentialFile)).values.token,'synthetic-token');
   if(process.platform!=='win32')assert.equal(fs.statSync(credentialFile).mode&0o777,0o600);
-  assert.equal(await js("state.pluginCatalog.limits.modules.every(module=>!module.sampling)"),true,'connection notification does not start quota demand');
-  await capture('settings-connected.png');
-  await runtime.manager.call('synthetic-limits','fixture-reject');
-  await js(`${accountBox}.refreshConnectionStatus()`);
-  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.reconnectRequired')`,'rejected connection before reconnect');
-  fixtureConsent=0;
-  await js(`${accountBox}.querySelector('button').click()`);
-  await pause(100);
-  await js(`${accountBox}.refreshConnectionStatus()`);
-  await capture('reconnect-cancelled.png');
-  assert.equal(await js(`${accountBox}.querySelector('span').textContent`),await js("t('plugins.connection.state.reconnectRequired')"),'cancelled reconnect remains rejected');
-  assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')"),true,'last quota exists before disconnect');
-  await capture('disconnect-before.png');
-  await js(`${accountBox}.querySelectorAll('button')[2].click()`);
-  await pause(150);
-  await js("loadPluginCatalog()");
-  await capture('disconnect-after.png');
-  assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')"),false,'disconnect clears paused quota');
-  assert.equal(await js("state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:two')"),true,'disconnect preserves sibling quota');
-  fixtureConsent=1;
-  await js(`${accountBox}.querySelector('button').click()`);
-  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connecting')`,'replacement login');
-  const replacementRequest={...request,webContentsId:loginWindow.webContents.id};
-  loginSession.before(replacementRequest,()=>{}); await loginSession.completed({...replacementRequest,statusCode:200});
-  await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connected')`,'replacement login clears rejection');
+  await js(`${helperBox}.scrollIntoView({block:'center'})`);
+  await capture('settings-native-helper.png');
+  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
+  await waitFor(`${helperBox}.querySelector('[role="alert"]').textContent.length>0`,'explicit required empty rejected');
+  assert.equal((await runtime.manager.call('synthetic-limits','fixture-read',{moduleId:'one'})).configured,true);
+  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
+  await waitFor(`!${helperBox}.querySelector('button').disabled&&${helperBox}.querySelector('input').value===''`,'helper resave');
+  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='conflict-draft';input.dispatchEvent(new Event('input'));})()`);
+  const external=await js("tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.status',{moduleId:'one'})");
+  await js(`tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.update',{moduleId:'one',expectedRevision:${external.revision},patch:{cookies:'synthetic-cookie'}})`);
+  await js(`${helperBox}.querySelector('button').click()`);
+  await waitFor(`${helperBox}.querySelector('[role="alert"]').textContent===t('plugins.credentials.conflict')`,'conflict keeps draft');
+  assert.equal(await js(`${helperBox}.querySelector('input').value`),'conflict-draft');
+  await js(`${helperBox}.querySelector('input').value='';${helperBox}.scrollIntoView({block:'center'})`);
+  await capture('settings-credential-conflict.png');
+  await js(`${helperBox}.querySelectorAll('button')[2].click()`);
+  await waitFor(`!${helperBox}.querySelector('button').disabled`,'explicit revision reload');
+  await js(`(()=>{const input=${helperBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
+  await waitFor(`!${helperBox}.querySelector('button').disabled&&${helperBox}.querySelector('input').value===''`,'save after explicit conflict reload');
+  await js("setLimitProviderSettingsExpanded('plugin:synthetic-limits:two')");
+  await waitFor("document.querySelector('[data-custom-token]')",'custom credential DOM');
+  await js("document.querySelector('[data-custom-token]').value='synthetic-token';document.querySelector('[data-custom-save]').click()");
+  await waitFor("document.querySelector('[data-custom-result]').textContent==='Saved'",'custom UI uses same credential API');
+  assert.equal((await runtime.manager.call('synthetic-limits','fixture-read',{moduleId:'two'})).configured,true);
+  await js("document.querySelector('[data-custom-token]').scrollIntoView({block:'center'})");
+  await capture('settings-custom-credentials.png');
+  await js("setLimitProviderSettingsExpanded('plugin:synthetic-limits:one')");
 
   await js(`(()=>{window.quotaDraftNode=document.querySelector('[data-limit-module="plugin:synthetic-limits:one"] [data-quota-draft]');quotaDraftNode.value='unsaved fixture';quotaDraftNode.focus();state.limitProviderRenderSignature='';renderLimitProviderCheckboxes();})()`);
   assert.equal(await js("quotaDraftNode===document.querySelector('[data-limit-module=\"plugin:synthetic-limits:one\"] [data-quota-draft]')&&quotaDraftNode.value==='unsaved fixture'&&document.activeElement===quotaDraftNode"),true,'row refresh retains controls, draft and focus');
@@ -262,7 +246,7 @@ app.whenReady().then(async () => {
   await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:two"]').textContent.includes('作者自填池')`,'restore localized labels');
   const statusSelector = '[data-provider="plugin:synthetic-limits:one"] .plugin-limit-status';
   assert.equal(await js(`document.querySelector(${JSON.stringify(statusSelector)})`),null,'healthy state has no duplicate pill');
-  for (const [status,label] of [['notConfigured','尚未設定'],['unauthorized','需要重新連接'],['error','讀取失敗']]) {
+  for (const [status,label] of [['notConfigured','尚未設定'],['unauthorized','憑證無效'],['error','讀取失敗']]) {
     await runtime.manager.call('synthetic-limits','fixture-status',{status});
     await js("openViewFromTray('limits')");
     await waitFor("state.pluginCatalog.limits.modules.every(module=>module.sampling)",'quota visible');
@@ -316,7 +300,7 @@ app.whenReady().then(async () => {
   await js("tokenMonitor.plugins.reload()");
   await waitFor("state.pluginCatalog?.limits?.modules?.length===2",'reload retains modules');
   await js("tokenMonitor.plugins.restart('synthetic-limits')");
-  const updated = JSON.parse(fs.readFileSync(path.join(fixtureDir,'manifest.json'))); updated.version = '1.0.1'; updated.limits.push({id:'plain',name:'Plain module'}); updated.limits[1].tags[0] = {en:'Updated pool','zh-TW':'更新後自填池'};
+  const updated = JSON.parse(fs.readFileSync(path.join(fixtureDir,'manifest.json'))); updated.version = '1.0.1'; updated.limits.push({id:'plain',name:'Plain module'},{id:'native',name:'Native form',credentials:{fields:[{id:'token',label:'API key',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]}}); updated.limits[1].tags[0] = {en:'Updated pool','zh-TW':'更新後自填池'};
   fs.writeFileSync(path.join(fixtureDir,'manifest.json'),JSON.stringify(updated));
   const updatePreview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(updatePreview.token)},{trustUpdate:true})`);
@@ -325,15 +309,25 @@ app.whenReady().then(async () => {
   await js("openSettingsPanel();setSettingsSectionExpanded('limits',true);renderLimitProviderCheckboxes()");
   await waitFor(`document.querySelector('[data-provider="plugin:synthetic-limits:two"]').textContent.includes('更新後自填池')`,'updated custom labels');
   assert.equal(await js("!!document.getElementById('limitProviderDisclosure-plugin:synthetic-limits:plain')"),false,'module with no controls has no empty disclosure');
+  await js("setLimitProviderSettingsExpanded('plugin:synthetic-limits:native')");
+  const defaultBox=`document.querySelector('[data-limit-module="plugin:synthetic-limits:native"] .plugin-credential-form')`;
+  await waitFor(defaultBox,'host default credentials without author view');
+  await js(`(()=>{const input=${defaultBox}.querySelector('input');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${defaultBox}.querySelector('button').click();})()`);
+  await waitFor(`${defaultBox}.querySelector('[role="status"]').textContent===t('plugins.credentials.configured')`,'host default form saves');
+  assert.equal((await runtime.manager.call('synthetic-limits','fixture-read',{moduleId:'native'})).configured,true);
+  await js(`${defaultBox}.querySelector('input').value='unsaved';${defaultBox}.querySelector('input').dispatchEvent(new Event('input'))`);
+  assert.equal(await js("pluginViewHost.hasUnsavedChanges(['synthetic-limits'])"),true,'default form participates in existing unsaved-work lifecycle');
+  await js(`${defaultBox}.querySelector('input').value='synthetic-token';${defaultBox}.querySelector('input').dispatchEvent(new Event('input'));${defaultBox}.querySelector('button').click()`);
+  await waitFor(`!${defaultBox}.querySelector('button').disabled&&${defaultBox}.querySelector('input').value===''`,'default form save resets draft');
+  await js(`${defaultBox}.scrollIntoView({block:'center'})`);
+  await capture('settings-default-credentials.png');
   await js("openSettingsPanel();setSettingsSectionExpanded('plugins',true);pluginSettingsPanel.refresh()");
   await waitFor("document.querySelector('[data-plugin-id=\"synthetic-limits\"] .plugin-card-footer')",'installed plugin controls');
-  await js(`(()=>{const card=document.querySelector('[data-plugin-id="synthetic-limits"]');[...card.querySelectorAll('button')].find(button=>button.textContent===t('plugins.connection.forget')).click();})()`);
+  await js(`(()=>{const card=document.querySelector('[data-plugin-id="synthetic-limits"]');[...card.querySelectorAll('button')].find(button=>button.textContent===t('plugins.credentials.forget')).click();})()`);
   await waitFor("!state.pluginCatalog.limits.providers.some(row=>row.provider==='plugin:synthetic-limits:one')",'native forget clears captured connection quota');
   await js("document.querySelector('.plugin-type-filter').value='appearance';document.querySelector('.plugin-type-filter').dispatchEvent(new Event('change'))");
   await waitFor("document.querySelector('#pluginSettingsList').textContent.includes(t('plugins.catalog.noResults'))",'filtered installed empty state');
-  await js("tokenMonitor.plugins.connection('synthetic-limits','one','connect')");
-  const uninstallRequest={...request,webContentsId:loginWindow.webContents.id};
-  loginSession.before(uninstallRequest,()=>{});await loginSession.completed({...uninstallRequest,statusCode:200});
+  await js("tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.update',{moduleId:'one',expectedRevision:0,patch:{token:'synthetic-token'}})");
   assert.equal(fs.readdirSync(credentialDirectory).length,1,'credential exists before keepData uninstall');
   await js("tokenMonitor.plugins.uninstall('synthetic-limits',{keepData:true})");
   await waitFor("state.pluginCatalog?.limits?.modules?.length===0",'uninstall');

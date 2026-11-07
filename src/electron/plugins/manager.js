@@ -19,7 +19,7 @@ function normalizePluginStates(value) {
   return result;
 }
 function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLocale = () => 'en', authorSettings, safeMode = false,
-  fork, hostCall = async () => { throw new Error('Unknown host operation'); }, log = () => {} }) {
+  fork, onBackendStopped = () => {}, hostCall = async () => { throw new Error('Unknown host operation'); }, log = () => {} }) {
   const plugins = new Map(), demands = new Map(), changes = new Set(), views = new Set(), listeners = new Set();
   const mutating = new Set();
   let disposed = false, hostContext = {};
@@ -33,7 +33,7 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
     if (plugin.logs.length > 100) plugin.logs.shift();
     log(`[plugins:${id}] ${message}`);
   }
-  const backends = createPluginBackends({ fork,
+  const backends = createPluginBackends({ fork, onStop: onBackendStopped,
     hostCall: (id, method, args) => { if (!active(plugins.get(id))) throw new Error('Plugin is disabled'); return hostCall(id, method, args); },
     onData(id, value) {
       const plugin = plugins.get(id);

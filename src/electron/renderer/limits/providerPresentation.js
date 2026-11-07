@@ -635,8 +635,7 @@
   }
 
   function pluginLimitCapabilityTags(module) {
-    // The OpenAI adapter owns its Web connection; authors need not repeat it.
-    const declared = new Set([...(module.capabilities || []), ...(module.connection === 'openai' ? ['web'] : [])]);
+    const declared = new Set(module.capabilities || []);
     const tags = module.sampling ? [{ label: 'Auto', kind: 'capability' }] : [];
     const sourceLabels = { api: 'API', apiKey: 'API key', oauth: 'OAuth', web: 'Web', cli: 'CLI' };
     const sources = Object.keys(sourceLabels).filter(id => declared.has(id));
@@ -655,7 +654,7 @@
     if (!provider) return { key: 'plugins.limits.awaitingData', tone: 'muted' };
     if (provider.status === 'ok' && !provider.stale) return null;
     if (provider.status === 'notConfigured') return { key: 'settings.limits.status.notSetUp', tone: 'setup' };
-    if (provider.status === 'unauthorized') return { key: module.connection ? 'plugins.connection.state.reconnectRequired' : 'settings.limits.status.error', tone: 'setup' };
+    if (provider.status === 'unauthorized') return { key: module.credentials ? 'plugins.credentials.invalid' : 'settings.limits.status.error', tone: 'setup' };
     if (provider.status === 'error') return { key: 'plugins.limits.readFailed', tone: 'warn' };
     return limitProviderStatusLabel(provider);
   }

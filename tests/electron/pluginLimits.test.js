@@ -68,19 +68,19 @@ test('editing visible preferences while a plugin is disabled retains its selecti
   assert.deepEqual(order.orderedLimitProviders([...providers, { id: one }, { id: two }], moved).map(row => row.id), moved);
 });
 test('forgetting host connections clears their retained quota but preserves unconnected modules', async t => {
-  const modules = [{ id: 'one', name: 'One', connection: 'openai' }, { id: 'two', name: 'Two' }];
+  const modules = [{ id: 'one', name: 'One', credentials: { fields: [] } }, { id: 'two', name: 'Two' }];
   const manager = { list: () => ({ plugins: [{ id: 'sample-plugin', status: 'active', revision: 'a', limits: modules }] }), call: async () => ({ status: 'ok', windows: [] }) };
   const service = createPluginLimits({ manager, getSettings: () => ({ limitProviders: 'plugin:sample-plugin:one,plugin:sample-plugin:two' }), changed() {} });
   t.after(() => service.dispose()); service.demand(true);
   for (let n = 0; n < 20 && service.records().length < 2; n++) await new Promise(setImmediate);
   service.demand(false);
   assert.deepEqual(new Set(service.records().map(row => row.provider)), new Set(['plugin:sample-plugin:one', 'plugin:sample-plugin:two']));
-  service.forgetConnections('sample-plugin');
+  service.invalidateCredentials('sample-plugin');
   assert.deepEqual(service.records().map(row => row.provider), ['plugin:sample-plugin:two']);
 });
 test('disconnect invalidates only its module while paused or sampling', async t => {
   for (const paused of [true,false]) {
-    const modules=[{id:'one',name:'One',connection:'openai'},{id:'two',name:'Two',connection:'openai'},{id:'plain',name:'Plain'}];
+    const modules=[{id:'one',name:'One',credentials:{fields:[]}},{id:'two',name:'Two',credentials:{fields:[]}},{id:'plain',name:'Plain'}];
     const ids=modules.map(module=>`plugin:sample-plugin:${module.id}`);
     const manager={list:()=>({plugins:[{id:'sample-plugin',status:'active',revision:'a',limits:modules}]}),
       call:async()=>({status:'ok',windows:[{kind:'billing',metric:'credits',remaining:80,currency:'USD'}]})};
@@ -89,7 +89,7 @@ test('disconnect invalidates only its module while paused or sampling', async t 
     for(let n=0;n<30&&service.records().length<3;n++) await new Promise(setImmediate);
     assert.equal(service.records().length,3);
     if(paused) service.demand(false);
-    service.forgetConnections('sample-plugin','one');
+    service.invalidateCredentials('sample-plugin','one');
     assert.deepEqual(service.records().map(row=>row.provider),ids.slice(1));
   }
 });
@@ -117,4 +117,14 @@ test('visibility resume preserves last-good windows while pending and after tran
   assert.deepEqual(service.records()[0]?.windows, windows, 'a repeated reveal also seeds the transient reading');
   service.demand(false); settings.limitProviders = ''; service.reconcile(); service.demand(true);
   assert.deepEqual(service.records(), [], 'deselection does not revive retained readings');
+});
+test('quota demand cancellation aborts only that module host transport', async t => {
+  const id='plugin:sample-plugin:one',cancelled=[];
+  let finish;
+  const manager={list:()=>({plugins:[{id:'sample-plugin',status:'active',revision:'a',limits:[{id:'one',name:'One'}]}]}),call:()=>new Promise(resolve=>{finish=resolve;})};
+  const service=createPluginLimits({manager,getSettings:()=>({limitProviders:id}),changed(){},cancelModule:(...args)=>cancelled.push(args)});
+  t.after(()=>service.dispose());service.demand(true);
+  for(let n=0;n<20&&!finish;n++)await new Promise(setImmediate);
+  service.demand(false);assert.deepEqual(cancelled,[['sample-plugin','one']]);
+  finish({status:'ok',windows:[]});await new Promise(setImmediate);assert.deepEqual(service.records(),[]);
 });
