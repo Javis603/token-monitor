@@ -54,6 +54,17 @@
         for (const input of controls.values()) input.disabled = pending;
         onStateChange({ editing, hasSaved: hasSaved(), configured: snapshot.configured, verification, pending, revision: snapshot.revision });
       }
+      async function verifySaved() {
+        const saved = snapshot;
+        snapshot = { ...saved, verification: 'verifying' }; paint();
+        try {
+          const next = await call('credentials.verify', { moduleId, expectedRevision: saved.revision });
+          if (!disposed) snapshot = next;
+        } catch (cause) {
+          if (!disposed) snapshot = saved;
+          throw cause;
+        }
+      }
       async function run(clearAll) {
         if (pending || disposed) return;
         pending = true; generation++; error.textContent = ''; paint();
@@ -66,8 +77,7 @@
           manualEditing = false;
           if (clearAll) editing = true;
           else if (snapshot.configured && snapshot.declaration.validation) {
-            snapshot = { ...snapshot, verification: 'verifying' }; paint();
-            snapshot = await call('credentials.verify', { moduleId, expectedRevision: snapshot.revision });
+            await verifySaved();
             if (disposed) return;
             editing = snapshot.verification !== 'valid';
           }
@@ -93,12 +103,16 @@
       });
       verify.addEventListener('click', async () => {
         if (pending || disposed || dirty.size) return;
-        pending = true; generation++; paint();
+        pending = true; generation++; error.textContent = ''; paint();
         try {
-          snapshot = { ...snapshot, verification: 'verifying' }; paint();
-          snapshot = await call('credentials.verify', { moduleId, expectedRevision: snapshot.revision });
+          await verifySaved();
           if (!manualEditing && snapshot.verification === 'valid') editing = false;
-        } catch { if (!disposed) error.textContent = t('plugins.credentials.saveError'); }
+        } catch (cause) {
+          if (!disposed) {
+            conflict = String(cause?.message || cause).includes('credentials-conflict');
+            error.textContent = t(conflict ? 'plugins.credentials.conflict' : 'plugins.credentials.saveError');
+          }
+        }
         finally { pending = false; if (!disposed) paint(); }
       });
       save.addEventListener('click', () => void run(false)); clear.addEventListener('click', () => void run(true));

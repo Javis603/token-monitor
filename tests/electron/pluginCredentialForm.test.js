@@ -91,3 +91,33 @@ test('host header owns the credential label; editing actions remain with fields 
   assert.equal(standalone.root.querySelector('.plugin-credential-summary').querySelector('p').hidden,false);
   own.dispose();
 });
+
+test('failed explicit and post-save verification restore saved state and expose conflicts without rolling back a successful save', async () => {
+  for (const automatic of [false,true]) for (const failure of ['transport-failed','credentials-conflict']) {
+    const document={createElement:tag=>{const node=new Element(tag);if(['input','textarea'].includes(tag))node.value='';return node;}};
+    let saved={revision:1,fields:{token:true},configured:true,verification:'unverified',declaration:{validation:true,fields:[{id:'token',label:'Token',control:'input',required:true}]}},states=[];
+    const root=new Element(),calls=[];let reject=true;
+    const editor=await create({document,t:key=>key,localize:value=>value,call:async(method,args)=>{
+      calls.push({method,args});
+      if(method==='credentials.update')saved={...saved,revision:2};
+      if(method==='credentials.verify'){if(reject)throw Error(failure);return {...saved,verification:'valid'};}
+      return saved;
+    }}).mount(root,{moduleId:'one',onStateChange:state=>states.push(state)});
+    const action=id=>root.querySelectorAll('button').find(node=>node.dataset.credentialAction===id);
+    if(automatic){const input=root.querySelector('input');input.value='synthetic-replacement';input.fire('input');action('save').fire('click');}
+    else action('verify').fire('click');
+    await tick();
+    assert.equal(states.at(-1).verification,'unverified');
+    assert.equal(states.at(-1).pending,false);
+    assert.equal(states.at(-1).revision,automatic?2:1,'successful save is retained when its later verification fails');
+    assert.equal(action('verify').disabled,false,'verification can be retried');
+    assert.equal(action('reload').hidden,failure!=='credentials-conflict');
+    assert.equal(root.querySelector('.plugin-credential-error').textContent,'plugins.credentials.'+(failure==='credentials-conflict'?'conflict':'saveError'));
+    assert.equal(editor.hasUnsavedChanges(),false);
+    assert.equal(calls.at(-1).args.expectedRevision,automatic?2:1);
+    reject=false;action('verify').fire('click');await tick();
+    assert.equal(states.at(-1).verification,'valid');
+    assert.equal(root.querySelector('.plugin-credential-error').hidden,true,'successful retry removes the previous failure');
+    editor.dispose();
+  }
+});
