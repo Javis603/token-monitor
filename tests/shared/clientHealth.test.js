@@ -624,7 +624,7 @@ test('labelling roots keeps diagnostics separate from watcher roots', () => {
   for (const [client, dirs] of Object.entries(candidates)) {
     const expected = roots[client]
       .filter((root) => (
-        !(client === 'copilot' && root.id === 'copilot-otel')
+        !(client === 'copilot' && ['copilot-otel', 'copilot-session-state'].includes(root.id))
         && root.id !== 'kiro-ide-globalstorage'
       ))
       .map((root) => root.dir);
@@ -645,7 +645,7 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   const ids = (client) => checks[client].map((check) => check.id);
   // The desktop and CLI databases are distinct sources, not same-kind variants:
   // both can exist at once, so each reports its own check.
-  assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-data', 'copilot-session-store', 'vscode-workspace-storage', 'vscode-empty-window-sessions']);
+  assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-session-state', 'copilot-data', 'copilot-session-store', 'vscode-workspace-storage', 'vscode-empty-window-sessions']);
   assert.deepEqual(ids('zed'), ['zed-threads']);
   assert.deepEqual(ids('cline'), ['cline-tasks', 'cline-cli-sessions']);
   // The extension database is a direct parser source alongside the synced IDE

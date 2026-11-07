@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { clientSourceRoots, clientSourceChecks, watchPathsForClients, watchIgnoreMatcher, clientsForWatchPath, watchAttributionRootsForClients } = require('../../src/shared/collector');
+const { deriveClientHealth, clientWatchCandidates, clientSourceRoots, clientSourceChecks, watchPathsForClients, watchIgnoreMatcher, clientsForWatchPath, watchAttributionRootsForClients } = require('../../src/shared/collector');
 const { createCursorUsageEventIndex } = require('../../src/shared/providers/cursor/usageEvents');
 
 function fixture(t) {
@@ -66,4 +66,45 @@ test('Senpi watches new home-agent project children and memory transcripts with 
   assert.deepEqual(clientsForWatchPath(memo, roots), ['senpi']);
   ignored = watchIgnoreMatcher('senpi', options);
   assert.equal(ignored(path.join(projects, 'future-hash/unrelated-cache')), true);
+});
+
+test('Copilot native session-state events survive watch pruning and retain client attribution', t => {
+  const options = fixture(t);
+  const root = path.join(options.homeDir, '.copilot');
+  fs.mkdirSync(root, { recursive: true });
+  const ignored = watchIgnoreMatcher('copilot', options);
+  const sources = watchAttributionRootsForClients('copilot', null, options);
+  for (const relative of ['session-state', 'session-state/new-session', 'session-state/new-session/events.jsonl', 'session-state/legacy.jsonl']) {
+    const file = path.join(root, relative);
+    assert.equal(ignored(file), false, relative);
+    assert.deepEqual(clientsForWatchPath(file, sources), ['copilot']);
+  }
+  for (const relative of ['session-state/new-session/checkpoints', 'session-state/new-session/plan.md', 'session-state/new-session/nested/events.jsonl']) {
+    assert.equal(ignored(path.join(root, relative)), true, relative);
+  }
+});
+
+test('Copilot native-only sources produce healthy and waiting health without duplicate watches', t => {
+  const options = fixture(t);
+  const root = path.join(options.homeDir, '.copilot');
+  const native = path.join(root, 'session-state');
+  let sourceChecks = clientSourceChecks('copilot', options);
+  assert.equal(deriveClientHealth('copilot', { clients: {} }, { sourceChecks }).clients.copilot.overall, 'unavailable');
+  fs.mkdirSync(path.join(native, 'new-session'), { recursive: true });
+  fs.writeFileSync(path.join(native, 'new-session/events.jsonl'), '{}\n');
+  sourceChecks = clientSourceChecks('copilot', options);
+  assert.deepEqual(sourceChecks.copilot.filter(check => check.exists), [{ id: 'copilot-session-state', exists: true }]);
+  for (const [tokens, expected] of [[0, 'waiting'], [100, 'healthy']]) {
+    const health = deriveClientHealth('copilot', { clients: { copilot: tokens } }, { sourceChecks });
+    assert.equal(health.clients.copilot.source.state, 'detected');
+    assert.equal(health.clients.copilot.overall, expected);
+    const mirrored = require('../../worker/src/shared/clientHealth').normalizeClientHealth(health).clients.copilot;
+    assert.equal(mirrored.overall, expected);
+    if (tokens === 0) assert.ok(mirrored.source.checks.some(check => check.id === 'copilot-session-state' && check.exists));
+  }
+  const watches = clientWatchCandidates('copilot', options).copilot;
+  assert.ok(watches.includes(root));
+  assert.ok(!watches.includes(native));
+  assert.ok(!watches.includes(path.join(root, 'otel')));
+  assert.equal(watchPathsForClients('copilot', options).filter(dir => dir === root).length, 1);
 });

@@ -1427,13 +1427,13 @@ function clientWatchCandidates(clientsCsv, options = {}) {
   if (senpiSources) options = { ...options, senpiSources };
   const byClient = {};
   for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv, options))) {
-    // The Copilot data root already keeps its `otel/` child through the
-    // matcher below. Keep that child as a diagnostic/source check, but do not
-    // hand both nested paths to chokidar or it may install two native watches
-    // over the same tree.
+    // The Copilot data root already keeps its otel and session-state children
+    // through the matcher below. Keep both as diagnostic/source checks, but do not
+    // hand overlapping parent and child paths to chokidar or it may install
+    // duplicate native watches over the same tree.
     byClient[client] = roots
       .filter((root) => (
-        !(client === 'copilot' && root.id === 'copilot-otel')
+        !(client === 'copilot' && ['copilot-otel', 'copilot-session-state'].includes(root.id))
         && !INTERVAL_ONLY_SOURCE_CHECK_IDS.has(root.id)
       ))
       .map((root) => root.dir);
@@ -1855,6 +1855,12 @@ function watchPolicyEntries(clientsCsv, options = {}) {
 
   bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
     if (parts[0] === 'otel') return false;
+    if (parts[0] === 'session-state') {
+      // Native CLI sessions can appear after the watcher starts. Keep their
+      // discovery directories and direct legacy JSONL files, but prune each
+      // session's plans, checkpoints and other non-usage content.
+      return parts.length > 2 && !(parts.length === 3 && parts[2] === 'events.jsonl');
+    }
     if (parts.length === 1) return !COPILOT_DB_WATCH_PATTERN.test(parts[0]);
     return true;
   });
