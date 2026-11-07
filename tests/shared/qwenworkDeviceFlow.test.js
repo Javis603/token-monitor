@@ -103,3 +103,24 @@ test('A refresh rotates the access and refresh tokens without dropping the devic
   assert.equal(calls[0].init.method, 'POST');
   assert.deepEqual(JSON.parse(calls[0].init.body), { refresh_token: 'old-refresh', target: 'c' });
 });
+
+test('The device sign-in honours the caller abort signal', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(runQwenworkDeviceFlowLogin({
+    authBaseUrl, apiBaseUrl, signal: controller.signal, timeoutMs: 20_000
+  }, {
+    openExternal: async () => {},
+    sleep: async () => {},
+    fetch: async () => response({}, 401)
+  }), (error) => error?.status === 'cancelled');
+});
+
+test('A gateway failure during refresh is unavailable, not an authentication failure', async () => {
+  await assert.rejects(refreshQwenworkSession({
+    access: 'old-access', refresh: 'old-refresh', expiresAt: 1
+  }, {
+    apiBaseUrl,
+    fetch: async () => response({}, 503)
+  }), (error) => error?.status === 'unavailable');
+});

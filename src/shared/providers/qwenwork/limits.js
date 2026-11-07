@@ -121,7 +121,7 @@ function creditAllowance(raw, name) {
   }
   const total = numberOrNull(raw.total ?? raw.cap);
   const used = numberOrNull(raw.used);
-  if (total === null || used === null || total <= 0 || used < 0 || used > total + 0.01) {
+  if (total === null || used === null || total <= 0 || used < 0) {
     throw errorWithStatus('unavailable', `QwenWork returned an inconsistent ${name}`);
   }
   const remaining = numberOrNull(raw.remaining);
@@ -129,7 +129,7 @@ function creditAllowance(raw, name) {
   let usedPercent = explicitPercent === null ? (used / total) * 100 : explicitPercent;
   // The gateway reports 0.9893 for 98.93%. Multiply only when the value
   // matches the raw fraction; a genuine sub-1% percentage stays as reported.
-  if (usedPercent >= 0 && usedPercent <= 1 && Math.abs(usedPercent - (used / total)) < 1e-6) {
+  if (usedPercent >= 0 && usedPercent <= 1 && Math.abs(usedPercent - (used / total)) < 0.001) {
     usedPercent *= 100;
   }
   return {
@@ -258,20 +258,17 @@ async function fetchQwenworkLimits(options = {}, deps = {}) {
         session = renewed;
         token = renewed.access;
       } catch (error) {
-        const fallback = qwenworkTokenWithSource(env);
-        if (!fallback.token) {
-          return normalizeLimitProvider({
-            ...base,
-            status: error?.status === 'unauthorized' ? 'unauthorized' : 'unavailable',
-            windows: []
-          });
-        }
-        token = fallback.token;
+        // A stored session is an explicit account choice. Do not replace it
+        // with an environment/magpie credential after refresh failure: that
+        // could report a different account's quota under this row.
+        return normalizeLimitProvider({
+          ...base,
+          status: error?.status === 'unauthorized' ? 'unauthorized' : 'unavailable',
+          windows: []
+        });
       }
     } else {
-      const fallback = qwenworkTokenWithSource(env);
-      if (!fallback.token) return normalizeLimitProvider({ ...base, status: 'unauthorized', windows: [] });
-      token = fallback.token;
+      return normalizeLimitProvider({ ...base, status: 'unauthorized', windows: [] });
     }
   }
   if (!token) {
@@ -306,11 +303,35 @@ async function fetchQwenworkLimits(options = {}, deps = {}) {
       return { parsed, account };
     }, { signal: deps.signal, deadlineMs: deps.qwenworkFetchTimeoutMs || QWENWORK_FETCH_TIMEOUT_MS });
 
+function inferredBillingWindowMinutes(resetsAtIso) {
+  const resetMs = Date.parse(resetsAtIso);
+  if (!Number.isFinite(resetMs)) return null;
+  const end = new Date(resetMs);
+  let year = end.getUTCFullYear();
+  let month = end.getUTCMonth() - 1;
+  if (month < 0) { month = 11; year -= 1; }
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const startMs = Date.UTC(
+    year,
+    month,
+    Math.min(end.getUTCDate(), lastDay),
+    end.getUTCHours(),
+    end.getUTCMinutes(),
+    end.getUTCSeconds(),
+    end.getUTCMilliseconds()
+  );
+  const minutes = Math.round((resetMs - startMs) / 60_000);
+  return minutes > 0 ? minutes : null;
+}
+
     const user = result.account?.user || null;
     const plan = result.account?.plan || null;
-    const identity = user?.id || user?.email || '';
+    const identity = user?.id || '';
+    const planWindowMinutes = inferredBillingWindowMinutes(plan?.resetsAt);
     const windows = result.parsed.windows.map((window, index) => (
-      index === 0 && plan?.resetsAt ? { ...window, resetsAt: plan.resetsAt } : window
+      index === 0 && plan?.resetsAt
+        ? { ...window, resetsAt: plan.resetsAt, ...(planWindowMinutes ? { windowMinutes: planWindowMinutes } : {}) }
+        : window
     ));
     return normalizeLimitProvider({
       ...base,

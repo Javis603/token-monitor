@@ -96,10 +96,24 @@ test('Quota parsing normalizes the gateway fraction and keeps additional pools s
   assert.equal(parsed.windows[2].label, 'Team credits');
   assert.equal(parsed.exceeded, false);
 
+  const overage = parseQwenworkQuota({ user_quota: { total: 10, used: 11, percentage: 110 } });
+  assert.equal(overage.windows[0].usedPercent, 100);
+  assert.equal(overage.windows[0].remaining, 0);
+  const roundedFraction = parseQwenworkQuota({ user_quota: { total: 1000, used: 989.3, percentage: 0.9893 } });
+  assert.ok(Math.abs(roundedFraction.windows[0].usedPercent - 98.93) < 1e-9);
   for (const body of [null, {}, { user_quota: { total: 0, used: 0 } },
-    { user_quota: { total: 10, used: 11 } }, { user_quota: { total: 10, used: -1 } }]) {
+    { user_quota: { total: 10, used: -1 } }]) {
     assert.throws(() => parseQwenworkQuota(body), /QwenWork/);
   }
+});
+
+test('An account without a gateway user id does not derive a portable key from email', async () => {
+  const accountWithoutId = account({ user: { name: 'Test User', email: 'test@example.com' } });
+  const d = deps((url) => url.includes('account-context') ? response(accountWithoutId) : response(quota()));
+  const result = await fetchQwenworkLimits(options, d);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.accountKey, '');
+  assert.equal(result.accountEmail, 'test@example.com');
 });
 
 test('Account parsing carries identity, plan and reset time', () => {
@@ -199,6 +213,19 @@ test('An expired stored session refreshes and reports the rotated session once',
     assert.equal(init.headers.Authorization, 'Bearer renewed-access');
     assert.ok(!url.endsWith('/deviceToken/refresh'));
   }
+});
+
+test('A failed stored-session refresh never switches to a different credential', async () => {
+  const d = deps((url) => url.endsWith('/api/v1/deviceToken/refresh')
+    ? response({ error: 'gateway unavailable' }, 503)
+    : response(quota()));
+  d.env.QWENWORK_TOKEN = 'env-token';
+  const result = await fetchQwenworkLimits({
+    qwenworkSession: { access: 'old-access', refresh: 'old-refresh', expiresAt: 1 }
+  }, d);
+  assert.equal(result.status, 'unavailable');
+  assert.equal(d.calls.length, 1);
+  assert.equal(new URL(d.calls[0].url).pathname, '/api/v1/deviceToken/refresh');
 });
 
 test('A rejected refresh keeps the provider unauthorized instead of retrying the expired access token', async () => {

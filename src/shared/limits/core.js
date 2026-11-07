@@ -1062,9 +1062,13 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   const hasKnownMinimaxAccount = knownMinimaxSources.size > 0;
   const hasKnownOpendesignWorkspace = Array.from(byKey.values()).some((candidate) =>
     candidate.provider === 'opendesign' && isConfiguredProvider(candidate));
+  const hasKnownQwenworkAccount = Array.from(byKey.values()).some((candidate) =>
+    candidate.provider === 'qwenwork' && isConfiguredProvider(candidate));
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
     if (hasKnownOpendesignWorkspace && candidate.provider === 'opendesign'
+      && ['notConfigured', 'disabled'].includes(candidate.status)) continue;
+    if (hasKnownQwenworkAccount && candidate.provider === 'qwenwork'
       && ['notConfigured', 'disabled'].includes(candidate.status)) continue;
     // A local-app sentinel is an onboarding hint, not an extra account. Real
     // identities keep their own failure hints even when none has credentials.
