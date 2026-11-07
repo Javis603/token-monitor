@@ -7,6 +7,9 @@ const { readRegularFileNoFollow, writePrivateJsonAtomic } = require('../../share
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const MAX_BYTES = 65536;
 function createPluginCredentials({ directory, changed = () => {} }) {
+  // A live editor may hold an older revision even if its file later corrupts.
+  // Remember observed revisions so repair never resets that editor's fence.
+  const revisions = new Map();
   function file(id, moduleId) {
     if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{1,39}$/.test(id)
       || typeof moduleId !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(moduleId)) throw Error('credentials-invalid-namespace');
@@ -24,6 +27,7 @@ function createPluginCredentials({ directory, changed = () => {} }) {
       const record = JSON.parse(readRegularFileNoFollow(file(id, moduleId), { maxBytes: MAX_BYTES, mode: 0o600 }));
       if (!object(record) || record.formatVersion !== 1 || !Number.isSafeInteger(record.revision) || record.revision < 1
         || !object(record.values) || Object.entries(record.values).some(([key, value]) => !/^[a-z][a-zA-Z0-9-]{0,39}$/.test(key) || typeof value !== 'string' || value.length > 16384)) throw Error('invalid');
+      revisions.set(file(id, moduleId), record.revision);
       return record;
     } catch (error) {
       if (error.code === 'ENOENT') return { revision: 0, values: {} };
@@ -52,6 +56,7 @@ function createPluginCredentials({ directory, changed = () => {} }) {
     checkDirectory();
     try { writePrivateJsonAtomic(file(id, moduleId), candidate); }
     catch { throw Error('credentials-storage-unavailable'); }
+    revisions.set(file(id, moduleId), candidate.revision);
     changed(id, moduleId, clear ? 'clear' : 'update');
     return statusOf(schema, candidate);
   }
@@ -65,19 +70,27 @@ function createPluginCredentials({ directory, changed = () => {} }) {
     },
     forget(id) {
       file(id, 'check'); checkDirectory();
-      let files;
-      try { files = fs.readdirSync(directory); } catch (error) { if (error.code === 'ENOENT') files = []; else throw Error('credentials-storage-unavailable'); }
-      try {
-        for (const name of files) if (new RegExp(`^${id}--[a-f0-9]{64}\\.json$`).test(name)) {
-          const target = path.join(directory, name);
+      let files = [], failed = false;
+      try { files = fs.readdirSync(directory); } catch (error) { if (error.code !== 'ENOENT') failed = true; }
+      for (const name of files) if (new RegExp(`^${id}--[a-f0-9]{64}\\.json$`).test(name)) {
+        const target = path.join(directory, name);
+        let revision = revisions.get(target) || 0;
+        try {
           const record = JSON.parse(readRegularFileNoFollow(target, { maxBytes: MAX_BYTES, mode: 0o600 }));
-          if (record.formatVersion !== 1 || !Number.isSafeInteger(record.revision) || record.revision < 1
-            || !Number.isSafeInteger(record.revision + 1)) throw Error('invalid-record');
-          writePrivateJsonAtomic(target, { formatVersion: 1, revision: record.revision + 1, values: {} });
+          if (Number.isSafeInteger(record?.revision) && record.revision > revision) revision = record.revision;
+        } catch {
+          // Corrupt records are still explicitly clearable. Replace their bytes
+          // with a secret-free tombstone; unlink symlinks without following them.
         }
+        try {
+          if (fs.lstatSync(target).isSymbolicLink()) fs.unlinkSync(target);
+          if (!Number.isSafeInteger(revision + 1)) throw Error('invalid-revision');
+          writePrivateJsonAtomic(target, { formatVersion: 1, revision: revision + 1, values: {} });
+          revisions.set(target, revision + 1);
+        } catch { failed = true; }
       }
-      catch { throw Error('credentials-storage-unavailable'); }
       changed(id, undefined, 'clear');
+      if (failed) throw Error('credentials-storage-unavailable');
     }
   };
 }

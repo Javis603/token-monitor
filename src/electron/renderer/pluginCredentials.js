@@ -111,11 +111,11 @@
       return {
         async update(context) {
           // Never silently replace an editor's base revision or its drafts.
-          if (context?.visible === false || dirty.size || pending || disposed) return;
+          if (context?.visible === false || dirty.size || conflict || pending || disposed) return;
           const current = ++generation;
           try {
             const next = await call('credentials.status', { moduleId });
-            if (current === generation && !disposed && !dirty.size && !pending) { snapshot = next; if (!manualEditing && snapshot.verification === 'valid') editing = false; paint(); }
+            if (current === generation && !disposed && !dirty.size && !conflict && !pending) { snapshot = next; if (!manualEditing && snapshot.verification === 'valid') editing = false; paint(); }
           } catch {
             if (current === generation && !disposed) { error.textContent = t('plugins.credentials.saveError'); paint(); }
           }

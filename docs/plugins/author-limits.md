@@ -70,7 +70,9 @@ The view first mounts when its module is expanded in the visible quota settings 
 
 ```js
 exports.activate = async ({ host }) => ({
-  async call(method, { moduleId }) {
+  async call(method, args) {
+    if (method === 'credentials.validate') return validateCredentials(host, args);
+    const { moduleId } = args;
     if (method !== 'limits.collect') throw Error('Unknown operation');
     if (moduleId === 'local') return {status: 'ok', windows: [
       {kind: 'daily', usedPercent: 20, remainingPercent: 80}
@@ -191,9 +193,9 @@ The helper returns `update(context)`, `hasUnsavedChanges()` and `dispose()`. For
 Opt into `credentials.validation: true` when the backend implements the explicit validation operation below. Without this declaration the host never invents connected status or calls a missing validator. `verification` is one of `unverified`, `verifying`, `valid`, `rejected`, `expired`, `unavailable`, independent of `configured`/field presence.
 
 ```js
-// Inside the backend call dispatcher:
-if (method === 'credentials.validate') {
-  const {moduleId, revision} = args;
+// Used by the credentials.validate branch above. Declare validationUrl as
+// the service authentication endpoint and opt into credentials.validation.
+async function validateCredentials(host, {moduleId, revision}) {
   const values = await host.call('credentials.read', {moduleId, expectedRevision: revision});
   // Use network.request and the service's actual authentication check here.
   // Return valid only after a successful server authentication response.

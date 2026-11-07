@@ -135,6 +135,7 @@ function createPluginRuntime({
       if (!module) throw new Error('Undeclared quota module');
       if (method === 'network.request') return network.request(id, args);
       if (method === 'network.cancel') { network.cancel(id, module.id, args.requestId); return; }
+      if (!method.startsWith('credentials.')) throw new Error('Unknown network operation');
       if (!module.credentials) throw new Error('Credentials not declared');
       const op = method.slice(12);
       if (op === 'status') return validation.snapshot(id, module.id, module.credentials);

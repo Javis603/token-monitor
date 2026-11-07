@@ -44,3 +44,31 @@ test('clear depends on saved presence, not completeness or unsaved text; valid s
   saved={...saved,configured:false,verification:'expired'};action('edit').fire('click');await editor.update({visible:true});assert.equal(action('clear').hidden,false,'partial/expired credentials can be cleared');
   action('clear').fire('click');await tick();assert.equal(action('clear').hidden,true);assert.equal(form.hidden,false);editor.dispose();
 });
+
+
+test('conflicting clear retains its revision until explicit reload, including an in-flight refresh',async()=>{
+ const document={createElement:tag=>{const n=new Element(tag);if(['input','textarea'].includes(tag))n.value='';return n;}};
+ let saved={revision:1,fields:{token:true},configured:true,declaration:{fields:[{id:'token',label:'Token',control:'input',required:true}]}},release;
+ const calls=[];let defer=false;
+ const root=new Element(),editor=await create({document,t:k=>k,localize:v=>v,call:async(method,args)=>{
+  calls.push({method,args});
+  if(method==='credentials.status'){if(defer)return new Promise(resolve=>{release=()=>resolve({...saved});});return {...saved};}
+  if(args.expectedRevision!==saved.revision)throw Error('credentials-conflict');
+  return {...saved,revision:++saved.revision};
+ }}).mount(root,{moduleId:'one'});
+ const action=id=>root.querySelectorAll('button').find(n=>n.dataset.credentialAction===id);
+ saved={...saved,revision:2};action('clear').fire('click');await tick();
+ assert.equal(action('reload').hidden,false);
+ await editor.update({visible:true});
+ action('clear').fire('click');await tick();
+ assert.equal(calls.at(-1).args.expectedRevision,1,'background update cannot silently rebase conflicting clear');
+ action('reload').fire('click');await tick();assert.equal(action('reload').hidden,true);
+ defer=true;const refreshing=editor.update({visible:true});
+ saved={...saved,revision:3};action('clear').fire('click');await tick();release();await refreshing;
+ assert.equal(action('reload').hidden,false);
+ const input=root.querySelector('input');input.value='synthetic-draft';input.fire('input');action('save').fire('click');await tick();
+ assert.equal(calls.at(-1).args.expectedRevision,2,'in-flight update cannot replace conflict base');
+ assert.equal(input.value,'synthetic-draft');assert.equal(action('reload').hidden,false);
+ defer=false;action('reload').fire('click');await tick();assert.equal(input.value,'synthetic-draft');action('save').fire('click');await tick();
+ assert.equal(calls.at(-1).args.expectedRevision,3);assert.equal(input.value,'');editor.dispose();
+});

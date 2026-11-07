@@ -124,6 +124,55 @@ app.whenReady().then(async () => {
   await js("openViewFromTray('limits')");
   await waitFor("state.pluginCatalog?.limits?.providers?.length===2",'native module samples');
   const capture=async name=>{await pause(250);fs.writeFileSync(path.join(evidence,name),(await win.webContents.capturePage()).toPNG());};
+  if (process.env.TM_CREDENTIAL_RECOVERY_PROOF === '1') {
+    const before = process.env.TM_CREDENTIAL_CONTROLLER_SOURCE;
+    if (before) await js(fs.readFileSync(before, 'utf8'));
+    await js(`(async()=>{
+      const host=(method,args)=>tokenMonitorTrustedPlugins.host(${JSON.stringify(fixtureManifest.id)},method,args);
+      const initial=await host('credentials.status',{moduleId:'two'});
+      await host('credentials.update',{moduleId:'two',expectedRevision:initial.revision,patch:{token:'synthetic-initial'}});
+      const panel=document.createElement('section');panel.className='settings-section';
+      Object.assign(panel.style,{position:'fixed',inset:'0',zIndex:'999',background:'#24282a',padding:'28px 22px',overflow:'auto'});
+      const title=document.createElement('h2');title.textContent='合成憑證衝突測試';
+      const context=document.createElement('p');context.className='settings-note';context.textContent='另一個編輯器已更新憑證；此表單尚未重新載入。';
+      const result=document.createElement('p');result.className='settings-note';result.id='recoveryResult';
+      panel.append(title,context);document.body.append(panel);
+      window.recoveryEditor=await TokenMonitorPluginCredentials.create({document,call:host,t,localize:value=>value['']||value.en||value}).mount(panel,{moduleId:'two'});
+      panel.append(result);
+      const current=await host('credentials.status',{moduleId:'two'});
+      await host('credentials.update',{moduleId:'two',expectedRevision:current.revision,patch:{token:'synthetic-other-editor'}});
+      window.recoveryHost=host;window.recoveryPanel=panel;
+      panel.querySelector('[data-credential-action=clear]').click();
+    })()`);
+    await waitFor("recoveryPanel.querySelector('[data-credential-action=reload]').hidden===false",'conflicting clear is visible');
+    await capture('credential-conflict-initial.png');
+    await js("recoveryEditor.update({visible:true})");
+    const beforeRevision=await js("recoveryHost('credentials.status',{moduleId:'two'}).then(value=>value.revision)");
+    await js("(()=>{const input=recoveryPanel.querySelector('input');input.value='synthetic-replacement';input.dispatchEvent(new Event('input'));recoveryPanel.querySelector('[data-credential-action=save]').click();})()");
+    await waitFor("!recoveryPanel.querySelector('[data-credential-action=save]').disabled",'save attempt settles');
+    const afterRevision=await js("recoveryHost('credentials.status',{moduleId:'two'}).then(value=>value.revision)");
+    if (before) {
+      assert.equal(afterRevision,beforeRevision+1,'baseline silently rebases and saves without reload');
+      assert.equal(await js("recoveryPanel.querySelector('input').value"),'');
+      await js("document.getElementById('recoveryResult').textContent='修正前：未重新載入，但修改已寫入。'");
+    } else {
+      assert.equal(afterRevision,beforeRevision,'fixed editor preserves conflict revision');
+      assert.equal(await js("recoveryPanel.querySelector('input').value"),'synthetic-replacement');
+      assert.equal(await js("recoveryPanel.querySelector('[data-credential-action=reload]').hidden"),false);
+      await js("document.getElementById('recoveryResult').textContent='修正後：仍然拒絕寫入，草稿保留；請先重新載入。'");
+    }
+    await capture('credential-conflict-after-background-update.png');
+    if (!before) {
+      await js("recoveryPanel.querySelector('[data-credential-action=reload]').click()");
+      await waitFor("recoveryPanel.querySelector('[data-credential-action=reload]').hidden",'explicit revision reload');
+      assert.equal(await js("recoveryPanel.querySelector('input').value"),'synthetic-replacement');
+      await js("recoveryPanel.querySelector('[data-credential-action=save]').click()");
+      await waitFor("recoveryPanel.querySelector('input').value===''",'explicit reload permits save');
+    }
+    console.log('PASS native synthetic credential conflict proof:',before?'BEFORE: silently overwritten':'AFTER: blocked until explicit reload; draft retained');
+    console.log('Evidence:',evidence);
+    await runtime.dispose();win.destroy();app.exit(0);return;
+  }
   assert.deepEqual(await js("[...document.querySelectorAll('#limitsPanel > *')].map(node=>node.innerText.split('\\n')[0])"),['API balance','Claude','Claude']);
   assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('Synthetic Team')"),true,'documented plugin plan appears in native Limits');
   assert.equal(await js("state.pluginCatalog.limits.providers.find(row=>row.provider==='plugin:synthetic-limits:two').planLabel"),'','missing plan stays blank');

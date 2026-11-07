@@ -77,3 +77,44 @@ test('plugin-wide forget fences retained editors across replacement credentials 
  assert.throws(()=>restarted.update('fixture','one',schema,{expectedRevision:1,patch:{token:'stale'}}),/credentials-conflict/);
  assert.deepEqual(restarted.read('fixture','one',schema),{token:'replacement'});
 });
+
+
+test('forget clears corrupt and sibling records, notifies once, and fences editors after recovery/restart',t=>{
+ const f=fixture(t),s=f.service;
+ for(const moduleId of ['one','two'])s.update('fixture',moduleId,schema,{expectedRevision:0,patch:{token:'synthetic'}});
+ s.update('fixture--other','one',schema,{expectedRevision:0,patch:{token:'unrelated'}});
+ const names=fs.readdirSync(f.directory).filter(name=>name.startsWith('fixture--')&&!name.startsWith('fixture--other--')).sort();
+ fs.writeFileSync(path.join(f.directory,names[0]),'{corrupt synthetic');
+ const before=f.events.length;s.forget('fixture');assert.equal(f.events.length,before+1);assert.deepEqual(f.events.at(-1),['fixture',undefined,'clear']);
+ for(const moduleId of ['one','two']){
+  const status=s.status('fixture',moduleId,schema);assert.equal(status.configured,false);assert.equal(status.revision,2);
+  s.update('fixture',moduleId,schema,{expectedRevision:status.revision,patch:{token:'replacement'}});
+  const restarted=createPluginCredentials({directory:f.directory});
+  assert.throws(()=>restarted.update('fixture',moduleId,schema,{expectedRevision:1,patch:{token:'stale'}}),/credentials-conflict/);
+ }
+ assert.equal(s.read('fixture--other','one',schema).token,'unrelated');
+});
+test('forget attempts all namespaced records and invalidates work before reporting IO failure',t=>{
+ const f=fixture(t),s=f.service;
+ for(const moduleId of ['one','two'])s.update('fixture',moduleId,schema,{expectedRevision:0,patch:{token:'synthetic'}});
+ const names=fs.readdirSync(f.directory).sort(),rename=fs.renameSync;
+ t.mock.method(fs,'renameSync',(from,to)=>{if(to===path.join(f.directory,names[0]))throw Error('synthetic rename failure');return rename(from,to);});
+ const before=f.events.length;assert.throws(()=>s.forget('fixture'),/^Error: credentials-storage-unavailable$/);
+ assert.equal(f.events.length,before+1);assert.deepEqual(f.events.at(-1),['fixture',undefined,'clear']);
+ assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.directory,names[1]))).values,{});
+});
+
+
+test('explicit forget repairs oversized/unknown-format records and unlinks only the namespaced symlink',t=>{
+ const f=fixture(t),s=f.service;
+ for(const moduleId of ['one','two','three'])s.update('fixture',moduleId,schema,{expectedRevision:0,patch:{token:'synthetic'}});
+ const names=fs.readdirSync(f.directory).sort();
+ fs.writeFileSync(path.join(f.directory,names[0]),'x'.repeat(65537));
+ fs.writeFileSync(path.join(f.directory,names[1]),JSON.stringify({formatVersion:999,revision:8,values:{token:'synthetic'}}));
+ const outside=path.join(f.dir,'outside.json');fs.writeFileSync(outside,'synthetic unrelated bytes');
+ fs.unlinkSync(path.join(f.directory,names[2]));fs.symlinkSync(outside,path.join(f.directory,names[2]));
+ s.forget('fixture');
+ assert.equal(fs.readFileSync(outside,'utf8'),'synthetic unrelated bytes');
+ for(const name of names){const record=JSON.parse(fs.readFileSync(path.join(f.directory,name)));assert.deepEqual(record.values,{});assert.equal(fs.lstatSync(path.join(f.directory,name)).isSymbolicLink(),false);}
+ assert.equal(JSON.parse(fs.readFileSync(path.join(f.directory,names[1]))).revision,9);
+});
