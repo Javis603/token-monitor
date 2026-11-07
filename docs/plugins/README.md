@@ -142,3 +142,7 @@ Subscriptions deliver `{type:'snapshot', value, sequence}` then coalesced invali
 The native tray menu offers **Restart without plugins**. Alternatively launch with `--plugins-safe-mode` or `TOKEN_MONITOR_PLUGINS_SAFE_MODE=1`. Safe mode lists packages and permits management without starting author UI/backends. This recovery route does not depend on a responsive renderer. It cannot undo arbitrary filesystem changes made by trusted code.
 
 No active plugins means no plugin backend, dedicated polling/sampler, or repeated business projection. Baseline imports/registration have a finite cost; byte-identical RAM or zero CPU overhead is not promised. See [validation](validation.md).
+
+## Native quota acceptance
+
+`npm run verify` covers the automated unit/regression suite. The separate manual Electron quota acceptance fixture is not part of `verify:plugins`: run `npx --no-install electron scripts/test-plugin-limits-ui.cjs` in a native GUI session with `ELECTRON_RUN_AS_NODE` unset. It uses disposable userData, synthetic credentials and blocked external networking, covering native quota settings, all three credential UI paths and lifecycle cleanup. Its screenshots are synthetic evidence, not real-account acceptance.

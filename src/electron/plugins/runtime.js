@@ -384,7 +384,7 @@ function createPluginRuntime({
   async function confirm(event, note, detail = null) {
     requireMain(event);
     const response = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
-      type: 'warning', title: translate(getLocale(), note === 'plugins.content.unsavedNote' ? 'plugins.content.unsavedTitle' : note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
+      type: 'warning', title: translate(getLocale(), note === 'plugins.credentials.forgetConfirm' ? 'plugins.credentials.forgetTitle' : note === 'plugins.content.unsavedNote' ? 'plugins.content.unsavedTitle' : note === 'plugins.trusted.unsavedNote' ? 'plugins.trusted.disableTitle' : note === 'plugins.trusted.packageUnsavedNote' ? 'plugins.trusted.packageTitle' : 'plugins.trusted.reloadTitle'),
       message: translate(getLocale(), note),
       ...(detail ? { detail: translate(getLocale(), detail) } : {}),
       buttons: [translate(getLocale(), 'settings.plugins.cancel'), translate(getLocale(), 'plugins.trusted.continue')],
@@ -555,8 +555,9 @@ function createPluginRuntime({
 
   function registerIpc() {
     handle('plugins:limitsDemand', (event, value) => { requireMain(event); registerSubscriber(event.sender); limits.demand(value); });
-    handle('plugins:forgetCredentials', (event, id) => {
+    handle('plugins:forgetCredentials', async (event, id) => {
       requireMain(event);
+      await confirm(event, 'plugins.credentials.forgetConfirm');
       credentials.forget(id);
       return { ok: true };
     });

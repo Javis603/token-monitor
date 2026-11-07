@@ -92,6 +92,8 @@ exports.activate = async ({ host }) => ({
 
 `limits.collect` returns `{status, windows, plan?}`; status is `ok`, `notConfigured`, `unauthorized`, `rateLimited`, `unavailable` or `error`. Up to 16 windows use the existing native window contract (`kind`, `label`, percentages, `used`, `limit`, `remaining`, `currency`, `resetsAt`, `boundaryKind`). Money uses `metric: 'credits'`; an expiry uses `boundaryKind: 'expiry'`, never an invented monthly reset. Unknown values remain unknown. A plan is optional and must describe a real plan. The host projects declared fields, not arbitrary backend data.
 
+For non-credit percentage windows, provide `usedPercent` or numeric `used` and a positive `limit`. A standalone `remainingPercent` is not a normalization input; if that is all the service supplies, derive `usedPercent = 100 - remainingPercent` before returning the window.
+
 ### Credit presentation
 
 Credit windows can opt into desktop presentation with `creditsDisplay: 'percent'` or `'balance'`. Omission preserves the existing money headline and meter behavior. `balance` shows the remaining money without a meter. `percent` uses the native percentage headline and bar, with expiry/reset on the lower left and money / total on the lower right. Percentage, bar and money numerator follow the App's global used/remaining mode together. This option is projected by the desktop quota registry, not added to Hub wire data.
@@ -130,13 +132,17 @@ export function activate(ctx) {
   return {
     async mount(container, context) {
       const help = document.createElement('p');
-      help.textContent = 'Paste the credentials required by this service.';
+      help.textContent = context.moduleId
+        ? 'Paste the credentials required by this service.'
+        : 'Open AI tool quota settings to edit module credentials.';
       container.append(help);
-      const editor = await ctx.native.credentials.mount(container, {moduleId: context.moduleId});
+      const editor = context.moduleId
+        ? await ctx.native.credentials.mount(container, {moduleId: context.moduleId})
+        : null;
       return {
-        update: value => editor.update(value),
-        hasUnsavedChanges: () => editor.hasUnsavedChanges(),
-        dispose() { editor.dispose(); help.remove(); }
+        update: value => editor?.update(value),
+        hasUnsavedChanges: () => editor?.hasUnsavedChanges() === true,
+        dispose() { editor?.dispose(); help.remove(); }
       };
     }
   };
@@ -155,7 +161,7 @@ The helper returns `update(context)`, `hasUnsavedChanges()` and `dispose()`. For
 
 Host-owned records live in `userData/plugin-credentials/`, separated by exact plugin ID and a module-ID hash. They use the existing private-file/atomic JSON helpers: POSIX `0600` files and private directories, Windows userData permissions. Files are **not encrypted** and remain accessible to same-user code. They never enter ordinary plugin data/settings, code directories, built-in `credentials.json`, Hub wire or sync. No safeStorage, keyring, optional encryption or legacy-record reader is involved.
 
-Disable/update cancels requests and retains saved credentials. Credential update/clear invalidates only the corresponding module's captured quota, including paused retained readings; siblings retain theirs. Uninstall removes all of the plugin's credential records even with keepData. The installed plugin card's **Clear saved plugin credentials** also handles disabled, invalid and missing-code records without executing author code. Other plugins and built-in credentials are untouched.
+Disable/update cancels requests and retains saved credentials. Credential update/clear invalidates only the corresponding module's captured quota, including paused retained readings; siblings retain theirs. Uninstall removes all of the plugin's credential records even with keepData. The installed plugin card's **Clear saved plugin credentials** asks for confirmation and also handles disabled, invalid and missing-code records without executing author code. Other plugins and built-in credentials are untouched.
 
 This unpublished experimental API intentionally replaces `connection: 'openai'` and `webSession.*` without aliases or migration. Plugins using that old contract, including OpenAI 0.2.0, must be updated before use. Existing old records on disk are not read, converted or proactively cleaned. Real service credentials and Windows/Linux native acceptance remain unverified; synthetic tests do not establish provider login validity.
 
