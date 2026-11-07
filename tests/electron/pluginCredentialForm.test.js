@@ -20,7 +20,7 @@ test('form submits only touched fields, handles explicit empty, retains failed d
   assert.deepEqual(f.calls.at(-1).args.patch,{cookies:'a=b'});assert.equal(textarea.value,'');assert.equal(editor.hasUnsavedChanges(),false);
   input.value='';input.fire('input');f.fail=true;save.fire('click');await tick();
   assert.deepEqual(f.calls.at(-1).args.patch,{token:''});assert.equal(editor.hasUnsavedChanges(),true);
-  assert.match(f.root.querySelector('.plugin-author-error').textContent,/conflict/);
+  assert.match(f.root.querySelector('.plugin-credential-error').textContent,/conflict/);
   input.value='draft';await editor.update({visible:true});assert.equal(input.value,'draft');assert.equal(f.calls.at(-1).method,'credentials.update');
   f.fail=false;save.fire('click');await tick();assert.equal(input.value,'');assert.equal(editor.hasUnsavedChanges(),false);
   editor.dispose();assert.equal(f.root.children.length,0);

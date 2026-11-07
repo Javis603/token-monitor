@@ -173,6 +173,18 @@ app.whenReady().then(async () => {
   await waitFor("document.querySelector('[data-limit-module=\"plugin:synthetic-limits:one\"] [data-quota-draft]')",'author settings view');
   const helperBox = `document.querySelector('[data-limit-module="plugin:synthetic-limits:one"] .plugin-credential-form')`;
   await waitFor(`${helperBox}`,'author composed native credential helper');
+  const nativeStyleProof=await js(`(()=>{
+    const own=${helperBox}.querySelector('input'), builtin=document.getElementById('minimaxApiKeyInput');
+    const properties=['fontFamily','fontSize','backgroundColor','paddingTop','paddingRight','paddingBottom','paddingLeft','borderRadius','borderTopColor'];
+    const pick=node=>Object.fromEntries(properties.map(key=>[key,getComputedStyle(node)[key]]));
+    return {own:pick(own),builtin:pick(builtin),fieldGap:getComputedStyle(own.closest('label')).gap,builtinFieldGap:getComputedStyle(builtin.closest('label')).gap,
+      formGap:getComputedStyle(${helperBox}).gap,builtinFormGap:getComputedStyle(builtin.closest('.opencode-credential-fields')).gap};
+  })()`);
+  assert.deepEqual(nativeStyleProof.own,nativeStyleProof.builtin,'shared credentials use built-in provider input styles');
+  assert.equal(nativeStyleProof.fieldGap,nativeStyleProof.builtinFieldGap);
+  assert.equal(nativeStyleProof.formGap,nativeStyleProof.builtinFormGap);
+  console.log('PASS native credential input and spacing match built-in provider computed styles');
+
   await js(`(()=>{const input=${helperBox}.querySelector('[data-credential-field="token"]');input.value='synthetic-token';input.dispatchEvent(new Event('input'));${helperBox}.querySelector('button').click();})()`);
   await waitFor(`${helperBox}.querySelector('[role="status"]').textContent===t('plugins.credentials.configured')`,'manual credentials saved');
   assert.equal(await js(`${helperBox}.querySelector('input').value`),'','save clears input');

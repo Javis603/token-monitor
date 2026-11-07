@@ -10,19 +10,19 @@
       let snapshot = await call('credentials.status', { moduleId });
       let disposed = false, pending = false, generation = 0, conflict = false;
       const dirty = new Set(), controls = new Map();
-      const wrapper = document.createElement('div'); wrapper.className = 'plugin-author-settings';
-      const form = document.createElement('div'); form.className = 'plugin-credential-form plugin-author-form';
-      const feedback = document.createElement('p'); feedback.className = 'settings-note plugin-author-status'; feedback.setAttribute('role', 'status');
-      const error = document.createElement('p'); error.className = 'plugin-author-error'; error.setAttribute('role', 'alert');
+      const wrapper = document.createElement('div'); wrapper.className = 'plugin-native-credentials';
+      const form = document.createElement('div'); form.className = 'plugin-credential-form opencode-credential-fields';
+      const feedback = document.createElement('p'); feedback.className = 'settings-note'; feedback.setAttribute('role', 'status');
+      const error = document.createElement('p'); error.className = 'settings-note error plugin-credential-error'; error.setAttribute('role', 'alert');
       const buttons = document.createElement('div'); buttons.className = 'settings-actions';
       const save = document.createElement('button'), clear = document.createElement('button'), reload = document.createElement('button');
       for (const [button, key] of [[save, 'save'], [clear, 'clear'], [reload, 'reload']]) { button.type = 'button'; button.className = 'settings-button'; button.textContent = t(`plugins.credentials.${key}`); buttons.append(button); }
       for (const field of snapshot.declaration.fields) {
-        const label = document.createElement('label'); label.className = 'plugin-author-field';
-        const title = document.createElement('span'); title.className = 'plugin-author-label'; title.textContent = localize(field.label);
+        const label = document.createElement('label'); label.className = 'settings-field';
+        const title = document.createElement('span'); title.className = 'settings-field-label'; title.textContent = localize(field.label);
         const input = document.createElement(field.control === 'textarea' ? 'textarea' : 'input');
         if (field.control === 'input') input.type = 'password'; else input.rows = 4;
-        input.className = 'plugin-author-input'; input.autocomplete = 'off'; input.spellcheck = false;
+        input.className = 'credential-input'; input.autocomplete = 'off'; input.spellcheck = false;
         input.maxLength = 16384; input.dataset.credentialField = field.id;
         input.addEventListener('input', () => { dirty.add(field.id); error.textContent = ''; error.hidden = true; });
         controls.set(field.id, input); label.append(title, input); form.append(label);
