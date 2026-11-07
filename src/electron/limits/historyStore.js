@@ -89,7 +89,7 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       // a placeholder stream so its card and button do not vanish; no point is
       // invented, so the chart stays empty until a real reading arrives. Other
       // unitless lanes keep their previous behaviour rather than claiming 0.
-      if (!reading && !['session', 'weekly', 'daily'].includes(window.kind)) return null;
+      if (!reading && window.placeholder !== true) return null;
       const identity = reading || { unit: 'pp', balance: false };
       const key = ['credits', 'spend'].includes(window.metric)
         ? JSON.stringify([limitWindowKey(window), window.currency || 'credits']) : limitWindowKey(window);

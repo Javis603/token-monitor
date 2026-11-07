@@ -16,7 +16,7 @@ test('a quota window with no numeric reading keeps a 0% placeholder card', async
     updatedAt: new Date().toISOString(),
     windows: [{
       kind: 'session', label: 'Claude/GPT 5-hour', usedPercent: null, remainingPercent: null,
-      showMeter: false, resetsAt: new Date(Date.now() + 3_600_000).toISOString()
+      showMeter: false, placeholder: true, resetsAt: new Date(Date.now() + 3_600_000).toISOString()
     }]
   };
   await store.record('local', { providers: [provider] });

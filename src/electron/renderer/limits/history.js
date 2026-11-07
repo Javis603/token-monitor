@@ -310,7 +310,7 @@
     const spent = unit(entry) !== 'pp' && entry.balance === false;
     $('trend-heading').textContent = bounds.cycle ? t(spent ? 'trendSpent' : 'trend') : t(spent ? 'trendSpentRecent' : 'trendRecent', { count: 14 });
     const rangeBtn = $('trend-range-btn');
-    rangeBtn.hidden = !hasAnyCycle;
+    rangeBtn.hidden = !hasAnyCycle || unit(entry) !== 'pp';
     rangeBtn.textContent = `${t(trendRangeMode === 'recent' ? 'rangeRecent' : 'rangeCycle', { count: 14 })} ▾`;
     const money = window.TokenMonitorLimitBalanceDisplay;
     const rawAmount = entry.window.metric === 'spend' ? entry.window.used : entry.window.remaining;

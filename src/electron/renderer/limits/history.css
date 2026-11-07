@@ -33,7 +33,7 @@
 #history .quota-history-trend .quota-history-grid { stroke: var(--line); }
 #history .quota-history-trend .quota-history-curve { fill: none; stroke: var(--accent); stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 #history .quota-history-trend .quota-history-area { stroke: none; opacity: .12; }
-#history .quota-history-trend .quota-history-dot { stroke: var(--bg, #fff); stroke-width: 1; }
+#history .quota-history-trend .quota-history-dot { stroke: var(--line-strong); stroke-width: 1; }
 #history .quota-history-trend .quota-history-guide { stroke: var(--accent); stroke-width: 1.1; stroke-dasharray: 3 3; opacity: .45; }
 #history .quota-history-trend .quota-history-now { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: .55; }
 #history .quota-history-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 5px; }

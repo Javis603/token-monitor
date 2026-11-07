@@ -313,16 +313,13 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     }
     return observationPoints(runs);
   }
-  const hasStreamData = sql('SELECT 1 FROM runs WHERE stream = ? UNION ALL SELECT 1 FROM daily WHERE stream = ? LIMIT 1');
   function query(windows, range, now) {
     if (maintainedDay !== dayKey(now)) transaction(() => {}, now);
     const anchor = new Date(`${range.day}T23:59:59.999`).getTime();
     const viewNow = Math.min(now, anchor);
     const detailSince = retentionStart(now, 180);
     return { persistent: persistent && !saveFailed, range, detailSince, since: retentionStart(now, 730), windows: windows.map(entry => {
-      const streamId = !hasStreamData.get(entry.id, entry.id) && entry.fallbackId && hasStreamData.get(entry.fallbackId, entry.fallbackId)
-        ? entry.fallbackId
-        : entry.id;
+      const streamId = entry.id;
       const options = { grain: range.grain, day: range.day, now: viewNow };
       let result;
       if (range.grain === 'hour') {

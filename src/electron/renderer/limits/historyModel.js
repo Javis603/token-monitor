@@ -95,7 +95,7 @@
     if (rangeMode !== 'recent') {
       const cycleEntries = list
         .map(entry => ({ entry, bounds: trendBounds(entry.window, now, provider) }))
-        .filter(item => item.bounds.cycle);
+        .filter(item => item.bounds.cycle && item.bounds.end >= now);
       if (cycleEntries.length > 0) {
         // Prefer the longest cycle among percentage windows (e.g. 7-day weekly over
         // 5-hour session) so short rolling sessions appear inside the full weekly cycle
@@ -107,7 +107,7 @@
     const defaultStart = now - 14 * 86400_000;
     const allPoints = list.flatMap(entry => entry.recentPoints || entry.points || [])
       .filter(p => p.at >= defaultStart && p.at <= now);
-    if (allPoints.length > 0 && rangeMode !== 'recent') {
+    if (allPoints.length > 0) {
       const earliest = Math.min(...allPoints.map(p => p.at));
       const span = Math.max(now - earliest, 6 * 3600_000);
       if (span < 3 * 86400_000) {
