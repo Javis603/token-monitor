@@ -67,3 +67,19 @@ test('Senpi watches new home-agent project children and memory transcripts with 
   ignored = watchIgnoreMatcher('senpi', options);
   assert.equal(ignored(path.join(projects, 'future-hash/unrelated-cache')), true);
 });
+
+test('Copilot native session-state events survive watch pruning and retain client attribution', t => {
+  const options = fixture(t);
+  const root = path.join(options.homeDir, '.copilot');
+  fs.mkdirSync(root, { recursive: true });
+  const ignored = watchIgnoreMatcher('copilot', options);
+  const sources = watchAttributionRootsForClients('copilot', null, options);
+  for (const relative of ['session-state', 'session-state/new-session', 'session-state/new-session/events.jsonl', 'session-state/legacy.jsonl']) {
+    const file = path.join(root, relative);
+    assert.equal(ignored(file), false, relative);
+    assert.deepEqual(clientsForWatchPath(file, sources), ['copilot']);
+  }
+  for (const relative of ['session-state/new-session/checkpoints', 'session-state/new-session/plan.md', 'session-state/new-session/nested/events.jsonl']) {
+    assert.equal(ignored(path.join(root, relative)), true, relative);
+  }
+});
