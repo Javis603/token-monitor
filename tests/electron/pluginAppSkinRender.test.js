@@ -17,9 +17,9 @@ function catalogHarness() {
   const calls = [], connectionRefreshes = [];
   const context = { state: {}, pluginLimitSettings: null, pluginPageDesigns: {}, isSettingsSurfaceVisible: () => true,
     preserveSettingsPanelScroll: fn => fn(), refreshPluginLimitAccountStatuses: () => connectionRefreshes.push(context.state.pluginCatalog) };
-  for (const name of ['renderLimitProviderCheckboxes', 'render', 'renderViewSwitcher', 'renderThemePresetChips', 'renderNotchPageChoices', 'renderViewPreferences']) context[name] = () => calls.push(name);
+  for (const name of ['renderLimits', 'renderLimitProviderCheckboxes', 'render', 'renderViewSwitcher', 'renderThemePresetChips', 'renderNotchPageChoices', 'renderViewPreferences']) context[name] = () => calls.push(name);
   vm.createContext(context);
-  vm.runInContext(`let pluginCatalogKey = ''; ${extract('applyPluginCatalog')}`, context);
+  vm.runInContext(`let pluginCatalogKey = '', pluginLimitReadingsKey = ''; ${extract('applyPluginCatalog')}`, context);
   return { calls, connectionRefreshes, context, apply: context.applyPluginCatalog };
 }
 const catalog = () => ({ enabled: true, plugins: [{ id: 'test', name: 'Design', status: 'active', revision: 1,
@@ -27,6 +27,18 @@ const catalog = () => ({ enabled: true, plugins: [{ id: 'test', name: 'Design', 
   skins: [{ id: 'blue', name: 'Blue', colors: { accent: '#123456' } }],
   webDocuments: [{ ref: 'test/models', title: 'Models', target: 'models', slot: 'replace', height: 240 }],
   runtime: { cpuPercent: 1, memoryMB: 12 }, logs: [] }] });
+test('quota readings refresh Limits and settings without rebuilding catalog UI', () => {
+  const h = catalogHarness(), first = catalog();
+  first.limits = { modules: [{id:'plugin:test:quota'}], providers: [{provider:'plugin:test:quota',updatedAt:'2026-01-01'}] };
+  h.context.state.breakdown = 'limits'; h.apply(first); h.calls.length = 0;
+  const next = structuredClone(first); next.limits.providers[0].updatedAt = '2026-01-02';
+  h.apply(next);
+  assert.deepEqual(h.calls, ['renderLimits', 'renderLimitProviderCheckboxes']);
+  assert.equal(h.context.state.pluginCatalog, next);
+  h.calls.length = 0; h.apply(structuredClone(next)); assert.deepEqual(h.calls, []);
+  h.context.state.breakdown = 'home'; next.limits.providers[0].updatedAt = '2026-01-03'; h.apply(next);
+  assert.deepEqual(h.calls, ['renderLimitProviderCheckboxes']);
+});
 test('identical and metric-only catalogs update state without any app redraw', () => {
   const h = catalogHarness(); h.apply(catalog()); h.calls.length = 0;
   h.apply(catalog());

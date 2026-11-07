@@ -141,10 +141,13 @@ app.whenReady().then(async () => {
   assert.equal(await js("state.pluginCatalog.limits.providers.find(row=>row.provider==='plugin:synthetic-limits:two').planLabel"),'','missing plan stays blank');
   assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('Daily pool')&&document.querySelector('#limitsPanel').textContent.includes('Billing pool')"),true,'non-credit daily and billing plugin quotas render');
   await capture('limits-mixed.png');
+  await js("window.quotaThemeRebuilds=0;window.originalQuotaThemeRender=renderThemePresetChips;renderThemePresetChips=(...args)=>{quotaThemeRebuilds++;return originalQuotaThemeRender(...args);};true");
   const creditWindow = {creditsDisplay:'percent',remaining:83.25,limit:100,boundaryKind:'expiry',resetsAt:new Date(Date.now()+30*86400000).toISOString()};
   await runtime.manager.call('synthetic-limits','fixture-window',creditWindow);
   await runtime.refreshLimits();
   await waitFor("document.querySelector('#limitsPanel').textContent.includes('$83.25 / $100.00')",'percent credit money detail');
+  assert.equal(await js("quotaThemeRebuilds"),0,'quota-only update does not rebuild unrelated theme controls');
+  await js("renderThemePresetChips=originalQuotaThemeRender;true");
   assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('83% left')"),true);
   await capture('credits-percent-remaining.png');
   await js("tokenMonitor.updateSettings({showLimitUsed:true})");
