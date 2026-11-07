@@ -28,7 +28,7 @@
   let selected = '';
   let hoveredBucket = '';
   let trendRangeMode = 'cycle';
-  let trendScaleMode = 'unified';
+  let trendScaleMode = 'normalized';
   function currentTrendView() {
     return trendScaleMode === 'normalized' ? 'normalized' : trendRangeMode === 'recent' ? 'unifiedRecent' : 'unifiedCycle';
   }
@@ -64,6 +64,15 @@
     const minutes = totalMinutes % 60;
     const duration = days > 0 ? `${days}d ${hours}h` : hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
     return t('inDuration', { duration });
+  }
+  function withLeadingBaseline(points, start) {
+    if (!points.length || points[0].at <= start) return points;
+    // The lane started full even when the first stored observation arrived
+    // later. Hold that starting level so the left side is not blank. Copy the
+    // first point's cycle identity so the synthetic point stays in its segment
+    // instead of creating a visible gap.
+    const first = points[0];
+    return [{ ...first, at: start, value: 0, breakBefore: false, uncertainBefore: false, allowanceMissingBefore: false }, ...points];
   }
   function overlayEntries(primaryEntry) {
     if (!payload?.windows?.length || !primaryEntry) return [];
@@ -107,10 +116,14 @@
         if (reading?.unit === 'pp') {
           // A lane with no observation in this range (an unused model, or a
           // history that starts after the cycle began) still has a current
-          // level. Hold that level across the cycle instead of omitting the
-          // series entirely.
-          shown = [{ at: start, value: reading.value }, { at: end, value: reading.value }];
+          // level. Start from full and descend to the current reading instead
+          // of omitting the series or leaving a blank beginning.
+          shown = item.window && trendScaleMode === 'unified'
+            ? [{ at: start, value: 0 }, { at: end, value: reading.value }]
+            : [{ at: start, value: reading.value }, { at: end, value: reading.value }];
         }
+      } else if (unit(item) === 'pp' && cycle) {
+        shown = withLeadingBaseline(shown, start);
       }
       return { item, shown, color: seriesColor(idx, series.length) };
     });
@@ -202,9 +215,11 @@
       if (!points.length) {
         const reading = model.historyReadings(row.item.window).primary;
         if (reading?.unit === 'pp') points = [
-          { at: row.bounds.start, value: reading.value },
+          { at: row.bounds.start, value: 0 },
           { at: row.bounds.end, value: reading.value }
         ];
+      } else if (row.item && unit(row.item) === 'pp') {
+        points = withLeadingBaseline(points, row.bounds.start);
       }
       return { ...row, points };
     });
@@ -514,7 +529,7 @@
       selected = next.windows.find(entry => entry.window.kind === 'weekly')?.key || next.windows[0]?.key || '';
       hoveredBucket = '';
       trendRangeMode = 'cycle';
-      trendScaleMode = 'unified';
+      trendScaleMode = 'normalized';
     }
     payload = next;
     const frameStyle = getComputedStyle($('history'));
