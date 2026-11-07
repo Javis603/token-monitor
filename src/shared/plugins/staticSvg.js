@@ -18,7 +18,7 @@ function validateStaticSvg(source) {
   let offset = 0, count = 0, root = false, closed = false;
   // Sticky scanning must consume every byte. Text, comments, declarations and
   // namespace-prefixed names are deliberately outside this small dialect.
-  const tag = /\s*<(\/)?([a-zA-Z]+)((?:\s+[a-zA-Z-]+\s*=\s*(?:"[^"<>]*"|'[^'<>]*'))*)\s*(\/?)>/y;
+  const tag = /\s*<(\/)?([a-zA-Z]+)((?:\s+[a-zA-Z][a-zA-Z0-9-]*\s*=\s*(?:"[^"<>]*"|'[^'<>]*'))*)\s*(\/?)>/y;
   while (offset < source.length && source.slice(offset).trim()) {
     tag.lastIndex = offset;
     const match = tag.exec(source);
@@ -33,7 +33,7 @@ function validateStaticSvg(source) {
     }
     if (++count > 256 || stack.length >= 16 || (name === 'svg' ? root : !stack.length)) fail();
     const attrs = new Map();
-    for (const item of raw.matchAll(/([a-zA-Z-]+)\s*=\s*(?:"([^"<>]*)"|'([^'<>]*)')/g)) {
+    for (const item of raw.matchAll(/([a-zA-Z][a-zA-Z0-9-]*)\s*=\s*(?:"([^"<>]*)"|'([^'<>]*)')/g)) {
       const key = item[1], value = item[2] ?? item[3];
       if (attrs.has(key) || ![...common, ...shapes[name]].includes(key) || value.length > 32768) fail();
       attrs.set(key, value);

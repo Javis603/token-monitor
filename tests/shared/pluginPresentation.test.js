@@ -51,3 +51,11 @@ test('manifest/package/catalog carry independent plugin defaults and module over
   assert.equal(normalizeManifest({...manifest,limits:[{id:'one',name:'One',presentation:{color:{hex:'red'}}}]}).ok,false);
   service.dispose();
 });
+
+
+test('SVG line coordinate names survive both scanners and retain numeric/allowlist validation', () => {
+  const drawing=uri(svg('<line x1="1" y1="2" x2="20" y2="21" stroke="black"/>'));
+  assert.equal(normalizeIdentityIcon(drawing),drawing);
+  assert.deepEqual(normalizePresentation({icon:{data:drawing}}),{icon:{data:drawing,mode:'image'}});
+  for (const body of ['<line x1="NaN"/>','<line x1="1" x1="2"/>','<line x9="1"/>','<line onload1="alert(1)"/>','<line 1x="1"/>']) assert.throws(()=>normalizeIdentityIcon(uri(svg(body))));
+});
