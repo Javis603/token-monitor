@@ -28,6 +28,7 @@
   let selected = '';
   let hoveredBucket = '';
   let trendRangeMode = 'cycle';
+  let trendScaleMode = 'unified';
   let restoreReading = () => {};
   let contentAnimation = null;
   let animateMeasurement = false;
@@ -81,13 +82,18 @@
     const series = overlayEntries(entry);
     plot.replaceChildren();
     plot.setAttribute('viewBox', `0 0 ${width} 86`);
+    if (trendScaleMode === 'normalized') {
+      drawNormalizedTrend(series, plot, width, now);
+      return;
+    }
     plot.setAttribute('aria-label', `${label(entry)} · ${$('trend-heading').textContent}`);
     const moneyAxis = unit(entry) !== 'pp';
     const { start, end, cycle, guideEntry } = moneyAxis
       ? { ...model.trendBounds(entry.window, now, payload.provider), guideEntry: entry }
       : model.combinedTrendBounds(series, now, payload.provider, { rangeMode: trendRangeMode, primaryEntry: entry });
     const seriesWithPoints = series.map((item, idx) => {
-      const sourcePoints = trendRangeMode === 'recent' && item.recentPoints ? item.recentPoints : item.points;
+      const sourcePoints = (trendRangeMode === 'recent' || trendScaleMode === 'unified') && item.recentPoints
+        ? item.recentPoints : item.points;
       const shown = sourcePoints.filter(p => p.at >= start && p.at <= end);
       return { item, shown, color: seriesColor(idx, series.length) };
     });
@@ -148,6 +154,61 @@
       : cycle ? { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'numeric', day: 'numeric' };
     plot.append(svgNode('text', { x: left, y: 81 }, date(start, format)));
     plot.append(svgNode('text', { x: right, y: 81, 'text-anchor': 'end' }, date(end, format)));
+  }
+
+  function drawNormalizedTrend(series, plot, width, now) {
+    const rows = series.map((item, idx) => ({
+      item,
+      bounds: model.trendBounds(item.window, now, payload.provider),
+      color: seriesColor(idx, series.length)
+    })).filter(row => row.bounds.cycle);
+    plot.setAttribute('aria-label', `${label(current())} · ${t('trendNormalized')}`);
+    if (!rows.length) {
+      $('empty').hidden = false;
+      $('empty').textContent = t('empty');
+      plot.hidden = false;
+      return;
+    }
+    const left = 26, right = width - 5, top = 10, bottom = 62;
+    const X = fraction => left + Math.max(0, Math.min(1, fraction)) * (right - left);
+    const Y = value => bottom - Math.max(0, Math.min(100, value)) / 100 * (bottom - top);
+    for (const value of [100, 50, 0]) {
+      plot.append(svgNode('line', { x1: left, x2: right, y1: Y(value), y2: Y(value), class: 'quota-history-grid' }));
+      if (value !== 50) plot.append(svgNode('text', { x: 0, y: Y(value) + 4 }, `${value}%`));
+    }
+    $('guide-caption').hidden = false;
+    $('guide-caption').textContent = t('guide');
+    plot.append(paintSvg(svgNode('line', { x1: left, x2: right, y1: Y(100), y2: Y(0), class: 'quota-history-guide', 'aria-hidden': 'true' }), { stroke: 'var(--accent)' }));
+    const shownRows = rows.map(row => {
+      const points = (row.item.points || []).filter(point => point.at >= row.bounds.start && point.at <= row.bounds.end);
+      return { ...row, points };
+    });
+    $('empty').hidden = shownRows.some(row => row.points.length > 0);
+    for (const row of shownRows) {
+      const isSelected = row.item === current();
+      const strokeWidth = rows.length > 1 ? (isSelected ? 2 : 1.45) : 1.65;
+      const opacity = rows.length > 1 && !isSelected ? 0.78 : 1;
+      const XAt = at => X((at - row.bounds.start) / Math.max(1, row.bounds.end - row.bounds.start));
+      for (const segment of model.segments(row.points)) {
+        let d = '';
+        segment.forEach((point, index) => {
+          d += `${index === 0 ? 'M' : 'L'}${XAt(point.at)},${Y(100 - point.value)}`;
+        });
+        if (segment.length > 1 && isSelected) {
+          const areaD = `${d} L${XAt(segment.at(-1).at)},${bottom} L${XAt(segment[0].at)},${bottom} Z`;
+          plot.append(paintSvg(svgNode('path', { d: areaD, class: 'quota-history-area' }), { fill: row.color }));
+        }
+        plot.append(paintSvg(svgNode('path', { d, class: 'quota-history-curve' }), { stroke: row.color, 'stroke-width': strokeWidth, opacity }));
+        if (segment.length === 1) {
+          const point = segment[0];
+          plot.append(paintSvg(svgNode('line', { x1: Math.max(left, XAt(point.at) - 2), x2: Math.min(right, XAt(point.at) + 2), y1: Y(100 - point.value), y2: Y(100 - point.value), class: 'quota-history-curve' }), { stroke: row.color, 'stroke-width': strokeWidth }));
+        }
+      }
+      const last = row.points.at(-1);
+      if (last) plot.append(paintSvg(svgNode('circle', { cx: XAt(last.at), cy: Y(100 - last.value), r: isSelected ? 2.6 : 2, class: 'quota-history-dot' }), { fill: row.color, opacity }));
+    }
+    plot.append(svgNode('text', { x: left, y: 81 }, t('cycleStart')));
+    plot.append(svgNode('text', { x: right, y: 81, 'text-anchor': 'end' }, t('cycleEnd')));
   }
 
   function drawDistribution(entry) {
@@ -308,10 +369,17 @@
       ? model.trendBounds(entry.window, now, payload.provider)
       : model.combinedTrendBounds(series, now, payload.provider, { rangeMode: trendRangeMode, primaryEntry: entry });
     const spent = unit(entry) !== 'pp' && entry.balance === false;
-    $('trend-heading').textContent = bounds.cycle ? t(spent ? 'trendSpent' : 'trend') : t(spent ? 'trendSpentRecent' : 'trendRecent', { count: 14 });
+    const normalized = trendScaleMode === 'normalized' && unit(entry) === 'pp';
+    $('trend-heading').textContent = normalized
+      ? t('trendNormalized')
+      : bounds.cycle ? t(spent ? 'trendSpent' : 'trend') : t(spent ? 'trendSpentRecent' : 'trendRecent', { count: 14 });
     const rangeBtn = $('trend-range-btn');
-    rangeBtn.hidden = !hasAnyCycle || unit(entry) !== 'pp';
+    rangeBtn.hidden = normalized || !hasAnyCycle;
     rangeBtn.textContent = `${t(trendRangeMode === 'recent' ? 'rangeRecent' : 'rangeCycle', { count: 14 })} ▾`;
+    const scaleBtn = $('trend-scale-btn');
+    scaleBtn.hidden = unit(entry) !== 'pp' || !hasAnyCycle || series.length < 2;
+    scaleBtn.textContent = normalized ? t('scaleUnified') : t('scaleNormalized');
+    scaleBtn.setAttribute('aria-pressed', String(normalized));
     const money = window.TokenMonitorLimitBalanceDisplay;
     const rawAmount = entry.window.metric === 'spend' ? entry.window.used : entry.window.remaining;
     const hasBalance = ['credits', 'spend'].includes(entry.window.metric) && unit(entry) === 'pp' && typeof rawAmount === 'number';
@@ -379,6 +447,11 @@
     trendRangeMode = trendRangeMode === 'cycle' ? 'recent' : 'cycle';
     renderContent(true);
   });
+  $('trend-scale-btn').addEventListener('mousedown', event => event.preventDefault());
+  $('trend-scale-btn').addEventListener('click', () => {
+    trendScaleMode = trendScaleMode === 'unified' ? 'normalized' : 'unified';
+    renderContent(true);
+  });
   $('bars').addEventListener('pointerleave', () => {
     hoveredBucket = '';
     restoreReading();
@@ -394,6 +467,7 @@
       selected = next.windows.find(entry => entry.window.kind === 'weekly')?.key || next.windows[0]?.key || '';
       hoveredBucket = '';
       trendRangeMode = 'cycle';
+      trendScaleMode = 'unified';
     }
     payload = next;
     const frameStyle = getComputedStyle($('history'));

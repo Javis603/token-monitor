@@ -25,6 +25,7 @@
 #history .quota-history-quota { margin: 4px 0 6px; font-weight: 500; overflow-wrap: anywhere; }
 #history .quota-history-balance { color: var(--muted); font-size: .625rem; margin: -2px 0 6px; }
 .quota-history-heading { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; }
+.quota-history-heading-actions { display: inline-flex; align-items: center; gap: 4px; }
 .quota-history-heading > span, #history .quota-history-reset, #history .quota-history-updated { color: var(--muted); font-size: .625rem; }
 #history .quota-history-range-btn { border: 1px solid var(--line); border-radius: 5px; padding: 2px 6px; font-size: .59375rem; background: rgba(var(--overlay-rgb), .04); color: var(--muted); }
 #history .quota-history-range-btn:hover { color: var(--text); background: rgba(var(--overlay-rgb), .09); }
@@ -33,7 +34,7 @@
 #history .quota-history-trend .quota-history-grid { stroke: var(--line); }
 #history .quota-history-trend .quota-history-curve { fill: none; stroke: var(--accent); stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 #history .quota-history-trend .quota-history-area { stroke: none; opacity: .12; }
-#history .quota-history-trend .quota-history-dot { stroke: var(--line-strong); stroke-width: 1; }
+#history .quota-history-trend .quota-history-dot { stroke: var(--bg, #fff); stroke-width: 1; }
 #history .quota-history-trend .quota-history-guide { stroke: var(--accent); stroke-width: 1.1; stroke-dasharray: 3 3; opacity: .45; }
 #history .quota-history-trend .quota-history-now { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2; opacity: .55; }
 #history .quota-history-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 5px; }
