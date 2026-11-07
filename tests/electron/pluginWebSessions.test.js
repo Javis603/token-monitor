@@ -13,6 +13,7 @@ function fixture(t) {
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const sessions = [], windows = [], calls = []; let enabled = true, encrypted = true, backend = 'gnome_libsecret', approval = 1;
   let fetch = async () => ({ ok: true, status: 200, body: Readable.from([Buffer.from('{"total_available":100}')]) });
+  let applyProxy = async () => {}, closeConnections = async () => {};
   class Window extends EventEmitter {
     constructor(options) { super(); this.options = options; this.dead = false; this.webContents = new EventEmitter(); this.webContents.id = windows.length + 10; this.webContents.setWindowOpenHandler = fn => { this.popup = fn; }; windows.push(this); }
     isDestroyed() { return this.dead; }
@@ -24,7 +25,7 @@ function fixture(t) {
     safeStorage: { isAsyncEncryptionAvailable: async () => encrypted, getSelectedStorageBackend: () => backend, encryptStringAsync: async value => crypt(Buffer.from(value)), decryptStringAsync: async value => ({ result: crypt(value).toString(), shouldReEncrypt: false }) },
     dialog: { showMessageBox: async () => ({ response: approval }) },
     session: { fromPartition: partition => {
-      const sess = { partition, clearStorageData: async () => {}, webRequest: { onBeforeSendHeaders: (...args) => { sess.before = args.at(-1); }, onCompleted: (...args) => { sess.completed = args.at(-1); } }, setPermissionRequestHandler: fn => { sess.permission = fn; }, fetch: async (...args) => { calls.push(args); return fetch(...args); } }; sessions.push(sess); return sess;
+      const sess = { partition, setProxy: async config => { sess.proxyConfig = config; await applyProxy(config); }, closeAllConnections: async () => { await closeConnections(); sess.connectionsClosed = true; }, clearStorageData: async () => {}, webRequest: { onBeforeSendHeaders: (...args) => { sess.before = args.at(-1); }, onCompleted: (...args) => { sess.completed = args.at(-1); } }, setPermissionRequestHandler: fn => { sess.permission = fn; }, fetch: async (...args) => { calls.push(args); return fetch(...args); } }; sessions.push(sess); return sess;
     } }
   };
   const create = (extra = {}) => createPluginWebSessions({ electron, fetchImpl: (...args) => electron.session.fromPartition('fixture-transport').fetch(...args), directory, active: () => enabled, ...extra });
@@ -37,8 +38,57 @@ function fixture(t) {
     await sess.completed({ id: 10, statusCode });
   }
   return { service, create, capture, calls, windows, sessions, directory, electron,
+    applyProxy: value => { applyProxy = value; }, closeConnections: value => { closeConnections = value; },
     enabled: value => { enabled = value; }, encrypted: value => { encrypted = value; }, backend: value => { backend = value; }, approval: value => { approval = value; }, fetch: value => { fetch = value; } };
 }
+test('isolated login awaits current app proxy and socket cleanup before opening its page', async t => {
+  const f = fixture(t), settings = {proxyUrl:'http://127.0.0.1:7890',noProxy:'example.test'};
+  const service = f.create({getSettings:()=>settings}); t.after(()=>service.dispose());
+  let finish; f.applyProxy(() => new Promise(resolve => { finish = resolve; }));
+  const pending = service.connect('credit-test',config);
+  for(let n=0;n<20&&!finish;n++) await new Promise(setImmediate);
+  assert.equal(f.windows.length,0,'no page or window before proxy setup');
+  assert.deepEqual(f.sessions[0].proxyConfig,{mode:'fixed_servers',proxyRules:settings.proxyUrl,proxyBypassRules:'example.test,*.example.test'});
+  let closed; f.closeConnections(() => new Promise(resolve=>{closed=resolve;}));
+  finish(); for(let n=0;n<20&&!closed;n++) await new Promise(setImmediate);
+  assert.equal(f.windows.length,0,'socket cleanup is also awaited'); closed();
+  assert.deepEqual(await pending,{state:'connecting'});
+  assert.equal(f.windows[0].url,config.loginUrl);
+  assert.equal(f.windows[0].options.webPreferences.session,f.sessions[0]);
+  service.disconnect('credit-test','platform');
+  settings.proxyUrl='http://127.0.0.1:7891'; f.applyProxy(async()=>{}); f.closeConnections(async()=>{});
+  await service.connect('credit-test',config);
+  assert.equal(f.sessions[1].proxyConfig.proxyRules,settings.proxyUrl,'new login reads current settings');
+});
+test('proxy setup or cleanup failure never opens a login page or falls back direct', async t => {
+  for (const phase of ['applyProxy','closeConnections']) {
+    const f = fixture(t), service = f.create({getSettings:()=>({proxyUrl:'http://127.0.0.1:7890'})}); t.after(()=>service.dispose());
+    f[phase](async()=>{throw Error('synthetic proxy failure');});
+    await assert.rejects(service.connect('credit-test',config),/web-session-connect-failed/);
+    assert.equal(f.windows.length,0); assert.equal(f.calls.length,0);
+    assert.equal((await service.status('credit-test','platform')).state,'notConnected');
+  }
+});
+test('cancelling while the isolated proxy applies cannot open a late login', async t => {
+  const f = fixture(t), service=f.create({getSettings:()=>({proxyUrl:'http://127.0.0.1:7890'})}); t.after(()=>service.dispose());
+  let finish; f.applyProxy(()=>new Promise(resolve=>{finish=resolve;}));
+  const pending=service.connect('credit-test',config);
+  for(let n=0;n<20&&!finish;n++) await new Promise(setImmediate);
+  service.disconnect('credit-test','platform'); finish();
+  assert.deepEqual(await pending,{state:'notConnected'}); assert.equal(f.windows.length,0);
+});
+test('a cancelled proxy setup failure cannot close a replacement login', async t => {
+  const f=fixture(t), service=f.create({getSettings:()=>({proxyUrl:'http://127.0.0.1:7890'})}); t.after(()=>service.dispose());
+  let fail; f.applyProxy(()=>new Promise((_resolve,reject)=>{fail=reject;}));
+  const old=service.connect('credit-test',config);
+  for(let n=0;n<20&&!fail;n++) await new Promise(setImmediate);
+  service.disconnect('credit-test','platform'); f.applyProxy(async()=>{});
+  assert.deepEqual(await service.connect('credit-test',config),{state:'connecting'});
+  fail(Error('synthetic delayed proxy failure'));
+  assert.deepEqual(await old,{state:'notConnected'});
+  assert.equal(f.windows[0].dead,false);
+  assert.equal((await service.status('credit-test','platform')).state,'connecting');
+});
 test('encrypted connection survives service restart; fixed GET includes captured organization and never returns the bearer', async t => {
   const f = fixture(t);
   assert.deepEqual(await f.service.connect('credit-test', config), { state: 'connecting' });

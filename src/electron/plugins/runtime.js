@@ -155,7 +155,7 @@ function createPluginRuntime({
   const manager = createPluginManager({ userDir, dataDir: path.join(userDataDir, 'plugin-data'), authorSettings,
     getSettings, saveStates: persistPluginStates, getLocale, safeMode, hostCall,
     fork: (...args) => electron.utilityProcess.fork(...args), log });
-  const connections = createPluginWebSessions({ electron, fetchImpl: fetchImpl || netFetch, directory: path.join(userDataDir, 'plugin-credentials'), active: id => manager.active(id), changed: (id, key) => {
+  const connections = createPluginWebSessions({ electron, fetchImpl: fetchImpl || netFetch, getSettings, directory: path.join(userDataDir, 'plugin-credentials'), active: id => manager.active(id), changed: (id, key) => {
     // Settings has no quota demand. Login completion must still reach its rows.
     for (const host of listListeners) if (!host.isDestroyed()) host.send('plugins:changed');
     void limits.refresh(`plugin:${id}:${key}`);

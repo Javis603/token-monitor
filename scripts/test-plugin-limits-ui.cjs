@@ -58,7 +58,7 @@ function FixtureWindow(options) {
 FixtureWindow.fromWebContents = BrowserWindow.fromWebContents;
 const fixtureSessions = { get defaultSession() { return session.defaultSession; }, fromPartition: (partition, ...args) => {
   if (!partition.startsWith('plugin-web-login-')) return session.fromPartition(partition, ...args);
-  loginSession = { fixtureLogin: true, setPermissionRequestHandler() {}, clearStorageData: async () => {}, webRequest: {
+  loginSession = { fixtureLogin: true, setProxy: async config => { loginSession.proxyConfig = config; }, closeAllConnections: async () => { loginSession.proxyReady = true; }, setPermissionRequestHandler() {}, clearStorageData: async () => {}, webRequest: {
     onBeforeSendHeaders: (...values) => { loginSession.before = values.at(-1); },
     onCompleted: (...values) => { loginSession.completed = values.at(-1); }
   } };
@@ -189,9 +189,12 @@ app.whenReady().then(async () => {
   await js("document.getElementById('limitProviderDisclosure-plugin:synthetic-limits:one').click()");
   await waitFor("document.querySelector('[data-limit-module=\"plugin:synthetic-limits:one\"] [data-quota-draft]')",'author settings view');
   const accountBox = `document.getElementById('limitProviderOptions-plugin:synthetic-limits:one').querySelector('.plugin-limit-account')`;
+  await js("tokenMonitor.updateSettings({proxyUrl:'http://127.0.0.1:7890',noProxy:'example.test'})");
   await js(`${accountBox}.querySelector('button').click()`);
   await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connecting')`,'synthetic login starts');
   assert.ok(loginSession && loginWindow);
+  assert.equal(loginSession.proxyConfig?.proxyRules,'http://127.0.0.1:7890','runtime injects current proxy into isolated login');
+  assert.equal(loginSession.proxyReady,true,'proxy cleanup completes before login window');
   await js("state.limitProviderRenderSignature='';renderLimitProviderCheckboxes()");
   await waitFor(`${accountBox}.querySelector('span').textContent===t('plugins.connection.state.connecting')`,'rebuilt row reads current connection');
   const request = {id:10,url:'https://api.openai.com/v1/dashboard/billing/credit_grants',method:'GET',webContentsId:loginWindow.webContents.id,
