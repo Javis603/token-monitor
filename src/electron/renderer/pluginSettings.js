@@ -111,6 +111,7 @@
       settle() { return state.pending ? new Promise(resolve => waiters.add(resolve)) : Promise.resolve(); },
       pause() { paused = true; },
       resume() { paused = false; void flush(); },
+      hasUnsavedChanges() { return dirty.size > 0; },
       dispose() { disposed = true; ready.clear(); }
     };
   }
@@ -243,6 +244,10 @@
           revealConsent = false;
         }
       }
+    }
+
+    function requireSavedAuthorSettings(id) {
+      if (authorSettings.get(id)?.editor?.hasUnsavedChanges()) throw new Error(t('plugins.authorSettings.pendingChanges'));
     }
 
     function button(label, action, className = '') {
@@ -521,6 +526,7 @@
       details.append(el(document, 'code', 'plugin-log', p.sha256)); panel.append(details);
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const install = trustInstall => void run(async () => {
+        requireSavedAuthorSettings(p.id);
         const next = await api.install(p.token, { trustUpdate: p.operation === 'update', trustInstall, initialSetup: p.initialChoices });
         packagePreview = null; catalogReview = null; activeTab = 'installed';
         if (p.operation === 'update' && next.plugins.find(plugin => plugin.id === p.id)?.status === 'needsApproval') { consentFor = p.id; revealConsent = true; }
@@ -550,6 +556,7 @@
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       actions.append(button(t('settings.plugins.cancel'), () => { operation = null; render(); }),
         button(t(isRemove ? 'plugins.package.uninstall' : 'plugins.package.rollback'), () => void run(async () => {
+          requireSavedAuthorSettings(plugin.id);
           const next = isRemove ? await api.uninstall(plugin.id, operation) : await api.rollback(plugin.id);
           operation = null; return next;
         }, 'operation')));
@@ -1146,7 +1153,7 @@
           input.setAttribute('aria-invalid', String(Boolean(current.errors[id]))); error.hidden = !current.errors[id];
         }
         retry.hidden = current.message !== 'saveFailed'; retry.disabled = busy || current.pending;
-        reload.hidden = !state.loadFailed && current.message !== 'conflict'; reload.disabled = busy || current.pending || state.loading;
+        reload.hidden = !state.loadFailed && !['conflict', 'saveFailed'].includes(current.message); reload.disabled = busy || current.pending || state.loading;
         recovery.hidden = retry.hidden && reload.hidden;
         const message = current.pending ? 'saving' : current.message === 'saved' ? '' : current.message;
         status.textContent = state.loadFailed ? t('plugins.authorSettings.loadFailed') : message ? t(`plugins.authorSettings.${message}`)

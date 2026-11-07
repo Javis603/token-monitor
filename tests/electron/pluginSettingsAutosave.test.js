@@ -79,3 +79,10 @@ test('Enter then blur completes one version only, including queued and rejected 
  const f=fixture();f.c.edit('text','bad');f.c.complete('text');f.c.complete('text');f.pending[0].reject(Object.assign(Error('invalid-settings-values'),{fields:{text:'length'}}));await tick();f.c.complete('text');await tick();assert.equal(f.calls.length,1);assert.equal(f.c.state.errors.text,'length');
  f.c.edit('text','fixed');f.c.complete('text');assert.equal(f.calls.length,2);f.c.dispose();
 });
+test('failed completed saves remain unsaved until retry succeeds or explicit reload discards them',async()=>{
+ for(const recovery of ['retry','reload']){
+  const f=fixture();assert.equal(f.c.hasUnsavedChanges(),false);f.c.edit('text','kept',true);f.pending[0].reject(Error('disk'));await f.c.settle();assert.equal(f.c.hasUnsavedChanges(),true);assert.equal(f.c.state.draft.text,'kept');
+  if(recovery==='retry'){f.c.retry();f.finish(1,{mode:'a',text:'kept'});await f.c.settle();}else f.c.reload(snapshot());
+  assert.equal(f.c.hasUnsavedChanges(),false);f.c.dispose();
+ }
+});
