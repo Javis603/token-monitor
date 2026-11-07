@@ -31,7 +31,7 @@ function render(windows, { showLimitUsed = false, native = false, details = fals
     vm.runInContext(['detailTooltipNode', 'limitDetailInfoNode', 'limitNoteRowNode'].map(extract).join('\n'), context);
   }
   if (native) vm.runInContext(['limitMeterNode', 'formatLimitWindowValue', 'limitWindowNode'].map(extract).join('\n'), context);
-  vm.runInContext(['quotaDetailEntries', 'genericCreditWindowNode', 'pluginQuotaWindowNode', 'repairWindowPairs', 'renderProviderWindows'].map(extract).join('\n'), context);
+  vm.runInContext(['quotaDetailEntries', 'genericCreditWindowNode', 'positionPluginQuotaInfo', 'pluginQuotaWindowNode', 'repairWindowPairs', 'renderProviderWindows'].map(extract).join('\n'), context);
   return context.renderProviderWindows(context.provider, 'blue').children;
 }
 test('normalized daily and billing plugin quotas each produce a native window', () => {
@@ -110,6 +110,8 @@ test('window and note details share native tooltip cells and money formatting', 
     assert.equal(node.querySelectorAll('.limit-detail-tooltip-row').length,2);
     assert.equal(node.querySelector('b'),null,'author strings are text, not markup');
   }
+  assert.equal(nodes[0].querySelector('.limit-detail-tooltip').classList.contains('is-centered'),true,'window tooltip uses native viewport clamping');
+  assert.equal(nodes[1].querySelector('.limit-detail-tooltip').classList.contains('is-centered'),true,'note tooltip also uses native viewport clamping');
   assert.equal(nodes[1].querySelector('.limit-spend-summary').textContent,'$4.00');
 });
 test('detail DTO limits reject malformed shapes and never enter shared windows', () => {

@@ -989,6 +989,12 @@
     return balanceNode;
   }
 
+  function positionPluginQuotaInfo(info) {
+    if (!info) return;
+    info.classList.add('plugin-quota-info');
+    info.querySelector('.limit-detail-tooltip').classList.add('is-centered');
+  }
+
   function pluginQuotaWindowNode(provider, window, color) {
     const node = isCreditsWindow(window) ? genericCreditWindowNode(provider, window, color)
       : limitWindowNode(providerWindowLabel(provider, window), window, color, window.kind === 'session' ? 0.95 : 0.68, null, window.detail);
@@ -999,6 +1005,7 @@
     }
     const info = limitDetailInfoNode(quotaDetailEntries(window.infoRows));
     if (info) {
+      positionPluginQuotaInfo(info);
       const name = node.querySelector('.limit-window-text').children[0];
       name.classList.add('limit-window-label');
       name.append(info);
@@ -1799,8 +1806,10 @@
       for (const note of provider.notes || []) {
         const summary = note.value === undefined ? '' : typeof note.value === 'string'
           ? note.value : formatMoney(note.value.amount, note.value.currency);
-        windows.append(limitNoteRowNode({ label: note.label, summary,
-          detailEntries: quotaDetailEntries(note.infoRows), ariaParts: summary ? [summary] : [] }));
+        const node = limitNoteRowNode({ label: note.label, summary,
+          detailEntries: quotaDetailEntries(note.infoRows), ariaParts: summary ? [summary] : [] });
+        positionPluginQuotaInfo(node.querySelector('.limit-detail-tooltip-wrap'));
+        windows.append(node);
       }
     } else {
       // Default: render only the windows the provider actually has. Providers

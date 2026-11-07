@@ -174,6 +174,8 @@ app.whenReady().then(async () => {
   await js("document.querySelector('#limitsPanel > :first-child .limit-window-label .limit-detail-tooltip-trigger').focus()");
   await waitFor("document.querySelector('#limitsPanel > :first-child .limit-window-label .limit-detail-tooltip').matches(':popover-open')",'window label shares native tooltip');
   assert.equal(await js("document.querySelector('#limitsPanel > :first-child .limit-window-label .limit-detail-tooltip-trigger').getAttribute('aria-label')"),'Scope: Synthetic team pool');
+  const tooltipBounds=await js("(()=>{const r=document.querySelector('#limitsPanel > :first-child .limit-window-label .limit-detail-tooltip').getBoundingClientRect();return {left:r.left,right:r.right,width:document.documentElement.clientWidth};})()");
+  assert.ok(tooltipBounds.left>=0&&tooltipBounds.right<=tooltipBounds.width,'window-label tooltip stays inside viewport: '+JSON.stringify(tooltipBounds));
   await capture('quota-tooltip-window.png');
   await js("document.activeElement.blur()");
   await js("document.querySelector('#limitsPanel > :first-child .limit-spend .limit-detail-tooltip-trigger').focus()");
