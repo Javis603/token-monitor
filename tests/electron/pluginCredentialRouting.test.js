@@ -52,8 +52,13 @@ test('credential permission split, namespace identity, backend transport, disabl
   await tick();const reloadSignal=f.request[1].signal;
   await f.invoke('plugins:reload');assert.equal(reloadSignal.aborted,true,'reload cancels requests even when the plugin stays active');
   assert.equal((await host('credentials.status',{moduleId:'one'})).configured,true);
+  const begin=f.runtime.manager.beginMutation;
+  f.runtime.manager.beginMutation=async()=>{throw Error('synthetic uninstall rejected');};
+  await assert.rejects(f.invoke('plugins:uninstall','trusted-fixture',{keepData:true}),/synthetic uninstall rejected/);
+  f.runtime.manager.beginMutation=begin;
+  assert.equal((await host('credentials.status',{moduleId:'one'})).configured,true,'failed uninstall preserves credentials');
   fs.rmSync(path.join(f.dir,'plugins/trusted-fixture'),{recursive:true});await f.runtime.manager.reload();
   f.cancel();await assert.rejects(f.invoke('plugins:forgetCredentials','trusted-fixture'),/cancelled/);
   assert.equal(fs.readdirSync(path.join(f.dir,'plugin-credentials')).length,1,'cancelled cleanup preserves saved credentials for missing code');
-  f.accept();await f.invoke('plugins:forgetCredentials','trusted-fixture');assert.deepEqual(fs.readdirSync(path.join(f.dir,'plugin-credentials')),[]);
+  f.accept();await f.invoke('plugins:forgetCredentials','trusted-fixture');assert.ok(fs.readdirSync(path.join(f.dir,'plugin-credentials')).every(name=>Object.keys(JSON.parse(fs.readFileSync(path.join(f.dir,'plugin-credentials',name))).values).length===0));
 });

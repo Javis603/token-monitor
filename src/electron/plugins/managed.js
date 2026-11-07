@@ -23,7 +23,7 @@ function atomicJson(file, value, limit = Infinity) {
 }
 // One transaction at a time. A prepared journal always rolls back;
 // only a persisted committed journal permits removal of the recovery copies.
-function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, manager, getSettings, saveSettings, getLocale = () => 'en', placementContext = () => ({}), now = Date.now, fault = () => {} }) {
+function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, credentialsDir = null, manager, getSettings, saveSettings, getLocale = () => 'en', placementContext = () => ({}), now = Date.now, fault = () => {} }) {
   const registryFile = path.join(root, 'installed.json');
   const journalFile = path.join(root, 'transaction.json');
   const txDir = path.join(root, 'transaction');
@@ -91,6 +91,14 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
       if (fs.existsSync(directoryBackup)) { fs.mkdirSync(dataDir, { recursive: true }); fs.renameSync(directoryBackup, path.join(dataDir, j.id)); }
       const settingsBackup = path.join(txDir, 'author-settings.json');
       if (settingsDir && fs.existsSync(settingsBackup)) { fs.mkdirSync(settingsDir, { recursive: true }); fs.renameSync(settingsBackup, path.join(settingsDir, `${j.id}.json`)); }
+      const credentialsBackup = path.join(txDir, 'plugin-credentials');
+      if (credentialsDir && fs.existsSync(credentialsBackup)) {
+        fs.mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
+        for (const name of fs.readdirSync(credentialsBackup)) {
+          if (!new RegExp(`^${j.id}--[a-f0-9]{64}\\.json$`).test(name)) throw Error('invalid credential recovery name');
+          fs.renameSync(path.join(credentialsBackup, name), path.join(credentialsDir, name));
+        }
+      }
       const previous = path.join(historyDir, `${j.id}.tmplugin`), previousBackup = path.join(txDir, 'previous.tmplugin');
       if (j.hadPrevious) fs.copyFileSync(previousBackup, previous);
       else fs.rmSync(previous, { force: true });
@@ -234,6 +242,15 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, mana
             }
             if (!options.keepData && fs.existsSync(path.join(dataDir, id))) fs.renameSync(path.join(dataDir, id), path.join(txDir, 'plugin-data'));
             if (!options.keepData && settingsDir && fs.existsSync(path.join(settingsDir, `${id}.json`))) fs.renameSync(path.join(settingsDir, `${id}.json`), path.join(txDir, 'author-settings.json'));
+            if (credentialsDir && fs.existsSync(credentialsDir)) {
+              const stat = fs.lstatSync(credentialsDir);
+              if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('invalid credential directory');
+              const backup = path.join(txDir, 'plugin-credentials'); fs.mkdirSync(backup, { mode: 0o700 });
+              for (const name of fs.readdirSync(credentialsDir)) if (new RegExp(`^${id}--[a-f0-9]{64}\\.json$`).test(name)) {
+                fs.renameSync(path.join(credentialsDir, name), path.join(backup, name));
+              }
+              fault('credentials-moved');
+            }
             fs.rmSync(previous, { force: true });
           } else {
             if (current) fs.writeFileSync(previous, current.bytes, { mode: 0o600 });

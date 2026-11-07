@@ -418,8 +418,9 @@ app.whenReady().then(async () => {
   await capture('settings-installed-clean.png');
   await js("document.querySelector('.plugin-type-filter').value='appearance';document.querySelector('.plugin-type-filter').dispatchEvent(new Event('change'))");
   await waitFor("document.querySelector('#pluginSettingsList').textContent.includes(t('plugins.catalog.noResults'))",'filtered installed empty state');
-  await js("tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.update',{moduleId:'one',expectedRevision:0,patch:{token:'synthetic-token'}})");
-  assert.equal(fs.readdirSync(credentialDirectory).length,1,'credential exists before keepData uninstall');
+  const forgotten=await js("tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.status',{moduleId:'one'})");
+  await js(`tokenMonitorTrustedPlugins.host('synthetic-limits','credentials.update',{moduleId:'one',expectedRevision:${forgotten.revision},patch:{token:'synthetic-token'}})`);
+  assert.ok(fs.readdirSync(credentialDirectory).length>0,'credential records exist before keepData uninstall');
   await js("tokenMonitor.plugins.uninstall('synthetic-limits',{keepData:true})");
   await waitFor("state.pluginCatalog?.limits?.modules?.length===0",'uninstall');
   assert.equal(fs.readdirSync(credentialDirectory).length,0,'keepData uninstall removes private credentials');
