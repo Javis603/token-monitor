@@ -185,6 +185,12 @@ app.whenReady().then(async () => {
     const textSaved=await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`);
     assert.equal(textSaved.values.label,'New label');
     assert.equal(textSaved.revision,textBase.revision+1,'Enter then blur saves one revision');
+    await js("textControl.blur();textControl.focus();textControl.value='Intermediate label';textControl.dispatchEvent(new Event('input'));textControl.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))");
+    await waitFor("document.querySelector('.plugin-author-status').hidden",'Enter saves intermediate value');
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'Intermediate label');
+    await js("textControl.value='New label';textControl.dispatchEvent(new Event('input'));textControl.blur()");
+    await waitFor("document.querySelector('.plugin-author-status').hidden",'blur completes return to focus-entry value');
+    assert.equal((await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`)).values.label,'New label','blur saves final draft without relying on change');
     await js("(()=>{window.restoreSetEnabled=pluginApi.setEnabled;pluginApi.setEnabled=()=>new Promise(resolve=>{window.releaseSettingsManagement=async()=>resolve(await pluginApi.list());});textControl.focus();const toggle=document.querySelector('.plugin-detail .plugin-enable');toggle.checked=!toggle.checked;toggle.dispatchEvent(new Event('change'));})()");
     await waitFor("typeof releaseSettingsManagement==='function'",'management action pending');
     assert.equal(await js("textControl.disabled"),false,'focused field stays editable during management');

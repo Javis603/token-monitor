@@ -1133,6 +1133,7 @@
         input.addEventListener(immediate ? 'change' : 'input', () => editor.edit(field.id, value(), immediate));
         if (!immediate) {
           input.addEventListener('change', () => editor.complete(field.id));
+          input.addEventListener('blur', () => editor.complete(field.id));
           input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); editor.complete(field.id); } });
         }
         controls.set(field.id, { input, error, field }); form.append(row);
