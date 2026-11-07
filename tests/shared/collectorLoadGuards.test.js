@@ -27,7 +27,15 @@ installInProcessWatchHost(test);
 
 function freshCollector() {
   delete require.cache[collectorPath];
-  return require(collectorPath);
+  const collector = require(collectorPath);
+  return {
+    ...collector,
+    // These tests count usage/self-sync spawns. Catalog scheduling is covered
+    // separately, and must not consume their synthetic source-event clocks.
+    startCollector: options => collector.startCollector({
+      ...options, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+    })
+  };
 }
 
 // realpath the base: a real os.homedir() is already canonical, but os.tmpdir()

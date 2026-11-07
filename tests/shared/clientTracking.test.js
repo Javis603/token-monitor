@@ -42,7 +42,7 @@ test('clientsCsvForSetting uses defaults only for missing settings', () => {
 
 test('default tracked clients include current tokscale-supported tools', () => {
   const clients = DEFAULT_CLIENTS.split(',');
-  for (const client of ['goose', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'muse', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin', 'fx', 'mcode']) {
+  for (const client of ['goose', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'muse', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin', 'fx', 'mcode', 'mistral', 'prime-agent', 'jcode']) {
     assert.ok(clients.includes(client), `${client} should be tracked by default`);
   }
 });
@@ -115,4 +115,12 @@ test('a saved micode selection migrates to the mimo client id', () => {
   // `pinnedClients`, since main.js routes all four through normalizeClientsCsv.
   assert.equal(clientsCsvForSetting('claude,micode'), 'claude,mimo');
   assert.equal(clientsCsvForSetting('micode,mimo'), 'mimo');
+});
+
+
+test('Mistral Vibe aliases use the Mistral brand client id', () => {
+  const { normalizeClientName } = require('../../src/shared/usage');
+  for (const name of ['vibe', 'mistral', 'Mistral Vibe', 'mistral-vibe', 'mistral_vibe']) {
+    assert.equal(normalizeClientName(name), 'mistral');
+  }
 });

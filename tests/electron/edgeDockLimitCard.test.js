@@ -3240,3 +3240,31 @@ test('grouped MiniMax Code quota opens its own history but non-history subrows d
   clickFrom(silentLane);
   assert.deepEqual(opened, ['code-history'], 'clicking a lane without history cannot open Code history');
 });
+
+
+test('Mistral renders both monthly allowances and an unmetered wallet, with independent visibility', () => {
+  const provider = normalizeLimitProvider({ provider: 'mistral', status: 'ok', source: 'web', windows: [
+    { kind: 'billing', label: 'Included API', usedPercent: 25, used: 5, limit: 20, currency: 'EUR' },
+    { kind: 'billing', label: 'Included Vibe Code', usedPercent: 50, used: 20, limit: 40, currency: 'EUR' },
+    { kind: 'billing', label: 'Balance', metric: 'credits', remaining: 13, currency: 'EUR' }
+  ] });
+  for (const showLimitUsed of [false, true]) {
+    const view = dockView({ showLimitUsed });
+    const card = view.renderProviderWindows(provider, '#FA520F');
+    assert.equal(card.children.length, 3);
+    assert.match(card.text, /Included API/);
+    assert.match(card.text, /Included Vibe Code/);
+    assert.ok(card.children.slice(0, 2).every((row) => row.classNames.has('limit-window-wide')));
+    assert.equal(card.children[0].find('limit-detail').text, showLimitUsed ? 'EUR 5.00 / EUR 20.00' : 'EUR 15.00 / EUR 20.00');
+    assert.equal(card.children[1].find('limit-detail').text, 'EUR 20.00 / EUR 40.00');
+    assert.match(card.text, showLimitUsed ? /25% used/ : /75% left/);
+    assert.match(card.text, /13/);
+    assert.equal(card.children[2].find('limit-meter'), null, 'wallet has no invented meter');
+    const items = view.limitProviderUsageItems([provider]);
+    assert.equal(items.length, 3);
+    for (const item of items) {
+      const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { mistral: [item.id] } });
+      assert.equal(hidden.renderProviderWindows(provider, '#FA520F').children.length, 2);
+    }
+  }
+});
