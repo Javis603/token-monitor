@@ -199,7 +199,7 @@ const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const { runQwenworkDeviceFlowLogin } = require('../shared/providers/qwenwork/deviceFlow');
-const { qwenworkAuthBaseUrl, qwenworkBaseUrl } = require('../shared/providers/qwenwork/limits');
+const { normalizeQwenworkSession, qwenworkAuthBaseUrl, qwenworkBaseUrl } = require('../shared/providers/qwenwork/limits');
 const {
   codexAuthIdentity,
   codexAccountKey,
@@ -1029,7 +1029,7 @@ function persistStepfunTokenRenewal({ previousToken, token } = {}) {
 }
 
 function persistQwenworkSessionRenewal({ previousSession, session } = {}) {
-  const current = settings?.qwenworkSession;
+  const current = normalizeQwenworkSession(settings?.qwenworkSession);
   if (!current || !session || !previousSession) return false;
   if (current.access !== previousSession.access
     || current.refresh !== previousSession.refresh

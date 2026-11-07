@@ -19982,7 +19982,11 @@ function setupCursorAccountUI() {
 
     document.getElementById('qwenworkCancelSignInButton').addEventListener('click', async () => {
       const flowId = state.qwenworkSignInFlowId;
-      await window.tokenMonitor.qwenwork.cancelSignIn({ flowId });
+      try {
+        await window.tokenMonitor.qwenwork.cancelSignIn({ flowId });
+      } catch (error) {
+        if (isCurrentQwenworkSignInFlow(flowId)) setQwenworkError(error?.message || t('settings.qwenwork.loginFailed'));
+      }
       if (!isCurrentQwenworkSignInFlow(flowId)) return;
       state.qwenworkSignInBusy = false;
       state.qwenworkSignInCancelable = false;
@@ -19992,7 +19996,13 @@ function setupCursorAccountUI() {
     });
 
     document.getElementById('qwenworkLogoutButton').addEventListener('click', async () => {
-      await window.tokenMonitor.qwenwork.signOut();
+      try {
+        await window.tokenMonitor.qwenwork.signOut();
+      } catch (error) {
+        setQwenworkError(error?.message || t('settings.qwenwork.loginFailed'));
+        renderQwenworkStatus();
+        return;
+      }
       clearQwenworkProviderStatus();
       setQwenworkError('');
       renderQwenworkStatus();
