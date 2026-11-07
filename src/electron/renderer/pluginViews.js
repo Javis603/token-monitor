@@ -1,9 +1,12 @@
 'use strict';
 (function expose(root, factory) {
-  const api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
+  const node = typeof module === 'object' && module.exports;
+  const script = root?.document?.currentScript;
+  const api = factory(node ? require('../../shared/vendorPresentation') : root?.TokenMonitorVendorPresentation,
+    script ? new URL('../../../assets/icons/', script.src).href : '../../../assets/icons/');
+  if (node) module.exports = api;
   if (root) root.TokenMonitorPluginViews = api;
-})(typeof window !== 'undefined' ? window : null, function () {
+})(typeof window !== 'undefined' ? window : null, function (vendors, iconBase) {
   const ICON_PATHS = Object.freeze({
     cpu: 'M8 4h8a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4zM9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3',
     memory: 'M3 7h18v10H3zM7 10v4M11 10v4M15 10v4M6 17v3M10 17v3M14 17v3M18 17v3',
@@ -38,16 +41,31 @@
     const node = document.createElement('span');
     node.setAttribute('aria-hidden', 'true');
     Object.assign(node.style, { display: 'inline-flex', width: `${size}px`, height: `${size}px`, flexShrink: '0' });
-    const fallback = () => node.replaceChildren(iconNode(document, view?.icon || 'dot', null, size));
-    if (view?.identityIcon) {
+    const icon = view?.presentation?.icon;
+    const fallback = () => node.replaceChildren(icon && icon.data !== view?.identityIcon && view?.identityIcon
+      ? navigationIcon(document, { identityIcon: view.identityIcon, icon: view.icon }, size)
+      : iconNode(document, view?.icon || 'dot', null, size));
+    const native = icon?.native && vendors.ROW_ICON_MASKS[icon.native];
+    const source = native ? `${iconBase}${native}.svg` : icon?.data || view?.identityIcon;
+    if (source) {
       const image = document.createElement('img');
       image.alt = ''; image.width = size; image.height = size;
       image.style.objectFit = 'contain';
       image.addEventListener('error', fallback, { once: true });
-      image.src = view.identityIcon;
+      if (native || icon?.mode === 'mask') image.addEventListener('load', () => {
+        const mask = document.createElement('span');
+        if (native) mask.className = `row-icon-${icon.native}`;
+        Object.assign(mask.style, { width: '100%', height: '100%', backgroundColor: 'currentColor', maskImage: `url("${source.replace(/["\\]/g, '\\$&')}")`, maskSize: 'contain', maskPosition: 'center', maskRepeat: 'no-repeat' });
+        node.replaceChildren(mask);
+      }, { once: true });
+      image.src = source;
       node.append(image);
     } else fallback();
     return node;
+  }
+  function presentationColor(presentation, palette) {
+    const color = presentation?.color;
+    return color?.hex || palette[color?.palette] || palette.default;
   }
   function drawIcon(ctx, name, { x, y, size, color }) {
     ctx.save();
@@ -158,5 +176,5 @@
       dispose() { disposed = true; observer?.disconnect(); if (frame !== null) window.cancelAnimationFrame(frame); document.removeEventListener('visibilitychange', refreshDemand); return ui.dispose(); }
     };
   }
-  return { iconNode, navigationIcon, drawIcon, actionErrorMessage, createPluginViewHost };
+  return { iconNode, navigationIcon, presentationColor, drawIcon, actionErrorMessage, createPluginViewHost };
 });

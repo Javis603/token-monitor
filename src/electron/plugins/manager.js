@@ -99,7 +99,7 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
   }
   function descriptor(plugin, view) {
     const base = `tm-plugin://${plugin.id}/${plugin.revision}/`;
-    return { ...view, identityIcon: plugin.manifest.identityIcon, title: localize(view.title, getLocale()), pluginId: plugin.id, ref: `${plugin.id}/${view.id}`,
+    return { ...view, identityIcon: plugin.manifest.identityIcon, presentation: plugin.manifest.presentation, title: localize(view.title, getLocale()), pluginId: plugin.id, ref: `${plugin.id}/${view.id}`,
       contentOrder: Object.fromEntries((view.targets || []).map(target => {
         const orders = getSettings().pluginContentOrder || {};
         const index = (Object.hasOwn(orders, target) ? orders[target] : []).indexOf(`${plugin.id}/${view.id}`);
@@ -118,7 +118,7 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
     const base = { id: plugin.id, source: 'user', status: status(plugin), enabled: state?.enabled === true, errors: plugin.errors, name: plugin.id };
     if (!m) return base;
     return { ...base, name: localize(m.name, getLocale()), version: m.version, description: localize(m.description, getLocale()),
-      author: m.author, homepage: m.homepage, identityIcon: m.identityIcon, types: pluginTypes(m), trustedCode: true, trusted: state?.trustedRevision === plugin.revision,
+      author: m.author, homepage: m.homepage, identityIcon: m.identityIcon, presentation: m.presentation, types: pluginTypes(m), trustedCode: true, trusted: state?.trustedRevision === plugin.revision,
       hasCode: Boolean(m.ui || m.backend), hasBackend: Boolean(m.backend), settings: m.settings, settingsIdentity: plugin.revision,
       revision: plugin.revision, defaults: m.defaults, limits: (m.limits || []).map(item => ({ ...item, name: localize(item.name, getLocale()), tags: (item.tags || []).map(tag => localize(tag, getLocale())) })), views: m.views.map(view => descriptor(plugin, view)),
       skins: m.skins.map(skin => ({ ...skin, ref: `${plugin.id}/${skin.id}`, name: localize(skin.name, getLocale()) })),

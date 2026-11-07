@@ -2,6 +2,7 @@
 const semver = require('semver');
 const { normalizeSettings } = require('./settings');
 const { normalizeIdentityIcon } = require('./identityIcon');
+const { normalizePresentation } = require('./presentation');
 const { normalizeAppearance } = require('./appearance');
 const { normalizeCredentials } = require('./credentials');
 const { normalizeLocalized, cleanText } = require('./localized');
@@ -118,14 +119,14 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
     if (!Array.isArray(rawTags) || rawTags.length > 2) { fail('limits tags must contain at most 2 labels'); continue; }
     const tags = rawTags.map(value => normalizeLocalized(value, 256));
     if (tags.some(tag => !tag || Object.values(tag).some(text => [...text].length > 16))) { fail('limits tags must be nonempty localized labels of at most 16 characters'); continue; }
-    let credentials;
-    try { credentials = normalizeCredentials(entry.credentials); } catch (error) { fail(error.message); continue; }
+    let credentials, presentation;
+    try { credentials = normalizeCredentials(entry.credentials); presentation = normalizePresentation(entry.presentation); } catch (error) { fail(error.message); continue; }
     limitIds.add(entry.id);
-    limits.push({ id: entry.id, name: title, credentials,
+    limits.push({ id: entry.id, name: title, credentials, presentation,
       capabilities: LIMIT_CAPABILITY_IDS.filter(id => declared.includes(id)), tags, settingsView });
   }
-  let settings, identityIcon;
-  try { settings = normalizeSettings(raw.settings); identityIcon = normalizeIdentityIcon(raw.identityIcon); } catch (error) { fail(error.message); }
+  let settings, identityIcon, presentation;
+  try { settings = normalizeSettings(raw.settings); identityIcon = normalizeIdentityIcon(raw.identityIcon); presentation = normalizePresentation(raw.presentation); } catch (error) { fail(error.message); }
   const skins = normalizeSkins(raw.skins, errors);
   if (!ui && !backend && !skins.length) fail('plugin must provide ui, backend or skins');
   if (raw.background !== undefined && typeof raw.background !== 'boolean') fail('background must be boolean');
@@ -150,6 +151,6 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
     name, category, limits: Object.freeze(limits), description: normalizeLocalized(raw.description, 240), author: cleanText(raw.author, 80),
     homepage: typeof raw.homepage === 'string' && /^https:\/\//.test(raw.homepage) ? raw.homepage.slice(0, 300) : '',
     ui, backend, files: Object.freeze([...files]), css: Object.freeze([...css]), views: Object.freeze(views),
-    skins: Object.freeze(skins), trayMenu: Object.freeze(trayMenu), settings, identityIcon, defaults, background: raw.background === true, backgroundDescription }) };
+    skins: Object.freeze(skins), trayMenu: Object.freeze(trayMenu), settings, identityIcon, presentation, defaults, background: raw.background === true, backgroundDescription }) };
 }
 module.exports = { LIMIT_CAPABILITY_IDS, API_MAJOR, ID_RE, SURFACES, SKIN_COLOR_KEYS, apiMajor, filePath, normalizeManifest };
