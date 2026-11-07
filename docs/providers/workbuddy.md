@@ -33,6 +33,12 @@ On-demand Session Detail uses the shared streaming line reader and CodeBuddy par
 
 The shared metadata scanner still skips records above 64 KiB, so oversized user or assistant records can leave turn status stale. This metadata limit is separate from Session Detail's record bound. The desktop credential-encryption boundary described below concerns quota access; it does not prevent reading local session transcripts.
 
+### Live context window
+
+`providers/workbuddy/sessionContext.js` reads the occupancy pair from the WorkBuddy app database (`~/.workbuddy/workbuddy.db`, table `session_usage`) rather than from the transcript: `used` is what the window currently holds and `size` is the window the running model was configured with. WorkBuddy rewrites both on every turn, and the window is a per-session runtime option (1,000,000 for DeepSeek-V4.1-Flash, 960,000 for models capped lower), so a model-name table would be wrong for exactly the sessions users watch — the same reason the Codex reader uses Codex's own `model_context_window`.
+
+The read is bounded by the shared 30-minute recency window and is attempted only for sessions that pass it, one primary-key lookup per visible id. The database is opened read-only through `sqliteReadOnly.js` and never written to; a WorkBuddy build without the table is a definite miss ('no badge'), a failed open or query is transient and retried next tick, and a runtime without `node:sqlite` leaves every session untouched. A definite miss clears the pair so a previous tick's badge cannot outlive its session.
+
 ## Limits and quota
 
 `fetchWorkbuddyLimits()` in `src/shared/providers/workbuddy/limits.js` owns the request and the response mapping. The existing CN discovery/headless billing paths post to `https://copilot.tencent.com` — `/v2/billing/meter/get-user-resource` for personal accounts and `/v2/billing/meter/get-enterprise-user-usage` when an enterprise id is present. The personal request mirrors the official client's package selection (`ProductCode: p_tcaca`, `Status: [0, 3]`) but aggregates only `Status 0` rows, because the `Status 3` history packages are not part of the spendable balance.
@@ -103,6 +109,7 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 | Concern | Primary files |
 | --- | --- |
 | Transcript metadata and roots | `src/shared/providers/workbuddy/sessionMetadata.js`, shared CodeBuddy transcript readers |
+| Live context window occupancy | `src/shared/providers/workbuddy/sessionContext.js`, shared `sqliteReadOnly.js` and `sessionContext.js` |
 | Transcript discovery and streaming Detail | `src/shared/sessionFiles.js`, `src/shared/sessionDetail.js`, `src/shared/sessionDetailResolver.js` |
 | App session reading, encryption detection, read reasons | `src/electron/providers/workbuddy/localAuth.js` |
 | Official login, refresh and managed credentials | `src/shared/providers/workbuddy/oauth.js`, `src/electron/providers/workbuddy/oauthLogin.js`, `src/electron/providers/workbuddy/managedAccounts.js`, shared `CredentialStore` |
@@ -122,6 +129,7 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 - the read reasons for absent, malformed, oversized, incomplete and expired sessions;
 - the widget lane refusing a legacy `.env` or settings token;
 - an explicit token outranking the local session;
+- live context occupancy stamped only for sessions inside the recency window, with a missing table, a half-filled row and a runtime without `node:sqlite` all degrading to no badge;
 - the allowlisted endpoint, header stripping, and mid-request session switch rejection;
 - realm/state/platform-bound official browser login, both pending codes and cancellation/timeouts;
 - refresh single-flight, rotated-token persistence, transient retention and account-mutation fences;
@@ -130,4 +138,4 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 
 Run focused tests while iterating, then `npm run sync:worker` when `src/shared/limits/core.js` changed, `npm run update:hub-build` after the final shared changes, `npm run verify`, and `git diff --check`.
 
-For session changes, run `node --test tests/shared/workbuddySessionMetadata.test.js tests/shared/sessionDetail.codebuddy.test.js tests/shared/sessionDetailStreaming.test.js tests/shared/sessionDetailResolver.test.js`.
+For session changes, run `node --test tests/shared/workbuddySessionMetadata.test.js tests/shared/workbuddySessionContext.test.js tests/shared/sessionDetail.codebuddy.test.js tests/shared/sessionDetailStreaming.test.js tests/shared/sessionDetailResolver.test.js`.
