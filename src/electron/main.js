@@ -410,6 +410,7 @@ const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const { createIcloudSyncStore } = require('./icloudSync');
 const { createIcloudSyncRuntime } = require('./icloudSyncRuntime');
+const { isCursorDetectedAccountCurrent } = require('../shared/providers/cursor/account');
 const {
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
@@ -7999,8 +8000,17 @@ async function cursorStatusValue({ discover = false } = {}) {
   }
   const disabled = new Set(normalizeCursorDisabledAccountIds(settings?.cursorDisabledAccountIds));
   const manual = new Set(normalizeCursorAccountIds(settings?.cursorManualAccountIds));
-  const safeAccounts = await Promise.all(accounts.map(async (account) => {
+  const desktop = cursorAuth.readCursorDesktopSignIn();
+  const listedAccounts = await Promise.all(accounts.map(async (account) => {
     const probeResult = await cursorProbe.probe(account.sessionToken);
+    const expired = !probeResult.ok && probeResult.error?.kind === 'unauthorized';
+    // Desktop-detected accounts follow the desktop sign-in; manual ones stay
+    // until removed. Hidden accounts keep their credentials and usage history.
+    if (!manual.has(account.id) && !isCursorDetectedAccountCurrent({
+      desktop,
+      userId: cursorAuth.canonicalCursorUserId(account.userId || account.id),
+      unauthorized: expired
+    })) return null;
     return {
       id: account.id,
       enabled: !disabled.has(account.id),
@@ -8008,10 +8018,11 @@ async function cursorStatusValue({ discover = false } = {}) {
       email: probeResult.ok ? probeResult.user?.email || '' : '',
       label: account.label || '',
       membershipType: probeResult.ok ? probeResult.usage.membershipType || '' : '',
-      expired: !probeResult.ok && probeResult.error?.kind === 'unauthorized',
+      expired,
       error: probeResult.ok ? '' : probeResult.error?.message || ''
     };
   }));
+  const safeAccounts = listedAccounts.filter(Boolean);
   return {
     loggedIn: safeAccounts.length > 0,
     accounts: safeAccounts,

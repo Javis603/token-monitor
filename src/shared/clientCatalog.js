@@ -97,7 +97,9 @@
     { id: 'devin', label: 'Devin' },
     { id: 'fx', label: 'fx' },
     { id: 'mcode', label: 'MiniMax Code' },
-    { id: 'mistral', label: 'Mistral Vibe' }
+    { id: 'mistral', label: 'Mistral Vibe' },
+    { id: 'prime-agent', label: 'Prime Agent' },
+    { id: 'jcode', label: 'Jcode' }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     forkOnly: false,

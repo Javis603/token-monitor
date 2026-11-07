@@ -329,6 +329,8 @@ function normalizeClientName(value) {
   if (/^unsloth(?:[\s_-]+(?:studio|api))?$/.test(raw)) return 'unsloth';
   if (raw.includes('dsh')) return 'dsh';
   if (raw.includes('devin')) return 'devin';
+  if (/^prime[\s_-]*agent$/.test(raw)) return 'prime-agent';
+  if (/^j[\s_-]*code$/.test(raw)) return 'jcode';
   if (raw === 'fx') return 'fx';
   if (raw === 'mistral' || /^mistral[\s_-]*vibe$/.test(raw)) return 'mistral';
   // Tokscale's id for MiniMax Code. The bare vendor name stays a model vendor

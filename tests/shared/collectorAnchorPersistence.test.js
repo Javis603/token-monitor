@@ -10,7 +10,15 @@ const collectorPath = require.resolve('../../src/shared/collector');
 
 function freshCollector() {
   delete require.cache[collectorPath];
-  return require(collectorPath);
+  const collector = require(collectorPath);
+  return {
+    ...collector,
+    // Anchor assertions count usage scans, independently of catalog refreshes
+    // and whether the host happens to have a fresh pricing cache.
+    startCollector: options => collector.startCollector({
+      ...options, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+    })
+  };
 }
 
 const {

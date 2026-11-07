@@ -30,7 +30,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 51개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 앱입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다. 메인 창, MacBook 노치, 메뉴 막대나 시스템 트레이, 화면 가장자리, 플로팅 버블, 네이티브 macOS 위젯 등 시선이 닿는 곳 어디서나 확인할 수 있습니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 53개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 앱입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다. 메인 창, MacBook 노치, 메뉴 막대나 시스템 트레이, 화면 가장자리, 플로팅 버블, 네이티브 macOS 위젯 등 시선이 닿는 곳 어디서나 확인할 수 있습니다.
 
 ## 지원 도구
 
@@ -77,6 +77,8 @@ Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 51개 이상의 AI
     <img src=".github/assets/tools-icon/fx.png" width="40" alt="fx" title="fx" />
     <img src=".github/assets/tools-icon/minimax.png" width="40" alt="MiniMax" title="MiniMax" />
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
+    <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
+    <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -157,7 +159,7 @@ brew install --cask token-monitor
 
 ### 사용량 추적
 
-- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 40개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 42개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
 - **실시간 토큰 속도** — 생성 속도를 `tok/s`로, 총 소모를 `tok/min`으로 보여주는 선택형 실시간 표시
 - **세션별 상세** — 세션을 열면 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
 - **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
@@ -252,6 +254,8 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="MiniMax" /> | MiniMax / MiniMax Code | `~/.minimax/v2/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Mistral Admin 쿠키 (Included API / Vibe 월간 할당량 및 크레딧 잔액) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/sessions/` + `~/.prime/agent/session-artifacts/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `$JCODE_HOME/sessions/` (`~/.jcode/sessions/`); `session_*.json` + `session_*.journal.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie (청구 잔액 및 토큰 사용량 기반 예상 지출) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 키 (사용량/키 한도, credits 접근 승인 시 잔액 표시; 공식 문서는 Management 키 지정) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 또는 Volcengine AK/SK (Volcengine API로 Ark Coding Plan / Agent Plan 할당량 조회) | — | ✅ | — |

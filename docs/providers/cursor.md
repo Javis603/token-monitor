@@ -23,6 +23,8 @@ Manual explicit sync allows Tokscale's dynamic budget of up to 1800 seconds plus
 
 Only accounts added manually by Token Monitor may be removed from its UI. Desktop discovery remains ambient ownership.
 
+A desktop-detected account follows the Cursor desktop sign-in. It leaves the current account list once Cursor rejects its token, the desktop app is signed out, or the desktop app is signed in as a different user. Its credentials and synced usage history stay intact, so it comes back if the desktop signs in to it again. A network failure or an unreadable desktop state keeps it listed. Manually added accounts are not affected and keep their remove action.
+
 ## Self-sync and sessions
 
 Cursor is self-synced: the collector supplies its one `SelfSyncThrottle` and tokscale resolver to `createCursorSelfSync()`. A credential change forces one targeted Cursor usage sync but does not restart the usage runtime.
