@@ -297,6 +297,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const copilotOtelRoot = path.join(home, '.copilot', 'otel');
   const copilotRoots = [
     ['copilot-otel', copilotOtelRoot],
+    ['copilot-session-state', path.join(home, '.copilot', 'session-state')],
     ['copilot-data', path.join(home, '.copilot'), path.join(home, '.copilot', 'data.db')],
     ['copilot-session-store', path.join(home, '.copilot'), path.join(home, '.copilot', 'session-store.db')],
     ...[...new Set(copilotWorkspaceRoots)].map((dir) => ['vscode-workspace-storage', dir]),

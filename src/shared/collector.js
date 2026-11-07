@@ -1427,13 +1427,13 @@ function clientWatchCandidates(clientsCsv, options = {}) {
   if (senpiSources) options = { ...options, senpiSources };
   const byClient = {};
   for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv, options))) {
-    // The Copilot data root already keeps its `otel/` child through the
-    // matcher below. Keep that child as a diagnostic/source check, but do not
-    // hand both nested paths to chokidar or it may install two native watches
-    // over the same tree.
+    // The Copilot data root already keeps its otel and session-state children
+    // through the matcher below. Keep both as diagnostic/source checks, but do not
+    // hand overlapping parent and child paths to chokidar or it may install
+    // duplicate native watches over the same tree.
     byClient[client] = roots
       .filter((root) => (
-        !(client === 'copilot' && root.id === 'copilot-otel')
+        !(client === 'copilot' && ['copilot-otel', 'copilot-session-state'].includes(root.id))
         && !INTERVAL_ONLY_SOURCE_CHECK_IDS.has(root.id)
       ))
       .map((root) => root.dir);
