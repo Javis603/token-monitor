@@ -3155,10 +3155,9 @@ test('history hover is automatic by default and optional without adding a separa
     row.isConnected = true;
     row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
     const info = [...row.walk()].find(node => node.getAttribute('aria-label') === 'Gift: ¥5.00');
-    row.listeners.click({ target: { closest(selector) {
-      if (selector === '.limit-row') return row;
-      return selector.split(',').some(part => info.parent.classList.contains(part.trim().slice(1))) ? info.parent : null;
-    } } });
+    let stopped = false;
+    const event = { target: { closest: selector => selector === '.limit-row' ? row : null }, stopPropagation() { stopped = true; } };
+    for (let target = info; target && !stopped; target = target.parent) target.listeners?.click?.(event);
     assert.deepEqual(opened, [], 'viewing balance details does not open history');
   } finally { global.setTimeout = nativeSetTimeout; global.clearTimeout = nativeClearTimeout; }
 });

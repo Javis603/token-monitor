@@ -431,7 +431,7 @@
         const hidden = new Set(item.hiddenAccounts || []);
         const group = el('div', 'edge-dock-composer-accounts');
         group.append(el('div', 'edge-dock-composer-menu-title', t('settings.edgeDock.accounts')));
-        for (const [index, account] of accounts.entries()) {
+        for (const account of accounts) {
           const label = el('label', 'edge-dock-composer-account');
           const input = document.createElement('input');
           input.type = 'checkbox';
@@ -445,7 +445,7 @@
           const identity = account.accountName || maskEmail(account.accountEmail);
           const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
           const name = product
-            ? limitAccountTitle('mimo', account, index, accounts)
+            ? limitAccountTitle('mimo', account, accounts.indexOf(account), accounts)
             : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
           text.setAttribute('aria-label', name);
@@ -477,11 +477,13 @@
         connected: isAutomatic() ? connectedProviders() : null,
         addable: ui.menuOpen ? enabledLimitProviders?.() : null,
         windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
-        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account, index, accounts) => [
-          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel,
-          selectedItem.provider === 'mimo' && mimoProductLabel(account)
-            ? limitAccountTitle('mimo', account, index, accounts) : ''
-        ]) : null,
+        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account, index, accounts) => {
+          const identity = [account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel];
+          if (selectedItem.provider === 'mimo' && mimoProductLabel(account)) {
+            identity.push(limitAccountTitle('mimo', account, index, accounts));
+          }
+          return identity;
+        }) : null,
         wording: [t('settings.edgeDock.window'), t('settings.edgeDock.window.auto'), t('settings.edgeDock.window.unavailable')]
       });
       if (signature === renderedSignature && root.firstChild) return;

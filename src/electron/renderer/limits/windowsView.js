@@ -1255,7 +1255,9 @@
           const right = document.createElement('span');
           right.className = 'limit-spend-right';
           value.replaceWith(right);
-          right.append(value, limitDetailInfoNode(details));
+          const info = limitDetailInfoNode(details);
+          info.addEventListener('click', event => event.stopPropagation());
+          right.append(value, info);
         }
         tagUsageItem(balanceNode, 'credits', 'Balance');
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
@@ -2320,7 +2322,7 @@
       row.addEventListener('click', event => {
         const clickedRow = event.target.closest('.limit-row');
         if (clickedRow && clickedRow !== row && clickedRow.dataset?.limitLead === undefined) return;
-        if (event.target.closest('button, a, input, select, summary, [role="button"], .limit-detail-tooltip-wrap')) return;
+        if (event.target.closest('button, a, input, select, summary, [role="button"]')) return;
         clearTimeout(hoverTimer); openHistory(true);
       });
     }
@@ -2617,7 +2619,7 @@
     return text === key ? '' : text;
   }
 
-  function renderLimitProviderGroupFrame(providerId, label, providers, color, { count, markId, planText } = {}) {
+  function renderLimitProviderGroupFrame(providerId, label, providers, color, { count, markId } = {}) {
     const row = document.createElement('div');
     row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
     // The header stands for the rows it draws, including when a card hides
@@ -2630,9 +2632,9 @@
       groupAccounts: providers
     };
     row.append(renderLimitProviderHead(providerId, label, groupProvider, color, {
-      planText: planText ?? (providerId === 'muse' && subscriptionsForProviderGroup(providerId, providers).length
+      planText: providerId === 'muse' && subscriptionsForProviderGroup(providerId, providers).length
         ? t('settings.subscriptions.title')
-        : count ? limitGroupCountText(providerId, count) : ''),
+        : count ? limitGroupCountText(providerId, count) : '',
       hideMeta: true,
       ...(markId ? { markId } : {})
     }));
@@ -2665,7 +2667,7 @@
     const visibleGroups = groups.map((group, index) => ({
       index,
       providers: group.filter(provider => {
-        if (provider.status !== 'ok' || provider.stale || subscriptionForProvider(provider)) return true;
+        if (hidden.size === 0 || provider.status !== 'ok' || provider.stale || subscriptionForProvider(provider)) return true;
         const items = limitProviderUsageItems([provider]);
         return items.length === 0 || items.some(item => !hidden.has(item.id));
       })
@@ -2678,10 +2680,14 @@
         subscriptionAccountMatches(entry.account, provider) && limitProviderPlan(provider)
       )))
     );
-    const { row, list } = renderLimitProviderGroupFrame('mimo', label, visible, color, {
-      count: visibleGroups.length > 1 ? visibleGroups.length : 0,
-      ...(subscriptionHeading ? { planText: t('settings.subscriptions.title') } : {})
+    const { row, list, groupProvider } = renderLimitProviderGroupFrame('mimo', label, visible, color, {
+      count: visibleGroups.length > 1 ? visibleGroups.length : 0
     });
+    if (subscriptionHeading) {
+      row.children[0].replaceWith(renderLimitProviderHead('mimo', label, groupProvider, color, {
+        planText: t('settings.subscriptions.title'), hideMeta: true
+      }));
+    }
     if (visible.length === 0 && recorded.length === 0) {
       row.style.display = 'none';
       return row;
