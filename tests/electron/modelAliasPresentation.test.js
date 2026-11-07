@@ -185,7 +185,10 @@ test('projection conserves priced totals and components in every period, client,
   assert.deepEqual(projected.limits, stats.limits);
   assert.deepEqual(stats, before);
   assert.deepEqual(projectModelAliasStats(stats, {}, { grouping: 'duplicates' }).periods.today.models, { 'claude-opus-5': 70, 'gpt-5.5-pro': 30 });
-  assert.deepEqual(projectModelAliasStats(stats, { 'anthropic/claude-opus-5': 'separate' }).periods.today.models, { separate: 40, 'claude-opus-5': 30, 'gpt-5.5-pro': 30 });
+  assert.deepEqual(projectModelAliasStats(stats, { 'anthropic/claude-opus-5': 'separate' }).periods.today.models, { separate: 70, 'gpt-5.5-pro': 30 });
+  assert.deepEqual(projectModelAliasStats(stats, {
+    'anthropic/claude-opus-5': 'separate', 'claude-opus-5': 'canonical name'
+  }).periods.today.models, { separate: 40, 'canonical name': 30, 'gpt-5.5-pro': 30 });
 });
 
 test('a pulled session list is grouped by the same plan as the stats it belongs to', () => {

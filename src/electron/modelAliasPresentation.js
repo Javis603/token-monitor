@@ -6,7 +6,7 @@ const {
   inferModelAliases,
   createModelAliasResolver
 } = require('./renderer/modelAliases');
-const { historyRevision, num } = require('../shared/history');
+const { historyRevision, normalizeTokscaleModelNameForClient, num } = require('../shared/history');
 const { isGrokBotSession } = require('./renderer/sessionRows');
 
 const MODEL_MAP_FIELDS = [
@@ -345,6 +345,14 @@ function aliasPlan(modelIds, aliases, grouping) {
   const explicit = normalizeModelAliases(aliases);
   const automatic = inferModelAliases(modelIds, grouping);
   const resolve = createModelAliasResolver(explicit, modelIds, grouping);
+  // Keep saved aliases usable after the scanner folds their source identity.
+  // Direct aliases still win, and settings retain their original source keys.
+  const inherited = new Map();
+  for (const [source, target] of Object.entries(explicit)) {
+    const canonical = normalizeTokscaleModelNameForClient(source);
+    if (canonical !== source && !inherited.has(canonical)) inherited.set(canonical, target);
+  }
+  const resolveInherited = createModelAliasResolver(Object.fromEntries(inherited), [], 'off');
   // Session/model maps repeat the same names throughout a projection. Discard
   // these results with the plan so every new snapshot/settings gets a fresh one.
   const resolved = new Map();
@@ -355,7 +363,8 @@ function aliasPlan(modelIds, aliases, grouping) {
     resolve(model) {
       const hit = resolved.get(model);
       if (hit !== undefined) return hit;
-      const result = resolve(model);
+      const direct = resolve(model);
+      const result = direct === model ? resolveInherited(model) : direct;
       resolved.set(model, result);
       return result;
     }
