@@ -1787,12 +1787,25 @@
         }
         const amount = creditsAmount(provider, creditsWindow);
         if (amount === null) continue;
+        const display = creditsWindow.creditsDisplay;
+        const explicitDisplay = display === 'percent' || display === 'balance';
+        const total = creditsWindow.limit;
+        const percentDisplay = display === 'percent' && creditsWindow.showMeter !== false
+          && Number.isFinite(total) && total > 0 && amount >= 0 && amount <= total;
+        const remainingPercent = percentDisplay ? amount / total * 100 : null;
+        const displayWindow = explicitDisplay
+          ? { ...creditsWindow, showMeter: percentDisplay, remainingPercent,
+            usedPercent: percentDisplay ? 100 - remainingPercent : null }
+          : { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) };
+        const currency = creditsCurrency(provider, creditsWindow);
+        const detailAmount = settings()?.showLimitUsed ? total - amount : amount;
         const balanceNode = limitWindowNode(
           providerWindowLabel(provider, creditsWindow, 'Balance'),
-          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) },
+          displayWindow,
           color,
           0.95,
-          formatMoney(amount, creditsCurrency(provider, creditsWindow))
+          percentDisplay ? null : formatMoney(amount, currency),
+          percentDisplay ? `${formatMoney(detailAmount, currency)} / ${formatMoney(total, currency)}` : ''
         );
         balanceNode.classList.add('limit-window-wide');
         if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');

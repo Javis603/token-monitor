@@ -16,7 +16,7 @@ const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
 const fixtureDir = path.join(scratch, 'source');
 fs.mkdirSync(fixtureDir, { recursive: true });
 fs.writeFileSync(path.join(fixtureDir, 'manifest.json'), JSON.stringify({tmApi:1,id:'synthetic-limits',name:'Synthetic limits',version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'string',label:'Display mode',default:'meter'}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',connection:'openai',capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]}));
-fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async()=>({call:async(method,args)=>{if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60}]};}});`);
+fs.writeFileSync(path.join(fixtureDir, 'backend.cjs'), `const fs=require('node:fs');const file=${JSON.stringify(path.join(scratch,'fixture-status.txt'))};exports.activate=async()=>({call:async(method,args)=>{if(method==='fixture-status'){fs.writeFileSync(file,args.status);return true;}const {moduleId}=args;if(method==='fixture-window'){fs.writeFileSync(file+'.window',JSON.stringify(args));return true;}const status=fs.existsSync(file)?fs.readFileSync(file,'utf8'):'ok';return{status:moduleId==='one'?status:'ok',plan:moduleId==='one'?'Synthetic Team':undefined,windows:moduleId==='two'?[{kind:'daily',label:'Daily pool',usedPercent:25,remainingPercent:75},{kind:'billing',label:'Billing pool',usedPercent:40,remainingPercent:60}]:[{kind:'billing',label:'API credits',metric:'credits',used:moduleId==='one'?20:40,limit:100,remaining:moduleId==='one'?80:60,currency:'USD',usedPercent:moduleId==='one'?20:40,remainingPercent:moduleId==='one'?80:60,...(fs.existsSync(file+'.window')?JSON.parse(fs.readFileSync(file+'.window','utf8')):{})}]};}});`);
 fs.writeFileSync(path.join(fixtureDir,'settings.mjs'), `
 export async function activate(ctx) {
   window.quotaViewEvents ||= [];
@@ -141,6 +141,28 @@ app.whenReady().then(async () => {
   assert.equal(await js("state.pluginCatalog.limits.providers.find(row=>row.provider==='plugin:synthetic-limits:two').planLabel"),'','missing plan stays blank');
   assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('Daily pool')&&document.querySelector('#limitsPanel').textContent.includes('Billing pool')"),true,'non-credit daily and billing plugin quotas render');
   await capture('limits-mixed.png');
+  const creditWindow = {creditsDisplay:'percent',remaining:83.25,limit:100,boundaryKind:'expiry',resetsAt:new Date(Date.now()+30*86400000).toISOString()};
+  await runtime.manager.call('synthetic-limits','fixture-window',creditWindow);
+  await runtime.refreshLimits();
+  await waitFor("document.querySelector('#limitsPanel').textContent.includes('$83.25 / $100.00')",'percent credit money detail');
+  assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('83% left')"),true);
+  await capture('credits-percent-remaining.png');
+  await js("tokenMonitor.updateSettings({showLimitUsed:true})");
+  await waitFor("document.querySelector('#limitsPanel').textContent.includes('$16.75 / $100.00')",'used credit money detail');
+  assert.equal(await js("document.querySelector('#limitsPanel').textContent.includes('17% used')"),true);
+  await capture('credits-percent-used.png');
+  await runtime.manager.call('synthetic-limits','fixture-window',{...creditWindow,creditsDisplay:'balance'});
+  await runtime.refreshLimits();
+  await waitFor("!document.querySelector('#limitsPanel').textContent.includes('$16.75 / $100.00')",'balance-only credit');
+  await capture('credits-balance.png');
+  await runtime.manager.call('synthetic-limits','fixture-window',{...creditWindow,limit:null});
+  await runtime.refreshLimits();
+  await capture('credits-unknown-total.png');
+  await js("tokenMonitor.updateSettings({showLimitUsed:false})");
+  await runtime.manager.call('synthetic-limits','fixture-window',{});
+  await runtime.refreshLimits();
+  await waitFor("document.querySelector('#limitsPanel').textContent.includes('$80.00')",'restore legacy fixture credit');
+
   await js("openSettingsPanel()");
   await waitFor("state.pluginCatalog.limits.modules.every(module=>!module.sampling)",'pause before transient reveal');
   await runtime.manager.call('synthetic-limits','fixture-status',{status:'error'});

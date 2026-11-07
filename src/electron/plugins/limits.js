@@ -14,7 +14,12 @@ function desktopProviderPreference(value, builtins) {
 function normalizeReading(input, provider) {
   if (!input || !['ok', 'notConfigured', 'unauthorized', 'rateLimited', 'unavailable', 'error'].includes(input.status)
     || !Array.isArray(input.windows) || input.windows.length > 16) throw Error('Invalid plugin limits reading');
-  const windows = input.windows.map(normalizeLimitWindow);
+  const windows = input.windows.map(window => {
+    const normalized = normalizeLimitWindow(window);
+    // Desktop presentation only; do not extend the shared Hub window shape.
+    if (normalized?.metric === 'credits' && ['percent', 'balance'].includes(window.creditsDisplay)) normalized.creditsDisplay = window.creditsDisplay;
+    return normalized;
+  });
   if (windows.some(window => !window)) throw Error('Invalid plugin limits window');
   const plan = typeof input.plan === 'string' ? input.plan.slice(0, 80) : '';
   return { provider, status: input.status, windows, plan, planLabel: plan, updatedAt: Number.isFinite(Date.parse(input.updatedAt)) ? new Date(input.updatedAt).toISOString() : new Date().toISOString() };

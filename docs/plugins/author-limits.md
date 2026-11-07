@@ -88,6 +88,22 @@ exports.activate = async ({ host }) => ({
 
 `limits.collect` returns `{status, windows, plan?}`; status is `ok`, `notConfigured`, `unauthorized`, `rateLimited`, `unavailable` or `error`. Up to 16 windows use the existing native window contract (`kind`, `label`, percentages, `used`, `limit`, `remaining`, `currency`, `resetsAt`, `boundaryKind`). Money uses `metric: 'credits'`; an expiry uses `boundaryKind: 'expiry'`, never an invented monthly reset. Unknown values remain unknown. A plan is optional and must describe a real plan. The host projects declared fields, not arbitrary backend data.
 
+### Credit presentation
+
+Credit windows can opt into desktop presentation with `creditsDisplay: 'percent'` or `'balance'`. Omission preserves the existing money headline and meter behavior. `balance` shows the remaining money without a meter. `percent` uses the native percentage headline and bar, with expiry/reset on the lower left and money / total on the lower right. Percentage, bar and money numerator follow the App's global used/remaining mode together. This option is projected by the desktop quota registry, not added to Hub wire data.
+
+```js
+return {status: 'ok', windows: [{
+  kind: 'billing', label: 'API credits', metric: 'credits',
+  creditsDisplay: 'percent', remaining: 83.25, limit: 100, currency: 'USD',
+  boundaryKind: 'expiry', resetsAt: expiryIso
+}]};
+```
+
+For a module named `OpenAI`, this shows `API credits` / `83% left`, a native bar, then `Expires …` / `$83.25 / $100.00`. Used mode shows `17% used` and `$16.75 / $100.00`. These are synthetic example values. Omit `plan` when no actual plan is known; do not use a plugin label as a plan.
+
+For percent mode, `limit` must be a finite, positive, real allowance and `remaining` must lie between zero and that allowance. The host derives both percentages and the used-money numerator from these amounts, ignoring supplied percentages. It never infers a denominator from observed spend or lifetime grants. Authors must supply only a reconciled applicable total. Unknown, zero, negative or inconsistent totals fall back to the true remaining balance without a percentage, meter or ratio; zero remaining with a positive total is a valid 0% left / 100% used reading. `showMeter: false` also selects this fallback. Use `limit: null` when unknown. The expiry boundary remains an expiry in either layout.
+
 `host.call('limits.read')` returns captured `{modules, providers}` from this desktop registry without starting collection. This formal read is available to active plugin UI/backends; it contains no credentials. Native consumers use the same runtime service, independent of the selected Hub data source. Plugin quota records do not enter DeviceRecord, Hub/Worker wire data, iCloud sync, quota history or alerts in this phase.
 
 Sampling reuses `LimitsRuntime`: fixed/adaptive scheduling, bounded concurrency, finite deadlines, last-good/attempt retention, retry cooldowns and latest-wins cancellation. Only enabled selected modules with native visibility demand sample. The initial main Limits owner releases demand while Settings overlays it, while collapsed into Floating Bubble, or while the native window/document is hidden. Settings retains captured readings without quota polling; reopening visible main Limits resumes sampling. Local token usage does not request a refresh. Multiple native owners share the registry/runtime; the initial owner is the main Limits view. The last owner leaving stops scheduling and fences late data; a later reveal starts a fresh sample. Backend calls retain the existing manager's finite deadline and process lifetime rules.
