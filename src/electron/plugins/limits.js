@@ -3,6 +3,7 @@
 // Desktop-only registry. These records never enter DeviceRecord or Hub history.
 const { normalizeLimitWindow } = require('../../shared/limits/core');
 const { createLimitsRuntime } = require('../../shared/limits/runtime');
+const { windowDetails, normalizeNotes } = require('./quotaDetails');
 const MODULE_ID = /^plugin:[a-z0-9][a-z0-9-]{1,39}:[a-z][a-z0-9-]{0,31}$/;
 const identity = (plugin, module) => `plugin:${plugin}:${module}`;
 function desktopProviderPreference(value, builtins) {
@@ -18,11 +19,13 @@ function normalizeReading(input, provider) {
     const normalized = normalizeLimitWindow(window);
     // Desktop presentation only; do not extend the shared Hub window shape.
     if (normalized?.metric === 'credits' && ['percent', 'balance'].includes(window.creditsDisplay)) normalized.creditsDisplay = window.creditsDisplay;
+    if (normalized) Object.assign(normalized, windowDetails(window));
     return normalized;
   });
   if (windows.some(window => !window)) throw Error('Invalid plugin limits window');
   const plan = typeof input.plan === 'string' ? input.plan.slice(0, 80) : '';
-  return { provider, status: input.status, windows, plan, planLabel: plan, updatedAt: Number.isFinite(Date.parse(input.updatedAt)) ? new Date(input.updatedAt).toISOString() : new Date().toISOString() };
+  const notes = normalizeNotes(input.notes);
+  return { provider, status: input.status, windows, ...(notes === undefined ? {} : { notes }), plan, planLabel: plan, updatedAt: Number.isFinite(Date.parse(input.updatedAt)) ? new Date(input.updatedAt).toISOString() : new Date().toISOString() };
 }
 function createPluginLimits({ manager, getSettings, changed, cancelModule = () => {}, credentialRevision = () => null, onReading = () => {} }) {
   let runtime = null, disposed = false;

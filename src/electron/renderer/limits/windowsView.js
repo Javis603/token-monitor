@@ -956,6 +956,56 @@
     return tagUsageItem(item, usageItems.limitUsageItemId(window), name.textContent);
   }
 
+  function quotaDetailEntries(rows) {
+    return (rows || []).map(row => [row.label, typeof row.value === 'string'
+      ? row.value : formatMoney(row.value.amount, row.value.currency)]);
+  }
+
+  function genericCreditWindowNode(provider, creditsWindow, color) {
+    const amount = creditsAmount(provider, creditsWindow);
+    if (amount === null) return null;
+    const display = creditsWindow.creditsDisplay;
+    const explicitDisplay = display === 'percent' || display === 'balance';
+    const total = creditsWindow.limit;
+    const percentDisplay = display === 'percent' && creditsWindow.showMeter !== false
+      && Number.isFinite(total) && total > 0 && amount >= 0 && amount <= total;
+    const remainingPercent = percentDisplay ? amount / total * 100 : null;
+    const displayWindow = explicitDisplay
+      ? { ...creditsWindow, showMeter: percentDisplay, remainingPercent,
+        usedPercent: percentDisplay ? 100 - remainingPercent : null }
+      : { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) };
+    const currency = creditsCurrency(provider, creditsWindow);
+    const detailAmount = settings()?.showLimitUsed ? total - amount : amount;
+    const balanceNode = limitWindowNode(
+      providerWindowLabel(provider, creditsWindow, 'Balance'),
+      displayWindow,
+      color,
+      0.95,
+      percentDisplay ? null : formatMoney(amount, currency),
+      percentDisplay ? `${formatMoney(detailAmount, currency)} / ${formatMoney(total, currency)}` : ''
+    );
+    balanceNode.classList.add('limit-window-wide');
+    if (!creditsWindow.resetsAt && !creditsWindow.resetDescription && !percentDisplay) balanceNode.classList.add('limit-window-no-reset');
+    return balanceNode;
+  }
+
+  function pluginQuotaWindowNode(provider, window, color) {
+    const node = isCreditsWindow(window) ? genericCreditWindowNode(provider, window, color)
+      : limitWindowNode(providerWindowLabel(provider, window), window, color, window.kind === 'session' ? 0.95 : 0.68, null, window.detail);
+    if (!node) return null;
+    if (window.span !== undefined) {
+      node.dataset.limitSpan = String(window.span);
+      node.classList.toggle('limit-window-wide', window.span === 2);
+    }
+    const info = limitDetailInfoNode(quotaDetailEntries(window.infoRows));
+    if (info) {
+      const name = node.querySelector('.limit-window-text').children[0];
+      name.classList.add('limit-window-label');
+      name.append(info);
+    }
+    return node;
+  }
+
   // `showAllUsageItems` draws the rows the user hid as well: the settings
   // checklist is read off that render.
   function renderProviderWindows(provider, color, options = {}) {
@@ -1740,33 +1790,39 @@
         const node = clineCreditsNode(provider, clineCredits, clineSpend);
         if (node) windows.append(node);
       }
+    } else if (provider.provider?.startsWith('plugin:')) {
+      for (const window of provider.windows || []) {
+        const node = pluginQuotaWindowNode(provider, window, color);
+        if (node) windows.append(node);
+      }
+      repairWindowPairs(windows);
+      for (const note of provider.notes || []) {
+        const summary = note.value === undefined ? '' : typeof note.value === 'string'
+          ? note.value : formatMoney(note.value.amount, note.value.currency);
+        windows.append(limitNoteRowNode({ label: note.label, summary,
+          detailEntries: quotaDetailEntries(note.infoRows), ariaParts: summary ? [summary] : [] }));
+      }
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to
       // the real one. Credits windows carry money rather than quota percentages;
       // their display meter is derived without changing the provider reading.
-      if (provider.provider?.startsWith('plugin:')) {
-        for (const window of (provider.windows || []).filter(window => !isCreditsWindow(window))) {
-          windows.append(limitWindowNode(providerWindowLabel(provider, window), window, color, window.kind === 'session' ? 0.95 : 0.68));
-        }
-      } else {
-        const session = windowForKind(provider, 'session');
-        if (session) {
-          const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
-          if (provider.provider === 'minimax' && !session.resetsAt && !session.resetDescription) node.classList.add('limit-window-no-reset');
+      const session = windowForKind(provider, 'session');
+      if (session) {
+        const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
+        if (provider.provider === 'minimax' && !session.resetsAt && !session.resetDescription) node.classList.add('limit-window-no-reset');
+        windows.append(node);
+      }
+      if (provider.provider === 'minimax') {
+        for (const weekly of windowsForKind(provider, 'weekly')) {
+          const detail = providerWindowText(provider, weekly).detail;
+          const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68, null, detail);
+          if (!weekly.resetsAt && !weekly.resetDescription && !detail) node.classList.add('limit-window-no-reset');
           windows.append(node);
         }
-        if (provider.provider === 'minimax') {
-          for (const weekly of windowsForKind(provider, 'weekly')) {
-            const detail = providerWindowText(provider, weekly).detail;
-            const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68, null, detail);
-            if (!weekly.resetsAt && !weekly.resetDescription && !detail) node.classList.add('limit-window-no-reset');
-            windows.append(node);
-          }
-        } else {
-          const weekly = windowForKind(provider, 'weekly');
-          if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
-        }
+      } else {
+        const weekly = windowForKind(provider, 'weekly');
+        if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
       }
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
         // Muse supplies the token balance as display text; keep it ahead of the
@@ -1785,31 +1841,8 @@
           }), usageItems.limitUsageItemId(creditsWindow), label));
           continue;
         }
-        const amount = creditsAmount(provider, creditsWindow);
-        if (amount === null) continue;
-        const display = creditsWindow.creditsDisplay;
-        const explicitDisplay = display === 'percent' || display === 'balance';
-        const total = creditsWindow.limit;
-        const percentDisplay = display === 'percent' && creditsWindow.showMeter !== false
-          && Number.isFinite(total) && total > 0 && amount >= 0 && amount <= total;
-        const remainingPercent = percentDisplay ? amount / total * 100 : null;
-        const displayWindow = explicitDisplay
-          ? { ...creditsWindow, showMeter: percentDisplay, remainingPercent,
-            usedPercent: percentDisplay ? 100 - remainingPercent : null }
-          : { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) };
-        const currency = creditsCurrency(provider, creditsWindow);
-        const detailAmount = settings()?.showLimitUsed ? total - amount : amount;
-        const balanceNode = limitWindowNode(
-          providerWindowLabel(provider, creditsWindow, 'Balance'),
-          displayWindow,
-          color,
-          0.95,
-          percentDisplay ? null : formatMoney(amount, currency),
-          percentDisplay ? `${formatMoney(detailAmount, currency)} / ${formatMoney(total, currency)}` : ''
-        );
-        balanceNode.classList.add('limit-window-wide');
-        if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
-        windows.append(balanceNode);
+        const balanceNode = genericCreditWindowNode(provider, creditsWindow, color);
+        if (balanceNode) windows.append(balanceNode);
       }
       if (provider.provider === 'minimax') {
         const spendNode = provider.balance && providerSpendNode(provider.balance, provider);
@@ -1847,11 +1880,11 @@
   }
 
   // A run of half-width rows with an odd count leaves its last row alone on a
-  // grid row, so that row spans it.
+  // grid row, so that row spans it. An explicit plugin span keeps its width.
   function repairWindowPairs(container) {
     let run = [];
     const closeRun = () => {
-      if (run.length % 2 === 1) run.at(-1).classList.add('limit-window-wide');
+      if (run.length % 2 === 1 && run.at(-1).dataset.limitSpan !== '1') run.at(-1).classList.add('limit-window-wide');
       run = [];
     };
     for (const child of container.children) {

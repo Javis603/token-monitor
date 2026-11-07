@@ -2,9 +2,8 @@
 
 Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review.
 
-Choose a guide for your next step:
+Start with the [quickstart](author-quickstart.md) to build and import a plugin. Use the task guides below when adding a feature; each API contract has one reference page.
 
-- [First UI and local import](author-quickstart.md)
 - [Data queries, live updates and plugin settings](author-data-settings.md)
 - [Resource fields, measurement coverage and limitations](author-data-resources.md)
 - [UI surfaces and composition](author-ui-options.md)
