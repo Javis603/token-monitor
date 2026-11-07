@@ -91,8 +91,9 @@
     }
     function paint(mount) {
       applyAppearance(mount.container, appearance);
-      const value = state(mount.surface, mount.ref) || (!latest.has(mount.surface) ? mount.options.descriptor : null);
-      if (value?.entry) {
+      const value = mount.options.descriptor?.nativeCredentials ? mount.options.descriptor
+        : state(mount.surface, mount.ref) || (!latest.has(mount.surface) ? mount.options.descriptor : null);
+      if (value?.entry || value?.nativeCredentials) {
         const { isVisible, ...options } = mount.options;
         const context = { ...options, ...getContext(mount.surface), surface: mount.surface };
         if (isVisible) context.visible = effectiveVisibility(mount);

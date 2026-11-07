@@ -4,7 +4,8 @@
 // Formal data operations reuse captured App state without refreshing collectors.
 
 const fs = require('node:fs');
-const { createPluginWebSessions } = require('./webSessions');
+const { createPluginCredentials } = require('./credentials');
+const { createPluginNetwork } = require('./network');
 const { createPluginLimits } = require('./limits');
 const { showPluginNotification } = require('./notification');
 const path = require('node:path');
@@ -119,7 +120,7 @@ function createPluginRuntime({
   const authorSettings = createPluginSettingsStore({ directory: path.join(userDataDir, 'plugin-settings') });
   const userDir = path.join(userDataDir, 'plugins');
 
-  // Catalog downloads use the App transport. Plugin backends use their own Node networking.
+  // Catalog downloads and backend network requests use injected host transports.
   const proxy = resolveProxyConfig(env);
   const netFetch = proxy.httpProxy || proxy.httpsProxy
     ? createOutboundFetch(env)
@@ -128,12 +129,15 @@ function createPluginRuntime({
   const auth = id => () => ({ pluginId: id, active: manager.active(id) });
   async function hostCall(id, method, args, owner = id) {
     if (!manager.active(id)) throw new Error('Plugin is disabled');
-    if (method.startsWith('webSession.')) {
-      const module = manager.list().plugins.find(plugin => plugin.id === id)?.limits?.find(module => module.id === args?.key);
-      if (!module?.connection) throw new Error('Undeclared connection');
-      const op = method.slice(11);
-      if (!['connect', 'status', 'request', 'disconnect'].includes(op)) throw new Error('Unknown connection operation');
-      return op === 'connect' ? connections.connect(id, { key: module.id, adapter: module.connection }) : connections[op](id, module.id);
+    if (method.startsWith('credentials.') || method.startsWith('network.')) {
+      const module = manager.list().plugins.find(plugin => plugin.id === id)?.limits?.find(module => module.id === args?.moduleId);
+      if (!module) throw new Error('Undeclared quota module');
+      if (method === 'network.request') return network.request(id, args);
+      if (method === 'network.cancel') { network.cancel(id, module.id, args.requestId); return; }
+      if (!module.credentials) throw new Error('Credentials not declared');
+      const op = method.slice(12);
+      if (!['status', 'update', 'clear', 'read'].includes(op)) throw new Error('Unknown credential operation');
+      return credentials[op](id, module.id, module.credentials, args);
     }
     if (method === 'data.query') {
       businessReaders.add(id);
@@ -153,15 +157,16 @@ function createPluginRuntime({
     throw new Error(`Unknown host operation: ${method}`);
   }
   const manager = createPluginManager({ userDir, dataDir: path.join(userDataDir, 'plugin-data'), authorSettings,
-    getSettings, saveStates: persistPluginStates, getLocale, safeMode, hostCall,
+    getSettings, saveStates: persistPluginStates, getLocale, safeMode, hostCall, onBackendStopped: id => network.cancelPlugin(id),
     fork: (...args) => electron.utilityProcess.fork(...args), log });
-  const connections = createPluginWebSessions({ electron, fetchImpl: fetchImpl || netFetch, getSettings, directory: path.join(userDataDir, 'plugin-credentials'), active: id => manager.active(id), changed: (id, key, reason) => {
-    if (reason === 'disconnect') limits.forgetConnections(id, key);
-    // Settings has no quota demand. Login completion must still reach its rows.
+  const network = createPluginNetwork({ fetchImpl: fetchImpl || netFetch, active: id => manager.active(id) });
+  const credentials = createPluginCredentials({ directory: path.join(userDataDir, 'plugin-credentials'), changed: (id, moduleId, reason) => {
+    network.cancelPlugin(id, moduleId);
+    limits.invalidateCredentials(id, moduleId);
+    if (reason === 'update') void limits.refresh(`plugin:${id}:${moduleId}`);
     for (const host of listListeners) if (!host.isDestroyed()) host.send('plugins:changed');
-    if (reason !== 'disconnect') void limits.refresh(`plugin:${id}:${key}`);
   } });
-  const limits = createPluginLimits({ manager, getSettings, changed: () => { for (const subscriber of subscribers.values()) if (!subscriber.webContents.isDestroyed()) subscriber.webContents.send('plugins:changed'); } });
+  const limits = createPluginLimits({ manager, getSettings, cancelModule: (id, moduleId) => network.cancelPlugin(id, moduleId), changed: () => { for (const subscriber of subscribers.values()) if (!subscriber.webContents.isDestroyed()) subscriber.webContents.send('plugins:changed'); } });
   const mime = name => ({ js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', woff2: 'font/woff2' }[name.split('.').pop()] || 'application/octet-stream');
   const protocol = session.defaultSession.protocol;
   protocol.handle('tm-plugin', request => {
@@ -283,7 +288,7 @@ function createPluginRuntime({
   const listListeners = new Set();
   manager.onChanged(() => {
     if (disposed) return;
-    connections.cancelInactive();
+    network.cancelInactive();
     limits.reconcile();
     for (const id of businessReaders) if (!manager.active(id)) {
       businessData.revoke(id); businessReaders.delete(id);
@@ -443,6 +448,7 @@ function createPluginRuntime({
     requireMain(event);
     const affected = await inspectHosts(ids);
     if (affected.length) await confirm(event, 'plugins.trusted.reloadNote');
+    for (const id of ids) network.cancelPlugin(id);
     await change();
     const result = listWithPlacements();
     reloadHosts(affected.map(item => item.host));
@@ -463,7 +469,7 @@ function createPluginRuntime({
     if (reload.length) await confirm(event, 'plugins.trusted.reloadNote', unsaved ? 'plugins.trusted.packageUnsavedNote' : null);
     else if (unsaved) await confirm(event, 'plugins.trusted.packageUnsavedNote');
     await beforeRelease?.();
-    for (const id of ids) connections.cancelPlugin(id);
+    for (const id of ids) network.cancelPlugin(id);
     const released = [], recovery = [];
     try {
       for (const item of affected.filter(item => !item.error)) {
@@ -549,12 +555,10 @@ function createPluginRuntime({
 
   function registerIpc() {
     handle('plugins:limitsDemand', (event, value) => { requireMain(event); registerSubscriber(event.sender); limits.demand(value); });
-    handle('plugins:connection', async (event, id, key, operation) => {
+    handle('plugins:forgetCredentials', (event, id) => {
       requireMain(event);
-      if (operation === 'forget') { connections.forget(id); limits.forgetConnections(id); return { state: 'notConnected' }; }
-      if (!['connect', 'status', 'disconnect'].includes(operation)) throw new Error('Invalid account operation');
-      const result = await hostCall(id, `webSession.${operation}`, { key });
-      return result;
+      credentials.forget(id);
+      return { ok: true };
     });
     handle('plugins:orderContent', (event, target, refs) => {
       requireMain(event);
@@ -628,7 +632,7 @@ function createPluginRuntime({
     });
     handle('plugins:restart', (event, { id } = {}) => {
       requireMain(event);
-      connections.cancelPlugin(String(id));
+      network.cancelPlugin(String(id));
       manager.restart(String(id));
       return listWithPlacements();
     });
@@ -673,7 +677,7 @@ function createPluginRuntime({
     });
     handle('plugins:cancelInstall', (event, token) => { requireMain(event); managed.cancel(token); });
     handle('plugins:rollback', (event, id) => changeCode(event, () => managed.rollback(id), [id]));
-    handle('plugins:uninstall', (event, id, options) => changePackage(event, async () => { connections.forget(id); return managed.uninstall(id, options); }, [id]));
+    handle('plugins:uninstall', (event, id, options) => changePackage(event, async () => { credentials.forget(id); return managed.uninstall(id, options); }, [id]));
     handle('plugins:openPage', (event, ref) => { requireMain(event); pages.open(ref); return { ok: true }; });
     handle('plugins:openFolder', async (event) => {
       requireMain(event);
@@ -727,7 +731,7 @@ function createPluginRuntime({
     handle('plugins:call', (event, id, method, args) => { requireHost(event); return manager.call(id, method, args); });
     handle('plugins:host', (event, id, method, args) => {
       requireHost(event);
-      if (method.startsWith('webSession.')) throw new Error('Backend-only operation');
+      if (method === 'credentials.read' || method.startsWith('network.')) throw new Error('Backend-only operation');
       if (method === 'data.query') registerSubscriber(event.sender);
       return hostCall(id, method, args, String(event.sender.id));
     });
@@ -828,7 +832,7 @@ function createPluginRuntime({
       if (disposed) return;
       refreshBusinessData();
       manager.settingsChanged();
-      connections.cancelInactive();
+      network.cancelInactive();
       limits.reconcile();
         pages.refresh();
       for (const subscriber of subscribers.values()) {
@@ -850,7 +854,7 @@ function createPluginRuntime({
       clearTimeout(catalogRefreshTimer);
       catalog.dispose();
       managed.dispose();
-      connections.dispose();
+      network.dispose();
       limits.dispose();
       pages.dispose();
       protocol.unhandle('tm-plugin');

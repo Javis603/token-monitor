@@ -16,7 +16,7 @@ function extract(name) {
 function catalogHarness() {
   const calls = [], connectionRefreshes = [];
   const context = { state: {}, pluginLimitSettings: null, pluginPageDesigns: {}, isSettingsSurfaceVisible: () => true,
-    preserveSettingsPanelScroll: fn => fn(), refreshPluginLimitAccountStatuses: () => connectionRefreshes.push(context.state.pluginCatalog) };
+    preserveSettingsPanelScroll: fn => fn(), refreshPluginLimitCredentialStatuses: () => connectionRefreshes.push(context.state.pluginCatalog) };
   for (const name of ['renderLimits', 'renderLimitProviderCheckboxes', 'render', 'renderViewSwitcher', 'renderThemePresetChips', 'renderNotchPageChoices', 'renderViewPreferences']) context[name] = () => calls.push(name);
   vm.createContext(context);
   vm.runInContext(`let pluginCatalogKey = '', pluginLimitReadingsKey = ''; ${extract('applyPluginCatalog')}`, context);

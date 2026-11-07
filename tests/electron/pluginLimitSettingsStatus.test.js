@@ -8,7 +8,7 @@ test('missing reading is unknown, while an explicit setup failure is not configu
   assert.equal(pluginLimitSettingsStatus({}, { status: 'notConfigured' }).key, 'settings.limits.status.notSetUp');
 });
 test('only modules with host login show reconnect; read failures do not assert lost configuration', () => {
-  assert.equal(pluginLimitSettingsStatus({ connection: 'openai' }, { status: 'unauthorized' }).key, 'plugins.connection.state.reconnectRequired');
+  assert.equal(pluginLimitSettingsStatus({ credentials: { fields: [] } }, { status: 'unauthorized' }).key, 'plugins.credentials.invalid');
   assert.equal(pluginLimitSettingsStatus({}, { status: 'unauthorized' }).key, 'settings.limits.status.error');
   assert.equal(pluginLimitSettingsStatus({}, { status: 'error' }).key, 'plugins.limits.readFailed');
   assert.equal(pluginLimitSettingsStatus({}, { status: 'unavailable' }).label, 'Unavailable');

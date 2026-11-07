@@ -9,7 +9,7 @@
   function create({ document, host, getModules, getView, isVisible }) {
     const mounts = new Map();
     function node(module) {
-      if (!module.settingsView) return null;
+      if (!module.settingsView && !module.credentials) return null;
       let held = mounts.get(module.id);
       if (!held) {
         const container = document.createElement('div');
@@ -22,7 +22,11 @@
     function reconcile() {
       const modules = new Map(getModules().map(module => [module.id, module]));
       for (const [id, held] of mounts) {
-        const module = modules.get(id), view = module?.settingsView && getView(module);
+        const module = modules.get(id);
+        const view = module?.settingsView ? getView(module) : module?.credentials ? {
+          ref: `${module.pluginId}/credentials-${module.moduleId}`, pluginId: module.pluginId, revision: module.revision,
+          status: 'active', nativeCredentials: true, id: module.moduleId
+        } : null;
         if (!view) {
           host.unmount(held.container); held.container.remove(); mounts.delete(id); continue;
         }
@@ -35,7 +39,7 @@
       }
       host.refreshDemand();
     }
-    return { node, reconcile, dispose() {
+    return { node, reconcile, refreshCredentials: reconcile, dispose() {
       for (const held of mounts.values()) host.unmount(held.container);
       mounts.clear();
     } };

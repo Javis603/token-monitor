@@ -1,6 +1,6 @@
-# Native quota modules and host connections
+# Native quota modules and manual credentials
 
-Quota modules are independent of plugin views. Declare once; the desktop host owns native rendering, sampling and account controls. A backend-only plugin is sufficient. Existing views, placements and their lifecycle remain available for other content. This is trusted OS-user code, not credential isolation against a malicious backend or same-user process.
+Quota modules are independent of plugin views. Declare once; the desktop host owns native rendering, sampling and settings lifecycle. A backend-only plugin is sufficient. Existing views, placements and their lifecycle remain available for other content. This is trusted OS-user code, not credential isolation against a malicious backend or same-user process.
 
 ```json
 {
@@ -11,19 +11,19 @@ Quota modules are independent of plugin views. Declare once; the desktop host ow
   "backend": "backend.cjs",
   "files": ["backend.cjs"],
   "limits": [
-    {"id": "credits", "name": "OpenAI", "connection": "openai"},
+    {"id": "credits", "name": "OpenAI", "capabilities": ["web"], "credentials": {"fields": [{"id": "sessionBearer", "label": "Platform session Bearer", "required": true}, {"id": "organization", "label": "Organization ID", "required": true}]}},
     {"id": "local", "name": "Local budget", "capabilities": ["cli"], "tags": [{"en": "Team pool", "zh-TW": "團隊共享"}]}
   ]
 }
 ```
 
-`limits` accepts up to 16 modules with unique IDs (`[a-z][a-z0-9-]{0,31}`) and localized names. The optional `connection` selects a host login adapter; currently only `openai` exists. A module without a connection can implement any other trusted backend data source without a core change. There is no arbitrary-site login API. Capability-derived **Limits** labels and type filters coexist with Widgets, Pages, Appearance and Automation; labels grant no authority.
+`limits` accepts up to 16 modules with unique IDs (`[a-z][a-z0-9-]{0,31}`) and localized names. Modules can declare manual `credentials` independently of `settingsView`. There is no browser login adapter or login-window API. A module without credentials can implement another trusted backend data source without a core change. Capability-derived **Limits** labels and type filters coexist with Widgets, Pages, Appearance and Automation; labels grant no authority.
 
-The stable identity is `plugin:<plugin-id>:<module-id>`. Display names do not identify modules. The same identity must be used by every future native picker/composer and data consumer; no surface-specific registration, login or fetcher is needed. Removing or disabling a plugin removes its active modules, while display selection/order remain saved for re-enable/reinstall. Plugin execution/trust and module sampling/display checkboxes are independent. Native settings use the same right-side status pill as built-ins: missing readings wait for data; explicit `notConfigured` means not set up; `unauthorized` requests reconnect only for a declared host connection; errors mean a failed read. Healthy readings use the status dot without a duplicate connected pill. These are mutually exclusive states, not author-supplied badge text.
+The stable identity is `plugin:<plugin-id>:<module-id>`. Display names do not identify modules. The same identity must be used by every future native picker/composer and data consumer; no surface-specific registration, login or fetcher is needed. Removing or disabling a plugin removes its active modules, while display selection/order remain saved for re-enable/reinstall. Plugin execution/trust and module sampling/display checkboxes are independent. Native settings use the same right-side status pill as built-ins: missing readings wait for data; explicit `notConfigured` means not set up; `unauthorized` marks declared credentials as rejected; errors mean a failed read. Healthy readings use the status dot without a duplicate connected pill. These are mutually exclusive states, not author-supplied badge text.
 
 ## Capability and custom labels
 
-Each module optionally declares `capabilities` as a duplicate-free array of `api`, `apiKey`, `oauth`, `web`, `cli`. These describe supported source/connection methods, not the source of a particular reading. They grant no permissions and do not install or enable any connection adapter. `api` describes calling an API; `apiKey` describes key authentication. The host renders them in a stable order, combines multiple sources with `/`, and omits redundant `API` when `API key` is present. OpenAI's host adapter derives `web`, deduplicated against author declarations. Existing host translations apply, including “API 金鑰”. `Local`, `Desktop app`, `Manual`, `Manual login`, service categories and plan names are not fixed capability choices.
+Each module optionally declares `capabilities` as a duplicate-free array of `api`, `apiKey`, `oauth`, `web`, `cli`. These describe supported source/connection methods, not the source of a particular reading. They grant no permissions and do not install or enable any connection adapter. `api` describes calling an API; `apiKey` describes key authentication. The host renders them in a stable order, combines multiple sources with `/`, and omits redundant `API` when `API key` is present. Existing host translations apply, including “API 金鑰”. `Local`, `Desktop app`, `Manual`, `Manual login`, service categories and plan names are not fixed capability choices.
 
 `tags` is an optional array of at most two author-written labels. Each accepts a plain string or the existing localized-string map, with at most 16 Unicode code points per localized value. Examples such as a team plan, relay service or a vendor-specific product name are entirely author text; the host does not maintain a list of selectable custom labels. The host localizes them with the normal plugin fallback and renders text in the existing badge style, after common sources. Custom text never selects a source, enables sampling, grants access or changes account status. Authors must not use these labels to imitate host account statuses or built-in source labels. There is no separate long-form “special capability description” underneath quota settings.
 
@@ -31,7 +31,7 @@ The host owns the `Auto` badge: it appears only while that selected module belon
 
 ## Custom UI in each module's settings accordion
 
-A module can set `settingsView` to the ID of one of the same plugin's declared views whose `surfaces` includes `settings`. This uses the existing trusted renderer UI and lifecycle, not a new renderer or backend. Modules without a custom view retain the host's account controls.
+A module can set `settingsView` to the ID of one of the same plugin's declared views whose `surfaces` includes `settings`. This uses the existing trusted renderer UI and lifecycle, not a new renderer or backend. Modules with credential declarations and no custom view receive the shared native credential form. A custom view receives no automatically appended account controls.
 
 ```json
 {
@@ -60,7 +60,7 @@ export function activate(ctx) {
 }
 ```
 
-Authors own this area's DOM, layout, controls, explanatory content and handlers. The host keeps the outer module identity, selection, capability/status labels, ordering and account controls. Prefer existing native settings classes when appropriate. Use the existing `ctx.host.call('settings.get')` and revisioned `settings.update` for ordinary declared preferences; this is the same per-plugin store as the native plugin-management form. Multiple modules share that schema/store, so choose distinct declared fields where needed. A custom editor must report save failures and respect revision conflicts. Do not put secrets into ordinary preferences; host connection commands still never expose raw authorization to renderer code.
+Authors own this area's DOM, layout, controls, explanatory content and handlers. The host keeps the outer module identity, selection, capability/status labels, ordering and lifecycle. Prefer existing native settings classes when appropriate. Use the existing `ctx.host.call('settings.get')` and revisioned `settings.update` for ordinary declared preferences; this is the same per-plugin store as the native plugin-management form. Multiple modules share that schema/store, so choose distinct declared fields where needed. A custom editor must report save failures and respect revision conflicts. Do not put secrets into ordinary preferences; saved credential values are available only through the backend credential API.
 
 The view first mounts when its module is expanded in the visible quota settings section. Native row rebuilds, filtering, scrolling and collapse/reopen retain its controls and drafts. Collapsed, filtered, hidden-window or closed-settings mounts receive `visible: false` and stop requesting visible backend demand; authors must stop their own visibility-bound work. Reopening reuses the mount. Disable, uninstall, removed module/view and executable revision changes use the existing plugin cleanup and unsaved-work/recovery flow. A failed view remains contained by the existing UI host and does not replace the surrounding native module controls.
 
@@ -73,11 +73,15 @@ exports.activate = async ({ host }) => ({
     if (moduleId === 'local') return {status: 'ok', windows: [
       {kind: 'daily', usedPercent: 20, remainingPercent: 80}
     ]};
-    const connection = await host.call('webSession.status', {key: moduleId});
-    if (connection.state === 'notConnected') return {status: 'notConfigured', windows: []};
-    const response = await host.call('webSession.request', {key: moduleId});
-    // Parse response.body into quota windows before returning ok. This skeleton
-    // has no parser yet; never infer prepaid balance from spending.
+    const saved = await host.call('credentials.status', {moduleId});
+    if (!saved.configured) return {status: 'notConfigured', windows: []};
+    const {sessionBearer, organization} = await host.call('credentials.read', {moduleId});
+    const response = await host.call('network.request', {
+      moduleId, requestId: 'quota', url: 'https://example.com/quota',
+      headers: {Authorization: `Bearer ${sessionBearer}`, 'X-Organization': organization}
+    });
+    // Parse response.body (text) before returning quota windows. Presence alone
+    // is not server validation; never infer prepaid balance from spending.
     const status = response.status === 200 ? 'unavailable'
       : [401, 403].includes(response.status) ? 'unauthorized'
       : response.status === 429 ? 'rateLimited' : 'error';
@@ -108,17 +112,52 @@ For percent mode, `limit` must be a finite, positive, real allowance and `remain
 
 Sampling reuses `LimitsRuntime`: fixed/adaptive scheduling, bounded concurrency, finite deadlines, last-good/attempt retention, retry cooldowns and latest-wins cancellation. Only enabled selected modules with native visibility demand sample. The initial main Limits owner releases demand while Settings overlays it, while collapsed into Floating Bubble, or while the native window/document is hidden. Settings retains captured readings without quota polling; reopening visible main Limits resumes sampling. Local token usage does not request a refresh. Multiple native owners share the registry/runtime; the initial owner is the main Limits view. The last owner leaving stops scheduling and fences late data; a later reveal starts a fresh sample. Backend calls retain the existing manager's finite deadline and process lifetime rules.
 
-## Host-managed accounts
+## Manual credential contract
 
-The module ID is also its connection ID within the plugin namespace. Backend-only operations are `webSession.connect/status/request/disconnect`, each with `{key: moduleId}`. The module must declare a supported `connection`. Renderer host calls cannot invoke these operations; native settings provide separate account commands returning only connection state. Raw bearer tokens, scope headers and cookies are never returned by the host account API.
+`limits[].credentials` declares `{fields: [...]}` with 1–16 unique fields. Each field has `id` (`[a-z][a-zA-Z0-9-]{0,39}`), a localized `label`, optional `required` boolean (default false), and `control: 'input' | 'textarea'` (default input). Single-line native controls mask typed text; textarea supports cookies or other long content. All declared values are private credentials, including organization IDs. General select/preferences use the existing ordinary settings schema and API.
 
-OpenAI connection requires explicit host consent, opens an ephemeral isolated login window and captures authorization only after a successful exact GET to `https://api.openai.com/v1/dashboard/billing/credit_grants`, including its organization header. Requests use the injected desktop provider transport, honoring the current App/env/system proxy route, and that fixed URL with GET, cookies omitted, redirects refused, a 15-second timeout and a 256 KiB response cap. The ephemeral login session also applies and awaits the current App proxy and socket cleanup before opening the page; a failed setup aborts login without a direct-route fallback. Login times out after three minutes; closing it cancels. The host destroys the window and clears its ephemeral storage after completion/cancellation. Captured JWT expiry is a reconnect hint, not token verification: known-expired authorization is not sent. Opaque tokens have unknown expiry; HTTP 401/403 reports reconnect required through status. Native settings offer Connect, Connection status and Disconnect; successful login automatically refreshes connection status independently of quota sampling.
+All calls derive the plugin ID from the host context; callers supply only their declared `moduleId`. The same module namespace serves every surface and all three UI choices:
 
-Records live under `userData/plugin-credentials`, keyed by plugin and connection identity, outside code, `plugin-data` and ordinary settings. Credentials are stored as ordinary private JSON, not encrypted. Reads and atomic writes reuse the same private-file helpers as the built-in Limits CredentialStore: regular files without symlink following, owner-only file permissions on POSIX, and private creation of the namespace directory. No keyring or Electron safeStorage API is required. This is the only supported storage format; there is no older-format reader, migration or optional encryption mode. Existing built-in `credentials.json` is separate and unchanged.
+- `credentials.status({moduleId})` returns `{revision, configured, fields, declaration}`. `fields` maps each declared field ID to a presence boolean; `declaration` contains public field metadata. `configured` means at least one value exists and all required fields are present, **not** that a service has accepted them.
+- `credentials.update({moduleId, expectedRevision, patch})` validates and atomically saves submitted strings, returning status only. Omitted fields retain their saved values. Explicit empty required values fail; explicit empty optional values remove that field. Required fields must be complete after the update. Each string is bounded to 16,384 characters and each record to 64 KiB. No silent trimming, parsing or guessed authentication mode occurs.
+- `credentials.clear({moduleId, expectedRevision})` removes that module's values and returns status. An empty revision record remains to reject stale editors; it contains no credentials. Update and clear require the exact current revision. `credentials-conflict` is never silently retried.
+- `credentials.read({moduleId})` returns a map of saved declared values **to the Node backend only**. Renderer host calls are explicitly denied. The host's settings, catalog and stats projections contain no saved credential values. Trusted backend code can deliberately relay data, so this is an API discipline, not a secret sandbox.
 
-Disable/restart/update cancels login and outstanding host requests but retains private connection records. Cancelling a reconnect preserves a confirmed authorization rejection until replacement authorization is successfully saved. Disconnect removes only that connection and invalidates its module's captured quota, including while sampling is paused; sibling modules retain their readings. Uninstall removes all of that plugin's credentials even with keepData; other plugins remain untouched. The installed plugin card's **Remove saved plugin connections** also works for disabled, invalid or missing-code records without executing author code. Deleting saved connections is separate from deleting plugin data/placements; the existing uninstall choices still own those operations.
+Without `settingsView`, the host mounts the native form through the existing UI lifecycle. With `settingsView`, authors choose their entire layout and may mount the same form wherever it belongs:
 
-Real provider login and Windows/Linux native acceptance remain required before release. Synthetic account capture and private-file tests are not real-account acceptance.
+```js
+export function activate(ctx) {
+  return {
+    async mount(container, context) {
+      const help = document.createElement('p');
+      help.textContent = 'Paste the credentials required by this service.';
+      container.append(help);
+      const editor = await ctx.native.credentials.mount(container, {moduleId: context.moduleId});
+      return {
+        update: value => editor.update(value),
+        hasUnsavedChanges: () => editor.hasUnsavedChanges(),
+        dispose() { editor.dispose(); help.remove(); }
+      };
+    }
+  };
+}
+```
+
+The helper returns `update(context)`, `hasUnsavedChanges()` and `dispose()`. Forward these through the author view's lifecycle. It loads presence only, distinguishes untouched inputs from explicit edits, clears input only after successful save, retains drafts on failure, and preserves its base revision while dirty. After a conflict, **Reload saved status** explicitly adopts the current revision while retaining input; the user can then decide to save again. Custom DOM may call the same status/update/clear API directly; authors own validation buttons, explanatory content and service validity feedback. Do not reinsert saved secrets into renderer controls. No fixed Connect/Status/Disconnect UI is appended.
+
+### Backend network requests
+
+`network.request({moduleId, requestId, url, method?, headers?, body?, timeoutMs?})` is backend-only and uses the host's injected provider transport, preserving App → environment → system proxy policy. The author owns the URL, credentials, headers and response parser. HTTP(S) URLs without embedded user/password are accepted; `Host` is rejected, cookies from browser storage are omitted, redirects fail, and cache is disabled. Supported methods are GET/HEAD/POST/PUT/PATCH/DELETE; body is optional text up to 256 KiB, headers up to 32 KiB. GET/HEAD cannot have a body. `timeoutMs` defaults to 15 seconds and must be 1–30,000. Response is `{status, headers, body}` with text body capped at 1 MiB. Non-2xx status is returned for author interpretation; transport failures use sanitized error codes. For Chromium, the existing cross-origin Referer limitation still applies.
+
+`requestId` is a module-local concurrent request key (1–64 ASCII letters/digits/hyphens). Duplicate active IDs fail. `network.cancel({moduleId, requestId})` aborts only that module's matching request. Backend stop, disable, update, restart and uninstall cancel owned in-flight host requests; quota demand cancellation aborts requests for the sampled module; credential update/clear cancels the affected module. These APIs are convenience/lifecycle contracts for trusted Node plugins, not network permissions or a sandbox. They never perform browser login or capture authorization.
+
+### Storage and cleanup
+
+Host-owned records live in `userData/plugin-credentials/`, separated by exact plugin ID and a module-ID hash. They use the existing private-file/atomic JSON helpers: POSIX `0600` files and private directories, Windows userData permissions. Files are **not encrypted** and remain accessible to same-user code. They never enter ordinary plugin data/settings, code directories, built-in `credentials.json`, Hub wire or sync. No safeStorage, keyring, optional encryption or legacy-record reader is involved.
+
+Disable/update cancels requests and retains saved credentials. Credential update/clear invalidates only the corresponding module's captured quota, including paused retained readings; siblings retain theirs. Uninstall removes all of the plugin's credential records even with keepData. The installed plugin card's **Clear saved plugin credentials** also handles disabled, invalid and missing-code records without executing author code. Other plugins and built-in credentials are untouched.
+
+This unpublished experimental API intentionally replaces `connection: 'openai'` and `webSession.*` without aliases or migration. Plugins using that old contract, including OpenAI 0.2.0, must be updated before use. Existing old records on disk are not read, converted or proactively cleaned. Real service credentials and Windows/Linux native acceptance remain unverified; synthetic tests do not establish provider login validity.
 
 ## Native surface rollout
 

@@ -8,7 +8,7 @@ Choose a guide for your next step:
 - [Data queries, live updates and plugin settings](author-data-settings.md)
 - [Resource fields, measurement coverage and limitations](author-data-resources.md)
 - [UI surfaces and composition](author-ui-options.md)
-- [Native quota modules and host connections](author-limits.md)
+- [Native quota modules and manual credentials](author-limits.md)
 - [Publishing and README template](publishing.md)
 - [Author self-check](validation.md#author-self-check)
 
@@ -133,7 +133,7 @@ Business queries use `{resource, period, filter?, sort?, page?}`. Resources incl
 
 Subscriptions deliver `{type:'snapshot', value, sequence}` then coalesced invalidations with `refetch` and `reset`. Source/privacy changes require discarding the old traversal. Ordinary updates preserve admitted immutable cursors until expiration or eviction. Use the returned cursor with the same query; restart on `snapshotExpired`/`invalidCursor`. Query work and retained memory remain bounded to protect the App's data service; these bounds do not restrict a plugin's own Node work. Large sessions use yielding indexed pagination.
 
-`manifest.settings` declares the [versioned field schema](author-data-settings.md#plugin-settings) and host form. `settings.get` returns values, schema and revision; `settings.update` submits `{schemaVersion, expectedRevision, patch}` and reports conflicts/field errors. The native form works while code is disabled. A custom `settings` view executes trusted UI and requires enablement. This plain JSON preference store is not a secret vault. Use the separate [host-managed quota connections](author-limits.md#host-managed-accounts) for supported login adapters; they store credentials in separate private JSON files, never in plugin settings. These files are not encrypted.
+`manifest.settings` declares the [versioned field schema](author-data-settings.md#plugin-settings) and host form. `settings.get` returns values, schema and revision; `settings.update` submits `{schemaVersion, expectedRevision, patch}` and reports conflicts/field errors. The native form works while code is disabled. A custom `settings` view executes trusted UI and requires enablement. This plain JSON preference store is not a secret vault. Use the separate [manual credential API](author-limits.md#manual-credential-contract); it stores credentials in separate private JSON files, never in plugin settings. These files are not encrypted.
 
 ## Installation and recovery
 
