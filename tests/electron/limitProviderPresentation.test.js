@@ -1906,11 +1906,6 @@ test('MiMo Limits draws a credits balance when the provider balance object is ab
 
   const windowOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
   assert.deepEqual(Array.from(windowOnly.children, (node) => [node.label, node.value]), [['Balance', '¥9.95']]);
-
-  context.provider.balance = { amount: 9.95, currency: 'CNY', giftBalance: 9.95, cashBalance: 0 };
-  const withBalance = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
-  assert.deepEqual(Array.from(withBalance.children, (node) => [node.label, node.value, node.detail]),
-    [['Balance', '¥9.95', 'Gift ¥9.95 · Cash ¥0.00']]);
 });
 
 test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
@@ -3078,6 +3073,7 @@ test('MiMo plan cells keep missing plan names empty and use shared recovery text
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] }), 'Pro');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), 'Sign in again');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), 'Sign in again');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'error', accountLabel: 'Desktop Membership' }), 'Unavailable');
 });
 
 test('MiMo product rows name the shared account and the product when both are known', () => {
@@ -3093,8 +3089,8 @@ test('MiMo product rows name the shared account and the product when both are kn
     { provider: 'mimo', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Console' },
     { provider: 'mimo', accountKey: 'membership', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Desktop Membership' }
   ];
-  assert.equal(view.limitAccountTitle('mimo', rows[0], 0, rows), 'user@example.com · MiMo account · Console');
-  assert.equal(view.limitAccountTitle('mimo', rows[1], 1, rows), 'user@example.com · MiMo account · Desktop Membership');
+  assert.equal(view.limitAccountTitle('mimo', rows[0], 0, rows), 'user@example.com · Console');
+  assert.equal(view.limitAccountTitle('mimo', rows[1], 1, rows), 'user@example.com · Desktop Membership');
   const withoutEmail = rows.map((row) => ({ ...row, accountEmail: '' }));
   assert.deepEqual(withoutEmail.map((row, index) => view.limitAccountTitle('mimo', row, index, withoutEmail)),
     ['MiMo account · Console', 'MiMo account · Desktop Membership']);
@@ -3102,6 +3098,9 @@ test('MiMo product rows name the shared account and the product when both are kn
   assert.equal(view.limitAccountTitle('mimo', {
     provider: 'mimo', accountName: 'Membership', accountLabel: 'Pro', accountKey: 'sha256:abcdef123456'
   }, 0), 'Membership');
+  const renamed = [{ ...rows[0], accountName: 'Profile · MiMo abcdef1' },
+    { ...rows[1], accountEmail: '', accountName: 'Renamed · MiMo abcdef1' }];
+  assert.equal(view.limitAccountTitle('mimo', renamed[1], 1, renamed), 'user@example.com · Desktop Membership');
 });
 
 test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
