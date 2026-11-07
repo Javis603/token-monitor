@@ -402,6 +402,35 @@ test('Notion rolling and monthly allowances render in both display modes and hid
   assert.equal(JSON.stringify(provider), before);
 });
 
+test('Qoder personal and team credits render as independent, hideable windows', () => {
+  const now = Date.now();
+  const provider = normalizeLimitProvider({
+    provider: 'qoder', status: 'ok', source: 'web',
+    windows: [
+      { kind: 'billing', label: 'Credits', used: 25, limit: 100, usedPercent: 25, remaining: 75,
+        resetsAt: new Date(now + 6 * 60 * 60 * 1000).toISOString() },
+      { kind: 'billing', label: 'Team credits', used: 10, limit: 50, usedPercent: 20, remaining: 40,
+        resetsAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString() }
+    ]
+  });
+  const view = dockView();
+  const card = view.renderProviderWindows(provider, '#2ADB5C');
+  assert.equal(card.children.length, 2);
+  assert.deepEqual(
+    card.children.map((row) => row.children[0].children[0].textContent),
+    ['Credits', 'Team credits']
+  );
+  assert.match(card.text, /75% left/);
+  assert.match(card.text, /80% left/);
+  const items = view.limitProviderUsageItems([provider]);
+  assert.equal(items.length, 2);
+  for (const item of items) {
+    const hidden = dockView({ limitProviderHiddenItems: { qoder: [item.id] } });
+    assert.equal(hidden.renderProviderWindows(provider, '#2ADB5C').children.length, 1);
+    assert.deepEqual(hidden.limitProviderUsageItems([provider]), items);
+  }
+});
+
 test('Manus daily refresh credits and credits balance render in both display modes and hide independently', () => {
   const nextRefreshTime = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
   const { windows } = parseManusCredits({ ...manusCreditsFixture, nextRefreshTime });
