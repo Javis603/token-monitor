@@ -1915,6 +1915,24 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     }
   );
 
+  // Prime's sessionDir may be cwd or the whole home. Its normal root sessions
+  // are direct JSONL files; RLM transcripts are artifacts/<parent>/sub-*/*.jsonl.
+  // Bound live traversal to that layout, while full Tokscale scans remain
+  // recursive. Explicit extra scan roots keep the custom-root policy below.
+  if (candidates['prime-agent']) {
+    const roots = clientSourceRoots('prime-agent', options)['prime-agent'];
+    const isTranscript = (name) => name.endsWith('.jsonl') && name !== 'rlm-subagents.jsonl';
+    bound('prime-agent', roots.filter(({ id }) => id === 'prime-agent-sessions').map(({ dir }) => dir),
+      directChildOnly(isTranscript));
+    bound('prime-agent', roots.filter(({ id }) => id === 'prime-agent-artifacts').map(({ dir }) => dir), (parts) => {
+      if (pruneDependencyTrees(parts)) return true;
+      if (parts.length === 1) return false;
+      if (!parts[1].startsWith('sub-')) return true;
+      if (parts.length === 2) return false;
+      return parts.length !== 3 || !isTranscript(parts[2]);
+    });
+  }
+
   // Command Code recursively stores session transcripts below projects/, but
   // checkpoint streams use the same JSONL suffix and are explicitly skipped by
   // Tokscale. Keep directories for traversal and ordinary JSONL files (including

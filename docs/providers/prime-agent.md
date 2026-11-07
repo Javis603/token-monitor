@@ -22,13 +22,22 @@ selects the collector working directory, and `~` or `~/` expands to the effectiv
 Tokscale home. Artifacts are siblings of an overridden session directory, except
 for the empty setting where they are children of the working directory.
 
-Source checks and transcript watches use these resolved roots. Settings changes
+Source checks use these resolved roots. Live watches retain only direct session
+JSONL files and `session-artifacts/*/sub-*/*.jsonl`, excluding
+`rlm-subagents.jsonl` and dependency/VCS trees. This bounds traversal when a
+session override selects the home or working directory. Root creation/removal
+and new RLM child directories remain observable; overlapping client sources keep
+the union of their watch policies. Full Tokscale scans still recurse through
+all resolved roots, so nonstandard nested transcripts can be counted on a full
+scan without becoming live watch targets. Explicit extra scan paths retain the
+shared custom-root watch policy. Settings changes
 are picked up when source roots are next resolved; there is no dedicated settings
 file watch. WSL discovery uses the default Linux home roots, as `--home` scans
 ignore host environment and project settings.
 
 ## Verification
 
-Run `node --test tests/shared/primeAgentJcode.test.js tests/docs/providerGuidance.test.js`
+Run `node --test tests/shared/primeAgentJcode.test.js tests/shared/primeAgentWatch.test.js tests/docs/providerGuidance.test.js`
 and `node scripts/verify-vendored-tokscale.js` against the manifest-pinned binary.
-Native WSL discovery and live filesystem-event acceptance remain manual checks.
+The watch tests exercise native and polling traversal, root transcript updates,
+and new RLM child discovery. Native WSL discovery remains a manual check.
