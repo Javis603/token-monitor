@@ -99,9 +99,19 @@
       ? { ...model.trendBounds(entry.window, now, payload.provider), guideEntry: entry }
       : model.combinedTrendBounds(series, now, payload.provider, { rangeMode: trendRangeMode, primaryEntry: entry });
     const seriesWithPoints = series.map((item, idx) => {
-      const sourcePoints = (trendRangeMode === 'recent' || trendScaleMode === 'unified') && item.recentPoints
+      const sourcePoints = (trendRangeMode === 'recent' || trendScaleMode === 'unified') && item.recentPoints?.length
         ? item.recentPoints : item.points;
-      const shown = sourcePoints.filter(p => p.at >= start && p.at <= end);
+      let shown = sourcePoints.filter(p => p.at >= start && p.at <= end);
+      if (!shown.length) {
+        const reading = model.historyReadings(item.window).primary;
+        if (reading?.unit === 'pp') {
+          // A lane with no observation in this range (an unused model, or a
+          // history that starts after the cycle began) still has a current
+          // level. Hold that level across the cycle instead of omitting the
+          // series entirely.
+          shown = [{ at: start, value: reading.value }, { at: end, value: reading.value }];
+        }
+      }
       return { item, shown, color: seriesColor(idx, series.length) };
     });
     const anyShown = seriesWithPoints.some(s => s.shown.length > 0);
@@ -187,7 +197,14 @@
     $('guide-caption').textContent = t('guide');
     plot.append(paintSvg(svgNode('line', { x1: left, x2: right, y1: Y(100), y2: Y(0), class: 'quota-history-guide', 'aria-hidden': 'true' }), { stroke: 'var(--accent)' }));
     const shownRows = rows.map(row => {
-      const points = (row.item.points || []).filter(point => point.at >= row.bounds.start && point.at <= row.bounds.end);
+      let points = (row.item.points || []).filter(point => point.at >= row.bounds.start && point.at <= row.bounds.end);
+      if (!points.length) {
+        const reading = model.historyReadings(row.item.window).primary;
+        if (reading?.unit === 'pp') points = [
+          { at: row.bounds.start, value: reading.value },
+          { at: row.bounds.end, value: reading.value }
+        ];
+      }
       return { ...row, points };
     });
     $('empty').hidden = shownRows.some(row => row.points.length > 0);
