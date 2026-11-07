@@ -190,6 +190,7 @@ function normalizeLimitWindow(input) {
     ...(limitId ? { limitId } : {}),
     ...(boundaryKind ? { boundaryKind } : {}),
     ...(input.additional === true ? { additional: true } : {}),
+    ...(input.placeholder === true ? { placeholder: true } : {}),
     label: normalizeWindowLabel(input.label || input.displayLabel || input.title),
     used,
     limit,

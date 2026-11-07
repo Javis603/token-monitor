@@ -4,9 +4,10 @@
 <title>Token Monitor — Quota history</title><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="history.css"></head>
 <body class="quota-history-body"><main class="shell" id="history" aria-label="Quota history">
 <div id="history-content" class="quota-history-content"><header><h1 id="provider"></h1><div id="account" class="quota-history-account"></div></header>
-<div id="windows" class="quota-history-windows" role="group" aria-label="Quota windows"></div><div id="quota" class="quota-history-quota"></div><div id="balance" class="quota-history-balance" hidden></div>
-<div class="quota-history-heading"><h2 id="trend-heading"></h2><span id="updated"></span></div>
+<div id="windows" class="quota-history-windows" role="group" aria-label="Quota windows"></div><div id="meters" class="quota-history-meters"></div><div id="quota" class="quota-history-quota"></div><div id="balance" class="quota-history-balance" hidden></div>
+<div class="quota-history-heading"><h2 id="trend-heading"></h2><div class="quota-history-view"><button type="button" id="trend-view-btn" class="quota-history-range-btn" aria-haspopup="menu" aria-expanded="false"></button><div id="trend-view-menu" class="quota-history-view-menu" role="menu" hidden><button type="button" role="menuitemradio" data-trend-view="unifiedCycle"></button><button type="button" role="menuitemradio" data-trend-view="unifiedRecent"></button><button type="button" role="menuitemradio" data-trend-view="normalized"></button></div></div></div>
 <svg id="trend" class="quota-history-trend" role="img" aria-describedby="guide-caption"></svg><div id="guide-caption" class="quota-history-description" hidden></div><div id="empty" class="quota-history-empty" hidden></div>
+<div id="legend" class="quota-history-legend" role="group"></div><div id="updated" class="quota-history-updated"></div>
 <section class="quota-history-distribution">
 <div class="quota-history-heading"><h2 id="distribution-heading"></h2><span id="range"></span></div>
 <div class="quota-history-bars-wrap"><div id="bars" class="quota-history-bars"></div></div>
@@ -14,4 +15,4 @@
 <div id="reading" class="quota-history-reading" role="status" aria-describedby="notice"></div>
 </section>
 <footer><div id="error" role="status" hidden></div><div id="reset" class="quota-history-reset"></div><div id="unallocated"></div><div id="notice" class="quota-history-description"></div></footer></div>
-</main><script src="../i18n.js"></script><script src="../../../shared/vendorPresentation.js"></script><script src="../themePresets.js"></script><script src="../../../shared/limits/windowLabels.js"></script><script src="../glassRendering.js"></script><script src="../../../shared/compactTokens.js"></script><script src="../../../shared/limits/balanceDisplay.js"></script><script src="../../motionPreference.js"></script><script src="../cardLayout.js"></script><script src="../cardMotion.js"></script><script src="historyModel.js"></script><script src="history.js"></script></body></html>
+</main><script src="../i18n.js"></script><script src="../../../shared/vendorPresentation.js"></script><script src="../themePresets.js"></script><script src="../../../shared/limits/windowLabels.js"></script><script src="../glassRendering.js"></script><script src="../../../shared/compactTokens.js"></script><script src="../../../shared/limits/balanceDisplay.js"></script><script src="../../motionPreference.js"></script><script src="../cardLayout.js"></script><script src="../cardMotion.js"></script><script src="historyModel.js"></script><script src="svgPaint.js"></script><script src="history.js"></script></body></html>

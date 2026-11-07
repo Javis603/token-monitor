@@ -82,17 +82,24 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
     onChange();
   }
   async function query(scope, provider, range = { grain: 'day', day: dayKey(now()) }) {
-    const windows = (provider.windows || []).filter(historyWindow).map(window => {
+    const windows = (provider.windows || []).map(window => {
       const reading = historyWindow(window);
+      // A percentage lane can be present without a numeric reading (for example
+      // an Antigravity 5-hour lane suspended by its exhausted weekly cap). Keep
+      // a placeholder stream so its card and button do not vanish; no point is
+      // invented, so the chart stays empty until a real reading arrives. Other
+      // unitless lanes keep their previous behaviour rather than claiming 0.
+      if (!reading && window.placeholder !== true) return null;
+      const identity = reading || { unit: 'pp', balance: false };
       const key = ['credits', 'spend'].includes(window.metric)
         ? JSON.stringify([limitWindowKey(window), window.currency || 'credits']) : limitWindowKey(window);
-      return { id: windowId(scope, provider, window, reading), key, window, provider: provider.provider,
-        unit: reading.unit, balance: reading.balance };
-    });
+      return { id: windowId(scope, provider, window, identity), key, window, provider: provider.provider,
+        unit: identity.unit, balance: identity.balance, ...(!reading ? { placeholder: true } : {}) };
+    }).filter(Boolean);
     try { return await rpc('query', [windows, range, now()]); }
     catch (error) {
       onError(error);
-      return { persistent: false, range, windows: windows.map(({ key, window, unit, balance }) => ({ key, window, unit, balance, points: [] })) };
+      return { persistent: false, range, windows: windows.map(({ key, window, unit, balance, placeholder }) => ({ key, window, unit, balance, ...(placeholder ? { placeholder } : {}), points: [] })) };
     }
   }
   async function flush() { if (worker && !closed) await rpc('flush', []); }

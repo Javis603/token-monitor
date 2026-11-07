@@ -59,7 +59,8 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
         resetsAt: window.resetTime || null,
         resetDescription: window.resetDescription || '',
         windowMinutes: window.kind === 'session' ? 300 : window.kind === 'weekly' ? 10_080 : null,
-        showMeter: window.showMeter !== false
+        showMeter: window.showMeter !== false,
+        placeholder: typeof window.remainingFraction !== 'number'
       }))
     : (snapshot?.pools || []).map((pool) => ({
         kind: 'weekly',
@@ -69,7 +70,8 @@ function mapAntigravitySnapshot(snapshot, { nowMs, source = 'rpc', account = nul
           : null,
         resetsAt: pool.resetTime || null,
         windowMinutes: null,
-        showMeter: Number.isFinite(pool.remainingFraction)
+        showMeter: Number.isFinite(pool.remainingFraction),
+        placeholder: !Number.isFinite(pool.remainingFraction)
       }));
   return normalizeLimitProvider({
     provider: 'antigravity',

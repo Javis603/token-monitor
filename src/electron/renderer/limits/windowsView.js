@@ -151,6 +151,11 @@
     return '';
   }
 
+  function antigravityDisplayWindow(window) {
+    if (!window || window.metric) return window;
+    if (Number.isFinite(window.remainingPercent) || Number.isFinite(window.usedPercent)) return window;
+    return { ...window, usedPercent: 100, remainingPercent: 0, showMeter: true, placeholder: true };
+  }
   function antigravityQuotaGroups(provider) {
     const entries = (provider?.windows || [])
       .filter((window) => window.kind === 'session' || window.kind === 'weekly')
@@ -1021,8 +1026,9 @@
           groupWindows.className = 'limit-window-group-items';
           for (const entry of group.windows) {
             const opacity = entry.window.kind === 'session' ? 0.95 : 0.78;
+            const displayWindow = { ...antigravityDisplayWindow(entry.window), label: entry.windowLabel };
             groupWindows.append(tagUsageItem(
-              limitWindowNode(entry.windowLabel, { ...entry.window, label: entry.windowLabel }, color, opacity),
+              limitWindowNode(entry.windowLabel, displayWindow, color, opacity),
               usageItems.limitUsageItemId(entry.window),
               `${group.label} · ${entry.windowLabel}`
             ));
@@ -1036,7 +1042,8 @@
           ? weeklyWindows.filter(presentationApi.antigravityQuotaWindowVisible)
           : [null];
         for (const quotaWindow of visibleWindows) {
-          const node = limitWindowNode(providerWindowLabel(provider, quotaWindow, 'Weekly'), quotaWindow, color, 0.78);
+          const displayWindow = antigravityDisplayWindow(quotaWindow);
+          const node = limitWindowNode(providerWindowLabel(provider, displayWindow, 'Weekly'), displayWindow, color, 0.78);
           node.classList.add('limit-window-wide');
           windows.append(node);
         }

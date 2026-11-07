@@ -59,6 +59,66 @@
     return { start: now - 14 * 86400_000, end: now, cycle: false };
   }
 
+  // Compares the current remaining quota with the even-use guide. Returns the
+  // signed gap in percentage points: positive means quota remains ahead of the
+  // guide (slower consumption), negative means it is behind (faster). This is
+  // the same direction as the charted remaining curve, so a line above the guide
+  // can never disagree with the card's pace sign. Returns null outside the
+  // advertised cycle or when the window has no percentage reading.
+  function windowPace(window, now = Date.now(), provider = '') {
+    const bounds = trendBounds(window, now, provider);
+    if (!bounds.cycle || bounds.end <= bounds.start) return null;
+    if (now < bounds.start || now > bounds.end) return null;
+    const reading = historyReadings(window).primary;
+    if (!reading || reading.unit !== 'pp') return null;
+    const elapsed = Math.max(0, Math.min(bounds.end - bounds.start, now - bounds.start));
+    const expectedUsed = (elapsed / (bounds.end - bounds.start)) * 100;
+    const actualUsed = reading.value;
+    const expectedRemaining = 100 - expectedUsed;
+    const actualRemaining = 100 - actualUsed;
+    return {
+      expectedUsed,
+      actualUsed,
+      expectedRemaining,
+      actualRemaining,
+      delta: Math.round(actualRemaining - expectedRemaining)
+    };
+  }
+
+  // Chooses the shared time bounds when overlaying multiple percentage windows on
+  // one trend plot (e.g. 5-hour session + 7-day weekly). When `rangeMode === 'recent'`
+  // or no window has a known cycle, returns the recent range (auto-fitted if all
+  // observations are much newer than 14 days so newly collected streams are not
+  // squashed into a 1px dot at the right edge).
+  function combinedTrendBounds(entries, now = Date.now(), provider = '', { rangeMode = 'cycle', primaryEntry = null } = {}) {
+    const list = Array.isArray(entries) && entries.length ? entries : (primaryEntry ? [primaryEntry] : []);
+    if (rangeMode !== 'recent') {
+      const cycleEntries = list
+        .map(entry => ({ entry, bounds: trendBounds(entry.window, now, provider) }))
+        .filter(item => item.bounds.cycle && item.bounds.end >= now);
+      if (cycleEntries.length > 0) {
+        // Prefer the longest cycle among percentage windows (e.g. 7-day weekly over
+        // 5-hour session) so short rolling sessions appear inside the full weekly cycle
+        // just like Magpie's combined trend view.
+        cycleEntries.sort((a, b) => (b.bounds.end - b.bounds.start) - (a.bounds.end - a.bounds.start));
+        return { ...cycleEntries[0].bounds, guideEntry: cycleEntries[0].entry };
+      }
+    }
+    const defaultStart = now - 14 * 86400_000;
+    const allPoints = list.flatMap(entry => entry.recentPoints || entry.points || [])
+      .filter(p => p.at >= defaultStart && p.at <= now);
+    if (allPoints.length > 0) {
+      const earliest = Math.min(...allPoints.map(p => p.at));
+      const span = Math.max(now - earliest, 6 * 3600_000);
+      if (span < 3 * 86400_000) {
+        const dayStart = new Date(earliest);
+        dayStart.setHours(0, 0, 0, 0);
+        return { start: Math.max(defaultStart, Math.min(dayStart.getTime(), now - 6 * 3600_000)), end: now, cycle: false, guideEntry: null };
+      }
+    }
+    return { start: defaultStart, end: now, cycle: false, guideEntry: null };
+  }
+
   function distribution(points, { grain = 'day', day = null, now = Date.now(), days = 14 } = {}) {
     const start = new Date(now);
     if (grain === 'hour' && day) {
@@ -181,5 +241,5 @@
     return points;
   }
 
-  return { sameCycle, historyReadings, dayKey, trendBounds, bucketKey, hourStart, observationPoints, distribution, segments };
+  return { sameCycle, historyReadings, dayKey, trendBounds, combinedTrendBounds, windowPace, bucketKey, hourStart, observationPoints, distribution, segments };
 });
