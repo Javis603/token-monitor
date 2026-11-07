@@ -134,7 +134,7 @@
     return Object.fromEntries(aliases);
   }
 
-  function createModelAliasResolver(value, modelIds = [], grouping = 'duplicates') {
+  function createModelAliasResolver(value, modelIds = [], grouping = 'duplicates', inherited = new Map()) {
     const explicit = new Map(
       Object.entries(normalizeModelAliases(value))
         .map(([alias, canonical]) => [matchKey(alias), canonical])
@@ -148,9 +148,8 @@
       if (typeof model !== 'string') return model;
       const direct = explicit.get(matchKey(model));
       if (direct !== undefined) return direct;
-      const inferred = automatic.get(matchKey(model));
-      if (inferred === undefined) return model;
-      return explicit.get(matchKey(inferred)) ?? inferred;
+      const inferred = automatic.get(matchKey(model)) ?? model;
+      return explicit.get(matchKey(inferred)) ?? inherited.get(matchKey(inferred)) ?? inferred;
     };
   }
 

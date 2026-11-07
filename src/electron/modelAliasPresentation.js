@@ -345,7 +345,6 @@ function projectHistory(history, resolve, semantics) {
 function aliasPlan(modelIds, aliases, grouping) {
   const explicit = normalizeModelAliases(aliases);
   const automatic = inferModelAliases(modelIds, grouping);
-  const resolve = createModelAliasResolver(explicit, modelIds, grouping);
   // Keep saved aliases usable after the scanner folds their source identity.
   // Direct aliases still win, and settings retain their original source keys.
   const inherited = new Map();
@@ -356,6 +355,7 @@ function aliasPlan(modelIds, aliases, grouping) {
   }
   // These pairs were validated against their original source above. Revalidating
   // against the canonical key would reject display labels such as `GPT 5`.
+  const resolve = createModelAliasResolver(explicit, modelIds, grouping, inherited);
   // Session/model maps repeat the same names throughout a projection. Discard
   // these results with the plan so every new snapshot/settings gets a fresh one.
   const resolved = new Map();
@@ -366,8 +366,7 @@ function aliasPlan(modelIds, aliases, grouping) {
     resolve(model) {
       const hit = resolved.get(model);
       if (hit !== undefined) return hit;
-      const direct = resolve(model);
-      const result = direct === model ? (inherited.get(modelAliasMatchKey(model)) ?? direct) : direct;
+      const result = resolve(model);
       resolved.set(model, result);
       return result;
     }
