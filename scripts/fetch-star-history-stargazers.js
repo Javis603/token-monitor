@@ -3,9 +3,11 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-const PAGE_SIZE = 100;
-const MAX_PAGES = 10_000;
+const PAGE_SIZE = 30;
+const MAX_PAGES = 100;
 const REQUEST_TIMEOUT_MS = 30_000;
+const SECONDS_PER_DAY = 86_400;
+const WEEK_SECONDS = 7 * SECONDS_PER_DAY;
 const GITHUB_API_VERSION = '2026-03-10';
 
 const fail = (message) => {
@@ -30,8 +32,8 @@ const responseHeader = (headers, name) => {
 };
 
 const requestHeaders = (token) => ({
-  Accept: 'application/vnd.github.star+json',
-  Authorization: `Bearer ${token}`,
+  Accept: 'application/vnd.github+json',
+  ...(token ? { Authorization: `Bearer ${token}` } : {}),
   'X-GitHub-Api-Version': GITHUB_API_VERSION,
   'User-Agent': 'token-monitor-star-history',
 });
@@ -67,15 +69,108 @@ const parseNextPage = (linkHeader) => {
   return Number(page);
 };
 
-const normalizePage = (entries, offset) => {
-  if (!Array.isArray(entries)) fail('GitHub stargazer response was not an array');
+// GitHub does not guarantee that calendar weeks align with UTC. A Sunday in a
+// positive-offset timezone can arrive as Saturday in UTC, so move those weeks
+// forward and normalize every week to midnight on its Sunday UTC date.
+const normalizeWeekStart = (week) => {
+  const sunday = new Date(week * 1000).getUTCDay() === 6 ? week + SECONDS_PER_DAY : week;
+  return Math.floor(sunday / SECONDS_PER_DAY) * SECONDS_PER_DAY;
+};
+
+const apiWeekForTimestamp = (timestampSeconds, anchorWeek) => (
+  anchorWeek + Math.floor((timestampSeconds - anchorWeek) / WEEK_SECONDS) * WEEK_SECONDS
+);
+
+const normalizeHistoryPage = (entries, offset) => {
+  if (!Array.isArray(entries)) fail('GitHub star history response was not an array');
   return entries.map((entry, index) => {
-    const parsed = new Date(entry?.starred_at);
-    if (typeof entry?.starred_at !== 'string' || !Number.isFinite(parsed.getTime())) {
-      fail(`stargazer entry ${offset + index + 1} has no valid starred_at timestamp`);
+    const week = entry?.week;
+    const total = entry?.total;
+    const days = entry?.days;
+    if (!Number.isInteger(week) || week < 0) {
+      fail(`star history entry ${offset + index + 1} has an invalid week timestamp`);
     }
-    return { starredAt: parsed.toISOString(), sourceIndex: offset + index };
+    if (!Array.isArray(days) || days.length !== 7 || days.some((day) => !Number.isInteger(day) || day < 0)) {
+      fail(`star history entry ${offset + index + 1} has invalid daily counts`);
+    }
+    const counted = days.reduce((sum, day) => sum + day, 0);
+    if (!Number.isInteger(total) || total < 0 || total !== counted) {
+      fail(`star history entry ${offset + index + 1} has inconsistent totals`);
+    }
+    return { week: normalizeWeekStart(week), sourceWeek: week, total, days };
   });
+};
+
+const fetchRepositoryMetadata = async ({ repository, token, apiUrl, fetchImpl }) => {
+  const response = await fetchJson(apiEndpoint(apiUrl, `/repos/${repository}`), token, fetchImpl);
+  const stargazersCount = response.data?.stargazers_count;
+  const createdAt = Date.parse(response.data?.created_at);
+  if (!Number.isInteger(stargazersCount) || stargazersCount < 0) {
+    fail('repository metadata has an invalid stargazers_count');
+  }
+  if (!Number.isFinite(createdAt)) {
+    fail('repository metadata has an invalid created_at');
+  }
+  return { stargazersCount, createdAt };
+};
+
+const fetchHistoryWeeks = async ({ repository, token, apiUrl, fetchImpl }) => {
+  const weeks = [];
+  const seenWeeks = new Set();
+  let page = 1;
+  for (;;) {
+    if (page > MAX_PAGES) fail(`pagination exceeded ${MAX_PAGES} pages`);
+    const url = new URL(apiEndpoint(apiUrl, `/repos/${repository}/stargazers/history`));
+    url.searchParams.set('per_page', String(PAGE_SIZE));
+    url.searchParams.set('page', String(page));
+    const response = await fetchJson(url, token, fetchImpl);
+    if (!Array.isArray(response.data)) fail('GitHub star history response was not an array');
+    if (response.data.length === 0) break;
+
+    const normalized = normalizeHistoryPage(response.data, weeks.length);
+    for (const entry of normalized) {
+      if (seenWeeks.has(entry.week)) fail(`GitHub returned duplicate star history week ${entry.week}`);
+      seenWeeks.add(entry.week);
+      weeks.push(entry);
+    }
+
+    const nextPage = parseNextPage(responseHeader(response.headers, 'link'));
+    if (nextPage !== null) {
+      if (nextPage <= page) fail(`pagination moved backwards from page ${page}`);
+      page = nextPage;
+    } else if (response.data.length === PAGE_SIZE && page < MAX_PAGES) {
+      page += 1;
+    } else {
+      break;
+    }
+  }
+
+  const ordered = [...weeks].sort((left, right) => left.week - right.week);
+  for (let index = 1; index < ordered.length; index += 1) {
+    if (ordered[index].week - ordered[index - 1].week !== 7 * SECONDS_PER_DAY) {
+      fail(`GitHub star history is not contiguous between weeks ${ordered[index - 1].week} and ${ordered[index].week}`);
+    }
+  }
+  return ordered;
+};
+
+// The aggregate endpoint exposes daily star counts without identities. Expand
+// each day back into one synthetic timestamp per star so the existing renderer,
+// which expects per-star timestamps, can chart the same daily curve.
+const expandHistoryWeeks = (weeks) => {
+  const stars = [];
+  const ordered = [...weeks].sort((left, right) => left.week - right.week);
+  for (const { week, days } of ordered) {
+    for (let dayIndex = 0; dayIndex < days.length; dayIndex += 1) {
+      const count = days[dayIndex];
+      if (count === 0) continue;
+      const starredAt = new Date((week + dayIndex * SECONDS_PER_DAY) * 1000).toISOString();
+      for (let index = 0; index < count; index += 1) {
+        stars.push({ starredAt });
+      }
+    }
+  }
+  return stars;
 };
 
 const fetchSanitizedStargazers = async ({
@@ -85,48 +180,32 @@ const fetchSanitizedStargazers = async ({
   fetchImpl = globalThis.fetch,
 } = {}) => {
   assertRepository(repository);
-  if (!token) fail('GITHUB_TOKEN is required');
   if (typeof fetchImpl !== 'function') fail('this Node runtime does not provide fetch');
 
-  const stars = [];
-  let page = 1;
-  for (;;) {
-    if (page > MAX_PAGES) fail(`pagination exceeded ${MAX_PAGES} pages`);
-    const url = new URL(apiEndpoint(apiUrl, `/repos/${repository}/stargazers`));
-    url.searchParams.set('per_page', String(PAGE_SIZE));
-    url.searchParams.set('page', String(page));
-    const response = await fetchJson(url, token, fetchImpl);
-    if (response.data.length === 0) {
-      if (page === 1) fail('GitHub returned no timestamped stargazers');
-      break;
-    }
-    stars.push(...normalizePage(response.data, stars.length));
+  const { stargazersCount, createdAt } = await fetchRepositoryMetadata({ repository, token, apiUrl, fetchImpl });
+  if (stargazersCount === 0) return [];
 
-    const nextPage = parseNextPage(responseHeader(response.headers, 'link'));
-    if (nextPage !== null) {
-      if (nextPage <= page) fail(`pagination moved backwards from page ${page}`);
-      page = nextPage;
-    } else if (response.data.length === PAGE_SIZE) {
-      page += 1;
-    } else {
-      break;
-    }
+  const weeks = await fetchHistoryWeeks({ repository, token, apiUrl, fetchImpl });
+  const stars = expandHistoryWeeks(weeks);
+  if (stars.length === 0) {
+    fail('GitHub returned no star history for a repository with stargazers');
   }
 
-  const metadata = await fetchJson(apiEndpoint(apiUrl, `/repos/${repository}`), token, fetchImpl);
-  const expectedCount = metadata.data?.stargazers_count;
-  if (!Number.isInteger(expectedCount) || expectedCount < 1) {
-    fail('repository metadata has no positive stargazers_count');
+  // Contiguous weeks plus the creation-week check above prove the history is
+  // complete. Any remaining count difference is a live star change during the
+  // fetch, so keep the fetched total instead of failing the scheduled run.
+  // Reuse the history's own week boundary: API weeks can start on Saturday in
+  // UTC, so a UTC Sunday calculation would disagree with valid history.
+  const creationWeek = normalizeWeekStart(
+    apiWeekForTimestamp(Math.floor(createdAt / 1000), weeks[0].sourceWeek),
+  );
+  if (weeks[0].week > creationWeek) {
+    fail(`star history starts at week ${weeks[0].week}, after repository creation week ${creationWeek}`);
   }
-  if (stars.length !== expectedCount) {
-    fail(`fetched ${stars.length} timestamps but repository metadata reports ${expectedCount}`);
+  if (stars.length !== stargazersCount) {
+    console.warn(`Star History stargazer count changed by ${Math.abs(stars.length - stargazersCount)} during fetch; using the fetched history total.`);
   }
-
-  stars.sort((left, right) => {
-    const delta = Date.parse(left.starredAt) - Date.parse(right.starredAt);
-    return delta || left.sourceIndex - right.sourceIndex;
-  });
-  return stars.map(({ starredAt }) => ({ starredAt }));
+  return stars;
 };
 
 const parseCli = (args) => {
@@ -163,6 +242,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  expandHistoryWeeks,
   fetchSanitizedStargazers,
+  normalizeHistoryPage,
   parseNextPage,
 };
