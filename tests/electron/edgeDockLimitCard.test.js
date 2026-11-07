@@ -1667,6 +1667,46 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   }
 });
 
+test('MiMo hidden products retain recovery and subscription access without empty account rows', () => {
+  const console = { provider: 'mimo', status: 'ok', accountKey: 'console', accountName: 'MiMo abcdef1',
+    accountLabel: 'Console', planLabel: 'Pay-as-you-go', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 10, currency: 'CNY' }] };
+  const membership = { provider: 'mimo', status: 'ok', accountKey: 'membership', accountName: 'MiMo abcdef1',
+    accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [{ kind: 'weekly', usedPercent: 20 }] };
+  const hidden = dockView({ limitProviderHiddenItems: { mimo: ['credits'] } });
+  const partlyHidden = hidden.renderLimitProviderGroup('mimo', 'MiMo', [console, membership], '#000000');
+  assert.doesNotMatch(partlyHidden.text, /Pay-as-you-go|Balance/);
+  assert.match(partlyHidden.text, /Pro|Weekly/);
+  const failed = { ...membership, status: 'unauthorized', windows: [] };
+  const mixed = hidden.renderLimitProviderGroup('mimo', 'MiMo', [console, failed], '#000000');
+  assert.doesNotMatch(mixed.text, /Pay-as-you-go|Balance/);
+  assert.match(mixed.text, /Desktop Membership/);
+  assert.match(mixed.text, /Sign in again/);
+  const subscription = { id: 'mimo-console', provider: 'mimo', kind: 'subscription', accountKey: 'console',
+    planName: 'Console plan', amountMinor: 1000, currency: 'CNY', intervalCount: 1, interval: 'month',
+    startDate: '2026-08-01', autoRenew: true, topUps: [], binding: { accountKey: 'console' } };
+  const subscribed = dockView({ limitProviderHiddenItems: { mimo: ['credits'] },
+    subscriptions: [subscription], accounts: [console, membership] })
+    .renderLimitProviderGroup('mimo', 'MiMo', [console, membership], '#000000');
+  assert.match(subscribed.text, /Pay-as-you-go/);
+  assert.match(subscribed.text, /Price ¥10\.00/);
+  const unbound = { ...subscription, binding: undefined };
+  const allHidden = dockView({ limitProviderHiddenItems: { mimo: ['credits'] },
+    subscriptions: [unbound], accounts: [console, { ...console, accountKey: 'other', accountName: 'MiMo abcdef2' }] })
+    .renderLimitProviderGroup('mimo', 'MiMo', [console], '#000000');
+  assert.match(allHidden.text, /Subscriptions/);
+  assert.match(allHidden.text, /Price ¥10\.00/);
+  const unnamedPlan = { ...membership, planLabel: '' };
+  const fallback = dockView({ subscriptions: [{ ...subscription, binding: { accountKey: 'membership' } }], accounts: [unnamedPlan] })
+    .renderLimitProviderGroup('mimo', 'MiMo', [unnamedPlan], '#000000');
+  assert.match(fallback.text, /Subscriptions/);
+  const otherAccount = { ...console, accountKey: 'other', accountName: 'MiMo abcdef2' };
+  const collapsed = dockView({ limitProviderHiddenItems: { mimo: ['credits'] },
+    subscriptions: [subscription, { ...subscription, id: 'membership-plan', binding: { accountKey: 'membership' } }],
+    accounts: [console, membership, otherAccount] })
+    .renderLimitProviderGroup('mimo', 'MiMo', [console, membership, otherAccount], '#000000');
+  assert.match(collapsed.text, /Subscriptions/);
+});
+
 test('MiMo groups products under each account and keeps their own plan and status', () => {
   const view = dockView();
   const rows = [
@@ -1686,6 +1726,12 @@ test('MiMo groups products under each account and keeps their own plan and statu
   }
   assert.equal(products[0].find('limit-plan').textContent, 'Pro');
   assert.equal(products[1].find('limit-plan')?.textContent ?? '', '');
+  const hiddenConsole = { ...rows[0], accountKey: 'console', accountLabel: 'Console', accountEmail: 'user@example.com',
+    windows: [{ kind: 'billing', metric: 'credits', remaining: 10, currency: 'CNY' }] };
+  const before = view.renderLimitProviderGroup('mimo', 'MiMo', [hiddenConsole, ...rows], '#000000');
+  const after = dockView({ limitProviderHiddenItems: { mimo: ['credits'] } })
+    .renderLimitProviderGroup('mimo', 'MiMo', [hiddenConsole, ...rows], '#000000');
+  assert.deepEqual(after.textOf('limit-name-title'), before.textOf('limit-name-title'));
   // INVITE hides the plan name but retains the quota that identifies the row.
   assert.match(products[1].text, /Weekly/);
   assert.match(products[1].text, /75%/);

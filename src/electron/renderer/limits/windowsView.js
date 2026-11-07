@@ -2617,7 +2617,7 @@
     return text === key ? '' : text;
   }
 
-  function renderLimitProviderGroupFrame(providerId, label, providers, color, { count, markId } = {}) {
+  function renderLimitProviderGroupFrame(providerId, label, providers, color, { count, markId, planText } = {}) {
     const row = document.createElement('div');
     row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
     // The header stands for the rows it draws, including when a card hides
@@ -2630,9 +2630,9 @@
       groupAccounts: providers
     };
     row.append(renderLimitProviderHead(providerId, label, groupProvider, color, {
-      planText: providerId === 'muse' && subscriptionsForProviderGroup(providerId, providers).length
+      planText: planText ?? (providerId === 'muse' && subscriptionsForProviderGroup(providerId, providers).length
         ? t('settings.subscriptions.title')
-        : count ? limitGroupCountText(providerId, count) : '',
+        : count ? limitGroupCountText(providerId, count) : ''),
       hideMeta: true,
       ...(markId ? { markId } : {})
     }));
@@ -2659,28 +2659,49 @@
   }
 
   function renderMimoProviderGroup(label, providers, color) {
+    const hidden = usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, 'mimo');
     const groups = mimoAccountGroups(providers);
     const representatives = mimoAccountRepresentatives(groups);
-    const accountTitle = (index) => limitAccountDefaultTitle(representatives[index], index, representatives);
-    const oneAccount = groups.length === 1;
-    const { row, list } = renderLimitProviderGroupFrame(
-      'mimo', label, providers, color, { count: oneAccount ? 0 : groups.length }
+    const visibleGroups = groups.map((group, index) => ({
+      index,
+      providers: group.filter(provider => {
+        if (provider.status !== 'ok' || provider.stale || subscriptionForProvider(provider)) return true;
+        const items = limitProviderUsageItems([provider]);
+        return items.length === 0 || items.some(item => !hidden.has(item.id));
+      })
+    })).filter(group => group.providers.length > 0);
+    const visible = visibleGroups.flatMap(group => group.providers);
+    const recorded = subscriptionsForProviderGroup('mimo', visible);
+    const subscriptionHeading = visibleGroups.length <= 1 && (
+      recorded.length > 1 && groups.length > 1
+      || recorded.some(entry => !entry.account || !visible.some(provider => (
+        subscriptionAccountMatches(entry.account, provider) && limitProviderPlan(provider)
+      )))
     );
-    if (oneAccount) {
-      appendMimoAccountProducts(list, groups[0], color);
+    const { row, list } = renderLimitProviderGroupFrame('mimo', label, visible, color, {
+      count: visibleGroups.length > 1 ? visibleGroups.length : 0,
+      ...(subscriptionHeading ? { planText: t('settings.subscriptions.title') } : {})
+    });
+    if (visible.length === 0 && recorded.length === 0) {
+      row.style.display = 'none';
+      return row;
+    }
+    if (visibleGroups.length === 1) {
+      appendMimoAccountProducts(list, visibleGroups[0].providers, color);
     } else {
-      groups.forEach((group, index) => {
+      visibleGroups.forEach(({ providers: productsForAccount, index }) => {
         const account = document.createElement('div');
         account.className = 'limit-row limit-account-row';
         const products = document.createElement('div');
         products.className = 'limit-account-list';
-        appendMimoAccountProducts(products, group, color);
-        account.append(renderLimitProviderHead('mimo', accountTitle(index), representatives[index], color, {
-          showIcon: false,
-          accountRow: true,
-          planText: '',
-          hideMeta: true
-        }), products);
+        appendMimoAccountProducts(products, productsForAccount, color);
+        account.append(renderLimitProviderHead('mimo',
+          limitAccountDefaultTitle(representatives[index], index, representatives), representatives[index], color, {
+            showIcon: false,
+            accountRow: true,
+            planText: '',
+            hideMeta: true
+          }), products);
         list.append(account);
       });
     }
