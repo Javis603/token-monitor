@@ -13444,6 +13444,7 @@ pluginMainPages = pluginViewHost ? window.TokenMonitorPluginMainPages.create({
 }) : null;
 if (pluginViewHost) new MutationObserver(() => { pluginViewHost.refreshDemand(); syncPluginLimitsDemand(); }).observe(els.shell, { attributes: true, attributeFilter: ['class'] });
 let pluginCatalogKey = '';
+let pluginLimitReadingsKey = '';
 
 function applyPluginCatalog(list) {
   if (!list) return list;
@@ -13451,7 +13452,10 @@ function applyPluginCatalog(list) {
   pluginLimitSettings?.reconcile();
   // Home and the theme chips depend only on which plugins and views are
   // active; process metrics refresh every few seconds and must not re-render.
-  const key = JSON.stringify([list.limits, list.contentSelections, list.contentOrder, (list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.revision,
+  const readingsKey = JSON.stringify(list.limits?.providers);
+  const readingsChanged = readingsKey !== pluginLimitReadingsKey;
+  pluginLimitReadingsKey = readingsKey;
+  const key = JSON.stringify([list.limits?.modules, list.contentSelections, list.contentOrder, (list.plugins || []).map((plugin) => [plugin.id, plugin.name, plugin.status, plugin.revision,
     (plugin.views || []).map((view) => [view.ref, view.title, view.surfaces, view.placements?.page, view.placements?.notch]), plugin.skins, plugin.revision])]);
   if (key !== pluginCatalogKey) {
     pluginCatalogKey = key;
@@ -13462,6 +13466,10 @@ function applyPluginCatalog(list) {
     renderThemePresetChips();
     renderNotchPageChoices();
     if (isSettingsSurfaceVisible()) preserveSettingsPanelScroll(renderViewPreferences);
+  } else if (readingsChanged) {
+    state.limitProviderRenderSignature = '';
+    if (state.breakdown === 'limits') renderLimits();
+    if (isSettingsSurfaceVisible()) renderLimitProviderCheckboxes();
   }
   refreshPluginLimitAccountStatuses();
   return list;

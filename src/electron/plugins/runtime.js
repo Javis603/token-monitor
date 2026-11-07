@@ -235,14 +235,16 @@ function createPluginRuntime({
   function registerSubscriber(webContents) {
     let subscriber = subscribers.get(webContents.id);
     if (!subscriber) {
+      const ownsMainLimits = isMainSender({ sender: webContents });
       subscriber = { webContents, demands: new Map() };
       subscribers.set(webContents.id, subscriber);
       const destroyed = () => {
         businessData.releaseOwner(String(webContents.id));
+        if (ownsMainLimits) limits.demand(false);
         subscribers.delete(webContents.id);
         demand.remove(webContents.id);
       };
-      const navigating = (_event, _url, inPlace, isMainFrame) => { if (isMainFrame !== false && !inPlace) { businessData.releaseOwner(String(webContents.id)); subscriber.demands.clear(); demand.remove(webContents.id); } };
+      const navigating = (_event, _url, inPlace, isMainFrame) => { if (isMainFrame !== false && !inPlace) { businessData.releaseOwner(String(webContents.id)); subscriber.demands.clear(); demand.remove(webContents.id); if (ownsMainLimits) limits.demand(false); } };
       webContents.on('did-start-navigation', navigating);
       observerCleanup.push(() => webContents.removeListener('did-start-navigation', navigating));
       webContents.once('destroyed', destroyed);
@@ -545,7 +547,7 @@ function createPluginRuntime({
   }
 
   function registerIpc() {
-    handle('plugins:limitsDemand', (event, value) => { requireMain(event); limits.demand(value); });
+    handle('plugins:limitsDemand', (event, value) => { requireMain(event); registerSubscriber(event.sender); limits.demand(value); });
     handle('plugins:connection', async (event, id, key, operation) => {
       requireMain(event);
       if (operation === 'forget') { connections.forget(id); limits.forgetConnections(id); return { state: 'notConnected' }; }
