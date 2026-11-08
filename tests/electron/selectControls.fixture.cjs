@@ -294,7 +294,7 @@ app.whenReady().then(async () => {
     const audit = [];
     for (const [width, scale, locale] of [[380, 1, 'zh-TW'], [500, 1, 'en'], [380, 1.2, 'pt-BR']]) {
       win.setContentSize(width, 720);
-      await run(`(()=>{window.auditLocale=${JSON.stringify(locale)};document.documentElement.style.setProperty('--ui-text-scale',${scale})})()`);
+      await run(`(()=>{window.auditLocale=${JSON.stringify(locale).replace(/</g, '\\u003c')};document.documentElement.style.setProperty('--ui-text-scale',${scale})})()`);
       const count = await run('auditSelectTemplates.length');
       for (let index = 0; index < count; index++) {
         const id = await run(`(()=>{
