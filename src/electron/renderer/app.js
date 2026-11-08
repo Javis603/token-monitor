@@ -9203,6 +9203,7 @@ function syncHubModeUi() {
   }
   syncModeSelect?.sync();
   renderSyncPanel();
+  renderHubLinkPanels();
   renderHubBuildStatus();
   syncHubConnectionUi();
   syncHubSaveButton();
@@ -15268,14 +15269,21 @@ window.tokenMonitor.onHubPush?.((payload) => {
       els.hubSecretInput.value = payload.info.secret;
     }
   }
-  if (settingsVisible) renderHubStatus();
+  if (settingsVisible) {
+    renderHubStatus();
+    // listening flips after the hub starts; re-enable Pair a phone once ready.
+    renderHubLinkPanels();
+  }
 });
 
 function renderConnectionStatus(surface = visibleStatsSurface()) {
   if (surface !== 'main') return;
   setLiveDot(state.streamConnected);
   setStatus(statusTextFor(state.mode, state.streamConnected));
-  if (isSettingsSurfaceVisible()) renderSyncPanel();
+  if (isSettingsSurfaceVisible()) {
+    renderSyncPanel();
+    renderHubLinkPanels();
+  }
 }
 
 function renderStatsUpdate() {
