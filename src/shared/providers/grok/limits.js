@@ -464,7 +464,7 @@ function resolveGrokCliHomeDir(env = process.env, options = {}, deps = {}) {
   if (explicit !== undefined) return cleanSecret(String(explicit || ''));
   const fromEnv = cleanSecret(envValue(env, 'HOME') || envValue(env, 'USERPROFILE'));
   if (fromEnv) return fromEnv;
-  if (env === process.env || deps.existsSync || options.existsSync) return os.homedir();
+  if (env === process.env || deps.statSync || options.statSync) return os.homedir();
   return '';
 }
 
@@ -501,10 +501,17 @@ function grokRpcCommand(env = process.env, options = {}, deps = {}) {
   if (explicit) return explicit;
   const platform = deps.platform || options.platform || process.platform;
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
-  const existsSync = deps.existsSync || options.existsSync || fs.existsSync;
+  const statSync = deps.statSync || options.statSync || fs.statSync;
+  const accessSync = deps.accessSync || options.accessSync || fs.accessSync;
   for (const candidate of grokCommandCandidates(env, options, deps)) {
     if (!pathApi.isAbsolute(candidate)) return candidate;
-    if (existsSync(candidate)) return candidate;
+    try {
+      if (!statSync(candidate).isFile()) continue;
+      if (platform !== 'win32') accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch (_) {
+      // Skip missing files, directories and non-executable PATH entries.
+    }
   }
   return 'grok';
 }

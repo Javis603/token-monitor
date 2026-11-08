@@ -45,6 +45,13 @@ test('isRetryableNetworkError classifies transient undici failures only', () => 
   assert.equal(isRetryableNetworkError(new Error('invalid proxy URL')), false);
 });
 
+function fakeGrokCliFiles(...files) {
+  return {
+    statSync: (candidate) => ({ isFile: () => files.includes(candidate) }),
+    accessSync: () => {}
+  };
+}
+
 function fakeGrokRpcSpawn(assertArgs = ['agent', 'stdio'], assertCommand = 'grok') {
   return (command, args) => {
     assert.equal(command, assertCommand);
@@ -392,7 +399,7 @@ test('grokRpcCommand honours explicit options.grokCommand and env.GROK_CLI_PATH 
     grokRpcCommand(
       { GROK_CLI_PATH: '/env/grok' },
       { grokCommand: ' "/opt/custom/grok" ' },
-      { existsSync: () => true }
+      { statSync: () => assert.fail('Explicit commands must not be probed') }
     ),
     '/opt/custom/grok'
   );
@@ -400,7 +407,7 @@ test('grokRpcCommand honours explicit options.grokCommand and env.GROK_CLI_PATH 
     grokRpcCommand(
       { GROK_CLI_PATH: ' "/env/grok" ' },
       {},
-      { existsSync: () => false }
+      fakeGrokCliFiles()
     ),
     '/env/grok'
   );
@@ -429,7 +436,7 @@ test('grokRpcCommand probes PATH then ~/.grok/bin, ~/.local/bin, /opt/homebrew/b
       { homeDir },
       {
         platform: 'darwin',
-        existsSync: (candidate) => candidate === '/custom/bin/grok' || candidate === '/Users/alice/.grok/bin/grok'
+        ...fakeGrokCliFiles('/custom/bin/grok', '/Users/alice/.grok/bin/grok')
       }
     ),
     '/custom/bin/grok'
@@ -443,7 +450,7 @@ test('grokRpcCommand probes PATH then ~/.grok/bin, ~/.local/bin, /opt/homebrew/b
       {
         platform: 'darwin',
         homeDir,
-        existsSync: (candidate) => candidate === '/Users/alice/.grok/bin/grok' || candidate === '/opt/homebrew/bin/grok'
+        ...fakeGrokCliFiles('/Users/alice/.grok/bin/grok', '/opt/homebrew/bin/grok')
       }
     ),
     '/Users/alice/.grok/bin/grok'
@@ -456,7 +463,7 @@ test('grokRpcCommand probes PATH then ~/.grok/bin, ~/.local/bin, /opt/homebrew/b
       { homeDir },
       {
         platform: 'darwin',
-        existsSync: (candidate) => candidate === '/Users/alice/.local/bin/grok' || candidate === '/opt/homebrew/bin/grok'
+        ...fakeGrokCliFiles('/Users/alice/.local/bin/grok', '/opt/homebrew/bin/grok')
       }
     ),
     '/Users/alice/.local/bin/grok'
@@ -467,7 +474,7 @@ test('grokRpcCommand probes PATH then ~/.grok/bin, ~/.local/bin, /opt/homebrew/b
       { homeDir },
       {
         platform: 'darwin',
-        existsSync: (candidate) => candidate === '/opt/homebrew/bin/grok' || candidate === '/usr/local/bin/grok'
+        ...fakeGrokCliFiles('/opt/homebrew/bin/grok', '/usr/local/bin/grok')
       }
     ),
     '/opt/homebrew/bin/grok'
@@ -478,7 +485,7 @@ test('grokRpcCommand probes PATH then ~/.grok/bin, ~/.local/bin, /opt/homebrew/b
       { homeDir },
       {
         platform: 'darwin',
-        existsSync: (candidate) => candidate === '/usr/local/bin/grok'
+        ...fakeGrokCliFiles('/usr/local/bin/grok')
       }
     ),
     '/usr/local/bin/grok'
@@ -487,7 +494,7 @@ test('grokRpcCommand probes PATH then ~/.grok/bin, ~/.local/bin, /opt/homebrew/b
     grokRpcCommand(
       { PATH: '/usr/bin:/bin' },
       { homeDir },
-      { platform: 'darwin', existsSync: () => false }
+      { platform: 'darwin', ...fakeGrokCliFiles() }
     ),
     'grok'
   );
@@ -499,17 +506,55 @@ test('grokRpcCommand probes PATH then ~/.grok/bin, ~/.local/bin, /opt/homebrew/b
       { homeDir: 'C:\\Users\\alice' },
       {
         platform: 'win32',
-        existsSync: (candidate) => candidate === 'C:\\Users\\alice\\.grok\\bin\\grok.exe'
+        ...fakeGrokCliFiles('C:\\Users\\alice\\.grok\\bin\\grok.exe'),
+        accessSync: () => assert.fail('Windows must not check POSIX execute permissions')
       }
     ),
     'C:\\Users\\alice\\.grok\\bin\\grok.exe'
   );
 });
 
+test('grokRpcCommand skips directories and missing files before an executable', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-cli-path-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const binName = process.platform === 'win32' ? 'grok.exe' : 'grok';
+  const first = path.join(root, 'first');
+  const missing = path.join(root, 'missing');
+  const last = path.join(root, 'last');
+  fs.mkdirSync(path.join(first, binName), { recursive: true });
+  fs.mkdirSync(last);
+  const executable = path.join(last, binName);
+  fs.writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  assert.equal(
+    grokRpcCommand({ PATH: [first, missing, last].join(path.delimiter) }, { homeDir: '' }),
+    executable
+  );
+});
+
+test('grokRpcCommand skips non-executable files before a valid CLI symlink', {
+  skip: process.platform === 'win32' && 'POSIX executable permissions'
+}, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-cli-mode-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const first = path.join(root, 'first');
+  const last = path.join(root, 'last');
+  fs.mkdirSync(first);
+  fs.mkdirSync(last);
+  fs.writeFileSync(path.join(first, 'grok'), 'not executable', { mode: 0o644 });
+  const executable = path.join(root, 'grok-real');
+  fs.writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const link = path.join(last, 'grok');
+  fs.symlinkSync(executable, link);
+  assert.equal(
+    grokRpcCommand({ PATH: [first, last].join(path.delimiter) }, { homeDir: '' }),
+    link
+  );
+});
+
 test('fetchGrokRpcBilling speaks Grok agent stdio x.ai/billing JSON-RPC', async () => {
   const body = await fetchGrokRpcBilling({}, {
     env: {},
-    existsSync: () => false,
+    ...fakeGrokCliFiles(),
     spawn: fakeGrokRpcSpawn(),
     rpcTimeoutMs: 100
   });
@@ -522,7 +567,7 @@ test('fetchGrokRpcBilling uses discovered ~/.grok/bin/grok when GUI PATH omits i
   const body = await fetchGrokRpcBilling({}, {
     env: { PATH: '/usr/bin:/bin', HOME: '/Users/alice' },
     platform: 'darwin',
-    existsSync: (candidate) => candidate === expectedCli,
+    ...fakeGrokCliFiles(expectedCli),
     spawn: fakeGrokRpcSpawn(['agent', 'stdio'], expectedCli),
     rpcTimeoutMs: 100
   });
