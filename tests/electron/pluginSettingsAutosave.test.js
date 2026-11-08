@@ -86,3 +86,7 @@ test('failed completed saves remain unsaved until retry succeeds or explicit rel
   assert.equal(f.c.hasUnsavedChanges(),false);f.c.dispose();
  }
 });
+test('restoring a valid saved value is a no-op unless a conflicting write is pending',async()=>{
+ const f=fixture();f.c.edit('text','temporary');f.c.edit('text','base');f.c.complete('text');assert.equal(f.calls.length,0);assert.equal(f.c.hasUnsavedChanges(),false);
+ f.c.edit('text','pending',true);f.c.edit('text','base');f.c.complete('text');f.finish(0,{mode:'a',text:'pending'});await tick();assert.equal(f.calls.length,2);assert.deepEqual(f.calls[1].patch,{text:'base'});f.finish(1,{mode:'a',text:'base'});await tick();assert.equal(f.c.hasUnsavedChanges(),false);f.c.dispose();
+});

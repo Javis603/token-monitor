@@ -87,8 +87,10 @@
         if (disposed || state.snapshot.readOnly) return;
         state.draft[id] = value; dirty.add(id); versions.set(id, (versions.get(id) || 0) + 1);
         delete state.errors[id]; ready.delete(id);
+        if (!state.pending && state.message !== 'conflict' && !state.snapshot.errors[id] && Object.is(value, state.snapshot.values[id])) dirty.delete(id);
         if (!['conflict', 'saveFailed'].includes(state.message)) state.message = '';
-        if (complete) { validationPaused = false; enqueue(id); void flush(); }
+        if (!dirty.size && !state.pending && state.message !== 'conflict') state.message = '';
+        if (complete && dirty.has(id)) { validationPaused = false; enqueue(id); void flush(); }
         publish();
       },
       complete(id) { if (dirty.has(id) && queued.get(id) !== versions.get(id)) { validationPaused = false; enqueue(id); void flush(); } },
@@ -1497,7 +1499,10 @@
         actionMenu(t('plugins.ui.more'), [
           [t('plugins.package.importFolder'), () => importPackage('directory')],
           [t('settings.plugins.openFolder'), () => void run(async () => { await api.openFolder(); return null; })],
-          [t('settings.plugins.reload'), () => void run(() => api.reload())],
+          [t('settings.plugins.reload'), () => void run(() => {
+            for (const id of authorSettings.keys()) requireSavedAuthorSettings(id);
+            return api.reload();
+          })],
           [t('plugins.ui.about'), () => { aboutOpen = true; render(); content.querySelector('.plugin-back')?.focus({ preventScroll: true }); }]
         ], globalSwitch()));
       if (previousToolbar) previousToolbar.replaceWith(actions);

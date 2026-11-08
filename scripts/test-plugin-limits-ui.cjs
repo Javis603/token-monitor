@@ -233,7 +233,7 @@ app.whenReady().then(async () => {
 
     const externalBase=await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.get')`);
     await js(`tokenMonitorTrustedPlugins.host('${fixtureManifest.id}','settings.update',{schemaVersion:${externalBase.schemaVersion},expectedRevision:${externalBase.revision},patch:{displayMode:'balance'}})`);
-    await js("(()=>{const select=document.querySelector('.plugin-author-form select');select.value='meter';select.dispatchEvent(new Event('change'));})()");
+    await js("(()=>{const select=document.querySelector('.plugin-author-form select');select.value='balance';select.dispatchEvent(new Event('change'));})()");
     await waitFor("!document.querySelector('[data-control-key=author-reload]').hidden",'conflict offers explicit reload');
     await capture('plugin-settings-conflict.png');
     await js("document.querySelector('[data-control-key=author-reload]').click()");
@@ -699,9 +699,10 @@ app.whenReady().then(async () => {
   assert.equal(await js("document.querySelector('[data-control-key=author-reload]').hidden"),true,'reload hidden during ordinary editing');
   const settingsBase=await js("tokenMonitorTrustedPlugins.host('synthetic-limits','settings.get')");
   await js(`tokenMonitorTrustedPlugins.host('synthetic-limits','settings.update',{schemaVersion:${settingsBase.schemaVersion},expectedRevision:${settingsBase.revision},patch:{displayMode:'balance'}})`);
-  await js("(()=>{const input=document.querySelector('.plugin-author-form select');input.value='meter';input.dispatchEvent(new Event('change'));})()");
+  const conflictMode=settingsBase.values.displayMode==='meter'?'balance':'meter';
+  await js(`(()=>{const input=document.querySelector('.plugin-author-form select');input.value=${JSON.stringify(conflictMode)};input.dispatchEvent(new Event('change'));})()`);
   await waitFor("document.querySelector('[data-control-key=author-reload]')?.hidden===false",'conflict exposes recovery action');
-  assert.equal(await js("document.querySelector('.plugin-author-form select').value"),'meter','conflict retains draft');
+  assert.equal(await js("document.querySelector('.plugin-author-form select').value"),conflictMode,'conflict retains draft');
   await js("document.querySelector('[data-control-key=author-reload]').click()");
   await waitFor("document.querySelector('.plugin-author-form select')?.value==='balance'&&document.querySelector('[data-control-key=author-reload]')?.hidden===true",'explicit reload adopts saved settings');
   await js("document.querySelector('.plugin-detail-utilities').scrollIntoView({block:'center'})");
