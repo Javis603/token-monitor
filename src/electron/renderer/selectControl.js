@@ -524,7 +524,7 @@
       close();
       select.dispatchEvent(new window.Event('blur'));
     });
-    listen(listbox, 'pointerdown', event => event.preventDefault());
+    listen(popup, 'pointerdown', event => { if (event.target !== searchInput) event.preventDefault(); });
     if (searchInput) {
       listen(searchInput, 'input', () => {
         filter = searchInput.value;

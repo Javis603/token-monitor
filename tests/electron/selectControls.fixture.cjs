@@ -44,7 +44,7 @@ app.whenReady().then(async () => {
   };
   let point;
   const move = async selector => {
-    point = await run(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
+    point = await run(`(()=>{const r=document.querySelector(${JSON.stringify(selector).replace(/</g, '\\u003c')}).getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
     win.webContents.sendInputEvent({ type: 'mouseMove', ...point });
     await settle();
   };
@@ -94,6 +94,7 @@ app.whenReady().then(async () => {
     const device=document.getElementById('deviceIconInput');
     TokenMonitorDeviceIcons.destroyDeviceIconSelect(device);
     if(device.hidden || device.nextElementSibling?.classList.contains('select-control-trigger')) throw new Error('device icon specialist did not clean up');
+    window.subscriptionCurrencyTemplate=document.getElementById('subscriptionCurrencyInput').cloneNode(true);
     const fields = ['languageInput','windowBehaviorInput','interfaceFontPreset','modelAliasesAliasSelect','syncUploadIntervalInput'];
     const clones = fields.map(id=>(document.getElementById(id).closest('label, .settings-font-field, .settings-field') || document.getElementById(id).parentElement).cloneNode(true));
     document.body.replaceChildren();
@@ -167,6 +168,14 @@ app.whenReady().then(async () => {
 
   await click('#modelAliasesAliasSelect + button');
   assert.equal(await run(`document.activeElement.className`), 'select-control-search');
+  await run(`(()=>{window.modelBlurCount=0;document.getElementById('modelAliasesAliasSelect').addEventListener('blur',()=>modelBlurCount++)})()`);
+  await win.webContents.insertText('no matching model');
+  await settle();
+  await click('.select-control-popup:popover-open .select-control-empty');
+  assert.deepEqual(await run(`({open:document.querySelector('#modelAliasesAliasSelect + button').getAttribute('aria-expanded'),focused:document.activeElement.className,blurs:modelBlurCount})`),
+    {open:'true',focused:'select-control-search',blurs:0}, 'empty-state clicks retain search focus and keep the picker open');
+  await click('.select-control-popup:popover-open .select-control-search');
+  await run(`document.activeElement.select()`);
   await win.webContents.insertText('Model 42');
   await settle();
   assert.deepEqual(await run(`[...document.querySelectorAll('.select-control-popup:popover-open [role="option"]')].filter(row=>!row.hidden).map(row=>row.getAttribute('aria-label'))`), ['Model 42']);
@@ -174,6 +183,42 @@ app.whenReady().then(async () => {
   await key('Return');
   assert.equal(await run(`document.getElementById('modelAliasesAliasSelect').value`), 'model-42');
   assert.equal(await run(`TokenMonitorSelectControl.isFocused(document.getElementById('modelAliasesAliasSelect'))`), true);
+
+  // The subscription editor moves the same currency source between plan and
+  // top-up slots, then hides the old slot. The visible control must follow it.
+  await run(`(()=>{
+    const row=document.createElement('div');row.id='currencyRelocation';
+    row.innerHTML='<div id="currencyPlanSlot"></div><div id="currencyTopUpSlot"></div>';
+    subscriptionCurrencyTemplate.replaceChildren(new Option('USD','USD'),new Option('HKD','HKD'));
+    row.querySelector('#currencyPlanSlot').append(subscriptionCurrencyTemplate);
+    document.getElementById('fixturePanel').append(row);
+  })()`);
+  await settle();
+  await run(`(()=>{
+    const select=document.getElementById('subscriptionCurrencyInput');
+    window.currencyTrigger=select.nextElementSibling;select.value='USD';
+    window.currencyChanges=0;select.addEventListener('change',()=>currencyChanges++);
+    document.getElementById('currencyTopUpSlot').append(select);
+    document.getElementById('currencyPlanSlot').hidden=true;
+  })()`);
+  await settle();
+  assert.equal(await run(`(()=>{const select=document.getElementById('subscriptionCurrencyInput');return select.nextElementSibling===currencyTrigger && currencyTrigger.getBoundingClientRect().height>0 && select.value==='USD'})()`), true,
+    'currency trigger follows its source into the visible top-up slot');
+  await run(`currencyTrigger.scrollIntoView({block:'nearest'})`);
+  await settle();
+  await click('#subscriptionCurrencyInput + button');
+  await key('Down');
+  await key('Return');
+  assert.deepEqual(await run(`({value:document.getElementById('subscriptionCurrencyInput').value,changes:currencyChanges})`), {value:'HKD',changes:1});
+  await run(`(()=>{
+    document.getElementById('currencyPlanSlot').append(document.getElementById('subscriptionCurrencyInput'));
+    document.getElementById('currencyPlanSlot').hidden=false;
+    document.getElementById('currencyTopUpSlot').hidden=true;
+  })()`);
+  await settle();
+  assert.equal(await run(`document.getElementById('subscriptionCurrencyInput').nextElementSibling===currencyTrigger && currencyTrigger.getBoundingClientRect().height>0`), true);
+  await run(`document.getElementById('currencyRelocation').remove()`);
+  await settle();
 
   // Dynamic host fields, disabled states and cleanup use real MutationObservers.
   await run(`(()=>{
@@ -266,7 +311,7 @@ app.whenReady().then(async () => {
         })()`);
         await settle();
         const metrics = await run(`(()=>{
-          const select=document.getElementById(${JSON.stringify(id)}), trigger=select.nextElementSibling;
+          const select=document.getElementById(${JSON.stringify(id).replace(/</g, '\\u003c')}), trigger=select.nextElementSibling;
           trigger.click();
           const popup=document.querySelector('.select-control-popup:popover-open');
           if(!popup) return {id:select.id,unavailable:true};

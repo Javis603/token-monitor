@@ -34,10 +34,16 @@
     }
 
     function add(select) {
+      const existing = managed.get(select);
+      if (existing) {
+        // Subscription forms move their currency select between visible slots.
+        if (select.nextElementSibling !== existing.trigger) select.after(existing.trigger);
+        return;
+      }
       // Third-party content owns its own controls. Host-rendered plugin settings
       // still participate, along with the rest of the app's form controls.
       // The local device icon picker is initialized later by deviceIcons.js.
-      if (managed.has(select) || select.id === 'deviceIconInput' || select.closest('.plugin-content') || select.multiple || select.size > 1) return;
+      if (select.id === 'deviceIconInput' || select.closest('.plugin-content') || select.multiple || select.size > 1) return;
       const focused = document.activeElement === select;
       const control = controls.enhance(select, optionsFor(select));
       if (control) {
