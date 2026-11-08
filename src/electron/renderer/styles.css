@@ -795,7 +795,8 @@ span.settings-note.settings-item-desc {
 }
 .settings-item-value strong { color: var(--text); font-weight: 600; }
 /* .settings-panel prefix outweighs the panel-wide `select { width: 100% }` default */
-.settings-panel .settings-item > select {
+.settings-panel .settings-item > select,
+.settings-panel .settings-item > .select-control-trigger {
   flex: 0 0 auto;
   width: auto;
   max-width: 58%;
@@ -3184,10 +3185,15 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
+.settings-panel .select-control-trigger { padding: 5px 9px; }
+.settings-font-input-row .select-control-trigger { width: 100%; min-width: 0; }
+.plugin-version-picker .select-control-trigger { width: auto; max-width: 100%; }
+.select-control-icon > .limit-icon { width: 14px; height: 14px; flex-basis: 14px; }
 .select-control-trigger:hover,
 .select-control-trigger[aria-expanded="true"] { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), 0.08); }
 .select-control-trigger:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.65); outline-offset: 2px; }
 .select-control-trigger:disabled { opacity: 0.5; cursor: default; }
+.select-control-trigger[aria-invalid="true"] { border-color: var(--orange); }
 .select-control-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .select-control-icon { display: flex; flex: 0 0 14px; align-items: center; justify-content: center; color: var(--muted); }
 .select-control-icon svg { width: 14px; height: 14px; }
@@ -3220,6 +3226,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   backdrop-filter: blur(28px) saturate(115%);
 }
 .select-control-popup {
+  box-sizing: border-box;
   position: fixed;
   inset: auto;
   margin: 0;
@@ -3230,12 +3237,33 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   line-height: 1.4;
   -webkit-app-region: no-drag;
 }
-.select-control-option { display: flex; min-height: 28px; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 5px; cursor: pointer; }
-.select-control-option > .select-control-icon { margin-top: 1px; }
-.select-control-option-text { display: grid; min-width: 0; gap: 3px; }
+.select-control-popup.has-search { overflow: hidden; }
+.select-control-search {
+  display: block;
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  margin: 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(var(--sunken-rgb), 0.48);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+.select-control-search:focus-visible { border-color: var(--accent); }
+.select-control-search::placeholder { color: var(--muted); }
+.select-control-list { overflow-y: auto; overscroll-behavior: contain; }
+.select-control-empty { padding: 12px 8px; color: var(--muted); }
+.select-control-group { padding: 8px 8px 4px; color: var(--muted); font-size: .59375rem; }
+.select-control-option { display: flex; box-sizing: border-box; min-height: 26px; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 5px; cursor: pointer; }
+.select-control-option.has-description { align-items: flex-start; padding-block: 6px; }
+.select-control-option.has-description > .select-control-icon { margin-top: 1px; }
+.select-control-option-text { display: grid; flex: 1; min-width: 0; gap: 3px; }
 .select-control-option-label { overflow-wrap: anywhere; }
 .select-control-description { color: var(--muted); font-size: 0.59375rem; line-height: 1.45; overflow-wrap: anywhere; }
-.select-control-annotation { margin-left: auto; align-self: center; color: var(--muted); font-size: 0.59375rem; white-space: nowrap; }
+.select-control-annotation { margin-left: auto; align-self: center; color: var(--muted); font-size: 0.59375rem; white-space: nowrap; text-align: right; }
 .select-control-option[data-highlighted="true"] { background: rgba(var(--overlay-rgb), 0.07); }
 .select-control-option[data-selected="true"] { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
 .select-control-option[aria-disabled="true"] { opacity: 0.5; cursor: default; }
@@ -5639,7 +5667,7 @@ html.is-windows .limit-live-badge {
    rather than widened on the shared rule, which the other provider forms
    already lay out against. Height is pinned for the same reason the
    third-party form pins it: select and input carry different paddings. */
-.subscription-add-body :is(input:not([type="checkbox"]), select) {
+.subscription-add-body :is(input:not([type="checkbox"]), select, .select-control-trigger) {
   height: 30px;
   box-sizing: border-box;
   font-size: 0.75rem;
@@ -5656,7 +5684,7 @@ html.is-windows .limit-live-badge {
    a whole email address. Nothing gives that width a shrinkable basis by default,
    so the row overflowed and dragged the entire settings panel into a horizontal
    scroll. */
-.subscription-add-body .settings-row > :is(input, select) {
+.subscription-add-body .settings-row > :is(input, select, .select-control-trigger) {
   flex: 1 1 0;
   min-width: 0;
 }
@@ -5666,7 +5694,7 @@ html.is-windows .limit-live-badge {
 .subscription-add-body .subscription-pair-row > input {
   flex: 2 1 0;
 }
-.subscription-add-body .subscription-pair-row > select {
+.subscription-add-body .subscription-pair-row > :is(select, .select-control-trigger) {
   flex: 1 1 0;
 }
 /* Amount, cadence, and dates are separate settings rows inside one field
@@ -5695,7 +5723,7 @@ html.is-windows .limit-live-badge {
   color: var(--muted);
   font-size: 0.6875rem;
 }
-.subscription-add-body .subscription-topup-heading-row > select {
+.subscription-add-body .subscription-topup-heading-row > :is(select, .select-control-trigger) {
   flex: 0 0 auto;
   width: 6.5em;
 }
@@ -7154,7 +7182,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   color: var(--text);
   font-size: 0.6875rem;
 }
-.settings-panel .status-provider-interval select {
+.settings-panel .status-provider-interval :is(select, .select-control-trigger) {
   flex: 0 0 auto;
   width: auto;
   max-width: 58%;
@@ -7901,7 +7929,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
    .subscription-add-body: the global `button, input, select { font: inherit }`
    otherwise drops a select back to the panel's base size, and the two carry
    different paddings, so the height is pinned to keep the rows aligned. */
-.opencode-add-body .settings-row :is(input, select) {
+.opencode-add-body .settings-row :is(input, select, .select-control-trigger) {
   flex: 1;
   min-width: 0;
   height: 30px;
@@ -7918,7 +7946,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 #volcengineAgentDetails .settings-row label {
   white-space: normal;
 }
-#volcengineAgentDetails .settings-row :is(input, select) {
+#volcengineAgentDetails .settings-row :is(input, select, .select-control-trigger) {
   height: auto;
   font-size: inherit;
 }
@@ -7958,7 +7986,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   font-size: 0.625rem;
   line-height: 1.2;
 }
-.thirdparty-field :is(input, select) {
+.thirdparty-field :is(input, select, .select-control-trigger) {
   width: 100%;
   min-width: 0;
   height: 30px;
@@ -8794,13 +8822,13 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-catalog .plugin-source { border: 0; padding: 0; }
 .plugin-catalog .plugin-logs > .plugin-version-picker { margin-top: 8px; }
 .plugin-catalog .plugin-logs > .plugin-description { margin-top: 8px; }
-.plugin-catalog-search, .plugin-source-form input, .plugin-source-form textarea, .plugin-version-picker select { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 0.75rem; }
+.plugin-catalog-search, .plugin-source-form input, .plugin-source-form textarea, .plugin-version-picker :is(select, .select-control-trigger) { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 0.75rem; }
 .plugin-catalog input:focus-visible, .plugin-catalog textarea:focus-visible, .plugin-catalog select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .plugin-source-form, .plugin-source-form label { display: flex; flex-direction: column; gap: 7px; font-size: 0.6875rem; }
 .plugin-source-row { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .plugin-source-form { margin-top: 12px; }
 .plugin-version-picker { display: flex; align-items: center; gap: 8px; font-size: 0.6875rem; }
-.plugin-version-picker select { width: auto; min-width: 0; max-width: 100%; }
+.plugin-version-picker :is(select, .select-control-trigger) { width: auto; min-width: 0; max-width: 100%; }
 .plugin-source-form textarea { resize: vertical; }
 .plugin-catalog .plugin-source { align-self: flex-start; }
 

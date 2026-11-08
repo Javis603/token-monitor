@@ -181,7 +181,7 @@ test('Home session rows expose named states and keep idle marks decorative', () 
   const context = {
     document, t, els: { homePanel: { querySelector: () => null } }, state: { settings: {} },
     homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
-    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '',
+    clientColors: { codex: 'blue' }, clientColor: require('../../src/electron/renderer/usageCharts').clientColor, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '',
     limitWindowsView: {}, sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
     window: {
       TokenMonitorSessionLive: require('../../src/shared/sessionLive'),

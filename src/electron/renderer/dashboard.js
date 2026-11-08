@@ -324,7 +324,7 @@ function displayColor(hex) {
   return `rgb(${lift(r)}, ${lift(g)}, ${lift(b)})`;
 }
 function colorFor(key) {
-  const base = state.stackBy === 'model' ? charts.modelColor(key) : (charts.clientColors[key] || charts.clientColors.default);
+  const base = state.stackBy === 'model' ? charts.modelColor(key) : (charts.clientColor(key));
   return displayColor(base);
 }
 
@@ -430,7 +430,7 @@ function renderBreakdown() {
   };
   
   const colModel = buildCol('dashboard.stack.model', modelTotals, charts.modelColor);
-  const colClient = buildCol('dashboard.stack.client', clientTotals, (k) => charts.clientColors[k] || charts.clientColors.default);
+  const colClient = buildCol('dashboard.stack.client', clientTotals, (k) => charts.clientColor(k));
   
   elsBreakdown.innerHTML = colModel + colClient;
   applySwatchColors(elsBreakdown);

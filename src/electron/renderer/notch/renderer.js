@@ -37,7 +37,6 @@
     const compactMoneyApi = window.TokenMonitorCompactMoney;
     const balanceDisplay = window.TokenMonitorLimitBalanceDisplay;
     const accountIdentityApi = window.TokenMonitorAccountIdentity;
-    const { clientColors } = window.TokenMonitorUsageCharts;
     const panelApi = window.TokenMonitorNotchPanel;
     const panel = panelApi.createNotchPanel({ document, window, el, t, state, bridge, shared: {
       markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, formatCost, usageCostNode, formatRate,
@@ -145,7 +144,7 @@
         node.querySelector('.edge-dock-mark').replaceWith(markNode(item.provider));
         return node;
       }
-      return ['app', '?'].includes(item.provider) ? el('span', 'notch-app-mark', item.provider === 'app' ? 'Σ' : '?') : markNode(item.provider);
+      return ['app', '?'].includes(item.provider) ? el('span', 'notch-app-mark', item.provider === 'app' ? 'Σ' : '?') : markNode(window.TokenMonitorVendorPresentation.clientMarkId(item.provider));
     }
 
     function positionNotchSummary(head, payload) {
@@ -306,7 +305,7 @@
           item.rows.forEach((row, i) => block.append(notchText(item, row, `${item.id}:${i}:${JSON.stringify(row.source || row.selection?.source)}`, used)));
         } else if (item.type === 'activity') {
           block.classList.add('notch-activity');
-          block.style.setProperty('--notch-accent', clientColors[item.provider] || limitProviderColor(item.provider));
+          block.style.setProperty('--notch-accent', window.TokenMonitorUsageCharts.clientColor(item.provider));
           if (sessionOnly) {
             notchSessionActivity(block, item, activityProviders.size > 1);
           } else if (item.running === 1 && !item.waiting) {

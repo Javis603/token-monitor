@@ -66,7 +66,7 @@ test('Tools, Models and Devices render more than their old hardcoded caps with u
     state, document: { createElement: () => new Element() }, homeModulePreferencesApi: preferences,
     homeOverviewApi: overview, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }),
     t: key => key, modelRowsForPeriod: () => rows, homeToolSourceRows: () => rows,
-    fixedPeriodDevices: () => devices, applyHomeListMark() {}, iconKindFor() {},
+    fixedPeriodDevices: () => devices, applyHomeListMark() {}, iconKindFor() {}, clientColor: require('../../src/electron/renderer/usageCharts').clientColor,
     formatCompact: String, formatPercent: String, deviceAccent: '#fff', deviceStaleColor: '#888'
   };
   for (const [name, next, count] of [
@@ -177,7 +177,7 @@ test('Home sessions respect a smaller count while retaining an active session be
     els: {}, sessionTooltipShouldHoldRender: () => false, homeModulePreferencesApi: preferences,
     window: { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: { sessionStateMarkup: () => '' } },
     sessionPresentationOptions: () => ({}), homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }),
-    applyHomeListMark() {}, iconKindFor() {}, clientColors: {}, stableColor() {}, fallbackModelColors: [], bindHoverMarquee() {},
+    applyHomeListMark() {}, iconKindFor() {}, clientColor: require('../../src/electron/renderer/usageCharts').clientColor, clientColors: {}, stableColor() {}, fallbackModelColors: [], bindHoverMarquee() {},
     formatCompact: String, homeSessionAgo: () => '', t: key => key, limitWindowsView: {},
     sessionRowsApi: require('../../src/electron/renderer/sessionRows')
   };

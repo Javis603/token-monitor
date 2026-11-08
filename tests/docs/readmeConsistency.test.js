@@ -115,7 +115,7 @@ const supportedToolIdOrder = [
   'openclaw',
   'cursor',
   'antigravity',
-  'gemini',
+  'gemini-cli',
   'cline',
   'amp',
   'droid',

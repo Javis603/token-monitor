@@ -86,7 +86,7 @@ struct MediumUsageWidgetView: View {
             WidgetBreakdownRow(
                 id: $0.id,
                 label: $0.displayName ?? WidgetFormat.provider($0.id),
-                vendorID: $0.id,
+                vendorID: $0.markId ?? $0.id,
                 tokens: $0.totalTokens,
                 share: $0.sharePercent
             )
@@ -196,7 +196,7 @@ struct LargeDashboardWidgetView: View {
     private var breakdownRows: [WidgetBreakdownRow] {
         if usesTools {
             return snapshot.tools.map {
-                WidgetBreakdownRow(id: $0.id, label: $0.displayName ?? WidgetFormat.provider($0.id), vendorID: $0.id, tokens: $0.totalTokens, share: $0.sharePercent)
+                WidgetBreakdownRow(id: $0.id, label: $0.displayName ?? WidgetFormat.provider($0.id), vendorID: $0.markId ?? $0.id, tokens: $0.totalTokens, share: $0.sharePercent)
             }
         }
         return snapshot.models.map {
@@ -702,7 +702,7 @@ struct WidgetVendorMark: View {
             if let image = image {
                 Image(nsImage: image)
                     .resizable()
-                    .renderingMode(.template)
+                    .renderingMode(vendorPalette.styles[vendorID]?.fullColor == true ? .original : .template)
                     .scaledToFit()
             } else {
                 Circle()
@@ -733,7 +733,7 @@ struct WidgetVendorMark: View {
         source = source.replacingOccurrences(of: "currentColor", with: "#000000", options: .caseInsensitive)
 
         guard let normalizedData = source.data(using: .utf8), let image = NSImage(data: normalizedData) else { return nil }
-        image.isTemplate = true
+        image.isTemplate = vendorPalette.styles[vendorID]?.fullColor != true
         return image
     }
 }

@@ -17,6 +17,7 @@ function readmeTrackedClientIds() {
   const iconToClient = {
     deepseek: 'dsh',
     'hermes-agent': 'hermes',
+    'gemini-cli': 'gemini',
     xai: 'grok',
     qoder: 'qodercn',
     // The limits-only Minimax row has no usage column, so only MiniMax Code's

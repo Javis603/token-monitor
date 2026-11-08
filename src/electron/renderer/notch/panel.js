@@ -38,7 +38,7 @@
   }
 
   function createNotchPanel({ document, window, el, t, state, bridge, shared }) {
-    const { markNode, hasMask, providerLabel, limitProviderColor, formatTokens, formatCardTokens, formatBreakdownTokens, usageCostNode: usageCost, formatRate,
+    const { markNode, hasMask, providerLabel, formatTokens, formatCardTokens, formatBreakdownTokens, usageCostNode: usageCost, formatRate,
       appearance, prefersReducedMotion, readableColor = color => color, limitAccountTitle, overflowText, limitWindowsView, pluginHost = null, pluginContent = null } = shared;
     const pluginViews = window.TokenMonitorPluginViews;
     const presentation = window.TokenMonitorEdgeDockPresentation;
@@ -49,7 +49,7 @@
     const resetMotion = window.TokenMonitorLimitResetMotion;
     const sessionRows = window.TokenMonitorSessionRows;
     const sessionLive = window.TokenMonitorSessionLive;
-    const { clientColors, modelColor } = window.TokenMonitorUsageCharts;
+    const { modelColor } = window.TokenMonitorUsageCharts;
     const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
     const { activateOnPress } = window.TokenMonitorPressActivation;
     const homeOverview = window.TokenMonitorHomeOverview;
@@ -348,10 +348,10 @@
       return level === 'critical' || level === 'low' ? level : '';
     }
     function clientColor(id) {
-      return readableColor(clientColors[id] || limitProviderColor(id) || clientColors.default);
+      return readableColor(window.TokenMonitorUsageCharts.clientColor(id));
     }
     function mark(id, className = '') {
-      const node = markNode(id);
+      const node = markNode(window.TokenMonitorVendorPresentation.clientMarkId(id));
       if (className) node.classList.add(className);
       return node;
     }
@@ -1237,7 +1237,7 @@
         line.dataset.focusKey = JSON.stringify(['breakdown', by, row.other === true, row.key]);
         line.tabIndex = 0;
         line.setAttribute('role', 'listitem');
-        if (row.client && !row.unattributed && hasMask(row.client)) line.append(mark(row.client));
+        if (row.client && !row.unattributed && hasMask(window.TokenMonitorVendorPresentation.clientMarkId(row.client))) line.append(mark(row.client));
         else {
           const swatch = el('span', 'notch-swatch');
           swatch.style.background = color;

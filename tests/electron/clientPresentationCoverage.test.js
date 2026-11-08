@@ -22,35 +22,37 @@ const test = require('node:test');
 const { CLIENT_IDS, CLIENT_LABELS } = require('../../src/shared/clientCatalog');
 const { VENDOR_ORDER, VENDOR_LABELS } = require('../../src/electron/renderer/themePresets');
 const { clientColors } = require('../../src/electron/renderer/usageCharts');
-const { VENDOR_IDS } = require('../../src/shared/vendorPresentation');
+const { VENDOR_IDS, clientMarkId } = require('../../src/shared/vendorPresentation');
 const { STYLES_PATH: stylesPath, rendererStyles } = require('../helpers/rendererStyles');
+
+const clientMarks = CLIENT_IDS.map(clientMarkId);
 
 const rootDir = path.join(__dirname, '..', '..');
 const rendererPath = path.join(rootDir, 'src/electron/renderer/app.js');
 
 test('every catalog client has a usage chart colour', () => {
   assert.deepEqual(
-    Object.keys(clientColors).filter((id) => CLIENT_IDS.includes(id)),
-    CLIENT_IDS,
+    Object.keys(clientColors).filter((id) => clientMarks.includes(id)),
+    clientMarks,
     'tracked clientColors entries should follow CLIENT_CATALOG display order'
   );
-  for (const id of CLIENT_IDS) {
+  for (const id of clientMarks) {
     assert.ok(clientColors[id], `${id} needs a clientColors entry in usageCharts.js`);
   }
 });
 
 test('every catalog client has a vendor ordering slot and label', () => {
   assert.deepEqual(
-    VENDOR_ORDER.filter((id) => CLIENT_IDS.includes(id)),
-    CLIENT_IDS,
+    VENDOR_ORDER.filter((id) => clientMarks.includes(id)),
+    clientMarks,
     'tracked VENDOR_ORDER entries should follow CLIENT_CATALOG display order'
   );
   assert.deepEqual(
-    Object.keys(VENDOR_LABELS).filter((id) => CLIENT_IDS.includes(id)),
-    CLIENT_IDS,
+    Object.keys(VENDOR_LABELS).filter((id) => clientMarks.includes(id)),
+    clientMarks,
     'tracked VENDOR_LABELS entries should follow CLIENT_CATALOG display order'
   );
-  for (const id of CLIENT_IDS) {
+  for (const id of clientMarks) {
     assert.ok(VENDOR_ORDER.includes(id), `${id} needs a VENDOR_ORDER slot in themePresets.js`);
     assert.ok(VENDOR_LABELS[id], `${id} needs a VENDOR_LABELS entry in themePresets.js`);
   }
@@ -61,8 +63,8 @@ test('every catalog client has a vendor mark', () => {
   // limits marks. app.js builds clientsWithIcon from VENDOR_IDS
   // (rendererClientLabels.test.js asserts that), so this is the icon set.
   assert.deepEqual(
-    VENDOR_IDS.filter((id) => CLIENT_IDS.includes(id)),
-    CLIENT_IDS,
+    VENDOR_IDS.filter((id) => clientMarks.includes(id)),
+    clientMarks,
     'tracked vendor entries should follow CLIENT_CATALOG display order'
   );
 });
@@ -74,7 +76,7 @@ test('every catalog client resolves to an icon asset through its CSS rule', () =
   // zcode → zai.svg), so the installed mask rule is the mapping and the asset
   // is checked through it rather than assumed from the id.
   const styles = rendererStyles();
-  for (const id of CLIENT_IDS) {
+  for (const id of clientMarks) {
     // The class must be terminated by a selector separator: the renderer applies
     // exactly `row-icon-${client}`, so neither a suffixed rule
     // (.row-icon-<id>-sm) nor a descendant rule (.row-icon-<id> .child) styles
@@ -104,7 +106,7 @@ test('the subscription usage comparison reads the scan, never a display-label ta
   // asks it of the map the scan itself produced: every key there is a client id
   // by construction, so no label table can be consulted even by accident. Read
   // from source because the answer is which accessor the function reads.
-  const labelOnly = Object.keys(CLIENT_LABELS).filter((id) => !CLIENT_IDS.includes(id));
+  const labelOnly = Object.keys(CLIENT_LABELS).filter((id) => !clientMarks.includes(id));
   const view = fs.readFileSync(path.join(rootDir, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
   const body = view.match(/function subscriptionUsageCostUsd\([\s\S]*?\n {2}\}/);
   assert.ok(body, 'subscriptionUsageCostUsd should exist in the shared view');

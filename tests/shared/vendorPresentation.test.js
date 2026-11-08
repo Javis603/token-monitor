@@ -6,6 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  clientMarkId,
+  colorsForClients,
   DEFAULT_VENDOR_COLOR,
   MARK_IDS,
   ROW_ICON_MASKS,
@@ -93,6 +95,11 @@ test('a mask url survives an install path with parentheses', () => {
   );
   for (const rule of rules) {
     // Exactly the two quoted url() tokens, each containing no bare `)`.
+    if (rule.startsWith('.row-icon-gemini-cli ')) {
+      assert.ok(rule.includes('background: url("'));
+      assert.ok(rule.includes('gemini-cli.svg") center / contain no-repeat;'));
+      continue;
+    }
     assert.match(rule, /^\.row-icon-[a-z0-9-]+ \{ -webkit-mask-image: url\("([^"\\]|\\.)*"\); mask-image: url\("([^"\\]|\\.)*"\); \}$/);
   }
 });
@@ -114,4 +121,30 @@ test('Mistral Vibe uses the existing Mistral mark and brand colour', () => {
   assert.equal(mistral[0].color.toLowerCase(), '#fa520f');
   assert.equal(ROW_ICON_MASKS.mistral, 'mistral');
   assert.equal(trayIconFile('mistral'), 'mistral');
+});
+
+
+test('Gemini CLI branding is independent of the Gemini model vendor and its overrides', () => {
+  const { clientColor, clientColors, modelColor } = require('../../src/electron/renderer/usageCharts');
+  assert.equal(clientMarkId('gemini'), 'gemini-cli');
+  assert.equal(clientMarkId('codex'), 'codex');
+  assert.equal(clientColor('gemini'), '#1E1E2E');
+  assert.equal(modelColor('gemini-3.1-pro-preview'), '#4285f4');
+  assert.equal(VENDOR_LABELS.gemini, 'Gemini');
+  assert.equal(VENDOR_LABELS['gemini-cli'], 'Gemini CLI');
+  assert.equal(trayIconFile(clientMarkId('gemini')), 'gemini-cli');
+  const colors = colorsForClients({ ...vendorColors(), gemini: '#123456', 'gemini-cli': '#654321' });
+  assert.equal(colors.gemini, '#654321');
+  const original = clientColors.gemini;
+  try {
+    clientColors.gemini = '#123456';
+    assert.equal(modelColor('gemini-3.1-pro-preview'), '#123456');
+    assert.equal(clientColor('gemini'), '#1E1E2E');
+  } finally {
+    clientColors.gemini = original;
+  }
+  assert.deepEqual(widgetVendorPalette()['gemini-cli'], { fullColor: true, ink: true });
+  const rule = rowIconMaskRules('../../../assets/icons/').split('\n').find(rule => rule.startsWith('.row-icon-gemini-cli '));
+  assert.match(rule, /mask-image: none/);
+  assert.match(rule, /background: url\(".*gemini-cli\.svg"\)/);
 });

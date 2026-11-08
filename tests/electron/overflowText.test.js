@@ -667,6 +667,7 @@ test('actual shared row rendering keeps group availability and binds Auto Review
   const bindings = [];
   const context = {
     state: { breakdown: 'session', settings: { showToolIcons: true, deviceId: 'imac' } }, rowWidth: () => 50,
+    clientMarkId: require('../../src/shared/vendorPresentation').clientMarkId,
     toolIconsEnabled: value => value !== false, clientsWithIcon: new Set(['codex', 'claude']),
     deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
     setHoverMarqueeText: h.api.setText, overflowText: h.api, formatNumber: String, formatCost: String,

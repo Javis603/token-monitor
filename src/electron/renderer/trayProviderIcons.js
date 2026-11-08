@@ -16,7 +16,7 @@
   function trayProviderIconSources(clientIds) {
     const sources = {};
     for (const id of clientIds || []) {
-      const file = VARIANT_ICON_FILES[id] || vendorPresentation.trayIconFile(id);
+      const file = VARIANT_ICON_FILES[id] || vendorPresentation.trayIconFile(vendorPresentation.clientMarkId(id));
       sources[id] = `../../../assets/icons/${file}.svg`;
     }
     return sources;

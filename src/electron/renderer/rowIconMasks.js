@@ -33,6 +33,9 @@
     // they are [a-z0-9-] (vendorPresentation.test.js).
     return Object.entries(vendorPresentation.ROW_ICON_MASKS).map(([id, file]) => {
       const url = `${iconBaseUrl}${file}.svg`.replace(/["\\]/g, '\\$&');
+      if (vendorPresentation.VENDOR_PRESENTATION.find((entry) => entry.id === id)?.fullColor) {
+        return `.row-icon-${id} { -webkit-mask-image: none; mask-image: none; background: url("${url}") center / contain no-repeat; }`;
+      }
       return `.row-icon-${id} { -webkit-mask-image: url("${url}"); mask-image: url("${url}"); }`;
     }).join('\n');
   }

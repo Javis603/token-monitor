@@ -7,12 +7,13 @@
 // A mark id is a tracked client, a model vendor that modelVendorFor() resolves
 // to, or a limits provider — three domains that share one string and one mark,
 // which is why this is its own table rather than a field on the client catalog
-// or the limits registry. Labels are not repeated here for catalog ids: the
-// catalog already names them, so an entry only carries `label` for an id no
-// catalog owns.
+// or the limits registry. Labels normally come from the client catalog. A separate client mark or
+// a model vendor sharing an accounting id can declare its own label.
 //
 // Fields, all optional except `id`:
-//   label        display name for an id the client catalog does not name
+//   client       accounting client whose display uses a separate mark id
+//   fullColor    preserve the artwork colours instead of applying a single ink
+//   label        display name when it differs from the client catalog
 //   color        brand colour; an entry with one is a vendor the appearance
 //                picker lists and the user can override (the override keys are
 //                persisted, so removing a colour drops a user's setting)
@@ -41,7 +42,7 @@
     { id: 'openclaw', color: '#ff4d4d' },
     { id: 'cursor', color: '#000000', widgetInk: true },
     { id: 'antigravity', color: '#4285f4' },
-    { id: 'gemini', color: '#4285f4' },
+    { id: 'gemini-cli', client: 'gemini', label: 'Gemini CLI', color: '#1E1E2E', widgetInk: true, fullColor: true },
     { id: 'cline', color: '#9D4EDD', widgetColor: '#53616D' },
     { id: 'amp', color: '#F34E3F' },
     { id: 'droid', color: '#000000', widgetInk: true },
@@ -79,6 +80,7 @@
     // Not tracked clients: model vendors and limits providers. A vendor shares
     // the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
     { id: 'openrouter', label: 'OpenRouter', color: '#6566F1' },
+    { id: 'gemini', label: 'Gemini', color: '#4285f4' },
     { id: 'qoder', label: 'Qoder', color: '#2ADB5C' },
     { id: 'deepseek', label: 'DeepSeek', color: '#4d6bfe' },
     { id: 'xai', label: 'xAI', color: '#000000', mask: 'grok', widgetInk: true },
@@ -128,6 +130,16 @@
   // ever carry the coloured ones.
   const MARK_IDS = Object.freeze(VENDOR_PRESENTATION.map((entry) => entry.id));
 
+  const clientMarks = new Map(VENDOR_PRESENTATION.filter((entry) => entry.client).map((entry) => [entry.client, entry.id]));
+
+  function clientMarkId(id) {
+    return clientMarks.get(id) || id;
+  }
+
+  function colorsForClients(colors) {
+    return { ...colors, ...Object.fromEntries([...clientMarks].map(([client, mark]) => [client, colors[mark]])) };
+  }
+
   function iconFile(entry) {
     return entry.icon || entry.id;
   }
@@ -157,6 +169,7 @@
     const palette = { default: { color: DEFAULT_VENDOR_COLOR } };
     for (const entry of VENDOR_PRESENTATION) {
       const style = {};
+      if (entry.fullColor) style.fullColor = true;
       if (entry.widgetInk) style.ink = true;
       else if (entry.widgetColor || entry.color) style.color = entry.widgetColor || entry.color;
       if (iconFile(entry) !== entry.id) style.icon = iconFile(entry);
@@ -166,6 +179,8 @@
   }
 
   return {
+    clientMarkId,
+    colorsForClients,
     DEFAULT_VENDOR_COLOR,
     MARK_IDS,
     ROW_ICON_MASKS,

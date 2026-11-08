@@ -460,6 +460,10 @@
     return null;
   }
 
+  function clientColor(client) {
+    return clientColors[vendorPresentation.clientMarkId(client)] || clientColors.default;
+  }
+
   function modelColor(model) {
     const vendor = modelVendorFor(model);
     if (vendor && clientColors[vendor]) return clientColors[vendor];
@@ -681,7 +685,7 @@
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
-    clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
+    clientColor, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
   };
 });

@@ -32,7 +32,8 @@ const subscriptionTextApi = window.TokenMonitorSubscriptionText;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 const { activateOnPress } = window.TokenMonitorPressActivation;
-const { clientColors, modelColor, modelVendorFor } = window.TokenMonitorUsageCharts;
+const { clientColor, clientColors, modelColor, modelVendorFor } = window.TokenMonitorUsageCharts;
+const { clientMarkId } = window.TokenMonitorVendorPresentation;
 const { UNATTRIBUTED_KEY } = window.TokenMonitorUsageAttributionRows;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
 const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
@@ -319,7 +320,8 @@ function hasMask(id) {
   probe.style.visibility = 'hidden';
   document.body.append(probe);
   const computed = getComputedStyle(probe);
-  const image = computed.webkitMaskImage || computed.maskImage || 'none';
+  const mask = computed.webkitMaskImage || computed.maskImage || 'none';
+  const image = mask !== 'none' ? mask : computed.backgroundImage;
   probe.remove();
   const supported = Boolean(id) && image !== 'none';
   maskSupport.set(id, supported);
@@ -930,7 +932,7 @@ function runningMarksNode(cell, now = Date.now()) {
     // Brand colour, corrected for contrast like every other mark the dock
     // draws: the client id is what the mark is looked up by, and the rail
     // already reserves colour for severity, so these stay marks and not meters.
-    row.append(markNode(client, readableColor(clientColors[client] || clientColors.default)));
+    row.append(markNode(clientMarkId(client), readableColor(clientColor(client))));
   }
   const rest = clientCount - Math.min(clients.length, CELL_MARK_LIMIT);
   if (rest > 0) row.append(el('span', 'edge-dock-cell-more', `+${rest}`));
@@ -1555,7 +1557,7 @@ function sessionsContainer(sessions, options = {}) {
     // mixed list has to name each row's client somewhere and the meta line has
     // no room left for a label beside the model, the age and the gauge.
     if (options.showClientMark && session.client) {
-      nameNode.append(markNode(session.client));
+      nameNode.append(markNode(clientMarkId(session.client)));
       // The mark is a mask-painted span with no text, so the tool it stands for is
       // invisible to assistive technology unless the name is said out loud. The
       // client's own label, not its id: this is read as prose.
@@ -1804,10 +1806,10 @@ function statCard(cell) {
       color: readableColor(model.unattributed ? clientColors.default : modelColor(model.model))
     }))
     : cell.clients.map((client) => ({
-      id: client.unattributed ? 'token-monitor' : client.client,
+      id: client.unattributed ? 'token-monitor' : clientMarkId(client.client),
       name: client.client === UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabel(client.client),
       tokens: client.tokens,
-      color: readableColor(clientColors[client.client] || clientColors.default)
+      color: readableColor(clientColor(client.client))
     }));
   const list = el('div', 'edge-dock-accounts edge-dock-clients');
   const top = rows[0]?.tokens || 1;
@@ -1891,7 +1893,7 @@ function sessionsCard(cell, card, head) {
     // two-item caption row aligned on the baseline, and a mask-drawn mark has no
     // baseline, so it floated above its label. This row centers its three parts.
     const groupHead = el('div', 'edge-dock-session-group-head');
-    groupHead.append(markNode(client), el('span', 'edge-dock-section-title', clientLabel(client)));
+    groupHead.append(markNode(clientMarkId(client)), el('span', 'edge-dock-section-title', clientLabel(client)));
     const liveCount = runningSessionSummary(rows).count;
     if (liveCount > 0) groupHead.append(el('span', 'edge-dock-section-count', t('edgeDock.runningCount', { count: liveCount })));
     section.append(groupHead, sessionsContainer(rows, { showCount: false, separator: false }));
@@ -1929,8 +1931,8 @@ function clearCardSwitch() {
   motion.ghost.remove();
 }
 
-function captureCardSwitch(previous, sameCard) {
-  if (surface !== 'bubble' || !previous || prefersReducedMotion() || document.visibilityState === 'hidden') {
+function captureCardSwitch(previous, sameCard, opening = false) {
+  if (surface !== 'bubble' || !previous || opening || prefersReducedMotion() || document.visibilityState === 'hidden') {
     clearCardSwitch();
     return null;
   }
@@ -1988,7 +1990,10 @@ function commitCard(card, cellId) {
     .filter(list => !list.closest('.edge-dock-session-family'));
   const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
   const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
-  const switchMotion = captureCardSwitch(previous, sameCard);
+  // The native window stays visible at zero opacity between hovers, so page
+  // visibility cannot distinguish a new opening from a continuous switch.
+  const opening = previous?.dataset.reveal !== card.dataset.reveal;
+  const switchMotion = captureCardSwitch(previous, sameCard, opening);
   const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
   contentLayer.replaceChildren(card);
   overflowText.refresh();
@@ -2073,8 +2078,17 @@ function renderBubble(payload) {
     stagingLayer.replaceChildren();
     return;
   }
+  const previous = contentLayer.querySelector('.edge-dock-card');
+  if (previous && previous.dataset.reveal !== String(payload.reveal)) {
+    // Native fade-in can start before the placement ACK reaches this page.
+    // Hide the old reading before reporting a size, even with reduced motion.
+    clearCardSwitch();
+    previous.style.visibility = 'hidden';
+  }
   const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin:not([aria-hidden="true"])');
   if (retained && retained.dataset.pluginRef === cell.ref && retained.dataset.cellId === cell.id) {
+    retained.dataset.reveal = String(payload.reveal);
+    retained.style.visibility = '';
     retained.style.transform = contentTransform;
     const view = pluginHost?.state('edgeDock', cell.ref);
     const caption = retained.querySelector('.edge-dock-stat-caption'); if (caption) caption.textContent = view?.title || cell.ref;
@@ -2084,6 +2098,7 @@ function renderBubble(payload) {
   }
   const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
+  card.dataset.reveal = String(payload.reveal);
   card.style.transform = contentTransform;
   pluginContent?.retain(cell.kind === 'plugin' ? [] : [`edgeDock.${cell.kind}.content`]);
   if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {

@@ -928,3 +928,15 @@ test('MiMo widget rows of several accounts keep the account and product distingu
     'u***r@example.com · Alice MiMo abcdef1 · Console'
   ]);
 });
+
+
+test('Gemini CLI widget rows retain accounting id and use their separate full-color mark', () => {
+  const stats = sampleStats();
+  stats.periods.today.clients = { gemini: 29 };
+  const snapshot = buildSnapshot(stats, { now: NOW });
+  const tool = snapshot.periods.day.tools.find(tool => tool.id === 'gemini');
+  assert.equal(tool.markId, 'gemini-cli');
+  assert.equal(tool.displayName, 'Gemini CLI');
+  assert.equal(snapshot.vendors['gemini-cli'].fullColor, true);
+  assert.equal(snapshot.vendors.gemini.color, '#4285f4');
+});

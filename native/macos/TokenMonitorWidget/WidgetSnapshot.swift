@@ -308,13 +308,15 @@ struct WidgetModel: Decodable, Equatable, Identifiable {
 
 struct WidgetTool: Decodable, Equatable, Identifiable {
     let id: String
+    let markId: String?
     let displayName: String?
     let totalTokens: Int
     let costUsd: Double
     let sharePercent: Double
 
-    init(id: String, displayName: String? = nil, totalTokens: Int, costUsd: Double = 0, sharePercent: Double) {
+    init(id: String, markId: String? = nil, displayName: String? = nil, totalTokens: Int, costUsd: Double = 0, sharePercent: Double) {
         self.id = id
+        self.markId = markId
         self.displayName = displayName
         self.totalTokens = totalTokens
         self.costUsd = costUsd
@@ -329,20 +331,23 @@ struct WidgetVendorStyle: Decodable, Equatable {
     let color: String?
     let ink: Bool
     let icon: String?
+    let fullColor: Bool
 
-    init(color: String? = nil, ink: Bool = false, icon: String? = nil) {
+    init(color: String? = nil, ink: Bool = false, icon: String? = nil, fullColor: Bool = false) {
         self.color = color
         self.ink = ink
         self.icon = icon
+        self.fullColor = fullColor
     }
 
-    private enum CodingKeys: String, CodingKey { case color, ink, icon }
+    private enum CodingKeys: String, CodingKey { case color, ink, icon, fullColor }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         color = c.optionalString(.color)
         ink = (try? c.decodeIfPresent(Bool.self, forKey: .ink)) ?? false
         icon = c.optionalString(.icon)
+        fullColor = (try? c.decodeIfPresent(Bool.self, forKey: .fullColor)) ?? false
     }
 }
 
@@ -528,10 +533,11 @@ extension WidgetModel {
 }
 
 extension WidgetTool {
-    private enum CodingKeys: String, CodingKey { case id, displayName, totalTokens, costUsd, sharePercent }
+    private enum CodingKeys: String, CodingKey { case id, markId, displayName, totalTokens, costUsd, sharePercent }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
+        markId = c.optionalString(.markId)
         displayName = c.optionalString(.displayName)
         totalTokens = try c.decode(Int.self, forKey: .totalTokens)
         costUsd = try c.decode(Double.self, forKey: .costUsd)

@@ -58,7 +58,7 @@ test('Devices, sync settings and TPS agree on labels in Node and browser entrypo
       state: { settings: { deviceId: 'remote' }, period: 'today' },
       fixedPeriodDevices: () => devices,
       deviceBreakdownApi: api.TokenMonitorDeviceBreakdown,
-      clientLabels: {}, clientColors: {},
+      clientLabels: {}, clientColors: {}, colorsForClients: require('../../src/shared/vendorPresentation').colorsForClients,
       deviceRuntimeLabel: () => '', deviceSyncedLabel: () => '', deviceColor: () => '', t: (key) => key
     });
     const rows = vm.runInContext(`${rowsSource}\ndeviceRowsForPeriod()`, context);
