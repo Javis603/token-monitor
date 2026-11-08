@@ -52,6 +52,64 @@
           }
         }
       ]
+    },
+    {
+      "id": "openai-api-credit",
+      "name": {
+        "en": "OpenAI API Credits",
+        "zh-TW": "OpenAI API Credits",
+        "zh-CN": "OpenAI API Credits",
+        "ja": "OpenAI API Credits",
+        "ko": "OpenAI API Credits",
+        "pt-BR": "OpenAI API Credits"
+      },
+      "description": {
+        "en": "Read actual Platform API credit using manually supplied session credentials.",
+        "zh-TW": "使用手動提供的 Platform 登入憑證讀取實際 API 點數餘額。",
+        "zh-CN": "使用手动提供的 Platform 登录凭证读取实际 API 点数余额。",
+        "ja": "手動で入力した Platform のログイン認証情報で、実際の API クレジット残高を取得します。",
+        "ko": "직접 입력한 Platform 로그인 자격 증명으로 실제 API 크레딧 잔액을 조회합니다.",
+        "pt-BR": "Consulte o saldo real de créditos da API com credenciais de sessão do Platform inseridas manualmente."
+      },
+      "author": "Javis603",
+      "presentation": {
+        "icon": {
+          "native": "codex"
+        },
+        "color": {
+          "palette": "codex"
+        }
+      },
+      "repository": "https://github.com/Javis603/token-monitor",
+      "readmePaths": {
+        "en": "plugins/openai-api-credit/README.md",
+        "zh-CN": "plugins/openai-api-credit/README.zh-CN.md",
+        "zh-TW": "plugins/openai-api-credit/README.zh-TW.md",
+        "ko": "plugins/openai-api-credit/README.ko.md",
+        "ja": "plugins/openai-api-credit/README.ja.md",
+        "pt-BR": "plugins/openai-api-credit/README.pt-BR.md"
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "url": "https://raw.githubusercontent.com/Javis603/token-monitor/dist/openai-api-credit-0.1.0.tmplugin",
+          "sha256": "fcfcdd3e12c16911d4044700cf0a39aff059e51dd67cdb8e6acbc5bb5a74074f",
+          "engines": {
+            "tokenMonitor": ">=0.88.0"
+          },
+          "types": [
+            "limits"
+          ],
+          "changelog": {
+            "en": "Initial release: actual OpenAI Platform API credit balance in native Limits, verified manual session credentials, native Codex artwork and colors, optional balance-only display, and per-grant expiry details. Interface and documentation support six languages.",
+            "zh-CN": "首次发布：在原生额度页显示实际 OpenAI Platform API 点数余额，支持手动登录凭证验证、Codex 图标与配色、仅余额选项及各笔点数到期明细。界面及文档支持六种语言。",
+            "zh-TW": "首次發布：在原生額度頁顯示實際 OpenAI Platform API 點數餘額，支援手動登入憑證驗證、Codex 圖示與配色、純餘額選項及各筆點數到期明細。介面及文件支援六種語言。",
+            "ko": "첫 릴리스: 기본 할당량 화면에 실제 OpenAI Platform API 크레딧 잔액을 표시합니다. 수동 자격 증명 검증, Codex 아이콘 및 색상, 잔액만 표시하는 옵션과 크레딧별 만료 상세 정보를 지원합니다. 인터페이스와 문서는 6개 언어를 지원합니다.",
+            "ja": "初回リリース：標準クォータ画面に実際の OpenAI Platform API クレジット残高を表示。手動認証情報の検証、Codex のアイコンと配色、残高のみの表示、クレジットごとの有効期限詳細に対応。UI とドキュメントは6言語に対応しています。",
+            "pt-BR": "Versão inicial: saldo real de créditos da API do OpenAI Platform nas cotas nativas, credenciais de sessão manuais verificadas, ícone e cores do Codex, opção de apenas saldo e detalhes de validade por crédito. Interface e documentação em seis idiomas."
+          }
+        }
+      ]
     }
   ]
 }
