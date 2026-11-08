@@ -9933,6 +9933,7 @@ function syncSettingsForm() {
   }
   settingsDomSyncPending = false;
   setupLimitAccountPanels();
+  applyInitialBreakdownPreference();
   applyVisibleSettingsAppearance();
   // Drives the header pin button as well as the Settings select, so it has to run
   // whenever the window is on screen — the pin button is reachable, and changes,
@@ -10093,7 +10094,6 @@ function syncSettingsForm() {
 
 function applyVisibleSettingsAppearance() {
   applySettingsTranslations();
-  applyInitialBreakdownPreference();
   syncPeriodTabs();
   applyVendorColorOverrides(state.settings.vendorColors);
   applyAppearanceSettings(state.settings);

@@ -96,3 +96,30 @@ test('static shell agrees with the icon-only title default', () => {
   assert.match(main, /titleIconOnly: true/);
   assert.match(html, /<main class="shell title-icon-only"/);
 });
+
+test('early appearance does not consume a plugin-dependent initial Limits preference', () => {
+  const context = vm.createContext({
+    state: { settings: { viewDisplayOrder: 'limits,home', hiddenViews: '' }, breakdown: 'home', pluginCatalog: null },
+    VIEW_DISPLAY_OPTIONS: [{ id: 'home' }, { id: 'limits' }],
+    viewDisplayPreferencesApi: require('../../src/electron/renderer/viewDisplayPreferences'),
+    effectiveViewDisplayOrderValue: () => 'limits,home',
+    // The plugin-only Limits page is unavailable until discovery supplies it.
+    availableBreakdownIds: () => context.state.pluginCatalog ? ['home', 'limits'] : ['home'],
+    setBreakdown: value => { context.state.breakdown = value; },
+    isRendererWindowHidden: () => false,
+    isSettingsSurfaceVisible: () => false,
+    setupLimitAccountPanels: () => {},
+    applySettingsTranslations: () => {},
+    syncPeriodTabs: () => {},
+    applyVendorColorOverrides: () => {},
+    applyAppearanceSettings: () => {},
+    syncWindowBehaviorControls: () => {}
+  });
+  const preference = app.slice(app.indexOf('function applyInitialBreakdownPreference()'), app.indexOf('function renderSessionUsageArchiveStatus()'));
+  const sync = app.slice(app.indexOf('function syncSettingsForm()'), app.indexOf('function enabledClientSet()'));
+  vm.runInContext(`let initialBreakdownPreferenceApplied = false;\n${preference}\n${sync}\napplyVisibleSettingsAppearance();`, context);
+  assert.equal(context.state.breakdown, 'home');
+  context.state.pluginCatalog = { limits: { modules: [{ id: 'plugin:fixture:quota' }] } };
+  vm.runInContext('syncSettingsForm();', context);
+  assert.equal(context.state.breakdown, 'limits');
+});
