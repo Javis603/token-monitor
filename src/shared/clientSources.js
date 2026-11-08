@@ -268,6 +268,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('antigravity',
     ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')],
     ['antigravity-extension-data', path.join(home, '.gemini', 'antigravity', 'conversations')]);
+  // Antigravity keeps its own roots under this home; do not watch `.gemini` itself.
+  const geminiHome = nonBlankEnvPath('GEMINI_CLI_HOME', path.join(tokscaleHome, '.gemini'), env);
+  add('gemini', ['gemini-sessions', path.join(geminiHome, 'tmp')]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.

@@ -65,6 +65,23 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
   {
+    client: 'gemini',
+    // 20 input - 5 cached + 4 tool = 19; thoughts stay out of output.
+    expectedRow: { model: 'gemini-3.1-pro-preview', input: 19, output: 2, cacheRead: 5, cacheWrite: 0, reasoning: 3 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 29, clientTokens: 29, clientOutputTokens: 5 },
+    expectedSession: { id: 'session-gemini-contract', totalTokens: 29, outputTokens: 5, reasoningTokens: 3 },
+    writeFixture(home) {
+      const dir = path.join(home, '.gemini', 'tmp', 'contract', 'chats');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'session-gemini-contract.json'), JSON.stringify({
+        type: 'gemini',
+        model: 'gemini-3.1-pro-preview',
+        tokens: { input: 20, output: 2, cached: 5, thoughts: 3, tool: 4, total: 29 }
+      }));
+    }
+  },
+  {
     client: 'prime-agent',
     expectedRow: { sessionId: 'prime-contract', model: 'claude-sonnet-4-5', input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, reasoning: 0 },
     additionalRows: [{ sessionId: 'prime-child-contract', model: 'claude-sonnet-4-5', input: 40, output: 12, cacheRead: 8, cacheWrite: 0, reasoning: 0 }],
@@ -590,7 +607,7 @@ function hermeticEnv(home) {
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'CODEX_HOME', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
     'VIBE_HOME', 'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
-    'JCODE_HOME', 'PRIME_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_DIR',
+    'JCODE_HOME', 'GEMINI_CLI_HOME', 'PRIME_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_DIR',
     'SENPI_CODING_AGENT_DIR', 'SENPI_CODING_AGENT_SESSION_DIR'
   ]) {
     delete env[key];

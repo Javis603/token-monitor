@@ -77,7 +77,7 @@ function iconKindFor(rowData, breakdown) {
     }
     const vendor = modelVendorFor(rowData.key);
     return vendor && clientsWithIcon.has(vendor)
-      ? { kind: 'icon', iconClass: `row-icon-${vendor}` }
+      ? { kind: 'icon', iconClass: `row-icon-${vendor} model-icon` }
       : { kind: 'icon', iconClass: 'row-icon-token-monitor' };
   }
   if (breakdown === 'session') {
@@ -1278,7 +1278,7 @@ function renderLiveTokenRate() {
   for (const cell of els.liveTokenRate.querySelectorAll('.limit-detail-tooltip-row span:first-child')) {
     const model = cell.textContent;
     const icon = document.createElement('span');
-    icon.className = `row-icon row-icon-${modelVendorFor(model) || 'token-monitor'}`;
+    icon.className = `row-icon row-icon-${modelVendorFor(model) || 'token-monitor'} model-icon`;
     icon.setAttribute('aria-hidden', 'true');
     const name = document.createElement('span');
     name.className = 'live-token-rate-model-label';
@@ -8370,7 +8370,7 @@ let appliedThemeOverrides = {};
 // Snapshot of the canonical brand colours, taken before any override is
 // applied. clientColors is mutated in place (other modules hold the same
 // reference), so this is the source of truth for "reset to brand".
-const BRAND_VENDOR_COLORS = { ...clientColors };
+const BRAND_VENDOR_COLORS = vendorPresentationApi.vendorColors();
 
 function appearanceSummary() {
   const theme = themePresetsApi.normalizeOverrides(state.settings?.themeColors, themePresetsApi.INTERFACE_COLOR_KEYS);
@@ -8406,7 +8406,7 @@ function applyThemeColors(overrides) {
 
 function applyVendorColorOverrides(overrides) {
   const merged = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, overrides);
-  for (const key of Object.keys(BRAND_VENDOR_COLORS)) clientColors[key] = merged[key];
+  window.TokenMonitorUsageCharts.applyVendorColors(merged);
 }
 
 // Current resolved palette value for an interface colour key.
