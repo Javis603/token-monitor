@@ -68,7 +68,7 @@ The renderer has no Node integration. Use `ctx.backend.call` for network/files/c
 
 ## Shared dropdowns in the desktop App
 
-Standard plugin preference fields already use the App's shared dropdowns. Custom content inserted into an App page keeps its own controls by default. Add `data-tm-select` to a single-select element before inserting it into the desktop App document to opt into the shared picker, including inside an appended, decorated or replacement content view:
+Eligible single-select elements in the desktop App use the shared dropdown automatically, including standard plugin preferences, custom pages, and appended, decorated or replacement content. Authors can use ordinary `select` elements without importing a widget or adding an opt-in marker:
 
 ```js
 const label = document.createElement('label');
@@ -77,7 +77,6 @@ const title = document.createElement('span');
 title.className = 'settings-item-title';
 title.textContent = 'Display'; // Use your plugin's localized text.
 const select = document.createElement('select');
-select.setAttribute('data-tm-select', '');
 select.add(new Option('Compact', 'compact'));
 const detailed = new Option('Detailed', 'detailed');
 detailed.dataset.tmSelectDescription = 'Show the full breakdown.';
@@ -87,9 +86,11 @@ label.append(title, select);
 container.append(label);
 ```
 
-The host discovers inserted controls asynchronously. Keep reading/writing `select.value` and handling its `change` event; do not address the generated button or popup. An option's optional `data-tm-select-description` is plain text supplied and localized by the plugin, and changes to options or their descriptions update the picker. Short lists stay compact; long lists offer search using App-localized search/empty labels. Multiple-selection and listbox-style selects stay native. The host removes generated controls when their source leaves the document, so normal mount disposal should remove the plugin's DOM. Set the opt-in marker before insertion and keep it for that element's lifetime. Authors retain responsibility for the surrounding layout.
+The host discovers inserted controls asynchronously. Keep reading/writing `select.value` and handling its `change` event; do not address the generated button or popup. An option's optional `data-tm-select-description` is plain text supplied and localized by the plugin, and changes to options or their descriptions update the picker. Short lists stay compact; long lists offer search using App-localized search/empty labels. The host removes generated controls when their source leaves the document, so normal mount disposal should remove the plugin's DOM. Authors retain responsibility for the surrounding layout. Enhancement hides the source and inserts a visible button beside it; account for that button in custom CSS rather than relying on selectors that style only `select`.
 
-This integration is for the desktop App renderer, including detached plugin pages. It does not add shared dropdown support to the separate Notch/Dock renderers or native tray menus. Unmarked controls inside `.plugin-content` keep their existing behavior; standalone plugin page controls are automatically enhanced by the host.
+To retain a native control, set `data-tm-native-select` before inserting it, for example `<select data-tm-native-select>…</select>`. This is available in both embedded and detached plugin pages. Choose shared or native behavior when creating the element; keep the marker unchanged for its lifetime. Multiple-selection and listbox-style controls stay native automatically.
+
+This integration is for the desktop App renderer, including detached plugin pages. It does not add shared dropdown support to the separate Notch/Dock renderers or native tray menus. The default applies both inside `.plugin-content` and on standalone plugin pages.
 
 ## Tray actions
 

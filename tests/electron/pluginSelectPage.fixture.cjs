@@ -37,10 +37,10 @@ app.whenReady().then(async () => {
   assert.equal(await run('typeof TokenMonitorAppSelects'),'object','detached entry loads shared select modules');
   await run(`(()=>{
     const region=document.createElement('div');region.className='plugin-content';
-    region.innerHTML='<label>Display<select id="detachedSelect" data-tm-select><option value="compact">Compact</option><option value="detailed" data-tm-select-description="Plugin-local detail text">Detailed</option></select></label><select id="authorNative"><option>Native author control</option></select><select id="detachedLong" data-tm-select></select>';
+    region.innerHTML='<label>Display<select id="detachedSelect"><option value="compact">Compact</option><option value="detailed" data-tm-select-description="Plugin-local detail text">Detailed</option></select></label><select id="authorNative" data-tm-native-select><option>Native author control</option></select><select id="detachedLong"></select>';
     for(let i=0;i<15;i++) region.querySelector('#detachedLong').add(new Option('Model '+i,String(i)));
     window.changes=0;region.querySelector('#detachedSelect').addEventListener('change',()=>changes++);
-    document.getElementById('pageContent').append(region);
+    document.getElementById('pageContent').append(region,region.querySelector('#authorNative'));
   })()`);
   await settle();
   assert.deepEqual(await run('({custom:document.getElementById("detachedSelect").hidden,native:document.getElementById("authorNative").hidden})'),{custom:true,native:false});

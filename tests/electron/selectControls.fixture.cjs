@@ -291,31 +291,32 @@ app.whenReady().then(async () => {
   await settle();
   assert.equal(await run(`document.querySelectorAll('.select-control-popup').length`), popups - 1);
 
-  // Plugin-authored content keeps native controls unless the author opts in.
+  // Plugin-authored single selects use the shared picker unless the author opts out.
   const pluginPopups = await run(`document.querySelectorAll('.select-control-popup').length`);
   await run(`(()=>{
     const region=document.createElement('div');region.className='plugin-content';region.id='pluginSelectFixture';
-    region.innerHTML='<label class="settings-item"><span class="settings-item-title">Plugin mode</span><select id="pluginOptIn" data-tm-select><option value="short">Compact</option><option value="detail" data-tm-select-description="A longer explanation supplied by the plugin author.">Detailed</option></select></label><select id="pluginNative"><option>Author control</option></select><select id="pluginMultiple" data-tm-select multiple><option>Multiple</option></select><label class="settings-item"><span class="settings-item-title">Plugin models</span><select id="pluginLong" data-tm-select></select></label>';
+    region.innerHTML='<label class="settings-item"><span class="settings-item-title">Plugin mode</span><select id="pluginDefault"><option value="short">Compact</option><option value="detail" data-tm-select-description="A longer explanation supplied by the plugin author.">Detailed</option></select></label><select id="pluginNative" data-tm-native-select><option>Author control</option></select><select id="pluginMultiple" multiple><option>Multiple</option></select><select id="pluginListbox" size="3"><option>Listbox</option></select><label class="settings-item"><span class="settings-item-title">Plugin models</span><select id="pluginLong"></select></label>';
     const long=region.querySelector('#pluginLong');
     for(let i=0;i<15;i++) long.add(new Option('Plugin model '+i,String(i)));
     document.getElementById('fixturePanel').prepend(region);
-    window.pluginSelectChanges=0;region.querySelector('#pluginOptIn').addEventListener('change',()=>pluginSelectChanges++);
+    window.pluginSelectChanges=0;region.querySelector('#pluginDefault').addEventListener('change',()=>pluginSelectChanges++);
   })()`);
   await settle();
-  assert.deepEqual(await run(`({opted:document.getElementById('pluginOptIn').hidden,native:document.getElementById('pluginNative').hidden,multiple:document.getElementById('pluginMultiple').hidden})`),
-    {opted:true,native:false,multiple:false});
-  await run(`document.getElementById('pluginOptIn').nextElementSibling.scrollIntoView({block:'nearest'})`);
+  assert.deepEqual(await run(`({custom:document.getElementById('pluginDefault').hidden,native:document.getElementById('pluginNative').hidden,multiple:document.getElementById('pluginMultiple').hidden,listbox:document.getElementById('pluginListbox').hidden})`),
+    {custom:true,native:false,multiple:false,listbox:false});
+  assert.equal(await run(`(()=>{const native=document.getElementById('pluginNative');native.focus();return document.activeElement===native && !Object.hasOwn(native,'value') && !Object.hasOwn(native,'focus')})()`),true);
+  await run(`document.getElementById('pluginDefault').nextElementSibling.scrollIntoView({block:'nearest'})`);
   await settle();
-  await click('#pluginOptIn + button');
+  await click('#pluginDefault + button');
   assert.equal(await run(`document.querySelector('.select-control-popup:popover-open .select-control-description:not([hidden])').textContent`), 'A longer explanation supplied by the plugin author.');
   await capture('plugin-options');
   await key('Down');await key('Return');
-  assert.deepEqual(await run(`({value:document.getElementById('pluginOptIn').value,changes:pluginSelectChanges})`),{value:'detail',changes:1});
-  await run(`document.getElementById('pluginOptIn').value='short'`);
-  assert.equal(await run(`document.querySelector('#pluginOptIn + button .select-control-value').textContent`),'Compact');
-  await run(`document.querySelector('#pluginOptIn option[value="detail"]').dataset.tmSelectDescription='Updated plugin description'`);
+  assert.deepEqual(await run(`({value:document.getElementById('pluginDefault').value,changes:pluginSelectChanges})`),{value:'detail',changes:1});
+  await run(`document.getElementById('pluginDefault').value='short'`);
+  assert.equal(await run(`document.querySelector('#pluginDefault + button .select-control-value').textContent`),'Compact');
+  await run(`document.querySelector('#pluginDefault option[value="detail"]').dataset.tmSelectDescription='Updated plugin description'`);
   await settle();
-  await click('#pluginOptIn + button');
+  await click('#pluginDefault + button');
   assert.equal(await run(`document.querySelector('.select-control-popup:popover-open .select-control-description:not([hidden])').textContent`),'Updated plugin description');
   await key('Escape');
   await click('#pluginLong + button');
