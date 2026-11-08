@@ -17,9 +17,20 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ width: 500, height: 720, webPreferences: { sandbox: true } });
   const errors = [];
   win.webContents.on('console-message', event => { if (event.level === 'error') { errors.push(event.message); console.error(event.message); } });
-  const html = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8').replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '');
+  const html = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8');
   const fixture = path.join(output, 'fixture.html');
-  fs.writeFileSync(fixture, html.replace('<head>', `<head><base href="${pathToFileURL(`${renderer}/`).href}">`));
+  await win.loadURL('about:blank');
+  // Parse the trusted app document inertly, then remove its boot scripts before
+  // loading the fixture. HTML parsing handles tag case and malformed markup.
+  const fixtureHtml = await win.webContents.executeJavaScript(`(()=>{
+    const source=new DOMParser().parseFromString(${JSON.stringify(html)},'text/html');
+    for(const script of source.querySelectorAll('script')) script.remove();
+    const base=source.createElement('base');
+    base.href=${JSON.stringify(pathToFileURL(`${renderer}/`).href)};
+    source.head.prepend(base);
+    return '<!doctype html>'+source.documentElement.outerHTML;
+  })()`);
+  fs.writeFileSync(fixture, fixtureHtml);
   await win.loadFile(fixture);
   for (const name of ['i18n.js', '../../shared/fontSettings.js', '../../shared/deviceKind.js', 'selectControl.js', 'deviceIcons.js', 'appSelects.js']) {
     await win.webContents.executeJavaScript(fs.readFileSync(path.join(renderer, name), 'utf8'));
