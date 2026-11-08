@@ -268,6 +268,30 @@ test('App manual-button IPC uses the shared entry; other stats reads retain thei
   assert.match(main, /options\?\.force === true && options\?\.feedback === true \? refreshManualStats\(\) : fetchStats\(options\)/);
 });
 
+for (const first of ['App', 'native']) test(`${first} manual refresh starts one shared plugin refresh without waiting for quota`, async () => {
+  const { context, usage, limits } = fixture();
+  const quota = deferred(), logs = [];
+  let pluginCalls = 0, handler;
+  context.pluginRuntime = { refreshLimits: () => { pluginCalls++; return quota.promise; }, manager: { surfaceCatalog: () => [] }, publishStats() {} };
+  context.console.log = message => logs.push(message);
+  context.statsPushSource = null; context.latestStats = null;
+  context.ipcMain = { handle: (_name, fn) => { handler = fn; } };
+  const start = main.indexOf("  ipcMain.handle('stats:get',");
+  vm.runInNewContext(main.slice(start, main.indexOf("  ipcMain.handle('devices:delete',", start)), context);
+  const app = () => handler({}, { force: true, feedback: true });
+  const native = () => context.refreshStatsFromEdgeDock();
+  const pending = [first === 'App' ? app() : native()];
+  assert.equal(pluginCalls, 1, 'the initiating entry point refreshes plugin quotas');
+  pending.push(first === 'App' ? native() : app());
+  assert.equal(pluginCalls, 1, 'both actual entry points join one plugin refresh');
+  usage.resolve(true); await Promise.all(pending);
+  quota.reject(Error('synthetic quota failure')); await new Promise(setImmediate);
+  assert.ok(logs.some(message => message.includes('[plugins] Limits refresh failed: synthetic quota failure')));
+  context.pluginRuntime.refreshLimits = async () => { pluginCalls++; };
+  await native(); assert.equal(pluginCalls, 2, 'a later manual action can retry');
+  limits.resolve();
+});
+
 function clientFixture() {
   const fixtureResult = fixture();
   const { context } = fixtureResult;
@@ -446,7 +470,9 @@ test('manual refresh reconciles older-only usage in Month, All Time and History'
 
 test('Tray-menu refresh retains its existing full usage request', async () => {
   const { context, usage, limits, calls } = fixture();
+  let pluginCalls = 0;
   Object.assign(context, {
+    pluginRuntime: { refreshLimits: async () => { pluginCalls++; } },
     trayRefreshInFlight: false,
     captureMacWidgetProducerOwner: () => null,
     runTrayMenuAction: ({ action }) => action(),
@@ -457,6 +483,7 @@ test('Tray-menu refresh retains its existing full usage request', async () => {
   const trayRefresh = main.slice(main.indexOf('async function refreshFromTray'), main.indexOf('function setTrayContentFromMenu'));
   vm.runInNewContext(trayRefresh, context);
   const request = context.refreshFromTray();
+  assert.equal(pluginCalls, 1, 'the Tray menu also refreshes desktop-local plugin quotas');
   assert.equal(JSON.stringify(calls), JSON.stringify([
     ['limits', { all: true }, 'manual'],
     ['usage', 'manual', { forceHistory: false, forceSelfSync: false }]

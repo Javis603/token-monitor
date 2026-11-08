@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, settings, stats, root, evidence, js, waitFor, capture, nativeProofSurfaces }) {
@@ -28,7 +29,7 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
   assert.equal(await js("els.edgeDockComposer.querySelectorAll('.edge-dock-composer-mark > span').length>=3"), true, 'module/custom-view icons in composer');
   const projected = require('../src/electron/plugins/limitsPresentation').projectPluginLimits(stats, runtime.limitsSnapshot());
   const dockSettings = { ...settings, edgeDockEnabled: true, edgeDockMode: 'always', edgeDockSide: 'right', edgeDockItems: [{ type: 'limit', provider: 'plugin:synthetic-limits:one' }, { type: 'limit', provider: 'plugin:synthetic-limits:two' }],
-    notchEnabled: true, notchShape: 'pill', notchSummaryMode: 'tray', trayContent: 'barsAllSessions', limitProviders: 'plugin:synthetic-limits:one,plugin:synthetic-limits:two', notchBuiltinPages: ['home', 'limits', 'sessions'], notchHoverAction: 'open', notchHoverDelayMs: 0 };
+    notchEnabled: true, notchRefreshEnabled: true, notchShape: 'pill', notchSummaryMode: 'tray', trayContent: 'barsAllSessions', limitProviders: 'plugin:synthetic-limits:one,plugin:synthetic-limits:two', notchBuiltinPages: ['home', 'limits', 'sessions'], notchHoverAction: 'open', notchHoverDelayMs: 0 };
   const cells = require('../src/electron/renderer/edgeDock/presentation').buildEdgeDockCells(projected, { items: dockSettings.edgeDockItems });
   assert.equal(cells.length, 2);
   const windows = [];
@@ -44,13 +45,20 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
   screen.getAllDisplays = () => [display]; screen.getPrimaryDisplay = () => display;
   screen.getDisplayMatching = () => display; screen.getDisplayNearestPoint = () => display;
   screen.point = { x: 600, y: 15 }; screen.getCursorScreenPoint = () => screen.point;
+  const mainSource = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
+  const refreshContext = vm.createContext({ pluginRuntime: runtime, deviceRuntimeHandle: null, hubModeGeneration: 1, statsPushRevision: 0,
+    edgeDockManualStats: null, fetchStats: async () => stats, repaintDockSurfaces() {}, console });
+  const refreshFunctions = ['refreshManualStats', 'refreshStatsFromEdgeDock'].map(name => mainSource.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n}`))[0]).join('\n');
+  vm.runInContext('let manualStatsRefreshInFlight = null;\n' + refreshFunctions, refreshContext);
   const common = { BrowserWindow: RecordingWindow, ipcMain, screen, getSettings: () => dockSettings, platform: 'darwin',
-    rendererDir: path.join(root, 'src/electron/renderer'), prefersReducedMotion: () => true, primaryButtonDown: () => false, nativeGlass: () => false };
+    rendererDir: path.join(root, 'src/electron/renderer'), prefersReducedMotion: () => true, primaryButtonDown: () => false, nativeGlass: () => false,
+    canRefreshLimits: () => true, onRefreshLimits: () => refreshContext.refreshStatsFromEdgeDock() };
   const notch = require('../src/electron/notch/controller').createNotchController({ ...common,
     preloadPath: path.join(root, 'src/electron/notch/preload.js'), readScreens: () => ({ screens: [], mainDisplayId: 1 }) });
   const dock = require('../src/electron/edgeDock/controller').createEdgeDockController({ ...common,
     preloadPath: path.join(root, 'src/electron/edgeDock/preload.js') });
   try {
+    runtime.demandLimits(true, 'fixture.native-refresh');
     notch.setAppearance({ ...settings, language: 'zh-TW', reduceMotion: 'on' });
     notch.setData(require('../src/electron/notch/data').buildNotchData(projected, cells, dockSettings)); notch.sync();
     dock.setAppearance({ ...settings, language: 'zh-TW', reduceMotion: 'on' }); dock.setCells(cells); dock.sync();
@@ -64,6 +72,10 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     await notchWin.webContents.executeJavaScript("document.querySelector('[data-page=limits][role=tab]').click()"); await pause(250);
     assert.equal(await notchWin.webContents.executeJavaScript("document.querySelector('.notch-page-limits').textContent.includes('API credits')"), true);
     assert.equal(notch.quotaVisibility().panel, true);
+    const beforeRefresh = runtime.limitsSnapshot().providers[0].updatedAt;
+    assert.equal((await notchWin.webContents.executeJavaScript('tokenMonitorEdgeDock.refreshLimits()')).ok, true);
+    for (let n = 0; n < 50 && runtime.limitsSnapshot().providers[0].updatedAt === beforeRefresh; n++) await pause(40);
+    assert.notEqual(runtime.limitsSnapshot().providers[0].updatedAt, beforeRefresh, 'native Refresh resamples the real synthetic plugin registry');
     fs.writeFileSync(path.join(evidence, 'notch-limits.png'), (await notchWin.webContents.capturePage()).toPNG());
     const railWin = await bySurface('rail');
     assert.equal(await railWin.webContents.executeJavaScript("document.querySelectorAll('.edge-dock-cell').length>=2"), true);
@@ -93,6 +105,6 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     await capture('composer-disabled.png');
     const inactive = require('../src/electron/plugins/limitsPresentation').projectPluginLimits(stats, runtime.limitsSnapshot());
     assert.equal(require('../src/electron/renderer/edgeDock/presentation').buildEdgeDockCells(inactive, { items: dockSettings.edgeDockItems }).length, 0);
-    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
-  } finally { dock.stop(); notch.dispose(); }
+    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
+  } finally { dock.stop(); notch.dispose(); runtime.demandLimits(false, 'fixture.native-refresh'); }
 };
