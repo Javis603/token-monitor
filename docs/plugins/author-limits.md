@@ -232,17 +232,16 @@ This unpublished experimental API intentionally replaces `connection: 'openai'` 
 
 ## Native surface support
 
-| Existing surface / entry point | Current support | Boundary for future integration |
-| --- | --- | --- |
-| Main Limits, `app.js:renderLimits` | Native records and mixed built-in/module order | Same registry |
-| AI tool quota settings, `renderLimitProviderCheckboxes` | Search, checkbox, disclosure, drag/keyboard mixed ordering, account controls | Same identity/preferences |
-| Home quota overview, `homeOverview.js`, Home provider choices in `app.js` | Built-ins only | Project registry records into existing overview/order picker |
-| Main window responsive sidebar layout, `styles.css` / `app.js` | Main Limits works in the same responsive window; no separate sidebar provider registry | Reuse native records; test compact/short-window visibility before wider rollout |
-| Main window navigation/content, `pluginMainPages.js`, `main.navigation.content` outlets | Existing plugin views only | Keep navigation distinct from Edge Dock; quota selection should reference modules, not duplicate backends |
-| Screen-edge rail and retained card, `edgeDock/composer.js`, `items.js`, native `cardWindow` | Built-ins and existing plugin views | Add module references to the native item composer and card demand |
-| Notch pages and provider choices, `notch/pageSettings.js`, `panel.js` | Built-ins and existing plugin views | Reference shared module identity in quota pages |
-| Notch summary/custom bitmap, `trayComposer.js`, `notchCustomLayout` | Existing composer behavior | Use shared records and independent summary visibility demand |
-| System Tray and Floating Bubble, `trayComposer.js`, `trayBars.js`, custom layouts | Existing composer behavior | Add native quota module references to existing pickers and modes |
-| Home provider selectors, subscriptions, history, alerts | Built-ins only | Review each consumer's semantics before admission |
+| Surface | Native quota support |
+| --- | --- |
+| Main Limits and AI tool quota settings | Native windows, details, selection and mixed ordering |
+| Home overview | Native compact quota rows, provider visibility and ordering |
+| Edge Dock rail and retained card | Module items in the existing composer; native rings, balances and detailed cards |
+| Notch Limits page and summary | Module items and native quota layouts, including summary/custom bitmap sources |
+| System Tray and Floating Bubble | Existing quota presets and custom layout source/account/window pickers |
 
-Main navigation/content, the responsive main-window layout and the screen-edge rail/card are separate surfaces. Rows marked as built-in-only do not support native plugin quota modules. Future integrations must use the same module identity, shared records and visibility demand rather than add a second backend, login or provider registry.
+Declare a module once; these surfaces use its namespaced identity, readings, icon and palette without loading an author view. Each surface keeps its native compact layout rather than reproducing every main Limits detail. Select the module in quota preferences and in the relevant surface's existing composer. Saved references and order survive plugin disable/removal; inactive entries are marked unavailable in composers and omitted from actual surfaces.
+
+Visible quota surfaces share the same sampler. Home/Notch quota pages, quota summaries and Tray/Bubble quota layouts add demand; hidden surfaces, Settings and token/cost-only layouts do not. Turning off the global quota switch or the plugin stops its sampling. Existing author DOM views remain available through their declared placements; they are independent of native module items.
+
+Main navigation/content and the responsive main-window layout remain distinct from the screen-edge rail/card. Plugin quota records stay desktop-local: they do not enter Hub subscriptions, synced device records, history, alerts or macOS Widget snapshots.

@@ -16,7 +16,7 @@ function source(file, from, to) {
 test('production Dock projection removes disabled, missing and master-off views without changing saved items', () => {
   const plugin = { status: 'active', views: [{ ref, surfaces: ['edgeDock'] }] };
   const settings = { edgeDockItems: [{ type: 'plugin', ref }] }, before = JSON.stringify(settings);
-  const context = { settings, pluginRuntime: { manager: { list: () => { throw new Error('full catalog must not be described on stats push'); }, surfaceCatalog: surface => plugin.status === 'active' ? plugin.views.filter(view => view.surfaces.includes(surface)) : [] } }, buildEdgeDockCells,
+  const context = { settings, desktopQuotaStats: s => s, pluginRuntime: { manager: { list: () => { throw new Error('full catalog must not be described on stats push'); }, surfaceCatalog: surface => plugin.status === 'active' ? plugin.views.filter(view => view.surfaces.includes(surface)) : [] } }, buildEdgeDockCells,
     refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {},
     edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, syncProvenanceActive: () => false,
     codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: '', codexPresentationActiveAccountId: '',
@@ -53,7 +53,7 @@ test('production Tray bitmap omits inactive plugin placeholders and restores ena
 
 test('Notch stats projection reads only active surface metadata and preserves saved selections', () => {
   let available = [{ ref, title: 'CPU', icon: 'activity' }], result;
-  const context = { settings: {}, pluginRuntime: { manager: { list() { throw new Error('full catalog on stats push'); }, surfaceCatalog: surface => { assert.equal(surface, 'notch'); return available; } } },
+  const context = { settings: {}, desktopQuotaStats: s => s, pluginRuntime: { manager: { list() { throw new Error('full catalog on stats push'); }, surfaceCatalog: surface => { assert.equal(surface, 'notch'); return available; } } },
     edgeDockCellsFor: () => [], notchPanelItems: () => [], notchDataFor: () => ({ panel: { pluginPages: [ref, 'missing/view'] } }),
     notchHistory: { read: () => null }, hubModeGeneration: 0, notchController: { setData: data => { result = data; } }, scheduleSessionExpiry() {} };
   vm.createContext(context);

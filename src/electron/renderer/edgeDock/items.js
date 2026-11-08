@@ -91,7 +91,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
     }
     if (raw.type === 'limit') {
       const provider = normalizedId(raw.provider);
-      if (!provider || (PROVIDER_IDS.size && !PROVIDER_IDS.has(provider))) return null;
+      if (!provider || (PROVIDER_IDS.size && !PROVIDER_IDS.has(provider) && !limitProviders.isPluginLimitModuleId(provider))) return null;
       const hiddenAccounts = Array.isArray(raw.hiddenAccounts)
         ? [...new Set(raw.hiddenAccounts.map((key) => String(key || '').trim()).filter((key) => key && key.length <= 200))]
           .slice(0, MAX_HIDDEN_ACCOUNTS)

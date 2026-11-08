@@ -272,7 +272,7 @@ test('the add menu offers all enabled providers in one limits section', () => {
 test('the composer is handed the enabled providers in the user\'s limits order', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   assert.match(app, /enabledLimitProviders: \(\) => limitProviderOrderApi/);
-  assert.match(app, /\.orderedLimitProviders\(LIMIT_PROVIDERS, state\.settings\?\.limitProviderOrder\)/);
+  assert.match(app, /\.orderedLimitProviders\(desktopLimitProviders\(\), state\.settings\?\.limitProviderOrder\)/);
   assert.match(app, /\.filter\(\(\{ id \}\) => enabledLimitProviderSet\(\)\.has\(id\)\)/);
 });
 
@@ -518,9 +518,9 @@ test('app-wired composer preserves account edits while asynchronous settings wri
     const root = new Element('div');
     const create = Function('window', 'state', 'pendingSettingsPatches', 't', 'saveSettings', 'mimoProductLabel', 'limitAccountTitle',
       'rowDragControllerApi', 'verticalDragSortApi', 'preserveSettingsPanelScroll', 'limitMarksWithIcon',
-      'limitProviderColor', `${factory}; return createDockItemsComposer;`)(
+      'limitProviderColor', 'desktopSurfaceStats', 'pluginLimitMetadata', 'desktopLimitProviders', `${factory}; return createDockItemsComposer;`)(
       window, state, pendingSettingsPatches, (key) => key, save, () => '', () => '',
-      { createRowDragController: () => ({ deferRender: () => false }) }, {}, (fn) => fn(), new Set(), () => '#fff'
+      { createRowDragController: () => ({ deferRender: () => false }) }, {}, (fn) => fn(), new Set(), () => '#fff', () => state.stats, () => null, () => []
     );
     const composer = create(root, 'edgeDockItems');
     const all = (node) => [node, ...node.children.flatMap(all)];
@@ -552,4 +552,27 @@ test('app-wired composer preserves account edits while asynchronous settings wri
     state.settings = { ...state.settings, edgeDockItems: [{ type: 'limit', provider: 'thirdparty', accountMode: 'lowest', accountKey: 'external' }] };
     assert.equal(settingsReader().edgeDockItems[0].accountKey, 'external', 'settled writes do not mask later settings');
   } finally { global.document = previousDocument; }
+});
+
+test('custom plugin composer items keep their icon and are explicitly inactive after disable', () => {
+  const previous = global.document;
+  global.document = { createElement: tag => new Element(tag), activeElement: null };
+  try {
+    const root = new Element('div');
+    let status = 'active';
+    const composer = createEdgeDockComposer({ root, itemsApi, t: key => key, presentationApi: {},
+      getSettings: () => ({ edgeDockItems: [{ type: 'plugin', ref: 'sample-plugin/card' }] }), getStats: () => ({}), save() {},
+      pluginLabel: () => 'Custom panel', pluginView: () => ({ status }), pluginMark: () => new Element('svg'),
+      providerLabel: id => id, providerColor: () => '#fff', hasProviderMark: () => false,
+      createRowDrag: () => ({ deferRender: () => false }) });
+    const all = node => [node, ...node.children.flatMap(all)];
+    composer.render();
+    let button = all(root).find(node => node.className === 'edge-dock-composer-item');
+    assert.equal(button.children[0].children[0].tagName, 'SVG');
+    assert.equal(button.attributes['aria-label'], 'Custom panel');
+    status = 'disabled'; composer.render();
+    button = all(root).find(node => node.className === 'edge-dock-composer-item');
+    assert.match(button.attributes['aria-label'], /disabled/);
+    assert.equal(button.children[0].children[0].tagName, 'SVG');
+  } finally { global.document = previous; }
 });

@@ -21,6 +21,7 @@
       save,
       providerLabel,
       pluginLabel = (ref) => ref,
+      pluginView, pluginMark, moduleView, moduleMark,
       providerColor,
       windowLabel,
       hasProviderMark,
@@ -101,6 +102,12 @@
         });
     }
 
+    function itemAvailable(item) {
+      if (item.type === 'plugin' && pluginView) return pluginView(item.ref)?.status === 'active';
+      if (item.type === 'limit' && item.provider.startsWith('plugin:') && moduleView) return moduleView(item.provider)?.status === 'active';
+      return true;
+    }
+
     function itemLabel(item) {
       if (item.type === 'action') return t('settings.common.refresh');
       if (item.type === 'stat') {
@@ -128,9 +135,12 @@
         return mark;
       }
       if (item.type === 'plugin') {
-        mark.classList.add('is-fallback');
+        const view = pluginView?.(item.ref), icon = view && pluginMark?.(view);
+        if (icon) { mark.classList.add('is-plugin'); mark.append(icon); } else mark.classList.add('is-fallback');
         return mark;
       }
+      const moduleIcon = moduleMark?.(item.provider);
+      if (moduleIcon) { mark.classList.add('is-plugin'); mark.append(moduleIcon); return mark; }
       if (hasProviderMark(item.provider)) mark.classList.add(`row-icon-${item.provider}`);
       else mark.classList.add('is-fallback');
       mark.style.setProperty('--composer-color', providerColor(item.provider));
@@ -145,7 +155,8 @@
       else button.dataset.itemId = id;
       button.classList.toggle('is-selected', ui.selected === id);
       button.classList.toggle('is-stat', item.type === 'stat');
-      button.setAttribute('aria-label', itemLabel(item));
+      button.classList.toggle('is-unavailable', !itemAvailable(item));
+      button.setAttribute('aria-label', itemLabel(item) + (itemAvailable(item) ? '' : ' · ' + t('settings.plugins.status.disabled')));
       button.setAttribute('aria-pressed', String(ui.selected === id));
       button.append(markFor(item));
       button.addEventListener('click', () => {
@@ -357,6 +368,7 @@
       });
       head.append(remove);
       pane.append(head);
+      if (!itemAvailable(item)) pane.append(el('p', 'settings-note', t('plugins.view.disabled')));
 
       if (item.type === 'plugin') {
         pane.append(el('p', 'edge-dock-composer-hint', item.ref));
@@ -471,6 +483,7 @@
       const signature = JSON.stringify({
         items,
         labels: items.map(itemLabel),
+        pluginMetadata: items.map(item => item.type === 'plugin' ? pluginView?.(item.ref) : moduleView?.(item.provider)),
         selected: ui.selected,
         menuOpen: ui.menuOpen,
         automatic: isAutomatic(),

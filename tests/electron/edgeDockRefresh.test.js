@@ -40,6 +40,8 @@ function fixture() {
     ownsUsageRuntime: () => Boolean(context.deviceRuntimeHandle),
     runManualDeviceRefresh,
     electronPresentationStats: (stats) => stats,
+    desktopQuotaStats: stats => stats,
+    syncPluginQuotaSurfaceDemand() {},
     edgeDockController: { isRunning: () => true },
     notchController: null,
     pushEdgeDockCells: (cells) => { context.dockStats = cells.stats; context.dockPeriods = cells.derivedPeriods; },

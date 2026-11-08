@@ -60,7 +60,7 @@ test('composer names plugin entries and keeps remove/reorder without quota contr
  const dockRoot=document.createElement('div');document.body.append(dockRoot);
  const dockState={settings:{edgeDockItems:[{type:'plugin',ref:'system-monitor/cpu'},{type:'plugin',ref:'system-monitor/memory'}]},stats:{limits:{providers:[]}},pluginCatalog:{plugins:[{status:'active',views:[{ref:'system-monitor/cpu',title:'CPU'},{ref:'system-monitor/memory',title:'Memory'}]}]}};
  const dockSaves=[];let drag;
- const dc=scope(['createDockItemsComposer'],{window:{TokenMonitorEdgeDockComposer:req('src/electron/renderer/edgeDock/composer.js'),TokenMonitorEdgeDockItems:itemsApi,TokenMonitorEdgeDockPresentation:{},TokenMonitorLimitProviders:req('src/shared/limits/providers.js')},state:dockState,pendingSettingsPatches:new Set(),t,saveSettings(patch){dockSaves.push(JSON.parse(JSON.stringify(patch)));dockState.settings={...dockState.settings,edgeDockItems:itemsApi.normalizeEdgeDockItems(patch.edgeDockItems)};},limitProviderColor:()=> '#fff',limitMarksWithIcon:new Set(),mimoProductLabel:()=>'',limitAccountTitle:()=>'',rowDragControllerApi:{createRowDragController:config=>{drag=config;return {deferRender:()=>false};}},verticalDragSortApi:{},preserveSettingsPanelScroll(){}});
+ const dc=scope(['createDockItemsComposer'],{document,window:{TokenMonitorEdgeDockComposer:req('src/electron/renderer/edgeDock/composer.js'),TokenMonitorEdgeDockItems:itemsApi,TokenMonitorEdgeDockPresentation:{},TokenMonitorLimitProviders:req('src/shared/limits/providers.js'),TokenMonitorPluginViews:{navigationIcon:()=>document.createElement('span')}},state:dockState,pluginLimitMetadata:()=>null,desktopSurfaceStats:()=>dockState.stats,desktopLimitProviders:()=>[],pendingSettingsPatches:new Set(),t,saveSettings(patch){dockSaves.push(JSON.parse(JSON.stringify(patch)));dockState.settings={...dockState.settings,edgeDockItems:itemsApi.normalizeEdgeDockItems(patch.edgeDockItems)};},limitProviderColor:()=> '#fff',limitMarksWithIcon:new Set(),mimoProductLabel:()=>'',limitAccountTitle:()=>'',rowDragControllerApi:{createRowDragController:config=>{drag=config;return {deferRender:()=>false};}},verticalDragSortApi:{},preserveSettingsPanelScroll(){}});
  const composer=dc.createDockItemsComposer(dockRoot,'edgeDockItems');composer.render();
  const labels=dockRoot.querySelectorAll('.edge-dock-composer-item').map(n=>({id:n.dataset.itemId,ariaLabel:n.getAttribute('aria-label'),text:n.textContent}));
  assert.equal(labels.length,2);assert.deepEqual(labels.map(x=>x.ariaLabel),['CPU','Memory']);
@@ -76,9 +76,9 @@ test('composer names plugin entries and keeps remove/reorder without quota contr
  dockRoot.querySelector('.edge-dock-composer-remove').fire('click');
  assert.deepEqual(dockState.settings.edgeDockItems,[{type:'plugin',ref:'system-monitor/memory'}]);
  dockState.pluginCatalog.plugins[0].status='disabled';composer.render();
- assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'Memory');
+ assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'Memory · Off');
  dockState.pluginCatalog={plugins:[]};composer.render();
- assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'system-monitor/memory');
+ assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'system-monitor/memory · Off');
 });
 
 test('Notch choices exclude inactive plugins without removing native pages', () => {

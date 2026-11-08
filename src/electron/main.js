@@ -2160,7 +2160,7 @@ function migrateHomeLimitProviderOrder(value) {
   const isEmpty = value === undefined || value === null || value === ''
     || (Array.isArray(value) && value.length === 0);
   if (isEmpty) return '';
-  const normalized = parseLimitProviders(value).join(',');
+  const normalized = require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders);
   return normalized && normalized !== defaultLimitProviderOrder() ? normalized : '';
 }
 
@@ -2171,7 +2171,7 @@ function normalizeHiddenLimitProviders(value) {
   const hidden = [];
   for (const item of raw) {
     const id = String(item || '').trim().toLowerCase();
-    if (!known.has(id) || seen.has(id)) continue;
+    if ((!known.has(id) && !require('../shared/limits/providers').isPluginLimitModuleId(id)) || seen.has(id)) continue;
     seen.add(id);
     hidden.push(id);
   }
@@ -5260,12 +5260,41 @@ function refreshTrayContextMenu() {
   if (typeof tray.refreshContextMenu === 'function') tray.refreshContextMenu();
 }
 
+function desktopQuotaStats(stats) {
+  return require('./plugins/limitsPresentation').projectPluginLimits(stats, pluginRuntime?.limitsSnapshot());
+}
+
+function syncPluginQuotaSurfaceDemand() {
+  if (!pluginRuntime) return;
+  const trayNeeds = settings?.showTrayIcon !== false && (['limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions'].includes(settings?.trayContent)
+    || (settings?.trayContent === 'custom' && trayLayoutApi.usesLimits(settings?.trayCustomLayout)));
+  const dockNeeds = edgeDockController?.limitsVisible?.() && (settings.edgeDockItems === null || (settings.edgeDockItems || []).some(item => item.type === 'limit'));
+  const notch = notchController?.quotaVisibility?.();
+  const summaryMode = notchSummaryMode(settings);
+  const notchNeeds = notch?.panel || (notch?.summary && (summaryMode === 'auto'
+    || (['tray', 'custom'].includes(summaryMode) && trayLayoutApi.usesLimits(notchSummaryLayout(settings)))));
+  pluginRuntime.demandLimits(Boolean(settings?.limitsEnabled !== false && (trayNeeds || dockNeeds || notchNeeds)), 'desktop.native');
+}
+
+let pluginQuotaRepaintPending = false;
+function pluginQuotaChanged() {
+  if (pluginQuotaRepaintPending) return;
+  pluginQuotaRepaintPending = true;
+  setImmediate(() => {
+    pluginQuotaRepaintPending = false;
+    syncPluginQuotaSurfaceDemand();
+    repaintDockSurfaces();
+    updateTrayDisplay();
+  });
+}
+
 function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
   // Keep the exported D-Bus menu in sync (radio checks, refresh state, Codex
   // accounts) — see the Linux note in createTray().
   refreshTrayContextMenu();
-  const visibleStats = electronPresentationStats(latestStats);
+  syncPluginQuotaSurfaceDemand();
+  const visibleStats = desktopQuotaStats(electronPresentationStats(latestStats));
   const mode = settings?.trayContent || 'tokens';
   const currency = normalizeCurrency(settings?.currency);
   const compactOptions = compactTokenDisplayOptions();
@@ -5928,7 +5957,7 @@ function ensureNotchController() {
     onToggleRateMode: toggleDockRateMode,
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
-    onWebSurfaceChanged: () => pluginRuntime?.refreshSurfaces(),
+    onWebSurfaceChanged: () => { pluginRuntime?.refreshSurfaces(); syncPluginQuotaSurfaceDemand(); },
     installNonActivatingInput: (win) => preventAppActivation(win),
     blurAvailable: () => nativeTheme.prefersReducedTransparency !== true,
     applyBlurMask: (win, mask, display) => {
@@ -6197,6 +6226,7 @@ async function refreshStatsFromEdgeDock() {
 }
 
 function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options = {}) {
+  visibleStats = desktopQuotaStats(visibleStats);
   refreshEdgeDockDerivedPeriods(visibleStats);
   refreshEdgeDockForecast();
   syncCodexPresentationActiveAccount();
@@ -6264,6 +6294,7 @@ const notchHistory = createNotchHistory({
 });
 
 function pushNotchCells(visibleStats) {
+  visibleStats = desktopQuotaStats(visibleStats);
   notchLastCells = edgeDockCellsFor(visibleStats, notchPanelItems(visibleStats, settings), { includeUnavailableAccounts: true });
   const data = notchDataFor(visibleStats, notchLastCells);
   // Tab names and icons are metadata; opening a page alone requests its data.
@@ -6349,7 +6380,7 @@ function ensureEdgeDockController() {
       return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
-    onWebSurfaceChanged: () => pluginRuntime?.refreshSurfaces(),
+    onWebSurfaceChanged: () => { pluginRuntime?.refreshSurfaces(); syncPluginQuotaSurfaceDemand(); },
     installNonActivatingInput: (win) => process.platform === 'darwin' ? preventAppActivation(win)
       : installWindowsNonActivatingInput(win, { logger: (message) => console.log(message) }),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
@@ -6388,6 +6419,7 @@ function syncDockSurfaces(rendererSettings) {
       if (edgeDockRateTimer) clearTimeout(edgeDockRateTimer);
       edgeDockRateTimer = null;
     }
+    syncPluginQuotaSurfaceDemand();
     return;
   }
   const controller = ensureEdgeDockController();
@@ -6403,6 +6435,7 @@ function syncDockSurfaces(rendererSettings) {
   // Now that the controller is running (sync() starts it when enabled), arm the
   // timer against the cells that were just handed over.
   scheduleSessionExpiry();
+  syncPluginQuotaSurfaceDemand();
 }
 
 function refreshLimitStatsPresentation() {
@@ -8688,7 +8721,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('settings:displayPreview', (event, surface, phase, slots) => {
     if (event.sender !== mainWindow?.webContents) return null;
-    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots);
+    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots, pluginRuntime?.limitsSnapshot());
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
@@ -9963,6 +9996,7 @@ app.whenReady().then(() => {
     try {
       pluginRuntime = createPluginRuntime({
         fetchImpl: electronLimitsFetch(),
+        onLimitsChanged: pluginQuotaChanged,
         getAppSettings: settingsForRenderer,
         electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, nativeImage, session, shell, dialog },
         userDataDir: app.getPath('userData'),

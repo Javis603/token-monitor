@@ -127,7 +127,11 @@
     return LIMIT_PROVIDER_IDS.filter((provider) => detectedProviders.has(provider));
   }
 
+  const PLUGIN_LIMIT_MODULE_ID = /^plugin:[a-z0-9][a-z0-9-]{1,39}:[a-z][a-z0-9-]{0,31}$/;
+
   return {
+    PLUGIN_LIMIT_MODULE_ID,
+    isPluginLimitModuleId: value => typeof value === 'string' && PLUGIN_LIMIT_MODULE_ID.test(value),
     LIMIT_PROVIDER_CATALOG,
     LIMIT_PROVIDER_IDS,
     LIMIT_PROVIDER_LABELS,

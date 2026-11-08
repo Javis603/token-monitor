@@ -158,7 +158,7 @@
 
   function normalizeSource(input, fallbackWindow = 'primary') {
     const source = input && typeof input === 'object' ? input : {};
-    const rawProvider = clean(source.provider, 48).toLowerCase();
+    const rawProvider = clean(source.provider, 80).toLowerCase();
     const provider = rawProvider === 'kilocode' ? 'kilo' : rawProvider;
     const accountMode = clean(source.accountMode, 24);
     const valueMode = clean(source.valueMode, 24);
@@ -643,7 +643,7 @@
   }
 
   function providerId(provider) {
-    return clean(provider?.provider, 48).toLowerCase();
+    return clean(provider?.provider, 80).toLowerCase();
   }
 
   function usableProvider(provider) {
@@ -691,7 +691,7 @@
   }
 
   function accountOptions(stats, selectedProvider) {
-    const id = clean(selectedProvider, 48).toLowerCase();
+    const id = clean(selectedProvider, 80).toLowerCase();
     const rows = providersFromStats(stats).filter((provider) => providerId(provider) === id);
     const seen = new Set();
     const options = [];
@@ -705,7 +705,7 @@
   }
 
   function windowOptions(stats, selectedProvider, accountKey = '') {
-    const id = clean(selectedProvider, 48).toLowerCase();
+    const id = clean(selectedProvider, 80).toLowerCase();
     const key = clean(accountKey);
     const seen = new Set();
     const options = [];
@@ -1024,7 +1024,7 @@
   }
 
   function preferredRowProvider(rows, preferredIndex = 0) {
-    const providerFor = (row) => clean(row?.selection?.provider || row?.provider, 48).toLowerCase();
+    const providerFor = (row) => clean(row?.selection?.provider || row?.provider, 80).toLowerCase();
     const preferred = Array.isArray(rows) ? rows[preferredIndex] : null;
     return providerFor(preferred)
       || providerFor((rows || []).find((row) => providerFor(row)))
@@ -1155,7 +1155,17 @@
     return normalizeTrayLayout(layout).items.filter((item) => item.type === 'plugin').map((item) => item.ref);
   }
 
+  function usesLimits(layout) {
+    const itemUsesLimits = item => item.type === 'bars'
+      || (item.type === 'icon' && item.icon === 'provider' && item.autoMode === 'lowestLimit')
+      || (item.type === 'text' && ['percent', 'percentReset', 'reset', 'account'].includes(item.metric))
+      || (item.type === 'stack' && (item.metric === 'mixed'
+        ? item.rows.some(row => itemUsesLimits({ ...row, type: 'text' })) : ['percent', 'reset'].includes(item.metric)));
+    return (layout?.items || []).some(itemUsesLimits);
+  }
+
   return {
+    usesLimits,
     MAX_ITEMS,
     STYLE_IDS,
     VERSION,
