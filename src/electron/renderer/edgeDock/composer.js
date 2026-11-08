@@ -102,10 +102,14 @@
         });
     }
 
+    function itemStatus(item) {
+      if (item.type === 'plugin' && pluginView) return pluginView(item.ref)?.status || 'missing';
+      if (item.type === 'limit' && item.provider.startsWith('plugin:') && moduleView) return moduleView(item.provider)?.status || 'missing';
+      return 'active';
+    }
+
     function itemAvailable(item) {
-      if (item.type === 'plugin' && pluginView) return pluginView(item.ref)?.status === 'active';
-      if (item.type === 'limit' && item.provider.startsWith('plugin:') && moduleView) return moduleView(item.provider)?.status === 'active';
-      return true;
+      return itemStatus(item) === 'active';
     }
 
     function itemLabel(item) {
@@ -156,7 +160,7 @@
       button.classList.toggle('is-selected', ui.selected === id);
       button.classList.toggle('is-stat', item.type === 'stat');
       button.classList.toggle('is-unavailable', !itemAvailable(item));
-      button.setAttribute('aria-label', itemLabel(item) + (itemAvailable(item) ? '' : ' · ' + t('settings.plugins.status.disabled')));
+      button.setAttribute('aria-label', itemLabel(item) + (itemAvailable(item) ? '' : ' · ' + t(`settings.plugins.status.${itemStatus(item)}`)));
       button.setAttribute('aria-pressed', String(ui.selected === id));
       button.append(markFor(item));
       button.addEventListener('click', () => {
@@ -368,7 +372,7 @@
       });
       head.append(remove);
       pane.append(head);
-      if (!itemAvailable(item)) pane.append(el('p', 'settings-note', t('plugins.view.disabled')));
+      if (!itemAvailable(item)) pane.append(el('p', 'settings-note', t(`settings.plugins.status.${itemStatus(item)}`)));
 
       if (item.type === 'plugin') {
         pane.append(el('p', 'edge-dock-composer-hint', item.ref));

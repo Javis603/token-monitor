@@ -570,9 +570,13 @@ test('custom plugin composer items keep their icon and are explicitly inactive a
     let button = all(root).find(node => node.className === 'edge-dock-composer-item');
     assert.equal(button.children[0].children[0].tagName, 'SVG');
     assert.equal(button.attributes['aria-label'], 'Custom panel');
-    status = 'disabled'; composer.render();
-    button = all(root).find(node => node.className === 'edge-dock-composer-item');
-    assert.match(button.attributes['aria-label'], /disabled/);
-    assert.equal(button.children[0].children[0].tagName, 'SVG');
+    button.listeners.click();
+    for (const inactive of ['disabled', 'needsApproval', 'safeMode', 'crashed', 'invalid', 'pluginsOff', 'missing']) {
+      status = inactive; composer.render();
+      button = all(root).find(node => node.className === 'edge-dock-composer-item');
+      assert.equal(button.attributes['aria-label'], `Custom panel · settings.plugins.status.${inactive}`);
+      assert.equal(button.children[0].children[0].tagName, 'SVG');
+      assert.ok(all(root).some(node => node.className === 'settings-note' && node.textContent === `settings.plugins.status.${inactive}`));
+    }
   } finally { global.document = previous; }
 });

@@ -1695,7 +1695,7 @@ function createEdgeDockController(deps) {
       for (const surface of SURFACES) render(surface);
     },
     isRunning: () => running,
-    limitsVisible: () => running && !drag && (alwaysVisible() || railVisible || bubbleVisible),
+    limitsVisible: () => running && (alwaysVisible() || railVisible || bubbleVisible),
     webSurface: (host) => {
       const kind = ['rail', 'bubble'].find(key => windows[key]?.webContents === host);
       return kind ? { kind, visible: running && !drag && visibleTargets[kind] === true && (kind === 'rail' ? railVisible : bubbleVisible) } : null;

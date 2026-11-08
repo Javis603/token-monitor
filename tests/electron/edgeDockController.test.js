@@ -674,8 +674,10 @@ test('dragging onto another display moves the dock there and persists its id', a
   t.after(() => fixture.controller.stop());
   const rail = fixture.windowFor('rail');
   fixture.screen.point = { x: 1700, y: 420 };
+  assert.equal(fixture.controller.limitsVisible(), true);
 
   fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetY: 30 });
+  assert.equal(fixture.controller.limitsVisible(), true, 'the visible dragged rail keeps its quota owner');
   await new Promise((resolve) => setTimeout(resolve, 35));
   fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
 

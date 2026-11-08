@@ -73,11 +73,16 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     assert.equal(await cardWin.webContents.executeJavaScript("document.body.textContent.includes('API credits')"), true);
     const cardRect = await cardWin.webContents.executeJavaScript("(()=>{const r=document.querySelector('.edge-dock-card').getBoundingClientRect();return {x:Math.max(0,Math.floor(r.x)-8),y:Math.max(0,Math.floor(r.y)-8),width:Math.ceil(r.width)+16,height:Math.ceil(r.height)+16}})()");
     fs.writeFileSync(path.join(evidence, 'dock-card.png'), (await cardWin.webContents.capturePage(cardRect)).toPNG());
+    // Remove built-in readings so their fallback artwork cannot satisfy this proof.
+    await js("state.stats={...state.stats,limits:{...state.stats.limits,providers:[]}}");
+    const sourceProviders = await js("TokenMonitorTrayText.pickConfiguredLimitProviders(desktopSurfaceStats(),{limitProviders:state.settings.limitProviders,limitProviderOrder:state.settings.limitProviderOrder}).map(pick=>pick.provider)");
+    assert.equal(sourceProviders.length, 2);
+    assert.ok(sourceProviders.every(id => id.startsWith('plugin:')));
     const trayImages = await js("(()=>{const modes=['barsAllSessions','limitsAllSessions'];return modes.map(mode=>({mode,image:trayDataUrlForMode(mode,44,{}, {stats:desktopSurfaceStats()})}));})()");
     for (const item of trayImages) { assert.match(item.image, /^data:image\/png/); fs.writeFileSync(path.join(evidence, `tray-${item.mode}.png`), Buffer.from(item.image.split(',')[1], 'base64')); }
     await js("openViewFromTray('home');state.settings.floatingBubbleContent='barsAllSessions';applyFloatingBubbleState({collapsed:true,side:'right'});renderFloatingBubbleContent();");
     await pause(250);
-    assert.equal(await js("state.floatingBubble.collapsed && !!els.floatingBubbleContent.querySelector('img')"), true);
+    assert.equal(await js("state.floatingBubble.collapsed && state.stats.limits.providers.length===0 && desktopLimitRecords().length===2 && desktopLimitRecords().every(row=>row.provider.startsWith('plugin:')) && !!els.floatingBubbleContent.querySelector('img')"), true);
     const bubbleRect = await js("(()=>{const r=els.floatingBubbleContent.getBoundingClientRect();return {x:Math.floor(r.x)-8,y:Math.floor(r.y)-8,width:Math.ceil(r.width)+16,height:Math.ceil(r.height)+16}})()");
     fs.writeFileSync(path.join(evidence, 'floating-bubble.png'), (await win.webContents.capturePage(bubbleRect)).toPNG());
     await js("applyFloatingBubbleState({collapsed:false});openSettingsPanel();setSettingsSectionExpanded('window',true);pluginApi.setEnabled('synthetic-limits',false)");
@@ -88,6 +93,6 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     await capture('composer-disabled.png');
     const inactive = require('../src/electron/plugins/limitsPresentation').projectPluginLimits(stats, runtime.limitsSnapshot());
     assert.equal(require('../src/electron/renderer/edgeDock/presentation').buildEdgeDockCells(inactive, { items: dockSettings.edgeDockItems }).length, 0);
-    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
+    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
   } finally { dock.stop(); notch.dispose(); }
 };

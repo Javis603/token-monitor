@@ -55,6 +55,8 @@ test('quota demand distinguishes custom quota sources from usage-only layouts', 
   assert.equal(uses({ type: 'text', metric: 'tokens' }), false);
   assert.equal(uses({ type: 'text', metric: 'custom', text: 'Hello' }), false);
   assert.equal(uses({ type: 'icon', icon: 'provider', autoMode: 'tokens' }), false);
+  assert.equal(uses({ type: 'icon', icon: 'provider', autoMode: 'lowestLimit', source: { provider: id } }), false);
+  assert.equal(uses({ type: 'icon', icon: 'provider', autoMode: 'lowestLimit', source: { provider: 'auto' } }), true);
   assert.equal(uses({ type: 'stack', metric: 'mixed', rows: [{ metric: 'cost' }, { metric: 'tokens' }] }), false);
   assert.equal(uses({ type: 'stack', metric: 'mixed', rows: [{ metric: 'cost' }, { metric: 'percent' }] }), true);
   assert.equal(uses({ type: 'bars', rows: [{ provider: id }] }), true);

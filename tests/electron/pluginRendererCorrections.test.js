@@ -78,7 +78,7 @@ test('composer names plugin entries and keeps remove/reorder without quota contr
  dockState.pluginCatalog.plugins[0].status='disabled';composer.render();
  assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'Memory · Off');
  dockState.pluginCatalog={plugins:[]};composer.render();
- assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'system-monitor/memory · Off');
+ assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'system-monitor/memory · Missing package');
 });
 
 test('Notch choices exclude inactive plugins without removing native pages', () => {

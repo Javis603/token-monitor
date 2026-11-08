@@ -1157,7 +1157,7 @@
 
   function usesLimits(layout) {
     const itemUsesLimits = item => item.type === 'bars'
-      || (item.type === 'icon' && item.icon === 'provider' && item.autoMode === 'lowestLimit')
+      || (item.type === 'icon' && item.icon === 'provider' && item.source?.provider === 'auto' && item.autoMode === 'lowestLimit')
       || (item.type === 'text' && ['percent', 'percentReset', 'reset', 'account'].includes(item.metric))
       || (item.type === 'stack' && (item.metric === 'mixed'
         ? item.rows.some(row => itemUsesLimits({ ...row, type: 'text' })) : ['percent', 'reset'].includes(item.metric)));
