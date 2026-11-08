@@ -236,6 +236,8 @@ const {
   normalizeEdgeDockOffset,
   edgeDockFittingScale,
   edgeDockScale,
+  edgeDockBubbleScale,
+  normalizeEdgeDockBubbleSize,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockSide,
   normalizeEdgeDockSize,
@@ -3672,4 +3674,15 @@ test('third-party headline account settings survive normalization without changi
   assert.equal(codex.accountMode, 'active');
   assert.equal(claude.accountMode, 'lowest');
   assert.equal(Object.hasOwn(codex, 'accountKey'), false);
+});
+
+test('detail size defaults to the fitted rail and validates its independent custom scale', () => {
+  assert.equal(normalizeEdgeDockBubbleSize(undefined), 'inherit');
+  assert.equal(normalizeEdgeDockBubbleSize('invalid'), 'inherit');
+  assert.equal(normalizeEdgeDockBubbleSize('custom'), 'custom');
+  assert.equal(edgeDockBubbleScale({ edgeDockSize: 'small' }), 0.85);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'inherit' }, 0.9), 0.9);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'large' }, 0.9), 1.25);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 1.234 }), 1.25);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 9 }), 1.5);
 });
