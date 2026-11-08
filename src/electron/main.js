@@ -6,6 +6,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
 const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
+
+// All of the app's pages are the same local bundle, and every window Chromium
+// gives its own renderer costs a process baseline plus a compositor for what is
+// often a small card. Process-per-site shares one renderer across them; heavy
+// work already runs in the usage worker, so the shared main thread carries UI
+// only. A renderer crash now takes every window down instead of one surface.
+app.commandLine.appendSwitch('process-per-site');
+
 const { createRetainedWindow, captureRetainedWindowState, restoreRetainedWindowState } = require('./retainedWindow');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
@@ -5692,6 +5700,9 @@ function settingsForRenderer() {
   delete rendererSettings.icloudWriterId;
   delete rendererSettings.syncContentState;
   delete rendererSettings.pluginSkinRef;
+  // Usage retained for untracked clients: only the collector transform reads
+  // it, and it is most of the settings payload a renderer would clone and keep.
+  delete rendererSettings.archivedClientUsage;
   rendererSettings.pluginAuthorSkin = normalizePluginAuthorSkin(settings.pluginAuthorSkin);
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
@@ -10043,6 +10054,24 @@ app.whenReady().then(() => {
 
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+// Every window shares one renderer, so a crash blanks them all. Main is the
+// source of truth and republishes settings and stats on load, so reload each
+// crashed page rather than leaving the widget dead. A page that crashes again
+// within the cooldown is left alone: reloading a deterministic failure would
+// only loop.
+const rendererCrashReloadAt = new Map();
+app.on('render-process-gone', (_event, contents, details) => {
+  if (quitRequested || details.reason === 'clean-exit') return;
+  if (!contents || contents.isDestroyed()) return;
+  const reloadAt = rendererCrashReloadAt.get(contents.id) || 0;
+  if (Date.now() - reloadAt < 30_000) return;
+  rendererCrashReloadAt.set(contents.id, Date.now());
+  // Let the crashed host finish tearing down before recreating the page.
+  setTimeout(() => {
+    if (contents.isDestroyed()) return;
+    try { contents.reload(); } catch (_) {}
+  }, 250);
+});
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
 // Drain queued quota-history writes with a bounded synchronous worker barrier,
 // then keep performQuit synchronous through to the exit. No preventDefault:

@@ -18,6 +18,8 @@ The widget (`src/electron/main.js`), headless collector (`src/agent/agent.js`) a
 
 Device collection, transforms and archives live in `src/shared/usage/`. The neighboring `src/shared/usage.js` is the Hub-core usage model, not that directory's index: `require('./usage')` resolves the file. Do not add `usage/index.js`.
 
+Desktop windows share one renderer process: `src/electron/main.js` enables Chromium's process-per-site mode, because each additional surface otherwise costs a renderer baseline and compositor for a small local card. Every page is the same local bundle and heavy work already runs in the usage worker, so the shared main thread carries UI work only. A renderer crash takes every window down at once; main reloads the crashed pages once, because it republishes settings and stats on load. This is a deliberate memory trade, not an isolation boundary.
+
 Cloudflare deployment isolates `worker/` into its own repository. Its portable closure, `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`, must not import Node built-ins or anything above `worker/`. Edit the originals in `src/shared/`, then run `npm run sync:worker`; the mirrored `worker/src/shared/` files are generated and CI rejects drift.
 
 ## Desktop plugins
@@ -96,6 +98,7 @@ Archive projection can share canonical live session rows read-only while copying
 - `sessionUsageArchiveStore.js` streams archive rows and captures the revision before scanning. Publish loads/revision changes only after cursor completion, and close failed cursors so retries cannot publish partial archives or skip concurrent writes.
 - `USAGE_TRANSFORM_SETTING_KEYS` is the worker's settings contract. Send saved patches before the reconfigure delay and resolve `settings:update` only after acknowledgement, so a completed archive pause guarantees no further capture.
 - Worker failure reports `usage-worker-failed` and pins subsequent runtimes to the in-process fallback; `TOKEN_MONITOR_USAGE_WORKER=0` selects it explicitly.
+- The worker collects its own dead heap after a publish once it passes a threshold. Summaries, archive projections and the structured-clone payload are per-tick transients, and V8's default old-space limit is far enough away that nothing else asks for a collection, so those pages would stay committed. A collection that reclaims little raises the next threshold instead of repeating every tick.
 - Quit cannot wait for a responsive worker. All worker subprocesses must use `createSubprocessTermination()` so the shared live-process table lets main's `stopAll()` signal them synchronously.
 
 ## Limits collector

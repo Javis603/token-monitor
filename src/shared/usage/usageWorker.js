@@ -48,9 +48,51 @@ const transform = createUsageTransform({
   })
 });
 
+// Return dead heap to the OS after publishing.
+//
+// A tick allocates the merged summary and its structured-clone payload, and V8
+// sizes this isolate's heap from allocation rate rather than live data. With
+// the default old-space limit nothing asks for a collection, so pages that held
+// superseded summaries stay committed and the process looks large long after
+// those objects died. A full GC here is cheap (tens of milliseconds on this
+// thread, which owns no window) and V8 decommits what it frees. A collection
+// that reclaims little means the live set owns the heap, so the next threshold
+// moves above it instead of collecting on every tick.
+const GC_THRESHOLD_BYTES = 96 * 1024 * 1024;
+const GC_RECLAIM_FLOOR_BYTES = 8 * 1024 * 1024;
+const GC_MIN_INTERVAL_MS = 10_000;
+const collectGarbage = (() => {
+  try {
+    // `gc` is only injected for --expose-gc starts; enabling it here changes
+    // nothing else about V8's behaviour.
+    require('node:v8').setFlagsFromString('--expose-gc');
+    return require('node:vm').runInNewContext('gc');
+  } catch (_) {
+    return null;
+  }
+})();
+let gcThresholdBytes = GC_THRESHOLD_BYTES;
+let lastGcAt = 0;
+
+function collectDeadHeap() {
+  if (!collectGarbage) return;
+  const startedAt = Date.now();
+  if (startedAt - lastGcAt < GC_MIN_INTERVAL_MS) return;
+  if (process.memoryUsage().heapUsed < gcThresholdBytes) return;
+  lastGcAt = startedAt;
+  // Let the tick or the postMessage serialization that grew the heap finish.
+  setImmediate(() => {
+    const before = process.memoryUsage().heapUsed;
+    collectGarbage();
+    const after = process.memoryUsage().heapUsed;
+    if (before - after < GC_RECLAIM_FLOOR_BYTES) gcThresholdBytes = after + 32 * 1024 * 1024;
+  });
+}
+
 function transformed(type, summary, reason) {
   const visible = transform.transform(summary, reason, { preview: type === 'preview' });
   post({ type, summary: visible, reason, archive: transform.getState(), diagnostics: diagnostics() });
+  collectDeadHeap();
   return visible;
 }
 
