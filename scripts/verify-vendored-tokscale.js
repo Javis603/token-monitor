@@ -66,9 +66,7 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 const TOKEN_CONTRACT_CASES = Object.freeze([
   {
     client: 'gemini',
-    // The session total includes cached input. Tokscale splits that overlap out
-    // and keeps thoughts disjoint from output. Tool tokens fold into input:
-    // 20 - 5 cached + 4 tool = 19 input, output 2, cache 5, thoughts 3.
+    // 20 input - 5 cached + 4 tool = 19; thoughts stay out of output.
     expectedRow: { model: 'gemini-3.1-pro-preview', input: 19, output: 2, cacheRead: 5, cacheWrite: 0, reasoning: 3 },
     hasExplicitTotal: false,
     expectedPeriod: { totalTokens: 29, clientTokens: 29, clientOutputTokens: 5 },

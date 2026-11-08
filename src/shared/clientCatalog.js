@@ -55,7 +55,6 @@
     { id: 'openclaw', label: 'OpenClaw' },
     { id: 'cursor', label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
-    // Gemini CLI only. The id stays `gemini`; Gemini Desktop is not a source.
     { id: 'gemini', label: 'Gemini CLI' },
     { id: 'cline', label: 'Cline' },
     { id: 'amp', label: 'Amp' },
@@ -108,8 +107,7 @@
   // only normalizes CSV, so TOKEN_MONITOR_CLIENTS or the agent's --clients can
   // put any id tokscale supports into a scan, tokscaleClientFilter() passes it
   // through, and normalizeClientName() keys the resulting rows under it. Such a
-  // row would otherwise render as the bare id. An id belongs here only when a
-  // row that can actually appear would otherwise render as the bare id.
+  // row would otherwise render as the bare id.
   const NON_CATALOG_CLIENT_LABELS = Object.freeze({});
 
   const CLIENT_IDS = Object.freeze(CLIENT_CATALOG.map((client) => client.id));
