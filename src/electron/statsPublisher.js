@@ -127,7 +127,11 @@ function rendererStats(stats) {
 function createRendererSnapshots(options = {}) {
   const source = options.source;
   if (typeof source !== 'function') throw new TypeError('source must be a function');
-  const limit = Math.max(1, Number(options.limit) || 8);
+  // Each addressable snapshot keeps its whole stats tree, and any all-time
+  // projection built from it, alive in main. The renderer pulls only for the
+  // snapshot it holds, so the current one plus a predecessor covers a pull that
+  // races a fresh push; more would just hold superseded summaries.
+  const limit = Math.max(1, Number(options.limit) || 3);
   const tags = new WeakMap();
   const byId = new Map();
   let nextId = 1;

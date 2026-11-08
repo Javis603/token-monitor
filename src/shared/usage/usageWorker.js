@@ -83,7 +83,12 @@ function collectDeadHeap() {
   // Let the tick or the postMessage serialization that grew the heap finish.
   setImmediate(() => {
     const before = process.memoryUsage().heapUsed;
-    collectGarbage();
+    try {
+      collectGarbage();
+    } catch (_) {
+      // A collection failing must not take the collector down.
+      return;
+    }
     const after = process.memoryUsage().heapUsed;
     if (before - after < GC_RECLAIM_FLOOR_BYTES) gcThresholdBytes = after + 32 * 1024 * 1024;
   });
