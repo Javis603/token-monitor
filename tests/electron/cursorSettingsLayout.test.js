@@ -80,7 +80,7 @@ function functionBodyBeforeMarker(source, name, marker) {
 
 function runMainFunction(source, name, nextName, expression, context = {}) {
   const body = functionBody(source, name, nextName);
-  return vm.runInNewContext(`${body}\n${expression}`, context);
+  return vm.runInNewContext(`${body}\n${expression}`, { require: id => { assert.equal(id, './plugins/limits'); return require('../../src/electron/plugins/limits'); }, ...context });
 }
 
 function runRendererFunctions(source, names, expression, context = {}) {
@@ -2808,7 +2808,7 @@ test('WorkBuddy Electron fetch adapter forwards parsed response JSON', () => {
 test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const body = functionBody(main, 'migrateLimitProviders', 'migrateLimitProviderOrder');
-  assert.match(body, /return parseLimitProviders\(value\)\.join/);
+  assert.match(body, /desktopProviderPreference\(value, parseLimitProviders\)/);
   assert.doesNotMatch(body, /preMimoDefault|legacyDefault.*return defaultLimitProviders/);
 });
 

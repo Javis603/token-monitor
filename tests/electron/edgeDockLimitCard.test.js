@@ -1308,7 +1308,8 @@ test('a MiMo wallet meters against its month spend and carries the spend line', 
     Math.abs(Number(card.find('limit-meter-fill').style['--bar-scale']) - 0.5169) < 0.001,
     'the bar is the wallet against its month spend'
   );
-  assert.match(labels[0], /Balance ¥9\.95 Gift ¥9\.95 · Cash ¥0\.00/);
+  assert.match(labels[0], /Balance ¥9\.95/);
+  assert.ok([...card.walk()].some(node => node.getAttribute('aria-label') === 'Gift: ¥9.95, Cash: ¥0.00'));
   // This fixture has no locally tracked Today or Week spend.
   const spend = card.find('limit-spend');
   assert.ok(spend, 'the card should carry the spend row the wallet providers have');
@@ -1666,6 +1667,40 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   }
 });
 
+test('MiMo hidden products retain recovery and subscription access without empty account rows', () => {
+  const console = { provider: 'mimo', status: 'ok', accountKey: 'console', accountName: 'MiMo abcdef1',
+    accountLabel: 'Console', planLabel: 'Pay-as-you-go', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 10, currency: 'CNY' }] };
+  const membership = { provider: 'mimo', status: 'ok', accountKey: 'membership', accountName: 'MiMo abcdef1',
+    accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [{ kind: 'weekly', usedPercent: 20 }] };
+  const hidden = dockView({ limitProviderHiddenItems: { mimo: ['credits'] } });
+  const partlyHidden = hidden.renderLimitProviderGroup('mimo', 'MiMo', [console, membership], '#000000');
+  assert.doesNotMatch(partlyHidden.text, /Pay-as-you-go|Balance/);
+  assert.match(partlyHidden.text, /Pro|Weekly/);
+  const failed = { ...membership, status: 'unauthorized', windows: [] };
+  const mixed = hidden.renderLimitProviderGroup('mimo', 'MiMo', [console, failed], '#000000');
+  assert.doesNotMatch(mixed.text, /Pay-as-you-go|Balance/);
+  assert.match(mixed.text, /Desktop/);
+  assert.match(mixed.text, /Sign in again/);
+  const subscription = { id: 'mimo-console', provider: 'mimo', kind: 'subscription', accountKey: 'console',
+    planName: 'Console plan', amountMinor: 1000, currency: 'CNY', intervalCount: 1, interval: 'month',
+    startDate: '2026-08-01', autoRenew: true, topUps: [], binding: { accountKey: 'console' } };
+  const subscribed = dockView({ limitProviderHiddenItems: { mimo: ['credits'] },
+    subscriptions: [subscription], accounts: [console, membership] })
+    .renderLimitProviderGroup('mimo', 'MiMo', [console, membership], '#000000');
+  assert.match(subscribed.text, /Pay-as-you-go/);
+  assert.match(subscribed.text, /Price ¥10\.00/);
+  const unbound = { ...subscription, binding: undefined };
+  const allHidden = dockView({ limitProviderHiddenItems: { mimo: ['credits'] },
+    subscriptions: [unbound], accounts: [console, { ...console, accountKey: 'other', accountName: 'MiMo abcdef2' }] })
+    .renderLimitProviderGroup('mimo', 'MiMo', [console], '#000000');
+  assert.match(allHidden.text, /Subscriptions/);
+  const otherAccount = { ...console, accountKey: 'other', accountName: 'MiMo abcdef2' };
+  const remaining = dockView({ limitProviderHiddenItems: { mimo: ['credits'] },
+    subscriptions: [subscription], accounts: [console, membership, otherAccount] })
+    .renderLimitProviderGroup('mimo', 'MiMo', [console, membership, otherAccount], '#000000');
+  assert.match(remaining.text, /MiMo abcdef1/);
+});
+
 test('MiMo groups products under each account and keeps their own plan and status', () => {
   const view = dockView();
   const rows = [
@@ -1679,12 +1714,16 @@ test('MiMo groups products under each account and keeps their own plan and statu
   ]);
   assert.equal(group.find('limit-plan').textContent, '2 accounts');
   const products = accounts.map((account) => account.find('limit-account-list').children[0]);
-  // Product rows name nothing: the plan cell and the readings carry what they are.
-  for (const row of products) {
-    assert.equal(row.find('limit-name-title'), null, 'the lane word stays off the screen');
-  }
+  assert.deepEqual(products.map(row => row.find('limit-name-title').textContent), ['Desktop', 'Desktop']);
   assert.equal(products[0].find('limit-plan').textContent, 'Pro');
   assert.equal(products[1].find('limit-plan')?.textContent ?? '', '');
+  const hiddenConsole = { ...rows[0], accountKey: 'console', accountLabel: 'Console', accountEmail: 'user@example.com',
+    windows: [{ kind: 'billing', metric: 'credits', remaining: 10, currency: 'CNY' }] };
+  const before = view.renderLimitProviderGroup('mimo', 'MiMo', [hiddenConsole, ...rows], '#000000');
+  const after = dockView({ limitProviderHiddenItems: { mimo: ['credits'] } })
+    .renderLimitProviderGroup('mimo', 'MiMo', [hiddenConsole, ...rows], '#000000');
+  const accountTitles = card => card.textOf('limit-name-title').filter(title => !['Console', 'Desktop'].includes(title));
+  assert.deepEqual(accountTitles(after), accountTitles(before));
   // INVITE hides the plan name but retains the quota that identifies the row.
   assert.match(products[1].text, /Weekly/);
   assert.match(products[1].text, /75%/);
@@ -1700,24 +1739,19 @@ test('one MiMo account uses the provider heading and separate product rows', () 
   assert.equal(group.find('limit-name-title').textContent, 'Xiaomi MiMo');
   assert.equal(group.find('limit-plan').textContent, '');
   const products = group.find('limit-account-list').children;
-  // The healthy row names nothing; the refused lane has no reading left, so its
-  // row carries the lane word the wire gave it.
-  assert.equal(products[0].find('limit-name-title'), null);
-  assert.equal(products[1].find('limit-name-title').textContent, 'Desktop Membership');
+  assert.deepEqual(products.map(row => row.find('limit-name-title').textContent), ['Console', 'Desktop']);
   assert.match(products[0].text, /9\.95/);
   assert.match(products[1].text, /Sign in again/);
 });
 
-test('a healthy MiMo product row names nothing; a refused one keeps its lane word', () => {
+test('MiMo product subheadings retain their plans, recovery text and legacy identity fallback', () => {
   const view = dockView();
   {
     const card = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', {
       provider: 'mimo', status: 'ok', sourceDetail: 'app', accountLabel: 'Console',
       planLabel: 'Pay-as-you-go', windows: []
     }, '#000000');
-    // The readings and the plan cell say what the row is.
-    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo']);
-    assert.equal(card.text.includes('Console'), false);
+    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo', 'Console']);
     assert.equal(card.find('limit-account-list').children[0].find('limit-plan').textContent, 'Pay-as-you-go');
   }
   {
@@ -1725,7 +1759,7 @@ test('a healthy MiMo product row names nothing; a refused one keeps its lane wor
       provider: 'mimo', status: 'unauthorized', sourceDetail: 'app', accountLabel: 'Desktop Membership',
       planLabel: 'Pay-as-you-go', windows: []
     }, '#000000');
-    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo', 'Desktop Membership']);
+    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo', 'Desktop']);
     assert.equal(card.find('limit-account-list').children[0].find('limit-plan').textContent, 'Sign in again');
   }
   {
@@ -1741,7 +1775,7 @@ test('a healthy MiMo product row names nothing; a refused one keeps its lane wor
     // name, disambiguated by an opaque key fingerprint because both rows
     // describe themselves identically.
     const products = group.find('limit-account-list').children;
-    assert.equal(products[0].find('limit-name-title'), null);
+    assert.equal(products[0].find('limit-name-title').textContent, 'Console');
     assert.match(products[1].find('limit-name-title').textContent, /^MiMo abcdefa · #[a-z0-9]+$/);
   }
   const unconfigured = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', {
@@ -1765,11 +1799,6 @@ test('MiMo keeps different accounts apart when emails mask alike', () => {
     'j***s@example.com · Profile · MiMo abcdef6'
   ]);
   assert.equal(group.find('limit-plan').textContent, '2 accounts');
-  for (const account of accounts) {
-    for (const product of account.find('limit-account-list').children) {
-      assert.equal(product.find('limit-name-title'), null, 'the lane word stays off the screen');
-    }
-  }
 });
 
 test('a group-only plan replacement leaves a solo row its plan', () => {
@@ -3099,6 +3128,19 @@ test('history hover is automatic by default and optional without adding a separa
       assert.equal(preventedRepeats, 2, 'repeated Space cannot scroll the page');
       assert.equal(row.querySelectorAll('.limit-history-open').length, 0);
     }
+    const opened = [];
+    const history = { key: () => 'wallet', open: async key => opened.push(key), enter() {}, leave() {} };
+    const row = dockView({ limitsHistoryOpenMode: 'click' }, { history }).renderLimitProviderRow('mimo', 'MiMo', {
+      provider: 'mimo', status: 'ok', windows: [{ kind: 'billing', metric: 'credits', remaining: 10, currency: 'CNY' }],
+      balance: { amount: 10, currency: 'CNY', giftBalance: 5 }
+    }, '#123456');
+    row.isConnected = true;
+    row.getBoundingClientRect = () => ({ x: 0, y: 0, width: 300, height: 100 });
+    const info = [...row.walk()].find(node => node.getAttribute('aria-label') === 'Gift: ¥5.00');
+    let stopped = false;
+    const event = { target: { closest: selector => selector === '.limit-row' ? row : null }, stopPropagation() { stopped = true; } };
+    for (let target = info; target && !stopped; target = target.parent) target.listeners?.click?.(event);
+    assert.deepEqual(opened, [], 'viewing balance details does not open history');
   } finally { global.setTimeout = nativeSetTimeout; global.clearTimeout = nativeClearTimeout; }
 });
 
