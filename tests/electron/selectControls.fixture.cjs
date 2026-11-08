@@ -21,7 +21,7 @@ app.whenReady().then(async () => {
   const fixture = path.join(output, 'fixture.html');
   fs.writeFileSync(fixture, html.replace('<head>', `<head><base href="${pathToFileURL(`${renderer}/`).href}">`));
   await win.loadFile(fixture);
-  for (const name of ['i18n.js', '../../shared/fontSettings.js', 'selectControl.js', 'appSelects.js']) {
+  for (const name of ['i18n.js', '../../shared/fontSettings.js', '../../shared/deviceKind.js', 'selectControl.js', 'deviceIcons.js', 'appSelects.js']) {
     await win.webContents.executeJavaScript(fs.readFileSync(path.join(renderer, name), 'utf8'));
   }
   const run = source => win.webContents.executeJavaScript('(()=>{try{return (' + source + ')}catch(error){console.error(error.stack);throw error}})()');
@@ -55,14 +55,34 @@ app.whenReady().then(async () => {
     const t = key => TokenMonitorI18n.translate('zh-TW', key);
     TokenMonitorI18n.applyTranslations(document, 'zh-TW');
     window.selectFixtureManager = TokenMonitorAppSelects.mount({document,t,fonts:TokenMonitorFontSettings});
+    // App discovery runs before syncHubDraftFields initializes this specialist.
+    const device=document.getElementById('deviceIconInput');
+    const genericOwned=Boolean(device.nextElementSibling?.classList.contains('select-control-trigger'));
+    const inspectDevice=kind=>{
+      TokenMonitorDeviceIcons.populateDeviceIconSelect(device,t,kind);
+      device.value=kind==='computer'?'desktop':kind;
+      const trigger=device.nextElementSibling;
+      const popup=document.getElementById(trigger.getAttribute('aria-controls'));
+      return {icon:!trigger.querySelector('.select-control-icon').hidden,
+        annotations:[...popup.querySelectorAll('.select-control-annotation')].map(node=>node.textContent)};
+    };
+    const detected=inspectDevice('laptop');
+    const fallback=inspectDevice('computer');
     return {sources:document.querySelectorAll('select').length, triggers:document.querySelectorAll('.select-control-trigger').length,
-      visibleNative:[...document.querySelectorAll('select')].filter(select=>!select.hidden).map(select=>select.id)};
+      visibleNative:[...document.querySelectorAll('select')].filter(select=>!select.hidden).map(select=>select.id),
+      genericOwned,detected,fallback,detectedLabel:t('devices.icon.detected'),defaultLabel:t('devices.icon.default')};
   })()`);
+  assert.equal(coverage.genericOwned, false, 'generic discovery leaves the device icon picker to its specialist');
+  assert.deepEqual(coverage.detected, {icon:true,annotations:[coverage.detectedLabel]});
+  assert.deepEqual(coverage.fallback, {icon:true,annotations:[coverage.defaultLabel]});
   assert.equal(coverage.sources, coverage.triggers);
   assert.deepEqual(coverage.visibleNative, []);
 
   await run(`(()=>{
     selectFixtureManager.destroy();
+    const device=document.getElementById('deviceIconInput');
+    TokenMonitorDeviceIcons.destroyDeviceIconSelect(device);
+    if(device.hidden || device.nextElementSibling?.classList.contains('select-control-trigger')) throw new Error('device icon specialist did not clean up');
     const fields = ['languageInput','windowBehaviorInput','interfaceFontPreset','modelAliasesAliasSelect','syncUploadIntervalInput'];
     const clones = fields.map(id=>(document.getElementById(id).closest('label, .settings-font-field, .settings-field') || document.getElementById(id).parentElement).cloneNode(true));
     document.body.replaceChildren();
