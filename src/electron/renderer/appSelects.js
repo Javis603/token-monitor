@@ -24,7 +24,7 @@
           const descriptionKey = option.dataset.selectDescription;
           const font = /^(interfaceFontPreset|displayFontPreset)$/.test(select.id);
           return {
-            description: descriptionKey ? t(descriptionKey) : '',
+            description: select.hasAttribute('data-tm-select') ? option.dataset.tmSelectDescription || '' : descriptionKey ? t(descriptionKey) : '',
             fontFamily: font ? fonts.fontFamilyForPreset(option.value, '', select.id === 'displayFontPreset' ? 'display' : 'interface') : '',
             annotation: select.id === 'languageInput' && option.value !== 'auto' ? option.value : '',
             icon: select.id === 'subscriptionProviderInput' ? providerIcon(option.value) : null
@@ -40,10 +40,10 @@
         if (select.nextElementSibling !== existing.trigger) select.after(existing.trigger);
         return;
       }
-      // Third-party content owns its own controls. Host-rendered plugin settings
-      // still participate, along with the rest of the app's form controls.
+      // Plugin content owns its controls unless the author opts in. Standard
+      // plugin settings participate along with the rest of the app's controls.
       // The local device icon picker is initialized later by deviceIcons.js.
-      if (select.id === 'deviceIconInput' || select.closest('.plugin-content') || select.multiple || select.size > 1) return;
+      if (select.id === 'deviceIconInput' || select.closest('.plugin-content') && !select.hasAttribute('data-tm-select') || select.multiple || select.size > 1) return;
       const focused = document.activeElement === select;
       const control = controls.enhance(select, optionsFor(select));
       if (control) {

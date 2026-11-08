@@ -66,6 +66,31 @@ Use any bundled CSS, DOM and canvas implementation. Optional host variables incl
 
 The renderer has no Node integration. Use `ctx.backend.call` for network/files/compute. The backend has the OS user's authority; moving a request there is not an isolation guarantee. Bundle dependencies ahead of time, include every asset in `files`, and use CSS files rather than inline script execution. See [package limits and installation](distribution-design.md#package-format).
 
+## Shared dropdowns in the desktop App
+
+Standard plugin preference fields already use the App's shared dropdowns. Custom content inserted into an App page keeps its own controls by default. Add `data-tm-select` to a single-select element before inserting it into the desktop App document to opt into the shared picker, including inside an appended, decorated or replacement content view:
+
+```js
+const label = document.createElement('label');
+label.className = 'settings-item';
+const title = document.createElement('span');
+title.className = 'settings-item-title';
+title.textContent = 'Display'; // Use your plugin's localized text.
+const select = document.createElement('select');
+select.setAttribute('data-tm-select', '');
+select.add(new Option('Compact', 'compact'));
+const detailed = new Option('Detailed', 'detailed');
+detailed.dataset.tmSelectDescription = 'Show the full breakdown.';
+select.add(detailed);
+select.addEventListener('change', () => saveDisplay(select.value));
+label.append(title, select);
+container.append(label);
+```
+
+The host discovers inserted controls asynchronously. Keep reading/writing `select.value` and handling its `change` event; do not address the generated button or popup. An option's optional `data-tm-select-description` is plain text supplied and localized by the plugin, and changes to options or their descriptions update the picker. Short lists stay compact; long lists offer search using App-localized search/empty labels. Multiple-selection and listbox-style selects stay native. The host removes generated controls when their source leaves the document, so normal mount disposal should remove the plugin's DOM. Set the opt-in marker before insertion and keep it for that element's lifetime. Authors retain responsibility for the surrounding layout.
+
+This integration is for the desktop App renderer, including detached plugin pages. It does not add shared dropdown support to the separate Notch/Dock renderers or native tray menus. Unmarked controls inside `.plugin-content` keep their existing behavior; standalone plugin page controls retain their existing automatic enhancement.
+
 ## Tray actions
 
 Declare `trayMenu: [{"id":"refresh","label":"Refresh my data"}]` with a backend. Active plugins contribute native menu commands; the host invokes backend `call('tray', {id:'refresh'})` only when clicked and rechecks current enablement/declaration. Menu enumeration does not start code. Labels may be localized. Native Settings, Restart without plugins and Quit remain available; Linux exported menus refresh on plugin changes. A bitmap may contain painted text but is not a native editable control or a promise of cross-platform tray titles.

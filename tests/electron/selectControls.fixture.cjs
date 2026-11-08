@@ -291,6 +291,40 @@ app.whenReady().then(async () => {
   await settle();
   assert.equal(await run(`document.querySelectorAll('.select-control-popup').length`), popups - 1);
 
+  // Plugin-authored content keeps native controls unless the author opts in.
+  const pluginPopups = await run(`document.querySelectorAll('.select-control-popup').length`);
+  await run(`(()=>{
+    const region=document.createElement('div');region.className='plugin-content';region.id='pluginSelectFixture';
+    region.innerHTML='<label class="settings-item"><span class="settings-item-title">Plugin mode</span><select id="pluginOptIn" data-tm-select><option value="short">Compact</option><option value="detail" data-tm-select-description="A longer explanation supplied by the plugin author.">Detailed</option></select></label><select id="pluginNative"><option>Author control</option></select><select id="pluginMultiple" data-tm-select multiple><option>Multiple</option></select><label class="settings-item"><span class="settings-item-title">Plugin models</span><select id="pluginLong" data-tm-select></select></label>';
+    const long=region.querySelector('#pluginLong');
+    for(let i=0;i<15;i++) long.add(new Option('Plugin model '+i,String(i)));
+    document.getElementById('fixturePanel').prepend(region);
+    window.pluginSelectChanges=0;region.querySelector('#pluginOptIn').addEventListener('change',()=>pluginSelectChanges++);
+  })()`);
+  await settle();
+  assert.deepEqual(await run(`({opted:document.getElementById('pluginOptIn').hidden,native:document.getElementById('pluginNative').hidden,multiple:document.getElementById('pluginMultiple').hidden})`),
+    {opted:true,native:false,multiple:false});
+  await run(`document.getElementById('pluginOptIn').nextElementSibling.scrollIntoView({block:'nearest'})`);
+  await settle();
+  await click('#pluginOptIn + button');
+  assert.equal(await run(`document.querySelector('.select-control-popup:popover-open .select-control-description:not([hidden])').textContent`), 'A longer explanation supplied by the plugin author.');
+  await capture('plugin-options');
+  await key('Down');await key('Return');
+  assert.deepEqual(await run(`({value:document.getElementById('pluginOptIn').value,changes:pluginSelectChanges})`),{value:'detail',changes:1});
+  await run(`document.getElementById('pluginOptIn').value='short'`);
+  assert.equal(await run(`document.querySelector('#pluginOptIn + button .select-control-value').textContent`),'Compact');
+  await run(`document.querySelector('#pluginOptIn option[value="detail"]').dataset.tmSelectDescription='Updated plugin description'`);
+  await settle();
+  await click('#pluginOptIn + button');
+  assert.equal(await run(`document.querySelector('.select-control-popup:popover-open .select-control-description:not([hidden])').textContent`),'Updated plugin description');
+  await key('Escape');
+  await click('#pluginLong + button');
+  assert.equal(await run(`document.activeElement.className`),'select-control-search');
+  await win.webContents.insertText('Plugin model 14');await settle();await key('Return');
+  assert.equal(await run(`document.getElementById('pluginLong').value`),'14');
+  await run(`document.getElementById('pluginSelectFixture').remove()`);await settle();
+  assert.equal(await run(`document.querySelectorAll('.select-control-popup').length`),pluginPopups);
+
   // Popovers inside a native modal must stay interactive rather than becoming inert.
   await run(`(()=>{const dialog=document.createElement('dialog');dialog.id='modal';dialog.innerHTML='<label>Mode<select id="modalSelect"><option>One</option><option>Two</option></select></label>';document.body.append(dialog);dialog.showModal()})()`);
   await settle();
