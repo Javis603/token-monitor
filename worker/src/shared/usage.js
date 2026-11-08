@@ -2018,6 +2018,7 @@ const shelledPeriods = new WeakSet();
 // That map is an immutable snapshot; mergeSession copies it before adding.
 function reuseUnchangedSession(session) {
   const copy = { ...session };
+  if (sessionsWithLiveSource.has(session)) sessionsWithLiveSource.add(copy);
   reusedUnchangedSessions.add(copy);
   if (session.modelCosts && typeof session.modelCosts === 'object') copy.modelCosts = { ...session.modelCosts };
   delete copy.parentSessionId;
@@ -2119,6 +2120,7 @@ function detachSessions(sessions) {
 
 function cloneSessionForMerge(session) {
   const copy = { ...session };
+  if (sessionsWithLiveSource.has(session)) sessionsWithLiveSource.add(copy);
   if (session.models && typeof session.models === 'object') copy.models = { ...session.models };
   if (session.modelCosts && typeof session.modelCosts === 'object') copy.modelCosts = { ...session.modelCosts };
   if (session.providers && typeof session.providers === 'object') copy.providers = { ...session.providers };
@@ -2159,7 +2161,7 @@ const OVERLAY_MAP_FIELDS = [
 // map; zero counters and empty maps do not. Call this on a normalized period.
 function normalizedOverlayChangesMerge(period) {
   if (!period || typeof period !== 'object') return false;
-  if (OVERLAY_NUMERIC_FIELDS.some((field) => Number(period[field]) > 0)) return true;
+  if (OVERLAY_NUMERIC_FIELDS.some((field) => asNumber(period[field]) !== 0)) return true;
   if (OVERLAY_MAP_FIELDS.some((field) => {
     const value = period[field];
     return Boolean(value && typeof value === 'object' && Object.keys(value).length > 0);

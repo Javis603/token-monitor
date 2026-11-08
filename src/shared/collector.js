@@ -1130,13 +1130,11 @@ async function collectUsageOnce(options) {
     propagateTodayProjects(today, Object.values(todayPartitions), { ...localSessionMetadataDeps, projectsFromToday: true });
   }
 
-  // Decoration can replace a title or project label after the scan's own
-  // normalizePeriod. The previous merge normalized the host period again on the
-  // way out. Do that once on a full scan, before these objects become the
-  // anchor, so later watch ticks shell the normalized text. A watch tick must
-  // not: normalizePeriod walks every retained session.
+  // Decoration can replace text after the scan's normalization. Today was
+  // freshly decorated even on a watch tick. Normalize broader periods only on
+  // full scans; delta merges already normalize the sessions Today touched.
+  today = normalizePeriod(today);
   if (!anchorUsed && normalizedClients) {
-    today = normalizePeriod(today);
     month = normalizePeriod(month);
     allTime = normalizePeriod(allTime);
   }
@@ -3040,19 +3038,19 @@ function startCollector(options) {
                 // The upstream wsl.today guard is preserved: non-WSL machines
                 // keep the identity pass-through instead of a normalize round
                 // trip on this shared preview path.
-                today: wsl.today ? mergeNormalizedPeriods(partial.today, wsl.today) : partial.today
+                today: wsl.today ? mergePeriods(partial.today, wsl.today) : partial.today
               };
               // Only include month/allTime when actually scanned. During warm
               // full scans the main.js handler carries the previous values
               // forward for omitted fields, so these cards don't flash empty.
               if (partial.month) {
                 preview.month = wsl.month
-                  ? mergeNormalizedPeriods(partial.month, wsl.month)
+                  ? mergePeriods(partial.month, wsl.month)
                   : partial.month;
               }
               if (partial.allTime) {
                 preview.allTime = wslAnchor
-                  ? mergeNormalizedPeriods(partial.allTime, wslAnchor.allTime)
+                  ? mergePeriods(partial.allTime, wslAnchor.allTime)
                   : partial.allTime;
               }
               // Only derive clientStatus when allTime is available; warm
@@ -3062,7 +3060,7 @@ function startCollector(options) {
               }
               if (codexLocalView && codexLocalViewDay === todayKey) {
                 for (const name of ['today', 'month', 'allTime']) {
-                  if (preview[name]) preview[name] = mergeNormalizedPeriods(preview[name], codexLocalView[name]);
+                  if (preview[name]) preview[name] = mergePeriods(preview[name], codexLocalView[name]);
                 }
                 preview.codexLocalSessionKeys = codexLocalView.sessionKeys;
               }
