@@ -60,6 +60,61 @@ app.whenReady().then(async () => {
     await settle();
   };
 
+  if (process.argv.includes('--forms')) {
+    await run(`(()=>{
+      window.formTemplates=['.subscription-add-body','#opencodeAddDetails .opencode-add-body','.thirdparty-add-body'].map(selector=>document.querySelector(selector).cloneNode(true));
+      const shell=document.createElement('main');shell.className='shell settings-open';
+      const panel=document.createElement('section');panel.className='settings-panel';panel.id='formPanel';shell.append(panel);document.body.replaceChildren(shell);
+      const style=document.createElement('style');style.textContent='.shell{width:100%;height:auto;padding:24px;box-sizing:border-box}.settings-panel{position:static;display:block;max-height:none;overflow:visible;margin:0;padding:0}';document.head.append(style);
+    })()`);
+    const cases = [];
+    for (const [width, locale, scale] of [[290,'zh-TW',1],[290,'en',1.2],[380,'pt-BR',1]]) {
+      win.setContentSize(width + 48, 1800);
+      await run(`(()=>{
+        document.documentElement.style.setProperty('--ui-text-scale',${scale});
+        const panel=document.getElementById('formPanel');panel.replaceChildren(...formTemplates.map(node=>node.cloneNode(true)));
+        TokenMonitorI18n.applyTranslations(panel,${JSON.stringify(locale).replace(/</g, '\\u003c')});
+        for(const select of panel.querySelectorAll('select')) if(!select.options.length) select.add(new Option('Example account','example'));
+        document.getElementById('subscriptionCurrencyInput').replaceChildren(new Option('USD','USD'),new Option('HKD','HKD'));
+        const row=document.createElement('div');row.className='status-provider-interval';row.innerHTML='<span>Trend interval</span><select id="formTrendInterval"><option>15 minutes</option></select>';panel.append(row);
+        window.measureForms=()=>{
+          const source=document.getElementById('subscriptionCurrencyInput');
+          const visible=select=>select.hidden?select.nextElementSibling:select;
+          const size=node=>{const r=node.getBoundingClientRect(),s=getComputedStyle(node);return {width:r.width,height:r.height,font:s.fontSize}};
+          const amount=size(document.getElementById('subscriptionAmountInput'));
+          const currency=size(visible(source));
+          const count=size(document.getElementById('subscriptionIntervalCountInput'));
+          const interval=size(visible(document.getElementById('subscriptionIntervalInput')));
+          const fields=[document.getElementById('opencodeCredentialKind'),...document.querySelectorAll('.thirdparty-field select')].map(visible).filter(node=>node.getBoundingClientRect().height>0).map(size);
+          const trend=size(visible(document.getElementById('formTrendInterval')));
+          return {amount,currency,count,interval,fields,trend};
+        };
+      })()`);
+      const native = await run('measureForms()');
+      if (width === 290 && locale === 'zh-TW') await capture('forms-native');
+      await run(`void(window.selectFixtureManager=TokenMonitorAppSelects.mount({document,t:key=>TokenMonitorI18n.translate(${JSON.stringify(locale).replace(/</g, '\\u003c')},key),fonts:TokenMonitorFontSettings}))`);
+      await settle();
+      const custom = await run('measureForms()');
+      if (width === 290 && locale === 'zh-TW') await capture('forms-custom');
+      await run(`(()=>{const source=document.getElementById('subscriptionCurrencyInput');document.getElementById('subscriptionTopUpHeadingRow').append(source);document.getElementById('subscriptionPlanFields').classList.add('hidden');document.getElementById('subscriptionTopUpFields').classList.remove('hidden')})()`);
+      await settle();
+      const topUp = await run(`(()=>{const trigger=document.getElementById('subscriptionCurrencyInput').nextElementSibling;return {width:trigger.getBoundingClientRect().width,font:parseFloat(getComputedStyle(trigger).fontSize)}})()`);
+      const failures = [];
+      for (const key of ['amount','count']) if(custom[key].width<native[key].width-1) failures.push(key+' input squeezed');
+      for (const key of ['currency','interval']) if(Math.abs(custom[key].height-native[key].height)>1 || custom[key].font!==native[key].font) failures.push(key+' sizing changed');
+      if(topUp.width>topUp.font*6.5+1) failures.push('top-up currency too wide');
+      if(custom.fields.some((field,index)=>Math.abs(field.width-native.fields[index].width)>1 || Math.abs(field.height-native.fields[index].height)>1 || field.font!==native.fields[index].font)) failures.push('provider field sizing changed');
+      if(custom.trend.width>width*.58+1 || custom.trend.font!==native.trend.font) failures.push('trend interval sizing changed');
+      cases.push({width,locale,scale,native,custom,topUp,failures});
+      await run('selectFixtureManager.destroy()');
+    }
+    fs.writeFileSync(path.join(output,'forms.json'),JSON.stringify(cases,null,2));
+    console.log(JSON.stringify({formCases:cases,output}));
+    assert.ok(cases.every(item=>!item.failures.length),'complete forms retain native layout after enhancement');
+    assert.deepEqual(errors,[]);
+    win.destroy();app.quit();return;
+  }
+
   // Exercise discovery against the entire real document before extracting the
   // representative controls for readable, comparable screenshots.
   const coverage = await run(`(()=>{

@@ -3300,7 +3300,7 @@ test('an attached subscription adds no resting decoration to the plan label', ()
 
 test('subscription form controls stay shrinkable so a long option cannot overflow the panel', () => {
   const styles = readRendererFile('styles.css');
-  const block = cssBlock(styles, '.subscription-add-body .settings-row > :is(input, select)');
+  const block = cssBlock(styles, '.subscription-add-body .settings-row > :is(input, select, .select-control-trigger)');
   assert.match(block, /flex: 1 1 0;/);
   assert.match(block, /min-width: 0;/);
   // Descendant, not child: each kind of record wraps its own rows, so a child
