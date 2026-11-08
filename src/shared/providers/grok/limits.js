@@ -15,7 +15,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { normalizeLimitProvider } = require('../../limits/core');
-const { cleanSecret } = require('../../limits/providerHelpers');
+const {
+  cleanSecret,
+  envValue,
+  pathDelimiterForPlatform,
+  uniqueStrings
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { createOutboundFetch } = require('../../outboundFetch');
 const { abortError } = require('../../probeDeadline');
@@ -454,9 +459,54 @@ function parseGrokGrpcWebBilling(data, nowMs = Date.now()) {
   return [buildWindow(billingWindowLabel(windowMinutes ?? minutesUntilReset), percent, 100, resetsAt, windowMinutes)];
 }
 
-function grokRpcCommand(env = process.env, options = {}) {
-  const explicit = cleanSecret(options.grokCommand || env.GROK_CLI_PATH);
-  return explicit || 'grok';
+function resolveGrokCliHomeDir(env = process.env, options = {}, deps = {}) {
+  const explicit = deps.homeDir !== undefined ? deps.homeDir : options.homeDir;
+  if (explicit !== undefined) return cleanSecret(String(explicit || ''));
+  const fromEnv = cleanSecret(envValue(env, 'HOME') || envValue(env, 'USERPROFILE'));
+  if (fromEnv) return fromEnv;
+  if (env === process.env || deps.existsSync || options.existsSync) return os.homedir();
+  return '';
+}
+
+function grokCommandCandidates(env = process.env, options = {}, deps = {}) {
+  const explicit = cleanSecret(options.grokCommand || envValue(env, 'GROK_CLI_PATH'));
+  if (explicit) return [explicit];
+  const platform = deps.platform || options.platform || process.platform;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const binName = platform === 'win32' ? 'grok.exe' : 'grok';
+  const candidates = [];
+  const rawPath = cleanSecret(envValue(env, 'PATH'));
+  if (rawPath) {
+    const delimiter = pathDelimiterForPlatform(platform);
+    for (const dir of rawPath.split(delimiter).filter(Boolean)) {
+      if (pathApi.isAbsolute(dir)) candidates.push(pathApi.join(dir, binName));
+    }
+  }
+  const homeDir = resolveGrokCliHomeDir(env, options, deps);
+  if (homeDir) {
+    candidates.push(
+      pathApi.join(homeDir, '.grok', 'bin', binName),
+      pathApi.join(homeDir, '.local', 'bin', binName)
+    );
+  }
+  if (platform !== 'win32') {
+    candidates.push('/opt/homebrew/bin/grok', '/usr/local/bin/grok');
+  }
+  candidates.push('grok');
+  return uniqueStrings(candidates);
+}
+
+function grokRpcCommand(env = process.env, options = {}, deps = {}) {
+  const explicit = cleanSecret(options.grokCommand || envValue(env, 'GROK_CLI_PATH'));
+  if (explicit) return explicit;
+  const platform = deps.platform || options.platform || process.platform;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const existsSync = deps.existsSync || options.existsSync || fs.existsSync;
+  for (const candidate of grokCommandCandidates(env, options, deps)) {
+    if (!pathApi.isAbsolute(candidate)) return candidate;
+    if (existsSync(candidate)) return candidate;
+  }
+  return 'grok';
 }
 
 function grokRpcArgs(options = {}) {
@@ -484,7 +534,7 @@ function grokRpcError(message, status = 'unavailable') {
 async function fetchGrokRpcBilling(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const spawnFn = deps.spawn || spawn;
-  const command = grokRpcCommand(env, options);
+  const command = grokRpcCommand(env, options, deps);
   const args = grokRpcArgs(options);
   const timeoutMs = Number(deps.rpcTimeoutMs || deps.fetchTimeoutMs || 5000);
   const signal = deps.signal;
@@ -800,6 +850,8 @@ module.exports = {
   resolveGrokCredential,
   parseGrokBilling,
   parseGrokGrpcWebBilling,
+  grokCommandCandidates,
+  grokRpcCommand,
   resolveGrokFetch,
   fetchGrokRpcBilling,
   fetchGrokWebGrpcBilling,

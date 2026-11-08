@@ -12,6 +12,8 @@ const {
   GROK_WEB_BILLING_GRPC_URL,
   resolveGrokHome,
   resolveGrokCredential,
+  grokCommandCandidates,
+  grokRpcCommand,
   isRetryableNetworkError,
   validateGrokGrpcStatus
 } = require('../../src/shared/providers/grok/limits');
@@ -43,9 +45,9 @@ test('isRetryableNetworkError classifies transient undici failures only', () => 
   assert.equal(isRetryableNetworkError(new Error('invalid proxy URL')), false);
 });
 
-function fakeGrokRpcSpawn(assertArgs = ['agent', 'stdio']) {
+function fakeGrokRpcSpawn(assertArgs = ['agent', 'stdio'], assertCommand = 'grok') {
   return (command, args) => {
-    assert.equal(command, 'grok');
+    assert.equal(command, assertCommand);
     assert.deepEqual(args, assertArgs);
     const child = new EventEmitter();
     child.stdout = new PassThrough();
@@ -385,10 +387,143 @@ test('parseGrokBilling throws when monthly window cannot be built', () => {
   assert.throws(() => parseGrokBilling(body), /no monthly quota/);
 });
 
+test('grokRpcCommand honours explicit options.grokCommand and env.GROK_CLI_PATH before probing paths', () => {
+  assert.equal(
+    grokRpcCommand(
+      { GROK_CLI_PATH: '/env/grok' },
+      { grokCommand: ' "/opt/custom/grok" ' },
+      { existsSync: () => true }
+    ),
+    '/opt/custom/grok'
+  );
+  assert.equal(
+    grokRpcCommand(
+      { GROK_CLI_PATH: ' "/env/grok" ' },
+      {},
+      { existsSync: () => false }
+    ),
+    '/env/grok'
+  );
+});
+
+test('grokRpcCommand probes PATH then ~/.grok/bin, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin and falls back to grok', () => {
+  const homeDir = '/Users/alice';
+  const expectedOrder = [
+    '/usr/bin/grok',
+    '/bin/grok',
+    '/Users/alice/.grok/bin/grok',
+    '/Users/alice/.local/bin/grok',
+    '/opt/homebrew/bin/grok',
+    '/usr/local/bin/grok',
+    'grok'
+  ];
+  assert.deepEqual(
+    grokCommandCandidates({ PATH: '/usr/bin:/bin' }, { homeDir }, { platform: 'darwin' }),
+    expectedOrder
+  );
+
+  // PATH hit wins over default install locations.
+  assert.equal(
+    grokRpcCommand(
+      { PATH: '/custom/bin:/usr/bin' },
+      { homeDir },
+      {
+        platform: 'darwin',
+        existsSync: (candidate) => candidate === '/custom/bin/grok' || candidate === '/Users/alice/.grok/bin/grok'
+      }
+    ),
+    '/custom/bin/grok'
+  );
+
+  // Official installer path ~/.grok/bin/grok wins when GUI PATH lacks ~/.grok/bin.
+  assert.equal(
+    grokRpcCommand(
+      { PATH: '/usr/bin:/bin' },
+      {},
+      {
+        platform: 'darwin',
+        homeDir,
+        existsSync: (candidate) => candidate === '/Users/alice/.grok/bin/grok' || candidate === '/opt/homebrew/bin/grok'
+      }
+    ),
+    '/Users/alice/.grok/bin/grok'
+  );
+
+  // Subsequent fallback order: ~/.local/bin/grok -> /opt/homebrew/bin/grok -> /usr/local/bin/grok -> grok.
+  assert.equal(
+    grokRpcCommand(
+      { PATH: '/usr/bin:/bin' },
+      { homeDir },
+      {
+        platform: 'darwin',
+        existsSync: (candidate) => candidate === '/Users/alice/.local/bin/grok' || candidate === '/opt/homebrew/bin/grok'
+      }
+    ),
+    '/Users/alice/.local/bin/grok'
+  );
+  assert.equal(
+    grokRpcCommand(
+      { PATH: '/usr/bin:/bin' },
+      { homeDir },
+      {
+        platform: 'darwin',
+        existsSync: (candidate) => candidate === '/opt/homebrew/bin/grok' || candidate === '/usr/local/bin/grok'
+      }
+    ),
+    '/opt/homebrew/bin/grok'
+  );
+  assert.equal(
+    grokRpcCommand(
+      { PATH: '/usr/bin:/bin' },
+      { homeDir },
+      {
+        platform: 'darwin',
+        existsSync: (candidate) => candidate === '/usr/local/bin/grok'
+      }
+    ),
+    '/usr/local/bin/grok'
+  );
+  assert.equal(
+    grokRpcCommand(
+      { PATH: '/usr/bin:/bin' },
+      { homeDir },
+      { platform: 'darwin', existsSync: () => false }
+    ),
+    'grok'
+  );
+
+  // Windows uses grok.exe under ~/.grok/bin and ~/.local/bin.
+  assert.equal(
+    grokRpcCommand(
+      { PATH: 'C:\\Windows\\System32' },
+      { homeDir: 'C:\\Users\\alice' },
+      {
+        platform: 'win32',
+        existsSync: (candidate) => candidate === 'C:\\Users\\alice\\.grok\\bin\\grok.exe'
+      }
+    ),
+    'C:\\Users\\alice\\.grok\\bin\\grok.exe'
+  );
+});
+
 test('fetchGrokRpcBilling speaks Grok agent stdio x.ai/billing JSON-RPC', async () => {
   const body = await fetchGrokRpcBilling({}, {
     env: {},
+    existsSync: () => false,
     spawn: fakeGrokRpcSpawn(),
+    rpcTimeoutMs: 100
+  });
+  assert.equal(body.monthlyLimit.val, 10000);
+  assert.equal(body.usage.totalUsed.val, 4200);
+});
+
+test('fetchGrokRpcBilling uses discovered ~/.grok/bin/grok when GUI PATH omits it', async () => {
+  const expectedCli = '/Users/alice/.grok/bin/grok';
+  const body = await fetchGrokRpcBilling({}, {
+    env: { PATH: '/usr/bin:/bin', HOME: '/Users/alice' },
+    platform: 'darwin',
+    existsSync: (candidate) => candidate === expectedCli,
+    spawn: fakeGrokRpcSpawn(['agent', 'stdio'], expectedCli),
     rpcTimeoutMs: 100
   });
   assert.equal(body.monthlyLimit.val, 10000);
