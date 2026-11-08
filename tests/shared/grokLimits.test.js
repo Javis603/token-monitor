@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,7 +13,7 @@ const {
   GROK_WEB_BILLING_GRPC_URL,
   resolveGrokHome,
   resolveGrokCredential,
-  grokCommandCandidates,
+  withGrokPathHints,
   grokRpcCommand,
   isRetryableNetworkError,
   validateGrokGrpcStatus
@@ -44,13 +45,6 @@ test('isRetryableNetworkError classifies transient undici failures only', () => 
   assert.equal(isRetryableNetworkError(Object.assign(new Error('rejected'), { status: 'unauthorized' })), false);
   assert.equal(isRetryableNetworkError(new Error('invalid proxy URL')), false);
 });
-
-function fakeGrokCliFiles(...files) {
-  return {
-    statSync: (candidate) => ({ isFile: () => files.includes(candidate) }),
-    accessSync: () => {}
-  };
-}
 
 function fakeGrokRpcSpawn(assertArgs = ['agent', 'stdio'], assertCommand = 'grok') {
   return (command, args) => {
@@ -394,167 +388,63 @@ test('parseGrokBilling throws when monthly window cannot be built', () => {
   assert.throws(() => parseGrokBilling(body), /no monthly quota/);
 });
 
-test('grokRpcCommand honours explicit options.grokCommand and env.GROK_CLI_PATH before probing paths', () => {
-  assert.equal(
-    grokRpcCommand(
-      { GROK_CLI_PATH: '/env/grok' },
-      { grokCommand: ' "/opt/custom/grok" ' },
-      { statSync: () => assert.fail('Explicit commands must not be probed') }
-    ),
-    '/opt/custom/grok'
-  );
-  assert.equal(
-    grokRpcCommand(
-      { GROK_CLI_PATH: ' "/env/grok" ' },
-      {},
-      fakeGrokCliFiles()
-    ),
-    '/env/grok'
-  );
+test('grokRpcCommand honours explicit commands without changing their environment', () => {
+  const env = { GROK_CLI_PATH: ' "/env/grok" ', PATH: '/original/bin' };
+  assert.equal(grokRpcCommand(env, { grokCommand: ' "/opt/custom/grok" ' }), '/opt/custom/grok');
+  assert.equal(grokRpcCommand(env), '/env/grok');
+  assert.strictEqual(withGrokPathHints(env), env);
+  const customEnv = {};
+  assert.strictEqual(withGrokPathHints(customEnv, { grokCommand: '/custom/grok' }), customEnv);
 });
 
-test('grokRpcCommand probes PATH then ~/.grok/bin, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin and falls back to grok', () => {
-  const homeDir = '/Users/alice';
-  const expectedOrder = [
-    '/usr/bin/grok',
-    '/bin/grok',
-    '/Users/alice/.grok/bin/grok',
-    '/Users/alice/.local/bin/grok',
-    '/opt/homebrew/bin/grok',
-    '/usr/local/bin/grok',
-    'grok'
-  ];
-  assert.deepEqual(
-    grokCommandCandidates({ PATH: '/usr/bin:/bin' }, { homeDir }, { platform: 'darwin' }),
-    expectedOrder
-  );
-
-  // PATH hit wins over default install locations.
-  assert.equal(
-    grokRpcCommand(
-      { PATH: '/custom/bin:/usr/bin' },
-      { homeDir },
-      {
-        platform: 'darwin',
-        ...fakeGrokCliFiles('/custom/bin/grok', '/Users/alice/.grok/bin/grok')
-      }
-    ),
-    '/custom/bin/grok'
-  );
-
-  // Official installer path ~/.grok/bin/grok wins when GUI PATH lacks ~/.grok/bin.
-  assert.equal(
-    grokRpcCommand(
-      { PATH: '/usr/bin:/bin' },
-      {},
-      {
-        platform: 'darwin',
-        homeDir,
-        ...fakeGrokCliFiles('/Users/alice/.grok/bin/grok', '/opt/homebrew/bin/grok')
-      }
-    ),
-    '/Users/alice/.grok/bin/grok'
-  );
-
-  // Subsequent fallback order: ~/.local/bin/grok -> /opt/homebrew/bin/grok -> /usr/local/bin/grok -> grok.
-  assert.equal(
-    grokRpcCommand(
-      { PATH: '/usr/bin:/bin' },
-      { homeDir },
-      {
-        platform: 'darwin',
-        ...fakeGrokCliFiles('/Users/alice/.local/bin/grok', '/opt/homebrew/bin/grok')
-      }
-    ),
-    '/Users/alice/.local/bin/grok'
-  );
-  assert.equal(
-    grokRpcCommand(
-      { PATH: '/usr/bin:/bin' },
-      { homeDir },
-      {
-        platform: 'darwin',
-        ...fakeGrokCliFiles('/opt/homebrew/bin/grok', '/usr/local/bin/grok')
-      }
-    ),
-    '/opt/homebrew/bin/grok'
-  );
-  assert.equal(
-    grokRpcCommand(
-      { PATH: '/usr/bin:/bin' },
-      { homeDir },
-      {
-        platform: 'darwin',
-        ...fakeGrokCliFiles('/usr/local/bin/grok')
-      }
-    ),
-    '/usr/local/bin/grok'
-  );
-  assert.equal(
-    grokRpcCommand(
-      { PATH: '/usr/bin:/bin' },
-      { homeDir },
-      { platform: 'darwin', ...fakeGrokCliFiles() }
-    ),
-    'grok'
-  );
-
-  // Windows uses grok.exe under ~/.grok/bin and ~/.local/bin.
-  assert.equal(
-    grokRpcCommand(
-      { PATH: 'C:\\Windows\\System32' },
-      { homeDir: 'C:\\Users\\alice' },
-      {
-        platform: 'win32',
-        ...fakeGrokCliFiles('C:\\Users\\alice\\.grok\\bin\\grok.exe'),
-        accessSync: () => assert.fail('Windows must not check POSIX execute permissions')
-      }
-    ),
-    'C:\\Users\\alice\\.grok\\bin\\grok.exe'
-  );
+test('withGrokPathHints appends install directories without rewriting the original PATH', () => {
+  const env = { PATH: './tools::/dir with spaces:/usr/bin:', HOME: '/Users/alice' };
+  const result = withGrokPathHints(env, {}, { platform: 'darwin' });
+  assert.equal(result.PATH, env.PATH + ':/Users/alice/.grok/bin:/Users/alice/.local/bin:/opt/homebrew/bin:/usr/local/bin');
+  assert.deepEqual(env, { PATH: './tools::/dir with spaces:/usr/bin:', HOME: '/Users/alice' });
 });
 
-test('grokRpcCommand skips directories and missing files before an executable', (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-cli-path-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const binName = process.platform === 'win32' ? 'grok.exe' : 'grok';
-  const first = path.join(root, 'first');
-  const missing = path.join(root, 'missing');
-  const last = path.join(root, 'last');
-  fs.mkdirSync(path.join(first, binName), { recursive: true });
-  fs.mkdirSync(last);
-  const executable = path.join(last, binName);
-  fs.writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  assert.equal(
-    grokRpcCommand({ PATH: [first, missing, last].join(path.delimiter) }, { homeDir: '' }),
-    executable
-  );
+test('withGrokPathHints distinguishes missing PATH from an intentionally empty PATH', () => {
+  const deps = { platform: 'darwin', homeDir: '/Users/alice' };
+  assert.equal(withGrokPathHints({}, {}, deps).PATH,
+    '/usr/bin:/bin:/Users/alice/.grok/bin:/Users/alice/.local/bin:/opt/homebrew/bin:/usr/local/bin');
+  assert.equal(withGrokPathHints({ PATH: '' }, {}, deps).PATH,
+    ':/Users/alice/.grok/bin:/Users/alice/.local/bin:/opt/homebrew/bin:/usr/local/bin');
 });
 
-test('grokRpcCommand skips non-executable files before a valid CLI symlink', {
-  skip: process.platform === 'win32' && 'POSIX executable permissions'
-}, (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-cli-mode-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const first = path.join(root, 'first');
-  const last = path.join(root, 'last');
-  fs.mkdirSync(first);
-  fs.mkdirSync(last);
-  fs.writeFileSync(path.join(first, 'grok'), 'not executable', { mode: 0o644 });
-  const executable = path.join(root, 'grok-real');
-  fs.writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  const link = path.join(last, 'grok');
-  fs.symlinkSync(executable, link);
-  assert.equal(
-    grokRpcCommand({ PATH: [first, last].join(path.delimiter) }, { homeDir: '' }),
-    link
-  );
+test('withGrokPathHints uses native home rules with an OS fallback and explicit test homes', () => {
+  const env = { HOME: '/home/alice', USERPROFILE: '/other/home' };
+  assert.equal(withGrokPathHints(env, {}, { platform: 'linux' }).PATH,
+    '/usr/bin:/bin:/home/alice/.grok/bin:/home/alice/.local/bin:/opt/homebrew/bin:/usr/local/bin');
+  const pathApi = process.platform === 'win32' ? path.win32 : path.posix;
+  const pathKey = Object.keys(withGrokPathHints({})).find((key) => key.toLowerCase() === 'path');
+  assert.ok(withGrokPathHints({})[pathKey].split(path.delimiter).includes(pathApi.join(os.homedir(), '.grok', 'bin')));
+  assert.ok(withGrokPathHints({}, { homeDir: '/options' }, { platform: 'linux', homeDir: '/deps' }).PATH.includes('/deps/.grok/bin'));
+});
+
+test('withGrokPathHints preserves one Windows Path key and prioritizes USERPROFILE over HOME', () => {
+  const env = { Path: 'D:\\Tools', USERPROFILE: 'C:\\Users\\alice', HOME: 'D:\\MSYSHome' };
+  const result = withGrokPathHints(env, {}, { platform: 'win32' });
+  assert.equal(result.Path, 'D:\\Tools;C:\\Users\\alice\\.grok\\bin;C:\\Users\\alice\\.local\\bin');
+  assert.equal(Object.hasOwn(result, 'PATH'), false);
+  const duplicate = withGrokPathHints({ ...env, PATH: 'C:\\First' }, {}, { platform: 'win32' });
+  assert.deepEqual(Object.keys(duplicate).filter((key) => key.toLowerCase() === 'path'), ['PATH']);
+  assert.ok(duplicate.PATH.startsWith('C:\\First;'));
+  assert.deepEqual(env, { Path: 'D:\\Tools', USERPROFILE: 'C:\\Users\\alice', HOME: 'D:\\MSYSHome' });
+});
+
+test('withGrokPathHints preserves Windows inherited PATH when a custom env omits it', () => {
+  const inheritedKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path');
+  const inherited = inheritedKey === undefined ? undefined : process.env[inheritedKey];
+  const result = withGrokPathHints({}, {}, { platform: 'win32', homeDir: 'C:\\Users\\alice' });
+  assert.equal(result.PATH, [...(inherited === undefined ? [] : [inherited]),
+    'C:\\Users\\alice\\.grok\\bin', 'C:\\Users\\alice\\.local\\bin'].join(';'));
 });
 
 test('fetchGrokRpcBilling speaks Grok agent stdio x.ai/billing JSON-RPC', async () => {
   const body = await fetchGrokRpcBilling({}, {
     env: {},
-    ...fakeGrokCliFiles(),
+    homeDir: '',
     spawn: fakeGrokRpcSpawn(),
     rpcTimeoutMs: 100
   });
@@ -562,17 +452,115 @@ test('fetchGrokRpcBilling speaks Grok agent stdio x.ai/billing JSON-RPC', async 
   assert.equal(body.usage.totalUsed.val, 4200);
 });
 
-test('fetchGrokRpcBilling uses discovered ~/.grok/bin/grok when GUI PATH omits it', async () => {
-  const expectedCli = '/Users/alice/.grok/bin/grok';
-  const body = await fetchGrokRpcBilling({}, {
-    env: { PATH: '/usr/bin:/bin', HOME: '/Users/alice' },
-    platform: 'darwin',
-    ...fakeGrokCliFiles(expectedCli),
-    spawn: fakeGrokRpcSpawn(['agent', 'stdio'], expectedCli),
-    rpcTimeoutMs: 100
+function createNativeGrokRpcFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-rpc-path-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const script = path.join(root, 'billing.cjs');
+  fs.writeFileSync(script, `
+    const readline = require('node:readline');
+    readline.createInterface({ input: process.stdin }).on('line', (line) => {
+      const request = JSON.parse(line);
+      const result = request.method === 'initialize' ? {} : {
+        executable: process.execPath,
+        rpcArgs: process.argv.slice(2),
+        monthlyLimit: { val: 10000 }, usage: { totalUsed: { val: 4200 } }
+      };
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
+    });
+  `);
+  function install(directory) {
+    fs.mkdirSync(directory, { recursive: true });
+    const executable = path.join(directory, process.platform === 'win32' ? 'grok.exe' : 'grok');
+    fs.copyFileSync(process.execPath, executable, fs.constants.COPYFILE_FICLONE);
+    return fs.realpathSync(executable);
+  }
+  async function run(pathValue, options = {}, extraEnv = {}) {
+    const env = { ...process.env, HOME: root, USERPROFILE: root };
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === 'path' || key === 'GROK_CLI_PATH') delete env[key];
+    }
+    if (pathValue !== undefined) env[process.platform === 'win32' ? 'Path' : 'PATH'] = pathValue;
+    Object.assign(env, extraEnv);
+    let closed;
+    try {
+      return await fetchGrokRpcBilling({ grokRpcArgs: [script, 'fixture'], ...options }, {
+        env,
+        rpcTimeoutMs: 5000,
+        spawn: (command, args, init) => {
+          const child = spawn(command, args, { ...init, cwd: root });
+          closed = new Promise((resolve) => child.once('close', resolve));
+          return child;
+        }
+      });
+    } finally {
+      await closed;
+    }
+  }
+  return { root, install, run };
+}
+
+test('fetchGrokRpcBilling resolves a real native CLI through the child PATH', async (t) => {
+  const fixture = createNativeGrokRpcFixture(t);
+  const homeCli = fixture.install(path.join(fixture.root, '.grok', 'bin'));
+  const originalDir = path.join(fixture.root, 'original tools');
+  const originalCli = fixture.install(originalDir);
+  const customCli = fixture.install(path.join(fixture.root, 'custom tools'));
+  const cwdCli = process.platform === 'win32' ? null : fixture.install(fixture.root);
+
+  await t.test('GUI PATH omits the installed CLI', async () => {
+    const body = await fixture.run(path.join(fixture.root, 'missing'));
+    assert.equal(body.executable, homeCli);
+    assert.deepEqual(body.rpcArgs, ['fixture']);
+    assert.equal(body.usage.totalUsed.val, 4200);
   });
-  assert.equal(body.monthlyLimit.val, 10000);
-  assert.equal(body.usage.totalUsed.val, 4200);
+  await t.test('original PATH wins over the home installation', async () => {
+    assert.equal((await fixture.run(originalDir)).executable, originalCli);
+  });
+  await t.test('relative PATH keeps its precedence', async () => {
+    assert.equal((await fixture.run(path.relative(fixture.root, originalDir))).executable, originalCli);
+  });
+  await t.test('explicit options command overrides the environment and PATH', async () => {
+    assert.equal((await fixture.run(originalDir, { grokCommand: customCli }, { GROK_CLI_PATH: homeCli })).executable, customCli);
+  });
+  await t.test('GROK_CLI_PATH overrides PATH', async () => {
+    assert.equal((await fixture.run(originalDir, {}, { GROK_CLI_PATH: customCli })).executable, customCli);
+  });
+  await t.test('Windows spawn receives one PATH key and uses USERPROFILE', {
+    skip: process.platform !== 'win32' && 'Windows native executable lookup'
+  }, async () => {
+    assert.equal((await fixture.run(path.dirname(homeCli), {}, { PATH: originalDir })).executable, originalCli);
+    assert.equal((await fixture.run(path.join(fixture.root, 'missing'), {}, {
+      HOME: path.join(fixture.root, 'other-home')
+    })).executable, homeCli);
+  });
+  await t.test('missing PATH does not introduce a current-directory search on POSIX', {
+    skip: process.platform === 'win32' && 'Windows natively searches the current directory'
+  }, async () => {
+    assert.equal((await fixture.run(undefined)).executable, homeCli);
+  });
+  await t.test('explicitly empty PATH retains current-directory search on POSIX', {
+    skip: process.platform === 'win32' && 'POSIX empty PATH semantics'
+  }, async () => {
+    assert.equal((await fixture.run('')).executable, cwdCli);
+  });
+  await t.test('a CLI symlink on PATH remains usable on POSIX', {
+    skip: process.platform === 'win32' && 'POSIX symlink fixture'
+  }, async () => {
+    const links = path.join(fixture.root, 'links');
+    fs.mkdirSync(links);
+    fs.symlinkSync(originalCli, path.join(links, 'grok'));
+    assert.equal((await fixture.run(links)).executable, originalCli);
+  });
+  await t.test('non-executable files and directories do not block a later CLI on POSIX', {
+    skip: process.platform === 'win32' && 'POSIX executable permissions'
+  }, async () => {
+    const blocked = path.join(fixture.root, 'blocked');
+    const directory = path.join(fixture.root, 'directory');
+    fs.mkdirSync(blocked);
+    fs.writeFileSync(path.join(blocked, 'grok'), 'not executable', { mode: 0o644 });
+    fs.mkdirSync(path.join(directory, 'grok'), { recursive: true });
+    assert.equal((await fixture.run([blocked, directory, originalDir].join(path.delimiter))).executable, originalCli);
+  });
 });
 
 test('fetchGrokRpcBilling kills the CLI when the parent signal aborts', async () => {
