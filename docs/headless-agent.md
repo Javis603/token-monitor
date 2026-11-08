@@ -50,7 +50,7 @@ The agent reads `.env` from the checkout root, wherever it is started from.
 
 Usage periods and daily graphs follow the agent process's system timezone. On a UTC server, set `TZ=Asia/Shanghai` (or another IANA timezone) in the agent service environment before starting it if you want that device to use a different calendar. The collector passes that timezone to its scanner even when Tokscale previously saved a different timezone. Each device retains its own day boundary; other devices are not rebucketed to the viewer's timezone.
 
-Changing timezone invalidates usage anchors and starts retention in that calendar. Previously saved daily history is preserved as recorded and is not automatically repaired.
+Changing the timezone triggers a full rescan, and daily history is kept separately for each timezone. Previously saved daily history is preserved as recorded and is not automatically repaired.
 
 ### Title-sync state and migration
 
