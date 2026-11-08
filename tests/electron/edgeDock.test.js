@@ -1113,7 +1113,9 @@ test('shared card repaint preserves both account and session scroll positions in
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const source = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
   let previous;
-  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR} = deps; const captureCardSwitch = () => null, animateCardSwitch = () => {}; ${source}; return commitCard;`)({
+  const openings = [];
+  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR, openings} = deps; const captureCardSwitch = (_previous, _sameCard, opening) => { openings.push(opening); return null; }, animateCardSwitch = () => {}; ${source}; return commitCard;`)({
+    openings,
     contentLayer: { querySelector: () => previous, replaceChildren() {} },
     overflowText: { refresh() {}, preserveReading() {} },
     cardResetAnimator: { capture() {}, animate() {} },
@@ -1132,6 +1134,16 @@ test('shared card repaint preserves both account and session scroll positions in
   commit(make('claude', positions), 'claude');
   assert.equal(positions['.edge-dock-accounts'].scrollTop, 0);
   assert.equal(positions['.edge-dock-session-list'].scrollTop, 0);
+  previous.dataset.reveal = '1';
+  const reopened = make('claude', positions);
+  reopened.dataset.reveal = '2';
+  commit(reopened, 'claude');
+  assert.equal(openings.at(-1), true, 'commit suppresses the outgoing card across openings');
+  previous = reopened;
+  const switched = make('cursor', positions);
+  switched.dataset.reveal = '2';
+  commit(switched, 'cursor');
+  assert.equal(openings.at(-1), false, 'a continuous switch still animates');
 });
 
 test('a repainted card restores the scroll container it actually uses', () => {
@@ -3431,7 +3443,7 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
     `${source}; return { captureCardSwitch, animateCardSwitch, clearCardSwitch };`)(
     'bubble', document, () => reduced, card => ({ opacity: card.opacity }), { append: ghost => ghosts.add(ghost) }, '.scroll');
   const first = node('1', 37), next = node();
-  const motion = api.captureCardSwitch(first, false, next);
+  const motion = api.captureCardSwitch(first, false);
   api.animateCardSwitch(next, motion);
   assert.equal(ghosts.size, 1);
   assert.equal(motion.ghost.inert, true);
@@ -3443,7 +3455,7 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   assert.equal(next.animations[0].timing.delay, undefined, 'both readings start together');
   const originalIncoming = motion.incoming, outgoing = motion.outgoing;
   originalIncoming.currentTime = 80;
-  const repaint = api.captureCardSwitch(next, true, node());
+  const repaint = api.captureCardSwitch(next, true);
   api.animateCardSwitch(node(), repaint);
   assert.equal(repaint, motion);
   assert.equal(repaint.incoming.currentTime, 80, 'a live repaint does not restart or snap the fade');
@@ -3451,7 +3463,7 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   assert.equal(originalIncoming.cancelled, true);
   outgoing.finish();
   await Promise.resolve();
-  const rapid = api.captureCardSwitch(node('0.4'), false, node());
+  const rapid = api.captureCardSwitch(node('0.4'), false);
   api.animateCardSwitch(node(), rapid);
   await Promise.resolve();
   assert.equal(ghosts.size, 1, 'an older completion cannot remove the latest transition');
@@ -3461,28 +3473,37 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   await Promise.resolve();
   assert.equal(ghosts.size, 0);
   assert.equal(rapid.incoming.cancelled, true, 'finishing releases the animation effect');
+  // Native opacity is zero between hovers, but the page stays visible.
+  // Reopening must discard the previous card instead of crossfading it back in.
+  assert.equal(document.visibilityState, 'visible');
+  assert.equal(api.captureCardSwitch(first, false, true), null, 'reopening never fades in the previous card');
+  const pendingReopen = api.captureCardSwitch(first, false);
+  api.animateCardSwitch(next, pendingReopen);
+  assert.equal(api.captureCardSwitch(next, false, true), null, 'a new opening has no outgoing card');
+  assert.equal(ghosts.size, 0);
+  assert.equal(pendingReopen.incoming.cancelled, true);
   reduced = true;
-  assert.equal(api.captureCardSwitch(first, false, next), null);
+  assert.equal(api.captureCardSwitch(first, false), null);
   reduced = false;
   document.visibilityState = 'hidden';
-  assert.equal(api.captureCardSwitch(first, false, next), null, 'reopening starts without stale outgoing content');
+  assert.equal(api.captureCardSwitch(first, false), null, 'reopening starts without stale outgoing content');
   document.visibilityState = 'visible';
   for (const top of [504, -504, 120, -120]) {
-    const pending = api.captureCardSwitch(first, false, next);
+    const pending = api.captureCardSwitch(first, false);
     api.animateCardSwitch(next, pending);
-    assert.equal(api.captureCardSwitch(next, false, node('1', 0, top)), null, 'interrupted fades hand off directly regardless of reading distance');
+    assert.equal(api.captureCardSwitch(node('1', 0, top), false), null, 'interrupted fades hand off directly regardless of reading distance');
     assert.equal(ghosts.size, 0, 'a direct switch also clears any interrupted outgoing copy');
     assert.equal(pending.incoming.cancelled, true);
   }
   for (const elapsed of [0, 16, 40]) {
     const incoming = node();
-    const pending = api.captureCardSwitch(first, false, incoming);
+    const pending = api.captureCardSwitch(first, false);
     api.animateCardSwitch(incoming, pending);
     pending.incoming.currentTime = elapsed;
     pending.outgoing.currentTime = elapsed;
     incoming.opacity = elapsed === 0 ? '0' : elapsed === 16 ? '0.0197225' : '0.129162';
     const latest = node();
-    const interrupted = api.captureCardSwitch(incoming, false, latest);
+    const interrupted = api.captureCardSwitch(incoming, false);
     assert.equal(interrupted, null, 'rapid selection displays the latest reading directly, without another fade from zero');
     api.animateCardSwitch(latest, interrupted);
     assert.equal(latest.animations.length, 0);

@@ -127,6 +127,7 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleShapeFailed = false;
   let bubbleVisible = false;
+  let bubbleReveal = 0;
   let railVisible = false;
   let pointerOnRail = false;
   const refreshHapticTarget = Symbol('refresh');
@@ -581,6 +582,7 @@ function createEdgeDockController(deps) {
         ...base,
         cell: bubbleCell !== null ? cells[bubbleCell] || null : null,
         placed: bubblePlaced,
+        reveal: bubbleReveal,
         cardWidth: layout()?.bubbleWidth / bubbleScale(),
         maxCardHeight: maxCardHeight()
       };
@@ -1101,6 +1103,7 @@ function createEdgeDockController(deps) {
   }
 
   function showBubble(cellIndex) {
+    if (!bubbleVisible) bubbleReveal += 1;
     bubbleCell = cellIndex;
     // Reopening the card that was last shown produces the same payload as the
     // one already sent, which the render de-duplication would swallow, and then
