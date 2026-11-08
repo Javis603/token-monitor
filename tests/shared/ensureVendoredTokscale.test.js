@@ -6,51 +6,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { downloadAsset, ensureVendoredTokscale } = require('../../scripts/ensure-vendored-tokscale');
+const { ensureVendoredTokscale } = require('../../scripts/ensure-vendored-tokscale');
 const { manifestMode } = require('../../scripts/vendoredTokscale');
-
-test('release download falls back to the matching public asset API after a gateway failure', async () => {
-  const payload = Buffer.from('pinned binary'), manifest = manifestFor(payload);
-  const entry = Object.values(manifest.platforms)[0];
-  const calls = [];
-  const fetchImpl = async (url, options) => {
-    calls.push({ url, options });
-    if (calls.length === 1) return new Response('', { status: 504 });
-    if (calls.length === 2) return Response.json({ assets: [
-      { name: 'other', id: 1 }, { name: entry.asset, id: 42 }
-    ] });
-    return new Response(payload);
-  };
-  assert.deepEqual(await downloadAsset(manifest, entry, fetchImpl), payload);
-  assert.equal(calls[1].url, `https://api.github.com/repos/Javis603/tokscale/releases/tags/${manifest.releaseTag}`);
-  assert.equal(calls[2].url, 'https://api.github.com/repos/Javis603/tokscale/releases/assets/42');
-  assert.equal(calls[2].options.headers.Accept, 'application/octet-stream');
-  assert.ok(calls.every(call => call.options.signal === calls[0].options.signal), 'fallback shares the original deadline');
-});
-
-test('release download does not fall back for missing assets or successful direct downloads', async () => {
-  const manifest = manifestFor(Buffer.from('binary')), entry = Object.values(manifest.platforms)[0];
-  for (const status of [200, 404]) {
-    let calls = 0;
-    const download = downloadAsset(manifest, entry, async () => { calls++; return new Response('binary', { status }); });
-    if (status === 200) assert.equal((await download).toString(), 'binary');
-    else await assert.rejects(download, /Download failed: 404/);
-    assert.equal(calls, 1);
-  }
-});
-
-test('release API fallback fails closed when the pinned asset is absent or its download fails', async () => {
-  const manifest = manifestFor(Buffer.from('binary')), entry = Object.values(manifest.platforms)[0];
-  for (const missing of [true, false]) {
-    let calls = 0;
-    await assert.rejects(downloadAsset(manifest, entry, async () => {
-      if (++calls === 1) return new Response('', { status: 504 });
-      if (calls === 2) return Response.json({ assets: missing ? [] : [{ name: entry.asset, id: 42 }] });
-      return new Response('', { status: 503 });
-    }), missing ? /asset not found/ : /Download failed: 503/);
-    assert.equal(calls, missing ? 2 : 3);
-  }
-});
 
 test('manifestMode defaults to override and only "upstream" flips it', () => {
   assert.equal(manifestMode({}), 'override');

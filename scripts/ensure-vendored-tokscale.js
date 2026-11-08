@@ -21,27 +21,11 @@ const MAX_BYTES = 50 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
 
 async function downloadAsset(manifest, entry, fetchImpl = fetch) {
-  let url = `https://github.com/${manifest.releaseRepo}/releases/download/${manifest.releaseTag}/${entry.asset}`;
+  const url = `https://github.com/${manifest.releaseRepo}/releases/download/${manifest.releaseTag}/${entry.asset}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
-    let response = await fetchImpl(url, { signal: controller.signal, redirect: 'follow' });
-    if (response.status >= 500 && response.status <= 599) {
-      // GitHub's browser download route can fail while its public asset API
-      // still serves the same pinned bytes. Keep one deadline for both routes.
-      await response.body?.cancel();
-      const api = `https://api.github.com/repos/${manifest.releaseRepo}/releases`;
-      const release = await fetchImpl(`${api}/tags/${encodeURIComponent(manifest.releaseTag)}`, {
-        signal: controller.signal, headers: { Accept: 'application/vnd.github+json' }
-      });
-      if (!release.ok) throw new Error(`Release lookup failed: ${release.status}`);
-      const metadata = await release.json();
-      const asset = metadata.assets?.find(asset => asset.name === entry.asset);
-      if (!Number.isSafeInteger(asset?.id) || asset.id <= 0) throw new Error(`Release asset not found: ${entry.asset}`);
-      url = `${api}/assets/${asset.id}`;
-      response = await fetchImpl(url, { signal: controller.signal, redirect: 'follow',
-        headers: { Accept: 'application/octet-stream' } });
-    }
+    const response = await fetchImpl(url, { signal: controller.signal, redirect: 'follow' });
     if (!response.ok) throw new Error(`Download failed: ${response.status} ${url}`);
     const contentLength = Number(response.headers.get('content-length') || 0);
     if (contentLength > MAX_BYTES) throw new Error(`Asset too large: ${contentLength} bytes`);
