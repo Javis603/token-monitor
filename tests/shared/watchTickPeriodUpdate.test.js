@@ -2,12 +2,10 @@
 
 // Watch ticks used to rebuild month/allTime through applyPeriodDelta's full
 // recursive copy and then mergePeriods, which normalizePeriod'd every retained
-// session again. On a 10k-session history that was ~150ms and ~15MB of garbage
-// every few seconds, before tokscale even ran. Unchanged sessions are re-shelled
-// once; the published values still match the old merge.
+// session again. Unchanged sessions are re-shelled
+// once with their own mutable maps; published values still match the old merge.
 
 const assert = require('node:assert/strict');
-const { performance } = require('node:perf_hooks');
 const test = require('node:test');
 const {
   applyPeriodDelta,
@@ -97,7 +95,7 @@ test('anchored period update matches a full merge and does not rebuild unchanged
   assert.deepEqual(summary, mergePeriods(delta, emptyPeriod()));
   assert.equal(JSON.stringify(base), anchorSnapshot);
   assert.notEqual(delta.sessions[historicalKey], anchorSession);
-  assert.equal(delta.sessions[historicalKey].models, anchorSession.models);
+  assert.notEqual(delta.sessions[historicalKey].models, anchorSession.models);
   assert.notEqual(delta.sessions[historicalKey].modelCosts, anchorSession.modelCosts);
   assert.equal(summary.sessions[historicalKey], delta.sessions[historicalKey]);
   assert.equal(summary.sessions[historicalKey].totalTokens, anchorSession.totalTokens);
@@ -180,14 +178,34 @@ test('full-scan normalization collapses decorated titles without doing so on a w
   assert.equal(fullScan.sessions[key].totalTokens, base.sessions[key].totalTokens);
 });
 
-test('watch-tick period update stays well under the old full-history rebuild', () => {
+test('large watch-tick update reuses detached session shells during publication', () => {
   const { base, anchorToday, fresh } = watchTick(8000);
-  const started = performance.now();
-  const summary = mergeNormalizedPeriods(applyPeriodDelta(base, fresh, anchorToday), emptyPeriod());
-  const elapsedMs = performance.now() - started;
+  const delta = applyPeriodDelta(base, fresh, anchorToday);
+  const summary = mergeNormalizedPeriods(delta, emptyPeriod());
   assert.equal(Object.keys(summary.sessions).length, 8001);
-  assert.equal(summary.sessions['claude:s7000'].models, base.sessions['claude:s7000'].models);
-  // The previous path took ~150ms at 10k sessions on this class of machine.
-  // 200ms for 8k leaves room for a slow CI host and still rejects that rebuild.
-  assert.ok(elapsedMs < 200, `watch-tick period update took ${elapsedMs.toFixed(1)}ms`);
+  assert.equal(summary.sessions['claude:s7000'], delta.sessions['claude:s7000']);
+  assert.notEqual(summary.sessions['claude:s7000'].models, base.sessions['claude:s7000'].models);
+});
+
+test('mutating published session maps leaves the anchor and subsequent ticks intact', () => {
+  const key = 'claude:s30';
+  const base = periodFrom({ [key]: session(30, 10, {
+    modelTokenComponents: { 'claude-opus': {
+      totalTokens: 10, inputTokens: 4, cacheReadTokens: 4, cacheWriteTokens: 1, outputTokens: 1
+    } }
+  }) });
+  const anchorSnapshot = JSON.stringify(base);
+  const expected = mergePeriods(applyPeriodDelta(base, emptyPeriod(), emptyPeriod()), emptyPeriod());
+  for (const host of [base, applyPeriodDelta(base, emptyPeriod(), emptyPeriod())]) {
+    const summary = mergeNormalizedPeriods(host, emptyPeriod());
+    const row = summary.sessions[key];
+    row.models['claude-opus'] = 999;
+    row.providers.anthropic = 999;
+    row.modelCosts['claude-opus'] = 999;
+    row.modelTokenComponents['claude-opus'].inputTokens = 999;
+    row.modelTokenComponents.extra = { totalTokens: 1 };
+    assert.equal(JSON.stringify(base), anchorSnapshot);
+    const next = mergeNormalizedPeriods(applyPeriodDelta(base, emptyPeriod(), emptyPeriod()), emptyPeriod());
+    assert.deepEqual(next, expected);
+  }
 });

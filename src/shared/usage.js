@@ -2010,14 +2010,12 @@ const shelledPeriods = new WeakSet();
 
 // A session the fresh and anchor Today periods both omit cannot change. The deep
 // walk used to allocate a new object for every nested map anyway, so a watch
-// tick paid for the whole retained history. The shell is a new object — callers
-// mutate titles and costs on the result — while the model map stays the anchor's.
-// That map is an immutable snapshot; mergeSession copies it before adding.
+// tick paid for the whole retained history. Copy the session's mutable maps so
+// callers can update the published result without moving the frozen anchor.
+// This avoids the recursive period walk and full normalization of old rows.
 function reuseUnchangedSession(session) {
-  const copy = { ...session };
-  if (sessionsWithLiveSource.has(session)) sessionsWithLiveSource.add(copy);
+  const copy = cloneSessionForMerge(session);
   reusedUnchangedSessions.add(copy);
-  if (session.modelCosts && typeof session.modelCosts === 'object') copy.modelCosts = { ...session.modelCosts };
   delete copy.parentSessionId;
   delete copy.parentClient;
   applyParentLink(copy, session.parentSessionId ? session : {});
@@ -2221,7 +2219,7 @@ function mergeNormalizedPeriods(base, extra) {
 // Recurses over the union of keys so it covers every numeric field a period may
 // grow (clients/models/clientModels/sessions/...) without per-field bookkeeping.
 // Subtrees present only on the base are not rebuilt: unchanged sessions are
-// re-shelled once, and their model maps are reused.
+// re-shelled once with detached mutable maps.
 function applyPeriodDelta(base, freshToday, anchorToday) {
   const result = deltaValue(base, freshToday, anchorToday, '');
   if (result && typeof result === 'object') deltaResults.add(result);
