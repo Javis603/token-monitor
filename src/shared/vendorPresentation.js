@@ -41,6 +41,7 @@
     { id: 'openclaw', color: '#ff4d4d' },
     { id: 'cursor', color: '#000000', widgetInk: true },
     { id: 'antigravity', color: '#4285f4' },
+    { id: 'gemini', color: '#4285f4' },
     { id: 'cline', color: '#9D4EDD', widgetColor: '#53616D' },
     { id: 'amp', color: '#F34E3F' },
     { id: 'droid', color: '#000000', widgetInk: true },
@@ -78,7 +79,6 @@
     // Not tracked clients: model vendors and limits providers. A vendor shares
     // the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
     { id: 'openrouter', label: 'OpenRouter', color: '#6566F1' },
-    { id: 'gemini', color: '#4285f4' },
     { id: 'qoder', label: 'Qoder', color: '#2ADB5C' },
     { id: 'deepseek', label: 'DeepSeek', color: '#4d6bfe' },
     { id: 'xai', label: 'xAI', color: '#000000', mask: 'grok', widgetInk: true },

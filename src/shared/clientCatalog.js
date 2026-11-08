@@ -55,6 +55,9 @@
     { id: 'openclaw', label: 'OpenClaw' },
     { id: 'cursor', label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
+    // Gemini CLI only. The label stays "Gemini" because the model-vendor mark
+    // shares this id; Gemini Desktop is not a source.
+    { id: 'gemini', label: 'Gemini' },
     { id: 'cline', label: 'Cline' },
     { id: 'amp', label: 'Amp' },
     { id: 'droid', label: 'Factory Droid' },
@@ -106,19 +109,9 @@
   // only normalizes CSV, so TOKEN_MONITOR_CLIENTS or the agent's --clients can
   // put any id tokscale supports into a scan, tokscaleClientFilter() passes it
   // through, and normalizeClientName() keys the resulting rows under it. Such a
-  // row would otherwise render as the bare id.
-  //
-  // `gemini` has never been a catalog client here. Promoting it is a product
-  // decision — settings surface, source roots, health checks, icons, README, WSL
-  // — not a rename. Note this is a *client* id: the Gemini model vendor is a
-  // separate domain keyed off the same string in modelVendorFor()/clientColors
-  // (usageCharts.js), clientsWithIcon (app.js) and VENDOR_LABELS
-  // (themePresets.js), and does not depend on this map.
-  //
-  // Keep it minimal anyway. This is a label lookup, so an id belongs here only
-  // when a row that can actually appear would otherwise render as the bare id —
-  // not as a cheap way to register a client.
-  const NON_CATALOG_CLIENT_LABELS = Object.freeze({ gemini: 'Gemini' });
+  // row would otherwise render as the bare id. An id belongs here only when a
+  // row that can actually appear would otherwise render as the bare id.
+  const NON_CATALOG_CLIENT_LABELS = Object.freeze({});
 
   const CLIENT_IDS = Object.freeze(CLIENT_CATALOG.map((client) => client.id));
   const DEFAULT_CLIENT_IDS = Object.freeze(
