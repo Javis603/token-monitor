@@ -666,6 +666,7 @@ enum WidgetVendorIdentity {
         if matches("stepfun|step-") { return "stepfun" }
         if matches("hy\\d|hunyuan") { return "hunyuan" }
         if matches("^swe[-_]|devin|cognition") { return "devin" }
+        if matches("inkling|thinking[ -]?machines") { return "thinkingmachines" }
         if matches("^big-pickle$") { return "opencode" }
         return "default"
     }

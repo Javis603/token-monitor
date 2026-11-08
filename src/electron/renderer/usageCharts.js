@@ -456,6 +456,10 @@
     if (/stepfun|step-/.test(name)) return 'stepfun';
     if (/hy\d|hunyuan/.test(name)) return 'hunyuan';
     if (/^swe[-_]|devin|cognition/.test(name)) return 'devin';
+    // Inkling (Thinking Machines Lab): bare ids like `inkling-2-small`, plus the
+    // OpenRouter vendor prefix. `thinking[ -]?machines` cannot catch `-thinking`
+    // model suffixes — it requires "machines" to follow.
+    if (/inkling|thinking[ -]?machines/.test(name)) return 'thinkingmachines';
     if (/^big-pickle$/.test(name)) return 'opencode'; // OpenCode Zen stealth model — no vendor hint in the name
     return null;
   }
