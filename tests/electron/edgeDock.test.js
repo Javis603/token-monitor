@@ -139,7 +139,7 @@ test('a card commits after its reported height is clamped to the work area', () 
       const card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: measured }) };
       const renderBubble = Function('deps', `
         const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
-        const { root, stagingLayer, providerCard, statCard, fitCardTotal,
+        const { root, contentLayer, stagingLayer, providerCard, statCard, fitCardTotal,
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
         let observedPluginCard = null;
         const bubbleSizeObserver = null, pluginContent = null;
@@ -148,6 +148,7 @@ test('a card commits after its reported height is clamped to the work area', () 
       `)({
         cardLayoutApi,
         root: { dataset: {}, style: { setProperty() {} }, classList: { toggle() {} } },
+        contentLayer: { querySelector: () => null },
         stagingLayer: { replaceChildren() {} },
         providerCard: () => card,
         statCard: () => card,
@@ -171,6 +172,61 @@ test('a card commits after its reported height is clamped to the work area', () 
       assert.equal(reports.length, 1, 'a placed card must not keep reporting its size');
     }
   }
+});
+
+test('reopening hides the previous reading before a delayed placement acknowledgement', () => {
+  const { Element } = require('../helpers/notchPanel');
+  const document = { createElement: tag => new Element(tag, document) };
+  const contentLayer = document.createElement('div'), stagingLayer = document.createElement('div');
+  const root = document.createElement('main'); root.append(contentLayer, stagingLayer);
+  const reports = [], switches = [];
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const commitSource = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
+  const renderSource = dock.slice(dock.indexOf('const bubbleLayout ='), dock.indexOf('const bubbleSizeObserver ='));
+  const renderBubble = Function('deps', `
+    const { document, root, contentLayer, stagingLayer, reports, switches } = deps;
+    const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
+    const CARD_SCROLL_SELECTOR = '.scroll';
+    const overflowText = { refresh() {}, preserveReading() {} };
+    const cardResetAnimator = { capture() {}, animate() {} };
+    const clearCardSwitch = () => {};
+    const captureCardSwitch = (_old, _same, opening) => { switches.push(opening); return null; };
+    const animateCardSwitch = () => {};
+    const providerCard = cell => {
+      const node = document.createElement('section'); node.className = 'edge-dock-card';
+      node.getBoundingClientRect = () => ({ height: cell.height });
+      return node;
+    };
+    const statCard = providerCard;
+    const fitCardTotal = () => {}, clampBreakdownList = () => {}, reserveAccountHeight = () => {};
+    const bridge = { reportBubbleSize: (cellId, height) => reports.push({ cellId, height }) };
+    const pluginContent = null, bubbleSizeObserver = null;
+    let observedPluginCard = null;
+    ${commitSource}
+    ${renderSource}
+    return renderBubble;
+  `)({ document, root, contentLayer, stagingLayer, reports, switches, cardLayoutApi });
+  const today = { id: 'today', kind: 'stat', height: 180 };
+  const month = { id: 'month', kind: 'stat', height: 240 };
+  const paint = (cell, reveal, placed) => renderBubble({ side: 'right', cell, reveal, placed });
+  const placed = cell => ({ cellId: cell.id, height: cell.height });
+  paint(today, 1, placed(today));
+  const old = contentLayer.children[0];
+  // Delay the ACK: the native window can already be opaque at this point,
+  // particularly with reduced motion, so the old DOM must not be paintable.
+  paint(month, 2, placed(today));
+  assert.deepEqual(reports, [placed(month)]);
+  assert.equal(contentLayer.children[0], old, 'retain DOM until the measured size is accepted');
+  assert.equal(old.style.visibility, 'hidden', 'old content cannot flash while waiting for placement');
+  paint(month, 2, placed(month));
+  const current = contentLayer.children[0];
+  assert.equal(current.dataset.cellId, 'month');
+  assert.notEqual(current.style.visibility, 'hidden', 'the committed reading is visible');
+  assert.equal(switches.at(-1), true, 'reopening does not crossfade the hidden old reading');
+  paint(today, 2, placed(month));
+  assert.notEqual(current.style.visibility, 'hidden', 'a continuous switch keeps the current reading visible while measuring');
+  paint(today, 2, placed(today));
+  assert.equal(switches.at(-1), false, 'continuous switches retain their animation');
 });
 
 test('a no-cell payload unmounts committed and staged plugin cards and removes their header actions', async () => {
@@ -3605,6 +3661,10 @@ for (const kind of ['provider', 'stat']) {
       assert.equal(mounts, mounted);
       await Promise.resolve();
       assert.deepEqual(contentLayer.children, [active], 'rapid selection cancels the outgoing copy without removing the live plugin');
+      renderBubble({ side: 'right', cell: plugin, reveal: 2, placed: { cellId: plugin.id, height: 180 } });
+      assert.equal(contentLayer.children[0], active, 'reopening retains the selected plugin mount');
+      assert.notEqual(active.style.visibility, 'hidden', 'retained plugin content is restored on reopening');
+      assert.equal(mounts, mounted);
     });
   }
 }
