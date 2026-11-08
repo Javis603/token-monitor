@@ -35,9 +35,9 @@ function setup() {
   const els = { sessionToolFilter: host, sessionToolFilterItems: strip,
     sessionToolPrevious: element(), sessionToolNext: element(), breakdown: { scrollTop: 42 } };
   let renders = 0;
-  const filter = Function('clientMarkId', 'state', 'els', 'document', 'KNOWN_CLIENTS', 'clientLabels', 'clientsWithIcon',
+  const filter = Function('state', 'els', 'document', 'KNOWN_CLIENTS', 'clientLabels', 'clientsWithIcon',
     'currentLocale', 't', 'render', 'updateSessionToolScrollButtons', 'sessionToolClients', `${app.slice(start, end)}; return renderSessionToolFilter;`)(
-    require('../../src/shared/vendorPresentation').clientMarkId, state, els, document, [{ id: 'claude' }, { id: 'codex' }], { claude: 'Claude Code', codex: 'Codex' },
+    state, els, document, [{ id: 'claude' }, { id: 'codex' }], { claude: 'Claude Code', codex: 'Codex' },
     new Set(['claude', 'codex']), () => 'en', key => key, () => renders++, () => {}, appFunction('sessionToolClients', [], []));
   return { state, els, document, host, strip, filter, renders: () => renders };
 }

@@ -4,7 +4,7 @@ const { CLIENT_LABELS } = require('./clientCatalog');
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limits/providers');
 const { limitWindowKindLabel, mimoAccountGroups, mimoProductLabel } = require('./limits/windowLabels');
-const { clientMarkId, widgetVendorPalette } = require('./vendorPresentation');
+const { widgetVendorPalette } = require('./vendorPresentation');
 
 const MAC_WIDGET_SCHEMA_VERSION = 10;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
@@ -150,7 +150,6 @@ function buildTools(period) {
   const denominator = tools.reduce((sum, tool) => sum + tool.totalTokens, 0);
   return tools.slice(0, 10).map((tool) => ({
     id: tool.id,
-    ...(clientMarkId(tool.id) !== tool.id ? { markId: clientMarkId(tool.id) } : {}),
     displayName: toolLabel(tool.id),
     totalTokens: tool.totalTokens,
     costUsd: tool.costUsd,

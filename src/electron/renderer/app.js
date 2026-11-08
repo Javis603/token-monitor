@@ -45,8 +45,6 @@ const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 const vendorPresentationApi = window.TokenMonitorVendorPresentation;
-const { clientMarkId, colorsForClients } = vendorPresentationApi;
-const { clientColor } = window.TokenMonitorUsageCharts;
 // Marks come from the vendor presentation table, which is also what installs
 // the .row-icon-<id> masks, so a listed id always has a mask behind it. Usage
 // rows (clients, sessions, models) carry the coloured vendors; Limits rows can
@@ -79,19 +77,18 @@ function iconKindFor(rowData, breakdown) {
     }
     const vendor = modelVendorFor(rowData.key);
     return vendor && clientsWithIcon.has(vendor)
-      ? { kind: 'icon', iconClass: `row-icon-${vendor}` }
+      ? { kind: 'icon', iconClass: `row-icon-${vendor} model-icon` }
       : { kind: 'icon', iconClass: 'row-icon-token-monitor' };
   }
   if (breakdown === 'session') {
-    return rowData.client && clientsWithIcon.has(clientMarkId(rowData.client))
-      ? { kind: 'icon', iconClass: `row-icon-${clientMarkId(rowData.client)}` }
+    return rowData.client && clientsWithIcon.has(rowData.client)
+      ? { kind: 'icon', iconClass: `row-icon-${rowData.client}` }
       : { kind: 'dot' };
   }
   if (breakdown === 'project') return { kind: 'icon', iconClass: 'row-icon-project' };
-  const markId = breakdown === 'limits' ? rowData.key : clientMarkId(rowData.key);
   const iconSet = breakdown === 'limits' ? limitMarksWithIcon : clientsWithIcon;
-  return iconSet.has(markId)
-    ? { kind: 'icon', iconClass: `row-icon-${markId}` }
+  return iconSet.has(rowData.key)
+    ? { kind: 'icon', iconClass: `row-icon-${rowData.key}` }
     : { kind: 'dot' };
 }
 
@@ -1281,7 +1278,7 @@ function renderLiveTokenRate() {
   for (const cell of els.liveTokenRate.querySelectorAll('.limit-detail-tooltip-row span:first-child')) {
     const model = cell.textContent;
     const icon = document.createElement('span');
-    icon.className = `row-icon row-icon-${modelVendorFor(model) || 'token-monitor'}`;
+    icon.className = `row-icon row-icon-${modelVendorFor(model) || 'token-monitor'} model-icon`;
     icon.setAttribute('aria-hidden', 'true');
     const name = document.createElement('span');
     name.className = 'live-token-rate-model-label';
@@ -2526,8 +2523,8 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       const label = document.createElement('div');
       label.className = 'device-tool-label';
       const mark = document.createElement('span');
-      if (toolIconsEnabled(state.settings?.showToolIcons) && clientsWithIcon.has(clientMarkId(tool.client))) {
-        mark.className = `device-tool-mark row-icon row-icon-${clientMarkId(tool.client)}`;
+      if (toolIconsEnabled(state.settings?.showToolIcons) && clientsWithIcon.has(tool.client)) {
+        mark.className = `device-tool-mark row-icon row-icon-${tool.client}`;
       } else {
         mark.className = 'device-tool-mark dot';
         mark.style.background = tool.color;
@@ -3127,9 +3124,9 @@ function renderSessionToolFilter(rows) {
       const label = client ? clientLabels[client] || client : t('sessions.allTools');
       button.setAttribute('aria-label', label);
       button.setAttribute('aria-pressed', String(state.sessionToolFilter === client));
-      if (client && clientsWithIcon.has(clientMarkId(client))) {
+      if (client && clientsWithIcon.has(client)) {
         const icon = document.createElement('span');
-        icon.className = `row-icon row-icon-${clientMarkId(client)}`;
+        icon.className = `row-icon row-icon-${client}`;
         icon.setAttribute('aria-hidden', 'true');
         button.append(icon);
       } else {
@@ -3296,7 +3293,7 @@ function deviceRowsForPeriod() {
   return fixedPeriodDevices().map((device) => {
     const breakdown = deviceBreakdownApi.deviceBreakdownForPeriod(device, state.period, {
       clientLabels,
-      clientColors: colorsForClients(clientColors),
+      clientColors,
       fallbackColor: clientColors.default,
       unattributedLabel: t('dashboard.tooltip.unclassified')
     });
@@ -3354,7 +3351,7 @@ function periodAttributionRows(period, values, costs, unpricedTokens) {
 
 function toolRowsForPeriod(period) {
   const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens)
-    .map(({ key: client, value, cost, unpricedTokens }) => ({ key: client, unpricedTokens, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColor(client), stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCost) }));
+    .map(({ key: client, value, cost, unpricedTokens }) => ({ key: client, unpricedTokens, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCost) }));
   if (clientRows.length > 0) {
     const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
     return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
@@ -3373,7 +3370,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
     cost,
     unattributed,
     modelSource: model === 'unknown' ? unknownSource : null,
-    color: model === 'unknown' ? (unknownSource ? clientColor(unknownSource) : 'var(--muted)') : modelColor(model),
+    color: model === 'unknown' ? (unknownSource ? clientColors[unknownSource] : 'var(--muted)') : modelColor(model),
     stale: false,
     cacheReadTokens: attributionComponent(period, 'modelCacheReads', model),
     cacheWriteTokens: attributionComponent(period, 'modelCacheWrites', model),
@@ -3391,7 +3388,7 @@ function sessionPresentationOptions() {
   const localDevice = state.stats?.devices?.find(device => device.deviceId === state.settings?.deviceId);
   return {
     clientLabels,
-    clientColors: colorsForClients(clientColors),
+    clientColors,
     modelColor,
     stableColor,
     fallbackColors: fallbackModelColors,
@@ -3441,7 +3438,7 @@ function sessionRowsForPeriod(period) {
 function projectRowsForPeriod(period) {
   return projectRowsApi.projectRowsForPeriod(period, {
     clientLabels,
-    clientColors: colorsForClients(clientColors),
+    clientColors,
     stableColor,
     shareBy: state.settings?.projectBreakdownMode,
     modelColor,
@@ -6905,7 +6902,7 @@ function homeToolSourceRows(period) {
     key: client,
     name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client,
     value: Number(value || 0),
-    color: clientColor(client)
+    color: clientColors[client] || clientColors.default
   }));
 }
 
@@ -7032,7 +7029,7 @@ function renderHomeSessionModule(rows) {
     item.className = 'home-list-row home-session-row';
     item.dataset.key = row.key;
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColor(row.client));
+    applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
     const stateMark = document.createElement('span');
     stateMark.className = 'home-session-state';
     stateMark.dataset.state = activityState;
@@ -8373,7 +8370,7 @@ let appliedThemeOverrides = {};
 // Snapshot of the canonical brand colours, taken before any override is
 // applied. clientColors is mutated in place (other modules hold the same
 // reference), so this is the source of truth for "reset to brand".
-const BRAND_VENDOR_COLORS = { ...clientColors };
+const BRAND_VENDOR_COLORS = vendorPresentationApi.vendorColors();
 
 function appearanceSummary() {
   const theme = themePresetsApi.normalizeOverrides(state.settings?.themeColors, themePresetsApi.INTERFACE_COLOR_KEYS);
@@ -8409,7 +8406,7 @@ function applyThemeColors(overrides) {
 
 function applyVendorColorOverrides(overrides) {
   const merged = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, overrides);
-  for (const key of Object.keys(BRAND_VENDOR_COLORS)) clientColors[key] = merged[key];
+  window.TokenMonitorUsageCharts.applyVendorColors(merged);
 }
 
 // Current resolved palette value for an interface colour key.

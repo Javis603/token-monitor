@@ -308,15 +308,13 @@ struct WidgetModel: Decodable, Equatable, Identifiable {
 
 struct WidgetTool: Decodable, Equatable, Identifiable {
     let id: String
-    let markId: String?
     let displayName: String?
     let totalTokens: Int
     let costUsd: Double
     let sharePercent: Double
 
-    init(id: String, markId: String? = nil, displayName: String? = nil, totalTokens: Int, costUsd: Double = 0, sharePercent: Double) {
+    init(id: String, displayName: String? = nil, totalTokens: Int, costUsd: Double = 0, sharePercent: Double) {
         self.id = id
-        self.markId = markId
         self.displayName = displayName
         self.totalTokens = totalTokens
         self.costUsd = costUsd
@@ -332,15 +330,19 @@ struct WidgetVendorStyle: Decodable, Equatable {
     let ink: Bool
     let icon: String?
     let fullColor: Bool
+    let modelIcon: String?
+    let modelColor: String?
 
-    init(color: String? = nil, ink: Bool = false, icon: String? = nil, fullColor: Bool = false) {
+    init(color: String? = nil, ink: Bool = false, icon: String? = nil, fullColor: Bool = false, modelIcon: String? = nil, modelColor: String? = nil) {
         self.color = color
         self.ink = ink
         self.icon = icon
         self.fullColor = fullColor
+        self.modelIcon = modelIcon
+        self.modelColor = modelColor
     }
 
-    private enum CodingKeys: String, CodingKey { case color, ink, icon, fullColor }
+    private enum CodingKeys: String, CodingKey { case color, ink, icon, fullColor, modelIcon, modelColor }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -348,6 +350,8 @@ struct WidgetVendorStyle: Decodable, Equatable {
         ink = (try? c.decodeIfPresent(Bool.self, forKey: .ink)) ?? false
         icon = c.optionalString(.icon)
         fullColor = (try? c.decodeIfPresent(Bool.self, forKey: .fullColor)) ?? false
+        modelIcon = c.optionalString(.modelIcon)
+        modelColor = c.optionalString(.modelColor)
     }
 }
 
@@ -363,14 +367,16 @@ struct WidgetVendorPalette: Equatable {
 
     let styles: [String: WidgetVendorStyle]
 
-    func ink(for vendorID: String) -> Ink {
+    func ink(for vendorID: String, model: Bool = false) -> Ink {
         let style = styles[vendorID.lowercased()]
+        if model, let color = style?.modelColor { return .hex(color) }
         if style?.ink == true { return .adaptive }
         return .hex(style?.color ?? styles["default"]?.color ?? "#6AB4F0")
     }
 
-    func iconName(for vendorID: String) -> String {
-        styles[vendorID.lowercased()]?.icon ?? vendorID.lowercased()
+    func iconName(for vendorID: String, model: Bool = false) -> String {
+        let style = styles[vendorID.lowercased()]
+        return (model ? style?.modelIcon : nil) ?? style?.icon ?? vendorID.lowercased()
     }
 }
 
@@ -533,11 +539,10 @@ extension WidgetModel {
 }
 
 extension WidgetTool {
-    private enum CodingKeys: String, CodingKey { case id, markId, displayName, totalTokens, costUsd, sharePercent }
+    private enum CodingKeys: String, CodingKey { case id, displayName, totalTokens, costUsd, sharePercent }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
-        markId = c.optionalString(.markId)
         displayName = c.optionalString(.displayName)
         totalTokens = try c.decode(Int.self, forKey: .totalTokens)
         costUsd = try c.decode(Double.self, forKey: .costUsd)

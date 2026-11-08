@@ -152,9 +152,9 @@ function incumbentOptions(stats) {
   const { clientColors } = require('../../src/electron/renderer/usageCharts');
   const { translate: localize } = require('../../src/electron/renderer/i18n');
   const source = app.slice(app.indexOf('function sessionPresentationOptions()'), app.indexOf('function rawSessionRowsForPeriod('));
-  return Function('colorsForClients', 'clientLabels', 'clientColors', 'modelColor', 'stableColor', 'fallbackModelColors', 't',
+  return Function('clientLabels', 'clientColors', 'modelColor', 'stableColor', 'fallbackModelColors', 't',
     'state', 'formatCompact', 'effectiveCompactTokenUnits', 'currentLocale', `${source}; return sessionPresentationOptions();`)(
-    require('../../src/shared/vendorPresentation').colorsForClients, CLIENT_LABELS, clientColors, () => '', () => '', [], (key, params) => localize('zh-TW', key, params),
+    CLIENT_LABELS, clientColors, () => '', () => '', [], (key, params) => localize('zh-TW', key, params),
     { stats, period: 'month' }, String, () => '', () => 'zh-TW'
   );
 }
@@ -166,21 +166,21 @@ function renderStatusGroup(group, metric = 'used') {
   const contextSource = app.slice(app.indexOf('function homeSessionContext('), app.indexOf('function stopHomeSessionRepaint('));
   const homeSource = app.slice(app.indexOf('function renderHomeSessionModule('), app.indexOf('function renderHomeDeviceModule()'));
   const tooltip = { setDetailTooltip() {} };
-  const home = Function('clientColor', 'document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
+  const home = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
     'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
     'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView',
     `${shellSource}; ${contextSource}; ${homeSource}; return renderHomeSessionModule;`)(
-    require('../../src/electron/renderer/usageCharts').clientColor, document, { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
+    document, { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
     state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
     () => {}, {}, translate, () => {}, () => '', {}, () => '', [], () => {}, String, () => '', rowApi, tooltip
   )([group]);
   const dockContext = dock.slice(dock.indexOf('function contextNode('), dock.indexOf('// Last activity seen'));
   const dockSource = dock.slice(dock.indexOf('const expandedSessionGroups ='), dock.indexOf('function providerCard('));
-  const card = Function('clientMarkId', 'document', 'presentation', 'sessionKey', 'el', 't', 'stateMark', 'overflowText',
+  const card = Function('document', 'presentation', 'sessionKey', 'el', 't', 'stateMark', 'overflowText',
     'clientLabel', 'sessionRowsApi', 'relativeAgo', 'limitWindowsView', 'sessionLive', 'appearance',
     'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode',
     `${dockContext}; ${dockSource}; return sessionsContainer;`)(
-    require('../../src/shared/vendorPresentation').clientMarkId, document, presentation, row => row.key, (tag, cls, text) => new Node(tag, cls, text), translate,
+    document, presentation, row => row.key, (tag, cls, text) => new Node(tag, cls, text), translate,
     () => new Node('span'), { bind() {} }, value => value, rowApi, () => '', tooltip, sessionLive,
     () => ({ sessionContextMetric: metric }), String, { payload: { cell: { id: 'sessions' } } },
     'bubble', () => {}, () => new Node('span')
@@ -284,11 +284,11 @@ test('Home keeps family membership below the title and routes mouse and keyboard
     const state = { stats, period: 'today', breakdown: 'home', openSession: null, settings: { periodMonthMode: periodMode } };
     const routes = [];
     const readingTargets = [];
-    const renderHomeSessionModule = Function('clientColor', 'document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
+    const renderHomeSessionModule = Function('document', 'window', 'state', 'els', 'pluginContent', 'sessionTooltipShouldHoldRender',
       'renderBreakdownChange', 'VIEW_ICON_CLASSES', 't', 'applyHomeListMark', 'iconKindFor', 'clientColors', 'stableColor', 'fallbackModelColors',
       'bindHoverMarquee', 'formatCompact', 'homeSessionAgo', 'sessionRowsApi', 'limitWindowsView', 'homeSessionContext',
       'sessionPresentationOptions', 'homeModulePreferencesApi', `${shellSource}; ${source}; return renderHomeSessionModule;`)(
-      require('../../src/electron/renderer/usageCharts').clientColor, { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) },
+      { createElement: tag => new Node(tag), createTextNode: text => new Node('text', '', text) },
       { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: sessionLive },
       state, { homePanel: { children: [], querySelector: () => null } }, null, () => false,
       (view, options) => { routes.push([view, options]); state.breakdown = view; }, {}, translate,
@@ -330,10 +330,10 @@ test('Dock family expansion keeps real member rows and requests the existing nat
   const source = dock.slice(dock.indexOf('const expandedSessionGroups ='), dock.indexOf('function providerCard('));
   const payload = { cell: { id: 'sessions' } };
   const resized = [];
-  const build = Function('clientMarkId', 'document', 'presentation', 'sessionKey', 'el', 't', 'stateMark', 'overflowText',
+  const build = Function('document', 'presentation', 'sessionKey', 'el', 't', 'stateMark', 'overflowText',
     'clientLabel', 'sessionRowsApi', 'relativeAgo', 'limitWindowsView', 'contextNode', 'sessionLive',
     'formatBreakdownTokens', 'state', 'surface', 'renderBubble', 'markNode', 'appearance', `${source}; return sessionsContainer;`)(
-    require('../../src/shared/vendorPresentation').clientMarkId, { createTextNode: text => new Node('text', '', text), createElement: tag => new Node(tag) }, presentation, row => row.key,
+    { createTextNode: text => new Node('text', '', text), createElement: tag => new Node(tag) }, presentation, row => row.key,
     (tag, className, text) => new Node(tag, className, text), translate, () => new Node('span'), { bind() {} },
     value => value, rowApi, () => '', { setDetailTooltip() {} }, () => null, sessionLive, String,
     { payload }, 'bubble', value => resized.push(value), () => new Node('span'), () => ({})

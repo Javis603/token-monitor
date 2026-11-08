@@ -150,7 +150,7 @@ test('Reasonix icon keeps the official color in a mask-safe SVG path', () => {
 test('Reasonix native session keeps presentation identity for the brand icon path', () => {
   const source = rendererSource();
   assertUsageMarks('reasonix');
-  assert.match(source, /if \(breakdown === 'session'\) \{[\s\S]*rowData\.client && clientsWithIcon\.has\(clientMarkId\(rowData\.client\)\)[\s\S]*row-icon-\$\{clientMarkId\(rowData\.client\)\}/);
+  assert.match(source, /if \(breakdown === 'session'\) \{[\s\S]*rowData\.client && clientsWithIcon\.has\(rowData\.client\)[\s\S]*row-icon-\$\{rowData\.client\}/);
 
   const [row] = sessionRowsForPeriod({ sessions: {} }, {
     nativeSessions: {

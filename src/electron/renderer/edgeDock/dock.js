@@ -32,8 +32,7 @@ const subscriptionTextApi = window.TokenMonitorSubscriptionText;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 const { activateOnPress } = window.TokenMonitorPressActivation;
-const { clientColor, clientColors, modelColor, modelVendorFor } = window.TokenMonitorUsageCharts;
-const { clientMarkId } = window.TokenMonitorVendorPresentation;
+const { clientColors, modelColor, modelVendorFor } = window.TokenMonitorUsageCharts;
 const { UNATTRIBUTED_KEY } = window.TokenMonitorUsageAttributionRows;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
 const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
@@ -52,7 +51,7 @@ const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   waiting: 'edge-dock-session-waiting'
 });
 
-const BRAND_VENDOR_COLORS = { ...clientColors };
+const BRAND_VENDOR_COLORS = { ...window.TokenMonitorUsageCharts.modelColors };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 // Inset the thicker quota stroke so its outer edge stays within the 42px ring.
 const RING_RADIUS = 18.5;
@@ -236,7 +235,7 @@ function applyAppearance(payload) {
     else style.removeProperty(name);
   }
   const vendors = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, appearance.vendorColors);
-  for (const vendor of Object.keys(BRAND_VENDOR_COLORS)) clientColors[vendor] = vendors[vendor];
+  window.TokenMonitorUsageCharts.applyVendorColors(vendors);
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance);
   style.setProperty('--ui-font', interfaceFont);
   style.setProperty('--display-font', displayFont);
@@ -328,10 +327,11 @@ function hasMask(id) {
   return supported;
 }
 
-function markNode(id, color) {
+function markNode(id, color, model = false) {
   const mark = el('span', 'edge-dock-mark');
   if (hasMask(id)) mark.classList.add(`row-icon-${id}`);
   else mark.classList.add('is-fallback');
+  if (model) mark.classList.add('model-icon');
   if (color) mark.style.setProperty('--ring-color', color);
   return mark;
 }
@@ -932,7 +932,7 @@ function runningMarksNode(cell, now = Date.now()) {
     // Brand colour, corrected for contrast like every other mark the dock
     // draws: the client id is what the mark is looked up by, and the rail
     // already reserves colour for severity, so these stay marks and not meters.
-    row.append(markNode(clientMarkId(client), readableColor(clientColor(client))));
+    row.append(markNode(client, readableColor(clientColors[client] || clientColors.default)));
   }
   const rest = clientCount - Math.min(clients.length, CELL_MARK_LIMIT);
   if (rest > 0) row.append(el('span', 'edge-dock-cell-more', `+${rest}`));
@@ -1557,7 +1557,7 @@ function sessionsContainer(sessions, options = {}) {
     // mixed list has to name each row's client somewhere and the meta line has
     // no room left for a label beside the model, the age and the gauge.
     if (options.showClientMark && session.client) {
-      nameNode.append(markNode(clientMarkId(session.client)));
+      nameNode.append(markNode(session.client));
       // The mark is a mask-painted span with no text, so the tool it stands for is
       // invisible to assistive technology unless the name is said out loud. The
       // client's own label, not its id: this is read as prose.
@@ -1732,7 +1732,7 @@ function appendLiveRateDetails(card, cell) {
       continue;
     }
     const row = el('div', 'edge-dock-rate-model');
-    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor');
+    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor', null, true);
     mark.setAttribute('aria-hidden', 'true');
     row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
     list.append(row);
@@ -1806,10 +1806,10 @@ function statCard(cell) {
       color: readableColor(model.unattributed ? clientColors.default : modelColor(model.model))
     }))
     : cell.clients.map((client) => ({
-      id: client.unattributed ? 'token-monitor' : clientMarkId(client.client),
+      id: client.unattributed ? 'token-monitor' : client.client,
       name: client.client === UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabel(client.client),
       tokens: client.tokens,
-      color: readableColor(clientColor(client.client))
+      color: readableColor(clientColors[client.client] || clientColors.default)
     }));
   const list = el('div', 'edge-dock-accounts edge-dock-clients');
   const top = rows[0]?.tokens || 1;
@@ -1825,7 +1825,7 @@ function statCard(cell) {
     applyBarScale(fill, Math.max(0.02, entry.tokens / top));
     meter.append(fill);
     row.append(
-      markNode(entry.id, entry.color),
+      markNode(entry.id, entry.color, breakdownMode === 'models'),
       el('span', 'edge-dock-client-name', entry.name),
       el('span', 'edge-dock-client-tokens', formatBreakdownTokens(entry.tokens)),
       el('span', 'edge-dock-client-share', `${Math.round((entry.tokens / sum) * 100)}%`),
@@ -1893,7 +1893,7 @@ function sessionsCard(cell, card, head) {
     // two-item caption row aligned on the baseline, and a mask-drawn mark has no
     // baseline, so it floated above its label. This row centers its three parts.
     const groupHead = el('div', 'edge-dock-session-group-head');
-    groupHead.append(markNode(clientMarkId(client)), el('span', 'edge-dock-section-title', clientLabel(client)));
+    groupHead.append(markNode(client), el('span', 'edge-dock-section-title', clientLabel(client)));
     const liveCount = runningSessionSummary(rows).count;
     if (liveCount > 0) groupHead.append(el('span', 'edge-dock-section-count', t('edgeDock.runningCount', { count: liveCount })));
     section.append(groupHead, sessionsContainer(rows, { showCount: false, separator: false }));

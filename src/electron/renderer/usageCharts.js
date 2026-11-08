@@ -422,7 +422,17 @@
 
   // Brand colours come from the vendor presentation table. One shared, mutable
   // object: the renderers apply the user's vendor-colour overrides onto it.
-  const clientColors = vendorPresentation.vendorColors();
+  const modelColors = vendorPresentation.vendorColors();
+  const clientColors = { ...modelColors };
+
+  function applyVendorColors(colors) {
+    Object.assign(modelColors, colors);
+    Object.assign(clientColors, colors);
+    for (const [client, style] of Object.entries(vendorPresentation.CLIENT_PRESENTATION)) {
+      clientColors[client] = style.color;
+    }
+  }
+  applyVendorColors(modelColors);
   // Kept distinct from every named vendor colour in the table — sharing a hex with a real
   // vendor (as '#cc7c5e'/'#49a3b0' used to, colliding with claude/codex) makes an
   // unrelated unrecognized model look like it belongs to that vendor.
@@ -460,13 +470,9 @@
     return null;
   }
 
-  function clientColor(client) {
-    return clientColors[vendorPresentation.clientMarkId(client)] || clientColors.default;
-  }
-
   function modelColor(model) {
     const vendor = modelVendorFor(model);
-    if (vendor && clientColors[vendor]) return clientColors[vendor];
+    if (vendor && modelColors[vendor]) return modelColors[vendor];
     const name = String(model || '').toLowerCase();
     let hash = 0;
     for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
@@ -685,7 +691,7 @@
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
-    clientColor, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
+    applyVendorColors, modelColors, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
   };
 });

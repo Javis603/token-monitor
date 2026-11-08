@@ -355,20 +355,20 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(palette.ink(for: "unlisted"), .hex("#6ab4f0"))
     }
 
-    func testGeminiClientMarkDoesNotChangeModelVendorBranding() throws {
+    func testGeminiClientAndModelUseTheirOwnArtworkWithoutRenamingTools() throws {
         let snapshot = try decode("""
         {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00Z",
-         "periods":{"day":{"tools":[{"id":"gemini","markId":"gemini-cli","displayName":"Gemini CLI","totalTokens":29,"costUsd":0,"sharePercent":100}]}},
-         "vendors":{"gemini-cli":{"fullColor":true,"ink":true},"gemini":{"color":"#4285f4"}},
+         "periods":{"day":{"tools":[{"id":"gemini","displayName":"Gemini CLI","totalTokens":29,"costUsd":0,"sharePercent":100}]}},
+         "vendors":{"gemini":{"icon":"gemini-cli","ink":true,"fullColor":true,"modelIcon":"gemini","modelColor":"#4285f4"}},
          "status":{"isStale":false}}
         """)
         XCTAssertEqual(snapshot.tools.first?.id, "gemini")
-        XCTAssertEqual(snapshot.tools.first?.markId, "gemini-cli")
-        XCTAssertEqual(snapshot.vendors["gemini-cli"]?.fullColor, true)
-        XCTAssertEqual(snapshot.vendors["gemini"]?.fullColor, false)
         let palette = WidgetVendorPalette(styles: snapshot.vendors)
-        XCTAssertEqual(palette.iconName(for: "gemini"), "gemini")
-        XCTAssertEqual(palette.ink(for: "gemini"), .hex("#4285f4"))
+        XCTAssertEqual(palette.iconName(for: "gemini"), "gemini-cli")
+        XCTAssertEqual(palette.iconName(for: "gemini", model: true), "gemini")
+        XCTAssertEqual(palette.ink(for: "gemini"), .adaptive)
+        XCTAssertEqual(palette.ink(for: "gemini", model: true), .hex("#4285f4"))
+        XCTAssertEqual(snapshot.vendors["gemini"]?.fullColor, true)
     }
 
     func testSnapshotWithoutPaletteOrToolNamesStillDecodes() throws {

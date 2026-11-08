@@ -29,7 +29,7 @@ function render({ running = 0, waiting = 0, clients = ['codex'], mode = 'session
   }));
   const data = buildNotchData({}, [{ metric: 'sessions', sessions }], { notchSummaryMode: mode }, { nowMs });
   const geometry = { gapWidth: camera ? 180 : 0, summaryRingSize: 0, notched: camera };
-  const context = { document, window: { TokenMonitorUsageCharts: require('../../src/electron/renderer/usageCharts'), TokenMonitorThemePresets: { isLightHex: value => value === '#fff' } }, el, Set, Map, state: { payload: { geometry } },
+  const context = { document, window: { TokenMonitorThemePresets: { isLightHex: value => value === '#fff' } }, el, Set, Map, state: { payload: { geometry } },
     t: (key, params) => i18n.translate(locale, key, params),
     notchIcon: item => { const node = el('span', 'edge-dock-mark'); node.dataset.provider = item.provider; return node; },
     providerLabel: value => value, trayTypographyApi: typography,

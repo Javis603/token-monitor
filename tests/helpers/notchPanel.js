@@ -103,7 +103,6 @@ function panelFixture(t, settings = {}, { viaRenderer = false, pluginHost = null
     TokenMonitorSessionRows: require('../../src/electron/renderer/sessionRows'),
     TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
     TokenMonitorUsageCharts: require('../../src/electron/renderer/usageCharts'),
-    TokenMonitorVendorPresentation: require('../../src/shared/vendorPresentation'),
     TokenMonitorClientCatalog: require('../../src/shared/clientCatalog'),
     TokenMonitorPressActivation: require('../../src/electron/renderer/pressActivation'),
     TokenMonitorHomeOverview: require('../../src/electron/renderer/homeOverview'),

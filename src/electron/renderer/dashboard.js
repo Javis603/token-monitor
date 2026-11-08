@@ -14,7 +14,7 @@ const glassRenderingApi = window.TokenMonitorGlassRendering;
 
 // Canonical brand colours, captured before any override (clientColors is shared
 // by reference and mutated in place to apply vendor overrides).
-const BRAND_VENDOR_COLORS = { ...charts.clientColors };
+const BRAND_VENDOR_COLORS = { ...charts.modelColors };
 
 const els = {
   body: document.body,
@@ -248,7 +248,7 @@ function applyThemeColors(overrides) {
 
 function applyVendorColorOverrides(overrides) {
   const merged = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, overrides);
-  for (const key of Object.keys(BRAND_VENDOR_COLORS)) charts.clientColors[key] = merged[key];
+  charts.applyVendorColors(merged);
 }
 
 function formatCompact(value) {
@@ -324,7 +324,7 @@ function displayColor(hex) {
   return `rgb(${lift(r)}, ${lift(g)}, ${lift(b)})`;
 }
 function colorFor(key) {
-  const base = state.stackBy === 'model' ? charts.modelColor(key) : (charts.clientColor(key));
+  const base = state.stackBy === 'model' ? charts.modelColor(key) : (charts.clientColors[key] || charts.clientColors.default);
   return displayColor(base);
 }
 
@@ -430,7 +430,7 @@ function renderBreakdown() {
   };
   
   const colModel = buildCol('dashboard.stack.model', modelTotals, charts.modelColor);
-  const colClient = buildCol('dashboard.stack.client', clientTotals, (k) => charts.clientColor(k));
+  const colClient = buildCol('dashboard.stack.client', clientTotals, (k) => charts.clientColors[k] || charts.clientColors.default);
   
   elsBreakdown.innerHTML = colModel + colClient;
   applySwatchColors(elsBreakdown);
