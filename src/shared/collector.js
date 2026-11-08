@@ -29,8 +29,10 @@ const {
   emptyPeriod,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
+  mergeNormalizedPeriods,
   mergePeriods,
   normalizeClientName,
+  normalizePeriod,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
@@ -1180,6 +1182,15 @@ async function collectUsageOnce(options) {
     propagateTodayProjects(today, Object.values(todayPartitions), { ...localSessionMetadataDeps, projectsFromToday: true });
   }
 
+  // Decoration can replace text after the scan's normalization. Today was
+  // freshly decorated even on a watch tick. Normalize broader periods only on
+  // full scans; delta merges already normalize the sessions Today touched.
+  today = normalizePeriod(today);
+  if (!anchorUsed && normalizedClients) {
+    month = normalizePeriod(month);
+    allTime = normalizePeriod(allTime);
+  }
+
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
   // homes; watch tick reuses the frozen snapshot so the Windows-only delta anchor
   // above stays exact (issue #15). Merged before deriveClientStatus so a client
@@ -1225,9 +1236,11 @@ async function collectUsageOnce(options) {
       wslDetected = wslResult.detected;
     }
   }
-  today = mergePeriods(windowsPeriods.today, wslBundle.today);
-  month = mergePeriods(windowsPeriods.month, wslBundle.month);
-  allTime = mergePeriods(windowsPeriods.allTime, wslBundle.allTime);
+  // The host periods are already normalized. Re-normalizing them here walked
+  // every retained session on each watch tick; only the WSL overlay is new.
+  today = mergeNormalizedPeriods(windowsPeriods.today, wslBundle.today);
+  month = mergeNormalizedPeriods(windowsPeriods.month, wslBundle.month);
+  allTime = mergeNormalizedPeriods(windowsPeriods.allTime, wslBundle.allTime);
   throwIfAborted(options.signal);
 
   // The renderer intentionally uses the live today period while a day is in
@@ -1296,9 +1309,9 @@ async function collectUsageOnce(options) {
       });
       throwIfAborted(options.signal);
       if (codexLocalView.sessionKeys.length) {
-        today = mergePeriods(today, codexLocalView.today);
-        month = mergePeriods(month, codexLocalView.month);
-        allTime = mergePeriods(allTime, codexLocalView.allTime);
+        today = mergeNormalizedPeriods(today, codexLocalView.today);
+        month = mergeNormalizedPeriods(month, codexLocalView.month);
+        allTime = mergeNormalizedPeriods(allTime, codexLocalView.allTime);
       }
       options.onCodexLocalUsageComputed?.(codexLocalView);
     } catch (_error) {

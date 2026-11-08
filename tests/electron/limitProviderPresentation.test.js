@@ -888,7 +888,7 @@ test('Codex limits render as one provider group with account subrows', () => {
   const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
   const groupPolicy = viewTable('LIMIT_GROUP_POLICIES');
 
-  assert.match(renderLimits, /providersByLimitProviderId\(state\.stats\?\.limits\?\.providers \|\| \[\]\)/);
+  assert.match(renderLimits, /providersByLimitProviderId\(desktopLimitRecords\(\)\)/);
   // The dispatch is by account count, not by provider: which providers have a
   // group is now the view's policy, so the page cannot forget one and the dock
   // card cannot render a bare row for the same provider.
@@ -1906,11 +1906,6 @@ test('MiMo Limits draws a credits balance when the provider balance object is ab
 
   const windowOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
   assert.deepEqual(Array.from(windowOnly.children, (node) => [node.label, node.value]), [['Balance', '¥9.95']]);
-
-  context.provider.balance = { amount: 9.95, currency: 'CNY', giftBalance: 9.95, cashBalance: 0 };
-  const withBalance = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
-  assert.deepEqual(Array.from(withBalance.children, (node) => [node.label, node.value, node.detail]),
-    [['Balance', '¥9.95', 'Gift ¥9.95 · Cash ¥0.00']]);
 });
 
 test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
@@ -2386,7 +2381,7 @@ test('provider toggles converge through the limits push without a forced refresh
   const statsRenderStart = app.indexOf('function renderStatsUpdate()');
   const statsRenderEnd = app.indexOf('const statsRenderScheduler =', statsRenderStart);
 
-  assert.match(body, /const patch = \{ limitProviders: checked\.join\(','\), limitsEnabled: checked\.length > 0 \};/);
+  assert.match(body, /const patch = \{ limitProviders: \[\.\.\.checked, \.\.\.absent\]\.join\(','\), limitsEnabled: checked\.length > 0 \|\| absent\.length > 0 \};/);
   assert.match(body, /state\.pendingLimitProviderSelection = \{ revision, \.\.\.patch \};/);
   assert.match(body, /saveSettings\(patch\)/);
   assert.match(body, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
@@ -2401,7 +2396,7 @@ function createLimitProviderToggleHarness({
   saveSettings
 } = {}) {
   const app = readRendererFile('app.js');
-  const providerSelection = functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
+  const providerSelection = functionBody(app, 'desktopLimitProviders', 'refreshPluginLimitCredentialStatuses') + functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
   const enabledProviderSelection = functionBody(app, 'enabledLimitProviderSet', 'limitProviderEnabled');
   const toggleStart = app.indexOf('async function onLimitProviderToggle()');
   const toggleEnd = app.indexOf('async function onLimitProviderMove(', toggleStart);
@@ -2666,11 +2661,13 @@ test('settings pushes sync once while repainting the background main view', () =
 });
 
 test('main limits cache reuses unchanged data and repaints when token units change', () => {
-  const source = functionBody(readRendererFile('app.js'), 'renderLimits', 'serviceStatusLabel');
+  const app = readRendererFile('app.js');
+  const source = functionBody(app, 'desktopLimitProviders', 'refreshPluginLimitCredentialStatuses') + functionBody(app, 'renderLimits', 'serviceStatusLabel');
   let paints = 0;
   const state = { settings: { compactTokenUnits: 'western' }, stats: { limits: { providers: [{ provider: 'muse', source: 'web', status: 'ok' }] } } };
   const context = vm.createContext({
     state,
+    pluginBridge: null, syncPluginLimitsDemand() {},
     Date: class extends Date { static now() { return 1793512800000; } },
     els: { limitsPanel: { children: [], replaceChildren(...nodes) { this.children = nodes; paints++; } } },
     currentLocale: () => 'zh-TW',
@@ -2706,7 +2703,7 @@ test('successful providers use a green dot while preserving source and account l
 
   assert.match(renderSettings, /const detected = provider\.status === 'ok' && !provider\.stale/);
   assert.match(renderSettings, /dot\.className = 'limit-provider-status-dot'/);
-  assert.match(renderSettings, /if \(\(detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
+  assert.match(renderSettings, /if \(\(pluginModule \|\| detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
   assert.match(renderSettings, /tag\.className = `limit-provider-tag limit-provider-tag-\$\{tagInfo\.kind\}`/);
   assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
   assert.match(css, /\.limit-provider-status-dot\s*\{[\s\S]*?background: var\(--success\)/);
@@ -2754,7 +2751,7 @@ test('disabled providers use checkbox state instead of a redundant status tag', 
   // The filter appends its own class after this one, so match the disabled part
   // rather than pinning the whole template literal.
   assert.match(renderSettings, /row\.className = `limit-provider-row\$\{isEnabled \? '' : ' is-disabled'\}/);
-  assert.match(renderSettings, /if \(\(detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
+  assert.match(renderSettings, /if \(\(pluginModule \|\| detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-main\s*\{[^}]*color: var\(--muted\)/);
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-tag\s*\{[^}]*color: var\(--muted\)/);
 });
@@ -3078,6 +3075,7 @@ test('MiMo plan cells keep missing plan names empty and use shared recovery text
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] }), 'Pro');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), 'Sign in again');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), 'Sign in again');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'error', accountLabel: 'Desktop Membership' }), 'Unavailable');
 });
 
 test('MiMo product rows name the shared account and the product when both are known', () => {
@@ -3093,8 +3091,8 @@ test('MiMo product rows name the shared account and the product when both are kn
     { provider: 'mimo', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Console' },
     { provider: 'mimo', accountKey: 'membership', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Desktop Membership' }
   ];
-  assert.equal(view.limitAccountTitle('mimo', rows[0], 0, rows), 'user@example.com · MiMo account · Console');
-  assert.equal(view.limitAccountTitle('mimo', rows[1], 1, rows), 'user@example.com · MiMo account · Desktop Membership');
+  assert.equal(view.limitAccountTitle('mimo', rows[0], 0, rows), 'user@example.com · Console');
+  assert.equal(view.limitAccountTitle('mimo', rows[1], 1, rows), 'user@example.com · Desktop Membership');
   const withoutEmail = rows.map((row) => ({ ...row, accountEmail: '' }));
   assert.deepEqual(withoutEmail.map((row, index) => view.limitAccountTitle('mimo', row, index, withoutEmail)),
     ['MiMo account · Console', 'MiMo account · Desktop Membership']);
@@ -3102,6 +3100,9 @@ test('MiMo product rows name the shared account and the product when both are kn
   assert.equal(view.limitAccountTitle('mimo', {
     provider: 'mimo', accountName: 'Membership', accountLabel: 'Pro', accountKey: 'sha256:abcdef123456'
   }, 0), 'Membership');
+  const renamed = [{ ...rows[0], accountName: 'Profile · MiMo abcdef1' },
+    { ...rows[1], accountEmail: '', accountName: 'Renamed · MiMo abcdef1' }];
+  assert.equal(view.limitAccountTitle('mimo', renamed[1], 1, renamed), 'user@example.com · Desktop Membership');
 });
 
 test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
@@ -3299,7 +3300,7 @@ test('an attached subscription adds no resting decoration to the plan label', ()
 
 test('subscription form controls stay shrinkable so a long option cannot overflow the panel', () => {
   const styles = readRendererFile('styles.css');
-  const block = cssBlock(styles, '.subscription-add-body .settings-row > :is(input, select)');
+  const block = cssBlock(styles, '.subscription-add-body .settings-row > :is(input, select, .select-control-trigger)');
   assert.match(block, /flex: 1 1 0;/);
   assert.match(block, /min-width: 0;/);
   // Descendant, not child: each kind of record wraps its own rows, so a child

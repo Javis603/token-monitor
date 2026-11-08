@@ -1929,8 +1929,8 @@ function clearCardSwitch() {
   motion.ghost.remove();
 }
 
-function captureCardSwitch(previous, sameCard) {
-  if (surface !== 'bubble' || !previous || prefersReducedMotion() || document.visibilityState === 'hidden') {
+function captureCardSwitch(previous, sameCard, opening = false) {
+  if (surface !== 'bubble' || !previous || opening || prefersReducedMotion() || document.visibilityState === 'hidden') {
     clearCardSwitch();
     return null;
   }
@@ -1988,7 +1988,10 @@ function commitCard(card, cellId) {
     .filter(list => !list.closest('.edge-dock-session-family'));
   const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
   const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
-  const switchMotion = captureCardSwitch(previous, sameCard);
+  // The native window stays visible at zero opacity between hovers, so page
+  // visibility cannot distinguish a new opening from a continuous switch.
+  const opening = previous?.dataset.reveal !== card.dataset.reveal;
+  const switchMotion = captureCardSwitch(previous, sameCard, opening);
   const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
   contentLayer.replaceChildren(card);
   overflowText.refresh();
@@ -2073,8 +2076,17 @@ function renderBubble(payload) {
     stagingLayer.replaceChildren();
     return;
   }
+  const previous = contentLayer.querySelector('.edge-dock-card');
+  if (previous && previous.dataset.reveal !== String(payload.reveal)) {
+    // Native fade-in can start before the placement ACK reaches this page.
+    // Hide the old reading before reporting a size, even with reduced motion.
+    clearCardSwitch();
+    previous.style.visibility = 'hidden';
+  }
   const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin:not([aria-hidden="true"])');
   if (retained && retained.dataset.pluginRef === cell.ref && retained.dataset.cellId === cell.id) {
+    retained.dataset.reveal = String(payload.reveal);
+    retained.style.visibility = '';
     retained.style.transform = contentTransform;
     const view = pluginHost?.state('edgeDock', cell.ref);
     const caption = retained.querySelector('.edge-dock-stat-caption'); if (caption) caption.textContent = view?.title || cell.ref;
@@ -2084,6 +2096,7 @@ function renderBubble(payload) {
   }
   const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
+  card.dataset.reveal = String(payload.reveal);
   card.style.transform = contentTransform;
   pluginContent?.retain(cell.kind === 'plugin' ? [] : [`edgeDock.${cell.kind}.content`]);
   if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {

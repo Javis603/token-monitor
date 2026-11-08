@@ -48,8 +48,8 @@ test('Home resolves real plan labels without treating MiMo products as plans', (
     { provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: '', windows: [{ kind: 'weekly', remainingPercent: 40 }] },
     { provider: 'mimo', status: 'ok', accountLabel: 'Console', planLabel: 'Pay-as-you-go', windows: [{ kind: 'weekly', remainingPercent: 50 }] }
   ]);
-  assert.equal(rows.find((row) => row.name === 'Desktop Membership').plan, '');
-  assert.equal(rows.find((row) => row.name === 'Console').plan, 'Pay-as-you-go');
+  assert.equal(rows.find((row) => row.name.endsWith('Desktop Membership')).plan, '');
+  assert.equal(rows.find((row) => row.name.endsWith('Console')).plan, 'Pay-as-you-go');
   assert.equal(resolveHomeRows([
     { provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [{ kind: 'weekly', remainingPercent: 40 }] }
   ])[0].plan, 'Pro');
