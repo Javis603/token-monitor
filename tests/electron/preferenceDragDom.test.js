@@ -525,7 +525,7 @@ test('settings mode choices use inline options and compact home limit rows', () 
   // further down the file, so the assertion would survive deleting the rule.
   const css = readRendererFile('styles.css');
   assert.match(css, /\.settings-panel \.status-provider-interval\s*\{[^}]*display:\s*flex/);
-  assert.match(css, /\.settings-panel \.status-provider-interval select\s*\{[^}]*width:\s*auto/);
+  assert.match(css, /\.settings-panel \.status-provider-interval :is\(select, \.select-control-trigger\)\s*\{[^}]*width:\s*auto/);
   assert.match(css, /\.settings-panel \.home-limit-account-count-setting > input\[type="number"\]\s*\{[^}]*height:\s*20px[^}]*padding:\s*2px 8px/);
 });
 

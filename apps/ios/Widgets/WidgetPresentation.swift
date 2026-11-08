@@ -17,6 +17,10 @@ nonisolated enum WidgetPresentation {
         case "openrouter": "OpenRouter"
         case "deepseek": "DeepSeek"
         case "minimax": "MiniMax"
+        case "mistral": "Mistral"
+        case "opendesign": "OpenDesign"
+        case "prime-agent": "Prime Agent"
+        case "jcode": "Jcode"
         case "mimo": "MiMo"
         case "grok": "Grok"
         case "copilot": "GitHub Copilot"
@@ -85,6 +89,9 @@ nonisolated enum WidgetPresentation {
         case "deepseek": "VendorDeepSeek"
         case "xai": "VendorXAI"
         case "mistral": "VendorMistral"
+        case "opendesign": "VendorOpenDesign"
+        case "prime-agent": "VendorPrimeAgent"
+        case "jcode": "VendorJcode"
         case "moonshot": "VendorMoonshot"
         case "cohere": "VendorCohere"
         case "doubao": "VendorDoubao"
@@ -152,6 +159,9 @@ nonisolated enum WidgetPresentation {
                          compact: Bool = false) -> String {
         guard value.isFinite else { return "—" }
         let source = sourceCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if source == "CREDITS" {
+            return value.formatted(.number.precision(.fractionLength(2)).locale(locale))
+        }
         let display = displayCode.uppercased()
         // Match the fixed display rates used by AppCurrency and the Hub.
         let rates: [String: Double] = ["USD": 1, "TWD": 31.5, "HKD": 7.8, "CNY": 6.8]

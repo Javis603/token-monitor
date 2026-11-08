@@ -26,6 +26,7 @@
       hasProviderMark,
       maskEmail,
       mimoProductLabel,
+      limitAccountTitle,
       createRowDrag,
       enabledLimitProviders,
       isWindowHidden = () => false
@@ -235,6 +236,45 @@
       return row;
     }
 
+    function headlineAccountChoices(item) {
+      const hidden = new Set(item.hiddenAccounts || []);
+      return accountsFor(item.provider).filter((account) => !hidden.has(account.accountKey));
+    }
+
+    function refreshAccountPicker(select, item) {
+      const accounts = headlineAccountChoices(item);
+      const options = accounts.map((account) => {
+        const option = document.createElement('option');
+        option.value = account.accountKey;
+        option.textContent = account.accountName || maskEmail(account.accountEmail)
+          || account.planLabel || providerLabel(item.provider);
+        return option;
+      });
+      if (!accounts.some((account) => account.accountKey === item.accountKey)) {
+        const missing = document.createElement('option');
+        missing.value = item.accountKey || '';
+        missing.textContent = t('trayComposer.account.none');
+        missing.disabled = true;
+        options.unshift(missing);
+      }
+      select.replaceChildren(...options);
+      select.value = item.accountKey || '';
+    }
+
+    function accountRow(item, id) {
+      const row = el('label', 'settings-item edge-dock-composer-window');
+      row.append(el('span', 'settings-item-title', t('trayComposer.account.specificLabel')));
+      const select = document.createElement('select');
+      refreshAccountPicker(select, item);
+      select.addEventListener('change', () => { void updateItem(id, { accountKey: select.value }); });
+      select.addEventListener('blur', () => {
+        const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+        if (currentItem && root.contains(select)) refreshAccountPicker(select, currentItem);
+      });
+      row.append(select);
+      return row;
+    }
+
     function windowChoices(item) {
       const hidden = new Set(item.hiddenAccounts || []);
       const choices = new Map();
@@ -372,6 +412,20 @@
           void updateItem(id, { accountMode });
         }));
       }
+      if (!limitsOnly && item.provider === 'thirdparty') {
+        pane.append(choiceRow('settings.edgeDock.limitValue', item.accountMode, [
+          { value: 'lowest', labelKey: 'trayComposer.account.lowest' },
+          { value: 'specific', labelKey: 'trayComposer.account.specific' }
+        ], (accountMode) => {
+          const change = { accountMode };
+          if (accountMode === 'specific') {
+            const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+            change.accountKey = currentItem.accountKey || headlineAccountChoices(currentItem)[0]?.accountKey || '';
+          }
+          void updateItem(id, change);
+        }));
+        if (item.accountMode === 'specific') pane.append(accountRow(item, id));
+      }
       const accounts = accountsFor(item.provider);
       if (accounts.length > 1) {
         const hidden = new Set(item.hiddenAccounts || []);
@@ -391,7 +445,7 @@
           const identity = account.accountName || maskEmail(account.accountEmail);
           const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
           const name = product
-            ? [identity, product].filter(Boolean).join(' · ')
+            ? limitAccountTitle('mimo', account, accounts.indexOf(account), accounts)
             : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
           text.setAttribute('aria-label', name);
@@ -413,7 +467,7 @@
       if (ui.selected && !items.some((item) => idFor(item) === ui.selected)) ui.selected = '';
       const selectedItem = items.find((item) => idFor(item) === ui.selected);
       // A stats tick can change token totals without changing any control here.
-      // Replacing the native select on every tick closes its open menu.
+      // Replacing a focused picker on every tick interrupts its selection.
       const signature = JSON.stringify({
         items,
         labels: items.map(itemLabel),
@@ -423,13 +477,19 @@
         connected: isAutomatic() ? connectedProviders() : null,
         addable: ui.menuOpen ? enabledLimitProviders?.() : null,
         windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
-        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account) => [
-          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel
-        ]) : null,
+        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account, index, accounts) => {
+          const identity = [account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel];
+          if (selectedItem.provider === 'mimo' && mimoProductLabel(account)) {
+            identity.push(limitAccountTitle('mimo', account, index, accounts));
+          }
+          return identity;
+        }) : null,
         wording: [t('settings.edgeDock.window'), t('settings.edgeDock.window.auto'), t('settings.edgeDock.window.unavailable')]
       });
       if (signature === renderedSignature && root.firstChild) return;
-      if (root.contains(document.activeElement) && document.activeElement?.tagName === 'SELECT') return;
+      if (root.contains(document.activeElement) && (document.activeElement?.tagName === 'SELECT'
+        || document.activeElement?.classList.contains('select-control-trigger'))) return;
+      if (root.querySelector('.select-control-trigger[aria-expanded="true"]')) return;
 
       const heading = el('div', 'edge-dock-composer-heading');
       heading.append(el('span', '', t(limitsOnly ? 'notch.tab.limits' : 'settings.edgeDock.items')));

@@ -312,6 +312,8 @@ for (const [runtime, api] of [
     assert.equal(windows[1].remainingPercent, undefined);
     assert.equal(windows[1].creditsAmount, 20);
     assert.deepEqual(stats, before);
+    stats.limits.providers[0].provider = 'mistral';
+    assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quotas[0].windows[1].remainingPercent, undefined);
     stats.limits.providers[0].provider = 'thirdparty';
     assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quotas[0].windows[1].remainingPercent, 20);
   });

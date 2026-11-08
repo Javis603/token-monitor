@@ -833,7 +833,14 @@ function providerCellNode(cell) {
   // answers "what does the primary window say" (0% when a quota is spent).
   // Splitting the two lets a tight secondary window warn without turning the
   // headline into whichever window is lowest this minute.
-  value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
+  // A cell printing a balance has no quota percentage behind it, and `unknown`
+  // would grey the figure out as if nothing had answered. The money is the answer,
+  // so it keeps the normal ink; a balance that does carry a reading — OpenRouter's
+  // derived percentage — is still coloured by how tight that reading is.
+  const severitySource = cell.severityPercent ?? cell.remainingPercent;
+  value.dataset.severity = hasCreditsAmount && (severitySource === null || severitySource === undefined)
+    ? 'ok'
+    : displaySeverity(severitySource);
   node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider), waitingRingStart(cell.id, waiting > 0)), value);
   // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
@@ -1318,6 +1325,11 @@ function renderRail(payload) {
   }
 }
 
+const cardFrames = window.TokenMonitorCardMotion.createCardFrameLoop({ sendFrame: id => bridge.cardFrame(id) });
+bridge.onCardMotion?.(next => {
+  if (state.payload?.platform === 'win32') cardFrames.update(next);
+});
+
 let gesture = null;
 let nextGestureId = 0;
 
@@ -1334,31 +1346,6 @@ function startDragFrames() {
   };
   requestAnimationFrame(frame);
 }
-
-let cardMotionId = null;
-let cardFrameLoop = false;
-
-function pumpCardFrames() {
-  if (cardMotionId === null) {
-    cardFrameLoop = false;
-    return;
-  }
-  bridge.cardFrame(cardMotionId);
-  if (cardMotionId !== null) requestAnimationFrame(pumpCardFrames);
-}
-
-bridge.onCardMotion?.(({ motionId, active }) => {
-  if (state.payload?.platform !== 'win32') return;
-  if (!active) {
-    if (cardMotionId === motionId) cardMotionId = null;
-    return;
-  }
-  cardMotionId = motionId;
-  if (!cardFrameLoop) {
-    cardFrameLoop = true;
-    requestAnimationFrame(pumpCardFrames);
-  }
-});
 
 bridge.onDragEnded?.(({ gestureId }) => {
   if (gesture?.id !== gestureId) return;
@@ -2060,6 +2047,16 @@ function fitCardTotal(card, scale = 1) {
   if (base > 0) number.style.fontSize = `${Math.max(12, Math.floor(base * (available - 1) / natural))}px`;
 }
 
+const bubbleLayout = window.TokenMonitorCardLayout.createCardLayout({
+  measure: ({ card, payload }) => Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity),
+  report(height, { card, payload, commit = false }) {
+    if (!(height > 0)) return;
+    const cellId = payload.cell.id;
+    if (commit && payload.placed?.cellId === cellId && payload.placed.height === height) commitCard(card, cellId);
+    else if (payload.placed?.cellId !== cellId || payload.placed.height !== height) bridge.reportBubbleSize(cellId, height);
+  }
+});
+
 function renderBubble(payload) {
   const contentTransform = '';
   root.dataset.side = payload.side;
@@ -2067,6 +2064,7 @@ function renderBubble(payload) {
   const cell = payload.cell;
   if (!cell) {
     clearCardSwitch();
+    bubbleLayout.cancel();
     if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
     observedPluginCard = null;
     for (const body of root.querySelectorAll('.edge-dock-plugin-card')) pluginHost?.unmount(body);
@@ -2081,8 +2079,7 @@ function renderBubble(payload) {
     const view = pluginHost?.state('edgeDock', cell.ref);
     const caption = retained.querySelector('.edge-dock-stat-caption'); if (caption) caption.textContent = view?.title || cell.ref;
     retained.style.maxHeight = payload.maxCardHeight ? `${payload.maxCardHeight}px` : '';
-    const height = Math.min(Math.ceil(retained.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
-    if (payload.placed?.cellId !== cell.id || payload.placed.height !== height) bridge.reportBubbleSize(cell.id, height);
+    bubbleLayout.prepare({ card: retained, payload });
     return;
   }
   const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
@@ -2104,12 +2101,7 @@ function renderBubble(payload) {
   clampBreakdownList(card);
   if (observedPluginCard) bubbleSizeObserver?.observe(observedPluginCard);
   if (cell.kind === 'provider') reserveAccountHeight(card, payload.maxCardHeight);
-  const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
-  if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
-    commitCard(card, cell.id);
-  } else {
-    bridge.reportBubbleSize(cell.id, height);
-  }
+  bubbleLayout.prepare({ card, payload, commit: true });
 }
 
 
@@ -2117,12 +2109,13 @@ const bubbleSizeObserver = surface === 'bubble' && window.ResizeObserver ? new R
   const card = observedPluginCard?.isConnected ? observedPluginCard : contentLayer.querySelector('.edge-dock-card') || stagingLayer.querySelector('.edge-dock-card');
   const payload = state.payload;
   if (card && payload?.cell?.id === card.dataset.cellId) {
-    const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
-    if (height > 0 && payload.placed?.height !== height) bridge.reportBubbleSize(card.dataset.cellId, height);
+    bubbleLayout.prepare({ card, payload });
   }
 }) : null;
 bubbleSizeObserver?.observe(root);
 window.addEventListener('pagehide', () => {
+  cardFrames.cancel();
+  bubbleLayout.cancel();
   clearCardSwitch();
   bubbleSizeObserver?.disconnect();
 }, { once: true });

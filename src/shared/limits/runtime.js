@@ -6,11 +6,11 @@ const {
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   parseBoolean,
-  parseLimitProviders,
+  parseLimitProviders: builtinParseProviders,
   probeLimitProvider,
   providerPhysicalBoundMs
 } = require('./collector');
-const { normalizeLimitProvider, normalizeLimitsSummary } = require('./core');
+const { normalizeLimitProvider: builtinNormalizeProvider, normalizeLimitsSummary: builtinNormalizeSummary } = require('./core');
 const {
   nextLimitsResetBoundary,
   pruneAttemptedResetBoundaries
@@ -155,6 +155,11 @@ function bypassesProviderCooldown(reason) {
 }
 
 function createLimitsRuntime(initialOptions = {}, deps = {}) {
+  // Desktop extensions supply their own closed registry and DTO normalization.
+  // Default collectors retain the built-in, wire-compatible provider allowlist.
+  const parseLimitProviders = deps.parseProviders || builtinParseProviders;
+  const normalizeLimitProvider = deps.normalizeProvider || builtinNormalizeProvider;
+  const normalizeLimitsSummary = deps.normalizeSummary || builtinNormalizeSummary;
   const now = deps.now || Date.now;
   const setTimer = deps.setTimeout || setTimeout;
   const clearTimer = deps.clearTimeout || clearTimeout;
@@ -552,6 +557,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         windows: existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label))
       };
     }
+    if (lane.provider === 'minimax' && !row.source && !row.accountKey) {
+      const previous = existing.lastAttempt?.row || existing.lastGood;
+      if (previous?.source) row = { ...row, source: previous.source };
+    }
     if (lane.provider === 'workbuddy' && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
       // A partial discovery can miss an encrypted identity which has never
       // produced lastGood quota. Preserve its last known metadata as well as
@@ -609,7 +618,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         return row;
       })
       .filter(Boolean);
-    const expected = new Set(dispatch.expectedIdentityKeys);
+    // A MiniMax API-only settings refresh shares the provider executor with Code,
+    // but it does not own Code's retained identity or freshness.
+    const apiOnly = lane.provider === 'minimax' && dispatch.scope.source === 'api' && !dispatch.accountScoped;
+    const belongsToApi = (identityKey) => {
+      if (!apiOnly) return true;
+      const state = lane.identities.get(identityKey);
+      return (state?.lastAttempt?.row?.source || state?.lastGood?.source) === 'api';
+    };
+    const expected = new Set(dispatch.expectedIdentityKeys.filter(belongsToApi));
     const represented = new Set();
     const committedRows = [];
 
@@ -617,10 +634,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const status = attemptError.status || (attemptError.code === 'PROBE_TIMEOUT' ? 'timeout' : 'unavailable');
       const targets = dispatch.accountScoped
         ? [dispatch.identityKey]
-        : expected.size ? [...expected] : [`${lane.provider}:*`];
+        : expected.size ? [...expected] : apiOnly && lane.identities.size ? [] : [`${lane.provider}:*`];
       for (const identityKey of targets) {
         if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
-        applyAttempt(lane, identityKey, { provider: lane.provider }, status, attemptAt);
+        applyAttempt(lane, identityKey, { provider: lane.provider, source: dispatch.scope.source }, status, attemptAt);
       }
       rebuildSnapshot();
       return [];
@@ -630,12 +647,24 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       && rowIdentityKey(normalizedRows[0]) === `${lane.provider}:*`
       && !TRANSIENT_STATUSES.has(normalizedRows[0].status)
       && normalizedRows[0].status !== 'ok';
-    if (genericTerminal && !dispatch.accountScoped) lane.identities.clear();
+    if (genericTerminal && !dispatch.accountScoped) {
+      if (apiOnly) {
+        for (const identityKey of expected) lane.identities.delete(identityKey);
+        // Without API credentials, the collector hides this optional placeholder
+        // whenever a real Code account is already present.
+        if ([...lane.identities.values()].some(state =>
+          (state.lastAttempt?.row?.source || state.lastGood?.source) === 'oauth')) {
+          rebuildSnapshot();
+          return [];
+        }
+      } else lane.identities.clear();
+    }
 
     for (const removal of removals) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
       if (identityKey === `${lane.provider}:*`) continue;
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
+      if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
       represented.add(identityKey);
       lane.identities.delete(identityKey);
@@ -644,6 +673,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     for (const row of normalizedRows) {
       let identityKey = rowIdentityKey(row);
       if (identityKey === `${lane.provider}:*` && dispatch.accountScoped) identityKey = dispatch.identityKey;
+      if (apiOnly && identityKey !== `${lane.provider}:*`
+        && lane.identities.has(identityKey) && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) identityKey = dispatch.identityKey;
 
@@ -682,6 +713,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       runtimeEpoch,
       providerEpoch: lane.epoch,
       accountScoped: intent.accountScoped,
+      scope: intent.scope,
       identityKey: intent.identityKey,
       accountRevision: lane.accountRevisions.get(intent.identityKey) || 0,
       accountRevisions: new Map(lane.accountRevisions),
@@ -696,8 +728,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         : config;
       const configSnapshot = cloneValue(resolved || config);
       configSnapshot.limitProviders = [lane.provider];
-      if (intent.accountScoped) configSnapshot.limitRefreshScope = cloneValue(intent.scope);
-      else delete configSnapshot.limitRefreshScope;
+      if (intent.accountScoped || (lane.provider === 'minimax' && intent.scope.source === 'api')) {
+        configSnapshot.limitRefreshScope = cloneValue(intent.scope);
+      } else delete configSnapshot.limitRefreshScope;
       // A provider that must remove a vanished local identity compares against
       // the rows this runtime actually accepted, not a mutable probe-side cache.
       // A superseded probe therefore cannot consume a removal before commit.
@@ -822,11 +855,33 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const lane = lanes.get(provider);
       if (!lane) continue;
       if (!isAccountScope(normalized)) {
+        // cancelLane empties pending, so capture API work before cancelling.
+        const pendingApi = provider === 'minimax' && normalized.source === 'api'
+          ? [...lane.pending.values(), lane.active?.intent]
+            .filter(intent => intent?.scope.source === 'api').map(intent => intent.identityKey)
+          : [];
         cancelLane(lane, reason);
         resetRetryPolicy(lane);
-        if (provider === 'muse' && scope.source === 'web') lane.identities.delete('muse:source:web');
-        else lane.identities.clear();
-        lane.accountRevisions.clear();
+        if (provider === 'minimax' && normalized.source === 'api') {
+          // Fence only API identities, retaining OAuth revisions.
+          const removed = new Set(pendingApi);
+          for (const [identityKey, state] of lane.identities) {
+            const row = state.lastAttempt?.row || state.lastGood;
+            if (row?.source === 'api') {
+              lane.identities.delete(identityKey);
+              removed.add(identityKey);
+            }
+          }
+          for (const identityKey of removed) {
+            lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
+          }
+        } else if (provider === 'muse' && scope.source === 'web') {
+          lane.identities.delete('muse:source:web');
+          lane.accountRevisions.clear();
+        } else {
+          lane.identities.clear();
+          lane.accountRevisions.clear();
+        }
         continue;
       }
       const identityKeys = matchingIdentityKeys(lane, normalized);

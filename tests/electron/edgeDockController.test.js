@@ -718,6 +718,56 @@ test('the dock size scales its windows and zooms their pages to match', (t) => {
   assert.equal(sentPayload(rail, 'rail').zoom, 1);
 });
 
+test('detail size is independent of the rail, previews live and restores inheritance', (t) => {
+  const fixture = createFixture({ settings: { edgeDockSize: 'small', edgeDockBubbleSize: 'large' } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  const railBounds = { ...rail.bounds };
+  assert.equal(rail.options.webPreferences.zoomFactor, 0.85);
+  assert.equal(bubble.options.webPreferences.zoomFactor, 1.25);
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+  assert.equal(paintedCardBounds(bubble).height, 225);
+  assert.equal(paintedCardBounds(bubble).width, scaledEdgeDockMetrics(1.25).bubbleWidth + scaledEdgeDockMetrics(1.25).bubbleTail);
+  assert.equal(sentPayload(bubble, 'bubble').maxCardHeight, Math.floor((860 - EDGE_DOCK_METRICS.screenMargin * 2) / 1.25));
+
+  fixture.controller.previewScale(1.5, 'bubble');
+  assert.equal(bubble.webContents.getZoomFactor(), 1.5);
+  assert.equal(paintedCardBounds(bubble).height, 270);
+  assert.deepEqual(rail.bounds, railBounds, 'detail previews never resize or move the rail');
+  fixture.controller.sync();
+  assert.equal(bubble.webContents.getZoomFactor(), 1.25, 'sync discards the unsaved preview');
+
+  fixture.settings.edgeDockBubbleSize = 'custom';
+  fixture.settings.edgeDockBubbleCustomScale = 1.4;
+  fixture.controller.sync();
+  assert.equal(bubble.webContents.getZoomFactor(), 1.4);
+  fixture.settings.edgeDockSize = 'large';
+  fixture.controller.sync();
+  assert.equal(bubble.webContents.getZoomFactor(), 1.4, 'rail changes leave an explicit detail size alone');
+  fixture.settings.edgeDockBubbleSize = 'inherit';
+  fixture.controller.sync();
+  assert.equal(bubble.webContents.getZoomFactor(), rail.webContents.getZoomFactor());
+  assert.equal(fixture.settings.edgeDockBubbleCustomScale, 1.4, 'the custom value survives presets and inheritance');
+});
+
+for (const side of ['left', 'right']) {
+  test(`large details stay on screen next to a small floating ${side} rail`, (t) => {
+    const fixture = createFixture({ settings: { edgeDockSize: 'small', edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 1.5, edgeDockFloatingX: side === 'left' ? 0.4 : 0.6 } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail'), bubble = fixture.windowFor('bubble');
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 2 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'cursor', height: 1000 });
+    const card = paintedCardBounds(bubble);
+    const area = fixture.screen.displays[0].workArea;
+    assert.ok(card.x >= area.x && card.x + card.width <= area.x + area.width);
+    assert.ok(card.y >= area.y && card.y + card.height <= area.y + area.height);
+    assert.equal(bubble.webContents.getZoomFactor(), 1.5);
+    assert.equal(rail.webContents.getZoomFactor(), 0.85);
+  });
+}
+
 test('a larger dock that would not fit the display zooms to the size it is drawn at', (t) => {
   const fixture = createFixture({
     settings: { edgeDockSize: 'large' },
@@ -871,7 +921,7 @@ test('Windows HostBackdrop follows shape, fade, resume and cleanup without using
   assert.equal(sentPayload(fixture.windowFor('rail'), 'rail').glass, false, 'ignore obsolete helper callbacks');
 });
 
-test('Windows dock material switches independently and rebuilds native underlays only when needed', (t) => {
+test('Windows dock material replaces only native underlays while retaining renderer windows', (t) => {
   const adapters = [];
   const options = { nativeGlass: true, windowsBackdrop: {
     attach(win, onMaterial) {
@@ -892,6 +942,7 @@ test('Windows dock material switches independently and rebuilds native underlays
   fixture.controller.sync();
   assert.ok(adapters.every((adapter) => adapter.disposed));
   const plain = fixture.windowFor('rail');
+  assert.equal(plain, inheritedRail, 'glass-off preserves the renderer and its state');
   plain.webContents.emit('did-finish-load');
   assert.equal(sentPayload(plain, 'rail').glass, false);
   assert.ok(plain.shapeCalls.at(-1).length > 0, 'transparent mode keeps curved hit regions');
@@ -902,10 +953,14 @@ test('Windows dock material switches independently and rebuilds native underlays
   fixture.controller.sync();
   assert.equal(adapters.length, 6, 'native glass can be restored without restarting the app');
   const rail = fixture.windowFor('rail');
-  const native = adapters.find((adapter) => adapter.win === rail);
+  assert.equal(rail, inheritedRail, 'glass-on reuses the same renderer');
+  assert.equal(FakeBrowserWindow.instances.length, 3);
+  const native = adapters.findLast((adapter) => adapter.win === rail);
   rail.webContents.emit('did-finish-load');
   native.onMaterial(true);
   assert.equal(sentPayload(rail, 'rail').glass, true);
+  adapters.find((adapter) => adapter.win === rail).onMaterial(false);
+  assert.equal(sentPayload(rail, 'rail').glass, true, 'disposed underlay cannot overwrite its replacement');
   options.nativeGlass = false;
   fixture.controller.sync();
   assert.equal(fixture.windowFor('rail'), rail, 'an explicit dock style overrides System Glass');

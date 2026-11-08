@@ -4,8 +4,29 @@ import UIKit
 @testable import TokenMonitor
 
 struct LimitsPresentationTests {
+    @Test func upstreamCatalogNamesAndProviderOrder() {
+        #expect(MetricFormatter.currency(680, code: "CREDITS") == "680.00")
+        #expect(WidgetPresentation.currency(680, sourceCode: "CREDITS", displayCode: "HKD", locale: Locale(identifier: "en_US")) == "680.00")
+        #expect(ClientPresentation.displayName(for: "mistral") == "Mistral Vibe")
+        for (id, name) in [("prime-agent", "Prime Agent"), ("jcode", "Jcode"), ("opendesign", "OpenDesign")] {
+            #expect(ProviderPresentation.displayName(for: id) == name)
+            #expect(WidgetPresentation.displayName(for: id) == name)
+        }
+        #expect(LimitProviderOrder.sortedIDs(["typesafe", "mistral", "minimax", "thirdparty", "opendesign", "manus"], order: []) ==
+            ["minimax", "mistral", "typesafe", "manus", "opendesign", "thirdparty"])
+    }
+
+    @Test func mistralWalletHasNoQuotaAndGrantsRemainSeparate() throws {
+        let value = try provider(#"{"provider":"mistral","windows":[{"kind":"billing","label":"Included API","used":5,"limit":20,"remainingPercent":75,"currency":"EUR"},{"kind":"billing","label":"Included Vibe Code","remainingPercent":50},{"kind":"billing","metric":"credits","label":"Balance","remaining":30,"currency":"EUR","showMeter":false}]}"#)
+        let windows = value.displayWindows
+        #expect(value.remainingPercent(for: windows[2]) == nil)
+        #expect(value.lowestRemainingPercent == 50)
+        #expect(value.windowDetail(for: windows[0]) == "EUR 15.00 / EUR 20.00")
+        #expect(LimitWindowSection.make(provider: value, windows: windows)[0].rows.map(\.count) == [1, 1, 1])
+    }
+
     // Desktop mark catalog: verify the actual compiled resources, including widgets' mapping.
-    @Test(arguments: ["goose","catpaw","notion","claude","codex","opencode","hermes","openclaw","cursor","antigravity","cline","amp","droid","kimi","qwen","grok","copilot","pi","omp","zed","kilo","commandcode","mimo","muse","zcode","kiro","codebuddy","workbuddy","proma","qodercn","reasonix","dsh","cherrystudio","lmstudio","unsloth","devin","fx","mcode","openrouter","gemini","qoder","deepseek","xai","meta","mistral","moonshot","zai","zaiteam","cohere","xiaomi","minimax","doubao","hunyuan","volcengine","ollama","trae","alibaba","stepfun","nvidia","typesafe","thirdparty","factory","newapi","sub2api"])
+    @Test(arguments: ["opendesign","prime-agent","jcode","goose","catpaw","notion","claude","codex","opencode","hermes","openclaw","cursor","antigravity","cline","amp","droid","kimi","qwen","grok","copilot","pi","omp","zed","kilo","commandcode","mimo","muse","zcode","kiro","codebuddy","workbuddy","proma","qodercn","reasonix","dsh","cherrystudio","lmstudio","unsloth","devin","fx","mcode","openrouter","gemini","qoder","deepseek","xai","meta","mistral","moonshot","zai","zaiteam","cohere","xiaomi","minimax","doubao","hunyuan","volcengine","ollama","trae","alibaba","stepfun","nvidia","typesafe","thirdparty","factory","newapi","sub2api"])
     func desktopProviderArtworkLoads(providerID: String) throws {
         let asset = ProviderPresentation.assetName(for: providerID)
         #expect(asset != "VendorTokenMonitor")

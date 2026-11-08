@@ -234,3 +234,27 @@ test('Worker cooldown retains delayed delivery, coalesces ingests and skips unre
     await Promise.all(kept);
   }
 });
+
+
+test('Worker delta ingest advances upload revision and pushes reconstructed usage', async () => {
+  const { hub, kept } = await makeHub();
+  const pushes = [];
+  hub.apns = { enabled: true, async send(_token, state) { pushes.push(state); return { sent: true }; } };
+  try {
+    await hub.registerLiveActivity(registerInput());
+    const fullRequest = request('/api/ingest', 'POST', { deviceId: 'device', periods: { today: { totalTokens: 100 } } });
+    fullRequest.headers.set('x-token-monitor-upload', '1');
+    const full = await (await hub.fetch(fullRequest)).json();
+    assert.ok(full.upload.revision);
+    await waitFor(() => pushes.some(state => state.usage.today.tokens === 100));
+    const delta = await hub.fetch(request('/api/ingest/delta', 'POST', { deviceId: 'device', baseRevision: full.upload.revision,
+      patch: [{ op: 'replace', path: '/periods/today/totalTokens', value: 250 }] }));
+    assert.equal(delta.status, 200);
+    assert.notEqual((await delta.json()).upload.revision, full.upload.revision);
+    await waitFor(() => pushes.some(state => state.usage.today.tokens === 250));
+  } finally {
+    hub.apns.enabled = false;
+    await hub.fetch(request('/api/live-activities/activity', 'DELETE'));
+    await Promise.all(kept);
+  }
+});

@@ -116,19 +116,7 @@ struct LimitWindowRow: View {
     }
 
     private var monetaryDetail: String? {
-        guard window.kind == "billing", let limit = window.limit, limit > 0 else {
-            return nil
-        }
-        switch provider.normalizedProviderID {
-        case "commandcode":
-            guard let remaining = window.remaining else { return nil }
-            return "\(MetricFormatter.currency(remaining, code: sourceCurrency)) / \(MetricFormatter.currency(limit, code: sourceCurrency))"
-        case "zed":
-            guard window.limitId != "zed.edit-predictions", let used = window.used else { return nil }
-            return "\(MetricFormatter.currency(used, code: sourceCurrency)) / \(MetricFormatter.currency(limit, code: sourceCurrency))"
-        default:
-            return nil
-        }
+        provider.windowDetail(for: window)
     }
 
     private var title: some View {

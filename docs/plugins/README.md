@@ -2,12 +2,13 @@
 
 Token Monitor plugins run code you choose to trust (`tmApi: 1`). The App does not sandbox a plugin's access to your files, credentials or network. An integrity hash identifies bytes, not a security review.
 
-Choose a guide for your next step:
+Start with the [quickstart](author-quickstart.md) to build and import a plugin. Use the task guides below when adding a feature; each API contract has one reference page.
 
-- [First UI and local import](author-quickstart.md)
 - [Data queries, live updates and plugin settings](author-data-settings.md)
 - [Resource fields, measurement coverage and limitations](author-data-resources.md)
 - [UI surfaces and composition](author-ui-options.md)
+- [Native quota modules and manual credentials](author-limits.md)
+- [Native icons and quota colors](author-presentation.md)
 - [Publishing and README template](publishing.md)
 - [Author self-check](validation.md#author-self-check)
 
@@ -57,6 +58,7 @@ The App displays labels beside the version to describe the plugin's interfaces a
 | Widgets | A view supports `home`, `tray`, `edgeDock` or `notch` |
 | Pages | A view supports `page` or declares content `targets` |
 | Appearance | At least one skin is declared in `skins` |
+| Limits | At least one native module declared in `limits` |
 | Automation | `category: "automation"` for monitoring, reminders or scheduled tasks |
 
 A plugin can have more than one label. `category` is optional. See [catalog metadata](distribution-design.md#create-a-community-catalog) for discovery type hints.
@@ -131,7 +133,7 @@ Business queries use `{resource, period, filter?, sort?, page?}`. Resources incl
 
 Subscriptions deliver `{type:'snapshot', value, sequence}` then coalesced invalidations with `refetch` and `reset`. Source/privacy changes require discarding the old traversal. Ordinary updates preserve admitted immutable cursors until expiration or eviction. Use the returned cursor with the same query; restart on `snapshotExpired`/`invalidCursor`. Query work and retained memory remain bounded to protect the App's data service; these bounds do not restrict a plugin's own Node work. Large sessions use yielding indexed pagination.
 
-`manifest.settings` declares the [versioned field schema](author-data-settings.md#plugin-settings) and host form. `settings.get` returns values, schema and revision; `settings.update` submits `{schemaVersion, expectedRevision, patch}` and reports conflicts/field errors. The native form works while code is disabled. A custom `settings` view executes trusted UI and requires enablement. This plain JSON preference store is not a dedicated secret vault. A plugin may implement its own credential handling through its trusted backend; the platform does not advertise encryption it does not provide.
+`manifest.settings` declares the [versioned field schema](author-data-settings.md#plugin-settings) and host form. `settings.get` returns values, schema and revision; `settings.update` submits `{schemaVersion, expectedRevision, patch}` and reports conflicts/field errors. The native form works while code is disabled. A custom `settings` view executes trusted UI and requires enablement. This plain JSON preference store is not a secret vault. Use the separate [manual credential API](author-limits.md#manual-credential-contract); it stores credentials in separate private JSON files, never in plugin settings. These files are not encrypted.
 
 ## Installation and recovery
 
@@ -140,3 +142,7 @@ Subscriptions deliver `{type:'snapshot', value, sequence}` then coalesced invali
 The native tray menu offers **Restart without plugins**. Alternatively launch with `--plugins-safe-mode` or `TOKEN_MONITOR_PLUGINS_SAFE_MODE=1`. Safe mode lists packages and permits management without starting author UI/backends. This recovery route does not depend on a responsive renderer. It cannot undo arbitrary filesystem changes made by trusted code.
 
 No active plugins means no plugin backend, dedicated polling/sampler, or repeated business projection. Baseline imports/registration have a finite cost; byte-identical RAM or zero CPU overhead is not promised. See [validation](validation.md).
+
+## Native quota acceptance
+
+`npm run verify` covers the automated unit/regression suite. The separate manual Electron quota acceptance fixture is not part of `verify:plugins`: run `npx --no-install electron scripts/test-plugin-limits-ui.cjs` in a native GUI session with `ELECTRON_RUN_AS_NODE` unset. It uses disposable userData, synthetic credentials and blocked external networking, covering native quota settings, all three credential UI paths and lifecycle cleanup. Its screenshots are synthetic evidence, not real-account acceptance.

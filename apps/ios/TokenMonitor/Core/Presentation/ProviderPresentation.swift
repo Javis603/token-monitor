@@ -11,6 +11,10 @@ nonisolated enum ProviderPresentation {
         case "openrouter": "OpenRouter"
         case "deepseek": "DeepSeek"
         case "minimax": "MiniMax"
+        case "mistral": "Mistral"
+        case "opendesign": "OpenDesign"
+        case "prime-agent": "Prime Agent"
+        case "jcode": "Jcode"
         case "mimo", "micode": "Xiaomi MiMo"
         case "grok": "Grok"
         case "copilot": "GitHub Copilot"
@@ -103,7 +107,7 @@ nonisolated enum ProviderPresentation {
         case "thirdparty": rgb(0x8090a6)
         case "opencode", "cursor", "factory", "droid", "kimi", "moonshot", "grok", "xai",
              "copilot", "pi", "mimo", "micode", "xiaomi", "zai", "zaiteam", "zcode",
-             "proma", "devin", "fx", "stepfun", "typesafe", "goose", "notion": .primary
+             "proma", "devin", "fx", "stepfun", "typesafe", "goose", "notion", "opendesign", "prime-agent", "jcode": .primary
         default: rgb(0x6ab4f0)
         }
     }

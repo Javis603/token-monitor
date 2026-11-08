@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { enhance, navigate, typeahead, popupPosition } = require('../../src/electron/renderer/selectControl');
+const { enhance, isFocused, navigate, typeahead, popupPosition } = require('../../src/electron/renderer/selectControl');
 
 class Element extends EventTarget {
   constructor(tagName, document) {
@@ -22,6 +22,15 @@ class Element extends EventTarget {
     this.offsetHeight = 182;
     this.clientHeight = 180;
     this.bindings = new Set();
+    this.classList = {
+      contains: name => (this.className || '').split(' ').includes(name),
+      add: name => { this.className = `${this.className || ''} ${name}`.trim(); },
+      toggle: (name, enabled) => {
+        const names = new Set((this.className || '').split(' ').filter(Boolean));
+        if (enabled) names.add(name); else names.delete(name);
+        this.className = [...names].join(' ');
+      }
+    };
   }
   get childNodes() { return this.children; }
   get isConnected() { return this === this.ownerDocument.body || Boolean(this.parentElement?.isConnected); }
@@ -44,9 +53,16 @@ class Element extends EventTarget {
   removeEventListener(type, handler, options) { super.removeEventListener(type, handler, options); this.bindings.delete(handler); }
 }
 
-function harness({ supported = true, metadata = {}, value = 'local' } = {}) {
+class SelectElement extends Element {
+  get value() { return this._value; }
+  set value(value) { this._value = String(value); }
+  get selectedIndex() { return this.options.findIndex(option => option.value === this.value); }
+  set selectedIndex(index) { this._value = this.options[index]?.value || ''; }
+}
+
+function harness({ supported = true, metadata = {}, value = 'local', controlOptions = {} } = {}) {
   const document = new EventTarget();
-  document.createElement = tag => new Element(tag, document);
+  document.createElement = tag => new (tag === 'select' ? SelectElement : Element)(tag, document);
   document.body = document.createElement('body');
   document.body.rect = { left: 0, top: 0, right: 400, bottom: 600, width: 400, height: 600 };
   const observers = [];
@@ -59,7 +75,7 @@ function harness({ supported = true, metadata = {}, value = 'local' } = {}) {
   let frame = 0;
   const frames = new Map();
   Object.assign(window, {
-    Event, HTMLElement: supported ? Element : class {},
+    Event, HTMLElement: supported ? Element : class {}, HTMLSelectElement: SelectElement,
     innerWidth: 400, innerHeight: 600,
     getComputedStyle: () => ({ visibility: 'visible', display: 'block', overflowX: 'visible', overflowY: 'visible' }),
     MutationObserver: Observer, ResizeObserver: Observer,
@@ -86,7 +102,7 @@ function harness({ supported = true, metadata = {}, value = 'local' } = {}) {
     });
     label.append(select);
     document.body.append(label);
-    const control = enhance(select, { getOptionMeta: option => metadata[option.value] });
+    const control = enhance(select, { getOptionMeta: option => metadata[option.value], ...controlOptions });
     return { select, label, control, trigger: label.children[2], popup: document.body.children.at(-1) };
   }
   const fixture = addSelect();
@@ -144,7 +160,7 @@ test('enhancement preserves source interface and links accessible name and descr
   const f = harness();
   assert.equal(f.select.hidden, true);
   assert.equal(f.select.tabIndex, -1);
-  assert.equal(f.label.getAttribute('for'), f.trigger.id);
+  assert.equal(f.label.getAttribute('for'), f.select.id);
   assert.equal(f.trigger.getAttribute('role'), 'combobox');
   assert.equal(f.trigger.getAttribute('aria-label'), 'Sync method');
   assert.equal(f.trigger.getAttribute('aria-describedby'), 'mode-description');
@@ -416,5 +432,92 @@ test('unsupported platform keeps native select; empty and all-disabled choices c
   f.select.options = [];
   f.control.sync();
   assert.equal(f.trigger.children[1].textContent, '');
+  f.control.destroy();
+});
+
+test('programmatic value/index changes repaint without saving, and dispose restores native properties', () => {
+  const f = harness();
+  let changes = 0;
+  f.select.addEventListener('change', () => { changes++; });
+  f.select.value = 'client';
+  assert.equal(f.trigger.children[1].textContent, 'Connect to hub');
+  f.select.selectedIndex = 2;
+  assert.equal(f.trigger.children[1].textContent, 'Host hub');
+  assert.equal(changes, 0);
+  f.select.focus();
+  assert.equal(isFocused(f.select), true);
+  assert.equal(f.document.activeElement, f.trigger);
+  f.control.destroy();
+  for (const name of ['value', 'selectedIndex', 'focus', 'blur']) assert.equal(Object.hasOwn(f.select, name), false);
+  f.select.focus();
+  assert.equal(f.document.activeElement, f.select);
+});
+
+test('search filters descriptions, skips hidden and disabled rows, and does not commit an empty match', () => {
+  const f = harness({
+    metadata: { host: { description: 'Serve devices on LAN' } },
+    controlOptions: { searchable: true, searchLabel: () => 'Search options', emptyLabel: () => 'No matches' }
+  });
+  const [input, list, empty] = f.popup.children;
+  open(f);
+  assert.equal(f.document.activeElement, input);
+  assert.equal(isFocused(f.select), true);
+  input.value = 'lan';
+  send(input, 'input');
+  assert.deepEqual(list.children.map(row => row.hidden), [true, true, false, true]);
+  assert.equal(input.getAttribute('aria-activedescendant'), list.children[2].id);
+  send(input, 'keydown', { key: 'Enter' });
+  assert.equal(f.select.value, 'host');
+  assert.equal(f.document.activeElement, f.trigger);
+  open(f);
+  input.value = 'missing';
+  send(input, 'input');
+  assert.equal(empty.hidden, false);
+  assert.equal(empty.textContent, 'No matches');
+  assert.equal(input.getAttribute('aria-activedescendant'), null);
+  send(input, 'keydown', { key: 'Enter' });
+  assert.equal(f.select.value, 'host');
+  open(f);
+  input.value = 'icloud';
+  send(input, 'input');
+  send(input, 'keydown', { key: 'ArrowDown' });
+  assert.equal(input.getAttribute('aria-activedescendant'), null);
+  send(input, 'keydown', { key: 'Escape' });
+  assert.equal(f.select.value, 'host');
+  f.control.destroy();
+});
+
+test('search keeps text editing and IME composition separate from picker navigation', () => {
+  const f = harness({ controlOptions: { searchable: true } });
+  open(f);
+  const input = f.popup.children[0];
+  for (const key of [' ', 'Home', 'End']) assert.equal(send(input, 'keydown', { key }).defaultPrevented, false);
+  assert.equal(send(input, 'keydown', { key: 'Enter', isComposing: true }).defaultPrevented, false);
+  assert.equal(f.trigger.getAttribute('aria-expanded'), 'true');
+  f.control.destroy();
+});
+
+test('automatic search follows a growing list and groups retain only matching headings', () => {
+  const f = harness({ controlOptions: { searchable: 'auto' } });
+  const [input, list] = f.popup.children;
+  assert.equal(input.hidden, true);
+  const extra = Array.from({ length: 12 }, (_, index) => {
+    const option = f.document.createElement('option');
+    option.value = `model-${index}`;
+    option.textContent = `Model ${index}`;
+    option.parentElement = { tagName: 'OPTGROUP', label: 'Models', disabled: false };
+    return option;
+  });
+  f.select.options.push(...extra);
+  f.control.sync();
+  assert.equal(input.hidden, false);
+  open(f);
+  input.value = 'model 11';
+  send(input, 'input');
+  assert.deepEqual(list.children.filter(node => !node.hidden).map(node => node.textContent), ['Models', '']);
+  assert.equal(list.children.at(-1).getAttribute('aria-label'), 'Model 11');
+  input.value = 'local';
+  send(input, 'input');
+  assert.equal(list.children.find(node => node.className === 'select-control-group').hidden, true);
   f.control.destroy();
 });

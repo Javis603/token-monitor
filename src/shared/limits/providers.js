@@ -55,6 +55,7 @@
     { id: 'deepseek', label: 'DeepSeek' },
     { id: 'devin', label: 'Devin' },
     { id: 'minimax', label: 'Minimax' },
+    { id: 'mistral', label: 'Mistral' },
     { id: 'typesafe', label: 'TypeSafe' },
     { id: 'openrouter', label: 'OpenRouter' },
     { id: 'volcengine', label: 'Volcengine' },
@@ -64,6 +65,7 @@
     { id: 'stepfun', label: 'StepFun' },
     { id: 'notion', label: 'Notion AI' },
     { id: 'manus', label: 'Manus' },
+    { id: 'opendesign', label: 'OpenDesign' },
     { id: 'thirdparty', label: 'Third-party APIs' }
   ].map((provider) => Object.freeze({ ...provider })));
 

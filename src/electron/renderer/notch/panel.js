@@ -488,7 +488,7 @@
         if (page.startsWith(PLUGIN_PAGE_PREFIX)) {
           const icon = button.querySelector('.notch-tab-plugin-icon');
           const metadata = pluginIconMetadata(page);
-          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon]);
+          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon, metadata.presentation]);
           if (icon && icon.dataset.icon !== iconName && pluginViews) {
             icon.dataset.icon = iconName;
             icon.replaceChildren(pluginViews.navigationIcon(document, metadata, 15));
@@ -872,10 +872,20 @@
       const sub = el('div', 'notch-limit-sub');
       if (records.length > 1) {
         const shown = limitAccountTitle(entry.provider, record, records.indexOf(record), records);
-        const accountName = text('notch-limit-account', shown || t('settings.codex.nAccounts', { count: records.length }), shown);
-        accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
-        overflowText.bind(accountName);
-        sub.append(accountName);
+        const minimaxFallback = entry.provider === 'minimax' && !shown
+          ? record?.source === 'oauth' ? (record.accountLabel || 'MiniMax Code')
+            : record?.source === 'api' ? t('settings.minimax.accountFallback', {
+              number: records.filter(value => value.source === 'api').indexOf(record) + 1
+            }) : ''
+          : '';
+        const title = shown || minimaxFallback || (entry.provider !== 'minimax'
+          ? t('settings.codex.nAccounts', { count: records.length }) : '');
+        if (title) {
+          const accountName = text('notch-limit-account', title, title);
+          accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
+          overflowText.bind(accountName);
+          sub.append(accountName);
+        }
         if (account?.active) {
           const live = text('notch-limit-active', '✓', t('limits.codex.activeAccountHint'));
           live.setAttribute('aria-label', t('limits.codex.activeAccountHint'));

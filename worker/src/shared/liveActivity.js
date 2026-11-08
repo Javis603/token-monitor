@@ -87,7 +87,7 @@ function normalizeLiveActivityRegistration(input) {
 
 function providerWindowRemaining(provider, window) {
   if (window?.metric === 'credits') return creditsMeterPercent(provider, window, {
-    inferBalance: provider?.provider !== 'ollama' || window.showMeter !== false
+    inferBalance: !['ollama', 'mistral'].includes(provider?.provider) || window.showMeter !== false
   });
   const explicit = asNumber(window?.remainingPercent);
   if (explicit !== null) return clamp(explicit, 0, 100);

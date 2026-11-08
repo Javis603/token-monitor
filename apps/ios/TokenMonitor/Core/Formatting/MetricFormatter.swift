@@ -22,7 +22,7 @@ nonisolated enum MetricFormatter {
     static func currency(_ value: Double, code: String = "USD") -> String {
         guard value.isFinite else { return "—" }
         let normalizedCode = normalizedCurrencyCode(code)
-        let symbol = AppCurrency(rawValue: normalizedCode)?.symbol ?? normalizedCode + " "
+        let symbol = normalizedCode == "CREDITS" ? "" : (AppCurrency(rawValue: normalizedCode)?.symbol ?? normalizedCode + " ")
         return symbol + decimalCurrency(value)
     }
 

@@ -35,7 +35,7 @@ nonisolated struct LimitWindowSection: Identifiable, Sendable {
             }
             return [Self(id: "windows", rows: windows.map { [$0] })]
         }
-        if providerID == "cursor" {
+        if providerID == "cursor" || providerID == "mistral" {
             return [Self(id: "windows", rows: windows.map { [$0] })]
         }
         if providerID == "codex" {
