@@ -274,6 +274,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 <br>
 
 - 上記はデフォルトのパスです。Token Monitor は Tokscale と同じ環境変数の上書きに従います。`~/.local/share/` 配下は `$XDG_DATA_HOME`、ツール個別では `$CODEX_HOME`、`$GEMINI_CLI_HOME`、`$SENPI_CODING_AGENT_DIR`、`$SENPI_CODING_AGENT_SESSION_DIR`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME`、`$CLINE_*` などです。
+- Gemini CLI は新規インストールでは追跡されます。保存済みのツール選択はアップグレードでは自動的に追加されないため、Settings → tools で Gemini を有効にしてください。
 - Muse Code の利用枠は Muse Code 1.4.13+ の `muse usage --json` と既存のログインから取得します。利用枠が返らない場合や API キー課金では使用率を表示できません。[Muse のデータソース](docs/providers/muse.md)を参照してください。
 - Goose の使用量は、翌日以降の分もセッション作成日に計上されます。リモート goosed とカスタムスキャンパスは対象外です。[Goose のデータソース](docs/providers/goose.md)を参照してください。
 - CatPaw は既定で無効です。Settings → tools で有効にすると、macOS と Windows の中国版・海外版アシスタントのデータベースを読み取ります。パスと検証範囲は [CatPaw のデータソース](docs/providers/catpaw.md)を参照してください。
