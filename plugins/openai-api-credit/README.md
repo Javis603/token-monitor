@@ -18,7 +18,7 @@ Interface example. Balance and expiry depend on your account.
 
 Requires **Token Monitor 0.88.0 or later**.
 
-Open **Settings → Plugins → Discover**, select **OpenAI API Credits** in the **Token Monitor** official group, review it and install it. You can also import a `.tmplugin` file or this complete source folder through **Settings → Plugins**. Then select and expand **OpenAI** in **AI tool quota** to set up your account.
+Open **Settings → Plugins → Discover**. Under **Featured plugins**, select **OpenAI API Credits** with the Token Monitor official badge, review it and choose **Install and enable**. You can also import a `.tmplugin` file or this complete source folder through **Settings → Plugins**. Make sure the plugin is enabled, then select and expand **OpenAI** in **AI Tool Limits** to set up your account.
 
 ## Setup
 
