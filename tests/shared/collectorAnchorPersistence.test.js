@@ -23,6 +23,7 @@ function freshCollector() {
 
 const {
   configFingerprint,
+  collectionCalendarKey,
   collectUsageOnce,
   localTodayKey,
   qoderCnSourcesForClients,
@@ -431,6 +432,7 @@ test('restart reuse: anchor file on disk enables todayOnly on first interval tic
     dateKey,
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: null,
+    calendarKey: collectionCalendarKey(),
     configFingerprint: configFingerprint('claude', '2024-01-01'),
     fullScanAt: new Date(Date.now() - 300000).toISOString() // 5 minutes ago — within the 1h safety window
   };
@@ -492,6 +494,7 @@ test('future fullScanAt forces a full scan on first interval tick', async () => 
     dateKey,
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: null,
+    calendarKey: collectionCalendarKey(),
     configFingerprint: configFingerprint('claude', '2024-01-01'),
     fullScanAt: new Date(Date.now() + 3600000).toISOString() // 1 hour in the future
   };
@@ -552,6 +555,7 @@ test('missing fullScanAt forces a full scan on first interval tick', async () =>
     dateKey,
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: null,
+    calendarKey: collectionCalendarKey(),
     configFingerprint: configFingerprint('claude', '2024-01-01')
     // no fullScanAt — triggers lastFullScanAt = 0 → full scan
   };
@@ -613,6 +617,7 @@ test('unparseable fullScanAt forces a full scan on first interval tick', async (
     dateKey,
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: null,
+    calendarKey: collectionCalendarKey(),
     configFingerprint: configFingerprint('claude', '2024-01-01'),
     fullScanAt: 'not-a-timestamp'
   };
@@ -677,6 +682,7 @@ test('WSL toggle off: persisted wslAnchor is not merged into warm previews', asy
     dateKey,
     today: mkPeriod(), month: mkPeriod(), allTime: mkPeriod(),
     wslBundle: { today: wslPeriod, month: wslPeriod, allTime: wslPeriod },
+    calendarKey: collectionCalendarKey(),
     configFingerprint: configFingerprint('claude', '2024-01-01')
     // no fullScanAt -> forces a full scan on the first interval tick
   };
@@ -791,6 +797,7 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   const anchor = (overrides = {}) => ({
     dateKey: '2026-08-08',
     today: {}, month: {}, allTime: {},
+    calendarKey: collectionCalendarKey(now),
     configFingerprint: configFingerprint('claude', '2024-01-01', true),
     fullScanAt: new Date(now.getTime() - 60_000).toISOString(),
     ...overrides
@@ -829,6 +836,7 @@ test('Cursor anchors from before the Auto model rename require a full scan', () 
   const options = { clients: 'cursor', allTimeSince: '2024-01-01', now };
   const anchor = {
     dateKey: '2026-08-08', today: {}, month: {}, allTime: {},
+    calendarKey: collectionCalendarKey(now),
     configFingerprint: configFingerprint('cursor', '2024-01-01'),
     fullScanAt: new Date(now.getTime() - 60_000).toISOString()
   };
@@ -842,6 +850,7 @@ test('flat catalog project provenance requires a full scan instead of guessing p
   const options = { clients: 'antigravity', allTimeSince: '2024-01-01', now };
   const anchor = {
     dateKey: '2026-08-08', today: {}, month: {}, allTime: {},
+    calendarKey: collectionCalendarKey(now),
     configFingerprint: configFingerprint('antigravity', '2024-01-01'),
     fullScanAt: new Date(now.getTime() - 60000).toISOString(),
     catalogProjects: { 'antigravity:session': 'project-a' }
@@ -916,6 +925,7 @@ for (const scenario of ['cross-client', 'native', 'locked', 'partial', 'missing'
   const anchorPeriods = { today: period(), month: period(true), allTime: period(true) };
   if (nativeChild) for (const period of ['month', 'allTime']) anchorPeriods[period].sessions[childKey].parentClient = 'codex';
   fs.writeFileSync(file, JSON.stringify({ dateKey: localTodayKey(), ...anchorPeriods,
+    calendarKey: collectionCalendarKey(),
     configFingerprint: configFingerprint('codex', '2024-01-01', false), fullScanAt: capturedAt, sessionIdentityVersion: 1 }));
   const scans = [], resolved = [], updates = [];
   let relationReads = 0;

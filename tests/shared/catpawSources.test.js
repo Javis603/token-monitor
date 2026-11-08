@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { catpawDataSources, catpawSourcesFingerprint, readWindowsFolders } = require('../../src/shared/providers/catpaw/paths');
 const {
-  startCollector, configFingerprint, collectorAnchorTrust, localTodayKey,
+  startCollector, configFingerprint, collectorAnchorTrust, collectionCalendarKey, localTodayKey,
   watchIgnoreMatcher, watchPathsForClients, clientSourceChecks, isSelfWatchSqliteSidecarEvent
 } = require('../../src/shared/collector');
 const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
@@ -150,7 +150,7 @@ test('account database additions and removals invalidate persisted and cold-star
   const f = fixture(t);
   const options = { ...f.options, clients: 'catpaw', allTimeSince: '2024-01-01', pricingRevision: 'fixed', now: new Date() };
   const saved = {
-    dateKey: localTodayKey(options.now), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
+    dateKey: localTodayKey(options.now), calendarKey: collectionCalendarKey(options.now), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
     configFingerprint: configFingerprint('catpaw', options.allTimeSince, true, '', '', null, 'fixed', options),
     fullScanAt: options.now.toISOString()
   };

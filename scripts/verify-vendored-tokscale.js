@@ -903,6 +903,48 @@ function verifyCodexOutputRateContract(binPath) {
   }
 }
 
+function verifyReportTimezoneContract(binPath) {
+  const assert = require('node:assert/strict');
+  const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tm-timezone-contract-'));
+  const env = hermeticEnv(home);
+  env.TZ = 'Asia/Taipei';
+  const settingsPath = path.join(env.TOKSCALE_CONFIG_DIR, 'settings.json');
+  const dir = path.join(home, '.claude', 'projects', 'timezone-contract');
+  fs.mkdirSync(dir, { recursive: true });
+  const rows = [
+    ['2026-11-06T14:00:00Z', 100],
+    ['2026-11-06T18:00:00Z', 200],
+    ['2026-11-07T10:00:00Z', 400]
+  ].map(([timestamp, input], index) => ({
+    type: 'assistant', timestamp, sessionId: 'timezone-contract', uuid: `tz-${index}`,
+    message: { id: `tz-${index}`, role: 'assistant', model: 'claude-sonnet-4-5', usage: { input_tokens: input, output_tokens: 0 } }
+  }));
+  fs.writeFileSync(path.join(dir, 'timezone-contract.jsonl'), `${rows.map(row => JSON.stringify(row)).join('\n')}\n`);
+  const run = args => {
+    const result = spawnSync(binPath, ['--offline', ...args, '--client', 'claude', '--home', home, '--no-spinner'], {
+      encoding: 'utf8', timeout: 15_000, env
+    });
+    assert.equal(result.status, 0, result.stderr || result.error?.message);
+    return JSON.parse(result.stdout);
+  };
+  try {
+    for (const pinnedZone of ['America/Los_Angeles', 'UTC']) {
+      const settings = JSON.stringify({ scanner: { bucketTimezone: pinnedZone } });
+      fs.writeFileSync(settingsPath, settings);
+      const report = ['--json', '--group-by', 'client,workspace,session,model', '--since', '2026-11-07', '--until', '2026-11-07'];
+      assert.equal(extractUsageFromTokscale(run(report)).totalTokens, 400, 'saved submission calendar remains the default');
+      // The preceding scan warms the source cache: overriding a report must also
+      // rebucket cache hits, rather than only freshly parsed records.
+      assert.equal(extractUsageFromTokscale(run(['--bucket-timezone', 'Asia/Taipei', ...report])).totalTokens, 600);
+      const graph = run(['graph', '--bucket-timezone', 'Asia/Taipei']);
+      assert.equal(graph.contributions.find(row => row.date === '2026-11-07').totals.tokens, 600);
+      assert.equal(fs.readFileSync(settingsPath, 'utf8'), settings, 'report override never rewrites the saved pin');
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 function main() {
   const manifest = loadManifest();
   const isUpstream = manifestMode(manifest) === 'upstream';
@@ -916,6 +958,7 @@ function main() {
     );
   }
 
+  verifyReportTimezoneContract(binPath);
   verifyGooseScannerContract(binPath);
   verifyCodexOutputRateContract(binPath);
 
@@ -959,4 +1002,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract, verifyCodexOutputRateContract };
+module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract, verifyCodexOutputRateContract, verifyReportTimezoneContract };
