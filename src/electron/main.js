@@ -7699,6 +7699,7 @@ function createWindow(boundsOverride, options = {}) {
     ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      zoomFactor: clampZoom(settings.zoomFactor),
       contextIsolation: true,
       nodeIntegration: false
     }

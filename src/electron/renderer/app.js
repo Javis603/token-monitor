@@ -13651,13 +13651,15 @@ async function init() {
   state.settings = await window.tokenMonitor.getSettings();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
-  if (!isRendererWindowHidden()) {
+  if (state.windowVisible) {
     applyVisibleSettingsAppearance();
     initialSettingsApplied = true;
-    // Let the configured styles/layout paint before main shows the window.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      window.tokenMonitor.signalAppearanceReady?.();
-    }));
+    const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
+    // A retained WebContentsView can be document.hidden until its native host
+    // shows. Prepare it now, without waiting on animation frames that pause while
+    // hidden. windowVisible still excludes intentionally hidden tray startup.
+    if (document.hidden) signalAppearanceReady();
+    else requestAnimationFrame(() => requestAnimationFrame(signalAppearanceReady));
   }
   try { await pluginApi?.list(); } catch (_) {}
   syncPluginTrayDemand();

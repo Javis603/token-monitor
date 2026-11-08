@@ -123,3 +123,55 @@ test('early appearance does not consume a plugin-dependent initial Limits prefer
   vm.runInContext('syncSettingsForm();', context);
   assert.equal(context.state.breakdown, 'limits');
 });
+
+function initialAppearance({ nativeHidden, windowVisible }) {
+  let applied = 0;
+  let signaled = 0;
+  const frames = [];
+  const context = vm.createContext({
+    state: { windowVisible },
+    document: { hidden: nativeHidden },
+    isRendererWindowHidden: () => nativeHidden || !windowVisible,
+    applyVisibleSettingsAppearance: () => { applied += 1; },
+    window: { tokenMonitor: { signalAppearanceReady: () => { signaled += 1; } } },
+    requestAnimationFrame: callback => { frames.push(callback); }
+  });
+  const init = app.slice(app.indexOf('async function init()'));
+  const early = init.slice(init.indexOf('// Local appearance'), init.indexOf('try { await pluginApi?.list();'));
+  vm.runInContext(`let initialSettingsApplied = false;\n${early}`, context);
+  return { applied: () => applied, signaled: () => signaled, frames };
+}
+
+test('an initially hidden retained startup view prepares appearance without waiting for hidden-page frames', () => {
+  const run = initialAppearance({ nativeHidden: true, windowVisible: true });
+  assert.equal(run.applied(), 1);
+  assert.equal(run.signaled(), 1);
+  assert.equal(run.frames.length, 0);
+});
+
+test('tray-hidden startup stays deferred while paintable startup waits for its configured frame', () => {
+  const tray = initialAppearance({ nativeHidden: true, windowVisible: false });
+  assert.equal(tray.applied(), 0);
+  assert.equal(tray.signaled(), 0);
+  const visible = initialAppearance({ nativeHidden: false, windowVisible: true });
+  assert.equal(visible.applied(), 1);
+  assert.equal(visible.signaled(), 0);
+  visible.frames.shift()();
+  assert.equal(visible.signaled(), 0);
+  visible.frames.shift()();
+  assert.equal(visible.signaled(), 1);
+});
+
+test('the native window starts with saved zoom before any page-load event', () => {
+  const create = main.slice(main.indexOf('function createWindow('), main.indexOf('function handleZoomShortcut('));
+  const options = create.slice(create.indexOf('const windowOptions ='), create.indexOf('\n  const win ='));
+  const context = vm.createContext({
+    bounds: { width: 400, height: 820 }, collapsedFloatingBubble: false,
+    WINDOW_LIMITS: {}, settings: { zoomFactor: 1.4 }, process: { platform: 'win32' },
+    appWindowIcon: () => ({}), skipTaskbarForSettings: () => false,
+    floatingBubbleWindowChrome: () => ({}), clampZoom: value => value,
+    path, __dirname: electronDir
+  });
+  const result = vm.runInContext(`${options}\nwindowOptions`, context);
+  assert.equal(result.webPreferences.zoomFactor, 1.4);
+});
