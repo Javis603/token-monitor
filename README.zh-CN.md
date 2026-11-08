@@ -274,7 +274,6 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 <br>
 
 - 上表为默认路径。Token Monitor 与 Tokscale 遵循相同的环境变量覆盖：`~/.local/share/` 下的路径跟随 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GEMINI_CLI_HOME`、`$SENPI_CODING_AGENT_DIR`、`$SENPI_CODING_AGENT_SESSION_DIR`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
-- Gemini CLI 在全新安装时会跟踪。已保存的工具选择在升级后不会自动加上，请在 Settings → tools 中启用 Gemini。
 - Muse Code 订阅额度通过 Muse Code 1.4.13+ 的 `muse usage --json` 和现有登录读取。未提供额度或使用 API 密钥计费时，无法显示额度百分比。详见 [Muse 数据来源说明](docs/providers/muse.md)。
 - Goose 的跨日用量仍计入会话创建日；暂不支持远程 goosed 与自定义扫描路径。详见 [Goose 数据来源说明](docs/providers/goose.md)。
 - CatPaw 默认关闭，可在 Settings → tools 中启用；读取 macOS 和 Windows 上国内版与外区版助手的数据库。路径与验证边界见 [CatPaw 数据来源说明](docs/providers/catpaw.md)。

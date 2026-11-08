@@ -274,7 +274,6 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 <br>
 
 - Os caminhos acima são os padrões. O Token Monitor segue as mesmas sobrescritas de ambiente que o Tokscale — `$XDG_DATA_HOME` para as raízes `~/.local/share/` e variáveis por ferramenta como `$CODEX_HOME`, `$GEMINI_CLI_HOME`, `$SENPI_CODING_AGENT_DIR`, `$SENPI_CODING_AGENT_SESSION_DIR`, `$GROK_HOME`, `$HERMES_HOME`, `$GOOSE_PATH_ROOT`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME` e a família `$CLINE_*`.
-- O Gemini CLI é rastreado em uma instalação nova. Uma seleção de ferramentas já salva não o ganha na atualização; ative Gemini em Settings → tools.
 - Os limites de assinatura do Muse Code usam `muse usage --json` do Muse Code 1.4.13+ e o login existente. A ausência de cota e a cobrança por chave de API não fornecem percentuais. Veja as [notas da origem do Muse](docs/providers/muse.md).
 - O Goose contabiliza todo o uso da sessão no dia de criação, inclusive o uso em dias posteriores. Servidores goosed remotos e caminhos de varredura personalizados não são suportados. Veja as [notas da origem do Goose](docs/providers/goose.md).
 - CatPaw vem desativado por padrão; ative-o em Settings → tools. Lê os bancos de dados do assistente nas edições chinesa e internacional no macOS e Windows. Veja [as notas de origem do CatPaw](docs/providers/catpaw.md) para caminhos e limites da verificação.
