@@ -89,7 +89,7 @@ container.append(label);
 
 The host discovers inserted controls asynchronously. Keep reading/writing `select.value` and handling its `change` event; do not address the generated button or popup. An option's optional `data-tm-select-description` is plain text supplied and localized by the plugin, and changes to options or their descriptions update the picker. Short lists stay compact; long lists offer search using App-localized search/empty labels. Multiple-selection and listbox-style selects stay native. The host removes generated controls when their source leaves the document, so normal mount disposal should remove the plugin's DOM. Set the opt-in marker before insertion and keep it for that element's lifetime. Authors retain responsibility for the surrounding layout.
 
-This integration is for the desktop App renderer, including detached plugin pages. It does not add shared dropdown support to the separate Notch/Dock renderers or native tray menus. Unmarked controls inside `.plugin-content` keep their existing behavior; standalone plugin page controls retain their existing automatic enhancement.
+This integration is for the desktop App renderer, including detached plugin pages. It does not add shared dropdown support to the separate Notch/Dock renderers or native tray menus. Unmarked controls inside `.plugin-content` keep their existing behavior; standalone plugin page controls are automatically enhanced by the host.
 
 ## Tray actions
 
