@@ -42,6 +42,82 @@
     return known ? t(known) : t('settings.plugins.actionFailed', { error: message });
   }
 
+  // One serialized writer per plugin. Inputs remain editable while a save is
+  // pending; only completed edits are queued, and conflicts never auto-rebase.
+  function createSettingsAutosave({ snapshot, save, changed = () => {} }) {
+    const state = { snapshot, draft: { ...snapshot.values }, errors: { ...snapshot.errors }, message: '', pending: false };
+    const dirty = new Set(), ready = new Set(), versions = new Map(), queued = new Map(), waiters = new Set();
+    let disposed = false, paused = false, validationPaused = false;
+    const publish = () => { if (!disposed) changed(state); };
+    const enqueue = id => { queued.set(id, versions.get(id)); ready.add(id); };
+    async function flush() {
+      if (disposed || paused || validationPaused || state.pending || state.snapshot.readOnly || ['conflict', 'saveFailed'].includes(state.message)) return;
+      const patch = Object.fromEntries([...ready].map(id => [id, state.draft[id]]));
+      ready.clear();
+      if (!Object.keys(patch).length) return;
+      const sent = new Map(Object.keys(patch).map(id => [id, versions.get(id)]));
+      state.pending = true; state.message = 'saving'; publish();
+      try {
+        const next = await save({ schemaVersion: state.snapshot.schemaVersion, expectedRevision: state.snapshot.revision, patch });
+        if (disposed) return;
+        const errors = state.errors;
+        state.snapshot = next; state.errors = { ...next.errors };
+        for (const id of sent.keys()) if (versions.get(id) === sent.get(id)) dirty.delete(id);
+        for (const [id, error] of Object.entries(errors)) if (dirty.has(id)) state.errors[id] = error;
+        for (const [id, value] of Object.entries(next.values)) if (!dirty.has(id)) state.draft[id] = value;
+        state.message = 'saved';
+      } catch (error) {
+        if (disposed) return;
+        const fieldErrors = Object.fromEntries(Object.entries(error.fields || {}).filter(([id]) => !sent.has(id) ? !dirty.has(id) : versions.get(id) === sent.get(id)));
+        state.errors = { ...state.errors, ...fieldErrors };
+        for (const id of sent.keys()) if (versions.get(id) === sent.get(id) && !fieldErrors[id]) ready.add(id);
+        // The store validates the whole record. A pre-existing invalid value
+        // needs a correction, not another identical patch at the same revision.
+        validationPaused = Object.keys(error.fields || {}).some(id => !sent.has(id) && !ready.has(id));
+        state.message = error.code === 'settings-conflict' || String(error.message).includes('settings-conflict') ? 'conflict'
+          : Object.keys(error.fields || {}).length ? 'invalid' : 'saveFailed';
+      } finally {
+        state.pending = false;
+        if (!disposed) { publish(); void flush(); }
+        if (!state.pending) { for (const resolve of waiters) resolve(); waiters.clear(); }
+      }
+    }
+    return { state,
+      edit(id, value, complete = false) {
+        if (disposed || state.snapshot.readOnly) return;
+        state.draft[id] = value; dirty.add(id); versions.set(id, (versions.get(id) || 0) + 1);
+        delete state.errors[id]; ready.delete(id);
+        if (!state.pending && state.message !== 'conflict' && !state.snapshot.errors[id] && Object.is(value, state.snapshot.values[id])) dirty.delete(id);
+        if (!['conflict', 'saveFailed'].includes(state.message)) state.message = '';
+        if (!dirty.size && !state.pending && state.message !== 'conflict') state.message = '';
+        if (complete && dirty.has(id)) { validationPaused = false; enqueue(id); void flush(); }
+        publish();
+      },
+      complete(id) { if (dirty.has(id) && queued.get(id) !== versions.get(id)) { validationPaused = false; enqueue(id); void flush(); } },
+      defaults() {
+        if (disposed || state.snapshot.readOnly || state.message === 'conflict') return;
+        state.message = ''; validationPaused = false;
+        for (const field of state.snapshot.schema.fields) {
+          state.draft[field.id] = field.default; dirty.add(field.id);
+          versions.set(field.id, (versions.get(field.id) || 0) + 1);
+          enqueue(field.id);
+        }
+        state.errors = {}; void flush(); publish();
+      },
+      retry() { if (state.message === 'saveFailed') { state.message = ''; void flush(); } },
+      reload(next) {
+        if (disposed || state.pending) return;
+        state.snapshot = next; state.draft = { ...next.values }; state.errors = { ...next.errors }; state.message = '';
+        dirty.clear(); ready.clear(); versions.clear(); queued.clear(); validationPaused = false; publish();
+      },
+      settle() { return state.pending ? new Promise(resolve => waiters.add(resolve)) : Promise.resolve(); },
+      pause() { paused = true; },
+      resume() { paused = false; void flush(); },
+      hasUnsavedChanges() { return dirty.size > 0; },
+      dispose() { disposed = true; ready.clear(); }
+    };
+  }
+
   function createPluginSettingsPanel({ mountSettings = null, unmountSettings = () => {}, document, container, t, api, setDetailTooltip = null, onApplySkin = () => {}, onPlaced = () => {}, onSetEnabled = null, getEnabled = null, getLocale = () => document.documentElement?.lang || 'en', onOpenExternal = () => {}, onCopyText = text => window.navigator.clipboard.writeText(text) }) {
     let list = null;
     let consentFor = '';
@@ -65,7 +141,7 @@
       const installed = new Map((list?.plugins || []).map(plugin => [plugin.id, JSON.stringify([plugin.settingsIdentity, plugin.version, plugin.source])]));
       for (const [id, identity] of settingsIdentities) {
         if (installed.get(id) !== identity) {
-          authorSettings.delete(id);
+          authorSettings.get(id)?.editor?.dispose(); authorSettings.delete(id);
         }
       }
       for (const [ref, held] of settingsMounts) {
@@ -153,6 +229,8 @@
       busy = true;
       setBusy();
       try {
+        await Promise.all([...authorSettings.values()].map(state => state.editor?.settle()));
+        for (const state of authorSettings.values()) state.editor?.pause();
         const next = await action();
         if (next) { list = next; if (catalogData) catalogData = await api.catalog(); }
       } catch (error) {
@@ -161,12 +239,17 @@
         busy = false;
         if (revealConsent && consentFor) { selectedPluginId = consentFor; diagnostics = false; }
         render();
+        for (const state of authorSettings.values()) state.editor?.resume();
         if (actionError) container.querySelector('.plugin-action-error')?.scrollIntoView({ block: 'nearest' });
         if (revealConsent) {
           container.querySelector(`[data-plugin-id="${consentFor}"] .plugin-consent`)?.scrollIntoView({ block: 'nearest' });
           revealConsent = false;
         }
       }
+    }
+
+    function requireSavedAuthorSettings(id) {
+      if (authorSettings.get(id)?.editor?.hasUnsavedChanges()) throw new Error(t('plugins.authorSettings.pendingChanges'));
     }
 
     function button(label, action, className = '') {
@@ -445,6 +528,7 @@
       details.append(el(document, 'code', 'plugin-log', p.sha256)); panel.append(details);
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       const install = trustInstall => void run(async () => {
+        requireSavedAuthorSettings(p.id);
         const next = await api.install(p.token, { trustUpdate: p.operation === 'update', trustInstall, initialSetup: p.initialChoices });
         packagePreview = null; catalogReview = null; activeTab = 'installed';
         if (p.operation === 'update' && next.plugins.find(plugin => plugin.id === p.id)?.status === 'needsApproval') { consentFor = p.id; revealConsent = true; }
@@ -474,6 +558,7 @@
       const actions = el(document, 'div', 'settings-actions plugin-consent-actions');
       actions.append(button(t('settings.plugins.cancel'), () => { operation = null; render(); }),
         button(t(isRemove ? 'plugins.package.uninstall' : 'plugins.package.rollback'), () => void run(async () => {
+          requireSavedAuthorSettings(plugin.id);
           const next = isRemove ? await api.uninstall(plugin.id, operation) : await api.rollback(plugin.id);
           operation = null; return next;
         }, 'operation')));
@@ -975,125 +1060,110 @@
     async function loadAuthorSettings(plugin, state) {
       try {
         const snapshot = await api.getSettings(plugin.id);
-        if (authorSettings.get(plugin.id) !== state) return;
-        state.snapshot = snapshot; state.draft = { ...snapshot.values }; state.errors = { ...snapshot.errors };
-        state.message = ''; state.dirty = false;
-      } catch {
-        state.message = 'loadFailed';
-      } finally {
-        state.loading = false;
-        if (authorSettings.get(plugin.id) === state && selectedPluginId === plugin.id) render();
+        if (disposed || authorSettings.get(plugin.id) !== state) return;
+        if (state.editor) state.editor.reload(snapshot);
+        else state.editor = createSettingsAutosave({ snapshot,
+          save: request => api.updateSettings(plugin.id, request), changed: () => state.paint?.() });
+        state.loadFailed = false;
+      } catch { state.loadFailed = true; }
+      finally {
+        state.loading = false; state.section = null;
+        if (!disposed && authorSettings.get(plugin.id) === state && selectedPluginId === plugin.id) render();
       }
     }
 
     function authorSettingsSection(plugin) {
-      const section = detailSection(t('plugins.authorSettings.title'));
-      section.classList.add('plugin-author-settings');
       let state = authorSettings.get(plugin.id);
       if (!state) {
-        state = { loading: true, snapshot: null, draft: {}, errors: {}, message: '', dirty: false };
-        authorSettings.set(plugin.id, state);
-        // The static form never enables a plugin or requests display demand.
+        state = { loading: true, editor: null, section: null }; authorSettings.set(plugin.id, state);
         void Promise.resolve().then(() => loadAuthorSettings(plugin, state));
       }
+      const locale = getLocale();
+      if (state.section && state.locale === locale && !state.loading) {
+        state.paint?.();
+        const placeholder = el(document, 'div'); placeholder.dataset.authorSettingsPlaceholder = plugin.id;
+        return placeholder;
+      }
+      const section = detailSection(t('plugins.authorSettings.title'));
+      section.classList.add('plugin-author-settings');
       const status = el(document, 'p', 'settings-note plugin-author-status');
       status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
-      const refresh = () => {
-        if (busy || state.loading) return;
-        state.loading = true; render(); void loadAuthorSettings(plugin, state);
+      const refresh = async () => {
+        if (busy || state.loading || state.editor?.state.pending) return;
+        state.loading = true; render(); await loadAuthorSettings(plugin, state);
       };
-      if (state.loading || !state.snapshot) {
-        section.setAttribute('aria-busy', String(state.loading));
-        status.textContent = t(`plugins.authorSettings.${state.loading ? 'loading' : 'loadFailed'}`);
-        section.append(status);
-        if (!state.loading) section.append(button(t('plugins.authorSettings.reload'), refresh));
+      if (!state.editor) {
+        status.textContent = t(`plugins.authorSettings.${state.loading ? 'loading' : 'loadFailed'}`); section.append(status);
+        if (!state.loading) section.append(button(t('plugins.authorSettings.reload'), () => void refresh()));
         return section;
       }
-      const snapshot = state.snapshot;
+      const editor = state.editor, snapshot = editor.state.snapshot;
+      const heading = section.querySelector('h3'), headingRow = el(document, 'div', 'plugin-author-heading');
+      headingRow.append(heading, actionMenu(t('plugins.authorSettings.actions'), [
+        [t('plugins.authorSettings.defaults'), () => editor.defaults()]
+      ])); section.append(headingRow);
       section.append(el(document, 'p', 'settings-note', t('plugins.authorSettings.note')));
-      if (!plugin.enabled || !list.enabled) section.append(el(document, 'p', 'settings-note', t('plugins.authorSettings.disabledNote')));
+      const disabledNote = el(document, 'p', 'settings-note', t('plugins.authorSettings.disabledNote')); section.append(disabledNote);
       const form = el(document, 'form', 'plugin-author-form'); form.noValidate = true;
+      const controls = new Map();
       for (const field of snapshot.schema.fields) {
         const row = el(document, 'div', 'plugin-author-field');
         const id = `${container.id || 'plugin-settings'}-author-${plugin.id}-${field.id}`;
         const label = el(document, 'label', 'plugin-author-label', authorText(field.label)); label.htmlFor = id;
         const input = el(document, field.type === 'select' ? 'select' : 'input', 'plugin-author-input');
-        input.id = id; input.dataset.controlKey = `author-${field.id}`; input.disabled = busy || snapshot.readOnly;
+        input.id = id; input.dataset.controlKey = `author-${field.id}`;
         if (field.type === 'select') {
-          for (const option of field.options) {
-            const node = el(document, 'option', '', authorText(option.label)); node.value = option.value; input.append(node);
-          }
-          input.value = state.draft[field.id] ?? '';
-        } else if (field.type === 'boolean') {
-          input.type = 'checkbox'; input.checked = state.draft[field.id] === true;
-          row.classList.add('plugin-author-checkbox');
-        } else {
-          input.type = field.type === 'number' ? 'number' : 'text'; input.value = state.draft[field.id] ?? '';
+          for (const option of field.options) { const node = el(document, 'option', '', authorText(option.label)); node.value = option.value; input.append(node); }
+        } else if (field.type === 'boolean') { input.type = 'checkbox'; row.classList.add('plugin-author-checkbox'); }
+        else {
+          input.type = field.type === 'number' ? 'number' : 'text';
           if (field.type === 'number') {
             input.step = field.integer ? '1' : 'any';
             if (field.min !== undefined) input.min = String(field.min);
             if (field.max !== undefined) input.max = String(field.max);
           } else { input.minLength = field.minLength; input.maxLength = field.maxLength; }
         }
-        const describedBy = [];
-        row.append(label, input);
+        const describedBy = []; row.append(label, input);
         if (field.description) {
           const description = el(document, 'p', 'settings-note', authorText(field.description));
           description.id = `${id}-description`; describedBy.push(description.id); row.append(description);
         }
         const error = el(document, 'p', 'plugin-author-error', t('plugins.authorSettings.invalidField'));
-        error.id = `${id}-error`; error.hidden = !state.errors[field.id]; describedBy.push(error.id); row.append(error);
-        input.setAttribute('aria-describedby', describedBy.join(' '));
-        input.setAttribute('aria-invalid', String(Boolean(state.errors[field.id])));
-        input.addEventListener(field.type === 'boolean' || field.type === 'select' ? 'change' : 'input', () => {
-          if (busy || snapshot.readOnly) return;
-          state.draft[field.id] = field.type === 'boolean' ? input.checked
-            : field.type === 'number' ? (input.value === '' ? null : input.valueAsNumber) : input.value;
-          delete state.errors[field.id]; error.hidden = true; input.setAttribute('aria-invalid', 'false');
-          state.dirty = true; state.message = ''; status.textContent = ''; save.disabled = false;
-        });
-        form.append(row);
-      }
-      async function commit() {
-        if (busy || snapshot.readOnly || !state.dirty) return;
-        const patch = { ...state.draft };
-        const hadFocus = form.contains(document.activeElement);
-        state.message = 'saving'; status.textContent = t('plugins.authorSettings.saving');
-        await run(async () => {
-          try {
-            const next = await api.updateSettings(plugin.id, { schemaVersion: snapshot.schemaVersion, expectedRevision: snapshot.revision, patch });
-            state.snapshot = next; state.draft = { ...next.values }; state.errors = { ...next.errors };
-            state.dirty = false; state.message = 'saved';
-          } catch (error) {
-            state.errors = error.fields || {};
-            state.message = error.code === 'settings-conflict' || String(error.message).includes('settings-conflict') ? 'conflict'
-              : Object.keys(state.errors).length ? 'invalid' : 'saveFailed';
-          }
-          return null;
-        });
-        if (hadFocus && document.activeElement === document.body && selectedPluginId === plugin.id) {
-          const feedback = content.querySelector('.plugin-author-status');
-          if (feedback) { feedback.tabIndex = -1; feedback.focus({ preventScroll: true }); }
+        error.id = `${id}-error`; describedBy.push(error.id); row.append(error); input.setAttribute('aria-describedby', describedBy.join(' '));
+        const value = () => field.type === 'boolean' ? input.checked : field.type === 'number' ? input.value === '' ? null : input.valueAsNumber : input.value;
+        const immediate = field.type === 'boolean' || field.type === 'select';
+        input.addEventListener(immediate ? 'change' : 'input', () => editor.edit(field.id, value(), immediate));
+        if (!immediate) {
+          input.addEventListener('change', () => editor.complete(field.id));
+          input.addEventListener('blur', () => editor.complete(field.id));
+          input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); editor.complete(field.id); } });
         }
+        controls.set(field.id, { input, error, field }); form.append(row);
       }
-      form.addEventListener('submit', event => { event.preventDefault(); void commit(); });
-      const actions = el(document, 'div', 'settings-actions plugin-author-actions');
-      const save = button(t('plugins.authorSettings.save'), () => void commit());
-      save.dataset.controlKey = 'author-save'; save.disabled = busy || snapshot.readOnly || !state.dirty;
-      const defaults = button(t('plugins.authorSettings.defaults'), () => {
-        if (busy || snapshot.readOnly) return;
-        state.draft = Object.fromEntries(snapshot.schema.fields.map(field => [field.id, field.default]));
-        state.dirty = true; state.errors = {}; state.message = 'defaultsNote'; render();
-      });
-      defaults.dataset.controlKey = 'author-defaults'; defaults.disabled = busy || snapshot.readOnly;
-      const reload = button(t('plugins.authorSettings.reload'), refresh); reload.dataset.controlKey = 'author-reload';
-      reload.hidden = !['conflict', 'loadFailed'].includes(state.message);
-      actions.append(save, defaults, reload); form.append(actions);
-      status.textContent = state.message ? t(`plugins.authorSettings.${state.message}`)
-        : snapshot.readOnly ? t('plugins.authorSettings.newerSchema')
-          : Object.keys(state.errors).length ? t('plugins.authorSettings.invalid') : '';
-      section.append(form, status);
-      return section;
+      form.addEventListener('submit', event => event.preventDefault());
+      const recovery = el(document, 'div', 'settings-actions plugin-author-actions');
+      const retry = button(t('plugins.authorSettings.retry'), () => editor.retry()); retry.dataset.controlKey = 'author-retry';
+      const reload = button(t('plugins.authorSettings.reload'), () => void refresh()); reload.dataset.controlKey = 'author-reload';
+      recovery.append(retry, reload); section.append(form, status, recovery);
+      state.paint = () => {
+        const current = editor.state;
+        disabledNote.hidden = Boolean(list?.plugins.find(item => item.id === plugin.id)?.enabled && list?.enabled);
+        for (const control of headingRow.querySelectorAll('button')) control.disabled = busy || current.snapshot.readOnly || state.loading || current.message === 'conflict';
+        for (const [id, { input, error, field }] of controls) {
+          input.disabled = (busy && document.activeElement !== input) || current.snapshot.readOnly || state.loading;
+          if (field.type === 'boolean') input.checked = current.draft[id] === true;
+          else if (document.activeElement !== input || field.type === 'select') input.value = current.draft[id] ?? '';
+          input.setAttribute('aria-invalid', String(Boolean(current.errors[id]))); error.hidden = !current.errors[id];
+        }
+        retry.hidden = current.message !== 'saveFailed'; retry.disabled = busy || current.pending;
+        reload.hidden = !state.loadFailed && !(editor.hasUnsavedChanges() && Object.keys(current.errors).length) && !['conflict', 'saveFailed'].includes(current.message); reload.disabled = busy || current.pending || state.loading;
+        recovery.hidden = retry.hidden && reload.hidden;
+        const message = current.pending ? 'saving' : current.message === 'saved' ? '' : current.message;
+        status.textContent = state.loadFailed ? t('plugins.authorSettings.loadFailed') : message ? t(`plugins.authorSettings.${message}`)
+          : current.snapshot.readOnly ? t('plugins.authorSettings.newerSchema') : Object.keys(current.errors).length ? t('plugins.authorSettings.invalid') : '';
+        status.hidden = !status.textContent;
+      };
+      state.section = section; state.locale = locale; state.paint(); return section;
     }
 
     function contentSourceRows(plugin) {
@@ -1235,7 +1305,19 @@
       // beyond what the current ancestor scroll positions actually require.
       const previousHeight = content.getBoundingClientRect().height;
       content.style.minHeight = `${Math.ceil(previousHeight)}px`;
-      content.replaceChildren(...nodes);
+      const placeholders = nodes.flatMap(node => [...node.querySelectorAll('[data-author-settings-placeholder]')]);
+      if (placeholders.length) {
+        content.append(...nodes);
+        for (const placeholder of placeholders) {
+          const section = authorSettings.get(placeholder.dataset.authorSettingsPlaceholder)?.section;
+          if (!section) continue;
+          const parent = placeholder.parentElement;
+          if (parent.moveBefore && section.isConnected) parent.moveBefore(section, placeholder);
+          else parent.insertBefore(section, placeholder);
+          placeholder.remove();
+        }
+        for (const child of [...content.children]) if (!nodes.includes(child)) child.remove();
+      } else content.replaceChildren(...nodes);
       const notice = errorNotice();
       if (notice) {
         const target = [...content.querySelectorAll('[data-error-target], [data-plugin-id]')].find(node =>
@@ -1417,7 +1499,10 @@
         actionMenu(t('plugins.ui.more'), [
           [t('plugins.package.importFolder'), () => importPackage('directory')],
           [t('settings.plugins.openFolder'), () => void run(async () => { await api.openFolder(); return null; })],
-          [t('settings.plugins.reload'), () => void run(() => api.reload())],
+          [t('settings.plugins.reload'), () => void run(() => {
+            for (const id of authorSettings.keys()) requireSavedAuthorSettings(id);
+            return api.reload();
+          })],
           [t('plugins.ui.about'), () => { aboutOpen = true; render(); content.querySelector('.plugin-back')?.focus({ preventScroll: true }); }]
         ], globalSwitch()));
       if (previousToolbar) previousToolbar.replaceWith(actions);
@@ -1443,7 +1528,7 @@
         render();
       },
       render,
-      dispose() { disposed = true; catalogModal?.close(); authorSettings.clear(); for (const held of settingsMounts.values()) unmountSettings(held.node); settingsMounts.clear(); },
+      dispose() { disposed = true; catalogModal?.close(); for (const held of authorSettings.values()) held.editor?.dispose(); authorSettings.clear(); for (const held of settingsMounts.values()) unmountSettings(held.node); settingsMounts.clear(); },
       summary() {
         if (!list) return '';
         const active = list.plugins.filter((plugin) => plugin.status === 'active').length;
@@ -1456,5 +1541,5 @@
     };
   }
 
-  return { SURFACE_ORDER, actionErrorMessage, createPluginSettingsPanel };
+  return { SURFACE_ORDER, actionErrorMessage, createSettingsAutosave, createPluginSettingsPanel };
 });
