@@ -795,7 +795,8 @@ span.settings-note.settings-item-desc {
 }
 .settings-item-value strong { color: var(--text); font-weight: 600; }
 /* .settings-panel prefix outweighs the panel-wide `select { width: 100% }` default */
-.settings-panel .settings-item > select {
+.settings-panel .settings-item > select,
+.settings-panel .settings-item > .select-control-trigger {
   flex: 0 0 auto;
   width: auto;
   max-width: 58%;
@@ -3184,10 +3185,15 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
+.settings-panel .select-control-trigger { padding: 5px 9px; }
+.settings-font-input-row .select-control-trigger { width: 100%; min-width: 0; }
+.plugin-version-picker .select-control-trigger { width: auto; max-width: 100%; }
+.select-control-icon > .limit-icon { width: 14px; height: 14px; flex-basis: 14px; }
 .select-control-trigger:hover,
 .select-control-trigger[aria-expanded="true"] { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), 0.08); }
 .select-control-trigger:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.65); outline-offset: 2px; }
 .select-control-trigger:disabled { opacity: 0.5; cursor: default; }
+.select-control-trigger[aria-invalid="true"] { border-color: var(--orange); }
 .select-control-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .select-control-icon { display: flex; flex: 0 0 14px; align-items: center; justify-content: center; color: var(--muted); }
 .select-control-icon svg { width: 14px; height: 14px; }
@@ -3220,6 +3226,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   backdrop-filter: blur(28px) saturate(115%);
 }
 .select-control-popup {
+  box-sizing: border-box;
   position: fixed;
   inset: auto;
   margin: 0;
@@ -3230,12 +3237,33 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   line-height: 1.4;
   -webkit-app-region: no-drag;
 }
-.select-control-option { display: flex; min-height: 28px; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 5px; cursor: pointer; }
-.select-control-option > .select-control-icon { margin-top: 1px; }
-.select-control-option-text { display: grid; min-width: 0; gap: 3px; }
+.select-control-popup.has-search { overflow: hidden; }
+.select-control-search {
+  display: block;
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  margin: 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(var(--sunken-rgb), 0.48);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+.select-control-search:focus-visible { border-color: var(--accent); }
+.select-control-search::placeholder { color: var(--muted); }
+.select-control-list { overflow-y: auto; overscroll-behavior: contain; }
+.select-control-empty { padding: 12px 8px; color: var(--muted); }
+.select-control-group { padding: 8px 8px 4px; color: var(--muted); font-size: .59375rem; }
+.select-control-option { display: flex; box-sizing: border-box; min-height: 26px; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 5px; cursor: pointer; }
+.select-control-option.has-description { align-items: flex-start; padding-block: 6px; }
+.select-control-option.has-description > .select-control-icon { margin-top: 1px; }
+.select-control-option-text { display: grid; flex: 1; min-width: 0; gap: 3px; }
 .select-control-option-label { overflow-wrap: anywhere; }
 .select-control-description { color: var(--muted); font-size: 0.59375rem; line-height: 1.45; overflow-wrap: anywhere; }
-.select-control-annotation { margin-left: auto; align-self: center; color: var(--muted); font-size: 0.59375rem; white-space: nowrap; }
+.select-control-annotation { margin-left: auto; align-self: center; color: var(--muted); font-size: 0.59375rem; white-space: nowrap; text-align: right; }
 .select-control-option[data-highlighted="true"] { background: rgba(var(--overlay-rgb), 0.07); }
 .select-control-option[data-selected="true"] { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
 .select-control-option[aria-disabled="true"] { opacity: 0.5; cursor: default; }

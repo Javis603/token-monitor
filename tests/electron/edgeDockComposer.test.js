@@ -21,7 +21,7 @@ class Element {
     this.listeners = {};
     this.dataset = {};
     this.style = { setProperty() {} };
-    this.classList = { toggle() {}, add() {} };
+    this.classList = { toggle() {}, add() {}, contains: name => (this.className || '').split(' ').includes(name) };
   }
   append(...children) {
     for (const child of children) {
@@ -35,6 +35,16 @@ class Element {
   setAttribute(name, value) { (this.attributes ||= {})[name] = value; }
   getAttribute(name) { return this.attributes?.[name]; }
   contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
+  querySelector(selector) {
+    const matches = node => selector === '.select-control-trigger[aria-expanded="true"]'
+      && node.classList.contains('select-control-trigger') && node.getAttribute('aria-expanded') === 'true';
+    for (const child of this.children) {
+      if (matches(child)) return child;
+      const match = child.querySelector(selector);
+      if (match) return match;
+    }
+    return null;
+  }
 }
 
 function accountChoices(provider, rows, presentationApi, settings = {}) {

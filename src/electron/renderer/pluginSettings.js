@@ -168,7 +168,7 @@
       }
       for (const control of container.querySelectorAll('button, input, select, textarea')) {
         control.setAttribute('aria-disabled', String(busy || control.disabled));
-        if (busy && !control.disabled && control !== document.activeElement && !tabs?.contains(control)) {
+        if (busy && !control.disabled && !positionApi.isFocused(control) && !tabs?.contains(control)) {
           busyControls.add(control);
           control.disabled = true;
         }
@@ -1150,7 +1150,7 @@
         disabledNote.hidden = Boolean(list?.plugins.find(item => item.id === plugin.id)?.enabled && list?.enabled);
         for (const control of headingRow.querySelectorAll('button')) control.disabled = busy || current.snapshot.readOnly || state.loading || current.message === 'conflict';
         for (const [id, { input, error, field }] of controls) {
-          input.disabled = (busy && document.activeElement !== input) || current.snapshot.readOnly || state.loading;
+          input.disabled = (busy && !positionApi.isFocused(input)) || current.snapshot.readOnly || state.loading;
           if (field.type === 'boolean') input.checked = current.draft[id] === true;
           else if (document.activeElement !== input || field.type === 'select') input.value = current.draft[id] ?? '';
           input.setAttribute('aria-invalid', String(Boolean(current.errors[id]))); error.hidden = !current.errors[id];

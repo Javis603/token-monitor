@@ -1955,11 +1955,12 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.match(controls, /data-i18n="settings\.collection\.cadence"/);
   assert.match(controls, /value="live"/);
   assert.match(controls, /value="smart"[\s\S]*data-i18n="settings\.collection\.mode\.smart"/);
-  assert.match(i18n, /'settings\.collection\.modeDesc': 'Smart mode collects after agent activity, with an hourly reconciliation; fixed intervals turn off file watching\.'/);
+  assert.match(i18n, /"settings\.collection\.mode\.smartDesc": "Collect after agent activity, with hourly reconciliation\."/);
   assert.match(controls, /<option value="300000"/);
   assert.match(controls, /<option value="900000"/);
   assert.match(controls, /<option value="1800000"/);
-  assert.match(controls, /id="collectionCadenceNote"[\s\S]*hidden/);
+  for (const mode of ['live', 'smart', 'interval']) assert.ok(controls.includes(`data-select-description="settings.collection.mode.${mode}Desc"`));
+  assert.doesNotMatch(controls, /id="collectionCadenceNote"/);
   assert.doesNotMatch(controls, /<option value="3600000"/);
   assert.doesNotMatch(controls, /id="collectionModeInput"/);
   assert.doesNotMatch(controls, /id="collectionIntervalInput"/);
@@ -1967,7 +1968,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   const app = readRendererFile('app.js');
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(syncBody, /collectionCadenceInput/);
-  assert.match(syncBody, /collectionCadenceNote[\s\S]*\.hidden\s*=/);
+  assert.doesNotMatch(syncBody, /collectionCadenceNote/);
 
   const listenerSlice = app.slice(
     app.indexOf("els.collectionCadenceInput?.addEventListener('change'"),
