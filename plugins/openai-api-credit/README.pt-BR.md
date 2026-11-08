@@ -18,7 +18,7 @@ Exemplo da interface. O saldo e a validade dependem da sua conta.
 
 Requer **Token Monitor 0.88.0 ou posterior**.
 
-Em **Configurações → Plugins**, importe o arquivo `.tmplugin` ou a pasta completa do código-fonte, revise e ative. Em **Cota de ferramentas de IA**, selecione e expanda **OpenAI**. A instalação não configura uma conta automaticamente.
+Abra **Configurações → Plugins → Explorar**, selecione **OpenAI API Credits** no grupo oficial **Token Monitor**, revise e instale. Você também pode importar um arquivo `.tmplugin` ou a pasta completa do código-fonte em **Configurações → Plugins**. Depois, selecione e expanda **OpenAI** em **Cota de ferramentas de IA** para configurar as credenciais da conta.
 
 ## Configuração
 

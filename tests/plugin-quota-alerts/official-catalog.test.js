@@ -49,6 +49,7 @@ test('the actual published catalog installs the source-matching official package
   t.after(async () => { catalog.dispose(); managed.dispose(); await manager.dispose(); });
   managed.recover(); await manager.reload(); await catalog.discover();
   assert.equal(manager.list().plugins.length, 0, 'discovery does not install');
+  assert.equal(catalog.list().entries.find(entry => entry.id === 'openai-api-credit').status, 'incompatible', 'older hosts cannot install the new native quota plugin');
   const archive = parsePackage(bytes);
   assert.equal(archive.hash, packageDirectory(source).hash);
   assert.equal(archive.manifest.version, release.version);
