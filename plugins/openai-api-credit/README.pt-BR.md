@@ -33,7 +33,7 @@ Use a opção de alterar credenciais para substituir os valores salvos; os segre
 
 ## Exibição e atualização
 
-O saldo vem diretamente do serviço. A barra compara o saldo com a soma dos valores concedidos dos créditos atualmente utilizáveis que ainda têm saldo. Um crédito disponível de $100 e um crédito inativo de $0/$24 aparecem como **$100 / $100**. Isso representa o conjunto utilizável atual, não gastos mensais ou históricos. O denominador muda quando um crédito expira ou se esgota.
+O saldo vem diretamente do serviço. A barra compara o saldo com a soma dos valores concedidos dos créditos atualmente utilizáveis que ainda têm saldo. Um crédito disponível de $100 e um crédito inativo de $0/$24 aparecem como **$100 / $100**. Isso representa o conjunto utilizável atual, não gastos mensais ou históricos. O denominador muda quando um crédito expira ou se esgota. No modo de barra, a configuração de crédito usado/restante do App controla a porcentagem, o preenchimento e o numerador monetário em conjunto. O crédito usado é o total do conjunto utilizável atual menos o saldo disponível, não o gasto histórico.
 
 Se os créditos não explicarem o saldo com segurança, apenas o saldo será exibido. Zero continua sendo zero. Abaixo da barra aparece o vencimento conhecido mais próximo dos créditos utilizáveis. O tooltip lista saldos individuais apenas quando há vários créditos utilizáveis com vencimentos diferentes; não repete totais históricos nem trata créditos expirados como gastos. Com mais de 12 créditos utilizáveis, o detalhamento é omitido em vez de ser truncado.
 

@@ -33,7 +33,7 @@ Use **Change credentials** to replace saved values; secrets are never filled bac
 
 ## Display and refresh
 
-The balance comes directly from the service. The bar compares it with the total allowance of grants that are currently usable and still have remaining credit. An available $100 grant and an inactive $0/$24 grant display **$100 / $100**. This is the current usable pool, not monthly or lifetime spending. The denominator changes as grants expire or are depleted.
+The balance comes directly from the service. The bar compares it with the total allowance of grants that are currently usable and still have remaining credit. An available $100 grant and an inactive $0/$24 grant display **$100 / $100**. This is the current usable pool, not monthly or lifetime spending. The denominator changes as grants expire or are depleted. In bar mode, the App’s used/remaining setting controls the percentage, bar fill and money numerator together. Used credit is the current usable pool’s allowance minus the available balance, not lifetime spending.
 
 If the grants do not reliably explain the balance, only the balance is shown. Zero remains zero. The expiry below the bar is the earliest known expiry of usable credit. A tooltip lists individual remaining amounts only when multiple usable grants have different expiry times; it does not repeat historical totals or claim expired credit was spent. With more than 12 usable grants, the breakdown is omitted rather than truncated.
 
