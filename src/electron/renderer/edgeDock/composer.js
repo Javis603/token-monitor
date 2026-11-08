@@ -26,6 +26,7 @@
       hasProviderMark,
       maskEmail,
       mimoProductLabel,
+      limitAccountTitle,
       createRowDrag,
       enabledLimitProviders,
       isWindowHidden = () => false
@@ -444,7 +445,7 @@
           const identity = account.accountName || maskEmail(account.accountEmail);
           const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
           const name = product
-            ? [identity, product].filter(Boolean).join(' · ')
+            ? limitAccountTitle('mimo', account, accounts.indexOf(account), accounts)
             : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
           text.setAttribute('aria-label', name);
@@ -466,7 +467,7 @@
       if (ui.selected && !items.some((item) => idFor(item) === ui.selected)) ui.selected = '';
       const selectedItem = items.find((item) => idFor(item) === ui.selected);
       // A stats tick can change token totals without changing any control here.
-      // Replacing the native select on every tick closes its open menu.
+      // Replacing a focused picker on every tick interrupts its selection.
       const signature = JSON.stringify({
         items,
         labels: items.map(itemLabel),
@@ -476,13 +477,19 @@
         connected: isAutomatic() ? connectedProviders() : null,
         addable: ui.menuOpen ? enabledLimitProviders?.() : null,
         windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
-        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account) => [
-          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel
-        ]) : null,
+        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account, index, accounts) => {
+          const identity = [account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel];
+          if (selectedItem.provider === 'mimo' && mimoProductLabel(account)) {
+            identity.push(limitAccountTitle('mimo', account, index, accounts));
+          }
+          return identity;
+        }) : null,
         wording: [t('settings.edgeDock.window'), t('settings.edgeDock.window.auto'), t('settings.edgeDock.window.unavailable')]
       });
       if (signature === renderedSignature && root.firstChild) return;
-      if (root.contains(document.activeElement) && document.activeElement?.tagName === 'SELECT') return;
+      if (root.contains(document.activeElement) && (document.activeElement?.tagName === 'SELECT'
+        || document.activeElement?.classList.contains('select-control-trigger'))) return;
+      if (root.querySelector('.select-control-trigger[aria-expanded="true"]')) return;
 
       const heading = el('div', 'edge-dock-composer-heading');
       heading.append(el('span', '', t(limitsOnly ? 'notch.tab.limits' : 'settings.edgeDock.items')));

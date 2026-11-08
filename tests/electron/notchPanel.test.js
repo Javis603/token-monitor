@@ -1509,6 +1509,11 @@ test('plugin navigation artwork arrives from metadata before page mount and refr
   const icon = f.all('notch-tab-plugin-icon')[0];
   assert.equal(icon.querySelector('img')?.src, data.panel.pluginCatalog['demo/panel'].identityIcon);
   assert.equal(mounts, 0);
+  data.panel.pluginCatalog['demo/panel'].presentation = { icon: { native: 'codex' } };
+  f.panel.render(data);
+  assert.ok(icon.querySelector('img')?.src.endsWith('/codex.svg'), 'presentation-only changes repaint without author UI');
+  assert.equal(mounts, 0);
+  delete data.panel.pluginCatalog['demo/panel'].presentation;
   data.panel.pluginCatalog['demo/panel'].identityIcon = '';
   f.panel.render(data);
   assert.equal(icon.querySelector('img'), null);

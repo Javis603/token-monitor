@@ -488,7 +488,7 @@
         if (page.startsWith(PLUGIN_PAGE_PREFIX)) {
           const icon = button.querySelector('.notch-tab-plugin-icon');
           const metadata = pluginIconMetadata(page);
-          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon]);
+          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon, metadata.presentation]);
           if (icon && icon.dataset.icon !== iconName && pluginViews) {
             icon.dataset.icon = iconName;
             icon.replaceChildren(pluginViews.navigationIcon(document, metadata, 15));

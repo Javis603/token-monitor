@@ -407,7 +407,7 @@ for (const { name, settings, expected } of [
 ]) {
   test(`Home limits empty-state copy when ${name}`, () => {
     const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-    const functions = ['configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule']
+    const functions = ['desktopLimitProviders', 'configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule']
       .map((functionName) => {
         const start = source.indexOf(`function ${functionName}(`);
         assert.notEqual(start, -1, `${functionName} exists`);

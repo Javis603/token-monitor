@@ -73,6 +73,8 @@
     { id: 'fx', color: '#000000', widgetInk: true },
     { id: 'mcode', color: '#f23f5d', icon: 'minimax' },
     { id: 'mistral', color: '#fa520f' },
+    { id: 'prime-agent', color: '#000000', widgetInk: true },
+    { id: 'jcode', color: '#000000', widgetInk: true },
     // Not tracked clients: model vendors and limits providers. A vendor shares
     // the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
     { id: 'openrouter', label: 'OpenRouter', color: '#6566F1' },
