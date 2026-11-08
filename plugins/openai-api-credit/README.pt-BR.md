@@ -18,6 +18,8 @@ Exemplo da interface. O saldo e a validade dependem da sua conta.
 
 Requer **Token Monitor 0.88.0 ou posterior**.
 
+Se os plugins estiverem desativados globalmente, primeiro ligue **Ativar plugins** em **Configurações → Plugins → Instalados → Mais ações de plugins**. Caso contrário, a instalação oferece apenas **Apenas instalar** e mantém o plugin desativado.
+
 Abra **Configurações → Plugins → Explorar**. Em **Plugins em destaque**, selecione **OpenAI API Credits** com o selo oficial do Token Monitor, revise e escolha **Instalar e ativar**. Você também pode importar um arquivo `.tmplugin` ou a pasta completa do código-fonte em **Configurações → Plugins**. Confirme que o plugin está ativado e selecione e expanda **OpenAI** em **Limites de Ferramentas de IA** para configurar as credenciais da conta.
 
 ## Configuração
