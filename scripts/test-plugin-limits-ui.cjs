@@ -700,7 +700,7 @@ app.whenReady().then(async () => {
   const settingsBase=await js("tokenMonitorTrustedPlugins.host('synthetic-limits','settings.get')");
   await js(`tokenMonitorTrustedPlugins.host('synthetic-limits','settings.update',{schemaVersion:${settingsBase.schemaVersion},expectedRevision:${settingsBase.revision},patch:{displayMode:'balance'}})`);
   const conflictMode=settingsBase.values.displayMode==='meter'?'balance':'meter';
-  await js(`(()=>{const input=document.querySelector('.plugin-author-form select');input.value=${JSON.stringify(conflictMode)};input.dispatchEvent(new Event('change'));})()`);
+  await js("(()=>{const input=document.querySelector('.plugin-author-form select');input.value=input.value==='meter'?'balance':'meter';input.dispatchEvent(new Event('change'));})()");
   await waitFor("document.querySelector('[data-control-key=author-reload]')?.hidden===false",'conflict exposes recovery action');
   assert.equal(await js("document.querySelector('.plugin-author-form select').value"),conflictMode,'conflict retains draft');
   await js("document.querySelector('[data-control-key=author-reload]').click()");
