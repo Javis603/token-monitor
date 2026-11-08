@@ -51,7 +51,7 @@ const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   waiting: 'edge-dock-session-waiting'
 });
 
-const BRAND_VENDOR_COLORS = { ...clientColors };
+const BRAND_VENDOR_COLORS = { ...window.TokenMonitorUsageCharts.modelColors };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 // Inset the thicker quota stroke so its outer edge stays within the 42px ring.
 const RING_RADIUS = 18.5;
@@ -235,7 +235,7 @@ function applyAppearance(payload) {
     else style.removeProperty(name);
   }
   const vendors = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, appearance.vendorColors);
-  for (const vendor of Object.keys(BRAND_VENDOR_COLORS)) clientColors[vendor] = vendors[vendor];
+  window.TokenMonitorUsageCharts.applyVendorColors(vendors);
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance);
   style.setProperty('--ui-font', interfaceFont);
   style.setProperty('--display-font', displayFont);
@@ -319,17 +319,19 @@ function hasMask(id) {
   probe.style.visibility = 'hidden';
   document.body.append(probe);
   const computed = getComputedStyle(probe);
-  const image = computed.webkitMaskImage || computed.maskImage || 'none';
+  const mask = computed.webkitMaskImage || computed.maskImage || 'none';
+  const image = mask !== 'none' ? mask : computed.backgroundImage;
   probe.remove();
   const supported = Boolean(id) && image !== 'none';
   maskSupport.set(id, supported);
   return supported;
 }
 
-function markNode(id, color) {
+function markNode(id, color, model = false) {
   const mark = el('span', 'edge-dock-mark');
   if (hasMask(id)) mark.classList.add(`row-icon-${id}`);
   else mark.classList.add('is-fallback');
+  if (model) mark.classList.add('model-icon');
   if (color) mark.style.setProperty('--ring-color', color);
   return mark;
 }
@@ -1730,7 +1732,7 @@ function appendLiveRateDetails(card, cell) {
       continue;
     }
     const row = el('div', 'edge-dock-rate-model');
-    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor');
+    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor', null, true);
     mark.setAttribute('aria-hidden', 'true');
     row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
     list.append(row);
@@ -1823,7 +1825,7 @@ function statCard(cell) {
     applyBarScale(fill, Math.max(0.02, entry.tokens / top));
     meter.append(fill);
     row.append(
-      markNode(entry.id, entry.color),
+      markNode(entry.id, entry.color, breakdownMode === 'models'),
       el('span', 'edge-dock-client-name', entry.name),
       el('span', 'edge-dock-client-tokens', formatBreakdownTokens(entry.tokens)),
       el('span', 'edge-dock-client-share', `${Math.round((entry.tokens / sum) * 100)}%`),

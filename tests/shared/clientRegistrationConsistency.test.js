@@ -68,7 +68,7 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.local/share/goose/sessions/sessions.db', '.local/share/Block/goose/sessions/sessions.db',
     '.hermes', '.kimi/sessions', '.kimi-code/sessions', '.qwen/projects',
     '.grok/sessions', '.copilot/otel', '.copilot/session-state', '.gemini/antigravity-cli/conversations',
-    '.gemini/antigravity/conversations',
+    '.gemini/antigravity/conversations', '.gemini/tmp',
     '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
     '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
     '.local/share/amp/threads', '.config/tokscale/amp-cache/threads', '.pi/agent/sessions', '.omp/agent/sessions',
