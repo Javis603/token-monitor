@@ -1569,10 +1569,10 @@
           </button>
           <div id="syncSettingsDetails" class="settings-section-details hidden">
             <div class="sync-connection-fields">
-              <label class="sync-mode-field" for="hubModeOptions">
-                <span data-i18n="settings.sync.mode">Sync method</span>
+              <div class="settings-field sync-mode-field">
+                <span id="syncModeLabel" data-i18n="settings.sync.mode">Sync method</span>
                 <span class="sync-mode-select">
-                  <select id="hubModeOptions" aria-describedby="syncModeDescription">
+                  <select id="hubModeOptions" aria-labelledby="syncModeLabel" aria-describedby="syncModeDescription">
                     <option value="local" data-i18n="settings.sync.localOnly">Local only</option>
                     <option value="client" data-i18n="settings.sync.connectHub">Connect to a hub</option>
                     <option value="host" data-i18n="settings.sync.hostHub">Host hub on this device</option>
@@ -1580,7 +1580,7 @@
                   </select>
                   <span class="settings-section-disclosure" aria-hidden="true"></span>
                 </span>
-              </label>
+              </div>
               <p id="syncModeDescription" class="settings-note sync-mode-description"></p>
               <div id="hubClientFields" class="hub-mode-fields hidden">
                 <div id="syncPanelConnection" class="sync-panel-connection" hidden>
@@ -1652,7 +1652,7 @@
                 </div>
                 <div id="syncConnectionSaveError" class="hub-status error" role="alert" hidden></div>
               </div>
-              <div id="deviceIconLocalRow" class="settings-item"><label for="deviceIconInput" class="settings-item-text" data-i18n="devices.icon.thisDevice">This device’s icon</label><span class="device-icon-local-control"><select id="deviceIconInput"></select></span></div>
+              <div id="deviceIconLocalRow" class="settings-item"><span id="deviceIconLocalLabel" class="settings-item-text settings-field" data-i18n="devices.icon.thisDevice">This device’s icon</span><span class="device-icon-local-control"><select id="deviceIconInput" aria-labelledby="deviceIconLocalLabel"></select></span></div>
               <label id="syncUploadIntervalRow" class="sync-upload-interval-row settings-item" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
                 <select id="syncUploadIntervalInput">
                   <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
