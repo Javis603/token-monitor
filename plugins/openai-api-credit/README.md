@@ -37,7 +37,7 @@ The balance comes directly from the service. The bar compares it with the total 
 
 If the grants do not reliably explain the balance, only the balance is shown. Zero remains zero. The expiry below the bar is the earliest known expiry of usable credit. A tooltip lists individual remaining amounts only when multiple usable grants have different expiry times; it does not repeat historical totals or claim expired credit was spent. With more than 12 usable grants, the breakdown is omitted rather than truncated.
 
-Refresh follows the App’s Limits interval, adaptive setting and visibility demand. Saving credentials performs a separate verification. The plugin has no polling timer. Choose **Balance only** in settings if preferred.
+Refresh follows the App’s Limits interval, adaptive setting and visibility demand. Saving credentials performs a separate verification. The plugin has no polling timer. Choose **Balance only** in settings if preferred. The display option saves immediately when changed.
 
 ## Data and access
 

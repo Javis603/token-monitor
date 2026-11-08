@@ -5,7 +5,6 @@ export const messages = {
     "bar": "Progress bar and balance",
     "balance": "Balance only",
     "displayHelp": "The bar uses grants that still contain usable credit. When no reliable total exists, only the balance is shown.",
-    "save": "Save settings",
     "saving": "Saving…",
     "saved": "Settings saved",
     "failed": "Could not save settings. Try again; your changes are retained.",
@@ -25,7 +24,8 @@ export const messages = {
     "expires": "Expires {time} UTC",
     "noExpiry": "No expiry reported",
     "newerSettings": "These settings were saved by a newer plugin version. Update the plugin to edit them.",
-    "invalidSettings": "The saved display option is invalid. Choose a display mode and save it."
+    "invalidSettings": "The saved display option is invalid. Choose a display mode to replace it.",
+    "retry": "Retry save"
   },
   "zh-TW": {
     "description": "使用手動提供的 Platform 登入憑證讀取實際 API 點數餘額。",
@@ -33,7 +33,6 @@ export const messages = {
     "bar": "進度條及餘額",
     "balance": "純餘額",
     "displayHelp": "進度條只計仍有可用餘額的點數；總額資料不足時只顯示餘額。",
-    "save": "儲存設定",
     "saving": "儲存中…",
     "saved": "設定已儲存",
     "failed": "無法儲存設定，請重試。你的修改仍保留。",
@@ -53,7 +52,8 @@ export const messages = {
     "expires": "到期時間：{time} UTC",
     "noExpiry": "未提供到期時間",
     "newerSettings": "這些設定由較新的插件版本儲存。請更新插件後再編輯。",
-    "invalidSettings": "已儲存的顯示選項無效。請選擇顯示方式並儲存。"
+    "invalidSettings": "已儲存的顯示選項無效。請選擇顯示方式以取代。",
+    "retry": "重試儲存"
   },
   "zh-CN": {
     "description": "使用手动提供的 Platform 登录凭证读取实际 API 点数余额。",
@@ -61,7 +61,6 @@ export const messages = {
     "bar": "进度条及余额",
     "balance": "仅余额",
     "displayHelp": "进度条仅计算仍有可用余额的点数；总额信息不足时只显示余额。",
-    "save": "保存设置",
     "saving": "保存中…",
     "saved": "设置已保存",
     "failed": "无法保存设置，请重试。你的修改仍保留。",
@@ -81,7 +80,8 @@ export const messages = {
     "expires": "到期时间：{time} UTC",
     "noExpiry": "未提供到期时间",
     "newerSettings": "这些设置由较新的插件版本保存。请更新插件后再编辑。",
-    "invalidSettings": "已保存的显示选项无效。请选择显示方式并保存。"
+    "invalidSettings": "已保存的显示选项无效。请选择显示方式以替换。",
+    "retry": "重试保存"
   },
   "ja": {
     "description": "手動で入力した Platform のログイン認証情報で、実際の API クレジット残高を取得します。",
@@ -89,7 +89,6 @@ export const messages = {
     "bar": "プログレスバーと残高",
     "balance": "残高のみ",
     "displayHelp": "バーには利用可能な残高があるクレジットのみを含めます。総額を確認できない場合は残高のみを表示します。",
-    "save": "設定を保存",
     "saving": "保存中…",
     "saved": "設定を保存しました",
     "failed": "設定を保存できませんでした。変更は保持されています。もう一度お試しください。",
@@ -109,7 +108,8 @@ export const messages = {
     "expires": "有効期限：{time} UTC",
     "noExpiry": "有効期限の記載なし",
     "newerSettings": "この設定は新しいバージョンのプラグインで保存されています。編集するにはプラグインを更新してください。",
-    "invalidSettings": "保存された表示オプションが無効です。表示方法を選択して保存してください。"
+    "invalidSettings": "保存された表示オプションが無効です。表示方法を選択して置き換えてください。",
+    "retry": "保存を再試行"
   },
   "ko": {
     "description": "직접 입력한 Platform 로그인 자격 증명으로 실제 API 크레딧 잔액을 조회합니다.",
@@ -117,7 +117,6 @@ export const messages = {
     "bar": "진행률 표시줄과 잔액",
     "balance": "잔액만",
     "displayHelp": "표시줄에는 사용 가능한 잔액이 있는 크레딧만 포함됩니다. 총액을 확인할 수 없으면 잔액만 표시합니다.",
-    "save": "설정 저장",
     "saving": "저장 중…",
     "saved": "설정이 저장되었습니다",
     "failed": "설정을 저장하지 못했습니다. 변경 사항은 유지됩니다. 다시 시도하세요.",
@@ -137,7 +136,8 @@ export const messages = {
     "expires": "만료: {time} UTC",
     "noExpiry": "만료 시간 정보 없음",
     "newerSettings": "이 설정은 더 최신 플러그인 버전에서 저장되었습니다. 편집하려면 플러그인을 업데이트하세요.",
-    "invalidSettings": "저장된 표시 옵션이 유효하지 않습니다. 표시 방식을 선택하고 저장하세요."
+    "invalidSettings": "저장된 표시 옵션이 유효하지 않습니다. 표시 방식을 선택해 바꾸세요.",
+    "retry": "저장 재시도"
   },
   "pt-BR": {
     "description": "Consulte o saldo real de créditos da API com credenciais de sessão do Platform inseridas manualmente.",
@@ -145,7 +145,6 @@ export const messages = {
     "bar": "Barra de progresso e saldo",
     "balance": "Apenas saldo",
     "displayHelp": "A barra considera apenas créditos com saldo utilizável. Quando não há um total confiável, apenas o saldo é exibido.",
-    "save": "Salvar configurações",
     "saving": "Salvando…",
     "saved": "Configurações salvas",
     "failed": "Não foi possível salvar. Suas alterações foram mantidas. Tente novamente.",
@@ -165,7 +164,8 @@ export const messages = {
     "expires": "Expira em {time} UTC",
     "noExpiry": "Validade não informada",
     "newerSettings": "Estas configurações foram salvas por uma versão mais recente do plugin. Atualize o plugin para editá-las.",
-    "invalidSettings": "A opção de exibição salva é inválida. Escolha um modo de exibição e salve."
+    "invalidSettings": "A opção de exibição salva é inválida. Escolha um modo de exibição para substituí-la.",
+    "retry": "Tentar salvar novamente"
   }
 };
 

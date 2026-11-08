@@ -67,28 +67,34 @@ export function activate(ctx) {
     for (const value of ['bar', 'balance']) { const option = document.createElement('option'); option.value = value; setText(option, value); select.append(option); }
     row.append(title, select);
     const actions = document.createElement('div'); actions.className = 'settings-actions';
-    const save = document.createElement('button'); save.type = 'button'; save.className = 'settings-button'; setText(save, 'save'); save.dataset.openaiSave = '';
+    const retry = document.createElement('button'); retry.type = 'button'; retry.className = 'settings-button'; setText(retry, 'retry'); retry.dataset.openaiRetry = ''; retry.hidden = true;
     const reload = document.createElement('button'); reload.type = 'button'; reload.className = 'settings-button'; setText(reload, 'reload'); reload.dataset.openaiReload = ''; reload.hidden = true;
     const feedback = document.createElement('p'); feedback.className = 'settings-note'; feedback.setAttribute('role', 'status'); feedback.setAttribute('aria-live', 'polite');
-    actions.append(save, reload); root.append(row, actions, feedback);
-    let snapshot, disposed = false, busy = false, recoveryRequired = false;
-    function sync() { select.disabled = busy || !snapshot || snapshot.readOnly; save.disabled = select.disabled || recoveryRequired || !select.value || select.value === snapshot.values.displayMode; reload.disabled = busy; reload.hidden = !recoveryRequired; }
+    actions.append(retry, reload); root.append(row, actions, feedback);
+    let snapshot, disposed = false, busy = false, recoveryRequired = false, saveFailed = false;
+    function sync() {
+      select.disabled = busy || !snapshot || snapshot.readOnly || recoveryRequired;
+      retry.hidden = !saveFailed; retry.disabled = busy;
+      reload.disabled = busy; reload.hidden = !recoveryRequired;
+    }
     async function load() {
       busy = true; sync();
-      try { const value = await ctx.host.call('settings.get'); if (!disposed) { snapshot = value; select.value = value.values.displayMode ?? ''; setText(feedback, value.status === 'newer-schema' ? 'newerSettings' : value.status === 'invalid' ? 'invalidSettings' : undefined); recoveryRequired = false; } }
+      try { const value = await ctx.host.call('settings.get'); if (!disposed) { snapshot = value; select.value = value.values.displayMode ?? ''; setText(feedback, value.status === 'newer-schema' ? 'newerSettings' : value.status === 'invalid' ? 'invalidSettings' : undefined); recoveryRequired = false; saveFailed = false; } }
       catch (_) { if (!disposed) { setText(feedback, 'loadFailed'); recoveryRequired = true; } }
       finally { if (!disposed) { busy = false; sync(); } }
     }
-    select.addEventListener('change', () => { if (!recoveryRequired) setText(feedback); sync(); });
-    save.addEventListener('click', async () => {
-      if (busy || !snapshot || snapshot.readOnly || recoveryRequired) return;
-      busy = true; setText(feedback, 'saving'); sync();
+    async function save() {
+      if (busy || !snapshot || snapshot.readOnly || recoveryRequired || !select.value) return;
+      if (select.value === snapshot.values.displayMode) { saveFailed = false; setText(feedback); sync(); return; }
+      busy = true; saveFailed = false; setText(feedback, 'saving'); sync();
       try {
         const value = await ctx.host.call('settings.update', { schemaVersion: snapshot.schemaVersion, expectedRevision: snapshot.revision, patch: { displayMode: select.value } });
         if (!disposed) { snapshot = value; select.value = value.values.displayMode; setText(feedback, 'saved'); }
-      } catch (error) { if (!disposed) { recoveryRequired = String(error?.message || error).includes('settings-conflict'); setText(feedback, recoveryRequired ? 'conflict' : 'failed'); } }
+      } catch (error) { if (!disposed) { recoveryRequired = String(error?.message || error).includes('settings-conflict'); saveFailed = !recoveryRequired; setText(feedback, recoveryRequired ? 'conflict' : 'failed'); } }
       finally { if (!disposed) { busy = false; sync(); } }
-    });
+    }
+    select.addEventListener('change', () => void save());
+    retry.addEventListener('click', () => void save());
     reload.addEventListener('click', () => void load());
     await load();
     return { update(next) { if (updateWords()) renderGuide(); return credentials.update(next); },

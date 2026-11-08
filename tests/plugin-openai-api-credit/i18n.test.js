@@ -21,7 +21,7 @@ test('all supported plugin locales have complete messages and matching placehold
   for (const [input, expected] of [['zh_Hans', 'zh-CN'], ['zh-SG', 'zh-CN'], ['zh-Hant-HK', 'zh-TW'], ['ja-JP', 'ja'], ['ko-KR', 'ko'], ['pt-PT', 'pt-BR'], ['en-GB', 'en'], ['fr', 'en'], ['', 'en']]) {
     assert.equal(resolveLocale(input), expected);
   }
-  assert.equal(t('fr', 'save'), messages.en.save);
+  assert.equal(t('fr', 'retry'), messages.en.retry);
   assert.equal(t('ja', 'expires', { time: '2030-01-01 12:00' }), messages.ja.expires.replace('{time}', '2030-01-01 12:00'));
 });
 

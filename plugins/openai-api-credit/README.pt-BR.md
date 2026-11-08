@@ -37,7 +37,7 @@ O saldo vem diretamente do serviço. A barra compara o saldo com a soma dos valo
 
 Se os créditos não explicarem o saldo com segurança, apenas o saldo será exibido. Zero continua sendo zero. Abaixo da barra aparece o vencimento conhecido mais próximo dos créditos utilizáveis. O tooltip lista saldos individuais apenas quando há vários créditos utilizáveis com vencimentos diferentes; não repete totais históricos nem trata créditos expirados como gastos. Com mais de 12 créditos utilizáveis, o detalhamento é omitido em vez de ser truncado.
 
-A atualização segue o intervalo de cotas, a configuração adaptativa e a visibilidade da interface do App. Salvar credenciais realiza uma verificação separada. O plugin não tem temporizador próprio de consulta. Você também pode escolher **Apenas saldo** nas configurações.
+A atualização segue o intervalo de cotas, a configuração adaptativa e a visibilidade da interface do App. Salvar credenciais realiza uma verificação separada. O plugin não tem temporizador próprio de consulta. Você também pode escolher **Apenas saldo** nas configurações. A opção de exibição é salva assim que é alterada.
 
 ## Dados e acesso
 

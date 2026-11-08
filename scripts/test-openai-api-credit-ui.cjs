@@ -123,14 +123,26 @@ app.whenReady().then(async () => {
   await showSettings();
   assert.equal(await js(`${credentialBox}.querySelector('[data-credential-action=clear]').hidden`),true,'empty state has no clear action');
   assert.equal(await js(`${moduleBox}.querySelector('[data-openai-reload]').hidden`),true,'no routine display reload action');
-  await js(`(async()=>{const current=await tokenMonitorTrustedPlugins.host('openai-api-credit','settings.get');await tokenMonitorTrustedPlugins.host('openai-api-credit','settings.update',{schemaVersion:current.schemaVersion,expectedRevision:current.revision,patch:{displayMode:'balance'}});const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='balance';select.dispatchEvent(new Event('change'));${moduleBox}.querySelector('[data-openai-save]').click();})()`);
+  await js(`(async()=>{const current=await tokenMonitorTrustedPlugins.host('openai-api-credit','settings.get');await tokenMonitorTrustedPlugins.host('openai-api-credit','settings.update',{schemaVersion:current.schemaVersion,expectedRevision:current.revision,patch:{displayMode:'balance'}});const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='balance';select.dispatchEvent(new Event('change'));})()`);
   await waitFor(`${moduleBox}.textContent.includes('設定已在另一個介面更新')`,'real settings revision conflict');
   assert.equal(await js(`${moduleBox}.querySelector('[data-openai-reload]').hidden`),false);
   assert.equal(await js(`${moduleBox}.querySelector('[data-openai-mode]').value`),'balance','conflict retains draft');
   await js(`${moduleBox}.querySelector('[data-openai-reload]').click()`);
   await waitFor(`${moduleBox}.querySelector('[data-openai-reload]').hidden`,'reload recovers and disappears');
-  await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='bar';select.dispatchEvent(new Event('change'));${moduleBox}.querySelector('[data-openai-save]').click();})()`);
+  await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='bar';select.dispatchEvent(new Event('change'));})()`);
   await waitFor(`${moduleBox}.textContent.includes('設定已儲存')`,'restore initial mode');
+  const preferenceFile=path.join(scratch,'plugin-settings','openai-api-credit.json');
+  const savedPreference=fs.readFileSync(preferenceFile);
+  fs.writeFileSync(preferenceFile,'invalid JSON');
+  await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='balance';select.dispatchEvent(new Event('change'));})()`);
+  await waitFor(`!${moduleBox}.querySelector('[data-openai-retry]').hidden`,'failed autosave retains draft and offers retry');
+  assert.equal(await js(`${moduleBox}.querySelector('[data-openai-mode]').value`),'balance');
+  fs.writeFileSync(preferenceFile,savedPreference);
+  await js(`${moduleBox}.querySelector('[data-openai-retry]').click()`);
+  await waitFor(`${moduleBox}.textContent.includes('設定已儲存')`,'retry autosave succeeds');
+  assert.equal(JSON.parse(fs.readFileSync(preferenceFile,'utf8')).values.displayMode,'balance','autosave durable without Save click');
+  await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='bar';select.dispatchEvent(new Event('change'));})()`);
+  await waitFor(`${moduleBox}.textContent.includes('設定已儲存') && ${moduleBox}.querySelector('[data-openai-retry]').hidden`,'restore initial display after retry');
   await capture('openai-manual-empty.png');
   const guide=`${moduleBox}.querySelector('[data-openai-setup]')`;
   assert.equal(await js(`${guide}.querySelectorAll('strong').length`),4,'four short native steps');
@@ -211,7 +223,7 @@ app.whenReady().then(async () => {
   await js("tokenMonitor.updateSettings({showLimitUsed:true})");await waitFor(has('$16.75 / $100.00'),'used money');assert.ok(await js(has('17% used')));
   await capture('openai-manual-used.png');await js("tokenMonitor.updateSettings({showLimitUsed:false})");
   await showSettings();
-  await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='balance';select.dispatchEvent(new Event('change',{bubbles:true}));${moduleBox}.querySelector('[data-openai-save]').click();})()`);
+  await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='balance';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   await waitFor(`${moduleBox}.textContent.includes('設定已儲存')`,'display preference saved');
   await js("openViewFromTray('limits')");await waitFor("state.pluginCatalog.limits.providers[0]?.windows[0]?.creditsDisplay==='balance'",'balance mode');
   await capture('openai-manual-balance.png');
@@ -226,7 +238,7 @@ app.whenReady().then(async () => {
   assert.equal(requests,beforeReopen,'reopening editor does not collect or verify');
   await js(`(()=>{const input=${credentialBox}.querySelector('[data-credential-field=organization]');input.value='org-synthetic';input.dispatchEvent(new Event('input'));${credentialBox}.querySelector('[data-credential-action=save]').click();})()`);
   await waitFor(saved(),'partial update preserves token');
-  await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='bar';select.dispatchEvent(new Event('change',{bubbles:true}));${moduleBox}.querySelector('[data-openai-save]').click();})()`);
+  await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='bar';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   await waitFor(`${moduleBox}.textContent.includes('設定已儲存')`,'restore default bar');
   win.setSize(360,760);await capture('openai-manual-settings-compact.png');win.setSize(440,760);
   responseBody={...billing(),total_available:91};
@@ -261,7 +273,8 @@ app.whenReady().then(async () => {
     await waitFor(`${moduleBox}.querySelector('[data-openai-copy]')?.textContent===${JSON.stringify(words.copyUrl)}`, `localized settings: ${locale}`);
     assert.ok(await js(`${guide}.textContent.includes(${JSON.stringify(words.step1)})`), `${locale} setup instructions`);
     assert.deepEqual(await js(`[...${guide}.querySelectorAll('code')].map(node=>node.textContent)`), ['credit_grants','Authorization','OpenAI-Organization']);
-    assert.equal(await js(`${moduleBox}.querySelector('[data-openai-save]').textContent`), words.save);
+    assert.equal(await js(`${moduleBox}.querySelector('[data-openai-save]')`), null, 'no manual Save settings control');
+    assert.equal(await js(`${moduleBox}.querySelector('[data-openai-retry]').hidden`), true);
     assert.ok(await js(`${guide}.scrollWidth <= ${guide}.clientWidth`), `${locale} guide fits narrow settings`);
     await capture(`openai-setup-${locale}.png`);
   }
@@ -275,17 +288,17 @@ app.whenReady().then(async () => {
     const message=messages['pt-BR'][status==='newer-schema'?'newerSettings':'invalidSettings'];
     await waitFor(`${moduleBox}.textContent.includes(${JSON.stringify(message)})`, `${status} preference recovery guidance`);
     assert.equal(await js(`${moduleBox}.querySelector('[data-openai-mode]').disabled`),status==='newer-schema');
-    assert.equal(await js(`${moduleBox}.querySelector('[data-openai-save]').disabled`),true,'no saving a blocked or unselected preference');
-    await js(`${moduleBox}.querySelector('[data-openai-save]').scrollIntoView({block:'center',behavior:'instant'})`);
+    assert.equal(await js(`${moduleBox}.querySelector('[data-openai-retry]').hidden`),true,'no save action for a blocked or unselected preference');
+    await js(`${moduleBox}.querySelector('[data-openai-mode]').scrollIntoView({block:'center',behavior:'instant'})`);
     await capture(`openai-settings-${status}.png`);
     if(status==='invalid') {
-      await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='bar';select.dispatchEvent(new Event('change'));${moduleBox}.querySelector('[data-openai-save]').click();})()`);
+      await js(`(()=>{const select=${moduleBox}.querySelector('[data-openai-mode]');select.value='bar';select.dispatchEvent(new Event('change'));})()`);
       await waitFor(`${moduleBox}.textContent.includes(${JSON.stringify(messages['pt-BR'].saved)})`,'invalid preference explicitly repaired');
       assert.equal(JSON.parse(fs.readFileSync(settingsFile,'utf8')).values.displayMode,'bar');
     }
   }
   assert.deepEqual(errors.filter(text=>!text.includes('Electron Security Warning')&&!text.includes('Autofill.')),[]);
   win.destroy();await pause(100);await runtime.dispose();clearTimeout(deadline);
-  console.log('PASS invalid/newer settings recovery, six live UI locales and real OpenAI manual plugin and native credential helper: explicit revision-bound credential verification, folded summary/instructions, edit/cancel/no readback, native credit tooltip/hover/Escape handler/no extra request, native Codex SVG and live palette override, contextual display reload and real revision-conflict recovery, no duplicate management editor, native compact setup/header mapping, public URL copy and narrow layout, save/partial update/clear, no readback/browser login, private persistence/reload, mixed order, both modes, used/remaining, zero/unknown denominator and 401. Synthetic transport only.');
+  console.log('PASS immediate preference autosave/storage failure/draft retry/conflict recovery, invalid/newer settings recovery, six live UI locales and real OpenAI manual plugin and native credential helper: explicit revision-bound credential verification, folded summary/instructions, edit/cancel/no readback, native credit tooltip/hover/Escape handler/no extra request, native Codex SVG and live palette override, contextual display reload and real revision-conflict recovery, no duplicate management editor, native compact setup/header mapping, public URL copy and narrow layout, save/partial update/clear, no readback/browser login, private persistence/reload, mixed order, both modes, used/remaining, zero/unknown denominator and 401. Synthetic transport only.');
   console.log('Screenshots:',evidence);app.exit(0);
 }).catch(error=>{console.error(error);clearTimeout(deadline);app.exit(1);});
