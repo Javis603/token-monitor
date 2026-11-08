@@ -145,3 +145,17 @@ test('unusable preferences never invent a display mode or trigger collection', a
     assert.deepEqual(await backend.call('credentials.validate', { moduleId: 'credits', revision: 1 }), { status: 'valid' }, 'credential verification is independent of display preferences');
   }
 });
+
+test('missing paid-credit detail keeps an authoritative balance without inferring a pool', async () => {
+  const body = sample(); delete body.total_paid_available;
+  const parsed = parseBalance(body, 100000);
+  assert.equal(parsed.available, 100); assert.equal(parsed.paidAvailable, null);
+  assert.equal(parsed.meterTotal, null); assert.deepEqual(parsed.usableGrants, []);
+  const state = fixture(); state.response.body = JSON.stringify(body);
+  const backend = createBackend({ host: state.host }, { now: () => 100000 });
+  assert.deepEqual(await backend.call('credentials.validate', { moduleId: 'credits', revision: 1 }), { status: 'valid' });
+  const result = await backend.call('limits.collect', { moduleId: 'credits' });
+  assert.equal(result.status, 'ok'); assert.equal(result.windows[0].remaining, 100);
+  assert.equal(result.windows[0].limit, null); assert.equal(result.windows[0].infoRows, undefined);
+  for (const invalid of [null, '0', -1, Infinity]) assert.throws(() => parseBalance({ ...body, total_paid_available: invalid }, 100000));
+});

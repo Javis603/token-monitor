@@ -245,6 +245,11 @@ app.whenReady().then(async () => {
   await js("openViewFromTray('limits')");await runtime.refreshLimits();await waitFor(has('$91.00'),'unknown total amount');
   assert.equal(await js("state.pluginCatalog.limits.providers[0].windows[0].limit"),null);
   assert.equal(await js("document.querySelectorAll('#limitsPanel > .limit-row:nth-child(2) .limit-meter').length"),0);
+  responseBody=billing();delete responseBody.total_paid_available;
+  await runtime.refreshLimits();await waitFor(has('$83.25'),'balance retained without paid-credit detail');
+  assert.equal(await js("state.pluginCatalog.limits.providers[0]?.status"),'ok');
+  assert.equal(await js("state.pluginCatalog.limits.providers[0].windows[0].limit"),null,'unknown paid scope has no inferred meter');
+  assert.equal(await js("document.querySelectorAll('#limitsPanel > .limit-row:nth-child(2) .limit-meter').length"),0);
   responseBody=billing();responseBody.total_available=0;responseBody.grants.data[0].used_amount=100;
   await runtime.refreshLimits();await waitFor(has('$0.00'),'measured zero');
   assert.equal(await js("state.pluginCatalog.limits.providers[0].windows[0].limit"),null,'zero balance does not reuse exhausted lifetime grants');
@@ -299,6 +304,6 @@ app.whenReady().then(async () => {
   }
   assert.deepEqual(errors.filter(text=>!text.includes('Electron Security Warning')&&!text.includes('Autofill.')),[]);
   win.destroy();await pause(100);await runtime.dispose();clearTimeout(deadline);
-  console.log('PASS immediate preference autosave/storage failure/draft retry/conflict recovery, invalid/newer settings recovery, six live UI locales and real OpenAI manual plugin and native credential helper: explicit revision-bound credential verification, folded summary/instructions, edit/cancel/no readback, native credit tooltip/hover/Escape handler/no extra request, native Codex SVG and live palette override, contextual display reload and real revision-conflict recovery, no duplicate management editor, native compact setup/header mapping, public URL copy and narrow layout, save/partial update/clear, no readback/browser login, private persistence/reload, mixed order, both modes, used/remaining, zero/unknown denominator and 401. Synthetic transport only.');
+  console.log('PASS missing-paid-field balance-only, immediate preference autosave/storage failure/draft retry/conflict recovery, invalid/newer settings recovery, six live UI locales and real OpenAI manual plugin and native credential helper: explicit revision-bound credential verification, folded summary/instructions, edit/cancel/no readback, native credit tooltip/hover/Escape handler/no extra request, native Codex SVG and live palette override, contextual display reload and real revision-conflict recovery, no duplicate management editor, native compact setup/header mapping, public URL copy and narrow layout, save/partial update/clear, no readback/browser login, private persistence/reload, mixed order, both modes, used/remaining, zero/unknown denominator and 401. Synthetic transport only.');
   console.log('Screenshots:',evidence);app.exit(0);
 }).catch(error=>{console.error(error);clearTimeout(deadline);app.exit(1);});

@@ -6,7 +6,8 @@ function amount(value) {
 function parseBalance(body, now = Date.now()) {
   if (body?.object !== 'credit_summary' || !Array.isArray(body.grants?.data)) throw Error('invalid-credit-response');
   const balance = { available: amount(body.total_available), granted: amount(body.total_granted), used: amount(body.total_used),
-    paidAvailable: amount(body.total_paid_available), currency: 'USD', expiresAt: null, meterTotal: null, usableGrants: [] };
+    paidAvailable: Object.hasOwn(body, 'total_paid_available') ? amount(body.total_paid_available) : null,
+    currency: 'USD', expiresAt: null, meterTotal: null, usableGrants: [] };
   const expiry = [], usableGrants = [];
   let activeTotal = 0, activeRemaining = 0, consistent = true;
   for (const grant of body.grants.data) {
