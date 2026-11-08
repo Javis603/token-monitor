@@ -406,7 +406,7 @@ let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 let viewSwitcherRenderKey = '';
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), sessionToolFilter: document.getElementById('sessionToolFilter'), sessionToolFilterItems: document.getElementById('sessionToolFilterItems'), sessionToolPrevious: document.getElementById('sessionToolPrevious'), sessionToolNext: document.getElementById('sessionToolNext'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), sessionToolFilter: document.getElementById('sessionToolFilter'), sessionToolFilterItems: document.getElementById('sessionToolFilterItems'), sessionToolPrevious: document.getElementById('sessionToolPrevious'), sessionToolNext: document.getElementById('sessionToolNext'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
@@ -439,7 +439,6 @@ Object.assign(els, {
   notchStyleInput: document.getElementById('notchStyleInput'),
   notchShapeInputs: Array.from(document.querySelectorAll('input[name="notchShape"]')),
   notchSummaryModeInput: document.getElementById('notchSummaryModeInput'),
-  notchSummaryModeNote: document.getElementById('notchSummaryModeNote'),
   notchSummaryInput: document.getElementById('notchSummaryInput'),
   notchWarnColorsInput: document.getElementById('notchWarnColorsInput'),
   notchComposer: document.getElementById('notchComposer'),
@@ -470,6 +469,9 @@ Object.assign(els, {
   edgeDockMoreOptionsDetails: document.getElementById('edgeDockMoreOptionsDetails'),
   edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
   edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockBubbleSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockBubbleSize"]')),
+  edgeDockBubbleCustomScaleRow: document.getElementById('edgeDockBubbleCustomScaleRow'),
+  edgeDockBubbleCustomScaleInput: document.getElementById('edgeDockBubbleCustomScaleInput'),
   edgeDockSizeInputs: Array.from(document.querySelectorAll('input[name="edgeDockSize"]')),
   edgeDockCustomScaleRow: document.getElementById('edgeDockCustomScaleRow'),
   edgeDockCustomScaleInput: document.getElementById('edgeDockCustomScaleInput'),
@@ -539,7 +541,6 @@ Object.assign(els, {
   hubAddressList: document.getElementById('hubAddressList'),
   syncUploadIntervalInput: document.getElementById('syncUploadIntervalInput'),
   collectionCadenceInput: document.getElementById('collectionCadenceInput'),
-  collectionCadenceNote: document.getElementById('collectionCadenceNote'),
   sessionUsageArchiveInput: document.getElementById('sessionUsageArchiveInput'),
   sessionUsageArchiveStatus: document.getElementById('sessionUsageArchiveStatus'),
   reduceMotionInputs: Array.from(document.querySelectorAll('input[name="reduceMotionOption"]')),
@@ -8253,11 +8254,9 @@ function applyAppearanceSettings(settings) {
   if (els.windowsBackdropNote) {
     const accentFallback = windowsGlass.showAccentNote
       && (settings?.windowsBackdropFallback ?? state.settings?.windowsBackdropFallback) === true;
-    els.windowsBackdropNote.textContent = t(accentFallback
-      ? 'settings.appearance.windowsBackdropFallback'
-      : 'settings.appearance.windowsBackdropNote');
+    els.windowsBackdropNote.textContent = accentFallback ? t('settings.appearance.windowsBackdropFallback') : '';
     els.windowsBackdropNote.classList.toggle('error', accentFallback);
-    els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
+    els.windowsBackdropNote.classList.toggle('hidden', !accentFallback);
   }
   els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
   // The dock's own style overrides System Glass either way, so its selectors
@@ -10331,9 +10330,6 @@ function syncSettingsForm() {
   els.limitsRefreshInput.value = state.settings.limitsRefreshMode === 'adaptive'
     ? 'adaptive'
     : String(LIMIT_REFRESH_OPTIONS.includes(Number(state.settings.limitsRefreshMs)) ? state.settings.limitsRefreshMs : 300000);
-  if (els.limitsRefreshAdaptiveNote) {
-    els.limitsRefreshAdaptiveNote.classList.toggle('hidden', state.settings.limitsRefreshMode !== 'adaptive');
-  }
   els.showLimitSourceInput.checked = Boolean(state.settings.showLimitSource);
   els.maskLimitAccountEmailsInput.checked = Boolean(state.settings.maskLimitAccountEmails);
   renderSubscriptionSettings();
@@ -10352,9 +10348,6 @@ function syncSettingsForm() {
       : state.settings.collectionMode === 'interval'
         ? String(allowed.includes(value) ? value : 300000)
         : 'live';
-    if (els.collectionCadenceNote) {
-      els.collectionCadenceNote.hidden = els.collectionCadenceInput.value === 'live';
-    }
   }
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
@@ -14717,7 +14710,7 @@ function edgeDockAvailable() {
 
 function syncDockSizeControls(surface) {
   const sizes = (els[`${surface}SizeInputs`] || []).map((input) => input.value);
-  const size = sizes.includes(state.settings?.[`${surface}Size`]) ? state.settings[`${surface}Size`] : 'medium';
+  const size = sizes.includes(state.settings?.[`${surface}Size`]) ? state.settings[`${surface}Size`] : surface === 'edgeDockBubble' ? 'inherit' : 'medium';
   for (const input of els[`${surface}SizeInputs`] || []) input.checked = input.value === size;
   els[`${surface}CustomScaleRow`]?.classList.toggle('hidden', size !== 'custom');
   if (els[`${surface}CustomScaleInput`] && document.activeElement !== els[`${surface}CustomScaleInput`]) {
@@ -14791,6 +14784,7 @@ function syncDockControls() {
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
   syncDockSizeControls('edgeDock');
+  syncDockSizeControls('edgeDockBubble');
   syncDockSizeControls('notch');
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
@@ -14826,11 +14820,6 @@ function syncDockControls() {
 function syncNotchSummaryMode() {
   const mode = state.settings?.notchSummaryMode || 'sessions';
   if (els.notchSummaryModeInput) els.notchSummaryModeInput.value = mode;
-  if (els.notchSummaryModeNote) {
-    const key = mode === 'auto' ? 'settings.notch.summaryModeNote' : `settings.notch.summaryMode.${mode}Note`;
-    els.notchSummaryModeNote.dataset.i18n = key;
-    els.notchSummaryModeNote.textContent = t(key);
-  }
 }
 
 function createDockItemsComposer(root, itemsKey) {
@@ -14973,7 +14962,7 @@ for (const input of els.edgeDockModeInputs || []) {
     if (input.checked) void saveSettings({ edgeDockMode: input.value });
   });
 }
-for (const surface of ['edgeDock', 'notch']) {
+for (const surface of ['edgeDock', 'edgeDockBubble', 'notch']) {
   for (const input of els[`${surface}SizeInputs`] || []) {
     input.addEventListener('change', () => {
       if (!input.checked) return;
@@ -20369,4 +20358,18 @@ displaySettings = window.TokenMonitorDisplaySettings.create({
 setupCursorAccountUI();
 setupCustomPricingUI();
 setupModelAliasesUI();
+const selectProviderIcons = new Map();
+const appSelects = window.TokenMonitorAppSelects.mount({
+  document, t, fonts: fontSettingsApi,
+  providerIcon(id) {
+    if (!limitMarksWithIcon.has(id)) return null;
+    if (!selectProviderIcons.has(id)) selectProviderIcons.set(id, doc => {
+      const icon = doc.createElement('span');
+      icon.className = `limit-icon row-icon-${id}`;
+      return icon;
+    });
+    return selectProviderIcons.get(id);
+  }
+});
+window.addEventListener('unload', () => appSelects.destroy(), { once: true });
 init();

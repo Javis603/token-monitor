@@ -246,14 +246,17 @@ test('partial Accent application keeps failed cleanup pending until a later sync
 test('appearance previews preserve fallback warnings unless the supplied patch replaces the flag', () => {
   const start = app.indexOf('  if (els.windowsBackdropNote) {', app.indexOf('function applyAppearanceSettings('));
   const snippet = app.slice(start, app.indexOf('  els.macBackdropRow', start));
-  const note = { classList: { toggle() {} } };
+  const classes = new Map();
+  const note = { classList: { toggle(name, enabled) { classes.set(name, enabled); } } };
   const context = { els: { windowsBackdropNote: note }, windowsGlass: { showAccentNote: true },
     state: { settings: { windowsBackdropFallback: true } }, settings: {}, t: key => key };
   require('node:vm').runInNewContext(snippet, context);
   assert.equal(note.textContent, 'settings.appearance.windowsBackdropFallback');
+  assert.equal(classes.get('hidden'), false);
   context.settings = { windowsBackdropFallback: false };
   require('node:vm').runInNewContext(snippet, context);
-  assert.equal(note.textContent, 'settings.appearance.windowsBackdropNote');
+  assert.equal(note.textContent, '');
+  assert.equal(classes.get('hidden'), true);
 });
 
 test('Acrylic and Accent switch both ways on the same window and unchanged preferences do no work', () => {
@@ -302,11 +305,12 @@ test('Windows exposes an accessible Acrylic and experimental Accent selector', (
   assert.match(html, /id="windowsBackdropInput"/);
   assert.match(html, /option value="acrylic"/);
   assert.match(html, /option value="accent"/);
-  assert.match(html, /data-i18n="settings\.appearance\.windowsBackdropNote"/);
+  assert.match(html, /option value="accent"[^>]*data-select-description="settings\.appearance\.windowsBackdropNote"/);
+  assert.doesNotMatch(html, /data-i18n="settings\.appearance\.windowsBackdropNote"/);
   assert.match(html, /id="windowsBackdropNote"/);
   assert.match(html, /<script src="\.\.\/windowsBackdropMode\.js"><\/script>[\s\S]*<script src="windowsGlass\.js"><\/script>[\s\S]*<script src="app\.js"><\/script>/);
   assert.match(app, /windowsBackdropRow\?\.classList\.toggle\('hidden', !windowsGlass\.showBackdropControl\)/);
-  assert.match(app, /classList\.toggle\('hidden', !windowsGlass\.showAccentNote\)/);
+  assert.match(app, /windowsBackdropNote.classList\.toggle\('hidden', !accentFallback\)/);
   assert.doesNotMatch(app, /backdropControlDisabled/);
   assert.equal((i18n.match(/'settings\.appearance\.glassEffectSystem':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.appearance\.glassEffectTransparent':/g) || []).length, 6);

@@ -496,7 +496,8 @@ const {
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
-  normalizeEdgeDockSize
+  normalizeEdgeDockSize,
+  normalizeEdgeDockBubbleSize
 } = require('./edgeDock/geometry');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const edgeDockPresentationApi = require('./renderer/edgeDock/presentation');
@@ -723,6 +724,8 @@ function defaultSettings() {
     edgeDockMacBackdrop: 'inherit',
     edgeDockWindowsBackdrop: 'inherit',
     edgeDockSize: 'medium',
+    edgeDockBubbleSize: 'inherit',
+    edgeDockBubbleCustomScale: 1,
     edgeDockCustomScale: 1,
     edgeDockSide: 'right',
     edgeDockFloatingX: null,
@@ -2890,6 +2893,8 @@ function readSettings() {
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
     merged.edgeDockWindowsBackdrop = normalizeWindowsDockBackdropMode(merged.edgeDockWindowsBackdrop);
+    merged.edgeDockBubbleSize = normalizeEdgeDockBubbleSize(merged.edgeDockBubbleSize);
+    merged.edgeDockBubbleCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockBubbleCustomScale);
     merged.edgeDockSize = normalizeEdgeDockSize(merged.edgeDockSize);
     merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
@@ -8696,6 +8701,8 @@ app.whenReady().then(() => {
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
       edgeDockWindowsBackdrop: normalizeWindowsDockBackdropMode(patch.edgeDockWindowsBackdrop ?? settings.edgeDockWindowsBackdrop),
+      edgeDockBubbleSize: normalizeEdgeDockBubbleSize(patch.edgeDockBubbleSize ?? settings.edgeDockBubbleSize),
+      edgeDockBubbleCustomScale: normalizeEdgeDockCustomScale(patch.edgeDockBubbleCustomScale ?? settings.edgeDockBubbleCustomScale),
       edgeDockSize: normalizeEdgeDockSize(patch.edgeDockSize ?? settings.edgeDockSize),
       edgeDockCustomScale: normalizeEdgeDockCustomScale(patch.edgeDockCustomScale ?? settings.edgeDockCustomScale),
       // `null` is a real value here (back to the automatic default), so the
@@ -8965,6 +8972,9 @@ app.whenReady().then(() => {
     }
     if (patch && patch.edgeDockCustomScale !== undefined && edgeDockController?.isRunning()) {
       edgeDockController.previewScale(patch.edgeDockCustomScale);
+    }
+    if (patch && patch.edgeDockBubbleCustomScale !== undefined && edgeDockController?.isRunning()) {
+      edgeDockController.previewScale(patch.edgeDockBubbleCustomScale, 'bubble');
     }
     if (patch && patch.notchCustomScale !== undefined && notchController?.isRunning()) {
       notchController.previewScale(patch.notchCustomScale);
