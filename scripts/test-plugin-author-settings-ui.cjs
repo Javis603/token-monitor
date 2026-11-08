@@ -80,6 +80,10 @@ async function main() {
     box.querySelector('.plugin-manage').click();await tick();
     mode='invalid';edit('width','30').dispatchEvent(new Event('blur'));await tick();
     check('validation-errors-associated-with-input',control('width').getAttribute('aria-invalid')==='true'&&!document.getElementById(control('width').id+'-error').hidden&&control('width').value==='30');
+    check('invalid-draft-offers-explicit-discard',!control('reload').hidden);
+    mode='ok';control('mode').value='marker';control('mode').dispatchEvent(new Event('change'));await tick();
+    check('other-save-retains-invalid-draft-discard',control('width').value==='30'&&!control('reload').hidden);
+    control('reload').click();await tick();check('discard-restores-valid-saved-value',control('width').value==='2'&&control('reload').hidden);
     mode='ok';edit('width','3').dispatchEvent(new Event('blur'));await tick();
     check('completed-number-autosaves',saved.values.width===3&&box.querySelector('.plugin-author-status').hidden);
     control('grid').click();await tick();check('checkbox-autosaves',saved.values.grid===false);

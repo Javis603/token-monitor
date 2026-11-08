@@ -1156,7 +1156,7 @@
           input.setAttribute('aria-invalid', String(Boolean(current.errors[id]))); error.hidden = !current.errors[id];
         }
         retry.hidden = current.message !== 'saveFailed'; retry.disabled = busy || current.pending;
-        reload.hidden = !state.loadFailed && !['conflict', 'saveFailed'].includes(current.message); reload.disabled = busy || current.pending || state.loading;
+        reload.hidden = !state.loadFailed && !(editor.hasUnsavedChanges() && Object.keys(current.errors).length) && !['conflict', 'saveFailed'].includes(current.message); reload.disabled = busy || current.pending || state.loading;
         recovery.hidden = retry.hidden && reload.hidden;
         const message = current.pending ? 'saving' : current.message === 'saved' ? '' : current.message;
         status.textContent = state.loadFailed ? t('plugins.authorSettings.loadFailed') : message ? t(`plugins.authorSettings.${message}`)
