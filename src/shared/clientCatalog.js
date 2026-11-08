@@ -55,9 +55,8 @@
     { id: 'openclaw', label: 'OpenClaw' },
     { id: 'cursor', label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
-    // Gemini CLI only. The label stays "Gemini" because the model-vendor mark
-    // shares this id; Gemini Desktop is not a source.
-    { id: 'gemini', label: 'Gemini' },
+    // Gemini CLI only. The id stays `gemini`; Gemini Desktop is not a source.
+    { id: 'gemini', label: 'Gemini CLI' },
     { id: 'cline', label: 'Cline' },
     { id: 'amp', label: 'Amp' },
     { id: 'droid', label: 'Factory Droid' },
