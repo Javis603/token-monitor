@@ -29,6 +29,8 @@ function dashboardWindowFixture() {
       this.webContents = new EventEmitter();
       this.webContents.setWindowOpenHandler = () => {};
       this.webContents.reload = () => this.calls.push('reload');
+      this.webContents.isDestroyed = () => this.isDestroyed();
+      this.webContents.id = windows.length + 1;
       this.webContents.draft = { tab: 'activity', range: 'month' };
       windows.push(this);
     }
@@ -55,8 +57,36 @@ function dashboardWindowFixture() {
   const main = read('src', 'electron', 'main.js');
   vm.runInContext(main.slice(main.indexOf('function discardFailedDashboardWindow('), main.indexOf('async function getDashboardHistory(')), context);
   vm.runInContext(main.slice(main.indexOf("ipcMain.on('dashboard:ready'"), main.indexOf("ipcMain.on('dashboard:minimize'")), context);
-  return { windows, open: () => context.createDashboardWindow(), ready: win => handlers.get('dashboard:ready')({ sender: win.webContents }) };
+  const app = new EventEmitter();
+  const timers = [];
+  Object.assign(context, { app, quitRequested: false, setTimeout: fn => timers.push(fn) });
+  vm.runInContext(main.slice(main.indexOf('const rendererCrashReloadAt ='), main.indexOf('// Every quit route')), context);
+  return {
+    windows, open: () => context.createDashboardWindow(),
+    ready: win => handlers.get('dashboard:ready')({ sender: win.webContents }),
+    crash(win) {
+      const details = { reason: 'crashed' };
+      win.webContents.emit('render-process-gone', {}, details);
+      app.emit('render-process-gone', {}, win.webContents, details);
+      for (const fn of timers.splice(0)) fn();
+    }
+  };
 }
+
+test('a shared renderer crash reloads the existing Dashboard and a repeat crash is bounded', () => {
+  const f = dashboardWindowFixture();
+  const win = f.open();
+  f.ready(win);
+  win.calls.length = 0;
+  f.crash(win);
+  assert.equal(win.isDestroyed(), false);
+  assert.deepEqual(win.calls, ['reload']);
+  assert.equal(f.open(), win);
+  win.calls.length = 0;
+  f.crash(win);
+  assert.equal(win.isDestroyed(), false);
+  assert.deepEqual(win.calls, [], 'a repeated crash in the cooldown must not loop');
+});
 
 test('repeated Dashboard opens wait for initial data without hiding or reloading the page', () => {
   const f = dashboardWindowFixture();
@@ -121,7 +151,7 @@ test('dashboard readiness waits for data and recovers only from actual failures'
   assert.doesNotMatch(main, /dashboardShowFallback|armDashboardShowFallback/);
   assert.match(main, /webContents\.on\('did-fail-load'/);
   assert.match(main, /errorCode === -3/);
-  assert.match(main, /webContents\.on\('render-process-gone'/);
+  assert.match(main, /app\.on\('render-process-gone'/);
   assert.match(main, /win\.on\('unresponsive'/);
   assert.match(main, /function discardFailedDashboardWindow\(win, reason\)[\s\S]*?win\.destroy\(\)/);
   assert.match(historySource, /const controller = new AbortController\(\);[\s\S]*?signal: controller\.signal[\s\S]*?clearTimeout\(timeout\)/);
