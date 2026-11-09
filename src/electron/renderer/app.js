@@ -9946,6 +9946,9 @@ function syncHideAppIconControl(showTrayIcon, trayMode) {
 function syncSettingsForm() {
   if (isRendererWindowHidden()) {
     applyInitialBreakdownPreference();
+    // Native show precedes the visibility IPC. Keep saved appearance current
+    // while hidden so the first tray/reopen frame cannot paint old fonts/title.
+    applyAppearanceSettings(state.settings);
     applyVendorColorOverrides(state.settings.vendorColors);
     appliedThemeOverrides = themePresetsApi.normalizeOverrides(
       state.settings.themeColors,
@@ -13637,7 +13640,7 @@ async function init() {
       nativeMaterialRevision += 1;
       nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(next);
       glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
-      applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
+      if (state.settings) applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
     });
   }
   const materialQueryRevision = nativeMaterialRevision;
@@ -13680,9 +13683,10 @@ async function init() {
   state.settings = await window.tokenMonitor.getSettings();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
+  // Tray startup also needs its saved appearance prepared before native show.
+  applyVisibleSettingsAppearance();
+  initialSettingsApplied = true;
   if (state.windowVisible) {
-    applyVisibleSettingsAppearance();
-    initialSettingsApplied = true;
     const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
     // A retained WebContentsView can be document.hidden until its native host
     // shows. Prepare it now, without waiting on animation frames that pause while

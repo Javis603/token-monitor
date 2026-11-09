@@ -149,9 +149,9 @@ test('an initially hidden retained startup view prepares appearance without wait
   assert.equal(run.frames.length, 0);
 });
 
-test('tray-hidden startup stays deferred while paintable startup waits for its configured frame', () => {
+test('tray-hidden startup prepares appearance without revealing while paintable startup waits for its configured frame', () => {
   const tray = initialAppearance({ nativeHidden: true, windowVisible: false });
-  assert.equal(tray.applied(), 0);
+  assert.equal(tray.applied(), 1);
   assert.equal(tray.signaled(), 0);
   const visible = initialAppearance({ nativeHidden: false, windowVisible: true });
   assert.equal(visible.applied(), 1);
@@ -160,6 +160,47 @@ test('tray-hidden startup stays deferred while paintable startup waits for its c
   assert.equal(visible.signaled(), 0);
   visible.frames.shift()();
   assert.equal(visible.signaled(), 1);
+});
+
+test('native material pushes before settings cannot replace the static icon title with default appearance', () => {
+  let materialPush;
+  const applied = [];
+  const context = vm.createContext({
+    state: { settings: null }, nativeMaterialRevision: 0, nativeMaterialState: {},
+    pendingSettingsPatches: new Set(), appearancePreview: {},
+    glassRenderingApi: { normalizeNativeMaterialState: value => value, applyNativeMaterialClasses: () => {} },
+    applyAppearanceSettings: value => applied.push(value),
+    window: { tokenMonitor: { onNativeMaterialState: callback => { materialPush = callback; } } }
+  });
+  const init = app.slice(app.indexOf('async function init()'));
+  vm.runInContext(init.slice(init.indexOf('const materialPush ='), init.indexOf('const materialQueryRevision =')), context);
+  materialPush({ type: 'vibrancy' });
+  assert.equal(applied.length, 0, 'preserve static appearance until saved preferences arrive');
+  context.state.settings = { titleIconOnly: true, interfaceFontFamily: 'Arial' };
+  materialPush({ type: 'vibrancy' });
+  assert.equal(applied.length, 1);
+  assert.equal(applied[0].titleIconOnly, true);
+  assert.equal(applied[0].interfaceFontFamily, 'Arial');
+});
+
+test('settings changed while hidden update appearance before the next native show', () => {
+  const applied = [];
+  const context = vm.createContext({
+    state: { settings: { titleIconOnly: true, interfaceFontFamily: 'Arial', themeColors: {} } },
+    isRendererWindowHidden: () => true,
+    applyInitialBreakdownPreference: () => {}, applyVendorColorOverrides: () => {},
+    themePresetsApi: { normalizeOverrides: value => value },
+    applyAppearanceSettings: value => applied.push({ ...value })
+  });
+  const sync = app.slice(app.indexOf('function syncSettingsForm()'), app.indexOf('function applyVisibleSettingsAppearance()'));
+  vm.runInContext(`let appliedThemeOverrides; let settingsDomSyncPending = false; ${sync}\nsyncSettingsForm();`, context);
+  context.state.settings = { titleIconOnly: false, interfaceFontFamily: 'Georgia', themeColors: {} };
+  vm.runInContext('syncSettingsForm();', context);
+  assert.equal(applied.length, 2);
+  assert.equal(applied[0].titleIconOnly, true);
+  assert.equal(applied[0].interfaceFontFamily, 'Arial');
+  assert.equal(applied[1].titleIconOnly, false);
+  assert.equal(applied[1].interfaceFontFamily, 'Georgia');
 });
 
 test('the native window starts with saved zoom before any page-load event', () => {
