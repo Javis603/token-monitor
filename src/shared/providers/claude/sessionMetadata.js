@@ -244,7 +244,7 @@ function applyReasoningEffort(state, entry) {
 function assistantMetadataFromTail(tail) {
   // Keep a message-level stop reason when available: complete JSON can still
   // describe a streamed response whose missing configuration supplies no clear.
-  for (const match of tail.matchAll(/"(?:stop_reason|usage)"\s*:/g)) {
+  for (const match of tail.matchAll(/"(?:model|stop_reason|usage)"\s*:/g)) {
     try { return JSON.parse('{"message":{' + tail.slice(match.index)); } catch (_) { /* Not a complete message suffix. */ }
   }
   // Prove a candidate belongs to the root by parsing its complete suffix.
@@ -452,6 +452,13 @@ function applyLongLineFragments(state, lineTerminated = false) {
     // A complete root prefix can carry configuration even when the tail has
     // no metadata. Missing configuration still supplies no clear on its own.
     if (lineTerminated) {
+      let responseModel = metadata?.message?.model;
+      const contentAt = head.indexOf('"content"');
+      if (!responseModel && contentAt >= 0) {
+        // Parse only the closed message prefix, excluding arbitrary tool content.
+        try { responseModel = JSON.parse(head.slice(0, contentAt).replace(/,\s*$/, '') + '}}').message?.model; } catch (_) { /* Incomplete prefix. */ }
+      }
+      applyLatestModel(state, { ...prefix, ...metadata, message: { model: responseModel } });
       applyReasoningEffort(state, { ...prefix, ...metadata });
     }
     // The usage reading is taken before the stop_reason guard below, matching
@@ -465,10 +472,6 @@ function applyLongLineFragments(state, lineTerminated = false) {
     // written the statement, and a record still being written yields no usage.
     const contextUsage = contextUsageFromFragments(head, tail);
     if (contextUsage) {
-      if (lineTerminated) applyLatestModel(state, {
-        ...prefix, ...metadata,
-        message: { model: contextUsage.model }
-      });
       applyContextUsage(state, contextUsage.model, contextUsage.usage);
       // Response metadata can trail large content. Use the existing bounded
       // fragments, never a second file read or a parse of the content itself.

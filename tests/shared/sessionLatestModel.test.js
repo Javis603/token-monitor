@@ -171,3 +171,19 @@ for (const envelope of ['type-first', 'timestamp-first', 'paginated']) test(`ove
   fs.appendFileSync(f.file, line({ type: 'turn_context', payload: { model: 'newest' } }));
   assert.equal(f.read().latestModel, 'newest');
 });
+
+for (const modelFirst of [false, true]) test(`oversized Claude model does not depend on usage (model first: ${modelFirst})`, t => {
+  const f = fixture(t, 'claude');
+  const content = [{ type: 'text', text: 'x'.repeat(600_000) }, { type: 'tool_use', input: { model: 'nested-tool-model' } }];
+  for (const flags of [{}, { isSidechain: true }, { isApiErrorMessage: true }]) {
+    fs.writeFileSync(f.file, line({ type: 'assistant', message: { model: 'older' } }));
+    assert.equal(f.read().latestModel, 'older');
+    const message = modelFirst ? { model: 'newer', content, stop_reason: 'end_turn' }
+      : { content, model: 'newer', stop_reason: 'end_turn' };
+    const append = line({ type: 'assistant', message, ...flags, timestamp: at });
+    const before = f.bytesRead();
+    fs.appendFileSync(f.file, append);
+    assert.equal(f.read().latestModel, flags.isSidechain || flags.isApiErrorMessage ? 'older' : 'newer');
+    assert.equal(f.bytesRead() - before, Buffer.byteLength(append));
+  }
+});
